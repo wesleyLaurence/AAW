@@ -18,9 +18,9 @@ The goal is to give an agent its own Ableton: the same power, exposed in the way
 
 These are the reframes the whole design rests on. Each one came from asking what a DAW is when the operator is an agent instead of a person.
 
-**The session is a document, not a UI.** Ableton is a data model plus a realtime engine plus a UI. Only the data model matters to an agent. The project is a plain text document the agent edits like code. The format is the API. Every command is sugar over editing the document, plus the verbs that compute.
+**The session is a document, not a UI.** Ableton is a data model plus a realtime engine plus a UI. Only the data model matters to an agent. The project is a plain text document the agent edits like code. The format is the API. Every command is sugar over editing the document, plus the verbs that compute. When a visual workspace arrives, it is a second client of the same document: it reads the file and writes the file exactly as the agent does, and never holds state the agent cannot see. That is what lets a person and an agent work in one project without an integration layer between them.
 
-**Rendering is a compiler, not an instrument.** Nearly all of the difficulty in a DAW is realtime audio: threads, latency, buffers, plugin GUIs. An agent does not play live. It edits, renders, analyzes, and edits again. So the renderer is offline and deterministic: the same document always produces the same audio. Unchanged tracks are cached. Bouncing is the fundamental operation, not playing. Realtime playback for the human is a later feature that reads rendered audio and never constrains the core.
+**Rendering is a compiler, not an instrument.** Nearly all of the difficulty in a DAW is realtime audio: threads, latency, buffers, plugin GUIs. An agent does not play live. It edits, renders, analyzes, and edits again. So the renderer is offline and deterministic: the same document always produces the same audio. Unchanged tracks are cached. Bouncing is the fundamental operation, not playing. The person hears the project through a player over rendered audio, and editing feels responsive because small regions re-render quickly against the cache. A true realtime engine is a possible end-state addition and never constrains the core.
 
 **Perception is designed for the reader.** A language model cannot hear, but it can read numbers and look at images. Mixing engineers already work heavily from meters and analyzers. The perception layer produces compact reports of loudness, spectral balance, stereo width, masking between tracks, transient character, and section structure, plus spectrograms drawn with bar gridlines and log frequency for a multimodal model to inspect. The most useful question is "what changed between these two renders," and numbers answer it more precisely than ears. Taste and feel come from the human. Audio-input models can be added later as an optional critic, not as the foundation.
 
@@ -41,6 +41,18 @@ These are the reframes the whole design rests on. Each one came from asking what
 3. **The perception layer.** Turns audio back into reports and images the agent can reason about, and compares renders against each other and against reference tracks.
 4. **The agent harness.** Claude Code or Codex, with an instruction file defining the framework, skills encoding reusable craft (sidechain the bass to the kick, master to a loudness target, slice a break into a rack, finish a song), and the CLI as the toolset.
 
+A fifth layer, the **workspace**, is the end state and is described next. It sits beside the harness as a second client of the document and the renderer, not on top of them.
+
+## The end state: a shared workspace
+
+The agentic loop is the priority and the point. DAW UIs already exist and another one is not groundbreaking. An agent that can work for hours with a DAW toolkit to make music or do audio engineering does not exist, and that is what this project is.
+
+The end state, though, is a workspace where both operate side by side. A visual DAW in the style of Ableton, Logic, or Pro Tools where a person adjusts tracks, volume, panning, devices, and knobs and hears the result as they do it. The agent works in the same project at the same time. The person watches it build in real time, plays back what it has made as it goes, reaches in to fix something small with a few clicks instead of a prompt, then hands the work back. Small things by hand, large things by delegation, one project underneath.
+
+This is designed in from the start rather than strapped on later, and the first principles above make it cheap. The document is the only source of truth, so the workspace is a viewer and editor of the same file. Renders are cached per track, so the workspace's player has stems to play for free. Devices describe themselves, so the workspace can generate their panels. The perception layer produces reports and images, so the workspace has better mix analysis than most DAWs ship with. Git is the history, so "go back to before you changed the drums" is a click.
+
+The requirements the end state places on the early build are few and specific, and they are recorded in the spec and the decision log: the document has one canonical form so two writers never fight over formatting; every device is implemented exactly once so the person and the agent always hear identical audio; the CLI and the workspace's long-lived service are both thin shells over one core library; and the renderer can render a region around a playhead. None of these slow the agentic build down, and each is worth having even if the workspace never ships.
+
 ## Workflows this must support on day one
 
 - Point the agent at a folder of samples. It indexes them, so "find me a dark punchy kick" works without listening to a thousand files.
@@ -56,10 +68,10 @@ These are the reframes the whole design rests on. Each one came from asking what
 
 - No recording of new audio. Input is samples, songs, and files the person provides, plus what the agent synthesizes.
 - No clip launching or session view. The mental model is the arrangement view: tracks, a timeline, clips.
-- No realtime engine in version one.
+- No realtime audio engine in version one. The person hears the project through playback of rendered audio and, in the workspace, through fast re-rendering of small regions. A callback-driven engine for playing instruments live is an end-state question, settled before effects are built.
 - No hosting of third-party VST or AU plugins in version one. Reconsider only if a specific need cannot be met in-house.
 - No generative audio model at the core. One may appear later as an instrument for texture, never as the product.
 
 ## The working rhythm
 
-The person drives: they bring the idea, the source material, the references, and the taste. The agent plans, builds, renders, and critiques, and leaves a short journal of what it is doing and why. The person listens to renders as they appear and interrupts with direction. Every meaningful step is a git checkpoint, so "go back to before you changed the drums" is a real command and "try a version with a different bassline" is a branch. When the person walks away, the agent keeps working against the brief, the rules, and the definition of done until the song is finished.
+The person drives: they bring the idea, the source material, the references, and the taste. The agent plans, builds, renders, and critiques, and leaves a short journal of what it is doing and why. The person listens to renders as they appear and interrupts with direction. Once the workspace exists, the person can also reach into the project directly, and those hand edits are signals the agent reads. Every meaningful step is a git checkpoint, so "go back to before you changed the drums" is a real command and "try a version with a different bassline" is a branch. When the person walks away, the agent keeps working against the brief, the rules, and the definition of done until the song is finished.

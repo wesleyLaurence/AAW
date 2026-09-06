@@ -19,13 +19,16 @@ Contents
 13. Intent and memory
 14. Working rhythm and autonomous mode
 15. Technology stack
-16. Version one boundaries
+16. Workspace UI
+17. Version one boundaries
 
 ---
 
 ## 1. Scope
 
-A macOS-native, offline, agent-operated DAW. The agent edits a text project, runs commands that render and analyze, and iterates. A person listens to rendered artifacts and steers. No recording, no realtime engine, no third-party plugin hosting, no clip launching in version one.
+A macOS-native, offline, agent-operated DAW. The agent edits a text project, runs commands that render and analyze, and iterates. A person listens to rendered artifacts and steers. No recording, no realtime audio engine, no third-party plugin hosting, no clip launching in version one.
+
+The end state adds a visual workspace (section 16) as a second client of the same project, so a person can adjust tracks, devices, and knobs by hand and hear the result while the agent works alongside. The agentic loop is built first. Version one is shaped so the workspace can be added without changing the core, and the specific requirements it imposes are called out where they land: canonical form (section 4), single device implementation (section 7), region rendering (section 8), the `fmt` and `serve` verbs (section 12), and the library layering (section 15).
 
 ---
 
@@ -186,6 +189,16 @@ modulation:
 
 Every rendered artifact and every promoted asset gets a `provenance` block: which project, which document revision, which command, which seed.
 
+### Canonical form
+
+The document has exactly one serialization for a given content. The agent and the workspace will both rewrite the file constantly, and if their formatting differs, every git diff fills with reordering and quoting noise that the agent has to read past and that hides real changes. So:
+
+- `daw fmt` rewrites a project into canonical form, and `daw check` fails on a file that is not canonical.
+- Every tool that writes the document writes canonical form, including the workspace daemon.
+- Writes are atomic: write to a temporary file, then rename. Every writer re-reads the document before modifying it, so two writers editing different fields do not clobber each other. Git catches anything that slips through.
+
+This weighs on the syntax choice in plan.md: a purpose-built format has one formatter by construction, while YAML needs ruamel with a fixed style, key order, and quoting policy to be canonical.
+
 ---
 
 ## 5. Pattern notation
@@ -293,6 +306,12 @@ lfo (rate free or tempo-synced, shapes, phase, retrigger), envelope (ADSR, per n
 
 Every device is deterministic given its inputs, parameters, and a seed. No free-running state that would differ between renders.
 
+### Single implementation
+
+Each device exists exactly once. The code that renders offline is the code any future responsive-preview path or realtime engine runs, so a person adjusting a knob in the workspace and the agent analyzing a render always hear identical audio. If they ever hear different things, the perception loop cannot be trusted. A second implementation of a device for the UI is forbidden, including approximations such as browser audio nodes standing in for the real effect while a knob is dragged.
+
+To keep the realtime door open without paying for it now, devices are written in a block-processing shape: explicit state carried between calls, one buffer of samples processed per call, and no operation that assumes the whole track is in memory at once. This is somewhat slower offline than whole-array vectorization, and it is the price of one implementation. The language the devices are written in is a separate decision, recorded in section 15.
+
 ---
 
 ## 8. Rendering
@@ -300,7 +319,8 @@ Every device is deterministic given its inputs, parameters, and a seed. No free-
 Offline, deterministic, cached.
 
 - **Graph evaluation.** The session routing is a DAG. Tracks render in dependency order so sidechain sources and groups are available when needed.
-- **Targets.** A clip, a pattern in isolation, a track, a section, a section of one track, all stems, the mix. `daw render drums`, `daw render section drop`, `daw render mix`, `daw render stems`.
+- **Targets.** A clip, a pattern in isolation, a track, a section, a section of one track, a region between two positions, all stems, the mix. `daw render drums`, `daw render section drop`, `daw render mix`, `daw render stems`, `daw render mix --region 25.1..29.1`.
+- **Region rendering.** A region render evaluates only the bars between two positions, on one track or the mix, and reuses the track cache for anything unaffected. The workspace daemon uses it to re-render a few bars around the playhead when the person changes something, which is what makes editing feel responsive without a realtime engine. The agent uses it to audition a change cheaply before committing to a full render.
 - **Caching and freezing.** Each track render is keyed by a hash of everything that affects it. Unchanged tracks are never re-rendered. This is what makes a full song cheap to iterate on.
 - **Draft and final.** Draft mode uses a lower sample rate, no oversampling, and cheap reverb settings for speed. Final mode renders at full quality. Perception reports state which mode produced them.
 - **Seeds.** Anything random (humanize, random modulation, round robin) takes a seed from the document. Same document, same audio.
@@ -394,8 +414,12 @@ The rule: the agent edits the document directly for anything that is state, and 
 | `daw export <preset>` | Mixdown, stems, MIDI, with named recipes such as a streaming loudness target. |
 | `daw log <text>` | Append to the project journal. |
 | `daw checkpoint <msg>` | Git commit the project with a message. |
+| `daw fmt` | Rewrite the project document in canonical form. |
+| `daw serve` | Start the long-lived project service the workspace UI talks to: watches the project directory, keeps the render cache warm, streams render progress, serves the document and waveform peaks. |
 
-The CLI is machine-first: terse, structured output, non-zero exit on problems, no interactive prompts. A `--json` flag on every verb.
+The CLI is machine-first: terse, structured output, non-zero exit on problems, no interactive prompts. A `--json` flag on every verb, and long-running verbs stream progress as newline-delimited JSON events under `--json`.
+
+The daemon is never required. When one is running for the project, the CLI hands renders to it so both clients share one cache and the workspace sees progress. When none is running, the CLI does the work itself. The agent should not notice the difference.
 
 ---
 
@@ -447,6 +471,10 @@ The DAW owns its own profile and brief files in its own format, so the same inte
 
 Version one in Python for speed of building. The document format and CLI are the stable contract; the engine behind them can be ported later.
 
+### Layering
+
+One core library, `daw`, holds the document model, the renderer, the devices, the perception tools, and the library index. Two thin shells sit over it: the CLI the agent uses, and the `daw serve` daemon the workspace uses. Neither shell contains logic the other would need. This is what keeps the workspace from becoming a second implementation of anything.
+
 | Need | Choice | Why |
 |---|---|---|
 | numeric DSP | numpy, scipy | vectorized offline rendering is fast enough for the target |
@@ -457,15 +485,64 @@ Version one in Python for speed of building. The document format and CLI are the
 | embeddings for sample search | a CLAP-family audio-text model, run locally | text search over samples |
 | MIDI import and export | mido | interoperability only; text notation is canonical |
 | images | matplotlib | spectrograms with gridlines |
-| project format | YAML via ruamel, or a custom parser | open question |
+| project format | YAML via ruamel, or a custom parser | open question; must be canonical either way |
 | versioning | git | checkpoints and branches |
+| project daemon | Python, websockets, watchfiles | same process as the core library, shares the cache |
+| workspace frontend | TypeScript, canvas timeline, Web Audio for playback | web is the best cross-platform UI toolkit; wraps into a desktop app later |
+| workspace shell | browser tab served by the daemon first, Tauri later | Tauri is a Rust shell, so a Rust engine could later live in-process |
 
-Later: port the render hot path to Rust if the performance target is missed, keeping the document and CLI unchanged. Realtime playback for the human as a thin player over rendered audio.
+### Device language
+
+Python remains in the project regardless. Demucs, CLAP, librosa, and the analysis layer are never leaving it. The open decision is only where device DSP lives.
+
+Python devices in the block-processing shape serve the offline renderer and the responsive-preview path. They cannot serve a true realtime engine: a callback thread with a few milliseconds of budget cannot tolerate the interpreter or the GIL. If the end state ever needs live instrument playing, devices must be in a language that runs both offline and in a callback, and Rust with Python bindings is the candidate D18 already names. Because devices must exist exactly once, this decision is made before phase 3, where effects, the bulk of device code, get written. Until then the block-processing shape is the hedge.
+
+Later: port the render hot path to Rust if the performance target is missed, keeping the document and CLI unchanged.
 
 All in-house devices are written from scratch in the project, with unit tests that assert deterministic output for fixed inputs and seeds.
 
 ---
 
-## 16. Version one boundaries
+## 16. Workspace UI
 
-In: everything above marked version one. Out until later: tempo and time signature changes, warp markers, third-party plugin hosting, realtime playback, FM and wavetable synthesis, audio-input model critique, Ableton project import or export, recording.
+The workspace is the end state: a visual DAW in the style of Ableton, Logic, or Pro Tools where a person adjusts tracks, volume, panning, devices, and knobs by hand and hears the result, while the agent works in the same project. The person watches the agent build in real time, plays back what it has made as it goes, and steps in for the small things. It is built after the agentic loop and in parallel with the numbered phases, never ahead of them.
+
+### Principles
+
+- **A second client of the document, never a second source of truth.** The workspace reads `song.yaml` and writes `song.yaml`, through the same canonical serializer the agent's tools use. It holds no state the file does not hold. Every edit made in the workspace is visible to the agent as a file change and a git diff.
+- **Watching the agent is file watching.** The agent edits the document, the workspace redraws. The agent renders a track, the workspace draws the waveform. There is no channel between the agent and the workspace other than the project directory.
+- **Hand edits are signals.** Section 13 already treats hand edits to the document as evidence for preferences. The workspace makes those edits easier to make. Nothing else changes.
+- **Same sound for everyone.** The workspace never runs an approximation of a device. Playback is rendered audio, and any audible change goes through the real renderer. See section 7.
+- **The agent lives in the terminal.** The workspace is a window into the project, not a chat client. Embedding the agent in the app is possible later through the agent SDK and is not required.
+
+### What it shows
+
+The arrangement: tracks, clips with waveforms from the render cache, sections, automation lanes, the playhead. Track strips with volume, pan, mute, solo, and sends. Device chains with panels generated from each device's self-description, so every knob has the right unit, range, and default without a hand-built UI per device. A step grid and piano roll that read and write the pattern notation. The journal, the brief, and the git history. The perception layer's reports and images for the current render.
+
+### Playback model
+
+"Realtime" is three different things, and the workspace needs the first two.
+
+1. **Playback of rendered audio.** Transport, playhead, scrubbing, looping a section. The player loads the track cache, which is the stem export, and applies mute, solo, volume, and pan in Web Audio instantly with no re-render. Those four cover most of what a person reaches in to change during a mix. This path skips the master chain, so it is a pre-master monitor; the daemon re-renders the true mix in the background and the player swaps to it when it lands.
+2. **Responsive editing.** Any other change, a filter cutoff, a compressor threshold, a moved clip, writes the document. The daemon region-renders the affected track for a few bars around the playhead and the player swaps the audio in. With the draft performance target this is a few hundred milliseconds of latency: not realtime in the audio-engineer sense, but responsive enough to mix by ear, and the same audio the agent will analyze.
+3. **Live instrument playing.** A keyboard into a synth with no perceptible latency needs a callback-driven engine and a device language that can run in it. Recording and live performance are out of scope for version one, so this is an end-state question, decided with the device language before phase 3.
+
+### Stages
+
+Each stage is small enough to stop after, and lower priority than any numbered phase.
+
+- **U0, read-only.** Arrangement view, waveforms, transport, playhead, journal and brief panes, live updating as the agent works. Available once phase 0 exists.
+- **U1, simple edits.** Mute, solo, volume, pan, sends, move and trim clips, delete. Writes the document, triggers a re-render.
+- **U2, panels and editors.** Generated device panels, step grid, piano roll, automation editing.
+- **U3, responsive editing.** Region rendering around the playhead, audio swap in the player.
+- **U4, realtime engine.** Only if live instrument playing becomes a goal. The only stage that touches the core.
+
+### What it is not
+
+Not a place to build whole songs by hand. Ableton exists for that. If the workspace starts growing features that only make sense for a person composing from scratch, the design has drifted from the product, which is the agent.
+
+---
+
+## 17. Version one boundaries
+
+In: everything above marked version one. Out until later: tempo and time signature changes, warp markers, third-party plugin hosting, the workspace UI and its daemon (designed for from the start, built as a parallel track after phase 0), a realtime audio engine, FM and wavetable synthesis, audio-input model critique, Ableton project import or export, recording.

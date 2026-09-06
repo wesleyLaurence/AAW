@@ -2,8 +2,8 @@
 
 Settled choices from the design conversation, with rationale, so a future session does not relitigate them. Revisit only with a new reason.
 
-**D1. Offline, deterministic rendering. No realtime engine in version one.**
-Realtime is where nearly all DAW complexity lives, and an agent iterates by edit, render, analyze. Determinism lets the agent trust its own loop and lets git act as a version history of sound. Realtime playback for the person comes later as a player over rendered audio.
+**D1. Offline, deterministic rendering. No realtime audio engine in version one.**
+Realtime is where nearly all DAW complexity lives, and an agent iterates by edit, render, analyze. Determinism lets the agent trust its own loop and lets git act as a version history of sound. The person hears the project through a player over rendered audio and, in the workspace, through fast region re-rendering against the cache, which is responsive without being a realtime engine. A callback-driven engine for playing instruments live is an end-state question, settled with the device language before phase 3 (D22, plan open question 7).
 
 **D2. The session is a plain text document. The format is the API.**
 Agents are best at reading and writing text. Ableton's own session file is gzipped XML, proving a DAW is a document. Text diffs cleanly, fits in context, and works with git. The agent edits state directly and uses the CLI only for verbs that compute.
@@ -54,7 +54,22 @@ Profile and brief live in the DAW's format so they work under any harness. The h
 Humanize, random modulation, and round robin take seeds from the document so renders are reproducible.
 
 **D18. Python first, behind a stable contract.**
-numpy and scipy for DSP, with the document format and CLI as the contract. A Rust port of the render hot path is the planned escape hatch if the performance target is missed.
+numpy and scipy for DSP, with the document format and CLI as the contract. A Rust port of the render hot path is the planned escape hatch if the performance target is missed. Devices are written in a block-processing shape from the start so that the device language can be revisited before phase 3 without changing their interface (D22).
 
 **D19. Human in the loop by default, autonomous by capability.**
 The person drives with ideas, material, references, and taste, and can interrupt at any point. The agent must also be able to finish a song alone against the brief, rules, and a definition of done.
+
+**D20. The agentic loop is the product. The workspace UI is the end state, designed in from the start and built second.**
+DAW UIs already exist. An agent that works for hours with a DAW toolkit does not, and that is what is unique here. But the end state is a shared workspace where a person adjusts tracks, devices, and knobs by hand and hears the result while the agent works in the same project. The numbered phases come first; the workspace runs as a parallel, lower-priority track after phase 0. The early build carries four small requirements on its behalf, each worth having anyway: canonical form (D23), single device implementation (D22), region rendering, and the library layering (D24).
+
+**D21. The workspace is a second client of the document, never a second source of truth.**
+It reads and writes `song.yaml` through the same core library and serializer the agent's tools use, and holds no state the file does not hold. Watching the agent work is file watching; the agent's renders appear as files in `renders/`. Hand edits made in the workspace reach the agent as file changes and git diffs, and they are already a preference signal under D15. There is no integration layer between the agent and the workspace beyond the project directory. The agent stays in the terminal; the workspace is a window, not a chat client.
+
+**D22. Every device is implemented exactly once. The person and the agent always hear the same audio.**
+If the workspace previewed a device with anything other than the real renderer, the person would tune by ear against one sound and the agent would analyze another, and the perception loop would stop being trustworthy. So workspace playback is rendered audio only, mute, solo, volume, and pan may be applied in the player because they are exact, and every other change goes through the renderer. Approximations such as browser audio nodes as a drag-time preview are forbidden. Consequence: if a true realtime engine is ever wanted, the devices must be in a language that runs both offline and in a callback, which is why the device language is decided before phase 3 rather than after.
+
+**D23. The document has one canonical form and every writer produces it.**
+Two writers rewriting one file need identical formatting or every diff fills with noise the agent has to read past. `daw fmt` produces canonical form, `daw check` rejects anything else, writes are atomic, and every writer re-reads before modifying. This constrains the syntax choice in plan open question 1.
+
+**D24. One core library; the CLI and the workspace daemon are thin shells over it. The daemon is never required.**
+The `daw` package holds the document model, renderer, devices, perception, and library index. The CLI and `daw serve` contain no logic of their own. When a daemon is running the CLI hands renders to it so both clients share one cache; when none is running the CLI does the work itself and the agent notices no difference. This is what keeps the workspace from becoming a second implementation of anything.
