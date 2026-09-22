@@ -79,3 +79,9 @@ Settles plan open question 7. Offline rendering is the product (D1) and a realti
 
 **D26. Stems are post-insert and pre-master-effects.**
 Each stem is a track after its inserts, gain, pan, mute and solo, master gain and end fade, and before master effects. Without master effects the stems sum to the mix; with a nonlinear master chain they cannot, and the render report says so in `stems_sum_to_mix`. Sidechain keys are taken after the source's inserts and before its fader, so fader and mute changes on the source never change ducking.
+
+**D27. Shared space comes from return buses, and returns are stems.**
+Tracks send to `returns`, post-fader by default (after gain and pan) or pre-fader (after inserts). One reverb shared by several tracks is how producers glue a mix, and it keeps the device count and render cost down. A muted or solo-muted track sends nothing, but returns are never solo-muted, so soloing a snare still plays its reverb. Track stems stay dry and each return renders its own stem, so D26's reconstruction still holds with track and return stems together. Returns share the ID namespace with tracks because both name stems. Sidechains key only from tracks, and returns cannot send, which keeps render order simple: tracks by sidechain dependency, then returns. Groups and return-to-return sends wait for a need.
+
+**D28. Reverb is seeded convolution with a synthetic impulse response.**
+A generated noise tail with frequency-dependent exponential decay is reproducible from its parameters and seed (D17), convolves exactly regardless of block partition through fixed internal partitions with compensated latency (D25), and runs fast with numpy FFTs. A feedback-delay-network reverb would need per-sample recursion that is slow in numpy and hard to make partition-exact. Convolution also leaves room to load recorded impulse responses as samples later. Accepted limits: the input is summed to mono, and there is no modulation or early-reflection model.

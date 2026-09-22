@@ -213,7 +213,50 @@ class Limiter(Strict):
     bypass: bool = False
 
 
-Effect = Annotated[Filter | Eq | Compressor | Limiter, Field(discriminator="type")]
+class Delay(Strict):
+    type: Literal["delay"]
+    time_beats: Beat
+    feedback_percent: float = Field(default=35, ge=0, le=95)
+    lowcut_hz: float | None = Field(default=None, ge=10, le=20000)
+    highcut_hz: float | None = Field(default=None, ge=10, le=20000)
+    ping_pong: bool = False
+    mix_percent: float = Field(default=100, ge=0, le=100)
+    bypass: bool = False
+
+    @model_validator(mode="after")
+    def delay_valid(self):
+        if not 0 < beat(self.time_beats) <= 16:
+            raise ValueError("delay time_beats must be greater than 0 and at most 16")
+        if self.lowcut_hz and self.highcut_hz and self.lowcut_hz >= self.highcut_hz:
+            raise ValueError("delay lowcut_hz must be below highcut_hz")
+        return self
+
+
+class Reverb(Strict):
+    type: Literal["reverb"]
+    decay_seconds: float = Field(default=1.5, ge=0.1, le=12)
+    predelay_ms: float = Field(default=10, ge=0, le=250)
+    damping_hz: float = Field(default=6000, ge=500, le=20000)
+    lowcut_hz: float = Field(default=100, ge=20, le=2000)
+    width_percent: float = Field(default=100, ge=0, le=100)
+    mix_percent: float = Field(default=100, ge=0, le=100)
+    seed: int = Field(default=0, ge=0, le=2**32 - 1)
+    bypass: bool = False
+
+
+Effect = Annotated[
+    Filter | Eq | Compressor | Limiter | Delay | Reverb, Field(discriminator="type")
+]
+
+
+def sidechains(effects) -> list[str]:
+    return [e.sidechain for e in effects if isinstance(e, Compressor) and e.sidechain]
+
+
+class Send(Strict):
+    to: str
+    gain_db: float = Field(default=0, ge=-96, le=12)
+    pre_fader: bool = False
 
 
 class Track(Strict):
@@ -225,13 +268,23 @@ class Track(Strict):
     pads: dict[str, Pad]
     clips: list[Clip] = Field(default_factory=list)
     effects: list[Effect] = Field(default_factory=list, max_length=32)
+    sends: list[Send] = Field(default_factory=list, max_length=16)
 
     def sidechains(self) -> list[str]:
-        return [
-            e.sidechain
-            for e in self.effects
-            if isinstance(e, Compressor) and e.sidechain
-        ]
+        return sidechains(self.effects)
+
+
+class Return(Strict):
+    """A return bus: the sum of track sends through its own chain, then to master."""
+
+    id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+    gain_db: float = Field(default=0, ge=-96, le=24)
+    pan: float = Field(default=0, ge=-1, le=1)
+    mute: bool = False
+    effects: list[Effect] = Field(default_factory=list, max_length=32)
+
+    def sidechains(self) -> list[str]:
+        return sidechains(self.effects)
 
 
 class Master(Strict):
@@ -274,6 +327,7 @@ class Project(Strict):
     samples: dict[str, Sample] = Field(default_factory=dict)
     patterns: dict[str, Pattern] = Field(default_factory=dict)
     tracks: list[Track] = Field(default_factory=list)
+    returns: list[Return] = Field(default_factory=list)
     sections: list[Section] = Field(default_factory=list)
     master: Master = Field(default_factory=Master)
 
@@ -288,10 +342,17 @@ class Project(Strict):
                     break
         return order
 
-    def sidechain_sources(self, track_id: str) -> set[str]:
-        """Every track whose audio feeds track_id's detectors, directly or not."""
+    def senders(self, return_id: str) -> list[str]:
+        """Tracks with a send to return_id, in document order."""
+        return [t.id for t in self.tracks if any(s.to == return_id for s in t.sends)]
+
+    def sidechain_sources(self, channel_id: str) -> set[str]:
+        """Every track whose audio feeds a track or return's detectors, directly or not."""
         tracks = {t.id: t for t in self.tracks}
-        found, stack = set(), list(tracks[track_id].sidechains())
+        channel = tracks.get(channel_id) or next(
+            r for r in self.returns if r.id == channel_id
+        )
+        found, stack = set(), list(channel.sidechains())
         while stack:
             s = stack.pop()
             if s not in found:
@@ -302,14 +363,28 @@ class Project(Strict):
     @model_validator(mode="after")
     def references(self):
         ids = [t.id for t in self.tracks]
+        return_ids = [r.id for r in self.returns]
         if len(ids) != len(set(ids)):
             raise ValueError("Track IDs must be unique")
-        for t in self.tracks:
+        if len(ids + return_ids) != len(set(ids + return_ids)):
+            raise ValueError("Return IDs must be unique and distinct from track IDs")
+        for t in [*self.tracks, *self.returns]:
             for source in t.sidechains():
+                if source in return_ids:
+                    raise ValueError(
+                        f"{t.id}: sidechain must name a track, not return {source}"
+                    )
                 if source not in ids:
                     raise ValueError(f"{t.id}: unknown sidechain track {source}")
                 if source == t.id:
                     raise ValueError(f"{t.id}: a track cannot sidechain itself")
+        for t in self.tracks:
+            targets = [s.to for s in t.sends]
+            for target in targets:
+                if target not in return_ids:
+                    raise ValueError(f"{t.id}: send to unknown return {target}")
+            if len(targets) != len(set(targets)):
+                raise ValueError(f"{t.id}: at most one send per return")
         visiting, visited = set(), set()
         graph = {t.id: t.sidechains() for t in self.tracks}
 
@@ -327,6 +402,15 @@ class Project(Strict):
             visit(node)
         if any(getattr(e, "sidechain", None) for e in self.master.effects):
             raise ValueError("Master compressor cannot use a sidechain")
+        chains = [*self.tracks, *self.returns, self.master]
+        for owner, e in ((c, e) for c in chains for e in c.effects):
+            if isinstance(e, Delay):
+                seconds = beat(e.time_beats) * 60 / Fraction(str(self.session.tempo))
+                if not Fraction(1, 1000) <= seconds <= 10:
+                    raise ValueError(
+                        f"{getattr(owner, 'id', 'master')}: delay time must be "
+                        f"1 ms to 10 s at the session tempo, not {float(seconds):.4g} s"
+                    )
         length = beat(self.session.length_beats)
         if len({s.id for s in self.sections}) != len(self.sections):
             raise ValueError("Section IDs must be unique")
@@ -393,6 +477,7 @@ def _represent_mapping(dumper, data):
         or ("id" in data and "length_beats" in data)
         or "type" in data
         or "shape" in data
+        or ("to" in data and set(data) <= {"to", "gain_db", "pre_fader"})
     )
     return dumper.represent_mapping(
         "tag:yaml.org,2002:map", data.items(), flow_style=flow

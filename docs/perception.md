@@ -82,6 +82,10 @@ sample files and the current editable project are not required. Preview section
 ranges intersect the original project timeline, preserving the preview's original
 offset; audio measurements include any tails in the rendered region.
 
+Return buses render as stems too. Each entry under `tracks` carries the render's
+`kind`, `track` or `return`; returns have no `musical_context` because they
+schedule no triggers.
+
 Stems must match the mix's frame count, channel count and sample rate. New renders
 record stem hashes, which are verified before analysis. Older render reports lack
 these hashes; analysis still records each actual stem hash, with
