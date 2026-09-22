@@ -4,7 +4,7 @@ An AI-native digital audio workstation. A next-generation DAW.
 
 Open this with Codex or Claude and start creating music.
 
-AAW is a workspace where humans and agents collaboratively build
+AAW is an open-source workspace where humans and agents collaboratively build
 music at the track, object, and project level. Here are notes on what the project
 is and why it is being created.
 
@@ -197,3 +197,7 @@ See [docs/perception.md](docs/perception.md) for definitions and limitations.
 
 The older files in `docs/` describe the broader product vision. The implemented MVP
 is deliberately narrower; `docs/mvp.md` is authoritative for the current build.
+
+## License
+
+AAW is open source under the [MIT License](LICENSE).
