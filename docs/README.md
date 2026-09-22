@@ -1,4 +1,6 @@
-# Agentic DAW — design docs
+# Agentic Audio Workspace (AAW) — design docs
+
+Start with the [project introduction](../README.md) for what AAW is and why it is being created.
 
 Current analysis commands: [perception.md](perception.md) documents `daw listen`
 and `daw compare`, the implemented subset of the broader perception plan.

@@ -1,8 +1,74 @@
-# Agent DAW
+# Agentic Audio Workspace (AAW)
 
-An offline, agent-operated sample workstation. Search a local sample library, copy
-sounds into a project, sequence drum/pitched notes, and render a mix and stems.
-No UI, effects, synths, plugins or realtime engine.
+An AI-native digital audio workstation. A next-generation DAW.
+
+Open this with Codex or Claude and start creating music.
+
+AAW is a workspace where humans and agents collaboratively build
+music at the track, object, and project level. Here are notes on what the project
+is and why it is being created.
+
+## Why AAW
+
+Generative AI music tools are impressive, but the prompt-to-finished-track workflow
+can be a poor fit for how producers work. A finished stereo track sounds complete,
+but it does not necessarily give you the underlying project. Turning down a guitar,
+extending a section by four bars, rewriting only the drums, or changing one
+transition can require generating another version instead of editing the original.
+You receive the result of a process, but not the process itself.
+
+AAW starts with a different idea: AI should build and manipulate a real, persistent
+music-production state. The long-term workspace contains tracks, clips, MIDI,
+instruments, plugins, routing, automation, effects, stems, arrangement data, and
+project history. Each decision remains available to inspect and change.
+
+Instead of asking:
+
+> Generate another version of this song with quieter guitars.
+
+You could say:
+
+> Turn the rhythm guitars down 1.5 dB in the second chorus, leave the vocals
+> untouched, add four bars before the bridge, and increase the bass compression
+> slightly.
+
+The agent would translate that request into operations on the project while
+preserving the rest of the session.
+
+Generative audio has an important role as one tool among many. An agent could
+generate a drum fill, synth texture, guitar layer, riser, vocal harmony, or sound
+effect and place it on its own editable track. It could also use synthesis, MIDI,
+samples, plugins, stem separation, DSP, or recording tools when those are more
+appropriate.
+
+The core loop resembles an AI coding agent working in an audio session:
+
+**inspect → plan → modify → render → listen/analyze → revise**
+
+AI becomes a collaborator in production, engineering, arrangement, sound design,
+and technical operation. The human retains authorship and control: decisions can
+be inspected, modified, rejected, or refined. The agent accelerates the craft while
+keeping the creative process editable.
+
+The word *workspace* is intentional. The long-term environment can bring together
+the timeline, mixer, piano roll, files, plugins, agents, code, generated assets,
+version history, tasks, and specialized production tools in one shared project.
+
+The goal is **a programmable, agent-native environment for making music**.
+
+See [the project idea](docs/idea.md) for the earlier design principles and
+[the documentation index](docs/README.md) for the specification, build plan,
+decision log, and design notes.
+
+## What works today
+
+The current MVP is an offline, agent-operated sample workstation. Search a local
+sample library, copy sounds into a project, sequence drum and pitched notes, and
+render a mix and stems. It also provides render analysis and comparisons.
+
+The broader workspace described above is the vision. UI, effects, synths, plugin
+hosting, MIDI import/export, recording, and a realtime engine are not implemented.
+[docs/mvp.md](docs/mvp.md) describes the implemented behavior.
 
 ## Repository scope
 
