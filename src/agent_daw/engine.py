@@ -234,12 +234,19 @@ def metrics(x, rate):
     }
 
 
+SFC_SET_ADD_PEAK_CHUNK = 0x1050  # libsndfile command; not exported by soundfile
+
+
 def wav_atomic(path, x, sr, subtype):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".wav")
     os.close(fd)
     try:
-        sf.write(tmp, x, sr, subtype=subtype)
+        with sf.SoundFile(tmp, "w", sr, x.shape[1], subtype) as f:
+            # libsndfile timestamps the PEAK chunk of float WAVs; omit it so equal
+            # audio always gives equal file bytes and hashes.
+            sf._snd.sf_command(f._file, SFC_SET_ADD_PEAK_CHUNK, sf._ffi.NULL, 0)
+            f.write(x)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
