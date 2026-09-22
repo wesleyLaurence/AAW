@@ -12,7 +12,10 @@ inspection. There is no embedded autonomous composer or visual editor.
 - `library.py`: incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
 - `engine.py`: event scheduling, sample decoding and bandlimited repitch, explicit
-  block-processing voice state, track summing, master gain and WAV/stem export.
+  block-processing voice state, sidechain-ordered track rendering, master gain and
+  WAV/stem export.
+- `effects.py`: filter, EQ, compressor/sidechain and limiter devices with explicit
+  block state and compensated latency; see [effects.md](effects.md).
 - `cli.py`: thin command shell with machine-readable results and errors.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
@@ -23,8 +26,8 @@ sampler for full mixes, stems and previews. No second playback engine exists.
 
 ## Format v1
 
-Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`, and
-`sections`; `schema_version` is 1. Unknown fields are rejected. Run `daw describe`
+Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
+`sections` and `master`; `schema_version` is 1. Unknown fields are rejected. Run `daw describe`
 for the exact generated JSON schema, bounds and defaults.
 
 Session: `title`, `tempo`, `time_signature` (4/4), `sample_rate` (44100 or 48000),
@@ -34,8 +37,13 @@ Sample: relative `path`, optional `sha256`, original `source`, optional `root_no
 with octave. Selected assets are copied into `samples/HASH_original-name.wav`.
 Supported library formats: WAV, AIFF and FLAC. Mono and stereo rendering only.
 
-Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`.
-The default output is the stereo master; no groups, returns or effects exist yet.
+Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
+and `effects`. The output is the stereo master; no groups or returns exist yet.
+
+Effects: `filter`, `eq`, `compressor` (optional `sidechain` track) and `limiter`,
+listed in order under `tracks[].effects` or `master.effects`. Track inserts come
+before track gain and pan; master effects follow `master_gain_db` and precede the
+end fade. See [effects.md](effects.md) for parameters and semantics.
 
 Pad: `sample`, `mode` (`one_shot` or `gate`), `gain_db`, `pan`, `transpose` in
 semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional
@@ -71,7 +79,8 @@ still click on low-frequency material; longer releases may be needed on bass.
 
 Mono pad pan uses equal-power gains; stereo pad and track pan use balance, preserving
 center stereo levels. Mono conversion averages source channels. Tracks sum in
-float64; master gain is static. Mute takes precedence over solo. Session end is
+float64; master gain is static. Sidechain keys are the source track after its
+inserts and before its gain, pan, mute and solo. Mute takes precedence over solo. Session end is
 finite and applies an explicit final fade; tails beyond it are discarded.
 
 The 4× oversampled peak reported by the engine is an estimate, not a certified
@@ -84,13 +93,15 @@ Tests cover timing/fractions, schema errors, references, pitch, source-rate conv
 choke groups, swing, gate release, block-size invariance, stems reconstruction,
 clipping rejection, copied-asset portability/tamper detection, incremental index
 updates, stable formatting, stale-edit rejection, section equivalence and track previews.
+Effect tests cover filter and EQ responses, compressor curves, limiter ceilings and
+latency, block-partition invariance, sidechain ducking and preview/stem equivalence.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
 
 ## Deliberately deferred
 
-Realtime playback, recording, UI, effects, synths, plugin hosting, time stretching,
-MIDI import/export, automation, routing graphs, semantic/audio embedding search,
+Realtime playback, recording, UI, reverb/delay/saturation, sends, groups, synths,
+plugin hosting, time stretching, MIDI import/export, automation, semantic/audio embedding search,
 key/chord detection, downbeat and swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
 perception layer is implemented; see [perception.md](perception.md). Monophonic pitch

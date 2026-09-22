@@ -8,7 +8,7 @@ import json
 import os
 import re
 import tempfile
-from typing import Literal
+from typing import Annotated, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -172,6 +172,50 @@ class Clip(Strict):
         return v
 
 
+class Filter(Strict):
+    type: Literal["filter"]
+    mode: Literal["highpass", "lowpass"]
+    cutoff_hz: float = Field(ge=10, le=20000)
+    slope_db_per_octave: Literal[12, 24, 36, 48] = 12
+    bypass: bool = False
+
+
+class EqBand(Strict):
+    shape: Literal["bell", "low_shelf", "high_shelf"]
+    freq_hz: float = Field(ge=20, le=20000)
+    gain_db: float = Field(ge=-24, le=24)
+    q: float = Field(default=0.71, ge=0.1, le=18)
+
+
+class Eq(Strict):
+    type: Literal["eq"]
+    bands: list[EqBand] = Field(min_length=1, max_length=16)
+    bypass: bool = False
+
+
+class Compressor(Strict):
+    type: Literal["compressor"]
+    threshold_db: float = Field(ge=-60, le=0)
+    ratio: float = Field(default=4, ge=1, le=20)
+    attack_ms: float = Field(default=10, ge=0, le=500)
+    release_ms: float = Field(default=120, ge=1, le=5000)
+    knee_db: float = Field(default=6, ge=0, le=24)
+    makeup_db: float = Field(default=0, ge=-24, le=24)
+    sidechain: str | None = None
+    bypass: bool = False
+
+
+class Limiter(Strict):
+    type: Literal["limiter"]
+    ceiling_db: float = Field(default=-1, ge=-24, le=-0.1)
+    release_ms: float = Field(default=60, ge=1, le=2000)
+    lookahead_ms: float = Field(default=3, ge=0.5, le=20)
+    bypass: bool = False
+
+
+Effect = Annotated[Filter | Eq | Compressor | Limiter, Field(discriminator="type")]
+
+
 class Track(Strict):
     id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
     gain_db: float = Field(default=0, ge=-96, le=24)
@@ -180,6 +224,18 @@ class Track(Strict):
     solo: bool = False
     pads: dict[str, Pad]
     clips: list[Clip] = Field(default_factory=list)
+    effects: list[Effect] = Field(default_factory=list, max_length=32)
+
+    def sidechains(self) -> list[str]:
+        return [
+            e.sidechain
+            for e in self.effects
+            if isinstance(e, Compressor) and e.sidechain
+        ]
+
+
+class Master(Strict):
+    effects: list[Effect] = Field(default_factory=list, max_length=32)
 
 
 class Section(Strict):
@@ -219,12 +275,58 @@ class Project(Strict):
     patterns: dict[str, Pattern] = Field(default_factory=dict)
     tracks: list[Track] = Field(default_factory=list)
     sections: list[Section] = Field(default_factory=list)
+    master: Master = Field(default_factory=Master)
+
+    def render_order(self) -> list[Track]:
+        """Tracks with sidechain sources first; otherwise document order."""
+        done, order = set(), []
+        while len(order) < len(self.tracks):
+            for t in self.tracks:
+                if t.id not in done and all(s in done for s in t.sidechains()):
+                    done.add(t.id)
+                    order.append(t)
+                    break
+        return order
+
+    def sidechain_sources(self, track_id: str) -> set[str]:
+        """Every track whose audio feeds track_id's detectors, directly or not."""
+        tracks = {t.id: t for t in self.tracks}
+        found, stack = set(), list(tracks[track_id].sidechains())
+        while stack:
+            s = stack.pop()
+            if s not in found:
+                found.add(s)
+                stack.extend(tracks[s].sidechains())
+        return found
 
     @model_validator(mode="after")
     def references(self):
         ids = [t.id for t in self.tracks]
         if len(ids) != len(set(ids)):
             raise ValueError("Track IDs must be unique")
+        for t in self.tracks:
+            for source in t.sidechains():
+                if source not in ids:
+                    raise ValueError(f"{t.id}: unknown sidechain track {source}")
+                if source == t.id:
+                    raise ValueError(f"{t.id}: a track cannot sidechain itself")
+        visiting, visited = set(), set()
+        graph = {t.id: t.sidechains() for t in self.tracks}
+
+        def visit(node):
+            if node in visiting:
+                raise ValueError(f"Sidechain cycle through track {node}")
+            if node not in visited:
+                visiting.add(node)
+                for source in graph[node]:
+                    visit(source)
+                visiting.remove(node)
+                visited.add(node)
+
+        for node in graph:
+            visit(node)
+        if any(getattr(e, "sidechain", None) for e in self.master.effects):
+            raise ValueError("Master compressor cannot use a sidechain")
         length = beat(self.session.length_beats)
         if len({s.id for s in self.sections}) != len(self.sections):
             raise ValueError("Section IDs must be unique")
@@ -289,6 +391,8 @@ def _represent_mapping(dumper, data):
         ("pad" in data and "at" in data)
         or ("pattern" in data)
         or ("id" in data and "length_beats" in data)
+        or "type" in data
+        or "shape" in data
     )
     return dumper.represent_mapping(
         "tag:yaml.org,2002:map", data.items(), flow_style=flow

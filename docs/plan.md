@@ -126,5 +126,5 @@ Tempo and time signature changes, warp markers for drifting material, FM and wav
 4. How much of the journal and brief the agent reads by default at session start, and how they are trimmed as they grow?
 5. Whether draft renders should downsample or only skip expensive processing.
 6. The CLI name.
-7. Device language: Python throughout in the block-processing shape, accepting that a realtime engine would then require a rewrite, or Rust with Python bindings from the start so one implementation serves both offline rendering and a future engine? Must be settled before phase 3.
+7. ~~Device language~~ Settled as D25: Python throughout in the block-processing shape, accepting that a realtime engine would require a rewrite.
 8. Workspace shell: a browser tab served by the daemon, Tauri, or native macOS? Browser tab first is the working assumption.

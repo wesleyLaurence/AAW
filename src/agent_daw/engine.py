@@ -15,6 +15,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 from . import __version__
+from .effects import Chain
 from .model import (
     Project,
     Pad,
@@ -190,6 +191,7 @@ class Sampler:
 
 
 def render_track(p: Project, track, triggers, sampler, block_size=4096):
+    """Sum a track's voices before its inserts, gain and pan."""
     total = frame(p.session.length_beats, p.session.tempo, p.session.sample_rate)
     out = np.zeros((total, 2), dtype=np.float64)
     pending = [x for x in triggers if x.track == track.id]
@@ -209,7 +211,7 @@ def render_track(p: Project, track, triggers, sampler, block_size=4096):
             if voice.cursor < voice.length:
                 alive.append((onset, voice))
         active = alive
-    return stereo_pan(out, track.pan) * 10 ** (track.gain_db / 20)
+    return out
 
 
 def metrics(x, rate):
@@ -278,29 +280,56 @@ def render(
     # Resolve all selected sources before producing any new artifacts.
     sampler = Sampler(p, path.parent)
     triggers = schedule(p)
-    tracks = {}
+    tracks, effect_reports, keys = {}, {}, {}
+    needed = (
+        {t.id for t in p.tracks}
+        if track_id is None
+        else {track_id} | p.sidechain_sources(track_id)
+    )
+    sources = {s for t in p.tracks for s in t.sidechains()}
     any_solo = any(t.solo for t in p.tracks)
     mix = np.zeros((total, 2), dtype=np.float64)
-    for track in p.tracks:
+    for track in p.render_order():
+        if track.id not in needed:
+            continue
+        chain = Chain(track.effects, rate)
+        x = chain.run(
+            render_track(p, track, triggers, sampler, block_size),
+            {s: keys[s] for s in track.sidechains()},
+            block_size,
+        )
+        # Sidechain keys are post-insert and pre-fader, so gain and mute never move them.
+        if track.id in sources:
+            keys[track.id] = x
         if track_id is not None and track.id != track_id:
             continue
-        x = render_track(p, track, triggers, sampler, block_size)
+        effect_reports[track.id] = chain.report()
+        x = stereo_pan(x, track.pan) * 10 ** (track.gain_db / 20)
         if track.mute or (any_solo and not track.solo):
             x[:] = 0
         tracks[track.id] = x
         mix += x
+    tracks = {t.id: tracks[t.id] for t in p.tracks if t.id in tracks}
     master = 10 ** (p.session.master_gain_db / 20)
     fade = min(total, round(p.session.end_fade_ms * rate / 1000))
-    envelope = np.ones(total) * master
+    fader = np.ones(total)
     if fade:
-        envelope[-fade:] *= np.linspace(1, 0, fade)
-    mix *= envelope[:, None]
+        fader[-fade:] = np.linspace(1, 0, fade)
+    envelope = fader * master
+    # Track previews are the track's stem, so they omit the master chain.
+    master_chain = Chain([] if track_id else p.master.effects, rate)
+    if master_chain.devices:
+        mix = master_chain.run(mix * master, block_size=block_size)
+        mix *= fader[:, None]
+    else:
+        mix *= envelope[:, None]
     if region:
         mix = mix[region[0] : region[1]]
     report = metrics(mix, rate)
     if not report["finite"] or report["over_range_samples"]:
         raise ValueError(
-            f"Unsafe PCM export: peak {report['peak_dbfs']:.2f} dBFS; lower master_gain_db"
+            f"Unsafe PCM export: peak {report['peak_dbfs']:.2f} dBFS; "
+            "lower master_gain_db or add a master limiter"
         )
     fingerprint = project_hash(p)
     engine_hash = hashlib.sha256(
@@ -341,12 +370,13 @@ def render(
         x *= envelope[:, None]
         if region:
             x = x[region[0] : region[1]]
-        # Float stems retain headroom and sum to the pre-quantization master.
+        # Float stems retain headroom and sum to the bus before master effects.
         wav_atomic(output / "stems" / f"{name}.wav", x, rate, "FLOAT")
         track_reports[name] = {
             "audio_sha256": digest(output / "stems" / f"{name}.wav"),
             "peak_dbfs": float(20 * np.log10(max(float(np.max(abs(x))), 1e-12))),
             "events": sum(tr.track == name for tr in triggers),
+            "effects": effect_reports[name],
         }
     manifest = {
         "engine_version": __version__,
@@ -365,7 +395,10 @@ def render(
         "tracks": track_reports,
         "sections": [s.model_dump() for s in p.sections],
         "tail_policy": "truncate at session length with explicit end fade",
-        "stem_policy": "post-track and post-master gain, float WAV, same start and length",
+        "master_effects": master_chain.report(),
+        "stems_sum_to_mix": not master_chain.devices,
+        "stem_policy": "post-insert, post-track and post-master gain and fade, before master effects; float WAV, same start and length",
+        "sidechain_policy": "key is the source track after its inserts, before its gain, pan, mute and solo",
         "pitch_policy": "bandlimited repitch; pitch changes duration; source_bpm also repitches",
     }
     atomic_text(output / "report.json", json.dumps(manifest, indent=2) + "\n")
