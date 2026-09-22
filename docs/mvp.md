@@ -12,6 +12,8 @@ inspection. There is no embedded autonomous composer or visual editor.
 - `engine.py`: event scheduling, sample decoding and bandlimited repitch, explicit
   block-processing voice state, track summing, master gain and WAV/stem export.
 - `cli.py`: thin command shell with machine-readable results and errors.
+- `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
+  snapshot-derived musical context, render comparisons and PNG summaries.
 
 The sampler preloads/resamples source files and mixes voices in blocks. This is an
 offline implementation, not a realtime-safe callback. It intentionally uses the same
@@ -80,10 +82,14 @@ Tests cover timing/fractions, schema errors, references, pitch, source-rate conv
 choke groups, swing, gate release, block-size invariance, stems reconstruction,
 clipping rejection, copied-asset portability/tamper detection, incremental index
 updates, stable formatting, stale-edit rejection, section equivalence and track previews.
+Perception tests use known tones, gain changes, silence, stereo polarity, changed
+frequencies, localized arrangement edits, previews and tampered render artifacts.
 
 ## Deliberately deferred
 
 Realtime playback, recording, UI, effects, synths, plugin hosting, time stretching,
 MIDI import/export, automation, routing graphs, semantic/audio embedding search,
 automatic pitch/BPM extraction, sample sustain looping, incremental render caching,
-and autonomous listening/revision. The CLI is ready for agent-driven iterative use.
+masking diagnosis, reference alignment and autonomous listening/revision. A bounded
+perception layer is implemented; see [perception.md](perception.md). The CLI is ready
+for agent-driven iterative use.

@@ -1,5 +1,8 @@
 # Agentic DAW — design docs
 
+Current analysis commands: [perception.md](perception.md) documents `daw listen`
+and `daw compare`, the implemented subset of the broader perception plan.
+
 These documents capture the design conversation for an AI-native digital audio workstation: a DAW built to be operated by a coding agent (Claude Code, Codex) rather than by a human clicking a UI. The sampler MVP is now implemented; see [../README.md](../README.md) and [mvp.md](mvp.md) for the current build. The documents below remain the broader design draft. Read in this order:
 
 1. **[idea.md](idea.md)** — the vision, the first-principles reframes, and the working rhythm between a person and the agent. Start here.

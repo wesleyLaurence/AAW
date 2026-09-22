@@ -43,6 +43,8 @@ uv run daw check projects/my-beat/song.yaml
 uv run daw inspect projects/my-beat/song.yaml
 uv run daw render projects/my-beat/song.yaml
 uv run daw render projects/my-beat/song.yaml --track drums
+uv run daw listen projects/my-beat/renders/latest.json
+uv run daw compare projects/my-beat/revisions/before-render.json projects/my-beat/renders/latest.json
 ```
 
 All commands emit JSON. Errors emit JSON to stderr and exit nonzero. The index is
@@ -116,6 +118,16 @@ to use its project-relative sample paths.
 Track and section previews evaluate the original timeline before slicing, so notes
 and tails beginning before a section are retained. They currently perform full-track
 work; there is no incremental cache yet.
+
+## Perception and comparison
+
+`daw listen <render>` measures the mix, tracks and sections, then writes JSON and
+an energy/spectrogram PNG. `daw compare <before> <after>` reports actual and
+loudness-matched deltas plus a comparison chart. Both accept render directories,
+render pointers, `report.json`, or standalone audio. Add `--no-images` for JSON only.
+Outputs live under `analysis/` inside the render directory or beside standalone
+audio. Reports use the saved project snapshot and do not change the song or audio.
+See [docs/perception.md](docs/perception.md) for definitions and limitations.
 
 The older files in `docs/` describe the broader product vision. The implemented MVP
 is deliberately narrower; `docs/mvp.md` is authoritative for the current build.

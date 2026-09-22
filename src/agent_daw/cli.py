@@ -64,6 +64,17 @@ def parser():
     ren.add_argument("--output", type=Path)
     ren.add_argument("--track")
     ren.add_argument("--section")
+    listen = sub.add_parser(
+        "listen", help="Measure a saved render or WAV; write analysis JSON and images"
+    )
+    listen.add_argument("source", type=Path)
+    listen.add_argument("--no-images", action="store_true")
+    compare = sub.add_parser(
+        "compare", help="Compare two renders: actual and loudness-matched deltas"
+    )
+    compare.add_argument("before", type=Path)
+    compare.add_argument("after", type=Path)
+    compare.add_argument("--no-images", action="store_true")
     desc = sub.add_parser("describe")
     desc.add_argument(
         "topic", nargs="?", choices=["project", "sampler"], default="project"
@@ -84,6 +95,12 @@ def merge(target, patch):
 
 
 def execute(a):
+    if a.command in ("listen", "compare"):
+        from . import perception
+
+        if a.command == "listen":
+            return perception.listen(a.source, images=not a.no_images)
+        return perception.compare(a.before, a.after, images=not a.no_images)
     if a.command == "init":
         path = a.directory / "song.yaml"
         if path.exists():

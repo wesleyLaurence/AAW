@@ -344,6 +344,7 @@ def render(
         # Float stems retain headroom and sum to the pre-quantization master.
         wav_atomic(output / "stems" / f"{name}.wav", x, rate, "FLOAT")
         track_reports[name] = {
+            "audio_sha256": digest(output / "stems" / f"{name}.wav"),
             "peak_dbfs": float(20 * np.log10(max(float(np.max(abs(x))), 1e-12))),
             "events": sum(tr.track == name for tr in triggers),
         }
