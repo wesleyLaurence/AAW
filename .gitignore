@@ -16,6 +16,3 @@ projects/*/renders/
 # Personal creative work stays local; this repository versions reusable tooling.
 /projects/
 /content/
-# Legacy song-specific scripts are preserved locally.
-/scripts/build_demo.py
-/scripts/verify_demo.py
