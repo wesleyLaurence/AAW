@@ -21,6 +21,10 @@ from .model import (
     Eq,
     Compressor,
     Limiter,
+    Delay,
+    Reverb,
+    Send,
+    Return,
 )
 from .engine import render, schedule
 
@@ -120,17 +124,21 @@ def parser():
 
 
 EFFECT_SEMANTICS = {
-    "order": "Effects run top to bottom. Track inserts come before track gain and pan. master.effects follow master_gain_db and precede the end fade.",
+    "order": "Effects run top to bottom. Track inserts come before track gain and pan. Return effects process the sum of its sends, before the return's gain and pan. master.effects follow master_gain_db and precede the end fade.",
     "filter": "Butterworth highpass or lowpass. slope_db_per_octave 12/24/36/48 is the order times 6 dB. No resonance control.",
     "eq": "RBJ biquad bands in series. bell uses q as bandwidth; shelves use q as shelf slope (0.71 is maximally flat). gain_db at freq_hz.",
     "compressor": "Stereo-linked sample-peak detector, soft knee of knee_db centered on threshold_db. attack_ms smooths onset; release_ms is the time for reduction to fall by a factor of e. makeup_db is static.",
     "sidechain": "compressor.sidechain names another track. Its key is that track after its own inserts, before its gain, pan, mute and solo, so a muted kick still ducks the bass. Cycles and self-sidechains are rejected. Master compressors cannot use a sidechain.",
     "limiter": "Look-ahead brickwall on sample peaks: no output sample exceeds ceiling_db. lookahead_ms is compensated latency. Estimated true peak can still exceed the ceiling slightly; leave margin below 0 dBFS.",
     "bypass": "bypass: true keeps an effect in the document without processing, for A/B renders with daw compare.",
-    "stems": "Stems are post-insert, post-track and post-master gain and fade, before master effects. Without master effects they sum to the mix; report.stems_sum_to_mix says which.",
-    "previews": "render --track renders that track plus its sidechain sources and omits master effects, matching its stem. Section previews include the master chain.",
-    "report": "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB.",
-    "limits": "No reverb, delay, saturation, sends, groups or automation yet. Effect parameters are static for the whole render.",
+    "stems": "Stems are post-insert, post-track and post-master gain and fade, before master effects. Track stems are dry; each return has its own stem. Without master effects track and return stems sum to the mix; report.stems_sum_to_mix says which.",
+    "previews": "render --track TRACK renders that track plus its sidechain sources and omits returns and master effects, matching its stem. render --track RETURN renders the return with its senders, output wet only. Section previews include returns and the master chain.",
+    "delay": "Tempo-synced feedback delay. time_beats (fractions allowed, 1 ms to 10 s at the session tempo) is the echo spacing; feedback_percent is each repeat's level relative to the previous one. Optional lowcut_hz/highcut_hz are 12 dB/octave filters inside the feedback loop, so every repeat darkens further. ping_pong sums the input to mono, starts on the left and alternates channels.",
+    "reverb": "Convolution with a seeded synthetic impulse response: same parameters and seed, same tail. decay_seconds is the RT60 up to damping_hz; above it RT60 falls in proportion to 1/f. predelay_ms delays the tail; lowcut_hz is a 12 dB/octave highpass on the tail; width_percent 0 is mono, 100 fully decorrelated. Input is summed to mono. Energy-normalized: white noise in gives wet RMS equal to the input RMS. Latency is compensated. Tails past the session end are cut by the end fade.",
+    "mix": "delay and reverb take mix_percent: output = input * (1 - mix) + wet * mix. The default 100 is fully wet, for returns; set it lower when used as a track insert.",
+    "returns": "returns[] are buses with id, gain_db, pan, mute and effects. tracks[].sends lists {to: RETURN, gain_db, pre_fader}. Post-fader sends (default) tap after the track's gain and pan; pre-fader after its inserts. Muted or solo-muted tracks send nothing. Returns are never solo-muted. A return compressor may sidechain a track; sidechains cannot name a return. Returns cannot send.",
+    "report": "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB. Returns appear under tracks with kind: return and their senders.",
+    "limits": "No saturation, modulation effects, groups, return-to-return sends, impulse-response samples or automation yet. Effect parameters are static for the whole render.",
 }
 
 
@@ -166,8 +174,9 @@ def execute(a):
         return {
             "schema": {
                 m.model_fields["type"].annotation.__args__[0]: m.model_json_schema()
-                for m in (Filter, Eq, Compressor, Limiter)
+                for m in (Filter, Eq, Compressor, Limiter, Delay, Reverb)
             },
+            "routing": {"send": Send.model_json_schema(), "return": Return.model_json_schema()},
             "semantics": EFFECT_SEMANTICS,
         }
     if a.command == "describe":
@@ -189,8 +198,9 @@ def execute(a):
                 "mix": "gain_db is dB. pan is -1 left to +1 right. Mono pads use equal-power pan. Stereo pads/tracks use balance. mute wins over solo.",
                 "render": "Finite session length, tails truncated with end fade. PCM24 stereo mix and aligned FLOAT stems. Clipping fails export.",
                 "editing": "Use inspect SHA with apply --expect. JSON merge patch: objects merge, arrays replace, null deletes. CLI writers acquire a project lock.",
-                "effects": "tracks[].effects and master.effects are serial insert chains; see daw describe effects.",
-                "limits": "No reverb, delay, sends, groups, synths, time stretching, automation, recording or realtime playback.",
+                "effects": "tracks[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects.",
+                "returns": "returns[] are reverb/delay buses fed by tracks[].sends; see daw describe effects.",
+                "limits": "No groups, synths, time stretching, automation, recording or realtime playback.",
             },
         }
     if a.command == "samples":
@@ -301,8 +311,20 @@ def execute(a):
                 "solo": t.solo,
                 "effects": [e.type for e in t.effects],
                 "sidechain": t.sidechains(),
+                "sends": [s.model_dump() for s in t.sends],
             }
             for t in project.tracks
+        ],
+        "returns": [
+            {
+                "id": r.id,
+                "gain_db": r.gain_db,
+                "mute": r.mute,
+                "effects": [e.type for e in r.effects],
+                "sidechain": r.sidechains(),
+                "senders": project.senders(r.id),
+            }
+            for r in project.returns
         ],
         "master_effects": [e.type for e in project.master.effects],
         "sections": [s.model_dump() for s in project.sections],

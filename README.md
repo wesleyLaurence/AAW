@@ -69,10 +69,12 @@ render a mix and stems. It also provides render analysis and comparisons.
 Samples can be measured from their audio for pitch (with octave), loop tempo and
 one-shot/loop kind.
 
-Tracks and the master bus take insert effects: filter, EQ, compressor with
-sidechain, and a look-ahead limiter. See [docs/effects.md](docs/effects.md).
+Tracks, returns and the master bus take insert effects: filter, EQ, compressor
+with sidechain, look-ahead limiter, tempo-synced delay and a seeded convolution
+reverb. Tracks send pre- or post-fader to return buses, which render as their own
+stems. See [docs/effects.md](docs/effects.md).
 
-The broader workspace described above is the vision. UI, reverb/delay, sends,
+The broader workspace described above is the vision. UI, saturation, groups,
 automation, synths, plugin hosting, MIDI import/export, recording, and a realtime
 engine are not implemented.
 [docs/mvp.md](docs/mvp.md) describes the implemented behavior.
@@ -179,12 +181,19 @@ A quarter beat grid means sixteenth notes. `x` triggers velocity 100, digits 1â€
 encode increasing velocity, and `.` is a rest. Step rows must exactly span the pattern.
 Pitched/gated patterns use events with `at`, `pad`, `note`, `duration`, and `velocity`.
 
-Effects are listed under a track's `effects` or under `master.effects`:
+Effects are listed under a track's or return's `effects` or under `master.effects`.
+Tracks reach shared reverb and delay through `sends` to `returns`:
 
 ```yaml
   effects:
   - {type: filter, mode: highpass, cutoff_hz: 30, slope_db_per_octave: 24}
   - {type: compressor, threshold_db: -30, ratio: 8, release_ms: 150, sidechain: kick}
+  sends:
+  - {to: plate, gain_db: -12}
+returns:
+- id: plate
+  effects:
+  - {type: reverb, decay_seconds: 1.8, predelay_ms: 20, lowcut_hz: 200}
 master:
   effects:
   - {type: limiter, ceiling_db: -1}
@@ -194,7 +203,8 @@ master:
 
 Each render produces a stereo 48 kHz or 44.1 kHz PCM24 `mix.wav`, aligned float WAV
 stems, a project snapshot, and `report.json`. Stems include track effects, master
-gain and ending fade, but not master effects. Without master effects they
+gain and ending fade, but not master effects. Track stems are dry and each return
+has its own stem. Without master effects track and return stems together
 reconstruct the mix within quantization tolerance; `stems_sum_to_mix` in the report
 says whether they do. Only the effects written in the project are applied: there is
 no automatic normalization. Unsafe PCM clipping aborts export; lower

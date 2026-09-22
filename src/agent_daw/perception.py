@@ -323,6 +323,7 @@ def analyze(source):
             if expected_hash and expected_hash != actual_hash:
                 raise ValueError(f"Stem hash mismatch: {track}")
             report["tracks"][track] = {
+                "kind": manifest["tracks"][track].get("kind", "track"),
                 "audio_sha256": actual_hash,
                 "hash_verified_against_render": expected_hash is not None,
                 "audio": measure(stem, rate),
@@ -538,7 +539,9 @@ def compare(before, after, images=True):
         }
     report["musical_context_delta"] = {}
     if a["musical_context"] and b["musical_context"]:
-        for name in sorted(set(a["tracks"]) & set(b["tracks"])):
+        # Returns have stems but schedule no triggers, so they have no context.
+        common = set(a["musical_context"]["tracks"]) & set(b["musical_context"]["tracks"])
+        for name in sorted(common):
             ra = a["musical_context"]["tracks"][name]["regions"]
             rb = b["musical_context"]["tracks"][name]["regions"]
             changes = []

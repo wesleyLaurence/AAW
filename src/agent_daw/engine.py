@@ -257,9 +257,10 @@ def render(
         raise ValueError("block_size must be positive")
     before = time.perf_counter()
     p = load(path)
-    rate = p.session.sample_rate
-    if track_id is not None and track_id not in {t.id for t in p.tracks}:
-        raise ValueError(f"Unknown track: {track_id}")
+    rate, tempo = p.session.sample_rate, p.session.tempo
+    return_ids = {r.id for r in p.returns}
+    if track_id is not None and track_id not in {t.id for t in p.tracks} | return_ids:
+        raise ValueError(f"Unknown track or return: {track_id}")
     region = None
     if section is not None:
         matches = [s for s in p.sections if s.id == section]
@@ -281,18 +282,25 @@ def render(
     sampler = Sampler(p, path.parent)
     triggers = schedule(p)
     tracks, effect_reports, keys = {}, {}, {}
-    needed = (
-        {t.id for t in p.tracks}
-        if track_id is None
-        else {track_id} | p.sidechain_sources(track_id)
-    )
-    sources = {s for t in p.tracks for s in t.sidechains()}
+    # A track preview needs its sidechain sources; a return preview also needs its
+    # senders and theirs. Only the target is output.
+    if track_id is None:
+        needed, needed_returns = {t.id for t in p.tracks}, return_ids
+    elif track_id in return_ids:
+        needed_returns = {track_id}
+        needed = set(p.senders(track_id)) | p.sidechain_sources(track_id)
+        for sender in p.senders(track_id):
+            needed |= p.sidechain_sources(sender)
+    else:
+        needed, needed_returns = {track_id} | p.sidechain_sources(track_id), set()
+    sources = {s for c in [*p.tracks, *p.returns] for s in c.sidechains()}
     any_solo = any(t.solo for t in p.tracks)
     mix = np.zeros((total, 2), dtype=np.float64)
+    buses = {r: np.zeros((total, 2), dtype=np.float64) for r in needed_returns}
     for track in p.render_order():
         if track.id not in needed:
             continue
-        chain = Chain(track.effects, rate)
+        chain = Chain(track.effects, rate, tempo)
         x = chain.run(
             render_track(p, track, triggers, sampler, block_size),
             {s: keys[s] for s in track.sidechains()},
@@ -301,15 +309,34 @@ def render(
         # Sidechain keys are post-insert and pre-fader, so gain and mute never move them.
         if track.id in sources:
             keys[track.id] = x
+        silent = track.mute or (any_solo and not track.solo)
+        post = stereo_pan(x, track.pan) * 10 ** (track.gain_db / 20)
+        # Sends tap after the inserts (pre-fader) or after gain and pan (post-fader).
+        # A muted or solo-muted track sends nothing.
+        for send in track.sends:
+            if not silent and send.to in buses:
+                tap = x if send.pre_fader else post
+                buses[send.to] += tap * 10 ** (send.gain_db / 20)
         if track_id is not None and track.id != track_id:
             continue
         effect_reports[track.id] = chain.report()
-        x = stereo_pan(x, track.pan) * 10 ** (track.gain_db / 20)
-        if track.mute or (any_solo and not track.solo):
-            x[:] = 0
-        tracks[track.id] = x
-        mix += x
+        if silent:
+            post[:] = 0
+        tracks[track.id] = post
+        mix += post
     tracks = {t.id: tracks[t.id] for t in p.tracks if t.id in tracks}
+    # Returns are never solo-muted, so a soloed track keeps its reverb and echoes.
+    for ret in p.returns:
+        if ret.id not in needed_returns:
+            continue
+        chain = Chain(ret.effects, rate, tempo)
+        x = chain.run(buses[ret.id], {s: keys[s] for s in ret.sidechains()}, block_size)
+        effect_reports[ret.id] = chain.report()
+        x = stereo_pan(x, ret.pan) * 10 ** (ret.gain_db / 20)
+        if ret.mute:
+            x[:] = 0
+        tracks[ret.id] = x
+        mix += x
     master = 10 ** (p.session.master_gain_db / 20)
     fade = min(total, round(p.session.end_fade_ms * rate / 1000))
     fader = np.ones(total)
@@ -317,7 +344,7 @@ def render(
         fader[-fade:] = np.linspace(1, 0, fade)
     envelope = fader * master
     # Track previews are the track's stem, so they omit the master chain.
-    master_chain = Chain([] if track_id else p.master.effects, rate)
+    master_chain = Chain([] if track_id else p.master.effects, rate, tempo)
     if master_chain.devices:
         mix = master_chain.run(mix * master, block_size=block_size)
         mix *= fader[:, None]
@@ -373,11 +400,15 @@ def render(
         # Float stems retain headroom and sum to the bus before master effects.
         wav_atomic(output / "stems" / f"{name}.wav", x, rate, "FLOAT")
         track_reports[name] = {
+            "kind": "return" if name in return_ids else "track",
             "audio_sha256": digest(output / "stems" / f"{name}.wav"),
             "peak_dbfs": float(20 * np.log10(max(float(np.max(abs(x))), 1e-12))),
-            "events": sum(tr.track == name for tr in triggers),
-            "effects": effect_reports[name],
         }
+        if name in return_ids:
+            track_reports[name]["senders"] = p.senders(name)
+        else:
+            track_reports[name]["events"] = sum(tr.track == name for tr in triggers)
+        track_reports[name]["effects"] = effect_reports[name]
     manifest = {
         "engine_version": __version__,
         "python": platform.python_version(),
@@ -397,7 +428,8 @@ def render(
         "tail_policy": "truncate at session length with explicit end fade",
         "master_effects": master_chain.report(),
         "stems_sum_to_mix": not master_chain.devices,
-        "stem_policy": "post-insert, post-track and post-master gain and fade, before master effects; float WAV, same start and length",
+        "stem_policy": "post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, each return has its own stem; float WAV, same start and length",
+        "send_policy": "post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks send nothing; returns are never solo-muted",
         "sidechain_policy": "key is the source track after its inserts, before its gain, pan, mute and solo",
         "pitch_policy": "bandlimited repitch; pitch changes duration; source_bpm also repitches",
     }

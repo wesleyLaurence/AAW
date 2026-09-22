@@ -256,7 +256,7 @@ def test_master_limiter_allows_hot_mix(beat, tmp_path):
             "Master compressor",
         ),
         (lambda d: d["tracks"][0]["effects"][0].update(cutoff_hz=30000), "cutoff_hz"),
-        (lambda d: d["tracks"][0]["effects"][0].update(type="reverb"), "type"),
+        (lambda d: d["tracks"][0]["effects"][0].update(type="chorus"), "type"),
         (
             lambda d: d["tracks"][0]["effects"][0].update(slope_db_per_octave=18),
             "slope",

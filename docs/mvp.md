@@ -14,8 +14,8 @@ inspection. There is no embedded autonomous composer or visual editor.
 - `engine.py`: event scheduling, sample decoding and bandlimited repitch, explicit
   block-processing voice state, sidechain-ordered track rendering, master gain and
   WAV/stem export.
-- `effects.py`: filter, EQ, compressor/sidechain and limiter devices with explicit
-  block state and compensated latency; see [effects.md](effects.md).
+- `effects.py`: filter, EQ, compressor/sidechain, limiter, delay and reverb devices
+  with explicit block state and compensated latency; see [effects.md](effects.md).
 - `cli.py`: thin command shell with machine-readable results and errors.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
@@ -38,11 +38,18 @@ with octave. Selected assets are copied into `samples/HASH_original-name.wav`.
 Supported library formats: WAV, AIFF and FLAC. Mono and stereo rendering only.
 
 Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
-and `effects`. The output is the stereo master; no groups or returns exist yet.
+`effects` and `sends`. A send is `{to, gain_db, pre_fader}`, at most one per return.
 
-Effects: `filter`, `eq`, `compressor` (optional `sidechain` track) and `limiter`,
-listed in order under `tracks[].effects` or `master.effects`. Track inserts come
-before track gain and pan; master effects follow `master_gain_db` and precede the
+Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute` and
+`effects`. A return sums its sends, runs its effects and joins the stereo master.
+Post-fader sends tap after track gain and pan, pre-fader sends after the inserts.
+Muted or solo-muted tracks send nothing; returns are never solo-muted. No groups
+or return-to-return sends exist yet.
+
+Effects: `filter`, `eq`, `compressor` (optional `sidechain` track), `limiter`,
+`delay` and `reverb`, listed in order under `tracks[].effects`, `returns[].effects`
+or `master.effects`. Track inserts come before track gain and pan; return effects
+precede return gain and pan; master effects follow `master_gain_db` and precede the
 end fade. See [effects.md](effects.md) for parameters and semantics.
 
 Pad: `sample`, `mode` (`one_shot` or `gate`), `gain_db`, `pan`, `transpose` in
@@ -94,13 +101,15 @@ choke groups, swing, gate release, block-size invariance, stems reconstruction,
 clipping rejection, copied-asset portability/tamper detection, incremental index
 updates, stable formatting, stale-edit rejection, section equivalence and track previews.
 Effect tests cover filter and EQ responses, compressor curves, limiter ceilings and
-latency, block-partition invariance, sidechain ducking and preview/stem equivalence.
+latency, delay echo timing, reverb decay and seeding, block-partition invariance,
+sidechain ducking and preview/stem equivalence. Routing tests cover pre/post-fader
+sends, mute/solo, return stems and previews and section tails.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
 
 ## Deliberately deferred
 
-Realtime playback, recording, UI, reverb/delay/saturation, sends, groups, synths,
+Realtime playback, recording, UI, saturation, groups, synths,
 plugin hosting, time stretching, MIDI import/export, automation, semantic/audio embedding search,
 key/chord detection, downbeat and swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
