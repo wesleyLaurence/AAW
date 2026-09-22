@@ -7,6 +7,8 @@ provides deterministic editing, sample retrieval, sequencing, rendering and tech
 inspection. There is no embedded autonomous composer or visual editor.
 
 - `model.py`: strict schema v1, exact musical time, stable YAML, validation and hashes.
+- `analysis.py`: audio-derived pitch, onsets, tempo and loop/one-shot kind; see
+  [sample-analysis.md](sample-analysis.md). Cached in the index by `library.py`.
 - `library.py`: incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
 - `engine.py`: event scheduling, sample decoding and bandlimited repitch, explicit
@@ -89,7 +91,8 @@ frequencies, localized arrangement edits, previews and tampered render artifacts
 
 Realtime playback, recording, UI, effects, synths, plugin hosting, time stretching,
 MIDI import/export, automation, routing graphs, semantic/audio embedding search,
-automatic pitch/BPM extraction, sample sustain looping, incremental render caching,
+key/chord detection, downbeat and swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
-perception layer is implemented; see [perception.md](perception.md). The CLI is ready
+perception layer is implemented; see [perception.md](perception.md). Monophonic pitch
+and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md). The CLI is ready
 for agent-driven iterative use.

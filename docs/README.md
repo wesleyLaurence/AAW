@@ -4,6 +4,8 @@ Start with the [project introduction](../README.md) for what AAW is and why it i
 
 Current analysis commands: [perception.md](perception.md) documents `daw listen`
 and `daw compare`, the implemented subset of the broader perception plan.
+[sample-analysis.md](sample-analysis.md) documents `daw samples analyze`, measured
+search filters, `--root-note auto` and root-note warnings in `daw check`.
 
 These documents capture the design conversation for an AI-native digital audio workstation: a DAW built to be operated by a coding agent (Claude Code, Codex) rather than by a human clicking a UI. The sampler MVP is now implemented; see [../README.md](../README.md) and [mvp.md](mvp.md) for the current build. The documents below remain the broader design draft. Read in this order:
 

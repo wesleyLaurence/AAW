@@ -5,8 +5,10 @@ import hashlib
 import re
 import shutil
 import sqlite3
+import json
 import numpy as np
 import soundfile as sf
+from . import analysis
 from .model import Sample, digest
 
 EXTENSIONS = {".wav", ".aif", ".aiff", ".flac"}
@@ -21,6 +23,11 @@ def connect(db: Path):
       duration REAL, sample_rate INTEGER, channels INTEGER, frames INTEGER,
       category TEXT, kind TEXT, bpm_hint INTEGER, key_hint TEXT,
       bytes INTEGER, mtime_ns INTEGER, search_text TEXT)""")
+    # Measured values, valid only while the file's size, mtime and analyzer match.
+    con.execute("""CREATE TABLE IF NOT EXISTS analysis (
+      id TEXT PRIMARY KEY, bytes INTEGER, mtime_ns INTEGER, analyzer TEXT,
+      pitched INTEGER, midi REAL, note TEXT, cents REAL, confidence REAL,
+      kind TEXT, bpm REAL, report TEXT)""")
     return con
 
 
@@ -116,6 +123,7 @@ def scan(root: Path, db: Path):
             p = Path(row["path"])
             if p.is_relative_to(root) and row["path"] not in seen:
                 con.execute("DELETE FROM samples WHERE path=?", (row["path"],))
+        con.execute("DELETE FROM analysis WHERE id NOT IN (SELECT id FROM samples)")
         con.commit()
         return {
             "root": str(root),
@@ -128,34 +136,157 @@ def scan(root: Path, db: Path):
         con.close()
 
 
-def search(db: Path, query="", category=None, kind=None, key=None, bpm=None, limit=20):
+MEASURED_KINDS = ["one_shot", "loop", "uncertain"]
+
+
+def search(
+    db: Path,
+    query="",
+    category=None,
+    kind=None,
+    key=None,
+    bpm=None,
+    limit=20,
+    pitched=None,
+    note_range=None,
+    measured_kind=None,
+    measured_bpm=None,
+):
+    """Filename search. Measured filters match only samples with a current analysis."""
     con = connect(db)
-    clauses, args = [], []
+    clauses, args = [], [analysis.ANALYZER]
     for token in query.lower().split():
-        clauses.append("search_text LIKE ? ESCAPE '\\'")
+        clauses.append("s.search_text LIKE ? ESCAPE '\\'")
         args.append(
             "%"
             + token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             + "%"
         )
     for col, value in [
-        ("category", category),
-        ("kind", kind),
-        ("key_hint", key),
-        ("bpm_hint", bpm),
+        ("s.category", category),
+        ("s.kind", kind),
+        ("s.key_hint", key),
+        ("s.bpm_hint", bpm),
+        ("a.kind", measured_kind),
     ]:
         if value is not None:
             clauses.append(f"{col} = ?")
             args.append(value)
-    sql = "SELECT id,name,pack,duration,channels,category,kind,bpm_hint,key_hint,path FROM samples"
+    if pitched is not None:
+        clauses.append("a.pitched = ?")
+        args.append(int(pitched))
+    if note_range is not None:
+        clauses.append("a.pitched = 1 AND ROUND(a.midi) BETWEEN ? AND ?")
+        args.extend(note_range)
+    if measured_bpm is not None:
+        clauses.append("ABS(a.bpm - ?) <= 1")
+        args.append(measured_bpm)
+    sql = """SELECT s.id,s.name,s.pack,s.duration,s.channels,s.category,s.kind,
+      s.bpm_hint,s.key_hint,s.path,a.id AS measured_id,a.pitched,a.note,a.cents,
+      a.confidence,a.kind AS measured_kind,a.bpm AS measured_bpm
+      FROM samples s LEFT JOIN analysis a ON a.id = s.id AND a.bytes = s.bytes
+      AND a.mtime_ns = s.mtime_ns AND a.analyzer = ?"""
     if clauses:
         sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY name,path LIMIT ?"
+    sql += " ORDER BY s.name,s.path LIMIT ?"
     args.append(limit)
     try:
-        return [dict(r) for r in con.execute(sql, args)]
+        rows = []
+        for r in con.execute(sql, args):
+            row = dict(r)
+            measured = {
+                k: row.pop(k)
+                for k in [
+                    "pitched",
+                    "note",
+                    "cents",
+                    "confidence",
+                    "measured_kind",
+                    "measured_bpm",
+                ]
+            }
+            if row.pop("measured_id") is None:
+                row["measured"] = None
+            else:
+                measured["pitched"] = bool(measured["pitched"])
+                measured["kind"] = measured.pop("measured_kind")
+                measured["bpm"] = measured.pop("measured_bpm")
+                row["measured"] = measured
+            rows.append(row)
+        return rows
     finally:
         con.close()
+
+
+def analyze(db: Path, path: Path, refresh=False):
+    """Measure one file, reusing the index cache when the file is indexed and unchanged."""
+    path = path.resolve()
+    con = connect(db)
+    try:
+        row = con.execute(
+            "SELECT id,bytes,mtime_ns,bpm_hint FROM samples WHERE path=?", (str(path),)
+        ).fetchone()
+        stat = path.stat()
+        if row and not refresh:
+            cached = con.execute(
+                "SELECT report FROM analysis WHERE id=? AND bytes=? AND mtime_ns=? AND analyzer=?",
+                (row["id"], stat.st_size, stat.st_mtime_ns, analysis.ANALYZER),
+            ).fetchone()
+            if cached:
+                return {**json.loads(cached["report"]), "cached": True, "indexed": True}
+        hint = row["bpm_hint"] if row else hints(path)[2]
+        report = analysis.analyze(path, hint)
+        if row and row["bytes"] == stat.st_size and row["mtime_ns"] == stat.st_mtime_ns:
+            pitch, rhythm = report["pitch"], report["rhythm"]
+            con.execute(
+                "INSERT OR REPLACE INTO analysis VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    row["id"],
+                    stat.st_size,
+                    stat.st_mtime_ns,
+                    analysis.ANALYZER,
+                    int(pitch["pitched"]),
+                    pitch["midi"],
+                    pitch["note"],
+                    pitch["cents"],
+                    pitch["confidence"],
+                    rhythm["kind"],
+                    rhythm["tempo"]["bpm"] if rhythm["tempo"] else None,
+                    json.dumps(report),
+                ),
+            )
+            con.commit()
+        return {**report, "cached": False, "indexed": bool(row)}
+    finally:
+        con.close()
+
+
+def analyze_all(db: Path, refresh=False):
+    """Analyze every indexed sample whose cached analysis is missing or stale."""
+    con = connect(db)
+    try:
+        rows = con.execute(
+            """SELECT s.path FROM samples s LEFT JOIN analysis a ON a.id = s.id
+            AND a.bytes = s.bytes AND a.mtime_ns = s.mtime_ns AND a.analyzer = ?
+            WHERE ? OR a.id IS NULL ORDER BY s.path""",
+            (analysis.ANALYZER, int(refresh)),
+        ).fetchall()
+        total = con.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
+    finally:
+        con.close()
+    errors = []
+    for row in rows:
+        try:
+            analyze(db, Path(row["path"]), refresh=True)
+        except (RuntimeError, ValueError, OSError) as e:
+            errors.append({"path": row["path"], "error": str(e)})
+    return {
+        "analyzed": len(rows) - len(errors),
+        "unchanged": total - len(rows),
+        "errors": errors,
+        "analyzer": analysis.ANALYZER,
+        "database": str(db),
+    }
 
 
 def resolve(db: Path, value: str) -> Path:

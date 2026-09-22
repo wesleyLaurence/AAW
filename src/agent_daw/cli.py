@@ -6,7 +6,18 @@ import sys
 import yaml
 from pathlib import Path
 from . import library
-from .model import Project, Session, load, save, project_hash, frame, Pad, Event, Sample
+from .model import (
+    Project,
+    Session,
+    load,
+    save,
+    project_hash,
+    frame,
+    midi,
+    Pad,
+    Event,
+    Sample,
+)
 from .engine import render, schedule
 
 DEFAULT_DB = Path(".daw/library.sqlite")
@@ -34,6 +45,22 @@ def parser():
     search.add_argument("--key")
     search.add_argument("--bpm", type=int)
     search.add_argument("--limit", type=int, default=20)
+    measured = search.add_argument_group(
+        "measured filters", "match only samples analyzed with daw samples analyze"
+    )
+    pitch = measured.add_mutually_exclusive_group()
+    pitch.add_argument("--pitched", action="store_true", default=None)
+    pitch.add_argument("--unpitched", dest="pitched", action="store_false")
+    measured.add_argument("--note-range", help="Measured root range, e.g. C1-B1")
+    measured.add_argument("--measured-type", choices=library.MEASURED_KINDS)
+    measured.add_argument("--measured-bpm", type=float, help="Within ±1 BPM")
+    analyze = ss.add_parser(
+        "analyze", help="Measure pitch, onsets, tempo and loop/one-shot from audio"
+    )
+    target = analyze.add_mutually_exclusive_group(required=True)
+    target.add_argument("sample", nargs="?")
+    target.add_argument("--all", action="store_true", help="Every indexed sample")
+    analyze.add_argument("--refresh", action="store_true", help="Ignore the cache")
     inspect = ss.add_parser("inspect")
     inspect.add_argument("sample")
     aud = ss.add_parser("audition")
@@ -44,7 +71,10 @@ def parser():
     imp.add_argument("sample")
     imp.add_argument("--project", type=Path, required=True)
     imp.add_argument("--id", required=True)
-    imp.add_argument("--root-note")
+    imp.add_argument(
+        "--root-note",
+        help="Note with octave, e.g. C2, or auto to use the measured pitch",
+    )
     for name in ["check", "fmt", "inspect"]:
         s = sub.add_parser(name)
         s.add_argument("project", type=Path)
@@ -123,7 +153,7 @@ def execute(a):
                 "time": "All at/duration/length_beats fields are quarter-note beats. at is zero-based. Use fraction strings for triplets. 4/4 only.",
                 "steps": "x = velocity 100, digits 1–9 = scaled velocities, dot = rest. Whitespace and | ignored. grid is beats per cell; 1/4 = sixteenth note.",
                 "swing": "0.5 straight, 0.75 maximum; delays odd step cells. Explicit events are unswung.",
-                "pitch": "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. No pitch-preserving stretch.",
+                "pitch": "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. No pitch-preserving stretch. daw samples analyze measures pitch; import --root-note auto uses it; check warns when a declared root disagrees with the audio.",
                 "gate": "Gate mode requires event.duration. Voice releases at note-off; it never sustains beyond sample length.",
                 "choke": "Pads sharing a choke_group within a track release on the next hit in that group.",
                 "mix": "gain_db is dB. pan is -1 left to +1 right. Mono pads use equal-power pan. Stereo pads/tracks use balance. mute wins over solo.",
@@ -138,10 +168,32 @@ def execute(a):
         if a.action == "search":
             if not 1 <= a.limit <= 1000:
                 raise ValueError("limit must be 1–1000")
+            note_range = None
+            if a.note_range:
+                low, sep, high = a.note_range.partition("-")
+                if not sep:
+                    raise ValueError("note-range must look like C1-B1")
+                note_range = (midi(low), midi(high))
+                if note_range[0] > note_range[1]:
+                    raise ValueError("note-range low note exceeds high note")
             return library.search(
-                a.db, a.query, a.category, a.kind, a.key, a.bpm, a.limit
+                a.db,
+                a.query,
+                a.category,
+                a.kind,
+                a.key,
+                a.bpm,
+                a.limit,
+                pitched=a.pitched,
+                note_range=note_range,
+                measured_kind=a.measured_type,
+                measured_bpm=a.measured_bpm,
             )
+        if a.action == "analyze" and a.all:
+            return library.analyze_all(a.db, a.refresh)
         source = library.resolve(a.db, a.sample)
+        if a.action == "analyze":
+            return library.analyze(a.db, source, a.refresh)
         if a.action == "inspect":
             return library.inspect(source)
         if a.action == "audition":
@@ -152,11 +204,27 @@ def execute(a):
             project = load(a.project)
             if a.id in project.samples:
                 raise ValueError(f"Sample ID already exists: {a.id}")
-            asset = library.import_asset(source, a.project.parent, a.root_note)
+            root_note, measured = a.root_note, None
+            if root_note == "auto":
+                measured = library.analyze(a.db, source)["pitch"]
+                if not measured["pitched"]:
+                    raise ValueError(
+                        "No reliable pitch measured (confidence "
+                        f"{measured['confidence']}); inspect the sample and pass --root-note"
+                    )
+                root_note = measured["note"]
+            asset = library.import_asset(source, a.project.parent, root_note)
             project.samples[a.id] = asset
             project = Project.model_validate(project.model_dump())
             save(project, a.project)
-            return {"sample_id": a.id, **asset.model_dump()}
+            result = {"sample_id": a.id, **asset.model_dump()}
+            if measured:
+                result["measured_pitch"] = measured
+                if abs(measured["cents"]) > 10:
+                    result["suggested_pad_transpose"] = round(
+                        -measured["cents"] / 100, 2
+                    )
+            return result
     project = load(a.project)
     if a.command == "fmt":
         save(project, a.project)
@@ -181,7 +249,7 @@ def execute(a):
     if a.command == "render":
         return render(a.project, a.output, track_id=a.track, section=a.section)
     triggers = schedule(project)
-    return {
+    result = {
         "valid": True,
         "project_sha256": project_hash(project),
         "session": project.session.model_dump(),
@@ -205,6 +273,36 @@ def execute(a):
         ],
         "sections": [s.model_dump() for s in project.sections],
     }
+    if a.command == "check":
+        result.update(root_notes(project, a.project.parent))
+    return result
+
+
+def root_notes(project, root):
+    """Compare each declared root_note with the pitch measured from its asset."""
+    from .analysis import compare_root, measure_pitch, PITCH_SECONDS
+    import soundfile as sf
+
+    report, warnings = {}, []
+    for name, sample in project.samples.items():
+        if not sample.root_note:
+            continue
+        path = root / sample.path
+        info = sf.info(path)
+        x, sr = sf.read(
+            path,
+            frames=min(info.frames, round((PITCH_SECONDS + 5) * info.samplerate)),
+            always_2d=True,
+            dtype="float64",
+        )
+        entry = compare_root(sample.root_note, measure_pitch(x.mean(axis=1), sr))
+        report[name] = entry
+        if entry["status"] != "ok":
+            warnings.append(
+                f"{name}: root_note {entry['declared']} but measured "
+                f"{entry['measured']} ({entry['status']})"
+            )
+    return {"root_notes": report, "warnings": warnings}
 
 
 def main():
