@@ -50,7 +50,8 @@ master:
 Effects run top to bottom. Track inserts come before the track's `gain_db` and `pan`.
 A return's chain processes the sum of its sends, before the return's `gain_db` and
 `pan`. The master chain follows `master_gain_db` and precedes the end fade. Any effect
-accepts `bypass: true`. It stays in the document but does not process, so you can
+accepts an optional `id`, unique within its chain, which automation lanes can use
+to address it. Any effect accepts `bypass: true`. It stays in the document but does not process, so you can
 render with and without it and use `daw compare`.
 
 | Effect | Parameters |
@@ -111,7 +112,8 @@ render with and without it and use `daw compare`.
   track insert, set it lower. `mix_percent: 0` passes the input through
   bit-identical.
 
-Effect parameters are static for the whole render; automation is not implemented.
+Parameters are static unless an automation lane moves them; see
+[automation.md](automation.md) for which ones can be automated.
 Delay and reverb tails that run past the session end are cut by the end fade;
 leave room after the last note.
 
@@ -190,4 +192,4 @@ development container.
 
 Not yet implemented: saturation, chorus and other modulation effects, groups,
 return-to-return sends, sidechain filtering, RMS detection, true-peak limiting,
-loudness-target export, impulse-response samples for the reverb and automation.
+loudness-target export and impulse-response samples for the reverb.

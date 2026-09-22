@@ -8,6 +8,8 @@ and `daw compare`, the implemented subset of the broader perception plan.
 search filters, `--root-note auto` and root-note warnings in `daw check`.
 [effects.md](effects.md) documents track, return and master insert effects,
 sidechain compression, the limiter, delay and reverb, and sends to return buses.
+[automation.md](automation.md) documents automation lanes for levels, pans, sends
+and effect parameters.
 
 These documents capture the design conversation for an AI-native digital audio workstation: a DAW built to be operated by a coding agent (Claude Code, Codex) rather than by a human clicking a UI. The sampler MVP is now implemented; see [../README.md](../README.md) and [mvp.md](mvp.md) for the current build. The documents below remain the broader design draft. Read in this order:
 

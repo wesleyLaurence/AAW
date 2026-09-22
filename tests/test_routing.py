@@ -406,6 +406,7 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
         "effects": ["reverb"],
         "sidechain": [],
         "senders": ["snare"],
+        "automation": [],
     }
     snare = inspected["tracks"][0]
     assert snare["sends"][0] == {"to": "plate", "gain_db": -6, "pre_fader": False}
