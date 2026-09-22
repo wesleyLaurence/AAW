@@ -12,6 +12,8 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
   with `daw samples analyze` or `--root-note auto`; resolve `daw check` root warnings.
 - Read `daw describe effects` before adding effects or returns. Stems exclude master
   effects; track stems are dry and each return has its own stem.
+- Read `daw describe automation` before writing automation lanes. Give automated
+  effects an `id`; ramp levels over a few milliseconds rather than jumping them.
 - Render a short section or isolated track to investigate an edit. Full mix pointer is
   `renders/latest.json`; previews use `renders/latest-preview.json`.
 - Keep demo composition separate from reusable engine code. Do not hardcode creative

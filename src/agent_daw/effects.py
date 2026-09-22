@@ -5,9 +5,13 @@ partition: filters carry their delay state, dynamics carry detector state, and t
 limiter's look-ahead is a declared latency that the chain runner compensates. The
 delay recurses in chunks no longer than its delay time, and the reverb convolves
 fixed partitions aligned to its own input, so neither depends on the caller's blocks.
+Automated parameters are read at absolute chain input frames, and automated filters
+update their coefficients on a fixed grid of those frames, so automation keeps
+output independent of the partition too.
 """
 
 from __future__ import annotations
+from types import SimpleNamespace
 import numpy as np
 from scipy.fft import irfft, rfft
 from scipy.ndimage import maximum_filter1d
@@ -30,6 +34,24 @@ class Device:
         self.window = (0, 0)
         self.position = 0
         self.stats = None
+        # Automation envelopes by parameter name. frame is the chain input frame of
+        # the block being processed; upstream is the latency of earlier devices.
+        self.automation = {}
+        self.frame = 0
+        self.upstream = 0
+
+    def param(self, name, m, start=None):
+        """The static value, or the automated value for m input frames from start."""
+        env = self.automation.get(name)
+        if env is None:
+            return getattr(self.spec, name)
+        start = self.frame if start is None else start
+        return env.at(start - self.upstream + np.arange(m))
+
+    def fraction(self, name, m, start=None):
+        """A percent parameter as a fraction: a scalar, or a column per frame."""
+        v = self.param(name, m, start)
+        return v / 100 if np.ndim(v) == 0 else (v / 100)[:, None]
 
     def record(self, reduction):
         """Accumulate gain reduction for output frames inside the aligned render."""
@@ -49,6 +71,8 @@ class Device:
 
     def report(self):
         result = {"type": self.spec.type, "latency_frames": self.latency}
+        if self.automation:
+            result["automated"] = sorted(self.automation)
         if self.stats is not None or isinstance(self, (Dynamics, LimiterDevice)):
             s = self.stats or {"max": 0.0, "sum": 0.0, "over_1db": 0, "frames": 0}
             n = max(1, s["frames"])
@@ -102,6 +126,100 @@ def band_sos(band, rate):
     return [*(v / d[0] for v in b), 1.0, d[1] / d[0], d[2] / d[0]]
 
 
+def butterworth_sos(mode, order, cutoff, rate):
+    """Butterworth as cascaded RBJ biquads, vectorized over cutoff: shape (..., order/2, 6).
+
+    The bilinear transform prewarped at the cutoff, as butter(fs=...) uses, so the
+    response matches filter_sos; section order and rounding differ.
+    """
+    w = 2 * np.pi * np.asarray(cutoff, dtype=np.float64) / rate
+    cos, sin = np.cos(w), np.sin(w)
+    one = np.ones_like(cos)
+    sections = []
+    for i in range(order // 2):
+        alpha = sin * np.sin(np.pi * (2 * i + 1) / (2 * order))  # sin / (2 q)
+        a0 = 1 + alpha
+        edge = (1 - cos) / 2 if mode == "lowpass" else (1 + cos) / 2
+        middle = 2 * edge if mode == "lowpass" else -2 * edge
+        sections.append(
+            np.stack(
+                [
+                    edge / a0,
+                    middle / a0,
+                    edge / a0,
+                    one,
+                    -2 * cos / a0,
+                    (1 - alpha) / a0,
+                ],
+                axis=-1,
+            )
+        )
+    return np.stack(sections, axis=-2)
+
+
+CONTROL = 64  # frames per coefficient update for automated filters and eq
+
+
+class AutomatedSos(Device):
+    """Filter or eq whose coefficients follow automation.
+
+    Coefficients are recomputed every CONTROL frames of the chain input, counted
+    from the start of the render, from the value at the first frame of each
+    period. The filter state carries across updates. Periods are aligned to the
+    timeline, not to the caller's blocks, so output is partition-independent.
+    """
+
+    def __init__(self, spec, rate, automation):
+        super().__init__(spec)
+        self.rate = rate
+        self.automation = automation
+        sections = (
+            len(spec.bands) if isinstance(spec, Eq) else spec.slope_db_per_octave // 12
+        )
+        self.zi = np.zeros((sections, 2, 2))
+
+    def design(self, ticks):
+        """Coefficients for each period starting at the given chain input frames."""
+        spec = self.spec
+        if isinstance(spec, Filter):
+            cutoff = self.values("cutoff_hz", ticks)
+            return butterworth_sos(
+                spec.mode, spec.slope_db_per_octave // 6, cutoff, self.rate
+            )
+        bands = []
+        for j, band in enumerate(spec.bands):
+            v = {
+                f: self.values(f"bands.{j}.{f}", ticks, getattr(band, f))
+                for f in ("freq_hz", "gain_db", "q")
+            }
+            coefficients = band_sos(SimpleNamespace(shape=band.shape, **v), self.rate)
+            bands.append(np.stack(np.broadcast_arrays(*coefficients), -1))
+        return np.stack(bands, axis=-2)
+
+    def values(self, name, ticks, static=None):
+        env = self.automation.get(name)
+        if env is None:
+            return np.full(len(ticks), static)
+        return env.at(ticks - self.upstream)
+
+    def process(self, x, key=None):
+        m = len(x)
+        if not m:
+            return x
+        start = self.frame
+        ticks = np.arange(start // CONTROL * CONTROL, start + m, CONTROL)
+        sos = self.design(ticks)
+        edges = np.clip(np.append(ticks, start + m) - start, 0, m)
+        # Filter runs of equal coefficients in one call; the result is the same.
+        changed = np.any(sos[1:] != sos[:-1], axis=(1, 2))
+        runs = np.concatenate([[0], np.flatnonzero(changed) + 1, [len(ticks)]])
+        out = np.empty_like(x)
+        for a, b in zip(runs[:-1], runs[1:]):
+            lo, hi = edges[a], edges[b]
+            out[lo:hi], self.zi = sosfilt(sos[a], x[lo:hi], axis=0, zi=self.zi)
+        return out
+
+
 class ReleaseHold:
     """y[n] = max(x[n], decay * y[n-1]), vectorized as a running maximum in log form."""
 
@@ -133,9 +251,9 @@ class Dynamics(Device):
         self.alpha = float(np.exp(-1 / attack)) if attack > 0 else 0.0
         self.zi = np.zeros(1)
 
-    def curve(self, level):
+    def curve(self, level, threshold):
         s = self.spec
-        over = level - s.threshold_db
+        over = level - threshold
         slope = 1 - 1 / s.ratio
         r = np.where(over > 0, over * slope, 0.0)
         if s.knee_db > 0:
@@ -147,13 +265,17 @@ class Dynamics(Device):
     def process(self, x, key=None):
         if not len(x):
             return x
-        reduction = self.hold.process(self.curve(peak_db(x if key is None else key)))
+        level = peak_db(x if key is None else key)
+        reduction = self.hold.process(
+            self.curve(level, self.param("threshold_db", len(x)))
+        )
         if self.alpha:
             reduction, self.zi = lfilter(
                 [1 - self.alpha], [1, -self.alpha], reduction, zi=self.zi
             )
         self.record(reduction)
-        return x * (10 ** ((self.spec.makeup_db - reduction) / 20))[:, None]
+        makeup = self.param("makeup_db", len(x))
+        return x * (10 ** ((makeup - reduction) / 20))[:, None]
 
 
 class LimiterDevice(Device):
@@ -205,8 +327,6 @@ class DelayDevice(Device):
         if tempo is None:
             raise ValueError("delay needs the session tempo")
         self.frames = d = max(1, frame(spec.time_beats, tempo, rate))
-        self.feedback = spec.feedback_percent / 100
-        self.mix = spec.mix_percent / 100
         sections = []
         if spec.lowcut_hz:
             sections.append(
@@ -225,6 +345,8 @@ class DelayDevice(Device):
         m, d = len(x), self.frames
         if not m:
             return x
+        feedback = self.fraction("feedback_percent", m)
+        mix = self.fraction("mix_percent", m)
         source = x
         if self.spec.ping_pong:
             source = np.column_stack([x.mean(axis=1), np.zeros(m)])
@@ -235,12 +357,13 @@ class DelayDevice(Device):
             fed = wet[i:stop]
             if self.spec.ping_pong:
                 fed = fed[:, ::-1]
-            v = inputs[i:stop] + self.feedback * fed
+            gain = feedback if np.ndim(feedback) == 0 else feedback[i:stop]
+            v = inputs[i:stop] + gain * fed
             if self.sos is not None:
                 v, self.zi = sosfilt(self.sos, v, axis=0, zi=self.zi)
             wet[d + i : d + stop] = v
         self.inputs, self.wet = inputs[m:], wet[m:]
-        return x * (1 - self.mix) + wet[d:] * self.mix
+        return x * (1 - mix) + wet[d:] * mix
 
 
 DECAY_60DB = 3 * np.log(10)  # exp(-DECAY_60DB * t / rt60) falls 60 dB at t = rt60
@@ -288,7 +411,6 @@ class ReverbDevice(Device):
         padded = np.zeros((count * n, 2))
         padded[: len(ir)] = ir
         self.latency = n
-        self.mix = spec.mix_percent / 100
         # Channel-major so every transform runs over contiguous frames.
         self.spectra = rfft(padded.reshape(count, n, 2).transpose(0, 2, 1), 2 * n)
         self.history = np.zeros((count, n + 1), dtype=complex)  # ring of input spectra
@@ -299,6 +421,7 @@ class ReverbDevice(Device):
 
     def process(self, x, key=None):
         n, count = self.latency, len(self.history)
+        first = self.frame - len(self.pending)  # chain input frame of pending[0]
         pending = np.concatenate([self.pending, x])
         ready = [self.queue]
         blocks = len(pending) // n
@@ -311,14 +434,24 @@ class ReverbDevice(Device):
             recent = self.history[(self.head + np.arange(count)) % count]
             spectrum = np.einsum("kf,kcf->cf", recent, self.spectra)
             wet = irfft(spectrum, 2 * n)[:, n:].T
-            ready.append(block * (1 - self.mix) + wet * self.mix)
+            mix = self.fraction("mix_percent", n, first + b * n)
+            ready.append(block * (1 - mix) + wet * mix)
         self.pending = pending[blocks * n :]
         out = np.concatenate(ready)
         self.queue = out[len(x) :]
         return out[: len(x)]
 
 
-def device(spec, rate, tempo=None):
+def device(spec, rate, tempo=None, automation=None):
+    """A device for spec; automation maps parameter names to envelopes."""
+    if automation and isinstance(spec, (Filter, Eq)):
+        return AutomatedSos(spec, rate, automation)
+    d = plain_device(spec, rate, tempo)
+    d.automation = automation or {}
+    return d
+
+
+def plain_device(spec, rate, tempo=None):
     if isinstance(spec, Filter):
         return SosDevice(spec, filter_sos(spec, rate))
     if isinstance(spec, Eq):
@@ -351,19 +484,23 @@ class Lag:
 class Chain:
     """Serial insert chain. Sidechain keys are delayed by upstream device latency."""
 
-    def __init__(self, specs, rate, tempo=None):
+    def __init__(self, specs, rate, tempo=None, automation=None):
+        """automation maps an effect's index in specs to its envelopes by name."""
         self.specs = list(specs)
         self.devices = []
         self.latency = 0
         self.slots = []
-        for spec in self.specs:
+        self.n = 0  # input frames processed
+        automation = automation or {}
+        for i, spec in enumerate(self.specs):
             if spec.bypass:
                 self.slots.append(None)
                 continue
-            d = device(spec, rate, tempo)
+            d = device(spec, rate, tempo, automation.get(i))
             d.key_delay = (
                 Lag(self.latency) if getattr(spec, "sidechain", None) else None
             )
+            d.upstream = self.latency
             self.latency += d.latency
             d.offset = self.latency
             self.devices.append(d)
@@ -374,7 +511,9 @@ class Chain:
             key = None
             if d.key_delay is not None:
                 key = d.key_delay.process(keys[d.spec.sidechain])
+            d.frame = self.n
             x = d.process(x, key)
+        self.n += len(x)
         return x
 
     def run(self, x, keys=None, block_size=4096):

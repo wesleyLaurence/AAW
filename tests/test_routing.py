@@ -325,6 +325,13 @@ def test_render_with_returns_is_block_size_invariant(mix, tmp_path):
     assert a["tracks"]["echo"]["audio_sha256"] == b["tracks"]["echo"]["audio_sha256"]
 
 
+def test_float_stems_have_no_timestamped_peak_chunk(mix, tmp_path):
+    # libsndfile's PEAK chunk holds a write time, which made equal audio hash unequally.
+    path, data = mix
+    render(path, tmp_path / "a")
+    assert b"PEAK" not in (tmp_path / "a" / "stems" / "echo.wav").read_bytes()
+
+
 def slow_long_delay(d):
     d["session"]["tempo"] = 60
     d["returns"][1]["effects"][0]["time_beats"] = 12  # 12 s at 60 BPM
@@ -399,6 +406,7 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
         "effects": ["reverb"],
         "sidechain": [],
         "senders": ["snare"],
+        "automation": [],
     }
     snare = inspected["tracks"][0]
     assert snare["sends"][0] == {"to": "plate", "gain_db": -6, "pre_fader": False}

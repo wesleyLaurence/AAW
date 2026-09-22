@@ -74,9 +74,13 @@ with sidechain, look-ahead limiter, tempo-synced delay and a seeded convolution
 reverb. Tracks send pre- or post-fader to return buses, which render as their own
 stems. See [docs/effects.md](docs/effects.md).
 
+Automation lanes move track, return and master levels, pans, send levels and
+effect parameters over time, such as a filter sweep into a drop or a quieter
+second chorus. See [docs/automation.md](docs/automation.md).
+
 The broader workspace described above is the vision. UI, saturation, groups,
-automation, synths, plugin hosting, MIDI import/export, recording, and a realtime
-engine are not implemented.
+synths, plugin hosting, MIDI import/export, recording, and a realtime engine are
+not implemented.
 [docs/mvp.md](docs/mvp.md) describes the implemented behavior.
 
 ## Repository scope
@@ -116,6 +120,7 @@ uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id ki
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
 uv run daw describe sampler
 uv run daw describe effects
+uv run daw describe automation
 uv run daw describe project
 
 uv run daw check projects/my-beat/song.yaml
@@ -182,14 +187,20 @@ encode increasing velocity, and `.` is a rest. Step rows must exactly span the p
 Pitched/gated patterns use events with `at`, `pad`, `note`, `duration`, and `velocity`.
 
 Effects are listed under a track's or return's `effects` or under `master.effects`.
-Tracks reach shared reverb and delay through `sends` to `returns`:
+Tracks reach shared reverb and delay through `sends` to `returns`. `automation`
+lanes change levels and effect parameters over time:
 
 ```yaml
   effects:
-  - {type: filter, mode: highpass, cutoff_hz: 30, slope_db_per_octave: 24}
+  - {type: filter, id: sweep, mode: lowpass, cutoff_hz: 18000, slope_db_per_octave: 24}
   - {type: compressor, threshold_db: -30, ratio: 8, release_ms: 150, sidechain: kick}
   sends:
   - {to: plate, gain_db: -12}
+  automation:
+  - param: effects.sweep.cutoff_hz
+    points:
+    - {at: 48, value: 300}
+    - {at: 64, value: 18000}
 returns:
 - id: plate
   effects:

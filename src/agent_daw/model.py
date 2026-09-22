@@ -1,6 +1,7 @@
 """Strict, versioned authoring model. Positions are zero-based quarter-note beats."""
 
 from __future__ import annotations
+from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 import hashlib
@@ -52,6 +53,9 @@ def midi(note: str) -> int:
     if not 0 <= n <= 127:
         raise ValueError(f"Note outside MIDI range: {note}")
     return n
+
+
+ID = r"^[a-zA-Z][a-zA-Z0-9_-]*$"
 
 
 class Strict(BaseModel):
@@ -174,6 +178,7 @@ class Clip(Strict):
 
 class Filter(Strict):
     type: Literal["filter"]
+    id: str | None = Field(default=None, pattern=ID)
     mode: Literal["highpass", "lowpass"]
     cutoff_hz: float = Field(ge=10, le=20000)
     slope_db_per_octave: Literal[12, 24, 36, 48] = 12
@@ -189,12 +194,14 @@ class EqBand(Strict):
 
 class Eq(Strict):
     type: Literal["eq"]
+    id: str | None = Field(default=None, pattern=ID)
     bands: list[EqBand] = Field(min_length=1, max_length=16)
     bypass: bool = False
 
 
 class Compressor(Strict):
     type: Literal["compressor"]
+    id: str | None = Field(default=None, pattern=ID)
     threshold_db: float = Field(ge=-60, le=0)
     ratio: float = Field(default=4, ge=1, le=20)
     attack_ms: float = Field(default=10, ge=0, le=500)
@@ -207,6 +214,7 @@ class Compressor(Strict):
 
 class Limiter(Strict):
     type: Literal["limiter"]
+    id: str | None = Field(default=None, pattern=ID)
     ceiling_db: float = Field(default=-1, ge=-24, le=-0.1)
     release_ms: float = Field(default=60, ge=1, le=2000)
     lookahead_ms: float = Field(default=3, ge=0.5, le=20)
@@ -215,6 +223,7 @@ class Limiter(Strict):
 
 class Delay(Strict):
     type: Literal["delay"]
+    id: str | None = Field(default=None, pattern=ID)
     time_beats: Beat
     feedback_percent: float = Field(default=35, ge=0, le=95)
     lowcut_hz: float | None = Field(default=None, ge=10, le=20000)
@@ -234,6 +243,7 @@ class Delay(Strict):
 
 class Reverb(Strict):
     type: Literal["reverb"]
+    id: str | None = Field(default=None, pattern=ID)
     decay_seconds: float = Field(default=1.5, ge=0.1, le=12)
     predelay_ms: float = Field(default=10, ge=0, le=250)
     damping_hz: float = Field(default=6000, ge=500, le=20000)
@@ -253,6 +263,56 @@ def sidechains(effects) -> list[str]:
     return [e.sidechain for e in effects if isinstance(e, Compressor) and e.sidechain]
 
 
+class Point(Strict):
+    """An automation breakpoint. curve shapes the segment from here to the next point."""
+
+    at: Beat
+    value: float
+    curve: Literal["linear", "hold"] = "linear"
+
+    @field_validator("at")
+    @classmethod
+    def beats_valid(cls, v):
+        beat(v)
+        return v
+
+
+class Lane(Strict):
+    """Automation for one parameter. It overrides the static value for the whole song."""
+
+    param: str
+    points: list[Point] = Field(min_length=1, max_length=10000)
+
+    @model_validator(mode="after")
+    def points_ordered(self):
+        times = [beat(p.at) for p in self.points]
+        if any(b < a for a, b in zip(times, times[1:])):
+            raise ValueError(f"{self.param}: automation points must be in time order")
+        if any(a == c for a, c in zip(times, times[2:])):
+            raise ValueError(f"{self.param}: at most two points may share a position")
+        return self
+
+
+# Continuous parameters a lane may target, with the domain values interpolate in.
+# Frequencies and q move in equal ratios per beat; dB, pan and percent move linearly.
+CHANNEL_PARAMS = {"gain_db": "linear", "pan": "linear"}
+EFFECT_PARAMS = {
+    "filter": {"cutoff_hz": "log"},
+    "eq": {"freq_hz": "log", "gain_db": "linear", "q": "log"},
+    "compressor": {"threshold_db": "linear", "makeup_db": "linear"},
+    "delay": {"feedback_percent": "linear", "mix_percent": "linear"},
+    "reverb": {"mix_percent": "linear"},
+}
+
+
+def bounds(model, field) -> tuple[float, float]:
+    lo, hi = -float("inf"), float("inf")
+    for m in model.model_fields[field].metadata:
+        lo = max(lo, getattr(m, "ge", getattr(m, "gt", lo)))
+        hi = min(hi, getattr(m, "le", getattr(m, "lt", hi)))
+    return lo, hi
+
+
 class Send(Strict):
     to: str
     gain_db: float = Field(default=0, ge=-96, le=12)
@@ -260,7 +320,7 @@ class Send(Strict):
 
 
 class Track(Strict):
-    id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+    id: str = Field(pattern=ID)
     gain_db: float = Field(default=0, ge=-96, le=24)
     pan: float = Field(default=0, ge=-1, le=1)
     mute: bool = False
@@ -269,6 +329,7 @@ class Track(Strict):
     clips: list[Clip] = Field(default_factory=list)
     effects: list[Effect] = Field(default_factory=list, max_length=32)
     sends: list[Send] = Field(default_factory=list, max_length=16)
+    automation: list[Lane] = Field(default_factory=list, max_length=64)
 
     def sidechains(self) -> list[str]:
         return sidechains(self.effects)
@@ -277,11 +338,12 @@ class Track(Strict):
 class Return(Strict):
     """A return bus: the sum of track sends through its own chain, then to master."""
 
-    id: str = Field(pattern=r"^[a-zA-Z][a-zA-Z0-9_-]*$")
+    id: str = Field(pattern=ID)
     gain_db: float = Field(default=0, ge=-96, le=24)
     pan: float = Field(default=0, ge=-1, le=1)
     mute: bool = False
     effects: list[Effect] = Field(default_factory=list, max_length=32)
+    automation: list[Lane] = Field(default_factory=list, max_length=64)
 
     def sidechains(self) -> list[str]:
         return sidechains(self.effects)
@@ -289,6 +351,96 @@ class Return(Strict):
 
 class Master(Strict):
     effects: list[Effect] = Field(default_factory=list, max_length=32)
+    automation: list[Lane] = Field(default_factory=list, max_length=64)
+
+
+@dataclass(frozen=True)
+class Target:
+    """A resolved lane target. key is canonical: effects are addressed by index."""
+
+    kind: Literal["channel", "send", "effect"]
+    field: str
+    domain: str
+    low: float
+    high: float
+    send: str | None = None
+    effect: int | None = None
+    band: int | None = None
+
+    @property
+    def name(self) -> str:
+        """Parameter name within its effect, e.g. cutoff_hz or bands.0.gain_db."""
+        return self.field if self.band is None else f"bands.{self.band}.{self.field}"
+
+    @property
+    def key(self) -> str:
+        if self.kind == "send":
+            return f"sends.{self.send}.{self.field}"
+        if self.kind == "effect":
+            return f"effects.{self.effect}.{self.name}"
+        return self.field
+
+
+def target(owner: Track | Return | Master, param: str) -> Target:
+    """Resolve gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD or
+    effects.REF.bands.N.FIELD, where REF is an effect id or zero-based index."""
+    parts = param.split(".")
+    if isinstance(owner, Master):
+        if parts == ["gain_db"]:
+            return Target(
+                "channel", "gain_db", "linear", *bounds(Session, "master_gain_db")
+            )
+    elif len(parts) == 1 and parts[0] in CHANNEL_PARAMS:
+        return Target("channel", parts[0], "linear", *bounds(type(owner), parts[0]))
+    if isinstance(owner, Track) and parts[0] == "sends" and len(parts) == 3:
+        if parts[2] != "gain_db":
+            raise ValueError(f"{param}: only a send's gain_db can be automated")
+        if parts[1] not in {s.to for s in owner.sends}:
+            raise ValueError(f"{param}: no send to {parts[1]}")
+        return Target(
+            "send", "gain_db", "linear", *bounds(Send, "gain_db"), send=parts[1]
+        )
+    if parts[0] == "effects" and len(parts) >= 3:
+        ids = [e.id for e in owner.effects]
+        if parts[1].isdigit() and int(parts[1]) < len(ids):
+            index = int(parts[1])
+        elif parts[1] in ids:
+            index = ids.index(parts[1])
+        else:
+            raise ValueError(f"{param}: no effect with id or index {parts[1]}")
+        spec = owner.effects[index]
+        allowed = EFFECT_PARAMS.get(spec.type, {})
+        band, model = None, type(spec)
+        if spec.type == "eq":
+            if len(parts) != 5 or parts[2] != "bands" or not parts[3].isdigit():
+                raise ValueError(
+                    f"{param}: address eq bands as effects.REF.bands.N.FIELD"
+                )
+            band, model = int(parts[3]), EqBand
+            if band >= len(spec.bands):
+                raise ValueError(f"{param}: eq has {len(spec.bands)} bands")
+        elif len(parts) != 3:
+            raise ValueError(f"{param}: expected effects.REF.FIELD")
+        field = parts[-1]
+        if field not in allowed:
+            raise ValueError(
+                f"{param}: {spec.type} {field} cannot be automated; "
+                f"automatable: {', '.join(allowed) or 'none'}"
+            )
+        return Target(
+            "effect",
+            field,
+            allowed[field],
+            *bounds(model, field),
+            effect=index,
+            band=band,
+        )
+    raise ValueError(
+        f"{param}: unknown automation target; use gain_db"
+        + ("" if isinstance(owner, Master) else ", pan")
+        + (", sends.RETURN.gain_db" if isinstance(owner, Track) else "")
+        + " or effects.REF.FIELD"
+    )
 
 
 class Section(Strict):
@@ -380,9 +532,9 @@ class Project(Strict):
                     raise ValueError(f"{t.id}: a track cannot sidechain itself")
         for t in self.tracks:
             targets = [s.to for s in t.sends]
-            for target in targets:
-                if target not in return_ids:
-                    raise ValueError(f"{t.id}: send to unknown return {target}")
+            for to in targets:
+                if to not in return_ids:
+                    raise ValueError(f"{t.id}: send to unknown return {to}")
             if len(targets) != len(set(targets)):
                 raise ValueError(f"{t.id}: at most one send per return")
         visiting, visited = set(), set()
@@ -412,6 +564,30 @@ class Project(Strict):
                         f"1 ms to 10 s at the session tempo, not {float(seconds):.4g} s"
                     )
         length = beat(self.session.length_beats)
+        for owner in chains:
+            name = getattr(owner, "id", "master")
+            ids = [e.id for e in owner.effects if e.id]
+            if len(ids) != len(set(ids)):
+                raise ValueError(f"{name}: effect IDs must be unique")
+            keys = set()
+            for lane in owner.automation:
+                try:
+                    t = target(owner, lane.param)
+                except ValueError as exc:
+                    raise ValueError(f"{name}: {exc}") from None
+                if t.key in keys:
+                    raise ValueError(f"{name}: more than one lane for {lane.param}")
+                keys.add(t.key)
+                for point in lane.points:
+                    if beat(point.at) > length:
+                        raise ValueError(
+                            f"{name}: {lane.param} point at {point.at} is after the session end"
+                        )
+                    if not t.low <= point.value <= t.high:
+                        raise ValueError(
+                            f"{name}: {lane.param} value {point.value} outside "
+                            f"{t.low:g} to {t.high:g}"
+                        )
         if len({s.id for s in self.sections}) != len(self.sections):
             raise ValueError("Section IDs must be unique")
         for s in self.sections:
@@ -478,6 +654,7 @@ def _represent_mapping(dumper, data):
         or "type" in data
         or "shape" in data
         or ("to" in data and set(data) <= {"to", "gain_db", "pre_fader"})
+        or ("at" in data and "value" in data)
     )
     return dumper.represent_mapping(
         "tag:yaml.org,2002:map", data.items(), flow_style=flow

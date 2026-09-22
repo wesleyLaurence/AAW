@@ -25,6 +25,10 @@ from .model import (
     Reverb,
     Send,
     Return,
+    Lane,
+    CHANNEL_PARAMS,
+    EFFECT_PARAMS,
+    target,
 )
 from .engine import render, schedule
 
@@ -117,7 +121,7 @@ def parser():
     desc.add_argument(
         "topic",
         nargs="?",
-        choices=["project", "sampler", "effects"],
+        choices=["project", "sampler", "effects", "automation"],
         default="project",
     )
     return p
@@ -138,7 +142,23 @@ EFFECT_SEMANTICS = {
     "mix": "delay and reverb take mix_percent: output = input * (1 - mix) + wet * mix. The default 100 is fully wet, for returns; set it lower when used as a track insert.",
     "returns": "returns[] are buses with id, gain_db, pan, mute and effects. tracks[].sends lists {to: RETURN, gain_db, pre_fader}. Post-fader sends (default) tap after the track's gain and pan; pre-fader after its inserts. Muted or solo-muted tracks send nothing. Returns are never solo-muted. A return compressor may sidechain a track; sidechains cannot name a return. Returns cannot send.",
     "report": "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB. Returns appear under tracks with kind: return and their senders.",
-    "limits": "No saturation, modulation effects, groups, return-to-return sends, impulse-response samples or automation yet. Effect parameters are static for the whole render.",
+    "automation": "Effect parameters can change over time with automation lanes; see daw describe automation. Give an effect an id to address it by name.",
+    "limits": "No saturation, modulation effects, groups, return-to-return sends or impulse-response samples yet.",
+}
+
+AUTOMATION_SEMANTICS = {
+    "lanes": "tracks[].automation, returns[].automation and master.automation list lanes {param, points}. A lane overrides the static value for the whole song. One lane per parameter.",
+    "params": "Tracks: gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD. Returns: gain_db, pan, effects.REF.FIELD. Master: gain_db (replaces session.master_gain_db) and effects.REF.FIELD. REF is an effect id or zero-based index; eq fields are effects.REF.bands.N.FIELD. Automatable effect fields are listed under automatable.",
+    "points": "points are {at, value, curve} in time order; at is in beats like any position and may equal the session length. Values use the parameter's own units and bounds.",
+    "curves": "curve shapes the segment after its point. linear (default) moves in the parameter's domain: dB, pan and percent linearly, frequencies and q in equal ratios per beat (log). hold keeps the value until the next point. Two points at the same at jump there; at most two may share a position.",
+    "outside": "Before the first point the lane holds the first value; after the last it holds the last value.",
+    "timing": "Values are evaluated on the timeline at each audio frame and move with latency compensation, so a change at beat 16 lands on beat 16. gain, pan, send, compressor, delay and reverb values change every frame. Filter and eq coefficients update every 64 frames.",
+    "clicks": "Nothing is smoothed. A hold step or jump on gain_db, pan or a send changes level within one frame and can click on sustained material; ramp over a few milliseconds (e.g. 1/64 beat) instead.",
+    "fades": "gain_db moves linearly in dB, so a fade to -96 dB drops quickly at the end; stop at -60 dB or so and let the end fade finish.",
+    "sidechain": "Sidechain keys are taken after the source's inserts and before its fader, so gain_db, pan and send automation on a key track never change ducking; its effect automation does.",
+    "stems": "Track and return stems include their gain, pan and effect automation and master gain automation, like the static values.",
+    "report": "Render reports list each channel's lane params under tracks.ID.automation, master lanes under master_automation, and automated effect fields under the effect's automated key.",
+    "check": "daw check warns about lanes on bypassed effects.",
 }
 
 
@@ -179,6 +199,15 @@ def execute(a):
             "routing": {"send": Send.model_json_schema(), "return": Return.model_json_schema()},
             "semantics": EFFECT_SEMANTICS,
         }
+    if a.command == "describe" and a.topic == "automation":
+        return {
+            "schema": {"lane": Lane.model_json_schema()},
+            "automatable": {
+                "channel": CHANNEL_PARAMS,
+                "effects": EFFECT_PARAMS,
+            },
+            "semantics": AUTOMATION_SEMANTICS,
+        }
     if a.command == "describe":
         return {
             "schema": Project.model_json_schema()
@@ -200,7 +229,8 @@ def execute(a):
                 "editing": "Use inspect SHA with apply --expect. JSON merge patch: objects merge, arrays replace, null deletes. CLI writers acquire a project lock.",
                 "effects": "tracks[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects.",
                 "returns": "returns[] are reverb/delay buses fed by tracks[].sends; see daw describe effects.",
-                "limits": "No groups, synths, time stretching, automation, recording or realtime playback.",
+                "automation": "tracks[].automation, returns[].automation and master.automation move gain, pan, send levels and effect parameters over time; see daw describe automation.",
+                "limits": "No groups, synths, time stretching, recording or realtime playback.",
             },
         }
     if a.command == "samples":
@@ -312,6 +342,7 @@ def execute(a):
                 "effects": [e.type for e in t.effects],
                 "sidechain": t.sidechains(),
                 "sends": [s.model_dump() for s in t.sends],
+                "automation": [lane.param for lane in t.automation],
             }
             for t in project.tracks
         ],
@@ -323,15 +354,29 @@ def execute(a):
                 "effects": [e.type for e in r.effects],
                 "sidechain": r.sidechains(),
                 "senders": project.senders(r.id),
+                "automation": [lane.param for lane in r.automation],
             }
             for r in project.returns
         ],
         "master_effects": [e.type for e in project.master.effects],
+        "master_automation": [lane.param for lane in project.master.automation],
         "sections": [s.model_dump() for s in project.sections],
     }
     if a.command == "check":
         result.update(root_notes(project, a.project.parent))
+        result["warnings"] += automation_warnings(project)
     return result
+
+
+def automation_warnings(project):
+    warnings = []
+    for owner in [*project.tracks, *project.returns, project.master]:
+        for lane in owner.automation:
+            t = target(owner, lane.param)
+            if t.kind == "effect" and owner.effects[t.effect].bypass:
+                name = getattr(owner, "id", "master")
+                warnings.append(f"{name}: {lane.param} automates a bypassed effect")
+    return warnings
 
 
 def root_notes(project, root):

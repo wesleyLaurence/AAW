@@ -16,6 +16,8 @@ inspection. There is no embedded autonomous composer or visual editor.
   WAV/stem export.
 - `effects.py`: filter, EQ, compressor/sidechain, limiter, delay and reverb devices
   with explicit block state and compensated latency; see [effects.md](effects.md).
+- `automation.py`: lane envelopes evaluated at timeline frames for levels, pans,
+  sends and effect parameters; see [automation.md](automation.md).
 - `cli.py`: thin command shell with machine-readable results and errors.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
@@ -38,19 +40,28 @@ with octave. Selected assets are copied into `samples/HASH_original-name.wav`.
 Supported library formats: WAV, AIFF and FLAC. Mono and stereo rendering only.
 
 Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
-`effects` and `sends`. A send is `{to, gain_db, pre_fader}`, at most one per return.
+`effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
+one per return.
 
-Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute` and
-`effects`. A return sums its sends, runs its effects and joins the stereo master.
+Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute`,
+`effects` and `automation`. A return sums its sends, runs its effects and joins the stereo master.
 Post-fader sends tap after track gain and pan, pre-fader sends after the inserts.
 Muted or solo-muted tracks send nothing; returns are never solo-muted. No groups
 or return-to-return sends exist yet.
 
 Effects: `filter`, `eq`, `compressor` (optional `sidechain` track), `limiter`,
 `delay` and `reverb`, listed in order under `tracks[].effects`, `returns[].effects`
-or `master.effects`. Track inserts come before track gain and pan; return effects
-precede return gain and pan; master effects follow `master_gain_db` and precede the
-end fade. See [effects.md](effects.md) for parameters and semantics.
+or `master.effects`, each with an optional `id` unique within its chain. Track
+inserts come before track gain and pan; return effects precede return gain and pan;
+master effects follow `master_gain_db` and precede the end fade. See
+[effects.md](effects.md) for parameters and semantics.
+
+Automation: `tracks[].automation`, `returns[].automation` and `master.automation`
+list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` or
+`effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve}`
+are in time order; `curve` is `linear` or `hold`. A lane overrides the static value
+for the whole song and holds its first and last values outside its points. See
+[automation.md](automation.md).
 
 Pad: `sample`, `mode` (`one_shot` or `gate`), `gain_db`, `pan`, `transpose` in
 semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional
@@ -103,14 +114,17 @@ updates, stable formatting, stale-edit rejection, section equivalence and track 
 Effect tests cover filter and EQ responses, compressor curves, limiter ceilings and
 latency, delay echo timing, reverb decay and seeding, block-partition invariance,
 sidechain ducking and preview/stem equivalence. Routing tests cover pre/post-fader
-sends, mute/solo, return stems and previews and section tails.
+sends, mute/solo, return stems and previews and section tails. Automation tests
+cover envelope semantics, constant lanes matching static values, sweeps and ramps,
+latency-compensated timing, block-partition invariance and validation.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
 
 ## Deliberately deferred
 
 Realtime playback, recording, UI, saturation, groups, synths,
-plugin hosting, time stretching, MIDI import/export, automation, semantic/audio embedding search,
+plugin hosting, time stretching, MIDI import/export, modulation (LFOs), tempo
+automation, semantic/audio embedding search,
 key/chord detection, downbeat and swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
 perception layer is implemented; see [perception.md](perception.md). Monophonic pitch

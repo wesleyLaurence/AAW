@@ -15,6 +15,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 from . import __version__
+from .automation import Automation, amplitude
 from .effects import Chain
 from .model import (
     Project,
@@ -78,11 +79,12 @@ def schedule(p: Project) -> list[Trigger]:
 
 
 def stereo_pan(data, pan):
+    """Pan by a scalar, or by one automated value per frame."""
     if data.shape[1] == 1:
         angle = (pan + 1) * np.pi / 4
-        return data * np.array([np.cos(angle), np.sin(angle)])
+        return data * np.stack([np.cos(angle), np.sin(angle)], axis=-1)
     # Stereo balance: retain center image, attenuate the opposite channel.
-    return data * np.array([min(1, 1 - pan), min(1, 1 + pan)])
+    return data * np.stack([np.minimum(1, 1 - pan), np.minimum(1, 1 + pan)], axis=-1)
 
 
 @dataclass
@@ -234,12 +236,19 @@ def metrics(x, rate):
     }
 
 
+SFC_SET_ADD_PEAK_CHUNK = 0x1050  # libsndfile command; not exported by soundfile
+
+
 def wav_atomic(path, x, sr, subtype):
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".wav")
     os.close(fd)
     try:
-        sf.write(tmp, x, sr, subtype=subtype)
+        with sf.SoundFile(tmp, "w", sr, x.shape[1], subtype) as f:
+            # libsndfile timestamps the PEAK chunk of float WAVs; omit it so equal
+            # audio always gives equal file bytes and hashes.
+            sf._snd.sf_command(f._file, SFC_SET_ADD_PEAK_CHUNK, sf._ffi.NULL, 0)
+            f.write(x)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):
@@ -281,7 +290,7 @@ def render(
     # Resolve all selected sources before producing any new artifacts.
     sampler = Sampler(p, path.parent)
     triggers = schedule(p)
-    tracks, effect_reports, keys = {}, {}, {}
+    tracks, effect_reports, keys, automated = {}, {}, {}, {}
     # A track preview needs its sidechain sources; a return preview also needs its
     # senders and theirs. Only the target is output.
     if track_id is None:
@@ -300,7 +309,8 @@ def render(
     for track in p.render_order():
         if track.id not in needed:
             continue
-        chain = Chain(track.effects, rate, tempo)
+        auto = Automation(track, p)
+        chain = Chain(track.effects, rate, tempo, auto.effects)
         x = chain.run(
             render_track(p, track, triggers, sampler, block_size),
             {s: keys[s] for s in track.sidechains()},
@@ -310,16 +320,20 @@ def render(
         if track.id in sources:
             keys[track.id] = x
         silent = track.mute or (any_solo and not track.solo)
-        post = stereo_pan(x, track.pan) * 10 ** (track.gain_db / 20)
+        post = stereo_pan(x, auto.channel_value("pan", track.pan, total)) * amplitude(
+            auto.channel_value("gain_db", track.gain_db, total)
+        )
         # Sends tap after the inserts (pre-fader) or after gain and pan (post-fader).
         # A muted or solo-muted track sends nothing.
         for send in track.sends:
             if not silent and send.to in buses:
                 tap = x if send.pre_fader else post
-                buses[send.to] += tap * 10 ** (send.gain_db / 20)
+                level = auto.send_value(send.to, send.gain_db, total)
+                buses[send.to] += tap * amplitude(level)
         if track_id is not None and track.id != track_id:
             continue
         effect_reports[track.id] = chain.report()
+        automated[track.id] = auto.params
         if silent:
             post[:] = 0
         tracks[track.id] = post
@@ -329,22 +343,31 @@ def render(
     for ret in p.returns:
         if ret.id not in needed_returns:
             continue
-        chain = Chain(ret.effects, rate, tempo)
+        auto = Automation(ret, p)
+        chain = Chain(ret.effects, rate, tempo, auto.effects)
         x = chain.run(buses[ret.id], {s: keys[s] for s in ret.sidechains()}, block_size)
         effect_reports[ret.id] = chain.report()
-        x = stereo_pan(x, ret.pan) * 10 ** (ret.gain_db / 20)
+        automated[ret.id] = auto.params
+        x = stereo_pan(x, auto.channel_value("pan", ret.pan, total)) * amplitude(
+            auto.channel_value("gain_db", ret.gain_db, total)
+        )
         if ret.mute:
             x[:] = 0
         tracks[ret.id] = x
         mix += x
-    master = 10 ** (p.session.master_gain_db / 20)
+    master_auto = Automation(p.master, p)
+    master = amplitude(
+        master_auto.channel_value("gain_db", p.session.master_gain_db, total)
+    )
     fade = min(total, round(p.session.end_fade_ms * rate / 1000))
     fader = np.ones(total)
     if fade:
         fader[-fade:] = np.linspace(1, 0, fade)
-    envelope = fader * master
+    envelope = fader * (master if np.ndim(master) == 0 else master[:, 0])
     # Track previews are the track's stem, so they omit the master chain.
-    master_chain = Chain([] if track_id else p.master.effects, rate, tempo)
+    master_chain = Chain(
+        [] if track_id else p.master.effects, rate, tempo, master_auto.effects
+    )
     if master_chain.devices:
         mix = master_chain.run(mix * master, block_size=block_size)
         mix *= fader[:, None]
@@ -409,6 +432,8 @@ def render(
         else:
             track_reports[name]["events"] = sum(tr.track == name for tr in triggers)
         track_reports[name]["effects"] = effect_reports[name]
+        if automated[name]:
+            track_reports[name]["automation"] = automated[name]
     manifest = {
         "engine_version": __version__,
         "python": platform.python_version(),
@@ -427,10 +452,12 @@ def render(
         "sections": [s.model_dump() for s in p.sections],
         "tail_policy": "truncate at session length with explicit end fade",
         "master_effects": master_chain.report(),
+        "master_automation": master_auto.params,
         "stems_sum_to_mix": not master_chain.devices,
         "stem_policy": "post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, each return has its own stem; float WAV, same start and length",
         "send_policy": "post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks send nothing; returns are never solo-muted",
         "sidechain_policy": "key is the source track after its inserts, before its gain, pan, mute and solo",
+        "automation_policy": "lanes override static values for the whole song, holding the first value before the first point and the last after the last point; gain, pan and send levels change per frame, compressor, delay and reverb parameters per frame, filter and eq coefficients every 64 frames; no smoothing",
         "pitch_policy": "bandlimited repitch; pitch changes duration; source_bpm also repitches",
     }
     atomic_text(output / "report.json", json.dumps(manifest, indent=2) + "\n")
