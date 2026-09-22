@@ -8,7 +8,8 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
 - Import selected samples into the project. Never modify the original Splice library.
 - Read `daw inspect` before editing; use its SHA with `daw apply --expect` for revisions.
 - Musical positions are zero-based quarter-note beats. Use fractions for triplets.
-- Read `daw describe sampler` before assigning pitched/gated samples. Confirm root octave.
+- Read `daw describe sampler` before assigning pitched/gated samples. Confirm root octave
+  with `daw samples analyze` or `--root-note auto`; resolve `daw check` root warnings.
 - Render a short section or isolated track to investigate an edit. Full mix pointer is
   `renders/latest.json`; previews use `renders/latest-preview.json`.
 - Keep demo composition separate from reusable engine code. Do not hardcode creative

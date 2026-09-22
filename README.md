@@ -66,6 +66,9 @@ The current MVP is an offline, agent-operated sample workstation. Search a local
 sample library, copy sounds into a project, sequence drum and pitched notes, and
 render a mix and stems. It also provides render analysis and comparisons.
 
+Samples can be measured from their audio for pitch (with octave), loop tempo and
+one-shot/loop kind.
+
 The broader workspace described above is the vision. UI, effects, synths, plugin
 hosting, MIDI import/export, recording, and a realtime engine are not implemented.
 [docs/mvp.md](docs/mvp.md) describes the implemented behavior.
@@ -97,11 +100,14 @@ uv run daw samples scan ~/Splice/sounds/packs
 uv run daw samples search 'kick' --type one-shot --limit 8
 uv run daw samples search 'bell' --bpm 160 --key 'A#m'
 uv run daw samples inspect SAMPLE_ID
+uv run daw samples analyze --all
+uv run daw samples search --pitched --note-range C1-B1
+uv run daw samples analyze SAMPLE_ID
 uv run daw samples audition SAMPLE_ID --output /tmp/candidate.wav
 
 uv run daw init projects/my-beat --tempo 160 --bars 20
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
-uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note C1
+uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
 uv run daw describe sampler
 uv run daw describe project
 
@@ -116,7 +122,10 @@ uv run daw compare projects/my-beat/revisions/before-render.json projects/my-bea
 All commands emit JSON. Errors emit JSON to stderr and exit nonzero. The index is
 `.daw/library.sqlite`; supply `daw samples --db /path/index.sqlite ...` to use another.
 Filename BPM/key/category are **hints**, not audio-derived facts. Names with C/F/etc.
-do not establish an octave: inspect a pitched source before setting its root note.
+do not establish an octave. `daw samples analyze` measures pitch with octave and
+cents, onsets, loop tempo and one-shot/loop kind from the audio. `--root-note auto`
+uses the measured note, and `daw check` warns when a declared root disagrees with
+the audio. See [docs/sample-analysis.md](docs/sample-analysis.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
 `inspect` returns the current `project_sha256`. To revise a project safely, write a
