@@ -69,8 +69,12 @@ render a mix and stems. It also provides render analysis and comparisons.
 Samples can be measured from their audio for pitch (with octave), loop tempo and
 one-shot/loop kind.
 
-The broader workspace described above is the vision. UI, effects, synths, plugin
-hosting, MIDI import/export, recording, and a realtime engine are not implemented.
+Tracks and the master bus take insert effects: filter, EQ, compressor with
+sidechain, and a look-ahead limiter. See [docs/effects.md](docs/effects.md).
+
+The broader workspace described above is the vision. UI, reverb/delay, sends,
+automation, synths, plugin hosting, MIDI import/export, recording, and a realtime
+engine are not implemented.
 [docs/mvp.md](docs/mvp.md) describes the implemented behavior.
 
 ## Repository scope
@@ -109,6 +113,7 @@ uv run daw init projects/my-beat --tempo 160 --bars 20
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
 uv run daw describe sampler
+uv run daw describe effects
 uv run daw describe project
 
 uv run daw check projects/my-beat/song.yaml
@@ -174,18 +179,33 @@ A quarter beat grid means sixteenth notes. `x` triggers velocity 100, digits 1�
 encode increasing velocity, and `.` is a rest. Step rows must exactly span the pattern.
 Pitched/gated patterns use events with `at`, `pad`, `note`, `duration`, and `velocity`.
 
+Effects are listed under a track's `effects` or under `master.effects`:
+
+```yaml
+  effects:
+  - {type: filter, mode: highpass, cutoff_hz: 30, slope_db_per_octave: 24}
+  - {type: compressor, threshold_db: -30, ratio: 8, release_ms: 150, sidechain: kick}
+master:
+  effects:
+  - {type: limiter, ceiling_db: -1}
+```
+
 ## Audio output
 
 Each render produces a stereo 48 kHz or 44.1 kHz PCM24 `mix.wav`, aligned float WAV
-stems, a project snapshot, and `report.json`. Stems include master gain and ending
-fade and reconstruct the mix within quantization tolerance. No limiter, normalization,
-compression, EQ, or added reverb is used. Unsafe PCM clipping aborts export.
+stems, a project snapshot, and `report.json`. Stems include track effects, master
+gain and ending fade, but not master effects. Without master effects they
+reconstruct the mix within quantization tolerance; `stems_sum_to_mix` in the report
+says whether they do. Only the effects written in the project are applied: there is
+no automatic normalization. Unsafe PCM clipping aborts export; lower
+`master_gain_db` or add a master limiter.
 
 `renders/latest.json` points to the latest full mix; previews have their own pointer.
 Render directories are keyed by project, actual sample content, engine code,
 dependencies and target. Re-rendering the same identity replaces its equivalent
 artifacts. A different render cannot overwrite an occupied `--output` directory. Reports record engine/dependency versions, asset hashes, audio hash,
-peak/RMS, a 4× oversampled peak estimate, track event counts, and render time.
+peak/RMS, a 4× oversampled peak estimate, track event counts, effect gain
+reduction, and render time.
 Bit-identical output is checked in the same environment, not promised across machines
 or dependency upgrades. Restore `song.snapshot.yaml` into the original project root
 to use its project-relative sample paths.

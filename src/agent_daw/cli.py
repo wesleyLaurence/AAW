@@ -17,6 +17,10 @@ from .model import (
     Pad,
     Event,
     Sample,
+    Filter,
+    Eq,
+    Compressor,
+    Limiter,
 )
 from .engine import render, schedule
 
@@ -107,9 +111,27 @@ def parser():
     compare.add_argument("--no-images", action="store_true")
     desc = sub.add_parser("describe")
     desc.add_argument(
-        "topic", nargs="?", choices=["project", "sampler"], default="project"
+        "topic",
+        nargs="?",
+        choices=["project", "sampler", "effects"],
+        default="project",
     )
     return p
+
+
+EFFECT_SEMANTICS = {
+    "order": "Effects run top to bottom. Track inserts come before track gain and pan. master.effects follow master_gain_db and precede the end fade.",
+    "filter": "Butterworth highpass or lowpass. slope_db_per_octave 12/24/36/48 is the order times 6 dB. No resonance control.",
+    "eq": "RBJ biquad bands in series. bell uses q as bandwidth; shelves use q as shelf slope (0.71 is maximally flat). gain_db at freq_hz.",
+    "compressor": "Stereo-linked sample-peak detector, soft knee of knee_db centered on threshold_db. attack_ms smooths onset; release_ms is the time for reduction to fall by a factor of e. makeup_db is static.",
+    "sidechain": "compressor.sidechain names another track. Its key is that track after its own inserts, before its gain, pan, mute and solo, so a muted kick still ducks the bass. Cycles and self-sidechains are rejected. Master compressors cannot use a sidechain.",
+    "limiter": "Look-ahead brickwall on sample peaks: no output sample exceeds ceiling_db. lookahead_ms is compensated latency. Estimated true peak can still exceed the ceiling slightly; leave margin below 0 dBFS.",
+    "bypass": "bypass: true keeps an effect in the document without processing, for A/B renders with daw compare.",
+    "stems": "Stems are post-insert, post-track and post-master gain and fade, before master effects. Without master effects they sum to the mix; report.stems_sum_to_mix says which.",
+    "previews": "render --track renders that track plus its sidechain sources and omits master effects, matching its stem. Section previews include the master chain.",
+    "report": "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB.",
+    "limits": "No reverb, delay, saturation, sends, groups or automation yet. Effect parameters are static for the whole render.",
+}
 
 
 def merge(target, patch):
@@ -140,6 +162,14 @@ def execute(a):
         project = Project(session=Session(tempo=a.tempo, length_beats=a.bars * 4))
         save(project, path)
         return {"project": str(path.resolve())}
+    if a.command == "describe" and a.topic == "effects":
+        return {
+            "schema": {
+                m.model_fields["type"].annotation.__args__[0]: m.model_json_schema()
+                for m in (Filter, Eq, Compressor, Limiter)
+            },
+            "semantics": EFFECT_SEMANTICS,
+        }
     if a.command == "describe":
         return {
             "schema": Project.model_json_schema()
@@ -159,7 +189,8 @@ def execute(a):
                 "mix": "gain_db is dB. pan is -1 left to +1 right. Mono pads use equal-power pan. Stereo pads/tracks use balance. mute wins over solo.",
                 "render": "Finite session length, tails truncated with end fade. PCM24 stereo mix and aligned FLOAT stems. Clipping fails export.",
                 "editing": "Use inspect SHA with apply --expect. JSON merge patch: objects merge, arrays replace, null deletes. CLI writers acquire a project lock.",
-                "limits": "No effects, synths, time stretching, automation, recording or realtime playback.",
+                "effects": "tracks[].effects and master.effects are serial insert chains; see daw describe effects.",
+                "limits": "No reverb, delay, sends, groups, synths, time stretching, automation, recording or realtime playback.",
             },
         }
     if a.command == "samples":
@@ -268,9 +299,12 @@ def execute(a):
                 "gain_db": t.gain_db,
                 "mute": t.mute,
                 "solo": t.solo,
+                "effects": [e.type for e in t.effects],
+                "sidechain": t.sidechains(),
             }
             for t in project.tracks
         ],
+        "master_effects": [e.type for e in project.master.effects],
         "sections": [s.model_dump() for s in project.sections],
     }
     if a.command == "check":

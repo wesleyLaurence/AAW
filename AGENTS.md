@@ -10,6 +10,7 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
 - Musical positions are zero-based quarter-note beats. Use fractions for triplets.
 - Read `daw describe sampler` before assigning pitched/gated samples. Confirm root octave
   with `daw samples analyze` or `--root-note auto`; resolve `daw check` root warnings.
+- Read `daw describe effects` before adding effects; stems exclude master effects.
 - Render a short section or isolated track to investigate an edit. Full mix pointer is
   `renders/latest.json`; previews use `renders/latest-preview.json`.
 - Keep demo composition separate from reusable engine code. Do not hardcode creative

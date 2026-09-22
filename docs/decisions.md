@@ -73,3 +73,9 @@ Two writers rewriting one file need identical formatting or every diff fills wit
 
 **D24. One core library; the CLI and the workspace daemon are thin shells over it. The daemon is never required.**
 The `daw` package holds the document model, renderer, devices, perception, and library index. The CLI and `daw serve` contain no logic of their own. When a daemon is running the CLI hands renders to it so both clients share one cache; when none is running the CLI does the work itself and the agent notices no difference. This is what keeps the workspace from becoming a second implementation of anything.
+
+**D25. Devices are written in Python (numpy/scipy), in the block-processing shape.**
+Settles plan open question 7. Offline rendering is the product (D1) and a realtime engine is still hypothetical, so one Python implementation serves mixes, stems and previews. Devices carry explicit state, declare latency and must produce identical output for any block partition, which keeps a later port to a compiled kernel mechanical. Accepted risk: a realtime engine would require rewriting the devices.
+
+**D26. Stems are post-insert and pre-master-effects.**
+Each stem is a track after its inserts, gain, pan, mute and solo, master gain and end fade, and before master effects. Without master effects the stems sum to the mix; with a nonlinear master chain they cannot, and the render report says so in `stems_sum_to_mix`. Sidechain keys are taken after the source's inserts and before its fader, so fader and mute changes on the source never change ducking.
