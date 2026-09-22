@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.daw/
+*.wav
+*.aif
+*.aiff
+*.flac
+*.mp3
+.DS_Store
+
+.daw.lock
+projects/*/renders/
+
+# Personal creative work stays local; this repository versions reusable tooling.
+/projects/
+/content/
+# Legacy song-specific scripts are preserved locally.
+/scripts/build_demo.py
+/scripts/verify_demo.py
