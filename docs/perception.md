@@ -93,7 +93,9 @@ Stems must match the mix's frame count, channel count and sample rate. New rende
 record stem hashes, which are verified before analysis. Older render reports lack
 these hashes; analysis still records each actual stem hash, with
 `hash_verified_against_render: false`. Such stems cannot be authenticated against
-the original render manifest.
+the original render manifest. The earliest reports also lack `render_id` and
+`target`. They predate previews, so they are read as full renders, which the
+timeline check confirms, and `source.render_id` is null.
 
 `musical_context` is separately labeled as **project-derived**. It reports scheduled
 trigger counts, triggers per beat and pattern occurrences for each track over the
