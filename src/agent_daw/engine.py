@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import platform
+import struct
 import time
 import tempfile
 import importlib.metadata
@@ -236,7 +237,29 @@ def metrics(x, rate):
     }
 
 
-SFC_SET_ADD_PEAK_CHUNK = 0x1050  # libsndfile command; not exported by soundfile
+def riff_chunk(name: bytes, payload: bytes) -> bytes:
+    return struct.pack("<4sI", name, len(payload)) + payload
+
+
+def float_wav(f, x, sr, block=1 << 16):
+    """Write a 32-bit float WAV whose bytes depend only on the audio.
+
+    libsndfile timestamps the PEAK chunk of float WAVs, so equal audio could hash
+    unequally. The layout is what libsndfile writes with that chunk switched off,
+    zeroed PAD chunk included, so stems stay byte-identical to earlier renders.
+    """
+    frames, channels = x.shape
+    size = frames * channels * 4
+    fmt = struct.pack("<HHIIHH", 3, channels, sr, sr * channels * 4, channels * 4, 32)
+    header = (
+        riff_chunk(b"fmt ", fmt)
+        + riff_chunk(b"fact", struct.pack("<I", frames))
+        + riff_chunk(b"PAD ", bytes(8 + 8 * channels))
+    )
+    f.write(b"RIFF" + struct.pack("<I", 4 + len(header) + 8 + size) + b"WAVE")
+    f.write(header + struct.pack("<4sI", b"data", size))
+    for i in range(0, frames, block):
+        f.write(x[i : i + block].astype("<f4").tobytes())
 
 
 def wav_atomic(path, x, sr, subtype):
@@ -244,11 +267,11 @@ def wav_atomic(path, x, sr, subtype):
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".wav")
     os.close(fd)
     try:
-        with sf.SoundFile(tmp, "w", sr, x.shape[1], subtype) as f:
-            # libsndfile timestamps the PEAK chunk of float WAVs; omit it so equal
-            # audio always gives equal file bytes and hashes.
-            sf._snd.sf_command(f._file, SFC_SET_ADD_PEAK_CHUNK, sf._ffi.NULL, 0)
-            f.write(x)
+        if subtype == "FLOAT":
+            with open(tmp, "wb") as f:
+                float_wav(f, x, sr)
+        else:
+            sf.write(tmp, x, sr, subtype)
         os.replace(tmp, path)
     finally:
         if os.path.exists(tmp):

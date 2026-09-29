@@ -6,8 +6,8 @@ import numpy as np
 import pytest
 import soundfile as sf
 import yaml
-from agent_daw.model import Project, beat, frame, save, load, project_hash
-from agent_daw.engine import render, schedule, Sampler, Voice
+from agent_daw.model import Project, beat, frame, save, load, project_hash, digest
+from agent_daw.engine import render, schedule, Sampler, Voice, wav_atomic
 from agent_daw.library import scan, search, import_asset
 
 
@@ -130,6 +130,19 @@ def test_block_size_invariance_and_stems(song, tmp_path):
     assert np.max(abs(x - stems)) < 2e-7
     assert len(x) == 96000 and sr == 48000
     assert a["mix"]["over_range_samples"] == 0
+
+
+def test_float_stem_bytes_match_earlier_renders(tmp_path):
+    # The hash of the libsndfile writer this replaced: equal audio keeps equal stem
+    # bytes across writes and engine versions. The audio spans several write blocks.
+    x = np.arange(140002).reshape(-1, 2) / 70001 - 1
+    wav_atomic(tmp_path / "stem.wav", x, 48000, "FLOAT")
+    assert digest(tmp_path / "stem.wav") == (
+        "c2554ec4d5acecc5494a73b6bcae7d474a4e6f1e3f0af74f31f4c7bd3e5281e0"
+    )
+    y, sr = sf.read(tmp_path / "stem.wav", dtype="float32")
+    assert sr == 48000 and np.array_equal(y, x.astype(np.float32))
+    assert sf.info(tmp_path / "stem.wav").subtype == "FLOAT"
 
 
 def test_mute_solo(song, tmp_path):
