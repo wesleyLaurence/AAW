@@ -122,6 +122,14 @@ def test_bypass_is_identity():
     assert chain.report() == [{"type": "filter", "bypass": True}]
 
 
+def test_chain_runs_one_timeline():
+    # Devices keep their state, so a second run would continue the first.
+    chain = Chain([Limiter(type="limiter", ceiling_db=-1)], SR)
+    chain.run(tone(300))
+    with pytest.raises(RuntimeError, match="one timeline"):
+        chain.run(tone(300))
+
+
 @pytest.fixture
 def beat(tmp_path):
     t = np.arange(SR // 4) / SR
