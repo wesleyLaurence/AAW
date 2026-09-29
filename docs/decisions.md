@@ -94,3 +94,6 @@ A lane is `{param, points}` on a track, return or the master and replaces the st
 
 **D31. Automated filters keep state-variable state across coefficient changes.**
 A direct-form biquad's state carried into very different coefficients bursts: a 48 dB lowpass jumping from 20 kHz to 10 Hz reached 220 times the input peak, and even a 1/64 beat ramp reached 12. Each automated section is a trapezoidal state-variable filter whose integrator states stay near signal level, as an analog filter's capacitors do. Between updates it runs as the equivalent direct form II biquad through `lfilter`, which keeps it fast, and its history is converted when coefficients change. Static filters and EQs keep `butter()` and RBJ biquads.
+
+**D32. A constant lane is its static value.**
+A lane whose points all share one value renders exactly as a static parameter with that value: channel lanes return a scalar and effects are built from their spec with the value in place. Such a lane previously built per-frame arrays and sent filters and EQs through the state-variable path, which matched the static filter only to within 1e-9. Moving lanes are evaluated over consecutive frames by filling each segment in place, so a lane costs one array over the timeline rather than about ten. Reports still list constant lanes as automated.

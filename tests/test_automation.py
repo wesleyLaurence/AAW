@@ -3,11 +3,12 @@
 import json
 import subprocess
 import sys
+import tracemalloc
 import numpy as np
 import pytest
 import soundfile as sf
-from agent_daw.automation import Envelope
-from agent_daw.effects import Chain
+from agent_daw.automation import Automation, Envelope
+from agent_daw.effects import AutomatedSos, Chain
 from agent_daw.engine import render
 from agent_daw.model import (
     Compressor,
@@ -68,12 +69,56 @@ def test_single_point_lane_is_constant():
     assert list(envelope("linear", (3, 0.25)).at([0, 10**7])) == [0.25, 0.25]
 
 
-def run(specs, x, automation, block_size=4096, keys=None):
-    envs = {
+def test_lanes_sharing_one_value_are_constant():
+    assert envelope("log", (3, 700)).constant == 700
+    assert envelope("linear", (0, -6, "hold"), (2, -6), (2, -6)).constant == -6
+    assert envelope("linear", (0, -6), (2, -5)).constant is None
+
+
+@pytest.mark.parametrize(
+    "domain, points",
+    [
+        ("linear", [(1, -12), (2, 0, "hold"), (3, 4), (3, -2), (5, 6)]),
+        ("log", [(0, 100), (2, 10000), (2, 50, "hold"), (4, 80)]),
+        ("linear", [(3, 0.25)]),
+    ],
+)
+def test_span_matches_values_at_each_frame(domain, points):
+    env = envelope(domain, *points)
+    for start, count in [(-5000, 200000), (23990, 20), (47999, 3), (60001, 13)]:
+        expected = env.at(start + np.arange(count))
+        assert np.array_equal(env.span(start, count), expected)
+
+
+def test_lane_values_take_one_array_over_the_timeline():
+    # Channel lanes cover the whole timeline, up to 43.2 million frames for 15
+    # minutes, so a lane may take no more than its one output array.
+    total = 60 * SR
+    env = envelope("log", (0, 100), (60, 10000), (100, 200, "hold"), (110, 300))
+    tracemalloc.start()
+    try:
+        values = Automation.value(env, 0, total)
+        peak = tracemalloc.get_traced_memory()[1]
+    finally:
+        tracemalloc.stop()
+    assert values.shape == (total,)
+    assert peak < 1.1 * values.nbytes
+
+
+def envelopes(automation):
+    return {
         i: {name: envelope(domain, *points) for name, (domain, points) in a.items()}
         for i, a in automation.items()
     }
-    return Chain(specs, SR, TEMPO, envs).run(x, keys, block_size)
+
+
+def run(specs, x, automation, block_size=4096, keys=None):
+    return Chain(specs, SR, TEMPO, envelopes(automation)).run(x, keys, block_size)
+
+
+def automated_sos(spec, lanes, x):
+    """The automated filter path alone, even for constant lanes."""
+    return AutomatedSos(spec, SR, envelopes({0: lanes})[0]).process(x)
 
 
 def lowpass(cutoff=1000, slope=24):
@@ -86,7 +131,10 @@ def lowpass(cutoff=1000, slope=24):
 def test_constant_filter_lane_matches_static_filter(slope):
     x = np.random.default_rng(1).normal(0, 0.3, (SR, 2))
     static = Chain([lowpass(700, slope)], SR).run(x)
-    automated = run([lowpass(5000, slope)], x, {0: {"cutoff_hz": ("log", [(0, 700)])}})
+    lanes = {"cutoff_hz": ("log", [(0, 700)])}
+    assert np.array_equal(run([lowpass(5000, slope)], x, {0: lanes}), static)
+    # The state-variable path, which moving lanes take, matches the static filter.
+    automated = automated_sos(lowpass(5000, slope), lanes, x)
     assert np.max(np.abs(automated - static)) < 1e-9
 
 
@@ -97,13 +145,40 @@ def test_constant_eq_lane_matches_static_eq():
     ]
     x = np.random.default_rng(2).normal(0, 0.3, (SR, 2))
     static = Chain([Eq(type="eq", bands=bands)], SR).run(x)
-    moved = [dict(bands[0], gain_db=0), bands[1]]
-    automated = run(
-        [Eq(type="eq", bands=moved)],
-        x,
-        {0: {"bands.0.gain_db": ("linear", [(0, -6)])}},
-    )
-    assert np.max(np.abs(automated - static)) < 1e-9
+    moved = Eq(type="eq", bands=[dict(bands[0], gain_db=0), bands[1]])
+    lanes = {"bands.0.gain_db": ("linear", [(0, -6)])}
+    assert np.array_equal(run([moved], x, {0: lanes}), static)
+    for shape in ["bell", "low_shelf", "high_shelf"]:
+        shaped = [dict(b, shape=shape) for b in bands]
+        static = Chain([Eq(type="eq", bands=shaped)], SR).run(x)
+        moved = Eq(type="eq", bands=[dict(shaped[0], gain_db=0), shaped[1]])
+        assert np.max(np.abs(automated_sos(moved, lanes, x) - static)) < 1e-9
+
+
+def test_constant_lanes_on_other_effects_match_static_values():
+    specs = [
+        Compressor(type="compressor", threshold_db=-20, makeup_db=3),
+        Delay(type="delay", time_beats="1/4", feedback_percent=40, mix_percent=30),
+        Reverb(type="reverb", decay_seconds=0.5, mix_percent=25),
+    ]
+    moved = [
+        Compressor(type="compressor", threshold_db=0),
+        Delay(type="delay", time_beats="1/4"),
+        Reverb(type="reverb", decay_seconds=0.5),
+    ]
+    lanes = {
+        0: {
+            "threshold_db": ("linear", [(0, -20)]),
+            "makeup_db": ("linear", [(1, 3), (3, 3)]),
+        },
+        1: {
+            "feedback_percent": ("linear", [(0, 40)]),
+            "mix_percent": ("linear", [(0, 30)]),
+        },
+        2: {"mix_percent": ("linear", [(2, 25)])},
+    }
+    x = np.random.default_rng(4).normal(0, 0.3, (SR, 2))
+    assert np.array_equal(run(moved, x, lanes), Chain(specs, SR, TEMPO).run(x))
 
 
 def test_filter_sweep_opens_over_time():
@@ -158,7 +233,9 @@ def test_filter_updates_align_to_the_timeline_after_latency():
     x = tone(5000, 1, 0.2)
     step = [(0, 20000, "hold"), (1, 100)]
     stepped = run(specs, x, {1: {"cutoff_hz": ("log", step)}})
-    steady = run(specs, x, {1: {"cutoff_hz": ("log", [(0, 20000)])}})
+    # The same automated path, stepping only after the tone ends.
+    later = [(0, 20000, "hold"), (2, 100)]
+    steady = run(specs, x, {1: {"cutoff_hz": ("log", later)}})
     assert np.flatnonzero(np.any(stepped != steady, axis=1))[0] == 24000
 
 
@@ -228,6 +305,11 @@ def test_chain_report_lists_automated_fields():
     report = chain.report()
     assert report[1]["automated"] == ["bands.0.freq_hz", "bands.0.gain_db"]
     assert "automated" not in report[2]
+    # A constant lane renders as the static value but is still listed.
+    constant = Chain(
+        [lowpass()], SR, TEMPO, envelopes({0: {"cutoff_hz": ("log", [(0, 700)])}})
+    )
+    assert constant.report()[0]["automated"] == ["cutoff_hz"]
 
 
 @pytest.fixture
@@ -308,9 +390,14 @@ def test_constant_gain_lane_matches_static_gain(song, tmp_path):
     del data["tracks"][0]["automation"]
     data["tracks"][0]["gain_db"] = -7
     rerender(path, data, tmp_path / "static")
+    lane, static = (
+        json.loads((tmp_path / d / "report.json").read_text())
+        for d in ["lane", "static"]
+    )
+    assert lane["audio_sha256"] == static["audio_sha256"]
     for name in ["pad", "space"]:
-        diff = stem(tmp_path / "lane", name) - stem(tmp_path / "static", name)
-        assert np.max(np.abs(diff)) < 1e-7
+        tracks = lane["tracks"][name], static["tracks"][name]
+        assert tracks[0]["audio_sha256"] == tracks[1]["audio_sha256"]
 
 
 def test_send_lane_silences_the_return(song, tmp_path):

@@ -116,7 +116,7 @@ Effect tests cover filter and EQ responses, compressor curves, limiter ceilings 
 latency, delay echo timing, reverb decay and seeding, block-partition invariance,
 sidechain ducking and preview/stem equivalence. Routing tests cover pre/post-fader
 sends, mute/solo, return stems and previews and section tails. Automation tests
-cover envelope semantics, constant lanes matching static values, sweeps and ramps,
+cover envelope semantics, constant lanes rendering exactly as static values, sweeps and ramps,
 latency-compensated timing, block-partition invariance and validation.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
