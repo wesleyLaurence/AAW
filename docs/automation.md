@@ -79,7 +79,7 @@ in the chain shifts indexes but not ids. EQ fields are addressed per band, e.g.
 Everything else is rejected: switches such as `mode`, `slope_db_per_octave`,
 `ping_pong` and `bypass`, and parameters whose change would rebuild a device's
 state, such as `time_beats`, `decay_seconds`, `lookahead_ms` and the limiter's
-ceiling. Values must lie within the parameter's normal bounds.
+ceiling. Values must lie within the limits the static parameter accepts.
 
 ## Semantics
 

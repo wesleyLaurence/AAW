@@ -305,12 +305,38 @@ EFFECT_PARAMS = {
 }
 
 
-def bounds(model, field) -> tuple[float, float]:
-    lo, hi = -float("inf"), float("inf")
+@dataclass(frozen=True)
+class Range:
+    """A numeric field's limits. An open end excludes its bound, as gt and lt do."""
+
+    low: float
+    high: float
+    low_open: bool = False
+    high_open: bool = False
+
+    def __contains__(self, value: float) -> bool:
+        above = value > self.low if self.low_open else value >= self.low
+        below = value < self.high if self.high_open else value <= self.high
+        return above and below
+
+    def __str__(self) -> str:
+        low = f"{self.low:g}" + (" (exclusive)" if self.low_open else "")
+        high = f"{self.high:g}" + (" (exclusive)" if self.high_open else "")
+        return f"{low} to {high}"
+
+
+def bounds(model, field) -> Range:
+    """The limits the field's ge, gt, le and lt constraints set together."""
+    # The larger key is the tighter limit; at one value the exclusive limit wins.
+    low, high = (-float("inf"), False), (-float("inf"), False)
     for m in model.model_fields[field].metadata:
-        lo = max(lo, getattr(m, "ge", getattr(m, "gt", lo)))
-        hi = min(hi, getattr(m, "le", getattr(m, "lt", hi)))
-    return lo, hi
+        for name, open_ in (("ge", False), ("gt", True)):
+            if getattr(m, name, None) is not None:
+                low = max(low, (getattr(m, name), open_))
+        for name, open_ in (("le", False), ("lt", True)):
+            if getattr(m, name, None) is not None:
+                high = max(high, (-getattr(m, name), open_))
+    return Range(low[0], -high[0], low[1], high[1])
 
 
 class Send(Strict):
@@ -361,8 +387,7 @@ class Target:
     kind: Literal["channel", "send", "effect"]
     field: str
     domain: str
-    low: float
-    high: float
+    range: Range
     send: str | None = None
     effect: int | None = None
     band: int | None = None
@@ -388,17 +413,17 @@ def target(owner: Track | Return | Master, param: str) -> Target:
     if isinstance(owner, Master):
         if parts == ["gain_db"]:
             return Target(
-                "channel", "gain_db", "linear", *bounds(Session, "master_gain_db")
+                "channel", "gain_db", "linear", bounds(Session, "master_gain_db")
             )
     elif len(parts) == 1 and parts[0] in CHANNEL_PARAMS:
-        return Target("channel", parts[0], "linear", *bounds(type(owner), parts[0]))
+        return Target("channel", parts[0], "linear", bounds(type(owner), parts[0]))
     if isinstance(owner, Track) and parts[0] == "sends" and len(parts) == 3:
         if parts[2] != "gain_db":
             raise ValueError(f"{param}: only a send's gain_db can be automated")
         if parts[1] not in {s.to for s in owner.sends}:
             raise ValueError(f"{param}: no send to {parts[1]}")
         return Target(
-            "send", "gain_db", "linear", *bounds(Send, "gain_db"), send=parts[1]
+            "send", "gain_db", "linear", bounds(Send, "gain_db"), send=parts[1]
         )
     if parts[0] == "effects" and len(parts) >= 3:
         ids = [e.id for e in owner.effects]
@@ -431,7 +456,7 @@ def target(owner: Track | Return | Master, param: str) -> Target:
             "effect",
             field,
             allowed[field],
-            *bounds(model, field),
+            bounds(model, field),
             effect=index,
             band=band,
         )
@@ -514,11 +539,11 @@ class Project(Strict):
 
     @model_validator(mode="after")
     def references(self):
-        ids = [t.id for t in self.tracks]
+        track_ids = [t.id for t in self.tracks]
         return_ids = [r.id for r in self.returns]
-        if len(ids) != len(set(ids)):
+        if len(track_ids) != len(set(track_ids)):
             raise ValueError("Track IDs must be unique")
-        if len(ids + return_ids) != len(set(ids + return_ids)):
+        if len(track_ids + return_ids) != len(set(track_ids + return_ids)):
             raise ValueError("Return IDs must be unique and distinct from track IDs")
         for t in [*self.tracks, *self.returns]:
             for source in t.sidechains():
@@ -526,7 +551,7 @@ class Project(Strict):
                     raise ValueError(
                         f"{t.id}: sidechain must name a track, not return {source}"
                     )
-                if source not in ids:
+                if source not in track_ids:
                     raise ValueError(f"{t.id}: unknown sidechain track {source}")
                 if source == t.id:
                     raise ValueError(f"{t.id}: a track cannot sidechain itself")
@@ -566,27 +591,27 @@ class Project(Strict):
         length = beat(self.session.length_beats)
         for owner in chains:
             name = getattr(owner, "id", "master")
-            ids = [e.id for e in owner.effects if e.id]
-            if len(ids) != len(set(ids)):
+            effect_ids = [e.id for e in owner.effects if e.id]
+            if len(effect_ids) != len(set(effect_ids)):
                 raise ValueError(f"{name}: effect IDs must be unique")
             keys = set()
             for lane in owner.automation:
                 try:
-                    t = target(owner, lane.param)
+                    lane_target = target(owner, lane.param)
                 except ValueError as exc:
                     raise ValueError(f"{name}: {exc}") from None
-                if t.key in keys:
+                if lane_target.key in keys:
                     raise ValueError(f"{name}: more than one lane for {lane.param}")
-                keys.add(t.key)
+                keys.add(lane_target.key)
                 for point in lane.points:
                     if beat(point.at) > length:
                         raise ValueError(
                             f"{name}: {lane.param} point at {point.at} is after the session end"
                         )
-                    if not t.low <= point.value <= t.high:
+                    if point.value not in lane_target.range:
                         raise ValueError(
                             f"{name}: {lane.param} value {point.value} outside "
-                            f"{t.low:g} to {t.high:g}"
+                            f"{lane_target.range}"
                         )
         if len({s.id for s in self.sections}) != len(self.sections):
             raise ValueError("Section IDs must be unique")
