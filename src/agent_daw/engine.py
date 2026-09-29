@@ -15,7 +15,7 @@ import numpy as np
 import soundfile as sf
 from scipy.signal import resample_poly
 from . import __version__
-from .automation import Automation, amplitude
+from .automation import Automation, amplitude, per_frame
 from .effects import Chain
 from .model import (
     Project,
@@ -320,16 +320,16 @@ def render(
         if track.id in sources:
             keys[track.id] = x
         silent = track.mute or (any_solo and not track.solo)
-        post = stereo_pan(x, auto.channel_value("pan", track.pan, total)) * amplitude(
-            auto.channel_value("gain_db", track.gain_db, total)
-        )
+        pan = auto.channel_value("pan", track.pan, total)
+        gain = amplitude(auto.channel_value("gain_db", track.gain_db, total))
+        post = stereo_pan(x, pan) * per_frame(gain)
         # Sends tap after the inserts (pre-fader) or after gain and pan (post-fader).
         # A muted or solo-muted track sends nothing.
         for send in track.sends:
             if not silent and send.to in buses:
                 tap = x if send.pre_fader else post
                 level = auto.send_value(send.to, send.gain_db, total)
-                buses[send.to] += tap * amplitude(level)
+                buses[send.to] += tap * per_frame(amplitude(level))
         if track_id is not None and track.id != track_id:
             continue
         effect_reports[track.id] = chain.report()
@@ -348,9 +348,9 @@ def render(
         x = chain.run(buses[ret.id], {s: keys[s] for s in ret.sidechains()}, block_size)
         effect_reports[ret.id] = chain.report()
         automated[ret.id] = auto.params
-        x = stereo_pan(x, auto.channel_value("pan", ret.pan, total)) * amplitude(
-            auto.channel_value("gain_db", ret.gain_db, total)
-        )
+        pan = auto.channel_value("pan", ret.pan, total)
+        gain = amplitude(auto.channel_value("gain_db", ret.gain_db, total))
+        x = stereo_pan(x, pan) * per_frame(gain)
         if ret.mute:
             x[:] = 0
         tracks[ret.id] = x
@@ -363,13 +363,13 @@ def render(
     fader = np.ones(total)
     if fade:
         fader[-fade:] = np.linspace(1, 0, fade)
-    envelope = fader * (master if np.ndim(master) == 0 else master[:, 0])
+    envelope = fader * master
     # Track previews are the track's stem, so they omit the master chain.
     master_chain = Chain(
         [] if track_id else p.master.effects, rate, tempo, master_auto.effects
     )
     if master_chain.devices:
-        mix = master_chain.run(mix * master, block_size=block_size)
+        mix = master_chain.run(mix * per_frame(master), block_size=block_size)
         mix *= fader[:, None]
     else:
         mix *= envelope[:, None]
@@ -457,7 +457,7 @@ def render(
         "stem_policy": "post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, each return has its own stem; float WAV, same start and length",
         "send_policy": "post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks send nothing; returns are never solo-muted",
         "sidechain_policy": "key is the source track after its inserts, before its gain, pan, mute and solo",
-        "automation_policy": "lanes override static values for the whole song, holding the first value before the first point and the last after the last point; gain, pan and send levels change per frame, compressor, delay and reverb parameters per frame, filter and eq coefficients every 64 frames; no smoothing",
+        "automation_policy": "lanes override static values for the whole song, holding the first value before the first point and the last after the last point; a lane whose points share one value renders exactly as that static value; gain, pan and send levels change per frame, compressor, delay and reverb parameters per frame, filter and eq coefficients every 64 frames; no smoothing",
         "pitch_policy": "bandlimited repitch; pitch changes duration; source_bpm also repitches",
     }
     atomic_text(output / "report.json", json.dumps(manifest, indent=2) + "\n")

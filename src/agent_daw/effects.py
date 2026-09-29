@@ -16,6 +16,7 @@ import numpy as np
 from scipy.fft import irfft, rfft
 from scipy.ndimage import maximum_filter1d
 from scipy.signal import butter, istft, lfilter, sosfilt, stft
+from .automation import per_frame
 from .model import Compressor, Delay, Eq, Filter, Limiter, Reverb, frame
 
 FIXED = 2**24  # Limiter smoothing sums fixed-point dB so sums are partition-exact.
@@ -34,9 +35,11 @@ class Device:
         self.window = (0, 0)
         self.position = 0
         self.stats = None
-        # Automation envelopes by parameter name. frame is the chain input frame of
-        # the block being processed; upstream is the latency of earlier devices.
+        # Envelopes of the parameters that move, by name, and the names of every
+        # lane, constant ones included. frame is the chain input frame of the block
+        # being processed; upstream is the latency of earlier devices.
         self.automation = {}
+        self.automated = []
         self.frame = 0
         self.upstream = 0
 
@@ -46,12 +49,11 @@ class Device:
         if env is None:
             return getattr(self.spec, name)
         start = self.frame if start is None else start
-        return env.at(start - self.upstream + np.arange(m))
+        return env.span(start - self.upstream, m)
 
     def fraction(self, name, m, start=None):
-        """A percent parameter as a fraction: a scalar, or a column per frame."""
-        v = self.param(name, m, start)
-        return v / 100 if np.ndim(v) == 0 else (v / 100)[:, None]
+        """A percent parameter as a fraction: a scalar, or one value per frame."""
+        return self.param(name, m, start) / 100
 
     def record(self, reduction):
         """Accumulate gain reduction for output frames inside the aligned render."""
@@ -71,8 +73,8 @@ class Device:
 
     def report(self):
         result = {"type": self.spec.type, "latency_frames": self.latency}
-        if self.automation:
-            result["automated"] = sorted(self.automation)
+        if self.automated:
+            result["automated"] = self.automated
         if self.stats is not None or isinstance(self, (Dynamics, LimiterDevice)):
             s = self.stats or {"max": 0.0, "sum": 0.0, "over_1db": 0, "frames": 0}
             n = max(1, s["frames"])
@@ -379,8 +381,8 @@ class DelayDevice(Device):
         m, d = len(x), self.frames
         if not m:
             return x
-        feedback = self.fraction("feedback_percent", m)
-        mix = self.fraction("mix_percent", m)
+        feedback = np.broadcast_to(self.fraction("feedback_percent", m), m)
+        mix = per_frame(self.fraction("mix_percent", m))
         source = x
         if self.spec.ping_pong:
             source = np.column_stack([x.mean(axis=1), np.zeros(m)])
@@ -391,8 +393,7 @@ class DelayDevice(Device):
             fed = wet[i:stop]
             if self.spec.ping_pong:
                 fed = fed[:, ::-1]
-            gain = feedback if np.ndim(feedback) == 0 else feedback[i:stop]
-            v = inputs[i:stop] + gain * fed
+            v = inputs[i:stop] + feedback[i:stop, None] * fed
             if self.sos is not None:
                 v, self.zi = sosfilt(self.sos, v, axis=0, zi=self.zi)
             wet[d + i : d + stop] = v
@@ -468,7 +469,7 @@ class ReverbDevice(Device):
             recent = self.history[(self.head + np.arange(count)) % count]
             spectrum = np.einsum("kf,kcf->cf", recent, self.spectra)
             wet = irfft(spectrum, 2 * n)[:, n:].T
-            mix = self.fraction("mix_percent", n, first + b * n)
+            mix = per_frame(self.fraction("mix_percent", n, first + b * n))
             ready.append(block * (1 - mix) + wet * mix)
         self.pending = pending[blocks * n :]
         out = np.concatenate(ready)
@@ -477,12 +478,36 @@ class ReverbDevice(Device):
 
 
 def device(spec, rate, tempo=None, automation=None):
-    """A device for spec; automation maps parameter names to envelopes."""
-    if automation and isinstance(spec, (Filter, Eq)):
-        return AutomatedSos(spec, rate, automation)
-    d = plain_device(spec, rate, tempo)
-    d.automation = automation or {}
+    """A device for spec; automation maps parameter names to envelopes.
+
+    A constant lane becomes the spec's static value, so the device renders exactly
+    as the static spec would; only moving lanes take the automated path.
+    """
+    automation = automation or {}
+    moving = {k: e for k, e in automation.items() if e.constant is None}
+    spec = with_values(
+        spec, {k: e.constant for k, e in automation.items() if e.constant is not None}
+    )
+    if moving and isinstance(spec, (Filter, Eq)):
+        d = AutomatedSos(spec, rate, moving)
+    else:
+        d = plain_device(spec, rate, tempo)
+        d.automation = moving
+    d.automated = sorted(automation)
     return d
+
+
+def with_values(spec, values):
+    """spec with values by parameter name, such as cutoff_hz or bands.0.gain_db."""
+    update = {}
+    for name, v in values.items():
+        if name.startswith("bands."):
+            _, j, field = name.split(".")
+            bands = update.setdefault("bands", list(spec.bands))
+            bands[int(j)] = bands[int(j)].model_copy(update={field: v})
+        else:
+            update[name] = v
+    return spec.model_copy(update=update) if update else spec
 
 
 def plain_device(spec, rate, tempo=None):

@@ -4,7 +4,8 @@ A lane holds its first value before its first point and its last value after its
 last point. A point's curve shapes the segment that follows it: linear moves in the
 parameter's domain (log for frequencies and q, so sweeps move in equal ratios per
 beat), hold keeps the value until the next point. Two points at one position jump
-there. Values change exactly at their frames; nothing is smoothed.
+there. Values change exactly at their frames; nothing is smoothed. A lane whose
+points share one value is that value, exactly, for the whole song.
 """
 
 from __future__ import annotations
@@ -19,6 +20,8 @@ class Envelope:
         self.log = domain == "log"
         self.values = np.log(values) if self.log else values
         self.hold = np.array([p.curve == "hold" for p in lane.points])
+        first = lane.points[0].value
+        self.constant = first if all(p.value == first for p in lane.points) else None
 
     def at(self, frames) -> np.ndarray:
         """Values at the given timeline frames; frames may precede zero."""
@@ -35,6 +38,31 @@ class Envelope:
         v = np.where(self.hold[k] | (k == last), start, start + (end - start) * t)
         v = np.where(before, self.values[0], v)
         return np.exp(v) if self.log else v
+
+    def span(self, start: int, count: int) -> np.ndarray:
+        """Values at count consecutive timeline frames from start, equal to at().
+
+        Segments are filled in place in the one output array, so memory stays at
+        one float per frame however long the span is.
+        """
+        out = np.arange(start, start + count, dtype=np.float64)
+        f, v = self.frames, self.values
+        edges = np.clip(f - start, 0, count)  # where each point's frame falls in out
+        out[: edges[0]] = v[0]
+        out[edges[-1] :] = v[-1]
+        # Only the segments overlapping the span: first the one containing start.
+        first = max(0, np.searchsorted(f, start, side="right") - 1)
+        stop = min(len(f) - 1, np.searchsorted(f, start + count))
+        for k in range(first, stop):
+            segment = out[edges[k] : edges[k + 1]]
+            if self.hold[k]:
+                segment[:] = v[k]
+            else:
+                segment -= f[k]
+                segment /= max(f[k + 1] - f[k], 1)
+                segment *= v[k + 1] - v[k]
+                segment += v[k]
+        return np.exp(out, out=out) if self.log else out
 
 
 class Automation:
@@ -56,8 +84,10 @@ class Automation:
 
     @staticmethod
     def value(env, static, total):
-        """The static value, or one value per frame of the timeline."""
-        return static if env is None else env.at(np.arange(total))
+        """The static value, a constant lane's value, or one value per frame."""
+        if env is None:
+            return static
+        return env.span(0, total) if env.constant is None else env.constant
 
     def channel_value(self, field, static, total):
         return self.value(self.channel.get(field), static, total)
@@ -67,7 +97,10 @@ class Automation:
 
 
 def amplitude(db):
-    """dB to linear gain: a scalar, or a column that scales stereo frames."""
-    if np.ndim(db) == 0:
-        return 10 ** (db / 20)
-    return (10 ** (db / 20))[:, None]
+    """dB to linear gain, for a scalar or one value per frame."""
+    return 10 ** (db / 20)
+
+
+def per_frame(v):
+    """A scalar or one value per frame, shaped to scale stereo frames."""
+    return np.reshape(v, (-1, 1))
