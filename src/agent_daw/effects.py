@@ -36,20 +36,19 @@ class Device:
         self.position = 0
         self.stats = None
         # Envelopes of the parameters that move, by name, and the names of every
-        # lane, constant ones included. frame is the chain input frame of the block
-        # being processed; upstream is the latency of earlier devices.
+        # lane, constant ones included. frame is the timeline frame of the block's
+        # first input frame; the chain sets it.
         self.automation = {}
         self.automated = []
         self.frame = 0
-        self.upstream = 0
 
     def param(self, name, m, start=None):
-        """The static value, or the automated value for m input frames from start."""
+        """The static value, or the automated value for m timeline frames from start,
+        by default the block's first."""
         env = self.automation.get(name)
         if env is None:
-            return getattr(self.spec, name)
-        start = self.frame if start is None else start
-        return env.span(start - self.upstream, m)
+            return spec_value(self.spec, name)
+        return env.span(self.frame if start is None else start, m)
 
     def fraction(self, name, m, start=None):
         """A percent parameter as a fraction: a scalar, or one value per frame."""
@@ -131,13 +130,13 @@ def band_sos(band, rate):
 def svf_params(spec, rate, values):
     """Trapezoidal SVF parameters (g, k, m0, m1, m2) per period and section.
 
-    values(name, static) returns one value per period. The formulas are Simper's
+    values(name) returns one value per period. The formulas are Simper's
     ("Linear Trap SVF"): Butterworth sections for filters, RBJ-equivalent bells and
     shelves for eq bands, so each section's response matches the static biquad.
     """
     if isinstance(spec, Filter):
         order = spec.slope_db_per_octave // 6
-        g = np.tan(np.pi * values("cutoff_hz", spec.cutoff_hz) / rate)[:, None]
+        g = np.tan(np.pi * values("cutoff_hz") / rate)[:, None]
         k = 2 * np.sin(np.pi * (2 * np.arange(order // 2) + 1) / (2 * order))
         g, k = np.broadcast_arrays(g, k)
         zero, one = np.zeros_like(g), np.ones_like(g)
@@ -146,8 +145,7 @@ def svf_params(spec, rate, values):
     bands = []
     for j, band in enumerate(spec.bands):
         f, gain, q = (
-            values(f"bands.{j}.{name}", getattr(band, name))
-            for name in ("freq_hz", "gain_db", "q")
+            values(f"bands.{j}.{name}") for name in ("freq_hz", "gain_db", "q")
         )
         a, t = 10 ** (gain / 40), np.tan(np.pi * f / rate)
         if band.shape == "bell":
@@ -228,12 +226,13 @@ class AutomatedSos(Device):
         m = len(x)
         if not m:
             return x
-        start = self.frame - self.upstream  # timeline frame of x[0]
-        ticks = np.arange(start // CONTROL * CONTROL, start + m, CONTROL)
+        start = self.frame  # timeline frame of x[0]
+        first = start // CONTROL * CONTROL  # the update at or before x[0]
+        ticks = np.arange(first, start + m, CONTROL)
 
-        def values(name, static):
-            env = self.automation.get(name)
-            return np.full(len(ticks), static, float) if env is None else env.at(ticks)
+        def values(name):  # one per update
+            count = start + m - first
+            return np.broadcast_to(self.param(name, count, first), count)[::CONTROL]
 
         params = svf_params(self.spec, self.rate, values)
         coefficients, to_state, from_state = svf_biquads(params)
@@ -456,7 +455,7 @@ class ReverbDevice(Device):
 
     def process(self, x, key=None):
         n, count = self.latency, len(self.history)
-        first = self.frame - len(self.pending)  # chain input frame of pending[0]
+        first = self.frame - len(self.pending)  # timeline frame of pending[0]
         pending = np.concatenate([self.pending, x])
         ready = [self.queue]
         blocks = len(pending) // n
@@ -495,6 +494,14 @@ def device(spec, rate, tempo=None, automation=None):
         d.automation = moving
     d.automated = sorted(automation)
     return d
+
+
+def spec_value(spec, name):
+    """spec's value of a parameter by name, such as cutoff_hz or bands.0.gain_db."""
+    if name.startswith("bands."):
+        _, j, field = name.split(".")
+        return getattr(spec.bands[int(j)], field)
+    return getattr(spec, name)
 
 
 def with_values(spec, values):
@@ -570,18 +577,23 @@ class Chain:
             key = None
             if d.key_delay is not None:
                 key = d.key_delay.process(keys[d.spec.sidechain])
-            d.frame = self.n
+            # Earlier devices' latency delays the audio reaching d.
+            d.frame = self.n - d.upstream
             x = d.process(x, key)
         self.n += len(x)
         return x
 
     def run(self, x, keys=None, block_size=4096):
-        """Process a whole timeline in blocks and return it latency-compensated."""
+        """Process a whole timeline in blocks and return it latency-compensated.
+
+        A chain runs one timeline: its devices keep their state and position.
+        """
+        if self.n:
+            raise RuntimeError("A chain runs one timeline; build a new chain")
         keys = keys or {}
         total = len(x)
         for d in self.devices:
             d.window = (d.offset, d.offset + total)
-            d.position = 0
         if not self.devices:
             return x
         out = []

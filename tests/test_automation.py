@@ -290,6 +290,18 @@ def test_automation_after_latency_lands_on_the_timeline():
     assert np.allclose(y[:24000], 0.25) and np.allclose(y[24000:], 0.025)
 
 
+def test_reverb_mix_after_latency_lands_on_the_timeline():
+    # The reverb reads its mix per partition; after the limiter's delay a jump
+    # from dry to wet on beat 1 still starts at frame 24000.
+    specs = [
+        Limiter(type="limiter", ceiling_db=-0.1, lookahead_ms=3),
+        Reverb(type="reverb", decay_seconds=0.5),
+    ]
+    x = np.random.default_rng(5).normal(0, 0.1, (SR, 2))
+    y = run(specs, x, {1: {"mix_percent": ("linear", [(1, 0), (1, 100)])}})
+    assert np.flatnonzero(np.any(y != x, axis=1))[0] == 24000
+
+
 def test_chain_report_lists_automated_fields():
     specs, automation = all_automated_chain()
     chain = Chain(
