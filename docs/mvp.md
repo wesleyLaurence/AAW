@@ -97,7 +97,8 @@ still click on low-frequency material; longer releases may be needed on bass.
 
 Mono pad pan uses equal-power gains; stereo pad and track pan use balance, preserving
 center stereo levels. Mono conversion averages source channels. Tracks sum in
-float64; master gain is static. Sidechain keys are the source track after its
+float64; master gain is `session.master_gain_db` unless a master `gain_db` lane
+replaces it. Sidechain keys are the source track after its
 inserts and before its gain, pan, mute and solo. Mute takes precedence over solo. Session end is
 finite and applies an explicit final fade; tails beyond it are discarded.
 

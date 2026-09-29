@@ -91,3 +91,6 @@ A lane is `{param, points}` on a track, return or the master and replaces the st
 
 **D30. The project fingerprint hashes the saved form.**
 `project_sha256` hashes the model without defaults, which is what `save` writes, so adding an optional field no longer changes every fingerprint and breaks older renders. Earlier engines hashed the full model; render verification also accepts those forms, one per schema change in `model.LEGACY_FIELDS`.
+
+**D31. Automated filters keep state-variable state across coefficient changes.**
+A direct-form biquad's state carried into very different coefficients bursts: a 48 dB lowpass jumping from 20 kHz to 10 Hz reached 220 times the input peak, and even a 1/64 beat ramp reached 12. Each automated section is a trapezoidal state-variable filter whose integrator states stay near signal level, as an analog filter's capacitors do. Between updates it runs as the equivalent direct form II biquad through `lfilter`, which keeps it fast, and its history is converted when coefficients change. Static filters and EQs keep `butter()` and RBJ biquads.
