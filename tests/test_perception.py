@@ -237,6 +237,46 @@ def test_reports_from_earlier_engines_still_verify(rendered):
         analyze(full)
 
 
+def test_reports_from_before_previews_are_full_renders(rendered):
+    # The earliest reports have no render_id, target or stem hashes.
+    _, _, full, preview = rendered
+    before, _ = analyze(full)
+    earliest = (
+        "engine_version",
+        "python",
+        "platform",
+        "dependencies",
+        "project_sha256",
+        "sample_sha256",
+        "audio_sha256",
+        "render_seconds",
+        "mix",
+        "tracks",
+        "sections",
+        "tail_policy",
+        "stem_policy",
+        "pitch_policy",
+    )
+    for folder in (full, preview):
+        report = folder / "report.json"
+        manifest = json.loads(report.read_text())
+        manifest = {k: manifest[k] for k in earliest}
+        manifest["tracks"] = {
+            name: {"peak_dbfs": t["peak_dbfs"], "events": t["events"]}
+            for name, t in manifest["tracks"].items()
+        }
+        report.write_text(json.dumps(manifest))
+    after, _ = analyze(full / "report.json")
+    assert after["source"]["render_id"] is None
+    assert after["source"]["start_seconds"] == 0
+    for key in ("mix", "timeline", "sections", "musical_context"):
+        assert after[key] == before[key]
+    assert not after["tracks"]["bass"]["hash_verified_against_render"]
+    # A preview without its target is not mistaken for a full render.
+    with pytest.raises(ValueError, match="timeline does not match"):
+        analyze(preview)
+
+
 def test_localized_changes_and_musical_deltas(rendered):
     path, p, full, _ = rendered
     p.patterns["busier"] = p.patterns["hit"].model_copy(deep=True)

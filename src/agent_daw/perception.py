@@ -116,7 +116,8 @@ def resolve(source):
         if "directory" in value:
             directory = Path(value["directory"])
             source = directory if directory.is_absolute() else source.parent / directory
-        elif "render_id" in value:
+        elif "audio_sha256" in value:
+            # A render report. The earliest reports have no render_id.
             source = source.parent
         else:
             raise ValueError("Expected a render report or render pointer JSON")
@@ -138,7 +139,9 @@ def context(folder, x, rate):
         raise ValueError("Render snapshot hash mismatch")
     if rate != project.session.sample_rate or len(x) != manifest["mix"]["frames"]:
         raise ValueError("Render audio dimensions do not match its manifest")
-    region = manifest["target"].get("source_frames")
+    # Reports from before previews have no target; they are full renders, which
+    # the timeline check below confirms.
+    region = manifest.get("target", {}).get("source_frames")
     offset = region[0] if region else 0
     expected_end = (
         region[1]
@@ -275,7 +278,7 @@ def analyze(source):
         "source": {
             "audio_path": str(audio_path),
             "audio_sha256": digest(audio_path),
-            "render_id": manifest["render_id"] if manifest else None,
+            "render_id": manifest.get("render_id") if manifest else None,
             "project_sha256": manifest["project_sha256"] if manifest else None,
             "sample_rate": rate,
             "frames": len(x),
