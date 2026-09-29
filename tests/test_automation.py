@@ -4,21 +4,31 @@ import json
 import subprocess
 import sys
 import tracemalloc
+from typing import Annotated
 import numpy as np
 import pytest
 import soundfile as sf
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 from agent_daw.automation import Automation, Envelope
 from agent_daw.effects import AutomatedSos, Chain
 from agent_daw.engine import render
 from agent_daw.model import (
+    EFFECT_PARAMS,
+    Clip,
     Compressor,
     Delay,
     Eq,
+    EqBand,
     Filter,
     Lane,
     Limiter,
     Project,
+    Return,
     Reverb,
+    Send,
+    Session,
+    Track,
+    bounds,
     load,
     save,
 )
@@ -573,6 +583,52 @@ def test_automation_validation(song, change, message):
     change(data)
     with pytest.raises(ValueError, match=message):
         Project.model_validate(data)
+
+
+class Limits(BaseModel):
+    exclusive: float = Field(gt=0, lt=1)
+    tied: float = Field(ge=0, gt=0, le=1, lt=1)
+
+
+EFFECT_MODELS = {
+    "filter": Filter,
+    "eq": EqBand,
+    "compressor": Compressor,
+    "delay": Delay,
+    "reverb": Reverb,
+}
+LIMITED_FIELDS = [
+    (Track, "gain_db"),
+    (Track, "pan"),
+    (Return, "gain_db"),
+    (Return, "pan"),
+    (Session, "master_gain_db"),
+    (Send, "gain_db"),
+    *((EFFECT_MODELS[k], f) for k, fields in EFFECT_PARAMS.items() for f in fields),
+    (Clip, "velocity_scale"),
+    (Limits, "exclusive"),
+    (Limits, "tied"),
+]
+
+
+@pytest.mark.parametrize("model, field", LIMITED_FIELDS)
+def test_lane_limits_match_the_static_field(model, field):
+    static = TypeAdapter(Annotated[float, *model.model_fields[field].metadata])
+    limits = bounds(model, field)
+    for edge in (limits.low, limits.high):
+        for value in (np.nextafter(edge, -np.inf), edge, np.nextafter(edge, np.inf)):
+            try:
+                static.validate_python(float(value))
+                accepted = True
+            except ValidationError:
+                accepted = False
+            assert (value in limits) == accepted, value
+
+
+def test_exclusive_limits_are_named_in_errors():
+    assert str(bounds(Track, "pan")) == "-1 to 1"
+    assert str(bounds(Clip, "velocity_scale")) == "0 (exclusive) to 2"
+    assert str(bounds(Limits, "tied")) == "0 (exclusive) to 1 (exclusive)"
 
 
 def test_lanes_by_id_and_index_collide(song):
