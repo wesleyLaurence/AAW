@@ -124,6 +124,44 @@ def test_eq_band_gain_ramp():
     assert end == pytest.approx(rms_db(x) + 11.5, abs=1)
 
 
+@pytest.mark.parametrize("mode", ["lowpass", "highpass"])
+@pytest.mark.parametrize("before, after", [(20000, 10), (10, 20000), (18000, 300)])
+def test_filter_cutoff_jump_does_not_burst(mode, before, after):
+    # Direct-form state carried into very different coefficients reached 6 to 220
+    # times the input peak here. The state-variable state stays below 3 times; the
+    # worst case, a highpass dropping to 10 Hz, is a decaying low thump.
+    x = np.random.default_rng(4).normal(0, 0.3, (SR, 2))
+    f = Filter(type="filter", mode=mode, cutoff_hz=1000, slope_db_per_octave=48)
+    jump = [(0, before), (1, before), (1, after)]
+    y = run([f], x, {0: {"cutoff_hz": ("log", jump)}})
+    assert np.max(np.abs(y)) < 4 * np.max(np.abs(x))
+
+
+def test_eq_frequency_and_q_jumps_do_not_burst():
+    eq = Eq(type="eq", bands=[{"shape": "bell", "freq_hz": 20, "gain_db": -12}])
+    x = np.random.default_rng(5).normal(0, 0.3, (SR, 2))
+    lanes = {
+        "bands.0.freq_hz": ("log", [(0, 20000), (1, 20000), (1, 20)]),
+        "bands.0.q": ("log", [(0, 18), (1, 0.1, "hold"), (1.5, 18)]),
+    }
+    y = run([eq], x, {0: lanes})
+    assert np.max(np.abs(y)) < 4 * np.max(np.abs(x))
+
+
+def test_filter_updates_align_to_the_timeline_after_latency():
+    # The limiter delays the filter's input by 144 frames; coefficient periods
+    # still start on timeline multiples of 64, so a step on beat 1 lands there.
+    specs = [
+        Limiter(type="limiter", ceiling_db=-0.1, lookahead_ms=3),
+        lowpass(20000, 12),
+    ]
+    x = tone(5000, 1, 0.2)
+    step = [(0, 20000, "hold"), (1, 100)]
+    stepped = run(specs, x, {1: {"cutoff_hz": ("log", step)}})
+    steady = run(specs, x, {1: {"cutoff_hz": ("log", [(0, 20000)])}})
+    assert np.flatnonzero(np.any(stepped != steady, axis=1))[0] == 24000
+
+
 def all_automated_chain():
     specs = [
         lowpass(slope=24),

@@ -101,11 +101,16 @@ ceiling. Values must lie within the parameter's normal bounds.
   beat 16 even after a look-ahead limiter or a reverb. `gain_db`, `pan`, send
   levels, compressor thresholds and makeup, delay feedback and mix, and reverb mix
   change every frame. Filter and EQ coefficients are recomputed every 64 frames,
-  counted from the start of the song, from the value at the first frame of each
-  period, and the filter state carries across updates.
+  counted from the start of the song even after upstream latency, from the value
+  at the first frame of each period. Each filter section keeps its
+  state-variable state across updates.
 - **No smoothing**: a `hold` step or jump on a level changes it within one frame.
   On sustained material that can click; ramp over a few milliseconds instead
-  (1/64 beat is 3.9 ms at 240 BPM and 7.8 ms at 120 BPM).
+  (1/64 beat is 3.9 ms at 240 BPM and 7.8 ms at 120 BPM). A step on a filter
+  cutoff or EQ band changes tone within one 64-frame period without a burst. A
+  highpass dropping far in one step, such as 20 kHz to 10 Hz, leaves a low thump
+  that decays over tens of milliseconds, up to about three times the input peak on
+  noise; a 1/64 beat ramp halves it.
 - **Fades**: `gain_db` moves linearly in dB, so the audible part of a fade to
   −96 dB is over early. Fading to about −40 to −60 dB and letting the session's
   end fade finish usually sounds more even.
@@ -136,24 +141,28 @@ values must be in bounds, points in order and inside the session.
 `numpy.searchsorted`. The renderer builds per-frame arrays for automated channel
 gain, pan and send levels. Effects receive their envelopes and each device reads
 the value for the frames it is processing, offset by the latency of the devices
-before it. Automated filters and EQs design their biquads for every 64-frame
-period in one vectorized step and run each group of equal coefficients through
-`sosfilt`. Filters use RBJ Butterworth sections whose response matches the static
-filter's. Unautomated effects run the same code as before, so projects without
+before it. Automated filters and EQs compute trapezoidal state-variable filter
+parameters (Simper's formulas) for every 64-frame period in one vectorized step, so
+each section's response matches the static Butterworth section or RBJ band. Each
+run of equal coefficients goes through `lfilter` as the equivalent direct form II
+biquad. When coefficients change, the direct form's history is converted so the
+SVF's integrator states carry over; those stay near signal level, so a jump does
+not burst as a carried direct-form state does. Unautomated effects run the same code as before, so projects without
 automation render bit-identically.
 
 Tests use generated audio. They cover envelope holds, interpolation, `hold`,
 jumps and log-domain ratios. They check that constant lanes match static filters,
-EQs and gains. They also check filter sweeps and EQ ramps, and block-partition
+EQs and gains, and that cutoff and EQ jumps stay bounded. They also check filter sweeps and EQ ramps, and block-partition
 invariance of a chain where every automatable device is automated. Further tests
-cover changes landing on the timeline after latency compensation, track gain
+cover changes and filter updates landing on the timeline after latency compensation, track gain
 ramps measured in stems, pan, send and return lanes, and master gain in stems
 and mix. The rest cover section previews, block-size invariance of whole
 renders, validation errors, id and index collisions, round-trip formatting,
 `inspect`, `check` and `describe`.
 
-Each automated filter or EQ costs about one second per minute of continuous
-change in the Linux development container. Constant stretches of a lane cost
+A 12 dB filter or one-band EQ costs about 1.5 seconds per minute of continuous
+change on an x86 Mac, and each further section about 0.8 seconds more; a 48 dB
+filter has four. Constant stretches of a lane cost
 nothing extra.
 
 Not yet implemented: smoothing options and curved segments beyond linear and

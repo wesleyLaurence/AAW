@@ -72,7 +72,8 @@ render with and without it and use `daw compare`.
 - **compressor**: stereo-linked sample-peak detector with a soft knee of `knee_db`
   centred on the threshold. Required reduction is held and decays with
   `release_ms`, the time for the reduction to fall by a factor of e. A one-pole
-  `attack_ms` smooths the onset. `makeup_db` is static.
+  `attack_ms` smooths the onset. `makeup_db` is gain added after reduction;
+  `threshold_db` and `makeup_db` can be automated (see [automation.md](automation.md)).
 - **sidechain**: a compressor's `sidechain` names another track. The key is that
   track **after its own inserts and before its gain, pan, mute and solo**. A muted
   or quiet kick still ducks the bass, and changing the kick's fader does not
