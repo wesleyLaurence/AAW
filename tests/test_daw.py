@@ -1,9 +1,11 @@
+import hashlib
 import json
 import subprocess
 import sys
 import numpy as np
 import pytest
 import soundfile as sf
+import yaml
 from agent_daw.model import Project, beat, frame, save, load, project_hash
 from agent_daw.engine import render, schedule, Sampler, Voice
 from agent_daw.library import scan, search, import_asset
@@ -199,6 +201,16 @@ def test_format_and_revision_edit(song, tmp_path):
     result = subprocess.run(cmd, capture_output=True, text=True)
     assert result.returncode == 1 and "Stale" in result.stderr
     assert load(path).session.tempo == 160
+
+
+def test_project_hash_fingerprints_the_saved_form(song):
+    # A field added later and left at its default is not saved, so it must not
+    # change the fingerprint that renders and apply --expect rely on.
+    path, _ = song
+    saved = yaml.safe_load(path.read_text())
+    del saved["schema_version"]
+    expected = hashlib.sha256(json.dumps(saved, sort_keys=True).encode()).hexdigest()
+    assert project_hash(load(path)) == expected
 
 
 def test_region_is_full_render_slice(song, tmp_path):

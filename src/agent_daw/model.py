@@ -687,7 +687,42 @@ def load(path: Path, verify_assets=True) -> Project:
     return p
 
 
+def _sha(data) -> str:
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
 def project_hash(project: Project) -> str:
-    return hashlib.sha256(
-        json.dumps(project.model_dump(mode="json"), sort_keys=True).encode()
-    ).hexdigest()
+    # The saved form: a new optional field left at its default keeps the fingerprint.
+    return _sha(
+        project.model_dump(mode="json", exclude_none=True, exclude_defaults=True)
+    )
+
+
+# Earlier engines hashed the full dump, so each schema change altered every
+# fingerprint. Newest first: the fields each change added, at their defaults.
+LEGACY_FIELDS = [
+    {"automation": [], "id": None},
+    {"sends": [], "returns": []},
+    {"effects": [], "master": {}},
+]
+
+
+def _without(data, fields):
+    if isinstance(data, list):
+        return [_without(v, fields) for v in data]
+    if not isinstance(data, dict):
+        return data
+    kept = {k: _without(v, fields) for k, v in data.items()}
+    return {k: v for k, v in kept.items() if k not in fields or v != fields[k]}
+
+
+def hash_matches(project: Project, sha: str) -> bool:
+    """Whether sha fingerprints project, also in the forms earlier engines wrote."""
+    if project_hash(project) == sha:
+        return True
+    full, fields = project.model_dump(mode="json"), {}
+    for added in [{}, *LEGACY_FIELDS]:
+        fields |= added
+        if _sha(_without(full, fields)) == sha:
+            return True
+    return False

@@ -1,5 +1,7 @@
 """Controlled audio fixtures test the meaning of reports, not just their shape."""
 
+import copy
+import hashlib
 import json
 import subprocess
 import sys
@@ -207,6 +209,32 @@ def test_mix_and_snapshot_tamper_rejected(rendered):
     snapshot.write_text(snapshot.read_text().replace("tempo: 120", "tempo: 121"))
     with pytest.raises(ValueError, match="snapshot hash mismatch"):
         analyze(preview)
+
+
+def test_reports_from_earlier_engines_still_verify(rendered):
+    # Earlier engines hashed the full dump before automation, before sends and
+    # returns, and before effects existed. Their reports must keep verifying.
+    _, p, full, _ = rendered
+    report = full / "report.json"
+    manifest = json.loads(report.read_text())
+    dump = p.model_dump(mode="json")
+    track = dump["tracks"][0]
+    forms = [copy.deepcopy(dump)]
+    del track["automation"], dump["master"]["automation"]
+    forms.append(copy.deepcopy(dump))
+    del track["sends"], dump["returns"]
+    forms.append(copy.deepcopy(dump))
+    del track["effects"], dump["master"]
+    forms.append(dump)
+    for form in forms:
+        encoded = json.dumps(form, sort_keys=True).encode()
+        manifest["project_sha256"] = hashlib.sha256(encoded).hexdigest()
+        report.write_text(json.dumps(manifest))
+        analyze(full)
+    manifest["project_sha256"] = "0" * 64
+    report.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="snapshot hash mismatch"):
+        analyze(full)
 
 
 def test_localized_changes_and_musical_deltas(rendered):
