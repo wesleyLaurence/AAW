@@ -15,7 +15,7 @@ import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
 from .engine import schedule
-from .model import atomic_text, beat, digest, frame, load, project_hash
+from .model import atomic_text, beat, digest, frame, hash_matches, load
 
 VERSION = 1
 BANDS = {
@@ -134,7 +134,7 @@ def context(folder, x, rate):
     if digest(folder / "mix.wav") != manifest["audio_sha256"]:
         raise ValueError("Render mix hash mismatch")
     project = load(folder / "song.snapshot.yaml", verify_assets=False)
-    if project_hash(project) != manifest["project_sha256"]:
+    if not hash_matches(project, manifest["project_sha256"]):
         raise ValueError("Render snapshot hash mismatch")
     if rate != project.session.sample_rate or len(x) != manifest["mix"]["frames"]:
         raise ValueError("Render audio dimensions do not match its manifest")

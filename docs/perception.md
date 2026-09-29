@@ -77,7 +77,10 @@ values are `null`, never an invented floor; only the overview displays silence a
 
 ## Snapshot and artifact integrity
 
-The mix hash and project snapshot hash must agree with the render manifest. Original
+The mix hash and project snapshot hash must agree with the render manifest. The
+project hash covers the saved form, so fields at their defaults do not count and a
+new optional field leaves it unchanged. Reports from earlier engines hashed the full
+model and are verified in that form too. Original
 sample files and the current editable project are not required. Preview section
 ranges intersect the original project timeline, preserving the preview's original
 offset; audio measurements include any tails in the rendered region.
