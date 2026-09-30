@@ -96,6 +96,8 @@ Exit: with a written brief and a folder of samples, "make a song and don't stop 
 
 ## Workspace track — U0 to U4
 
+Replaced by milestones M0 to M9 in [Rust-Swift-Update.md](Rust-Swift-Update.md): a native macOS app over a real-time Rust engine. The stages below are kept for history.
+
 Goal: the end state, a visual DAW where a person adjusts tracks, devices, and knobs and hears the result while the agent works in the same project. See spec section 16. This track starts after phase 0, runs beside the numbered phases, and yields to them. Each stage ends with something usable and is small enough to stop after.
 
 - **U0 — Watch.** `daw serve` watching the project directory. A browser-tab frontend showing the arrangement, waveforms from the render cache, sections, transport and playhead, the journal and brief. Redraws as the agent edits and renders. Exit: start the agent on a task in one terminal, open the workspace, and watch tracks and waveforms appear as it works, playing back the latest mix at any point.
@@ -126,5 +128,5 @@ Tempo and time signature changes, warp markers for drifting material, FM and wav
 4. How much of the journal and brief the agent reads by default at session start, and how they are trimmed as they grow?
 5. Whether draft renders should downsample or only skip expensive processing.
 6. The CLI name.
-7. ~~Device language~~ Settled as D25: Python throughout in the block-processing shape, accepting that a realtime engine would require a rewrite.
-8. Workspace shell: a browser tab served by the daemon, Tauri, or native macOS? Browser tab first is the working assumption.
+7. ~~Device language~~ Settled as D25: Python throughout in the block-processing shape, accepting that a realtime engine would require a rewrite. Superseded by D34: the engine and devices move to Rust.
+8. ~~Workspace shell~~ Settled as D39: a native macOS app with SwiftUI and AppKit over the Rust core. See [Rust-Swift-Update.md](Rust-Swift-Update.md).
