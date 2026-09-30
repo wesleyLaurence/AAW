@@ -14,3 +14,5 @@ aaw-model.workspace = true
 aaw-engine.workspace = true
 clap = { version = "4.6.7", features = ["derive"] }
 serde_json = { version = "1.0.151", features = ["preserve_order"] }
+assert_no_alloc = "1.1.2"
+ctrlc = "3.5.2"

@@ -218,6 +218,44 @@ pub fn json_dumps(v: &Value) -> String {
     out
 }
 
+fn json_indent_into(v: &Value, level: usize, out: &mut String) {
+    let pad = |n: usize| "  ".repeat(n);
+    match v {
+        Value::List(items) if !items.is_empty() => {
+            out.push('[');
+            for (i, item) in items.iter().enumerate() {
+                out.push_str(if i > 0 { ",\n" } else { "\n" });
+                out.push_str(&pad(level + 1));
+                json_indent_into(item, level + 1, out);
+            }
+            out.push('\n');
+            out.push_str(&pad(level));
+            out.push(']');
+        }
+        Value::Dict(d) if !d.is_empty() => {
+            out.push('{');
+            for (i, (k, item)) in d.iter().enumerate() {
+                out.push_str(if i > 0 { ",\n" } else { "\n" });
+                out.push_str(&pad(level + 1));
+                json_str(k.as_str().expect("string keys"), out);
+                out.push_str(": ");
+                json_indent_into(item, level + 1, out);
+            }
+            out.push('\n');
+            out.push_str(&pad(level));
+            out.push('}');
+        }
+        other => json_into(other, out),
+    }
+}
+
+/// `json.dumps(value, indent=2)`, keeping insertion order.
+pub fn json_dumps_indent(v: &Value) -> String {
+    let mut out = String::new();
+    json_indent_into(v, 0, &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

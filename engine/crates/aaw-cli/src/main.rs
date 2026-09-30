@@ -3,13 +3,24 @@
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
 //! with exit status 1, as the Python CLI does.
 
+use aaw_engine::offline::{render, RenderOptions};
+use aaw_engine::program::compile;
+use aaw_engine::realtime::{benchmark, play, PlayOptions};
+use aaw_engine::schedule::schedule;
 use aaw_model::validate::ValidationError;
-use aaw_model::{ModelError, Project};
+use aaw_model::{frame, Beat, ModelError, Project};
 use clap::{Parser, Subcommand};
 use serde_json::{json, Value as Json};
 use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+
+// Debug builds abort when the audio callback allocates.
+#[cfg(debug_assertions)]
+#[global_allocator]
+static ALLOCATOR: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 #[derive(Parser)]
 #[command(name = "daw", about = "Agent DAW engine (Rust). Emits JSON.")]
@@ -33,6 +44,34 @@ enum Command {
     /// Validate documents with the Rust model and print each one's canonical
     /// YAML and fingerprints, or its errors. Reads only; samples are not checked.
     Model { paths: Vec<PathBuf> },
+    /// Render the mix and stems, one track or return as its stem, or one section.
+    Render {
+        project: PathBuf,
+        #[arg(long)]
+        output: Option<PathBuf>,
+        #[arg(long)]
+        track: Option<String>,
+        #[arg(long)]
+        section: Option<String>,
+    },
+    /// List every scheduled hit: its start frame, track, pad and release frame.
+    Schedule { project: PathBuf },
+    /// Play the song through the default audio output.
+    Play {
+        project: PathBuf,
+        /// Start position in beats; sounding samples are picked up mid-sample.
+        #[arg(long, default_value = "0")]
+        from: String,
+        /// Stop after this many seconds.
+        #[arg(long)]
+        seconds: Option<f64>,
+        /// Hardware buffer size in frames.
+        #[arg(long, default_value_t = 128)]
+        buffer: u32,
+        /// Time the playback path without a device instead of playing.
+        #[arg(long)]
+        benchmark: bool,
+    },
 }
 
 impl Command {
@@ -41,6 +80,9 @@ impl Command {
             Command::Fmt { .. } => "fmt",
             Command::Apply { .. } => "apply",
             Command::Model { .. } => "model",
+            Command::Render { .. } => "render",
+            Command::Schedule { .. } => "schedule",
+            Command::Play { .. } => "play",
         }
     }
 }
@@ -99,8 +141,84 @@ fn model_entry(path: &Path) -> Json {
     }
 }
 
+/// An engine result as JSON, keeping its key order.
+fn value(v: aaw_model::value::Value) -> Json {
+    use aaw_model::value::Value;
+    match v {
+        Value::None => Json::Null,
+        Value::Bool(b) => Json::Bool(b),
+        Value::Int(n) => serde_json::from_str(&n.to_string()).expect("integer"),
+        Value::Float(f) => serde_json::Number::from_f64(f).map_or(Json::Null, Json::Number),
+        Value::Str(s) => Json::String(s),
+        Value::List(items) => Json::Array(items.into_iter().map(value).collect()),
+        Value::Dict(d) => Json::Object(
+            d.into_iter()
+                .map(|(k, v)| (k.as_str().unwrap_or_default().to_string(), value(v)))
+                .collect(),
+        ),
+        Value::Bytes(_) | Value::Other(_) => Json::Null,
+    }
+}
+
 fn run(command: &Command) -> Result<Json> {
     match command {
+        Command::Render {
+            project,
+            output,
+            track,
+            section,
+        } => render(
+            project,
+            &RenderOptions {
+                output: output.clone(),
+                track: track.clone(),
+                section: section.clone(),
+                ..RenderOptions::default()
+            },
+        )
+        .map(value),
+        Command::Schedule { project } => {
+            let p = aaw_model::load(project, false).map_err(text)?;
+            let triggers: Vec<Json> = schedule(&p)
+                .iter()
+                .map(|t| json!({"start": t.start, "track": t.track_id, "pad": t.pad, "cutoff": t.cutoff}))
+                .collect();
+            Ok(Json::Array(triggers))
+        }
+        Command::Play {
+            project,
+            from,
+            seconds,
+            buffer,
+            benchmark: bench,
+        } => {
+            let p = aaw_model::load(project, true).map_err(text)?;
+            let from_beat = aaw_model::beat(&Beat::Str(from.clone()))?;
+            let start = frame(&from_beat, p.session.tempo, p.session.sample_rate).max(0) as usize;
+            let dir = project.parent().unwrap_or(Path::new("."));
+            let program = Arc::new(compile(&p, dir)?);
+            if start >= program.total {
+                return Err(format!("--from {from} is at or after the session end"));
+            }
+            let opts = PlayOptions {
+                from: start,
+                seconds: *seconds,
+                buffer: *buffer,
+            };
+            if *bench {
+                return Ok(value(benchmark(program, &opts)));
+            }
+            if !program.omitted.is_empty() {
+                eprintln!(
+                    "{}",
+                    json!({"warning": format!("playing without {}, which the Rust engine does not process yet", program.omitted.join(", "))})
+                );
+            }
+            let stop = Arc::new(AtomicBool::new(false));
+            let flag = stop.clone();
+            ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed)).map_err(text)?;
+            play(program, &opts, stop).map(value)
+        }
         Command::Model { paths } => Ok(Json::Array(paths.iter().map(|p| model_entry(p)).collect())),
         Command::Fmt { project } => {
             let _lock = lock(project)?;
