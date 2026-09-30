@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// A pad's source after trim, reverse, downmix and repitch: interleaved frames.
 #[derive(Debug)]
@@ -96,6 +97,8 @@ pub struct TrackProgram {
 #[derive(Debug)]
 pub struct Program {
     pub rate: u32,
+    /// Beats per minute, to carry a playhead across a tempo change.
+    pub tempo: f64,
     /// The session length in frames.
     pub total: usize,
     /// Tracks in render order.
@@ -131,30 +134,82 @@ impl Program {
     }
 }
 
-/// Loads and prepares pad audio, caching both, as `engine.Sampler`.
+/// A sample file's identity on disk: a replaced file is decoded again.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct Stamp {
+    len: u64,
+    modified: Option<SystemTime>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct PrepKey {
+    path: PathBuf,
+    stamp: Stamp,
+    start: u64,
+    end: Option<u64>,
+    reverse: bool,
+    mono: bool,
+    speed: u64,
+    rate: i64,
+}
+
+/// Decoded and prepared pad audio kept between compiles, so recompiling after an
+/// edit prepares only what changed. Entries a compile does not use are dropped.
+#[derive(Default)]
+pub struct SampleCache {
+    generation: u64,
+    original: HashMap<PathBuf, (u64, Stamp, Arc<sndfile::Audio>)>,
+    prepared: HashMap<PrepKey, (u64, Arc<Prepared>)>,
+}
+
+impl SampleCache {
+    fn begin(&mut self) {
+        self.generation += 1;
+    }
+
+    fn finish(&mut self) {
+        let g = self.generation;
+        self.original.retain(|_, e| e.0 == g);
+        self.prepared.retain(|_, e| e.0 == g);
+    }
+}
+
+/// Loads and prepares pad audio through a cache, as `engine.Sampler`.
 pub struct Sampler<'a> {
     project: &'a Project,
     directory: PathBuf,
-    original: HashMap<String, Arc<sndfile::Audio>>,
-    prepared: HashMap<(String, u64, Option<u64>, bool, bool, u64), Arc<Prepared>>,
+    cache: &'a mut SampleCache,
 }
 
 impl<'a> Sampler<'a> {
-    pub fn new(project: &'a Project, directory: &Path) -> Self {
+    pub fn new(project: &'a Project, directory: &Path, cache: &'a mut SampleCache) -> Self {
         Sampler {
             project,
             directory: directory.to_path_buf(),
-            original: HashMap::new(),
-            prepared: HashMap::new(),
+            cache,
         }
     }
 
-    fn original(&mut self, name: &str) -> Result<Arc<sndfile::Audio>, String> {
-        if let Some(a) = self.original.get(name) {
-            return Ok(a.clone());
+    fn original(&mut self, name: &str) -> Result<(PathBuf, Stamp, Arc<sndfile::Audio>), String> {
+        let path = self.directory.join(&self.project.samples[name].path);
+        let g = self.cache.generation;
+        if let Some((used, stamp, audio)) = self.cache.original.get_mut(&path) {
+            if *used == g {
+                return Ok((path, stamp.clone(), audio.clone()));
+            }
         }
-        let asset = &self.project.samples[name];
-        let audio = sndfile::read(&self.directory.join(&asset.path))?;
+        let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let stamp = Stamp {
+            len: meta.len(),
+            modified: meta.modified().ok(),
+        };
+        if let Some((used, known, audio)) = self.cache.original.get_mut(&path) {
+            if *known == stamp {
+                *used = g;
+                return Ok((path, stamp, audio.clone()));
+            }
+        }
+        let audio = sndfile::read(&path)?;
         if !(audio.channels == 1 || audio.channels == 2)
             || audio.frames() == 0
             || !audio.data.iter().all(|x| x.is_finite())
@@ -162,13 +217,13 @@ impl<'a> Sampler<'a> {
             return Err(format!("{name}: expected finite mono/stereo audio"));
         }
         let audio = Arc::new(audio);
-        self.original.insert(name.to_string(), audio.clone());
-        Ok(audio)
+        self.cache.original.insert(path.clone(), (g, stamp.clone(), audio.clone()));
+        Ok((path, stamp, audio))
     }
 
     pub fn prepare(&mut self, pad: &Pad, event: &Event) -> Result<Arc<Prepared>, String> {
         let asset = &self.project.samples[&pad.sample];
-        let x = self.original(&pad.sample)?;
+        let (path, stamp, x) = self.original(&pad.sample)?;
         let mut semitones = pad.transpose + event.transpose;
         if let Some(note) = &event.note {
             let root = asset.root_note.as_deref().expect("validated root note");
@@ -178,15 +233,19 @@ impl<'a> Sampler<'a> {
         if let Some(bpm) = pad.source_bpm {
             speed *= self.project.session.tempo / bpm;
         }
-        let key = (
-            pad.sample.clone(),
-            pad.start_seconds.to_bits(),
-            pad.end_seconds.map(f64::to_bits),
-            pad.reverse,
-            pad.mono,
-            speed.to_bits(),
-        );
-        if let Some(p) = self.prepared.get(&key) {
+        let key = PrepKey {
+            path,
+            stamp,
+            start: pad.start_seconds.to_bits(),
+            end: pad.end_seconds.map(f64::to_bits),
+            reverse: pad.reverse,
+            mono: pad.mono,
+            speed: speed.to_bits(),
+            rate: self.project.session.sample_rate,
+        };
+        let g = self.cache.generation;
+        if let Some((used, p)) = self.cache.prepared.get_mut(&key) {
+            *used = g;
             return Ok(p.clone());
         }
         let frames = x.frames();
@@ -216,7 +275,7 @@ impl<'a> Sampler<'a> {
             }
         }
         let prepared = Arc::new(Prepared { channels, data });
-        self.prepared.insert(key, prepared.clone());
+        self.cache.prepared.insert(key, (g, prepared.clone()));
         Ok(prepared)
     }
 
@@ -271,15 +330,22 @@ pub fn unsupported(p: &Project) -> Vec<String> {
 /// Compiles a project whose samples live under `directory`. Features the engine
 /// does not process are left out and listed in `Program::omitted`.
 pub fn compile(p: &Project, directory: &Path) -> Result<Program, String> {
+    compile_cached(p, directory, &mut SampleCache::default())
+}
+
+/// `compile`, reusing and then pruning a cache of prepared sample audio.
+pub fn compile_cached(p: &Project, directory: &Path, cache: &mut SampleCache) -> Result<Program, String> {
     let rate = p.session.sample_rate;
     let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
     let triggers = schedule(p);
-    let mut sampler = Sampler::new(p, directory);
+    cache.begin();
+    let mut sampler = Sampler::new(p, directory, cache);
     let mut per_track: Vec<Vec<Voice>> = vec![Vec::new(); p.tracks.len()];
     for tr in &triggers {
         let pad = &p.tracks[tr.track].pads[&tr.pad];
         per_track[tr.track].push(sampler.voice(pad, tr)?);
     }
+    cache.finish();
     let any_solo = p.tracks.iter().any(|t| t.solo);
     let index: HashMap<&str, usize> = p.tracks.iter().enumerate().map(|(i, t)| (t.id.as_str(), i)).collect();
     let tracks = p
@@ -298,6 +364,7 @@ pub fn compile(p: &Project, directory: &Path) -> Result<Program, String> {
         .collect();
     Ok(Program {
         rate: rate as u32,
+        tempo: p.session.tempo,
         total,
         tracks,
         master: amplitude(p.session.master_gain_db),

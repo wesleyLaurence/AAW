@@ -12,6 +12,7 @@ publish = false
 aaw-model = { path = "crates/aaw-model" }
 aaw-dsp = { path = "crates/aaw-dsp" }
 aaw-engine = { path = "crates/aaw-engine" }
+aaw-host = { path = "crates/aaw-host" }
 
 [profile.test]
 opt-level = 1

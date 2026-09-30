@@ -6,6 +6,11 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
 - Use `uv run daw ...`; all commands emit JSON. Run `uv run pytest -q` after engine changes.
 - The Rust rebuild in `engine/` follows docs/Rust-Swift-Update.md; run `cargo test` there after
   Rust changes. The Python engine stays the reference until each part passes parity.
+- While a Rust session host runs for a song (`engine/target/release/daw host` or `play`; `daw
+  status` shows `"host": true`), edit through the Rust `daw` commands (`set`, `clip move`,
+  `effect add`, `undo`; see engine/README.md) rather than `apply`: the person hears each edit,
+  and it lands in one undo history with your origin. Read `daw changes --since REV` for what
+  the person changed. Python writers still work; the host loads them as external edits.
 - Index samples with `daw samples scan`; filename metadata is a hint, never guaranteed.
 - Import selected samples into the project. Never modify the original Splice library.
 - Read `daw inspect` before editing; use its SHA with `daw apply --expect` for revisions.
