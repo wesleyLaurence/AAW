@@ -8,8 +8,8 @@ local renders.
 Line numbers in each heading are from the reviewed commit `5dd2e6c`. All 14
 findings are now fixed. Of the other notes, the earliest-report crash is fixed in PR
 #11, the local test runner has been repaired, and formatting needs no change. A
-final pass over the fixes found one more latent issue, fixed on branch
-`claude/legacy-hash-guard` (see Final pass).
+final pass over the fixes found one more latent issue, fixed in PR #12 (see Final
+pass).
 
 ## Status
 
@@ -33,15 +33,15 @@ final pass over the fixes found one more latent issue, fixed on branch
 PR #5 is commit `79c2122`, PR #6 is commit `ece667d`, PR #7 is commit `ea0c135`
 (merged as `abb4cd2`), PR #8 is commit `5a68cb3` (merged as `41bfd37`), PR #9 is
 commit `8720c26` (merged as `78042c4`), PR #10 is commit `d9ea91b` (merged as
-`3e0f256`), and PR #11 is commit `9038d1a` (merged as `cd3ed0a`). Every finding
-and note is closed.
+`3e0f256`), PR #11 is commit `9038d1a` (merged as `cd3ed0a`), and PR #12 is commit
+`491e18d` (merged as `58c8918`). Every finding and note is closed.
 
 | Note | Status |
 |---|---|
 | Test runner points at the old `code/DAW` path | Fixed locally (`.venv` rebuilt); no repo change |
 | Earliest render reports raise `KeyError: 'target'` | Fixed in PR #11 |
 | Formatting | Checked; no change warranted |
-| Final pass: legacy fingerprints break at the next schema change | Fixed on `claude/legacy-hash-guard` |
+| Final pass: legacy fingerprints break at the next schema change | Fixed in PR #12 |
 
 ## Fixed
 
@@ -470,7 +470,7 @@ is what the PR #4 engine hashed. That holds only until a field is added.
 - `test_reports_from_earlier_engines_still_verify` still passed, because it
   derives its forms from the current dump, as the code does.
 
-**Fix (branch `claude/legacy-hash-guard`).**
+**Fix (PR #12).**
 - A comment at `LEGACY_FIELDS` says a new field needs a new first entry, and that
   keys match by name anywhere in the dump. D30 says the same.
 - `test_fingerprints_of_earlier_engines_still_verify` pins the fingerprints that
