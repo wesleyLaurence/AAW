@@ -1,0 +1,17 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.dependencies]
+aaw-model = { path = "crates/aaw-model" }
+aaw-dsp = { path = "crates/aaw-dsp" }
+aaw-engine = { path = "crates/aaw-engine" }
+
+[profile.test]
+opt-level = 1

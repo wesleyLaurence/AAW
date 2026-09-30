@@ -4,6 +4,8 @@ Read README.md and docs/mvp.md for the implemented MVP. Older design documents a
 future scope, not a requirement to add effects, UI or broad infrastructure.
 
 - Use `uv run daw ...`; all commands emit JSON. Run `uv run pytest -q` after engine changes.
+- The Rust rebuild in `engine/` follows docs/Rust-Swift-Update.md; run `cargo test` there after
+  Rust changes. The Python engine stays the reference until each part passes parity.
 - Index samples with `daw samples scan`; filename metadata is a hint, never guaranteed.
 - Import selected samples into the project. Never modify the original Splice library.
 - Read `daw inspect` before editing; use its SHA with `daw apply --expect` for revisions.

@@ -1,6 +1,6 @@
 # Rust + Swift update: build plan for a native real-time DAW
 
-Status: proposed September 30, 2026. Nothing in this document is built. If adopted, it replaces the workspace track (U0–U4) in [plan.md](plan.md) and revises decisions D1, D18, D21, D24 and D25; see [Decisions to record](#decisions-to-record). [mvp.md](mvp.md) remains authoritative for what exists today.
+Status: adopted September 30, 2026; M0 done. It replaces the workspace track (U0–U4) in [plan.md](plan.md), and decisions D33 to D40 in [decisions.md](decisions.md) record the changes listed in [Decisions to record](#decisions-to-record). [mvp.md](mvp.md) remains authoritative for what exists today.
 
 ## Goal
 
@@ -412,18 +412,18 @@ The risk in plan.md about scope creep toward a full DAW changes meaning. A hand-
 
 ## Decisions to record
 
-To be written into [decisions.md](decisions.md) in M0:
+Recorded in [decisions.md](decisions.md) in M0:
 
-- **D1 (revised):** real-time playback is in scope. Offline rendering stays deterministic and uses the same engine.
+- **D1 (revised):** real-time playback is in scope. Offline rendering stays deterministic and uses the same engine. Recorded as D33.
 - **D5 (unchanged):** Arrangement View model; no Session View.
-- **D18 and D25 (superseded):** the engine and devices move to Rust. Python remains for the library, analysis and perception.
-- **D21 (revised):** when the app is open, its session host is the authority for the song and saves `song.yaml` continuously. The agent reaches it through the `daw` CLI. All musical state is in the file; playhead, selection and undo history are ephemeral host state.
-- **D22 (kept, strengthened):** one engine for playback and export. Live smoothing applies only to live parameter moves.
-- **D24 (revised):** the core library is Rust. The CLI, the app and the Python bindings are shells over it.
-- **New:** edits are commands with origins, handles and undo.
-- **New:** Swift and Rust are connected through UniFFI.
-- **New:** reverb impulse responses come from a documented Rust generator.
-- **plan.md open question 8 (closed):** native macOS app with SwiftUI and AppKit.
+- **D18 and D25 (superseded):** the engine and devices move to Rust. Python remains for the library, analysis and perception. Recorded as D34.
+- **D21 (revised):** when the app is open, its session host is the authority for the song and saves `song.yaml` continuously. The agent reaches it through the `daw` CLI. All musical state is in the file; playhead, selection and undo history are ephemeral host state. Recorded as D36.
+- **D22 (kept, strengthened):** one engine for playback and export. Live smoothing applies only to live parameter moves. Recorded as D37.
+- **D24 (revised):** the core library is Rust. The CLI, the app and the Python bindings are shells over it. Recorded as D35.
+- **New:** edits are commands with origins, handles and undo. Recorded as D38.
+- **New:** Swift and Rust are connected through UniFFI. Recorded as D39.
+- **New:** reverb impulse responses come from a documented Rust generator. Recorded as D40.
+- **plan.md open question 8 (closed):** native macOS app with SwiftUI and AppKit, in D39.
 
 ## Open questions
 

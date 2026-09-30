@@ -2,7 +2,7 @@
 
 Settled choices from the design conversation, with rationale, so a future session does not relitigate them. Revisit only with a new reason.
 
-**D1. Offline, deterministic rendering. No realtime audio engine in version one.**
+**D1. Offline, deterministic rendering. No realtime audio engine in version one.** Revised by D33.
 Realtime is where nearly all DAW complexity lives, and an agent iterates by edit, render, analyze. Determinism lets the agent trust its own loop and lets git act as a version history of sound. The person hears the project through a player over rendered audio and, in the workspace, through fast region re-rendering against the cache, which is responsive without being a realtime engine. A callback-driven engine for playing instruments live is an end-state question, settled with the device language before phase 3 (D22, plan open question 7).
 
 **D2. The session is a plain text document. The format is the API.**
@@ -53,7 +53,7 @@ Profile and brief live in the DAW's format so they work under any harness. The h
 **D17. Seeded randomness.**
 Humanize, random modulation, and round robin take seeds from the document so renders are reproducible.
 
-**D18. Python first, behind a stable contract.**
+**D18. Python first, behind a stable contract.** Superseded by D34.
 numpy and scipy for DSP, with the document format and CLI as the contract. A Rust port of the render hot path is the planned escape hatch if the performance target is missed. Devices are written in a block-processing shape from the start so that the device language can be revisited before phase 3 without changing their interface (D22).
 
 **D19. Human in the loop by default, autonomous by capability.**
@@ -62,19 +62,19 @@ The person drives with ideas, material, references, and taste, and can interrupt
 **D20. The agentic loop is the product. The workspace UI is the end state, designed in from the start and built second.**
 DAW UIs already exist. An agent that works for hours with a DAW toolkit does not, and that is what is unique here. But the end state is a shared workspace where a person adjusts tracks, devices, and knobs by hand and hears the result while the agent works in the same project. The numbered phases come first; the workspace runs as a parallel, lower-priority track after phase 0. The early build carries four small requirements on its behalf, each worth having anyway: canonical form (D23), single device implementation (D22), region rendering, and the library layering (D24).
 
-**D21. The workspace is a second client of the document, never a second source of truth.**
+**D21. The workspace is a second client of the document, never a second source of truth.** Revised by D36.
 It reads and writes `song.yaml` through the same core library and serializer the agent's tools use, and holds no state the file does not hold. Watching the agent work is file watching; the agent's renders appear as files in `renders/`. Hand edits made in the workspace reach the agent as file changes and git diffs, and they are already a preference signal under D15. There is no integration layer between the agent and the workspace beyond the project directory. The agent stays in the terminal; the workspace is a window, not a chat client.
 
-**D22. Every device is implemented exactly once. The person and the agent always hear the same audio.**
+**D22. Every device is implemented exactly once. The person and the agent always hear the same audio.** Restated by D37.
 If the workspace previewed a device with anything other than the real renderer, the person would tune by ear against one sound and the agent would analyze another, and the perception loop would stop being trustworthy. So workspace playback is rendered audio only, mute, solo, volume, and pan may be applied in the player because they are exact, and every other change goes through the renderer. Approximations such as browser audio nodes as a drag-time preview are forbidden. Consequence: if a true realtime engine is ever wanted, the devices must be in a language that runs both offline and in a callback, which is why the device language is decided before phase 3 rather than after.
 
 **D23. The document has one canonical form and every writer produces it.**
 Two writers rewriting one file need identical formatting or every diff fills with noise the agent has to read past. `daw fmt` produces canonical form, `daw check` rejects anything else, writes are atomic, and every writer re-reads before modifying. This constrains the syntax choice in plan open question 1.
 
-**D24. One core library; the CLI and the workspace daemon are thin shells over it. The daemon is never required.**
+**D24. One core library; the CLI and the workspace daemon are thin shells over it. The daemon is never required.** Revised by D35.
 The `daw` package holds the document model, renderer, devices, perception, and library index. The CLI and `daw serve` contain no logic of their own. When a daemon is running the CLI hands renders to it so both clients share one cache; when none is running the CLI does the work itself and the agent notices no difference. This is what keeps the workspace from becoming a second implementation of anything.
 
-**D25. Devices are written in Python (numpy/scipy), in the block-processing shape.**
+**D25. Devices are written in Python (numpy/scipy), in the block-processing shape.** Superseded by D34.
 Settles plan open question 7. Offline rendering is the product (D1) and a realtime engine is still hypothetical, so one Python implementation serves mixes, stems and previews. Devices carry explicit state, declare latency and must produce identical output for any block partition, which keeps a later port to a compiled kernel mechanical. Accepted risk: a realtime engine would require rewriting the devices.
 
 **D26. Stems are post-insert and pre-master-effects.**
@@ -83,7 +83,7 @@ Each stem is a track after its inserts, gain, pan, mute and solo, master gain an
 **D27. Shared space comes from return buses, and returns are stems.**
 Tracks send to `returns`, post-fader by default (after gain and pan) or pre-fader (after inserts). One reverb shared by several tracks is how producers glue a mix, and it keeps the device count and render cost down. A muted or solo-muted track sends nothing, but returns are never solo-muted, so soloing a snare still plays its reverb. Track stems stay dry and each return renders its own stem, so D26's reconstruction still holds with track and return stems together. Returns share the ID namespace with tracks because both name stems. Sidechains key only from tracks, and returns cannot send, which keeps render order simple: tracks by sidechain dependency, then returns. Groups and return-to-return sends wait for a need.
 
-**D28. Reverb is seeded convolution with a synthetic impulse response.**
+**D28. Reverb is seeded convolution with a synthetic impulse response.** Partly revised by D40.
 A generated noise tail with frequency-dependent exponential decay is reproducible from its parameters and seed (D17), convolves exactly regardless of block partition through fixed internal partitions with compensated latency (D25), and runs fast with numpy FFTs. A feedback-delay-network reverb would need per-sample recursion that is slow in numpy and hard to make partition-exact. Convolution also leaves room to load recorded impulse responses as samples later. Accepted limits: the input is summed to mono, and there is no modulation or early-reflection model.
 
 **D29. Automation lanes override static values and cover an allowlist of continuous parameters.**
@@ -97,3 +97,27 @@ A direct-form biquad's state carried into very different coefficients bursts: a 
 
 **D32. A constant lane is its static value.**
 A lane whose points all share one value renders exactly as a static parameter with that value: channel lanes return a scalar and effects are built from their spec with the value in place. Such a lane previously built per-frame arrays and sent filters and EQs through the state-variable path, which matched the static filter only to within 1e-9. Moving lanes are evaluated over consecutive frames by filling each segment in place, so a lane costs one array over the timeline rather than about ten. Reports still list constant lanes as automated.
+
+**D33. Real-time playback is in scope. Offline rendering stays deterministic and uses the same engine.**
+The end state is a person and an agent sharing one song: click a position, press space and hear each edit right away. Rendering the whole song offline took 4 to 34 seconds on local projects, far too slow for that. A callback-driven engine plays from any beat and applies edits during playback. Export runs the same program with fixed blocks as fast as the machine allows, so it stays deterministic, and the agent's render-and-analyze loop and git as a history of sound are unchanged. Settled with the plan in [Rust-Swift-Update.md](Rust-Swift-Update.md).
+
+**D34. The engine and devices move to Rust. Python keeps the sample library, analysis and perception.**
+A real-time callback cannot tolerate the interpreter, the GIL or garbage collection, and D25 accepted that a real-time engine would mean rewriting the devices. Rust compiles to native code without a garbage collector, its compiler rejects most memory-safety errors and data races, and it has the FFT, lock-free queue, audio I/O and Swift and Python binding crates the port needs. C++ with JUCE was considered; its clearest advantage, hosting third-party plugins, is outside D3. The Python engine stays the reference: each subject is ported against it and deleted only after its parity tests pass. The library index, sample analysis and perception stay in Python because nothing there needs a real-time path.
+
+**D35. The core library is Rust. The CLI, the Mac app and the Python bindings are shells over it.**
+There is still exactly one implementation of the document (D23) and of each device (D22). The `daw` binary links the crates directly, the app through UniFFI and Python through PyO3, so Python reads and validates projects through the Rust model rather than a second schema. A running app is never required: with none open, the CLI runs the same core headless against the file, as D24 required of the daemon.
+
+**D36. While the app has a project open, its session host is the authority for the song.**
+The host holds the song in memory, applies edits from the app and the agent one at a time, and writes canonical `song.yaml` shortly after each change. The agent reaches it through the `daw` CLI over a local socket. With no app running, the CLI runs the same host headless against the file under the project lock. All musical state is in the file. Playhead, play state, loop region, selection, zoom and undo history are ephemeral host state, readable through `daw status` but never saved. A change to the file from outside, such as a text edit or `git checkout`, reloads as one undoable command. D21's file-only channel could not give the person and the agent one undo history, live playback of edits or a feed of what changed; an in-memory authority can, while the file stays the saved form and git stays the history.
+
+**D37. One engine plays and exports. Live smoothing applies only to live parameter moves.**
+The real-time and offline drivers run the same compiled program and the same devices, and processing stays independent of block partition (D25), so a performance played from the start equals its offline render. A knob or fader moved during playback is smoothed over a few milliseconds to avoid zipper noise. Automation written in the document keeps its exact, unsmoothed semantics (D29), and an offline render reflects only saved values. This replaces D22's rule that the workspace plays only rendered audio: the engine itself now plays, so the person and the agent still hear the same devices.
+
+**D38. Edits are commands with origins, handles and undo.**
+Every change, from the app or the agent, is a command validated against the whole resulting song before it applies, tagged `user`, `agent` or `external`, and given a new revision and `project_sha256`. Commands address fields with the automation parameter syntax, such as `tracks.drums.effects.sweep.cutoff_hz`. Objects that schema v1 leaves without IDs, such as clips, unnamed effects, pattern events and automation points, get handles that stay stable for the session, so an address keeps meaning the same object after other edits; the file format does not change. `daw apply --expect` remains for whole-document edits. A command log tells the agent what the person did as a list of operations rather than a diff to interpret, gives both one undo history, and lets edits to different objects commute.
+
+**D39. The Mac app is native SwiftUI and AppKit, connected to Rust through UniFFI.**
+Settles plan open question 8. The engine must run in the same process as the interface for the transport and immediate playback, and a native app gets CoreAudio, precise mouse handling and fast drawing without a web layer between them. UniFFI generates the Swift bindings, including callback interfaces for the change feed, so no C bridge is written by hand. Swift holds no model logic: it displays what the host reports and sends commands.
+
+**D40. Reverb impulse responses come from a documented Rust generator.**
+The Python reverb draws its noise from numpy's seeded Gaussian generator and shapes it with scipy's STFT. Reproducing numpy's generator bit for bit in Rust is possible but fragile, so the Rust reverb uses its own documented, seeded generator. Its impulse responses are statistically equivalent to Python's rather than sample-identical, and reverb parity is tested on decay time, spectrum and energy. Renders remain reproducible from the document (D17). The Rust reverb also replaces D28's fixed partitions with non-uniformly partitioned convolution, a short first partition followed by growing ones, which computes the same convolution with at most one small block of latency instead of up to 1.4 seconds.

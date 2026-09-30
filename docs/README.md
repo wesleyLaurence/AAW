@@ -11,8 +11,9 @@ sidechain compression, the limiter, delay and reverb, and sends to return buses.
 [automation.md](automation.md) documents automation lanes for levels, pans, sends
 and effect parameters.
 
-Proposed next direction: [Rust-Swift-Update.md](Rust-Swift-Update.md) plans a native
-macOS app with a real-time Rust engine that a person and an agent operate together.
+In progress: [Rust-Swift-Update.md](Rust-Swift-Update.md) plans a native macOS app
+with a real-time Rust engine that a person and an agent operate together. The Rust
+workspace is in [../engine](../engine).
 
 These documents capture the design conversation for an AI-native digital audio workstation: a DAW built to be operated by a coding agent (Claude Code, Codex) rather than by a human clicking a UI. The sampler MVP is now implemented; see [../README.md](../README.md) and [mvp.md](mvp.md) for the current build. The documents below remain the broader design draft. Read in this order:
 

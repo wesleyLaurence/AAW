@@ -493,6 +493,8 @@ One core library, `daw`, holds the document model, the renderer, the devices, th
 
 ### Device language
 
+Settled by D34: the engine and devices move to Rust, and Python keeps the library, analysis and perception. See [Rust-Swift-Update.md](Rust-Swift-Update.md).
+
 Python remains in the project regardless. Demucs, CLAP, librosa, and the analysis layer are never leaving it. The open decision is only where device DSP lives.
 
 Python devices in the block-processing shape serve the offline renderer and the responsive-preview path. They cannot serve a true realtime engine: a callback thread with a few milliseconds of budget cannot tolerate the interpreter or the GIL. If the end state ever needs live instrument playing, devices must be in a language that runs both offline and in a callback, and Rust with Python bindings is the candidate D18 already names. Because devices must exist exactly once, this decision is made before phase 3, where effects, the bulk of device code, get written. Until then the block-processing shape is the hedge.
@@ -504,6 +506,8 @@ All in-house devices are written from scratch in the project, with unit tests th
 ---
 
 ## 16. Workspace UI
+
+Superseded by [Rust-Swift-Update.md](Rust-Swift-Update.md): a native macOS app embedding a real-time Rust engine, with a session host that the app and the agent's CLI both edit through (D33 to D39). This section is kept for history.
 
 The workspace is the end state: a visual DAW in the style of Ableton, Logic, or Pro Tools where a person adjusts tracks, volume, panning, devices, and knobs by hand and hears the result, while the agent works in the same project. The person watches the agent build in real time, plays back what it has made as it goes, and steps in for the small things. It is built after the agentic loop and in parallel with the numbered phases, never ahead of them.
 

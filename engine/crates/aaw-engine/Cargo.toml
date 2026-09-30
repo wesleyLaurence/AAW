@@ -1,0 +1,10 @@
+[package]
+name = "aaw-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+aaw-model.workspace = true
+aaw-dsp.workspace = true
