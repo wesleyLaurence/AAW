@@ -6,3 +6,13 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+indexmap = "2.14.2"
+libyaml-safer = "0.3.0"
+num-bigint = "0.4"
+num-integer = "0.1.47"
+num-rational = { version = "0.4.2", features = ["num-bigint"] }
+num-traits = "0.2.19"
+regex = "1.13.1"
+serde_json = { version = "1.0.151", features = ["preserve_order", "arbitrary_precision"] }
+sha2 = "0.11.0"
+tempfile = "3.27.0"
