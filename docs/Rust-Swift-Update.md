@@ -1,6 +1,12 @@
 # Rust + Swift update: build plan for a native real-time DAW
 
-Status: adopted September 30, 2026; M0 done. It replaces the workspace track (U0–U4) in [plan.md](plan.md), and decisions D33 to D40 in [decisions.md](decisions.md) record the changes listed in [Decisions to record](#decisions-to-record). [mvp.md](mvp.md) remains authoritative for what exists today.
+Status: adopted September 30, 2026; M0 to M2 done and the M2 spike exit test passed (see [Progress](#progress)). It replaces the workspace track (U0–U4) in [plan.md](plan.md), and decisions D33 to D40 in [decisions.md](decisions.md) record the changes listed in [Decisions to record](#decisions-to-record). [mvp.md](mvp.md) remains authoritative for what exists today.
+
+## Progress
+
+- **M0:** Cargo workspace under `engine/`; decisions D33 to D40 recorded. Xcode 16.2 is still to be installed, before M4.
+- **M1:** `aaw-model` matches `model.py` on 12,532 generated documents and on every local song: the same documents are accepted, canonical YAML is byte-identical, and `project_sha256` and the legacy fingerprints are equal. Rejections carry pydantic's locations, types and messages. Known differences, all in input no tool writes, are listed in [engine/README.md](../engine/README.md).
+- **M2:** The Rust sampler engine renders effect-free songs byte-identically to the Python engine: 199 of 199 files over 60 generated songs, and 52 of 53 files over four local 10–15 track songs with their effects removed (the other within 1.8e-12). Playback of a 15-track song at 128-frame buffers on the built-in speakers used at most 0.05 ms of each 2.67 ms callback, with no xruns; the headless benchmark runs about 500 times faster than real time. Playing from beat 32 picks up sounding samples and equals the same frames of a full render. The plan proceeds as written.
 
 ## Goal
 
