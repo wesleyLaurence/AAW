@@ -724,7 +724,10 @@ def project_hash(project: Project) -> str:
 
 
 # Earlier engines hashed the full dump, so each schema change altered every
-# fingerprint. Newest first: the fields each change added, at their defaults.
+# fingerprint. Newest first: the fields each change added, at their defaults,
+# matched by name anywhere in the dump. The forms are rebuilt from today's full
+# dump, so a field added to any model needs a new first entry here, or reports
+# from those engines stop verifying; tests/test_daw.py pins their fingerprints.
 LEGACY_FIELDS = [
     {"automation": [], "id": None},
     {"sends": [], "returns": []},
