@@ -7,6 +7,7 @@ name = "aaw-cli"
 version = "0.1.0"
 dependencies = [
  "aaw-engine",
+ "aaw-host",
  "aaw-model",
  "assert_no_alloc",
  "clap",
@@ -36,6 +37,24 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits",
+ "rtrb",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "aaw-host"
+version = "0.1.0"
+dependencies = [
+ "aaw-engine",
+ "aaw-model",
+ "assert_no_alloc",
+ "indexmap",
+ "num-bigint",
+ "num-rational",
+ "num-traits",
+ "serde",
+ "serde_json",
  "sha2",
  "tempfile",
 ]
@@ -856,6 +875,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d6f6ff9a378485b298a5286656da665ba74413d36db0979633275d2e708145d4"
 
 [[package]]
+name = "rtrb"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9278fb35b3e730abe136e9b395b5b81b96d06b9f5478a50f0c8430a2237b22de"
+
+[[package]]
 name = "rustc_version"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -905,6 +930,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
+ "serde_derive",
 ]
 
 [[package]]

@@ -9,11 +9,12 @@ the cutover (M7).
 |---|---|
 | `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints |
 | `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`); devices later |
-| `aaw-engine` | Song compilation, scheduling, mixing, offline and real-time drivers |
+| `aaw-engine` | Song compilation, scheduling, mixing, the transport, offline and real-time drivers |
+| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket |
 | `aaw-cli` | The `daw` binary |
 
-The session host, Swift bindings and Python bindings join the workspace in the
-milestones that need them.
+The Swift bindings and Python bindings join the workspace in the milestones that
+need them.
 
 ## Build and test
 
@@ -38,14 +39,70 @@ Rust one as `target/release/daw` or `cargo run -q -p aaw-cli --`. It implements:
 | `daw model PATH...` | Canonical YAML and fingerprints, or validation errors |
 | `daw schedule PROJECT` | Every hit's start frame, track, pad and release frame |
 | `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json` in the Python engine's formats |
-| `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output and reports callback timing and dropouts |
+| `daw host PROJECT` | Runs a session host until interrupted or `daw close` |
+| `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output; see below |
 | `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device |
+| `daw stop`, `daw locate PROJECT BEAT`, `daw loop PROJECT START LENGTH`, `daw loop PROJECT off` | Transport of a running host |
+| `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
+| `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
+| `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
+| `daw undo`, `daw redo`, `daw batch PROJECT FILE` | History of a running host; a JSON list of commands as one step |
 
 The engine covers the sampler: scheduling, choke groups, gates, repitch, trim,
 reverse, downmix, pan laws, track gain, pan, mute and solo, master gain and the
 end fade. Effects, sends, returns and automation come in M6. Until then `render`
 refuses a song that uses them and `play` plays it without them, with a warning.
-A bypassed effect is not processed, so it does not count.
+A bypassed effect is not processed, so it does not count. Commands edit all of
+them already.
+
+## Session host
+
+A host holds a song in memory as the authority for it, applies commands one at
+a time, keeps an undo history and a change log, and plays the song with each
+edit heard as it lands. `daw host PROJECT` runs one until interrupted or `daw
+close PROJECT`; `daw play PROJECT` without a running host hosts the project for
+as long as it plays. Each change prints to the host's stderr as a JSON line.
+
+Every other command reaches the running host of its project through a Unix
+socket registered under `~/Library/Application Support/AAW/hosts` (or
+`AAW_HOST_DIR`), outside the project because projects may be synced. With no
+host, commands run headless: load, apply, save, exit, under the `.daw.lock` the
+Python writers take. Edits behave the same either way; undo, redo, the change
+log, handles and the transport need a host.
+
+- **Commands** validate the whole resulting song before they apply and carry an
+  origin, `agent` by default or `--origin user`. `--expect SHA` refuses an edit
+  over an unseen change. A host saves canonical `song.yaml` before it replies.
+- **Values** are JSON, or text when they do not parse as JSON: `-4.5`, `true`,
+  `1/3`, `C3`, `'{"sample": "kick"}'`. Fields of objects a command adds or
+  changes are `--name value` pairs, such as `daw pad set PROJECT drums kick
+  --gain-db -3 --release-ms 40`.
+- **Paths** are dot-separated. A list item is an index, its `id` (a send: its
+  `to`), or a handle: while a host runs, clips, effects, events and points have
+  handles such as `@12` that keep naming the same object as other edits land.
+  `daw inspect` lists each clip's reference and `daw get` puts one on every list
+  item.
+- **References stay valid.** Renaming a track renames the sidechains naming it;
+  renaming or removing a return updates or removes its sends and their lanes;
+  inserting, moving or removing an effect rewrites or removes the lanes that
+  address effects by index; a lane's last point takes the lane with it. Removing
+  something still referenced, such as a pad a pattern plays, is refused.
+- **External edits**, such as a text edit, `git checkout` or a Python `daw
+  apply`, load as one undoable `external` change. A file that does not validate
+  pauses edits, with the error in `daw status`, until it is fixed; `daw fmt`
+  writes the host's song over it instead.
+- **Playback** recompiles the song after each edit, reusing prepared sample
+  audio, and the audio thread crossfades into it over 5 ms at the same beat. A
+  tempo change keeps the beat. Stop, locate and loop jumps let the old position
+  ring out for 5 ms without new hits and fade in voices picked up mid-sample;
+  hits at the new position play in full. The audio thread never allocates,
+  locks or blocks; replaced programs return to the host to be freed.
+
+`crates/aaw-host/tests` cover every command, handles, undo, batches, external
+edits, concurrent clients and a real-time stress run: random edits compiled and
+swapped in while a thread renders 128-frame blocks on schedule under allocation
+checking. `tests/test_rust_host.py` checks `inspect` and command results against
+the Python model and drives a `daw host` process from outside.
 
 ## Model parity
 

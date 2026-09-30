@@ -1,17 +1,24 @@
-//! The `daw` binary: JSON in and out over the Rust model and engine.
+//! The `daw` binary: JSON in and out over the Rust model, engine and host.
+//!
+//! Commands that read or change a song go to the host that owns it when one is
+//! running (`daw host`, or `daw play` while it plays), so the change is heard and
+//! recorded in its history. Otherwise they run headless: load, apply, save, exit.
 //!
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
 //! with exit status 1, as the Python CLI does.
 
 use aaw_engine::offline::{render, RenderOptions};
 use aaw_engine::program::compile;
-use aaw_engine::realtime::{benchmark, play, PlayOptions};
+use aaw_engine::realtime::{benchmark, PlayOptions};
 use aaw_engine::schedule::schedule;
+use aaw_host::client::{self, Request};
+use aaw_host::command::{Command, Fields, Kind, Origin};
+use aaw_host::host::{self, lock};
+use aaw_host::session::Session;
 use aaw_model::validate::ValidationError;
-use aaw_model::{frame, Beat, ModelError, Project};
-use clap::{Parser, Subcommand};
+use aaw_model::{frame, Beat, ModelError};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value as Json};
-use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -25,22 +32,38 @@ static ALLOCATOR: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisable
 #[derive(Parser)]
 #[command(name = "daw", about = "Agent DAW engine (Rust). Emits JSON.")]
 struct Cli {
+    /// Who makes the change, as the change log records it.
+    #[arg(long, global = true, value_enum, default_value = "agent")]
+    origin: Who,
+    /// Refuse an edit unless the song's project_sha256 is this one.
+    #[arg(long, global = true)]
+    expect: Option<String>,
     #[command(subcommand)]
-    command: Command,
+    command: Top,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Who {
+    Agent,
+    User,
+}
+
+/// Fields of the object a command adds or changes, as `--name value` pairs,
+/// e.g. `--gain-db -3 --release-ms 40`. Values are JSON where they parse as JSON
+/// and text otherwise; a flag without a value is true.
+#[derive(Args)]
+struct FieldArgs {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, value_name = "--FIELD VALUE")]
+    fields: Vec<String>,
 }
 
 #[derive(Subcommand)]
-enum Command {
+enum Top {
     /// Rewrite a project in canonical form.
     Fmt { project: PathBuf },
     /// Validate and atomically replace project fields from a JSON merge patch.
-    Apply {
-        project: PathBuf,
-        patch: PathBuf,
-        /// Project SHA256 from inspect; rejects stale edits.
-        #[arg(long)]
-        expect: String,
-    },
+    /// Requires --expect.
+    Apply { project: PathBuf, patch: PathBuf },
     /// Validate documents with the Rust model and print each one's canonical
     /// YAML and fingerprints, or its errors. Reads only; samples are not checked.
     Model { paths: Vec<PathBuf> },
@@ -56,35 +79,305 @@ enum Command {
     },
     /// List every scheduled hit: its start frame, track, pad and release frame.
     Schedule { project: PathBuf },
-    /// Play the song through the default audio output.
+
+    /// Run a session host for the project until interrupted or closed. Other
+    /// `daw` commands reach it; each change prints to stderr as it lands.
+    Host {
+        project: PathBuf,
+        /// Output buffer in frames.
+        #[arg(long, default_value_t = 128)]
+        buffer: u32,
+    },
+    /// Ask the project's host to save and exit.
+    Close { project: PathBuf },
+    /// Play from a beat. With a host running, the host plays; otherwise this
+    /// command hosts the project until playback stops.
     Play {
         project: PathBuf,
         /// Start position in beats; sounding samples are picked up mid-sample.
-        #[arg(long, default_value = "0")]
-        from: String,
-        /// Stop after this many seconds.
+        #[arg(long)]
+        from: Option<String>,
+        /// Stop after this many seconds (without a running host).
         #[arg(long)]
         seconds: Option<f64>,
-        /// Hardware buffer size in frames.
+        /// Output buffer in frames (without a running host).
         #[arg(long, default_value_t = 128)]
         buffer: u32,
         /// Time the playback path without a device instead of playing.
         #[arg(long)]
         benchmark: bool,
     },
+    /// Stop playback, with a short fade.
+    Stop { project: PathBuf },
+    /// Move the playhead to a beat; while stopped, play starts there.
+    Locate { project: PathBuf, beat: String },
+    /// Loop START LENGTH (beats), or `loop PROJECT off`.
+    Loop {
+        project: PathBuf,
+        start: String,
+        length: Option<String>,
+    },
+    /// Transport, revision, undo and redo state.
+    Status { project: PathBuf },
+    /// The host's change log after a revision, with each change's origin.
+    Changes {
+        project: PathBuf,
+        #[arg(long, default_value_t = 0)]
+        since: u64,
+    },
+    /// Summary of the song, with a reference for each clip.
+    Inspect { project: PathBuf },
+    /// Part of the song by path, e.g. tracks.drums.clips; list items start with
+    /// the reference commands use for them.
+    Get { project: PathBuf, path: Option<String> },
+    /// Undo the last change, whoever made it.
+    Undo { project: PathBuf },
+    /// Redo the last undone change.
+    Redo { project: PathBuf },
+    /// Set any value by path, e.g. tracks.drums.gain_db -4.5. VALUE is JSON,
+    /// or text when it does not parse as JSON.
+    Set {
+        project: PathBuf,
+        path: String,
+        #[arg(allow_hyphen_values = true)]
+        value: String,
+    },
+    /// Flip a boolean, e.g. tracks.drums.mute.
+    Toggle { project: PathBuf, path: String },
+    /// Remove an object or map entry by path, or reset a field to its default.
+    Remove { project: PathBuf, path: String },
+    /// Apply a JSON list of commands as one step.
+    Batch { project: PathBuf, file: PathBuf },
+    #[command(subcommand)]
+    Track(TrackCmd),
+    #[command(subcommand)]
+    Return(ReturnCmd),
+    #[command(subcommand)]
+    Clip(ClipCmd),
+    #[command(subcommand)]
+    Pattern(PatternCmd),
+    #[command(subcommand)]
+    Pad(PadCmd),
+    #[command(subcommand)]
+    Effect(EffectCmd),
+    #[command(subcommand)]
+    Send(SendCmd),
+    #[command(subcommand)]
+    Lane(LaneCmd),
+    #[command(subcommand)]
+    Section(SectionCmd),
 }
 
-impl Command {
-    fn name(&self) -> &'static str {
-        match self {
-            Command::Fmt { .. } => "fmt",
-            Command::Apply { .. } => "apply",
-            Command::Model { .. } => "model",
-            Command::Render { .. } => "render",
-            Command::Schedule { .. } => "schedule",
-            Command::Play { .. } => "play",
-        }
-    }
+/// Tracks.
+#[derive(Subcommand)]
+enum TrackCmd {
+    /// Add a track; --index places it.
+    Add {
+        project: PathBuf,
+        id: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    Remove { project: PathBuf, track: String },
+    /// Rename a track and the sidechains that name it.
+    Rename { project: PathBuf, track: String, to: String },
+    Move { project: PathBuf, track: String, index: usize },
+}
+
+/// Returns.
+#[derive(Subcommand)]
+enum ReturnCmd {
+    Add {
+        project: PathBuf,
+        id: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Remove a return with the sends to it and their lanes.
+    Remove { project: PathBuf, id: String },
+    /// Rename a return, its sends and their lanes.
+    Rename { project: PathBuf, id: String, to: String },
+}
+
+/// Clips, addressed by reference: @N while a host runs, else tracks.T.clips.I.
+#[derive(Subcommand)]
+enum ClipCmd {
+    /// Add a clip: --at, --repeats and --velocity-scale are optional.
+    Add {
+        project: PathBuf,
+        track: String,
+        pattern: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Move a clip to another beat and/or track.
+    Move {
+        project: PathBuf,
+        clip: String,
+        #[arg(long)]
+        track: Option<String>,
+        #[arg(long)]
+        at: Option<String>,
+    },
+    Repeats { project: PathBuf, clip: String, repeats: String },
+    /// Copy a clip, by default right after the original.
+    Duplicate {
+        project: PathBuf,
+        clip: String,
+        #[arg(long)]
+        track: Option<String>,
+        #[arg(long)]
+        at: Option<String>,
+    },
+    Remove { project: PathBuf, clip: String },
+}
+
+/// Patterns and their events.
+#[derive(Subcommand)]
+enum PatternCmd {
+    Add {
+        project: PathBuf,
+        pattern: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Set a pad's step row, e.g. "x... x... x... x...", or --clear it.
+    Steps {
+        project: PathBuf,
+        pattern: String,
+        pad: String,
+        row: Option<String>,
+        #[arg(long)]
+        clear: bool,
+    },
+    Duplicate { project: PathBuf, pattern: String, to: String },
+    #[command(subcommand)]
+    Event(EventCmd),
+}
+
+/// Pattern events, addressed by reference.
+#[derive(Subcommand)]
+enum EventCmd {
+    /// Add an event: --at and --pad, optionally --note, --duration, --velocity, --transpose.
+    Add {
+        project: PathBuf,
+        pattern: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Change an event's fields; a null value resets one.
+    Set {
+        project: PathBuf,
+        event: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    Remove { project: PathBuf, event: String },
+}
+
+/// Pads.
+#[derive(Subcommand)]
+enum PadCmd {
+    /// Add a pad: --sample, and any pad field.
+    Add {
+        project: PathBuf,
+        track: String,
+        pad: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Change a pad's fields; a null value resets one.
+    Set {
+        project: PathBuf,
+        track: String,
+        pad: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    Remove { project: PathBuf, track: String, pad: String },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum OnOff {
+    On,
+    Off,
+}
+
+/// Effects on tracks.T, returns.R or master, addressed by path, id or reference.
+#[derive(Subcommand)]
+enum EffectCmd {
+    /// Add an effect: --type, optionally --id, --index and parameters.
+    Add {
+        project: PathBuf,
+        owner: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Remove an effect and the lanes that automate it.
+    Remove { project: PathBuf, effect: String },
+    /// Move an effect in its chain; lanes addressing effects by index follow.
+    Move { project: PathBuf, effect: String, index: usize },
+    Bypass {
+        project: PathBuf,
+        effect: String,
+        #[arg(value_enum, default_value = "on")]
+        state: OnOff,
+    },
+}
+
+/// Sends from a track to a return.
+#[derive(Subcommand)]
+enum SendCmd {
+    /// Add or change a send: --gain-db, --pre-fader.
+    Set {
+        project: PathBuf,
+        track: String,
+        to: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Remove a send and the lane that automates it.
+    Remove { project: PathBuf, track: String, to: String },
+}
+
+/// Automation lanes on tracks.T, returns.R or master.
+#[derive(Subcommand)]
+enum LaneCmd {
+    /// Replace or create a whole lane from a JSON list of points.
+    Set { project: PathBuf, owner: String, param: String, points: String },
+    Remove { project: PathBuf, owner: String, param: String },
+    #[command(subcommand)]
+    Point(PointCmd),
+}
+
+/// Automation points, addressed by reference.
+#[derive(Subcommand)]
+enum PointCmd {
+    /// Add a point in time order, creating the lane if needed: --at, --value, --curve.
+    Add {
+        project: PathBuf,
+        owner: String,
+        param: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Change a point's --at, --value or --curve.
+    Move {
+        project: PathBuf,
+        point: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Remove a point; a lane's last point takes the lane with it.
+    Remove { project: PathBuf, point: String },
+}
+
+/// Sections.
+#[derive(Subcommand)]
+enum SectionCmd {
+    Add { project: PathBuf, id: String, at: String, length: String },
+    Move { project: PathBuf, section: String, at: String },
+    Remove { project: PathBuf, section: String },
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -93,19 +386,41 @@ fn text(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
-/// Holds the project's advisory lock, as the Python CLI's writers do.
-fn lock(project: &Path) -> Result<File> {
-    let dir = match project.parent() {
-        Some(d) if !d.as_os_str().is_empty() => d,
-        _ => Path::new("."),
-    };
-    let file = File::options()
-        .append(true)
-        .create(true)
-        .open(dir.join(".daw.lock"))
-        .map_err(text)?;
-    file.lock().map_err(text)?;
-    Ok(file)
+/// A command-line value: JSON where it parses, text otherwise.
+fn parse_value(text: &str) -> Json {
+    serde_json::from_str(text).unwrap_or_else(|_| Json::String(text.to_string()))
+}
+
+fn fields(f: &FieldArgs) -> Result<Fields> {
+    let args = &f.fields;
+    let mut out = Fields::new();
+    let mut i = 0;
+    while i < args.len() {
+        let Some(flag) = args[i].strip_prefix("--") else {
+            return Err(format!("Expected --FIELD VALUE, got {}", args[i]));
+        };
+        let (name, value) = match flag.split_once('=') {
+            Some((n, v)) => (n, v.to_string()),
+            None if i + 1 < args.len() && !args[i + 1].starts_with("--") => {
+                i += 1;
+                (flag, args[i].clone())
+            }
+            None => (flag, "true".to_string()),
+        };
+        out.insert(name.replace('-', "_"), parse_value(&value));
+        i += 1;
+    }
+    Ok(out)
+}
+
+fn take_index(fields: &mut Fields) -> Result<Option<usize>> {
+    match fields.shift_remove("index") {
+        None => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .map(|n| Some(n as usize))
+            .ok_or_else(|| format!("--index must be a non-negative integer, not {v}")),
+    }
 }
 
 fn errors_json(e: &ValidationError) -> Json {
@@ -143,26 +458,100 @@ fn model_entry(path: &Path) -> Json {
 
 /// An engine result as JSON, keeping its key order.
 fn value(v: aaw_model::value::Value) -> Json {
-    use aaw_model::value::Value;
-    match v {
-        Value::None => Json::Null,
-        Value::Bool(b) => Json::Bool(b),
-        Value::Int(n) => serde_json::from_str(&n.to_string()).expect("integer"),
-        Value::Float(f) => serde_json::Number::from_f64(f).map_or(Json::Null, Json::Number),
-        Value::Str(s) => Json::String(s),
-        Value::List(items) => Json::Array(items.into_iter().map(value).collect()),
-        Value::Dict(d) => Json::Object(
-            d.into_iter()
-                .map(|(k, v)| (k.as_str().unwrap_or_default().to_string(), value(v)))
-                .collect(),
-        ),
-        Value::Bytes(_) | Value::Other(_) => Json::Null,
+    aaw_host::session::value_json(&v)
+}
+
+struct PlayArgs {
+    seconds: Option<f64>,
+    buffer: u32,
+}
+
+fn interrupted() -> Result<Arc<AtomicBool>> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let f = flag.clone();
+    ctrlc::set_handler(move || f.store(true, Ordering::Relaxed)).map_err(text)?;
+    Ok(flag)
+}
+
+fn no_host(project: &Path, what: &str) -> String {
+    format!(
+        "No host is running for {}; {what} exists only while a host runs (start one with `daw host` or `daw play`)",
+        project.display()
+    )
+}
+
+/// Runs a command without a host.
+fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<Json> {
+    let Request { command, origin, expect } = request;
+    match command.kind() {
+        Kind::Edit => {
+            let _lock = lock(project)?;
+            let mut s = Session::open(project, false)?;
+            let (reply, _) = s.edit(&command, origin, expect.as_deref())?;
+            s.write()?;
+            Ok(reply)
+        }
+        Kind::Read => {
+            let s = Session::open(project, false)?;
+            match command {
+                Command::Inspect => Ok(s.inspect()),
+                Command::Get { path } => s.get(&path),
+                Command::Status => {
+                    let mut m = s.status();
+                    m.insert("playing".into(), json!(false));
+                    Ok(Json::Object(m))
+                }
+                _ => Err(no_host(project, "the change log")),
+            }
+        }
+        Kind::History => Err(no_host(project, "undo history")),
+        Kind::Transport => match (command, play) {
+            (Command::Play { from }, Some(p)) => host::run(
+                project,
+                host::Options {
+                    buffer: p.buffer,
+                    play: Some(from.unwrap_or(json!(0))),
+                    exit_on_stop: true,
+                    seconds: p.seconds,
+                    feed: true,
+                },
+                interrupted()?,
+            ),
+            _ => Err(no_host(project, "the transport")),
+        },
+        Kind::Host => match command {
+            Command::Fmt => {
+                let _lock = lock(project)?;
+                let p = aaw_model::load(project, true).map_err(text)?;
+                aaw_model::save(&p, project).map_err(text)?;
+                Ok(json!({"project": project, "formatted": true}))
+            }
+            _ => Err(format!("No host is running for {}", project.display())),
+        },
     }
 }
 
-fn run(command: &Command) -> Result<Json> {
-    match command {
-        Command::Render {
+/// Sends a command to the project's host, or runs it headless.
+fn route(cli: &Cli, project: &Path, command: Command, play: Option<PlayArgs>) -> Result<Json> {
+    let request = Request {
+        command,
+        origin: match cli.origin {
+            Who::Agent => Origin::Agent,
+            Who::User => Origin::User,
+        },
+        expect: cli.expect.clone(),
+    };
+    match client::send(project, &request)? {
+        Some(reply) => Ok(reply),
+        None => headless(project, request, play),
+    }
+}
+
+fn run(cli: &Cli) -> Result<Json> {
+    use Command as C;
+    let edit = |project: &PathBuf, c: Command| route(cli, project, c, None);
+    match &cli.command {
+        Top::Render {
             project,
             output,
             track,
@@ -177,7 +566,7 @@ fn run(command: &Command) -> Result<Json> {
             },
         )
         .map(value),
-        Command::Schedule { project } => {
+        Top::Schedule { project } => {
             let p = aaw_model::load(project, false).map_err(text)?;
             let triggers: Vec<Json> = schedule(&p)
                 .iter()
@@ -185,88 +574,410 @@ fn run(command: &Command) -> Result<Json> {
                 .collect();
             Ok(Json::Array(triggers))
         }
-        Command::Play {
+        Top::Model { paths } => Ok(Json::Array(paths.iter().map(|p| model_entry(p)).collect())),
+        Top::Fmt { project } => {
+            let mut reply = route(cli, project, C::Fmt, None)?;
+            reply["project"] = json!(project);
+            Ok(reply)
+        }
+        Top::Apply { project, patch } => {
+            if cli.expect.is_none() {
+                return Err("apply requires --expect with the project SHA256 from inspect".into());
+            }
+            let body = std::fs::read_to_string(patch).map_err(text)?;
+            let patch: Json = serde_json::from_str(&body).map_err(text)?;
+            let reply = edit(project, C::Apply { patch })?;
+            // The Python CLI's result, plus the revision while a host runs.
+            let mut out = serde_json::Map::new();
+            for key in ["revision", "project_sha256"] {
+                if let Some(v) = reply.get(key) {
+                    out.insert(key.into(), v.clone());
+                }
+            }
+            Ok(Json::Object(out))
+        }
+        Top::Host { project, buffer } => host::run(
+            project,
+            host::Options {
+                buffer: *buffer,
+                play: None,
+                exit_on_stop: false,
+                seconds: None,
+                feed: true,
+            },
+            interrupted()?,
+        ),
+        Top::Close { project } => edit(project, C::Close),
+        Top::Play {
             project,
             from,
             seconds,
             buffer,
             benchmark: bench,
         } => {
-            let p = aaw_model::load(project, true).map_err(text)?;
-            let from_beat = aaw_model::beat(&Beat::Str(from.clone()))?;
-            let start = frame(&from_beat, p.session.tempo, p.session.sample_rate).max(0) as usize;
-            let dir = project.parent().unwrap_or(Path::new("."));
-            let program = Arc::new(compile(&p, dir)?);
-            if start >= program.total {
-                return Err(format!("--from {from} is at or after the session end"));
+            if *bench {
+                let p = aaw_model::load(project, true).map_err(text)?;
+                let from_beat = aaw_model::beat(&Beat::Str(from.clone().unwrap_or_else(|| "0".into())))?;
+                let start = frame(&from_beat, p.session.tempo, p.session.sample_rate).max(0) as usize;
+                let program = Arc::new(compile(&p, project.parent().unwrap_or(Path::new(".")))?);
+                if start >= program.total {
+                    return Err("--from is at or after the session end".into());
+                }
+                let opts = PlayOptions {
+                    from: start,
+                    seconds: *seconds,
+                    buffer: *buffer,
+                };
+                return Ok(value(benchmark(program, &opts)));
             }
-            let opts = PlayOptions {
-                from: start,
+            let play = PlayArgs {
                 seconds: *seconds,
                 buffer: *buffer,
             };
-            if *bench {
-                return Ok(value(benchmark(program, &opts)));
-            }
-            if !program.omitted.is_empty() {
-                eprintln!(
-                    "{}",
-                    json!({"warning": format!("playing without {}, which the Rust engine does not process yet", program.omitted.join(", "))})
-                );
-            }
-            let stop = Arc::new(AtomicBool::new(false));
-            let flag = stop.clone();
-            ctrlc::set_handler(move || flag.store(true, Ordering::Relaxed)).map_err(text)?;
-            play(program, &opts, stop).map(value)
+            route(cli, project, C::Play { from: from.as_deref().map(parse_value) }, Some(play))
         }
-        Command::Model { paths } => Ok(Json::Array(paths.iter().map(|p| model_entry(p)).collect())),
-        Command::Fmt { project } => {
-            let _lock = lock(project)?;
-            let p = aaw_model::load(project, true).map_err(text)?;
-            aaw_model::save(&p, project).map_err(text)?;
-            Ok(json!({"project": project, "formatted": true}))
+        Top::Stop { project } => edit(project, C::Stop),
+        Top::Locate { project, beat } => edit(project, C::Locate { at: parse_value(beat) }),
+        Top::Loop { project, start, length } => {
+            let c = match (start.as_str(), length) {
+                ("off", None) => C::Loop { start: None, length: None },
+                (_, Some(l)) => C::Loop {
+                    start: Some(parse_value(start)),
+                    length: Some(parse_value(l)),
+                },
+                _ => return Err("Use `loop PROJECT START LENGTH` or `loop PROJECT off`".into()),
+            };
+            edit(project, c)
         }
-        Command::Apply {
+        Top::Status { project } => edit(project, C::Status),
+        Top::Changes { project, since } => edit(project, C::Changes { since: *since }),
+        Top::Inspect { project } => edit(project, C::Inspect),
+        Top::Get { project, path } => edit(project, C::Get { path: path.clone().unwrap_or_default() }),
+        Top::Undo { project } => edit(project, C::Undo),
+        Top::Redo { project } => edit(project, C::Redo),
+        Top::Set { project, path, value } => edit(
             project,
-            patch,
-            expect,
-        } => {
-            let _lock = lock(project)?;
-            let p: Project = aaw_model::load(project, true).map_err(text)?;
-            if &aaw_model::project_hash(&p) != expect {
-                return Err("Stale project revision; inspect and retry".into());
-            }
-            let patch = aaw_model::json_value(&std::fs::read_to_string(patch).map_err(text)?)
-                .map_err(text)?;
-            let updated = aaw_model::apply_patch(&p, &patch).map_err(text)?;
-            // Verify referenced audio before replacing the authoritative document.
-            let root = project.parent().unwrap_or(Path::new("."));
-            for (name, asset) in &updated.samples {
-                let path = root.join(&asset.path);
-                if !path.is_file() {
-                    return Err(format!("Missing asset {name}"));
-                }
-                if let Some(sha) = &asset.sha256 {
-                    if &aaw_model::digest(&path).map_err(text)? != sha {
-                        return Err(format!("Changed asset {name}"));
-                    }
-                }
-            }
-            aaw_model::save(&updated, project).map_err(text)?;
-            Ok(json!({"project_sha256": aaw_model::project_hash(&updated)}))
+            C::Set {
+                path: path.clone(),
+                value: parse_value(value),
+            },
+        ),
+        Top::Toggle { project, path } => edit(project, C::Toggle { path: path.clone() }),
+        Top::Remove { project, path } => edit(project, C::Remove { path: path.clone() }),
+        Top::Batch { project, file } => {
+            let body = std::fs::read_to_string(file).map_err(text)?;
+            let parsed: Json = serde_json::from_str(&body).map_err(text)?;
+            let list = match parsed {
+                Json::Object(mut m) => m.remove("commands").unwrap_or(Json::Null),
+                other => other,
+            };
+            let commands: Vec<Command> =
+                serde_json::from_value(list).map_err(|e| format!("{}: {e}", file.display()))?;
+            edit(project, C::Batch { commands })
         }
+        Top::Track(t) => match t {
+            TrackCmd::Add { project, id, f } => {
+                let mut fields = fields(f)?;
+                let index = take_index(&mut fields)?;
+                edit(project, C::TrackAdd { id: id.clone(), index, fields })
+            }
+            TrackCmd::Remove { project, track } => edit(project, C::TrackRemove { track: track.clone() }),
+            TrackCmd::Rename { project, track, to } => edit(
+                project,
+                C::TrackRename {
+                    track: track.clone(),
+                    to: to.clone(),
+                },
+            ),
+            TrackCmd::Move { project, track, index } => edit(
+                project,
+                C::TrackMove {
+                    track: track.clone(),
+                    index: *index,
+                },
+            ),
+        },
+        Top::Return(r) => match r {
+            ReturnCmd::Add { project, id, f } => {
+                let mut fields = fields(f)?;
+                let index = take_index(&mut fields)?;
+                edit(project, C::ReturnAdd { id: id.clone(), index, fields })
+            }
+            ReturnCmd::Remove { project, id } => edit(project, C::ReturnRemove { id: id.clone() }),
+            ReturnCmd::Rename { project, id, to } => edit(
+                project,
+                C::ReturnRename {
+                    id: id.clone(),
+                    to: to.clone(),
+                },
+            ),
+        },
+        Top::Clip(c) => match c {
+            ClipCmd::Add { project, track, pattern, f } => {
+                let mut all = Fields::new();
+                all.insert("pattern".into(), json!(pattern));
+                all.extend(fields(f)?);
+                edit(project, C::ClipAdd { track: track.clone(), fields: all })
+            }
+            ClipCmd::Move { project, clip, track, at } => edit(
+                project,
+                C::ClipMove {
+                    clip: clip.clone(),
+                    track: track.clone(),
+                    at: at.as_deref().map(parse_value),
+                },
+            ),
+            ClipCmd::Repeats { project, clip, repeats } => edit(
+                project,
+                C::ClipRepeats {
+                    clip: clip.clone(),
+                    repeats: parse_value(repeats),
+                },
+            ),
+            ClipCmd::Duplicate { project, clip, track, at } => edit(
+                project,
+                C::ClipDuplicate {
+                    clip: clip.clone(),
+                    track: track.clone(),
+                    at: at.as_deref().map(parse_value),
+                },
+            ),
+            ClipCmd::Remove { project, clip } => edit(project, C::ClipRemove { clip: clip.clone() }),
+        },
+        Top::Pattern(p) => match p {
+            PatternCmd::Add { project, pattern, f } => edit(
+                project,
+                C::PatternAdd {
+                    pattern: pattern.clone(),
+                    fields: fields(f)?,
+                },
+            ),
+            PatternCmd::Steps {
+                project,
+                pattern,
+                pad,
+                row,
+                clear,
+            } => {
+                if row.is_some() == *clear {
+                    return Err("Give a step row or --clear".into());
+                }
+                edit(
+                    project,
+                    C::PatternSteps {
+                        pattern: pattern.clone(),
+                        pad: pad.clone(),
+                        row: row.clone(),
+                    },
+                )
+            }
+            PatternCmd::Duplicate { project, pattern, to } => edit(
+                project,
+                C::PatternDuplicate {
+                    pattern: pattern.clone(),
+                    to: to.clone(),
+                },
+            ),
+            PatternCmd::Event(e) => match e {
+                EventCmd::Add { project, pattern, f } => edit(
+                    project,
+                    C::EventAdd {
+                        pattern: pattern.clone(),
+                        fields: fields(f)?,
+                    },
+                ),
+                EventCmd::Set { project, event, f } => edit(
+                    project,
+                    C::EventSet {
+                        event: event.clone(),
+                        fields: fields(f)?,
+                    },
+                ),
+                EventCmd::Remove { project, event } => edit(project, C::EventRemove { event: event.clone() }),
+            },
+        },
+        Top::Pad(p) => match p {
+            PadCmd::Add { project, track, pad, f } => edit(
+                project,
+                C::PadAdd {
+                    track: track.clone(),
+                    pad: pad.clone(),
+                    fields: fields(f)?,
+                },
+            ),
+            PadCmd::Set { project, track, pad, f } => edit(
+                project,
+                C::PadSet {
+                    track: track.clone(),
+                    pad: pad.clone(),
+                    fields: fields(f)?,
+                },
+            ),
+            PadCmd::Remove { project, track, pad } => edit(
+                project,
+                C::PadRemove {
+                    track: track.clone(),
+                    pad: pad.clone(),
+                },
+            ),
+        },
+        Top::Effect(e) => match e {
+            EffectCmd::Add { project, owner, f } => {
+                let mut fields = fields(f)?;
+                let index = take_index(&mut fields)?;
+                if !fields.contains_key("type") {
+                    return Err("effect add needs --type".into());
+                }
+                edit(
+                    project,
+                    C::EffectAdd {
+                        owner: owner.clone(),
+                        index,
+                        fields,
+                    },
+                )
+            }
+            EffectCmd::Remove { project, effect } => edit(project, C::EffectRemove { effect: effect.clone() }),
+            EffectCmd::Move { project, effect, index } => edit(
+                project,
+                C::EffectMove {
+                    effect: effect.clone(),
+                    index: *index,
+                },
+            ),
+            EffectCmd::Bypass { project, effect, state } => edit(
+                project,
+                C::EffectBypass {
+                    effect: effect.clone(),
+                    bypass: matches!(state, OnOff::On),
+                },
+            ),
+        },
+        Top::Send(s) => match s {
+            SendCmd::Set { project, track, to, f } => edit(
+                project,
+                C::SendSet {
+                    track: track.clone(),
+                    to: to.clone(),
+                    fields: fields(f)?,
+                },
+            ),
+            SendCmd::Remove { project, track, to } => edit(
+                project,
+                C::SendRemove {
+                    track: track.clone(),
+                    to: to.clone(),
+                },
+            ),
+        },
+        Top::Lane(l) => match l {
+            LaneCmd::Set {
+                project,
+                owner,
+                param,
+                points,
+            } => edit(
+                project,
+                C::LaneSet {
+                    owner: owner.clone(),
+                    param: param.clone(),
+                    points: serde_json::from_str(points).map_err(|e| format!("points must be a JSON list: {e}"))?,
+                },
+            ),
+            LaneCmd::Remove { project, owner, param } => edit(
+                project,
+                C::LaneRemove {
+                    owner: owner.clone(),
+                    param: param.clone(),
+                },
+            ),
+            LaneCmd::Point(p) => match p {
+                PointCmd::Add { project, owner, param, f } => edit(
+                    project,
+                    C::PointAdd {
+                        owner: owner.clone(),
+                        param: param.clone(),
+                        fields: fields(f)?,
+                    },
+                ),
+                PointCmd::Move { project, point, f } => edit(
+                    project,
+                    C::PointSet {
+                        point: point.clone(),
+                        fields: fields(f)?,
+                    },
+                ),
+                PointCmd::Remove { project, point } => edit(project, C::PointRemove { point: point.clone() }),
+            },
+        },
+        Top::Section(s) => match s {
+            SectionCmd::Add { project, id, at, length } => edit(
+                project,
+                C::SectionAdd {
+                    id: id.clone(),
+                    at: parse_value(at),
+                    length_beats: parse_value(length),
+                },
+            ),
+            SectionCmd::Move { project, section, at } => edit(
+                project,
+                C::SectionMove {
+                    section: section.clone(),
+                    at: parse_value(at),
+                },
+            ),
+            SectionCmd::Remove { project, section } => edit(project, C::SectionRemove { section: section.clone() }),
+        },
     }
+}
+
+fn name(top: &Top) -> String {
+    let group = |g: &str, s: &str| format!("{g} {s}");
+    match top {
+        Top::Fmt { .. } => "fmt".into(),
+        Top::Apply { .. } => "apply".into(),
+        Top::Model { .. } => "model".into(),
+        Top::Render { .. } => "render".into(),
+        Top::Schedule { .. } => "schedule".into(),
+        Top::Host { .. } => "host".into(),
+        Top::Close { .. } => "close".into(),
+        Top::Play { .. } => "play".into(),
+        Top::Stop { .. } => "stop".into(),
+        Top::Locate { .. } => "locate".into(),
+        Top::Loop { .. } => "loop".into(),
+        Top::Status { .. } => "status".into(),
+        Top::Changes { .. } => "changes".into(),
+        Top::Inspect { .. } => "inspect".into(),
+        Top::Get { .. } => "get".into(),
+        Top::Undo { .. } => "undo".into(),
+        Top::Redo { .. } => "redo".into(),
+        Top::Set { .. } => "set".into(),
+        Top::Toggle { .. } => "toggle".into(),
+        Top::Remove { .. } => "remove".into(),
+        Top::Batch { .. } => "batch".into(),
+        Top::Track(_) => group("track", ""),
+        Top::Return(_) => group("return", ""),
+        Top::Clip(_) => group("clip", ""),
+        Top::Pattern(_) => group("pattern", ""),
+        Top::Pad(_) => group("pad", ""),
+        Top::Effect(_) => group("effect", ""),
+        Top::Send(_) => group("send", ""),
+        Top::Lane(_) => group("lane", ""),
+        Top::Section(_) => group("section", ""),
+    }
+    .trim()
+    .to_string()
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    match run(&cli.command) {
+    match run(&cli) {
         Ok(result) => {
             println!("{}", serde_json::to_string_pretty(&result).expect("json"));
             ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("{}", json!({"error": error, "command": cli.command.name()}));
+            eprintln!("{}", json!({"error": error, "command": name(&cli.command)}));
             ExitCode::FAILURE
         }
     }
