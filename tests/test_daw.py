@@ -1,3 +1,4 @@
+import copy
 import hashlib
 import json
 import subprocess
@@ -6,7 +7,16 @@ import numpy as np
 import pytest
 import soundfile as sf
 import yaml
-from agent_daw.model import Project, beat, frame, save, load, project_hash, digest
+from agent_daw.model import (
+    Project,
+    beat,
+    frame,
+    save,
+    load,
+    project_hash,
+    digest,
+    hash_matches,
+)
 from agent_daw.engine import render, schedule, Sampler, Voice, wav_atomic
 from agent_daw.library import scan, search, import_asset
 
@@ -224,6 +234,76 @@ def test_project_hash_fingerprints_the_saved_form(song):
     del saved["schema_version"]
     expected = hashlib.sha256(json.dumps(saved, sort_keys=True).encode()).hexdigest()
     assert project_hash(load(path)) == expected
+
+
+def projects_by_schema():
+    """A project using every model of each schema that hashed the full dump, newest
+    first: automation, sends and returns, effects, and the first schema."""
+    pads = {"k": {"sample": "hit"}}
+    first = {
+        "session": {"tempo": 120, "length_beats": 8},
+        "samples": {"hit": {"path": "hit.wav", "root_note": "C3"}},
+        "patterns": {
+            "beat": {
+                "length_beats": 4,
+                "steps": {"k": "x..." * 4},
+                "events": [{"at": "1/3", "pad": "k"}],
+            }
+        },
+        "tracks": [
+            {"id": "kick", "pads": pads, "clips": [{"pattern": "beat"}]},
+            {"id": "bass", "pads": pads, "clips": [{"pattern": "beat", "at": 4}]},
+        ],
+        "sections": [{"id": "drop", "at": 4, "length_beats": 4}],
+    }
+    effects = copy.deepcopy(first)
+    effects["tracks"][1]["effects"] = [
+        {"type": "filter", "mode": "lowpass", "cutoff_hz": 800},
+        {"type": "eq", "bands": [{"shape": "bell", "freq_hz": 200, "gain_db": 3}]},
+        {"type": "compressor", "threshold_db": -20, "sidechain": "kick"},
+    ]
+    effects["master"] = {"effects": [{"type": "limiter"}]}
+    sends = copy.deepcopy(effects)
+    sends["tracks"][1]["sends"] = [{"to": "space"}]
+    sends["returns"] = [
+        {
+            "id": "space",
+            "effects": [{"type": "delay", "time_beats": "1/2"}, {"type": "reverb"}],
+        }
+    ]
+    automation = copy.deepcopy(sends)
+    automation["tracks"][1]["effects"][0]["id"] = "tone"
+    automation["tracks"][1]["automation"] = [
+        {
+            "param": "effects.tone.cutoff_hz",
+            "points": [{"at": 0, "value": 800}, {"at": 8, "value": 4000}],
+        }
+    ]
+    automation["returns"][0]["automation"] = [
+        {"param": "gain_db", "points": [{"at": 4, "value": -6, "curve": "hold"}]}
+    ]
+    automation["master"]["automation"] = [
+        {"param": "gain_db", "points": [{"at": 0, "value": -6}]}
+    ]
+    return [automation, sends, effects, first]
+
+
+# project_hash of each projects_by_schema() entry under the engine of its schema
+# (commits 5dd2e6c, 695ca77, 74c074a and f71aa1d).
+EARLIER_FINGERPRINTS = [
+    "c0c7d463215a7839767cef6302532441594a6f9432486e4061406bc51fbdc509",
+    "2079b7e7da4f90bbbfcd9b93414f91f2ede9df70a7bfec57401b4c8d32f06a30",
+    "0caffe96828674076f68c7060c86e5cc553cd6fab7d196c58bea5a6a7ae2b159",
+    "1b90bf9dcc3079a74cd794764f03445e7aa76eb30ea55b62cad15efa479a26dc",
+]
+
+
+def test_fingerprints_of_earlier_engines_still_verify():
+    # hash_matches rebuilds these forms from today's full dump, so a field added to
+    # any model breaks them here until it is listed in model.LEGACY_FIELDS.
+    for data, sha in zip(projects_by_schema(), EARLIER_FINGERPRINTS, strict=True):
+        p = Project.model_validate(data)
+        assert project_hash(p) != sha and hash_matches(p, sha)
 
 
 def test_region_is_full_render_slice(song, tmp_path):
