@@ -87,6 +87,14 @@ public struct TimelineLayout: Equatable {
         return max(0, beat)
     }
 
+    /// A beat on the grid, or with `free` to a thousandth of a beat, from the
+    /// song's start to its end: where an automation point can be.
+    public func snapped(_ beat: Double, free: Bool) -> Double {
+        let g = grid
+        let on = free ? (beat * 1000).rounded() / 1000 : (beat / g).rounded() * g
+        return min(max(on, 0), lengthBeats)
+    }
+
     /// A loop over the dragged span: on the grid, at least one grid step long
     /// and inside the song. Nil when the span is outside the song.
     public func loop(fromX a: CGFloat, toX b: CGFloat) -> (start: Double, length: Double)? {

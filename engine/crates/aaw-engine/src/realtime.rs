@@ -90,6 +90,7 @@ impl Transport {
         };
         let stats = Arc::new(Stats::default());
         let (control, mut player) = channel(program);
+        let shared = control.shared().clone();
         let mut block = vec![[0.0f64; 2]; MAX_BLOCK];
         let ns_per_frame = 1e9 / rate as f64;
         let callback_stats = stats.clone();
@@ -97,9 +98,11 @@ impl Transport {
         let stream = device
             .build_output_stream::<f32, _, _>(
                 config,
-                move |data: &mut [f32], _info| {
+                move |data: &mut [f32], info| {
                     assert_no_alloc::assert_no_alloc(|| {
                         let started = Instant::now();
+                        let ahead = info.timestamp().playback.duration_since(info.timestamp().callback);
+                        shared.output_latency.store((ahead.as_secs_f64() * rate as f64).round() as u64, Relaxed);
                         let frames = data.len() / channels;
                         let mut done = 0;
                         while done < frames {
@@ -159,6 +162,7 @@ impl Transport {
             ("sample_rate", Value::int(self.rate as i64)),
             ("channels", Value::int(self.channels as i64)),
             ("buffer_frames", Value::int(self.buffer as i64)),
+            ("output_latency_frames", Value::int(shared.output_latency.load(Relaxed) as i64)),
             (
                 "played_seconds",
                 Value::Float((shared.played.load(Relaxed) as f64 / self.rate as f64 * 1000.0).round() / 1000.0),
@@ -194,7 +198,7 @@ pub fn benchmark(program: Arc<Program>, opts: &PlayOptions) -> Value {
     let started = Instant::now();
     while renderer.position() < end {
         let t = Instant::now();
-        renderer.process(&mut block, |_, _| {});
+        renderer.render(&mut block, |_, _, _| {});
         times.push(t.elapsed().as_nanos() as f64);
     }
     let cpu = started.elapsed().as_secs_f64();
@@ -215,6 +219,6 @@ pub fn benchmark(program: Arc<Program>, opts: &PlayOptions) -> Value {
         ("p99_block_ms", ms(pick(0.99))),
         ("max_block_ms", ms(pick(1.0))),
         ("over_budget_blocks", Value::int(times.iter().filter(|t| **t > budget).count() as i64)),
-        ("omitted", Value::List(program.omitted.iter().map(|s| Value::str(s)).collect())),
+        ("latency_frames", Value::int(program.latency as i64)),
     ])
 }

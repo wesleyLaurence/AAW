@@ -1,11 +1,13 @@
 //! Real-time stress: a thread renders 128-frame blocks on the audio schedule,
 //! with allocation checking, while random commands change the song and each
-//! revision is compiled and swapped in. Counts blocks that overran their budget.
+//! revision is compiled and swapped in: clips, levels, knobs, sends, lanes,
+//! and effects added, bypassed and removed, through a sidechained compressor
+//! and a reverb. Counts blocks that overran their budget.
 
 mod common;
 
 use aaw_engine::player::channel;
-use aaw_engine::program::{compile_cached, SampleCache};
+use aaw_engine::program::{compile_cached, Cache};
 use aaw_host::command::Origin;
 use aaw_host::session::Session;
 use common::{cmd, write_song};
@@ -32,7 +34,7 @@ fn random_edits_during_playback_never_allocate_on_the_audio_thread() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
     let mut s = Session::open(&path, true).unwrap();
-    let mut cache = SampleCache::default();
+    let mut cache = Cache::default();
     let program = Arc::new(compile_cached(s.project(), s.dir(), &mut cache).unwrap());
     let rate = program.rate as f64;
     let (mut control, mut player) = channel(program);
@@ -69,7 +71,16 @@ fn random_edits_during_playback_never_allocate_on_the_audio_thread() {
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(3) {
         let n = rng.next(1000) as f64;
-        let edit = match rng.next(9) {
+        let edit = match rng.next(18) {
+            9 => json!({"op": "set", "path": "tracks.bass.effects.0.threshold_db", "value": -(n / 20.0)}),
+            10 => json!({"op": "set", "path": "returns.plate.effects.0.mix_percent", "value": n / 10.0}),
+            11 => json!({"op": "set", "path": "returns.plate.effects.0.decay_seconds", "value": 0.3 + n / 2000.0}),
+            12 => json!({"op": "effect.bypass", "effect": "tracks.bass.effects.0", "bypass": n < 500.0}),
+            13 => json!({"op": "effect.add", "owner": "tracks.drums", "type": "filter", "mode": "highpass", "cutoff_hz": 40.0 + n}),
+            14 => json!({"op": "effect.remove", "effect": "tracks.drums.effects.0"}),
+            15 => json!({"op": "send.set", "track": "drums", "to": "plate", "gain_db": -(n / 30.0)}),
+            16 => json!({"op": "point.add", "owner": "tracks.bass", "param": "gain_db", "at": rng.next(32), "value": -(n / 100.0)}),
+            17 => json!({"op": "effect.add", "owner": "master", "type": "limiter", "index": 0}),
             0 => json!({"op": "set", "path": "tracks.drums.gain_db", "value": -(n / 50.0)}),
             1 => json!({"op": "set", "path": "tracks.bass.pan", "value": n / 1000.0 - 0.5}),
             2 => json!({"op": "toggle", "path": "tracks.drums.mute"}),

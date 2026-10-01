@@ -3,7 +3,7 @@
 //! No audio device is opened.
 
 use aaw_engine::wav::float_wav_bytes;
-use aaw_ffi::view::{Delta, Part, SendView, Touch};
+use aaw_ffi::view::{Delta, EffectView, FieldKind, FieldValue, FieldView, LaneView, Part, SendView, Touch};
 use aaw_ffi::{Edit, HistoryStep, Row, Song, SongObserver, TransportView, Update, Who};
 use aaw_host::client::{self, Request};
 use aaw_host::command::Origin;
@@ -146,6 +146,7 @@ fn the_arrangement_is_what_the_app_draws() {
     assert_eq!(a.master.gain_db, -6.0);
     let sections: Vec<_> = a.sections.iter().map(|s| (s.id.as_str(), s.at, s.length_beats)).collect();
     assert_eq!(sections, [("intro", 0.0, 8.0), ("drop", 8.0, 24.0)]);
+    assert_eq!(drums.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.gate)).collect::<Vec<_>>(), [("h", "hit", false)]);
     // Every object has its own key, and a clip's reference is its handle.
     let mut keys: Vec<u64> = a.tracks.iter().flat_map(|t| std::iter::once(t.key).chain(t.clips.iter().map(|c| c.key))).collect();
     keys.extend(a.returns.iter().map(|r| r.key));
@@ -482,4 +483,234 @@ fn refusals_read_plainly() {
         "session.tempo: Input should be less than or equal to 400; tracks.0.pan: Input should be greater than or equal to -1"
     );
     assert_eq!(aaw_ffi::plain("locate 99 is at or after the session end"), "locate 99 is at or after the session end");
+}
+
+fn field<'a>(e: &'a EffectView, name: &str) -> &'a FieldView {
+    e.fields.iter().find(|f| f.name == name).unwrap_or_else(|| panic!("{} has no {name}", e.kind))
+}
+
+fn number(value: f64) -> FieldValue {
+    FieldValue::Number { value }
+}
+
+fn text(value: &str) -> FieldValue {
+    FieldValue::Text { value: value.into() }
+}
+
+#[test]
+fn a_device_panel_is_drawn_from_an_effect_s_fields() {
+    let (_dir, _path, song, _seen) = open();
+    let a = song.arrangement();
+    let filter = &a.tracks[1].effects[0];
+    assert_eq!(filter.fields.iter().map(|f| f.label.as_str()).collect::<Vec<_>>(), ["Mode", "Cutoff", "Slope"]);
+    let mode = field(filter, "mode");
+    assert_eq!((mode.kind, &mode.value, mode.choices.as_slice(), mode.live), (FieldKind::Choice, &text("lowpass"), &["highpass".to_string(), "lowpass".to_string()][..], false));
+    let cutoff = field(filter, "cutoff_hz");
+    assert_eq!((cutoff.kind, &cutoff.value, cutoff.min, cutoff.max, cutoff.unit.as_str(), cutoff.log, cutoff.live), (FieldKind::Number, &number(800.0), 10.0, 20000.0, "Hz", true, true));
+    // Automation can move the cutoff, by the effect's place while it has no ID.
+    assert_eq!((cutoff.param.as_deref(), cutoff.lane), (Some("effects.0.cutoff_hz"), None));
+    let slope = field(filter, "slope_db_per_octave");
+    assert_eq!((slope.kind, &slope.value, slope.choices.len(), slope.param.as_deref()), (FieldKind::Integer, &number(12.0), 4, None));
+
+    let delay = &a.tracks[1].effects[1];
+    assert!(delay.bypass);
+    let time = field(delay, "time_beats");
+    assert_eq!((time.kind, &time.value, time.live), (FieldKind::Beats, &number(0.5), false));
+    let cut = field(delay, "highcut_hz");
+    assert_eq!((cut.optional, &cut.value, &cut.initial), (true, &FieldValue::Absent, &number(4000.0)));
+    assert_eq!(field(delay, "ping_pong").value, FieldValue::Flag { value: false });
+
+    let reverb = &a.returns[0].effects[0];
+    assert_eq!(field(reverb, "decay_seconds").value, number(1.5));
+    assert!(!field(reverb, "decay_seconds").live && field(reverb, "mix_percent").live);
+    // What could have a lane: levels, sends, and each effect's knobs.
+    let targets = |t: &[aaw_ffi::view::LaneTarget]| t.iter().map(|t| (t.param.clone(), t.label.clone())).collect::<Vec<_>>();
+    assert_eq!(
+        targets(&a.tracks[0].lane_targets),
+        [("gain_db".into(), "Volume".into()), ("pan".into(), "Pan".into()), ("sends.plate.gain_db".into(), "Send plate".into())]
+    );
+    assert_eq!(targets(&a.master.lane_targets), [("gain_db".to_string(), "Volume".to_string())]);
+    assert!(targets(&a.tracks[1].lane_targets).contains(&("effects.1.feedback_percent".into(), "delay Feedback".into())));
+    song.close();
+}
+
+#[test]
+fn the_person_builds_a_chain_and_turns_its_knobs() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let drums = Row::Track { key: start.tracks[0].key };
+    let kinds = |a: &aaw_ffi::Arrangement, track: usize| a.tracks[track].effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>();
+
+    // An effect is added with its required fields at a place to start.
+    let made = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "compressor".into(), index: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Add compressor to tracks.drums"));
+    let compressor = &u.arrangement.tracks[0].effects[0];
+    assert_eq!(made, [compressor.key]);
+    assert_eq!(field(compressor, "threshold_db").value, number(-18.0));
+    // Any other track can key it.
+    assert_eq!(field(compressor, "sidechain").choices, ["perc"]);
+    song.edit(Edit::EffectSet { effect: made[0], field: "sidechain".into(), value: text("perc") }, None).unwrap();
+    assert_eq!(field(&update(&seen).arrangement.tracks[0].effects[0], "sidechain").value, text("perc"));
+
+    // A delay or reverb as an insert starts under the dry signal; on a return it is all wet.
+    let delay = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "delay".into(), index: Some(0) }, None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!(kinds(&u.arrangement, 0), ["delay", "compressor"]);
+    assert_eq!(field(&u.arrangement.tracks[0].effects[0], "mix_percent").value, number(25.0));
+    assert_eq!(field(&u.arrangement.tracks[0].effects[0], "time_beats").value, text("1/2"));
+    let plate = Row::Return { key: start.returns[0].key };
+    song.edit(Edit::EffectAdd { row: plate, kind: "delay".into(), index: None }, None).unwrap();
+    assert_eq!(field(&update(&seen).arrangement.returns[0].effects[1], "mix_percent").value, number(100.0));
+    for kind in ["filter", "eq", "limiter", "reverb"] {
+        song.edit(Edit::EffectAdd { row: Row::Master, kind: kind.into(), index: None }, None).unwrap();
+        update(&seen);
+    }
+    assert_eq!(song.arrangement().master.effects.len(), 4);
+
+    // A knob drag is one undo step, named for the whole move.
+    let set = |value: f64| Edit::EffectSet { effect: delay, field: "feedback_percent".into(), value: number(value) };
+    for value in [40.0, 52.5, 60.0] {
+        song.edit(set(value), Some("knob".into())).unwrap();
+    }
+    update(&seen);
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set tracks.drums.effects.0.feedback_percent: 35.0 → 60");
+    assert_eq!(field(&u.arrangement.tracks[0].effects[0], "feedback_percent").value, number(60.0));
+    // A beat is written as a fraction or a number, and an optional field can be left out again.
+    song.edit(Edit::EffectSet { effect: delay, field: "time_beats".into(), value: text("0.75") }, None).unwrap();
+    update(&seen);
+    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{delay}.time_beats")})), json!(0.75));
+    song.edit(Edit::EffectSet { effect: delay, field: "highcut_hz".into(), value: number(3000.0) }, None).unwrap();
+    assert_eq!(field(&update(&seen).arrangement.tracks[0].effects[0], "highcut_hz").value, number(3000.0));
+    song.edit(Edit::EffectSet { effect: delay, field: "highcut_hz".into(), value: FieldValue::Absent }, None).unwrap();
+    assert_eq!(field(&update(&seen).arrangement.tracks[0].effects[0], "highcut_hz").value, FieldValue::Absent);
+    let e = song.edit(set(200.0), None).unwrap_err().to_string();
+    assert!(e.contains("less than or equal to 95"), "{e}");
+
+    // Bypass, reorder and remove, by the effect's key.
+    song.edit(Edit::EffectBypass { effect: delay, on: true }, None).unwrap();
+    assert!(update(&seen).arrangement.tracks[0].effects[0].bypass);
+    song.edit(Edit::EffectMove { effect: delay, index: 1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(kinds(&u.arrangement, 0), ["compressor", "delay"]);
+    assert_eq!(u.arrangement.tracks[0].effects[1].key, delay);
+    song.edit(Edit::EffectRemove { effect: delay }, None).unwrap();
+    assert_eq!(kinds(&update(&seen).arrangement, 0), ["compressor"]);
+    song.undo().unwrap();
+    assert_eq!(kinds(&update(&seen).arrangement, 0), ["compressor", "delay"]);
+    song.close();
+}
+
+#[test]
+fn lanes_and_points_are_edited_by_key() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let perc = Row::Track { key: start.tracks[1].key };
+    let lane = |u: &Update, track: usize, index: usize| -> LaneView { u.arrangement.tracks[track].lanes[index].clone() };
+    let points = |l: &LaneView| l.points.iter().map(|p| (p.at, p.value, p.hold)).collect::<Vec<_>>();
+
+    // A new lane holds the value the parameter has, which changes nothing.
+    song.edit(Edit::LaneAdd { row: perc.clone(), param: "gain_db".into() }, None).unwrap();
+    let u = update(&seen);
+    let volume = lane(&u, 1, 0);
+    assert_eq!((volume.label.as_str(), volume.unit.as_str(), volume.min, volume.max, volume.log), ("Volume", "dB", -60.0, 6.0, false));
+    assert_eq!(points(&volume), [(0.0, -3.0, false)]);
+    assert!(!u.arrangement.tracks[1].lane_targets.iter().any(|t| t.param == "gain_db"));
+
+    // Points land in time order wherever they are added, on exact beats.
+    let late = song.edit(Edit::PointAdd { lane: volume.key, at: 16.0, value: -12.0 }, None).unwrap()[0];
+    update(&seen);
+    let mid = song.edit(Edit::PointAdd { lane: volume.key, at: 8.25, value: -6.0 }, None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!(points(&lane(&u, 1, 0)), [(0.0, -3.0, false), (8.25, -6.0, false), (16.0, -12.0, false)]);
+    assert_eq!(lane(&u, 1, 0).points[1].key, mid);
+    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{mid}.at")})), json!(8.25));
+
+    // A dragged point is one undo step; moved past another, it stays in order.
+    for (at, value) in [(10.0, -8.0), (20.0, -9.0)] {
+        song.edit(Edit::PointSet { point: mid, at: Some(at), value: Some(value), hold: None }, Some("point".into())).unwrap();
+    }
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!(points(&lane(&u, 1, 0)), [(0.0, -3.0, false), (16.0, -12.0, false), (20.0, -9.0, false)]);
+    assert_eq!(lane(&u, 1, 0).points[2].key, mid);
+    song.edit(Edit::PointSet { point: late, at: None, value: None, hold: Some(true) }, None).unwrap();
+    assert_eq!(points(&lane(&update(&seen), 1, 0))[1], (16.0, -12.0, true));
+    song.undo().unwrap();
+    update(&seen);
+    song.undo().unwrap();
+    assert_eq!(points(&lane(&update(&seen), 1, 0))[1], (8.25, -6.0, false));
+    // A point past the session end, or a value out of range, is refused.
+    assert!(song.edit(Edit::PointAdd { lane: volume.key, at: 40.0, value: 0.0 }, None).is_err());
+    assert!(song.edit(Edit::PointSet { point: mid, at: None, value: Some(99.0), hold: None }, None).is_err());
+
+    // An effect's knob: the field shows its lane, on the knob's own range.
+    let filter = start.tracks[1].effects[0].key;
+    song.edit(Edit::LaneAdd { row: perc.clone(), param: "effects.0.cutoff_hz".into() }, None).unwrap();
+    let u = update(&seen);
+    let sweep = lane(&u, 1, 1);
+    assert_eq!((sweep.label.as_str(), sweep.unit.as_str(), sweep.min, sweep.max, sweep.log), ("filter Cutoff", "Hz", 10.0, 20000.0, true));
+    assert_eq!(points(&sweep), [(0.0, 800.0, false)]);
+    let cutoff = field(&u.arrangement.tracks[1].effects[0], "cutoff_hz").clone();
+    assert_eq!((u.arrangement.tracks[1].effects[0].key, cutoff.lane), (filter, Some(sweep.key)));
+
+    // A lane goes when it is removed, or with its last point.
+    song.edit(Edit::LaneRemove { lane: sweep.key }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].lanes.len(), 1);
+    for point in lane(&u, 1, 0).points {
+        song.edit(Edit::PointRemove { point: point.key }, None).unwrap();
+        update(&seen);
+    }
+    assert!(song.arrangement().tracks[1].lanes.is_empty());
+    song.close();
+}
+
+#[test]
+fn equalizer_bands_come_and_go_with_their_lanes() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let drums = Row::Track { key: start.tracks[0].key };
+    let eq = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "eq".into(), index: None }, None).unwrap()[0];
+    let u = update(&seen);
+    let e = &u.arrangement.tracks[0].effects[0];
+    assert_eq!((e.bands, e.fields.len()), (1, 4));
+    assert_eq!(e.fields.iter().map(|f| (f.name.as_str(), f.band)).collect::<Vec<_>>()[..2], [("bands.0.shape", Some(0)), ("bands.0.freq_hz", Some(0))]);
+    assert_eq!((field(e, "bands.0.gain_db").value.clone(), field(e, "bands.0.q").value.clone()), (number(0.0), number(0.71)));
+    for _ in 0..2 {
+        song.edit(Edit::BandAdd { effect: eq }, None).unwrap();
+        assert_eq!(update(&seen).change.label, "Add a band to an equalizer");
+    }
+    for (band, hz) in [(0, 200.0), (1, 1200.0), (2, 5000.0)] {
+        song.edit(Edit::EffectSet { effect: eq, field: format!("bands.{band}.freq_hz"), value: number(hz) }, None).unwrap();
+        update(&seen);
+    }
+    song.edit(Edit::EffectSet { effect: eq, field: "bands.2.shape".into(), value: text("high_shelf") }, None).unwrap();
+    update(&seen);
+    for param in ["effects.0.bands.1.gain_db", "effects.0.bands.2.gain_db", "effects.0.bands.2.freq_hz"] {
+        song.edit(Edit::LaneAdd { row: drums.clone(), param: param.into() }, None).unwrap();
+        update(&seen);
+    }
+    assert_eq!(song.arrangement().tracks[0].lanes[1].label, "eq band 3 Gain");
+
+    // Removing the middle band takes its lane, and the last band's lanes follow it down.
+    song.edit(Edit::BandRemove { effect: eq, band: 1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Remove band 2 of an equalizer"));
+    let e = &u.arrangement.tracks[0].effects[0];
+    assert_eq!(e.bands, 2);
+    assert_eq!((field(e, "bands.1.freq_hz").value.clone(), field(e, "bands.1.shape").value.clone()), (number(5000.0), text("high_shelf")));
+    let lanes: Vec<(String, f64)> = u.arrangement.tracks[0].lanes.iter().map(|l| (l.param.clone(), l.points[0].value)).collect();
+    assert_eq!(lanes, [("effects.0.bands.1.gain_db".to_string(), 0.0), ("effects.0.bands.1.freq_hz".to_string(), 5000.0)]);
+    assert!(field(e, "bands.1.freq_hz").lane.is_some() && field(e, "bands.0.gain_db").lane.is_none());
+    // One step, which undo takes back whole.
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.tracks[0].effects[0].bands, u.arrangement.tracks[0].lanes.len()), (3, 3));
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.drums.automation.0.param"})), json!("effects.0.bands.1.gain_db"));
+    song.close();
 }

@@ -5,6 +5,7 @@
 //! `project_sha256` is the same, so `--expect` SHAs and render reports carry over.
 
 pub mod beat;
+pub mod describe;
 pub mod hash;
 pub mod pyfmt;
 pub mod rules;

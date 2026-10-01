@@ -1,12 +1,16 @@
 //! The transport's player: program swaps mid-playback, stops, locates and loop
-//! jumps, checked against plain renders, and never allocating.
+//! jumps, checked against plain renders, and never allocating. With effects:
+//! edits that glide instead of clicking, tails that ring through edits, stops
+//! and locates, and a stream that rests once it is silent.
 
 mod common;
 
 use aaw_engine::player::{channel, Control, Player, FADE_SECONDS};
-use aaw_engine::program::Program;
+use aaw_engine::program::{compile_cached, Cache, Program};
 use aaw_engine::render::{Frame, Renderer};
-use common::{program, song, write_song};
+use common::{program, song, write_mix_song, write_sample, write_song};
+use std::f64::consts::PI;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 #[global_allocator]
@@ -16,12 +20,12 @@ fn fade(p: &Program) -> usize {
     (FADE_SECONDS * p.rate as f64).round() as usize
 }
 
-/// A plain render of `n` frames from `from`.
+/// A plain render of `n` frames of the stream with the transport from `from`.
 fn plain(p: &Arc<Program>, from: usize, n: usize) -> Vec<Frame> {
     let mut r = Renderer::new(p.clone(), from, 4096);
     let mut out = vec![[0.0; 2]; n];
     for chunk in out.chunks_mut(4096) {
-        r.process(chunk, |_, _| {});
+        r.render(chunk, |_, _, _| {});
     }
     out
 }
@@ -45,6 +49,23 @@ fn max_diff(a: &[Frame], b: &[Frame]) -> f64 {
         .fold(0.0, f64::max)
 }
 
+/// The largest step between one frame and the next.
+fn steepest(x: &[Frame]) -> f64 {
+    x.windows(2)
+        .map(|w| (w[1][0] - w[0][0]).abs().max((w[1][1] - w[0][1]).abs()))
+        .fold(0.0, f64::max)
+}
+
+/// The largest step as a share of the peak: a click is a step far larger than
+/// a signal of that level makes on its own.
+fn roughness(x: &[Frame]) -> f64 {
+    steepest(x) / peak(x)
+}
+
+fn peak(x: &[Frame]) -> f64 {
+    x.iter().fold(0.0, |m, f| m.max(f[0].abs()).max(f[1].abs()))
+}
+
 fn started(p: &Arc<Program>, from: usize) -> (Control, Player) {
     let (mut control, player) = channel(p.clone());
     control.play(from).unwrap();
@@ -64,6 +85,21 @@ fn playing_from_the_start_equals_a_render() {
 }
 
 #[test]
+fn a_song_with_latency_plays_as_its_render_that_much_later() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = program(&write_mix_song(dir.path()), |_| {});
+    assert_eq!(p.latency, 216);
+    let (control, mut player) = started(&p, 0);
+    let out = pull(&mut player, p.total + p.latency + 128);
+    assert_eq!(&out[..p.total + p.latency], &plain(&p, 0, p.total + p.latency)[..]);
+    assert!(out[..p.latency].iter().all(|f| *f == [0.0; 2]));
+    assert!(peak(&out[p.latency..]) > 0.01);
+    assert!(!player.playing(), "stops once the last frame has come out");
+    // The playhead is where the output is.
+    assert_eq!(control.position(), p.total);
+}
+
+#[test]
 fn playing_mid_song_fades_in_only_the_sounding_voices() {
     let dir = tempfile::tempdir().unwrap();
     let p = song(dir.path());
@@ -79,13 +115,14 @@ fn playing_mid_song_fades_in_only_the_sounding_voices() {
 #[test]
 fn swapping_in_the_same_song_changes_nothing() {
     let dir = tempfile::tempdir().unwrap();
-    let path = write_song(dir.path());
-    let p = program(&path, |_| {});
-    let (mut control, mut player) = started(&p, 0);
-    let mut out = pull(&mut player, 30000);
-    control.load(program(&path, |_| {})).unwrap();
-    out.extend(pull(&mut player, 100000));
-    assert!(max_diff(&out, &plain(&p, 0, 130000)) < 1e-15);
+    for path in [write_song(dir.path()), write_mix_song(dir.path())] {
+        let p = program(&path, |_| {});
+        let (mut control, mut player) = started(&p, 0);
+        let mut out = pull(&mut player, 30000);
+        control.load(program(&path, |_| {})).unwrap();
+        out.extend(pull(&mut player, 100000));
+        assert!(max_diff(&out, &plain(&p, 0, 130000)) < 1e-12);
+    }
 }
 
 #[test]
@@ -104,7 +141,8 @@ fn an_edit_is_heard_after_the_crossfade() {
     let f = fade(&before);
     assert_eq!(&head[..], &plain(&before, 0, 40000)[..]);
     assert_eq!(&tail[f..], &plain(&after, 40000 + f, 100000 - f)[..]);
-    // Within the crossfade the output moves between the two versions.
+    // Within the fade the level glides and the moved clip's voices ring out
+    // under the new ones, which is a crossfade between the two versions.
     let (old, new) = (plain(&before, 40000, f), plain(&after, 40000, f));
     for k in 0..f {
         let g = (f - k) as f64 / f as f64;
@@ -179,15 +217,31 @@ fn locating_while_playing_rings_out_the_old_position() {
 #[test]
 fn many_swaps_and_moves_never_allocate_or_leak() {
     let dir = tempfile::tempdir().unwrap();
-    let path = write_song(dir.path());
-    let versions: Vec<Arc<Program>> = (0..4)
-        .map(|i| program(&path, |p| p.tracks[0].gain_db = -(i as f64)))
+    let voices = write_song(dir.path());
+    let mut versions: Vec<Arc<Program>> = (0..4)
+        .map(|i| program(&voices, |p| p.tracks[0].gain_db = -(i as f64)))
         .collect();
     let (mut control, mut player) = started(&versions[0], 0);
+    // With effects: levels, a moved clip, and devices bypassed and back, which
+    // changes the structure and the latency.
+    let mix = write_mix_song(dir.path());
+    let mut cache = Cache::default();
+    for i in 0..6 {
+        let mut p = aaw_model::load(&mix, true).unwrap();
+        p.tracks[1].gain_db = -(i as f64);
+        if i % 2 == 1 {
+            p.tracks[0].clips[0].at = aaw_model::Beat::int(2);
+        }
+        if i % 3 == 2 {
+            p.master.effects.clear();
+            p.returns[0].effects.pop();
+        }
+        versions.push(Arc::new(compile_cached(&p, dir.path(), &mut cache).unwrap()));
+    }
     control.set_loop(Some((10000, 200000))).unwrap();
-    for i in 0..200 {
+    for i in 0..400 {
         // Deck building allocates on this thread; `pull` asserts the player does not.
-        control.load(versions[i % 4].clone()).unwrap();
+        control.load(versions[if i < 100 { i % 4 } else { 4 + i % 6 }].clone()).unwrap();
         if i % 7 == 0 {
             control.locate(i * 997 % 300000).unwrap();
         }
@@ -199,4 +253,215 @@ fn many_swaps_and_moves_never_allocate_or_leak() {
         control.collect();
     }
     assert_eq!(control.shared().leaked.load(std::sync::atomic::Ordering::Relaxed), 0);
+}
+
+/// A song for hearing clicks: one sustained low tone through every effect, a
+/// reverb and a delay on returns and a master limiter. Its own output never
+/// steps far from one frame to the next.
+fn write_tone_song(dir: &Path) -> PathBuf {
+    let tone: Vec<[f32; 2]> = (0..4 * 48000).map(|i| [(0.4 * (2.0 * PI * 110.0 * i as f64 / 48000.0).sin()) as f32; 2]).collect();
+    write_sample(dir, "long.wav", tone, 48000);
+    let yaml = r#"
+session: {tempo: 120, length_beats: 8, master_gain_db: -6}
+samples:
+  long: {path: long.wav}
+  hit: {path: long.wav}
+patterns:
+  drone: {length_beats: 8, events: [{at: 0, pad: t, duration: 8}]}
+  pulse: {length_beats: 8, events: [{at: 6, pad: t, duration: 1}]}
+tracks:
+- id: drone
+  pads: {t: {sample: long, mode: gate, attack_ms: 20, release_ms: 50}}
+  clips: [{pattern: drone}]
+  effects:
+  - {type: eq, bands: [{shape: bell, freq_hz: 110, gain_db: 3}]}
+  - {type: compressor, threshold_db: -20, ratio: 3}
+  - {type: filter, mode: lowpass, cutoff_hz: 2000, slope_db_per_octave: 24}
+  - {type: delay, time_beats: 1/3, feedback_percent: 30, mix_percent: 20, highcut_hz: 3000}
+  sends: [{to: room, gain_db: -12}]
+- id: pulse
+  mute: true
+  pads: {t: {sample: hit, mode: gate, attack_ms: 20, release_ms: 50}}
+  clips: [{pattern: pulse}]
+returns:
+- id: room
+  effects: [{type: reverb, decay_seconds: 0.8, mix_percent: 100}]
+- id: echo
+  effects: [{type: delay, time_beats: 1/2}]
+master:
+  effects: [{type: limiter, ceiling_db: -1}]
+"#;
+    let path = dir.join("tone.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    path
+}
+
+/// The tone song after `edit`, compiled through a cache as a host compiles.
+fn tone(path: &Path, cache: &mut Cache, edit: impl FnOnce(&mut aaw_model::Project)) -> Arc<Program> {
+    let mut p = aaw_model::load(path, true).unwrap();
+    edit(&mut p);
+    Arc::new(compile_cached(&p, path.parent().unwrap(), cache).unwrap())
+}
+
+#[test]
+fn dragging_levels_and_knobs_does_not_click() {
+    use aaw_model::Effect;
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_tone_song(dir.path());
+    let mut cache = Cache::default();
+    let base = tone(&path, &mut cache, |_| {});
+    let (_c, mut player) = started(&base, 0);
+    let reference = pull(&mut player, 3 * 48000);
+    let natural = roughness(&reference);
+    assert!(natural > 0.005 && natural < 0.05, "{natural}");
+    // A level stepped without a glide is several times rougher.
+    let mut stepped = reference.clone();
+    for f in &mut stepped[60000..] {
+        *f = [f[0] * 0.5, f[1] * 0.5];
+    }
+    assert!(roughness(&stepped) > natural * 8.0, "{} against {natural}", roughness(&stepped));
+
+    // Every level and knob moves a large step thirty times a second.
+    let (mut control, mut player) = started(&base, 0);
+    let mut out = pull(&mut player, 9600);
+    for step in 0..60 {
+        let up = step % 2 == 0;
+        let p = tone(&path, &mut cache, |p| {
+            let t = &mut p.tracks[0];
+            t.gain_db = if up { -9.0 } else { 0.0 };
+            t.pan = if up { 0.8 } else { -0.8 };
+            t.sends[0].gain_db = if up { -30.0 } else { -6.0 };
+            if step % 4 < 2 {
+                t.sends.push(aaw_model::Send {
+                    to: "echo".into(),
+                    gain_db: -6.0,
+                    pre_fader: step % 8 < 4,
+                });
+            }
+            for e in &mut t.effects {
+                match e {
+                    Effect::Eq(e) => e.bands[0].gain_db = if up { -9.0 } else { 9.0 },
+                    Effect::Compressor(c) => (c.threshold_db, c.makeup_db) = if up { (-40.0, 6.0) } else { (-10.0, -3.0) },
+                    Effect::Filter(f) => f.cutoff_hz = if up { 150.0 } else { 6000.0 },
+                    Effect::Delay(d) => (d.feedback_percent, d.mix_percent, d.highcut_hz) = if up { (70.0, 60.0, Some(800.0)) } else { (10.0, 5.0, Some(9000.0)) },
+                    _ => {}
+                }
+            }
+            let Effect::Reverb(r) = &mut p.returns[0].effects[0] else { panic!() };
+            r.mix_percent = if up { 40.0 } else { 100.0 };
+            p.returns[0].gain_db = if up { -12.0 } else { 0.0 };
+            p.session.master_gain_db = if up { -12.0 } else { -6.0 };
+            p.tracks[1].mute = step % 3 != 0;
+        });
+        assert_eq!(p.structure, base.structure, "levels and knobs keep the structure");
+        control.load(p).unwrap();
+        out.extend(pull(&mut player, 1600));
+    }
+    assert!(max_diff(&out[9600..], &reference[9600..out.len()]) > 0.05, "the edits are heard");
+    assert!(roughness(&out) < natural * 3.0, "{} against the song's own {natural}", roughness(&out));
+}
+
+#[test]
+fn a_tail_rings_through_an_edit_a_locate_and_a_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_tone_song(dir.path());
+    let mut cache = Cache::default();
+    // Only the pulse sounds, for a beat from beat 6, into the reverb alone.
+    let quiet = |p: &mut aaw_model::Project| {
+        p.tracks[0].clips.clear();
+        p.tracks[0].mute = true;
+        p.tracks[1].mute = false;
+        p.tracks[1].sends.push(aaw_model::Send {
+            to: "room".into(),
+            gain_db: 0.0,
+            pre_fader: false,
+        });
+        p.master.effects.clear();
+    };
+    let base = tone(&path, &mut cache, quiet);
+    let from = 7 * 24000 + 2400; // just after the pulse ends
+    let tail = |control: &mut dyn FnMut(&mut Control)| {
+        let (mut c, mut player) = started(&base, 6 * 24000);
+        let head = pull(&mut player, from - 6 * 24000);
+        control(&mut c);
+        (head, pull(&mut player, 12000))
+    };
+    let (head, reference) = tail(&mut |_| {});
+    assert!(peak(&head) > 0.05 && peak(&reference[..2400]) > 1e-3, "the reverb is ringing");
+
+    // An edit of another track's clips, a level and a tempo-free knob.
+    let edited = tone(&path, &mut cache, |p| {
+        quiet(p);
+        p.tracks[0].clips.push(aaw_model::Clip {
+            pattern: "drone".into(),
+            at: aaw_model::Beat::int(0),
+            repeats: 1,
+            velocity_scale: 0.5,
+        });
+    });
+    let (_, after_edit) = tail(&mut |c| c.load(edited.clone()).unwrap());
+    assert!(max_diff(&after_edit, &reference) < 1e-9, "the tail is cut or changed by {}", max_diff(&after_edit, &reference));
+
+    // A locate to silence: the voices move, the tail stays.
+    let (_, after_locate) = tail(&mut |c| c.locate(1000).unwrap());
+    assert!(max_diff(&after_locate, &reference) < 1e-9);
+
+    // A stop: the timeline stands still and the tail rings out.
+    let (_, after_stop) = tail(&mut |c| c.stop().unwrap());
+    assert!(max_diff(&after_stop[..4000], &reference[..4000]) < 1e-9);
+}
+
+#[test]
+fn a_change_of_structure_fades_through_silence_and_keeps_tails() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_tone_song(dir.path());
+    let mut cache = Cache::default();
+    let base = tone(&path, &mut cache, |_| {});
+    // A filter added before the delay, and the master limiter removed.
+    let changed = tone(&path, &mut cache, |p| {
+        p.tracks[0].effects.insert(
+            0,
+            aaw_model::Effect::Filter(aaw_model::Filter {
+                id: None,
+                mode: aaw_model::FilterMode::Highpass,
+                cutoff_hz: 60.0,
+                slope_db_per_octave: 12,
+                bypass: false,
+            }),
+        );
+        p.master.effects.clear();
+    });
+    assert_ne!(base.structure, changed.structure);
+    let (mut control, mut player) = started(&base, 0);
+    let head = pull(&mut player, 48000);
+    control.load(changed.clone()).unwrap();
+    let tail = pull(&mut player, 48000);
+    let f = fade(&base);
+    // The output falls to silence, where the programs change hands, and rises.
+    assert_eq!(tail[f], [0.0; 2]);
+    assert!(peak(&tail[..f / 2]) > 0.05 && peak(&tail[2 * f..3 * f]) > 0.05);
+    let all: Vec<Frame> = head.iter().chain(&tail).copied().collect();
+    assert!(steepest(&all[4800..]) < 0.03, "a step of {}", steepest(&all[4800..]));
+    // Devices that are still there kept their state: the delay's echoes of
+    // the first second are in the second, where a fresh program has none.
+    let fresh = plain(&changed, 48000, 48000);
+    assert!(max_diff(&tail[4 * f..], &fresh[4 * f..]) > 1e-3);
+}
+
+#[test]
+fn a_stopped_stream_rests_once_it_is_silent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_tone_song(dir.path());
+    let base = tone(&path, &mut Cache::default(), |_| {});
+    let (mut control, mut player) = started(&base, 0);
+    pull(&mut player, 48000);
+    control.stop().unwrap();
+    let out = pull(&mut player, 6 * 48000);
+    let f = fade(&base);
+    // The delays and the reverb ring on past the fade of the voices.
+    assert!(peak(&out[2 * f..24000]) > 1e-3);
+    assert!(out[5 * 48000..].iter().all(|x| *x == [0.0; 2]), "resting");
+    assert_eq!(player.position(), 48000);
+    control.play(0).unwrap();
+    assert!(peak(&pull(&mut player, 24000)) > 0.05);
 }

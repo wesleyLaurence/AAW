@@ -8,7 +8,7 @@
 //! with exit status 1, as the Python CLI does.
 
 use aaw_engine::offline::{render, RenderOptions};
-use aaw_engine::program::compile;
+use aaw_engine::program::{compile_cached, Cache};
 use aaw_engine::realtime::{benchmark, PlayOptions};
 use aaw_engine::schedule::schedule;
 use aaw_host::client::{self, Request};
@@ -631,7 +631,19 @@ fn run(cli: &Cli) -> Result<Json> {
                 let p = aaw_model::load(project, true).map_err(text)?;
                 let from_beat = aaw_model::beat(&Beat::Str(from.clone().unwrap_or_else(|| "0".into())))?;
                 let start = frame(&from_beat, p.session.tempo, p.session.sample_rate).max(0) as usize;
-                let program = Arc::new(compile(&p, project.parent().unwrap_or(Path::new(".")))?);
+                // What an edit costs the host before the audio thread has it: a
+                // compile with everything the last one made, and a renderer.
+                let directory = project.parent().unwrap_or(Path::new("."));
+                let mut cache = Cache::default();
+                let started = std::time::Instant::now();
+                let program = Arc::new(compile_cached(&p, directory, &mut cache)?);
+                let cold = started.elapsed();
+                let started = std::time::Instant::now();
+                compile_cached(&p, directory, &mut cache)?;
+                let warm = started.elapsed();
+                let started = std::time::Instant::now();
+                drop(aaw_engine::player::Deck::new(program.clone()));
+                let deck = started.elapsed();
                 if start >= program.total {
                     return Err("--from is at or after the session end".into());
                 }
@@ -640,7 +652,12 @@ fn run(cli: &Cli) -> Result<Json> {
                     seconds: *seconds,
                     buffer: *buffer,
                 };
-                return Ok(value(benchmark(program, &opts)));
+                let mut report = value(benchmark(program, &opts));
+                let ms = |d: std::time::Duration| json!((d.as_secs_f64() * 1e5).round() / 100.0);
+                report["compile_ms"] = ms(cold);
+                report["recompile_ms"] = ms(warm);
+                report["renderer_ms"] = ms(deck);
+                return Ok(report);
             }
             let play = PlayArgs {
                 seconds: *seconds,

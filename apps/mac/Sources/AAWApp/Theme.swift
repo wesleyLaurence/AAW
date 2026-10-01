@@ -44,6 +44,11 @@ enum Theme {
     static let mute = rgb(0xf2b134)
     static let solo = rgb(0x4aa8ff)
     static let section = rgb(0x4c525d)
+    /// An automation lane's line and points, and the mark of what has one.
+    static let automation = rgb(0xf0884a)
+    static let automationLane = gray(0.125)
+    /// The fill of a knob's bar in a device panel.
+    static let knob = rgb(0x4d6f96)
 
     /// Whose change it was, in the activity panel and on what it touched.
     static func color(of origin: Who) -> NSColor {

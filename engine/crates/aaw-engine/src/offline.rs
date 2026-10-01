@@ -1,15 +1,16 @@
 //! Offline export: the mix, stems, snapshot and `report.json` a render leaves, in
 //! the Python engine's formats so `daw listen` and `daw compare` read them.
 
-use crate::program::{compile, unsupported, Program};
-use crate::render::{Frame, Renderer};
+use crate::program::{amplitude, compile_scoped, Cache, Scope};
+use crate::render::{DeviceReport, Frame, Renderer};
 use crate::{sndfile, wav};
-use aaw_dsp::resample::{pairwise_sum, resample_poly};
+use aaw_dsp::resample::{pairwise_sum, Resampler};
 use aaw_model::pyfmt::{json_dumps, json_dumps_indent};
 use aaw_model::value::{dict, Value};
 use aaw_model::{frame, project_hash, Project};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -46,9 +47,18 @@ pub fn metrics(x: &[Frame], rate: u32) -> Value {
     let peak = flat.iter().fold(0.0f64, |m, v| m.max(v.abs()));
     let squares: Vec<f64> = flat.iter().map(|v| v * v).collect();
     let rms = if n > 0 { (pairwise_sum(&squares) / n as f64).sqrt() } else { 0.0 };
-    // Oversampled peak is an estimate, not a certified true-peak meter.
+    // Oversampled peak is an estimate, not a certified true-peak meter. The
+    // channels are resampled apart, as `resample_poly` does, and side by side.
     let true_peak = if n > 0 {
-        resample_poly(&flat, 2, 4, 1).iter().fold(0.0f64, |m, v| m.max(v.abs()))
+        let resampler = Resampler::new(4, 1);
+        let channel = |c: usize| {
+            let column: Vec<f64> = x.iter().map(|f| f[c]).collect();
+            resampler.apply(&column).iter().fold(0.0f64, |m, v| m.max(v.abs()))
+        };
+        std::thread::scope(|scope| {
+            let left = scope.spawn(|| channel(0));
+            channel(1).max(left.join().expect("the peak estimate panicked"))
+        })
     } else {
         0.0
     };
@@ -74,6 +84,23 @@ fn engine_hash() -> Result<String, String> {
     Ok(hex(&Sha256::digest(&bytes)))
 }
 
+/// A device's entry in the report, as `Device.report`.
+fn device_report(d: &DeviceReport) -> Value {
+    if d.bypass {
+        return dict(vec![("type", Value::str(d.kind)), ("bypass", Value::Bool(true))]);
+    }
+    let mut out = vec![("type", Value::str(d.kind)), ("latency_frames", Value::int(d.latency as i64))];
+    if !d.automated.is_empty() {
+        out.push(("automated", Value::List(d.automated.iter().map(|a| Value::str(a)).collect())));
+    }
+    if let Some(r) = &d.reduction {
+        out.push(("max_gain_reduction_db", Value::Float(r.max)));
+        out.push(("mean_gain_reduction_db", Value::Float(r.mean())));
+        out.push(("fraction_over_1db_reduction", Value::Float(r.fraction_over_1db())));
+    }
+    dict(out)
+}
+
 fn write_text(path: &Path, text: &str) -> Result<(), String> {
     aaw_model::atomic_write(path, text).map_err(|e| e.to_string())
 }
@@ -86,17 +113,10 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     }
     let before = Instant::now();
     let p: Project = aaw_model::load(path, true).map_err(|e| e.to_string())?;
-    let missing = unsupported(&p);
-    if !missing.is_empty() {
-        return Err(format!(
-            "The Rust engine does not render {} yet; use `uv run daw render`",
-            missing.join(", ")
-        ));
-    }
     let rate = p.session.sample_rate;
     let tempo = p.session.tempo;
     if let Some(t) = &opts.track {
-        if p.track(t).is_none() {
+        if p.track(t).is_none() && !p.returns.iter().any(|r| &r.id == t) {
             return Err(format!("Unknown track or return: {t}"));
         }
     }
@@ -125,40 +145,64 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         return Err("MVP render limit is 15 minutes".into());
     }
     let directory = path.parent().unwrap_or(Path::new("."));
-    let mut program: Program = compile(&p, directory)?;
-    // A track preview is that track's stem.
-    if let Some(t) = &opts.track {
-        program.tracks.retain(|x| &x.id == t);
-    }
-    let program = Arc::new(program);
-    let (first, last) = region.map_or((0, total as usize), |(a, b)| (a as usize, b as usize));
+    // A track or return preview is its stem: it needs the tracks that key or
+    // feed it, and omits the master chain.
+    let scope = opts.track.as_deref().map_or(Scope::Song, Scope::Channel);
+    let program = Arc::new(compile_scoped(&p, directory, &mut Cache::default(), scope)?);
+    let (first, last) = region.map_or((0, total), |(a, b)| (a, b));
+    let frames = (last - first).max(0) as usize;
+    let names = program.stems();
     let mut renderer = Renderer::new(program.clone(), 0, opts.block_size);
-    let mut mix: Vec<Frame> = Vec::with_capacity(last - first);
-    let mut stems: Vec<Vec<[f32; 2]>> = vec![Vec::with_capacity(last - first); program.tracks.len()];
-    let mut peaks = vec![0.0f64; program.tracks.len()];
+    let mut mix: Vec<Frame> = Vec::with_capacity(frames);
+    let mut stems: Vec<Vec<[f32; 2]>> = vec![Vec::with_capacity(frames); names.len()];
+    let mut peaks = vec![0.0f64; names.len()];
     let mut block = vec![[0.0; 2]; opts.block_size];
-    while renderer.position() < total as usize {
-        let at = renderer.position();
-        let n = opts.block_size.min(total as usize - at);
-        let lo = first.max(at).min(at + n) - at;
-        let hi = last.min(at + n).max(at) - at;
-        renderer.process(&mut block[..n], |ti, post| {
-            for (k, f) in post[lo..hi].iter().enumerate() {
-                let env = program.envelope(at + lo + k);
-                let x = [f[0] * env, f[1] * env];
-                peaks[ti] = peaks[ti].max(x[0].abs()).max(x[1].abs());
-                stems[ti].push([x[0] as f32, x[1] as f32]);
+    // The master gain and end fade, which stems carry as the mix does, for the
+    // frames of one block. Most stems of a block share its frames.
+    let mut envelope: (i64, Vec<f64>) = (0, Vec::with_capacity(opts.block_size));
+    let level = (!program.master.gain.moves()).then(|| amplitude(program.master.gain.value()));
+    let fill_envelope = |at: i64, n: usize, envelope: &mut (i64, Vec<f64>)| {
+        if envelope.0 == at && envelope.1.len() == n {
+            return;
+        }
+        envelope.0 = at;
+        envelope.1.clear();
+        envelope.1.extend((at..at + n as i64).map(|f| {
+            if f < 0 || f >= total {
+                return 0.0;
             }
+            program.fader(f as usize) * level.unwrap_or_else(|| amplitude(program.master.gain.at(f)))
+        }));
+    };
+    // The output trails the transport by the program's latency; rendering that
+    // much further brings out the session's last frames.
+    while !renderer.finished() {
+        let heard = renderer.heard();
+        let n = opts.block_size.min(program.total + program.latency - renderer.position());
+        renderer.render(&mut block[..n], |index, post, at| {
+            fill_envelope(at, post.len(), &mut envelope);
+            // The block's frames inside the region.
+            let lo = (first - at).clamp(0, post.len() as i64) as usize;
+            let hi = (last - at).clamp(0, post.len() as i64) as usize;
+            let mut peak = peaks[index];
+            stems[index].extend(post[lo..hi].iter().zip(&envelope.1[lo..hi]).map(|(f, env)| {
+                let x = [f[0] * env, f[1] * env];
+                peak = peak.max(x[0].abs()).max(x[1].abs());
+                [x[0] as f32, x[1] as f32]
+            }));
+            peaks[index] = peak;
         });
+        let lo = (first - heard).clamp(0, n as i64) as usize;
+        let hi = (last - heard).clamp(0, n as i64) as usize;
         mix.extend_from_slice(&block[lo..hi]);
     }
-    let report = metrics(&mix, rate as u32);
-    let finite = matches!(report.get("finite"), Some(Value::Bool(true)));
-    let over = matches!(report.get("over_range_samples"), Some(Value::Int(n)) if *n != 0.into());
-    if !finite || over {
-        let Some(Value::Float(peak)) = report.get("peak_dbfs") else { unreachable!() };
+    // An unsafe mix writes nothing. Its other measurements wait until the
+    // files are written, beside them.
+    let peak = mix.iter().fold(0.0f64, |m, f| m.max(f[0].abs()).max(f[1].abs()));
+    if peak >= 1.0 || !mix.iter().all(|f| f[0].is_finite() && f[1].is_finite()) {
         return Err(format!(
-            "Unsafe PCM export: peak {peak:.2} dBFS; lower master_gain_db or add a master limiter"
+            "Unsafe PCM export: peak {:.2} dBFS; lower master_gain_db or add a master limiter",
+            db(peak)
         ));
     }
     let fingerprint = project_hash(&p);
@@ -204,28 +248,84 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     }
     std::fs::create_dir_all(&output).map_err(|e| e.to_string())?;
     let mix_path = output.join("mix.wav");
-    wav::write_atomic(&mix_path, &wav::pcm24_wav_bytes(&mix, rate as u32))?;
+    // The mix's measurements, its file and the stems' files are made side by
+    // side: a few stems at a time, since each is held whole while it is hashed
+    // and written.
+    let next = AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get()).clamp(1, 4);
+    let (report, written, hashes) = std::thread::scope(|scope| {
+        let report = scope.spawn(|| metrics(&mix, rate as u32));
+        let written = scope.spawn(|| wav::write_atomic(&mix_path, &wav::pcm24_wav_bytes(&mix, rate as u32)));
+        let stems: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Relaxed);
+                        let Some(frames) = stems.get(i) else { break };
+                        let bytes = wav::float_wav_bytes(frames, rate as u32);
+                        let path = output.join("stems").join(format!("{}.wav", names[i].0));
+                        done.push((i, wav::write_atomic(&path, &bytes).map(|_| hex(&Sha256::digest(&bytes)))));
+                    }
+                    done
+                })
+            })
+            .collect();
+        let mut hashes: Vec<Result<String, String>> = vec![Err("The stem was not written".into()); names.len()];
+        for worker in stems {
+            for (i, hash) in worker.join().expect("a stem writer panicked") {
+                hashes[i] = hash;
+            }
+        }
+        (
+            report.join().expect("the measurements panicked"),
+            written.join().expect("the mix writer panicked"),
+            hashes,
+        )
+    });
+    written?;
+    let (track_effects, return_effects, master_effects) = renderer.report();
+    let effects = |chain: &[DeviceReport]| Value::List(chain.iter().map(device_report).collect());
+    let params = |lanes: &[String]| Value::List(lanes.iter().map(|l| Value::str(l)).collect());
     let mut track_reports = Vec::new();
-    // Stems are reported in document order.
+    let mut stem = |name: &str, fields: Vec<(&str, Value)>| -> Result<(), String> {
+        let index = names.iter().position(|(n, _)| *n == name).expect("a stem for each heard channel");
+        let mut entry = vec![
+            ("kind", Value::str(if names[index].1 { "return" } else { "track" })),
+            ("audio_sha256", Value::str(&hashes[index].clone()?)),
+            ("peak_dbfs", Value::Float(db(peaks[index]))),
+        ];
+        entry.extend(fields);
+        track_reports.push((name.to_string(), dict(entry)));
+        Ok(())
+    };
+    // Stems are reported in document order: tracks, then returns.
     for t in &p.tracks {
-        let Some(ti) = program.tracks.iter().position(|x| x.id == t.id) else {
+        let Some(ti) = program.tracks.iter().position(|x| x.id == t.id && x.in_mix) else {
             continue;
         };
-        let stem_path = output.join("stems").join(format!("{}.wav", t.id));
-        let bytes = wav::float_wav_bytes(&stems[ti], rate as u32);
-        wav::write_atomic(&stem_path, &bytes)?;
-        let events = program.tracks[ti].voices.len();
-        track_reports.push((
-            t.id.as_str(),
-            dict(vec![
-                ("kind", Value::str("track")),
-                ("audio_sha256", Value::str(&hex(&Sha256::digest(&bytes)))),
-                ("peak_dbfs", Value::Float(db(peaks[ti]))),
-                ("events", Value::int(events as i64)),
-                ("effects", Value::List(vec![])),
-            ]),
-        ));
+        let track = &program.tracks[ti];
+        let mut fields = vec![
+            ("events", Value::int(track.voices.len() as i64)),
+            ("effects", effects(&track_effects[ti])),
+        ];
+        if !track.automation.is_empty() {
+            fields.push(("automation", params(&track.automation)));
+        }
+        stem(&t.id, fields)?;
     }
+    for (ri, r) in program.returns.iter().enumerate() {
+        let mut fields = vec![
+            ("senders", Value::List(r.senders.iter().map(|s| Value::str(s)).collect())),
+            ("effects", effects(&return_effects[ri])),
+        ];
+        if !r.automation.is_empty() {
+            fields.push(("automation", params(&r.automation)));
+        }
+        stem(&r.id, fields)?;
+    }
+    let track_reports: Vec<(&str, Value)> = track_reports.iter().map(|(name, v)| (name.as_str(), v.clone())).collect();
+    let stems_sum = program.master.chain.devices.is_empty();
     let region_value = match region {
         Some((a, b)) => Value::List(vec![Value::int(a), Value::int(b)]),
         None => Value::None,
@@ -256,9 +356,9 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         ("tracks", dict(track_reports)),
         ("sections", Value::List(p.sections.iter().map(|s| s.dump(false)).collect())),
         ("tail_policy", Value::str("truncate at session length with explicit end fade")),
-        ("master_effects", Value::List(vec![])),
-        ("master_automation", Value::List(vec![])),
-        ("stems_sum_to_mix", Value::Bool(true)),
+        ("master_effects", effects(&master_effects)),
+        ("master_automation", params(&program.master.automation)),
+        ("stems_sum_to_mix", Value::Bool(stems_sum)),
         ("stem_policy", Value::str("post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, each return has its own stem; float WAV, same start and length")),
         ("send_policy", Value::str("post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks send nothing; returns are never solo-muted")),
         ("sidechain_policy", Value::str("key is the source track after its inserts, before its gain, pan, mute and solo")),

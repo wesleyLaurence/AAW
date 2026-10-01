@@ -1,4 +1,5 @@
 import CoreGraphics
+import Foundation
 
 /// Where the controls of a row's header are, for drawing them and for knowing
 /// what a click is on. Geometry only.
@@ -13,6 +14,14 @@ public struct HeaderLayout: Equatable {
         case name, mute, solo, volume, pan
         /// The send to the return at this place among the returns.
         case send(Int)
+        /// The mark that shows or hides the row's automation lanes.
+        case auto
+        /// The header of the lane at this place among the row's lanes, and
+        /// the mark that removes that lane.
+        case lane(Int)
+        case laneRemove(Int)
+        /// The mark under the lanes that adds one.
+        case laneAdd
         case body
     }
 
@@ -20,6 +29,10 @@ public struct HeaderLayout: Equatable {
     public static let sendHeight: CGFloat = 17
     /// Space under the last send.
     public static let sendPadding: CGFloat = 5
+    /// The height of one automation lane, and of the strip under the lanes
+    /// with the mark that adds one.
+    public static let laneHeight: CGFloat = 46
+    public static let laneAddHeight: CGFloat = 18
     public static let width: CGFloat = TimelineLayout.headerWidth - 1
 
     public var kind: Kind
@@ -29,12 +42,15 @@ public struct HeaderLayout: Equatable {
     public var sends: Int
     /// Whether the track has a fold mark, which it has when the song has returns.
     public var folds: Bool
+    /// The row's automation lanes while they are shown; nil while folded away.
+    public var lanes: Int?
 
-    public init(kind: Kind, top: CGFloat, sends: Int = 0, folds: Bool = false) {
+    public init(kind: Kind, top: CGFloat, sends: Int = 0, folds: Bool = false, lanes: Int? = nil) {
         self.kind = kind
         self.top = top
         self.sends = sends
         self.folds = folds
+        self.lanes = lanes
     }
 
     /// How much taller a track's header is with `sends` sends shown.
@@ -42,8 +58,19 @@ public struct HeaderLayout: Equatable {
         sends == 0 ? 0 : CGFloat(sends) * sendHeight + sendPadding
     }
 
-    public var height: CGFloat {
+    /// How much taller a row is with its lanes shown: the lanes, and the
+    /// strip that adds one.
+    public static func extraHeight(lanes: Int?) -> CGFloat {
+        lanes.map { CGFloat($0) * laneHeight + laneAddHeight } ?? 0
+    }
+
+    /// The row's height without its lanes.
+    public var baseHeight: CGFloat {
         kind == .track ? TimelineLayout.trackHeight + Self.extraHeight(sends: sends) : TimelineLayout.busHeight
+    }
+
+    public var height: CGFloat {
+        baseHeight + Self.extraHeight(lanes: lanes)
     }
 
     public var fold: CGRect {
@@ -54,9 +81,17 @@ public struct HeaderLayout: Equatable {
         switch kind {
         case .track:
             let left: CGFloat = folds ? 23 : 14
-            return CGRect(x: left, y: top + 5, width: mute.minX - 6 - left, height: 16)
+            return CGRect(x: left, y: top + 5, width: auto.minX - 6 - left, height: 16)
         case .bus, .master:
-            return CGRect(x: 14, y: top + 7, width: volume.minX - 6 - 14, height: 16)
+            return CGRect(x: 14, y: top + 7, width: auto.minX - 6 - 14, height: 16)
+        }
+    }
+
+    /// The mark that shows or hides the row's automation lanes.
+    public var auto: CGRect {
+        switch kind {
+        case .track: CGRect(x: Self.width - 64, y: top + 6, width: 16, height: 14)
+        case .bus, .master: CGRect(x: volume.minX - 20, y: top + 9, width: 16, height: 14)
         }
     }
 
@@ -115,8 +150,38 @@ public struct HeaderLayout: Equatable {
         CGRect(x: 156, y: send(index).minY + 2, width: Self.width - 8 - 156, height: 13)
     }
 
+    /// The header of the lane at `index`, beside the lane itself.
+    public func lane(_ index: Int) -> CGRect {
+        CGRect(x: 0, y: top + baseHeight + CGFloat(index) * Self.laneHeight, width: Self.width, height: Self.laneHeight)
+    }
+
+    public func laneName(_ index: Int) -> CGRect {
+        CGRect(x: 23, y: lane(index).minY + 5, width: Self.width - 23 - 28, height: 13)
+    }
+
+    /// The range the lane covers, under its name.
+    public func laneRange(_ index: Int) -> CGRect {
+        CGRect(x: 23, y: lane(index).minY + 22, width: Self.width - 23 - 8, height: 13)
+    }
+
+    public func laneRemove(_ index: Int) -> CGRect {
+        CGRect(x: Self.width - 22, y: lane(index).minY + 5, width: 14, height: 14)
+    }
+
+    /// The mark under the lanes that adds one.
+    public var laneAdd: CGRect {
+        CGRect(x: 23, y: top + baseHeight + CGFloat(lanes ?? 0) * Self.laneHeight + 2, width: 64, height: 14)
+    }
+
     /// What of the header is at a point of the view.
     public func part(at p: CGPoint) -> Part {
+        if auto.insetBy(dx: -1, dy: -2).contains(p) { return .auto }
+        if let lanes, p.y >= top + baseHeight {
+            for index in 0..<lanes where lane(index).contains(p) {
+                return laneRemove(index).insetBy(dx: -3, dy: -3).contains(p) ? .laneRemove(index) : .lane(index)
+            }
+            return laneAdd.insetBy(dx: -2, dy: -2).contains(p) ? .laneAdd : .body
+        }
         switch kind {
         case .track:
             if folds, fold.insetBy(dx: -4, dy: -4).contains(p) { return .fold }
@@ -166,5 +231,79 @@ public enum Fader {
     public static func text(pan: Double) -> String {
         let percent = Int((abs(pan) * 100).rounded())
         return percent == 0 ? "C" : (pan < 0 ? "L\(percent)" : "R\(percent)")
+    }
+}
+
+/// How a parameter maps to the height of an automation lane or the width of a
+/// knob's bar, and what a drag sets it to: linearly, or in equal ratios for a
+/// frequency.
+public struct ValueScale: Equatable {
+    public var min: Double
+    public var max: Double
+    public var log: Bool
+
+    /// Space kept clear above and below a lane's values, in points.
+    public static let inset: CGFloat = 7
+
+    public init(min: Double, max: Double, log: Bool) {
+        self.min = min
+        self.max = max
+        self.log = log && min > 0
+    }
+
+    /// How far up its range a value is, from 0 to 1. Values outside the range
+    /// are at its edge.
+    public func fraction(_ value: Double) -> Double {
+        guard max > min else { return 0 }
+        let v = Swift.min(Swift.max(value, min), max)
+        return log ? Foundation.log(v / min) / Foundation.log(max / min) : (v - min) / (max - min)
+    }
+
+    /// The value a fraction of the way up the range, on the scale's steps.
+    public func value(at fraction: Double) -> Double {
+        let f = Swift.min(Swift.max(fraction, 0), 1)
+        let raw = log ? min * pow(max / min, f) : min + (max - min) * f
+        return Swift.min(Swift.max(stepped(raw), min), max)
+    }
+
+    /// A value rounded as a person would set it: to three figures on a ratio
+    /// scale, else to a step of about a five-hundredth of the range.
+    public func stepped(_ value: Double) -> Double {
+        let step: Double
+        if log {
+            guard value > 0 else { return value }
+            step = pow(10, log10(value).rounded(.down) - 2)
+        } else {
+            step = pow(10, log10((max - min) / 200).rounded(.down))
+        }
+        return ((value / step).rounded() * step * 1e9).rounded() / 1e9
+    }
+
+    /// The y of a value in a lane's rectangle.
+    public func y(_ value: Double, in rect: CGRect) -> CGFloat {
+        rect.maxY - Self.inset - CGFloat(fraction(value)) * (rect.height - 2 * Self.inset)
+    }
+
+    /// The value at a y of a lane's rectangle.
+    public func value(atY y: CGFloat, in rect: CGRect) -> Double {
+        value(at: Double((rect.maxY - Self.inset - y) / (rect.height - 2 * Self.inset)))
+    }
+
+    /// A value with its unit, as a control shows it. A level that can be
+    /// negative shows its sign.
+    public static func text(_ value: Double, unit: String, signed: Bool = true) -> String {
+        func minus(_ s: String) -> String { s.replacingOccurrences(of: "-", with: "−") }
+        switch unit {
+        case "Hz":
+            if value >= 1000 { return String(format: "%.2f kHz", value / 1000) }
+            return String(format: value < 100 ? "%.1f Hz" : "%.0f Hz", value)
+        case "dB": return minus(String(format: signed ? "%+.1f dB" : "%.1f dB", value))
+        case "%": return String(format: "%.0f%%", value)
+        case "ms": return String(format: value < 10 ? "%.1f ms" : "%.0f ms", value)
+        case "s": return String(format: "%.2f s", value)
+        case ":1": return String(format: "%.1f:1", value)
+        case "": return minus(String(format: "%.2f", value))
+        default: return minus(String(format: "%g", value)) + " " + unit
+        }
     }
 }

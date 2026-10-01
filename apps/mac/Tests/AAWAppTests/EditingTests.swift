@@ -54,8 +54,11 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(part(track.pan), .pan)
         XCTAssertEqual(part(track.sendBar(0)), .send(0))
         XCTAssertEqual(part(track.sendName(1)), .send(1))
-        XCTAssertEqual(track.part(at: CGPoint(x: 150, y: 110)), .name, "the name reaches to the buttons")
+        XCTAssertEqual(part(track.auto), .auto)
+        XCTAssertEqual(track.part(at: CGPoint(x: 135, y: 110)), .name, "the name reaches to the buttons")
         XCTAssertEqual(track.part(at: CGPoint(x: 207, y: 130)), .body, "beside the pan")
+        XCTAssertFalse(track.name.intersects(track.auto))
+        XCTAssertFalse(track.auto.intersects(track.mute))
         XCTAssertLessThanOrEqual(track.send(1).maxY, 100 + track.height)
         XCTAssertFalse(track.name.intersects(track.mute))
         XCTAssertFalse(track.volume.intersects(track.pan))
@@ -75,6 +78,72 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(master.part(at: CGPoint(x: master.volume.midX, y: master.volume.midY)), .volume)
         XCTAssertEqual(master.part(at: CGPoint(x: 100, y: 315)), .name)
         XCTAssertGreaterThan(master.volume.maxX, bus.volume.maxX)
+        for row in [bus, master] {
+            XCTAssertEqual(row.part(at: CGPoint(x: row.auto.midX, y: row.auto.midY)), .auto)
+            XCTAssertFalse(row.auto.intersects(row.volume) || row.auto.intersects(row.name))
+        }
+    }
+
+    func testLanesFoldOutUnderARowWithTheirMarks() {
+        // Two sends, then three lanes and the strip that adds one.
+        let track = HeaderLayout(kind: .track, top: 100, sends: 2, folds: true, lanes: 3)
+        let base = TimelineLayout.trackHeight + 2 * HeaderLayout.sendHeight + HeaderLayout.sendPadding
+        XCTAssertEqual(track.baseHeight, base)
+        XCTAssertEqual(track.height, base + 3 * HeaderLayout.laneHeight + HeaderLayout.laneAddHeight)
+        XCTAssertEqual(track.lane(0).minY, 100 + base)
+        XCTAssertEqual(track.lane(2).maxY, 100 + base + 3 * HeaderLayout.laneHeight)
+        func part(_ rect: CGRect) -> HeaderLayout.Part { track.part(at: CGPoint(x: rect.midX, y: rect.midY)) }
+        XCTAssertEqual(part(track.laneName(1)), .lane(1))
+        XCTAssertEqual(part(track.laneRange(2)), .lane(2))
+        XCTAssertEqual(part(track.laneRemove(0)), .laneRemove(0))
+        XCTAssertEqual(part(track.laneAdd), .laneAdd)
+        XCTAssertEqual(part(track.sendBar(1)), .send(1), "the sends are above the lanes")
+        XCTAssertLessThanOrEqual(track.laneAdd.maxY, 100 + track.height)
+        // A row with its lanes shown and none yet has only the strip.
+        let empty = HeaderLayout(kind: .bus, top: 300, lanes: 0)
+        XCTAssertEqual(empty.height, TimelineLayout.busHeight + HeaderLayout.laneAddHeight)
+        XCTAssertEqual(empty.part(at: CGPoint(x: empty.laneAdd.midX, y: empty.laneAdd.midY)), .laneAdd)
+        XCTAssertEqual(HeaderLayout(kind: .bus, top: 300).height, TimelineLayout.busHeight)
+    }
+
+    func testAValueScaleMapsLevelsLinearlyAndFrequenciesInRatios() {
+        let level = ValueScale(min: -60, max: 6, log: false)
+        XCTAssertEqual(level.fraction(-27), 0.5, accuracy: 1e-9)
+        XCTAssertEqual(level.fraction(-96), 0, "values the song allows outside the range are at its edge")
+        XCTAssertEqual(level.value(at: 0.5), -27)
+        XCTAssertEqual(level.stepped(-5.7499999), -5.7, "tenths of a dB")
+        XCTAssertEqual(ValueScale(min: -1, max: 1, log: false).stepped(0.3049), 0.3, "hundredths of pan")
+        let cutoff = ValueScale(min: 10, max: 20000, log: true)
+        // Each octave is the same distance.
+        XCTAssertEqual(cutoff.fraction(400) - cutoff.fraction(200), cutoff.fraction(8000) - cutoff.fraction(4000), accuracy: 1e-9)
+        XCTAssertEqual(cutoff.value(at: 1), 20000)
+        XCTAssertEqual(cutoff.value(at: 0), 10)
+        XCTAssertEqual(cutoff.stepped(1234.56), 1230, "three figures")
+        XCTAssertEqual(cutoff.stepped(87.654), 87.7)
+        // In a lane, the top of the range is near the top, and a point goes back where it was put.
+        let rect = CGRect(x: 0, y: 200, width: 500, height: 45)
+        XCTAssertEqual(level.y(6, in: rect), 200 + ValueScale.inset)
+        XCTAssertEqual(level.y(-60, in: rect), 245 - ValueScale.inset)
+        XCTAssertEqual(level.value(atY: level.y(-12.3, in: rect), in: rect), -12.3)
+        XCTAssertEqual(level.value(atY: 0, in: rect), 6)
+        XCTAssertEqual(cutoff.value(atY: cutoff.y(1500, in: rect), in: rect), 1500)
+        XCTAssertEqual(ValueScale.text(1500, unit: "Hz"), "1.50 kHz")
+        XCTAssertEqual(ValueScale.text(87.7, unit: "Hz"), "87.7 Hz")
+        XCTAssertEqual(ValueScale.text(-4.5, unit: "dB"), "−4.5 dB")
+        XCTAssertEqual(ValueScale.text(35, unit: "%"), "35%")
+        XCTAssertEqual(ValueScale.text(0.71, unit: ""), "0.71")
+        XCTAssertEqual(ValueScale.text(4, unit: ":1"), "4.0:1")
+    }
+
+    func testAnAutomationPointSnapsToTheGridInsideTheSong() {
+        var l = layout()
+        XCTAssertEqual(l.snapped(9.7, free: false), 8, "a grid of bars")
+        XCTAssertEqual(l.snapped(63.9, free: false), 64, "a point may be at the song's end")
+        XCTAssertEqual(l.snapped(80, free: false), 64)
+        XCTAssertEqual(l.snapped(-3, free: true), 0)
+        XCTAssertEqual(l.snapped(9.70049, free: true), 9.7)
+        l.pixelsPerBeat = 60
+        XCTAssertEqual(l.snapped(9.7, free: false), 9.75)
     }
 
     func testLevelsFollowADragInSteps() {

@@ -87,9 +87,6 @@ pub struct Change {
     /// in the log, so the log holds its latest.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gesture: Option<String>,
-    /// Whether only mixer values changed, so playback needs no recompile.
-    #[serde(skip)]
-    pub mix: bool,
 }
 
 /// A file's identity on disk, to notice changes without reading it.
@@ -268,7 +265,6 @@ impl Session {
             project_sha256: self.doc.sha.clone(),
             time: now(),
             gesture: gesture.map(str::to_string),
-            mix: outcome.mix,
         };
         if gesture.is_some() && self.log.back().is_some_and(|c| c.gesture == change.gesture && c.origin == origin) {
             self.log.pop_back();
