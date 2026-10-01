@@ -187,5 +187,6 @@ key/chord detection, downbeat and swing detection, sample sustain looping, incre
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
 perception layer is implemented; see [perception.md](perception.md). Monophonic pitch
 and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md). The CLI is ready
-for agent-driven iterative use. Packaging the app is the remaining milestone of
-[Rust-Swift-Update.md](Rust-Swift-Update.md).
+for agent-driven iterative use. The milestones of
+[Rust-Swift-Update.md](Rust-Swift-Update.md) are done; the app is packaged as a
+bundle with `daw` inside it, and has not yet been signed with a Developer ID.

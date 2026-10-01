@@ -246,6 +246,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if panel.runModal() == .OK, let url = panel.url { openSong(url) }
     }
 
+    /// Links the bundle's `daw` onto the PATH, or says that it is.
+    @objc func installCommandLineTool(_ sender: Any?) {
+        CommandLineTool.offer()
+    }
+
     @objc private func openRecent(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { openSong(url) }
     }
@@ -376,7 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return item
     }
 
-    private func mainMenu() -> NSMenu {
+    func mainMenu() -> NSMenu {
         let main = NSMenu()
         func add(_ title: String, _ items: [NSMenuItem]) {
             let menu = NSMenu(title: title)
@@ -387,6 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         add("AAW", [
             item("About AAW", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            item("Install Command Line Tool…", #selector(installCommandLineTool(_:))),
             .separator(),
             item("Hide AAW", #selector(NSApplication.hide(_:)), "h"),
             item("Hide Others", #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]),

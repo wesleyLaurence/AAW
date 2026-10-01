@@ -126,7 +126,9 @@ x86_64-apple-darwin`.
 other the commands it does not own (`samples`, `listen`, `compare` and `check` run
 in Python), so either works for everything. `uv run daw` runs the release build, or
 the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
-or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`.
+or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`; its
+bundle holds a copy of the binary, which **Install Command Line Tool…** in the app's
+menu links onto the PATH as `daw`.
 
 ## Agent workflow
 
