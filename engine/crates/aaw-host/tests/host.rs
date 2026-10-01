@@ -5,7 +5,7 @@ mod common;
 
 use aaw_host::client::{self, Request};
 use aaw_host::command::{Command, Origin};
-use aaw_host::host::{self, Options};
+use aaw_host::host::{self, Event, Options, TransportState};
 use aaw_host::registry;
 use common::{cmd, write_song};
 use serde_json::{json, Value as Json};
@@ -61,6 +61,7 @@ impl Running {
                     exit_on_stop: false,
                     seconds: None,
                     feed: false,
+                    prepare: false,
                 },
                 s,
             )
@@ -179,6 +180,7 @@ fn one_host_per_project_and_stale_sockets_are_cleared() {
             exit_on_stop: false,
             seconds: None,
             feed: false,
+            prepare: false,
         },
         Arc::new(AtomicBool::new(true)),
     )
@@ -211,4 +213,88 @@ fn transport_settings_without_a_device() {
     assert!(h.send(json!({"op": "locate", "at": 40})).unwrap_err().contains("at or after the session end"));
     let _: Command = cmd(json!({"op": "stop"}));
     assert_eq!(h.send(json!({"op": "stop"})).unwrap()["playing"], json!(false));
+}
+
+/// The next event that is not a warning; warnings are collected.
+fn next(events: &std::sync::mpsc::Receiver<Event>, warnings: &mut Vec<String>) -> Event {
+    loop {
+        match events.recv_timeout(Duration::from_secs(10)).expect("an event") {
+            Event::Warning(w) => warnings.push(w),
+            other => return other,
+        }
+    }
+}
+
+#[test]
+fn an_embedded_host_reports_what_changes() {
+    registry_dir();
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    let options = || Options {
+        buffer: 128,
+        play: None,
+        exit_on_stop: false,
+        seconds: None,
+        feed: false,
+        prepare: true,
+    };
+    let (tx, events) = std::sync::mpsc::channel();
+    let running = host::spawn(&path, options(), move |e| {
+        let _ = tx.send(e);
+    })
+    .unwrap();
+    let mut warnings = Vec::new();
+    let Event::Opened(doc) = next(&events, &mut warnings) else {
+        panic!("the first event is the opened song")
+    };
+    assert_eq!(doc.project.tracks.len(), 2);
+    let stopped = |cue: f64, region| {
+        Event::Transport(TransportState {
+            playing: false,
+            cue,
+            region,
+        })
+    };
+    let transport = |e: Event| match e {
+        Event::Transport(t) => t,
+        _ => panic!("expected a transport event"),
+    };
+    assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(0.0, None)));
+
+    // An edit from another process arrives with its origin and the new song.
+    request(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -6}), Origin::Agent).unwrap();
+    let Event::Changed { change, doc } = next(&events, &mut warnings) else {
+        panic!("expected a change")
+    };
+    assert_eq!((change.revision, change.origin), (1, Origin::Agent));
+    assert_eq!(change.label, "Set tracks.drums.gain_db: 0.0 → -6");
+    assert_eq!(doc.project.tracks[0].gain_db, -6.0);
+    // `prepare` compiled the song, which found what the engine leaves out.
+    assert!(warnings.iter().any(|w| w.contains("playing without")), "{warnings:?}");
+
+    // Requests made in-process are answered as over the socket.
+    let ask = |j: Json| {
+        running.request(Request {
+            command: cmd(j),
+            origin: Origin::User,
+            expect: None,
+        })
+    };
+    assert_eq!(ask(json!({"op": "locate", "at": 8})).unwrap()["cue"], json!(8));
+    assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(8.0, None)));
+    ask(json!({"op": "loop", "start": 8, "length": 4})).unwrap();
+    assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(8.0, Some((8.0, 4.0)))));
+    assert!(ask(json!({"op": "locate", "at": 99})).unwrap_err().contains("session end"));
+    // No output has been opened, so there is no playhead yet.
+    assert!(running.clock().now().is_none());
+
+    // The project has one host, and a song that does not load is refused.
+    let e = host::spawn(&path, options(), |_| {}).err().unwrap();
+    assert!(e.contains("is already open in the host with pid"), "{e}");
+    assert!(host::spawn(&dir.path().join("missing.yaml"), options(), |_| {}).is_err());
+
+    let summary = running.close().unwrap();
+    assert_eq!(summary["revision"], json!(1));
+    assert!(matches!(next(&events, &mut warnings), Event::Closed));
+    assert!(request(&path, json!({"op": "status"}), Origin::Agent).unwrap().is_none());
 }
