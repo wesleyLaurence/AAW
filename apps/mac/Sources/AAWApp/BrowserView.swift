@@ -9,8 +9,9 @@ import SwiftUI
 @MainActor
 @Observable
 final class Browser {
-    /// The audio files a pad can play.
-    nonisolated static let extensions: Set<String> = ["wav", "aif", "aiff", "flac"]
+    /// The audio files a song takes: those a pad plays as they are, and
+    /// compressed ones, which the import decodes into the project.
+    nonisolated static let extensions: Set<String> = ["wav", "aif", "aiff", "flac", "m4a", "mp3"]
     nonisolated static let limit: UInt32 = 200
 
     /// The index, or nil when none was found for the song.

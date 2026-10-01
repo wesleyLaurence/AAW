@@ -22,6 +22,9 @@ first-principles review of the original design, written before the MVP.
 [design-notes-2026-09-30.md](design-notes-2026-09-30.md) collects unscheduled ideas for
 the app's agent panel, collaboration, the workspace and song layout, SONG.md and
 taste.md, skills, custom tools and devices, and what interface an agent works best in.
+[new-features-2026-10-01.md](new-features-2026-10-01.md) lists what editing a finished
+song from timecodes needs (decoding, a beat map, time stretch, audio regions, join
+checks, export and skills) and which of those are built.
 
 These documents capture the design conversation for an AI-native digital audio workstation: a DAW built to be operated by a coding agent (Claude Code, Codex) rather than by a human clicking a UI. The sampler MVP is now implemented; see [../README.md](../README.md) and [mvp.md](mvp.md) for the current build. The documents below remain the broader design draft. Read in this order:
 

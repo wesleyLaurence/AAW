@@ -22,6 +22,7 @@ const PROJECT: &[(&str, &str)] = &[
     ("steps", "x = velocity 100, digits 1–9 = scaled velocities, dot = rest. Whitespace and | ignored. grid is beats per cell; 1/4 = sixteenth note."),
     ("swing", "0.5 straight, 0.75 maximum; delays odd step cells. Explicit events are unswung."),
     ("pitch", "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. No pitch-preserving stretch. daw samples analyze measures pitch; import --root-note auto uses it; check warns when a declared root disagrees with the audio."),
+    ("samples", "sample.path is a file in the project that libsndfile reads: mono or stereo WAV, AIFF or FLAC. daw samples import copies such a file in, and decodes .m4a and .mp3 once to 32-bit float WAV, with the original's hash as source_sha256; a decoded file can peak a little above full scale. Copy-protected files cannot be decoded. check warns of a sample the engine cannot read."),
     ("gate", "Gate mode requires event.duration. Voice releases at note-off; it never sustains beyond sample length."),
     ("choke", "Pads sharing a choke_group within a track release on the next hit in that group."),
     ("mix", "gain_db is dB. pan is -1 left to +1 right. Mono pads use equal-power pan. Stereo pads/tracks use balance. mute wins over solo."),

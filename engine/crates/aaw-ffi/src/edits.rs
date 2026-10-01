@@ -804,6 +804,9 @@ pub fn commands(doc: &Doc, edit: &Edit) -> Result<Vec<Json>> {
                 None => {
                     let id = unique(&stem, |n| project.samples.contains_key(n));
                     let mut entry = json!({"path": asset.path, "sha256": asset.sha256, "source": asset.source});
+                    if let Some(sha) = &asset.source_sha256 {
+                        entry["source_sha256"] = json!(sha);
+                    }
                     if let Some(root) = &asset.root_note {
                         entry["root_note"] = json!(root);
                     }

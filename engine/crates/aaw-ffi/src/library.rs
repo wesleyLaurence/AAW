@@ -37,8 +37,10 @@ pub struct Asset {
     /// Relative to the song's folder.
     pub path: String,
     pub sha256: String,
-    /// The file it was copied from.
+    /// The file it was copied or decoded from.
     pub source: String,
+    /// The hash of that file, when the copy was decoded from it.
+    pub source_sha256: Option<String>,
     pub root_note: Option<String>,
 }
 
@@ -125,8 +127,9 @@ pub fn library_search(
 }
 
 /// Copies a sample file into the project of the song at `song`, leaving the
-/// original as it is, and returns the copy as the song would list it. A file
-/// already copied is not copied again. Blocks while Python runs.
+/// original as it is, and returns the copy as the song would list it. A
+/// compressed file is decoded to WAV there. A file already copied or decoded
+/// is not done again. Blocks while Python and a decoder run.
 #[uniffi::export]
 pub fn library_import(song: String, source: String, root_note: Option<String>) -> Result<Asset, SongError> {
     let mut args = vec!["import", source.as_str(), "--project", song.as_str(), "--copy-only"];
@@ -138,6 +141,7 @@ pub fn library_import(song: String, source: String, root_note: Option<String>) -
         path: text(&copied, "path"),
         sha256: text(&copied, "sha256"),
         source: text(&copied, "source"),
+        source_sha256: optional(&copied, "source_sha256"),
         root_note: optional(&copied, "root_note"),
     })
 }

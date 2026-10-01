@@ -86,7 +86,10 @@ def parser():
     aud.add_argument("sample")
     aud.add_argument("--output", type=Path, required=True)
     aud.add_argument("--seconds", type=float, default=8)
-    imp = ss.add_parser("import")
+    imp = ss.add_parser(
+        "import",
+        help="Copy a file into the project and add it to the song; .m4a and .mp3 are decoded to WAV",
+    )
     imp.add_argument("sample")
     imp.add_argument("--project", type=Path, required=True)
     imp.add_argument("--id", help="The sample's ID in the song")
@@ -185,16 +188,22 @@ def import_sample(a, source):
         project = load(a.project)
         if a.id in project["samples"]:
             raise ValueError(f"Sample ID already exists: {a.id}")
-    root_note, measured = a.root_note, None
+    root_note, measured, asset = a.root_note, None, None
     if root_note == "auto":
-        measured = library.analyze(a.db, source)["pitch"]
+        audio = source
+        if source.suffix.lower() in library.COMPRESSED:
+            # Pitch is measured from the decoded copy.
+            asset = library.import_asset(source, a.project.parent)
+            audio = a.project.parent / asset["path"]
+        measured = library.analyze(a.db, audio)["pitch"]
         if not measured["pitched"]:
             raise ValueError(
                 "No reliable pitch measured (confidence "
                 f"{measured['confidence']}); inspect the sample and pass --root-note"
             )
         root_note = measured["note"]
-    asset = library.import_asset(source, a.project.parent, root_note)
+    asset = asset or library.import_asset(source, a.project.parent)
+    asset["root_note"] = root_note
     if a.copy_only:
         result = dict(asset)
     else:
@@ -207,6 +216,13 @@ def import_sample(a, source):
             sha = project_hash(project)
             run_engine("apply", a.project, patch, "--expect", sha, "--label", label)
         result = {"sample_id": a.id, **asset}
+    if "source_sha256" in asset:
+        info = library.probe(a.project.parent / asset["path"])
+        result["decoded"] = {
+            "sample_rate": info.samplerate,
+            "channels": info.channels,
+            "duration": info.duration,
+        }
     if measured:
         result["measured_pitch"] = measured
         if abs(measured["cents"]) > 10:
@@ -226,16 +242,24 @@ def check(path):
 
 
 def root_notes(project, root):
-    """Compare each declared root_note with the pitch measured from its asset."""
+    """Compare each declared root_note with the pitch measured from its asset.
+
+    A sample the engine cannot read is a warning here and not a note to compare.
+    """
     from .analysis import compare_root, measure_pitch, PITCH_SECONDS
+    from .library import probe
     import soundfile as sf
 
     report, warnings = {}, []
     for name, sample in project["samples"].items():
+        path = root / sample["path"]
+        try:
+            info = probe(path)
+        except ValueError as e:
+            warnings.append(f"{name}: {e}; a render will fail")
+            continue
         if not sample["root_note"]:
             continue
-        path = root / sample["path"]
-        info = sf.info(path)
         x, sr = sf.read(
             path,
             frames=min(info.frames, round((PITCH_SECONDS + 5) * info.samplerate)),
