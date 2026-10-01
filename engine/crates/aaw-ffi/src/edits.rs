@@ -8,10 +8,10 @@ use aaw_host::command::beat_value;
 use aaw_host::session::{value_json, Doc};
 use aaw_host::tree::{self, handle_text, Item, Node, Step};
 use aaw_model::describe::{self, Initial};
-use aaw_model::rules::{target, Owner, TargetKind};
+use aaw_model::rules::{midi, note_name, target, Owner, TargetKind};
 use aaw_model::{Beat, Effect, Project};
 use num_rational::BigRational;
-use num_traits::Zero;
+use num_traits::{ToPrimitive, Zero};
 use serde_json::{json, Value as Json};
 
 /// A row of the arrangement.
@@ -76,6 +76,71 @@ pub enum Edit {
     },
     /// Removes a point; a lane's last point takes the lane with it.
     PointRemove { point: u64 },
+    /// Sets steps of a pad's row in a pattern to a level: 0 for none, 1 to 9
+    /// for the row's digits and 10 for an `x`. A pad gets a row with its
+    /// first step, and a row left without steps goes.
+    Steps {
+        pattern: String,
+        pad: String,
+        steps: Vec<u32>,
+        level: u32,
+    },
+    /// Adds an event to a pattern at a beat: on the pattern's grid, exactly,
+    /// unless `free`. With `pitch` it has that note; `steps` is how many grid
+    /// steps a gated pad is held for. The event is what the edit makes.
+    EventAdd {
+        pattern: String,
+        pad: String,
+        at: f64,
+        free: bool,
+        pitch: Option<i32>,
+        steps: u32,
+    },
+    /// Moves an event later by `steps` grid steps and `by` beats, and up by
+    /// `semitones` from its note, or from its sample's root when it has none.
+    EventMove {
+        event: u64,
+        steps: i32,
+        by: f64,
+        semitones: i32,
+    },
+    /// Ends an event on a line of the pattern's grid: it is held from where
+    /// it starts to there.
+    EventEnd { event: u64, step: u32 },
+    /// Sets fields of an event. Beats are as typed, such as `1/3` or `0.75`;
+    /// an empty duration or note takes the field away.
+    EventSet {
+        event: u64,
+        at: Option<String>,
+        duration: Option<String>,
+        velocity: Option<u32>,
+        transpose: Option<f64>,
+        note: Option<String>,
+    },
+    EventRemove { event: u64 },
+    PatternSwing { pattern: String, swing: f64 },
+    /// Changes a pattern's length, as typed. Step rows grow or shrink with
+    /// it, and events past the new end go.
+    PatternLength { pattern: String, beats: String },
+    /// Changes the length of a pattern's steps, as typed, such as `1/8`. Step
+    /// rows are written on the new grid when their hits fall on it.
+    PatternGrid { pattern: String, grid: String },
+    /// Adds a clip of a new, empty pattern one bar long to a track. The clip
+    /// is what the edit makes.
+    ClipNew { track: u64, at: f64 },
+    /// Gives a clip a copy of its pattern, so that editing it leaves the
+    /// other clips that play the pattern as they are.
+    ClipOwnPattern { clip: u64 },
+    /// Adds a sample that `library::import` copied into the project, as a
+    /// pad of a track or, without one, of a new track at `index`. Pad and
+    /// track are named after `name` as far as IDs allow. A new track is what
+    /// the edit makes.
+    SampleAdd {
+        asset: crate::library::Asset,
+        name: String,
+        track: Option<u64>,
+        index: u32,
+    },
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -228,6 +293,116 @@ fn static_value(project: &Project, owner: Owner, param: &str) -> Result<f64> {
 fn free_name(project: &Project, stem: &str) -> String {
     let taken = |name: &str| project.tracks.iter().any(|t| t.id == name) || project.returns.iter().any(|r| r.id == name);
     (1..).map(|n| format!("{stem}-{n}")).find(|name| !taken(name)).expect("a free name")
+}
+
+/// `stem` if it is free, else the first free of `stem-2`, `stem-3`, ….
+fn unique(stem: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(stem) {
+        return stem.to_string();
+    }
+    (2..).map(|n| format!("{stem}-{n}")).find(|name| !taken(name)).expect("a free name")
+}
+
+/// A name as an ID allows it: lower-case letters, digits, `-` and `_`,
+/// starting with a letter, and not too long to read in a header.
+pub fn ident(name: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches('-');
+    let out = if out.starts_with(|c: char| c.is_ascii_lowercase()) { out.to_string() } else { format!("s-{out}") };
+    let out: String = out.chars().take(24).collect();
+    match out.trim_matches('-') {
+        "s" | "" => "sample".to_string(),
+        name => name.to_string(),
+    }
+}
+
+fn pattern<'a>(project: &'a Project, name: &str) -> Result<&'a aaw_model::Pattern> {
+    project.patterns.get(name).ok_or_else(|| format!("The song has no pattern {name}"))
+}
+
+/// An event in the song: its pattern's name, the pattern and the event.
+fn event<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'a str, &'a aaw_model::Pattern, &'a aaw_model::Event)> {
+    let gone = || "The event is no longer in the song".to_string();
+    match tree::find(tree, key).ok_or_else(gone)?.as_slice() {
+        [Step::Key(k), Step::Key(name), Step::Key(l), Step::Index(i)] if k == "patterns" && l == "events" => {
+            let (name, pattern) = project.patterns.get_key_value(name).ok_or_else(gone)?;
+            Ok((name.as_str(), pattern, pattern.events.get(*i).ok_or_else(gone)?))
+        }
+        _ => Err("That is not a pattern's event".into()),
+    }
+}
+
+/// A beat as typed: a number where it reads as one, else a fraction.
+fn typed_beat(text: &str) -> Json {
+    serde_json::from_str::<Json>(text.trim()).ok().filter(Json::is_number).unwrap_or(json!(text.trim()))
+}
+
+/// The exact beat a typed value names.
+fn typed_exact(text: &str) -> Result<BigRational> {
+    let value = match typed_beat(text) {
+        Json::Number(n) if n.is_i64() => Beat::Int(n.as_i64().unwrap_or(0).into()),
+        Json::Number(n) => Beat::Float(n.as_f64().unwrap_or(0.0)),
+        _ => Beat::Str(text.trim().to_string()),
+    };
+    aaw_model::beat(&value)
+}
+
+/// A step's level as a row writes it.
+fn step_char(level: u32) -> Result<char> {
+    match level {
+        0 => Ok('.'),
+        1..=9 => Ok(char::from_digit(level, 10).expect("a digit")),
+        10 => Ok('x'),
+        _ => Err(format!("A step's level is 0 to 10, not {level}")),
+    }
+}
+
+/// A step row written in groups of a beat where a beat is a few whole steps.
+fn row_text(cells: &[char], grid: &BigRational) -> String {
+    let per_beat = grid.recip();
+    let group = match per_beat.is_integer().then(|| per_beat.to_integer().to_usize()).flatten() {
+        Some(n) if (2..=8).contains(&n) => n,
+        _ => cells.len().max(1),
+    };
+    cells.chunks(group).map(|c| c.iter().collect::<String>()).collect::<Vec<_>>().join(" ")
+}
+
+/// How many steps a pattern of `length` has on `grid`, as its step rows need.
+fn step_count(length: &BigRational, grid: &BigRational) -> Result<usize> {
+    let steps = length / grid;
+    steps
+        .is_integer()
+        .then(|| steps.to_integer().to_usize())
+        .flatten()
+        .ok_or_else(|| "The pattern's length is not a whole number of steps, so it cannot have step rows".to_string())
+}
+
+/// The command that writes a step row, or with no steps left removes it.
+fn steps_command(name: &str, pad: &str, cells: &[char], grid: &BigRational, had: bool) -> Option<Json> {
+    if cells.iter().any(|c| *c != '.') {
+        Some(json!({"op": "pattern.steps", "pattern": name, "pad": pad, "row": row_text(cells, grid)}))
+    } else {
+        had.then(|| json!({"op": "pattern.steps", "pattern": name, "pad": pad}))
+    }
+}
+
+/// The root note of the sample a pattern's pad plays, as a MIDI number: on a
+/// track that plays the pattern, else on any track with such a pad.
+fn pad_root(project: &Project, pattern: &str, pad: &str) -> Option<i64> {
+    let root = |t: &aaw_model::Track| t.pads.get(pad).and_then(|p| crate::view::root(project, &p.sample));
+    let plays = |t: &&aaw_model::Track| t.clips.iter().any(|c| c.pattern == pattern);
+    project.tracks.iter().filter(plays).find_map(root).or_else(|| project.tracks.iter().find_map(root)).map(i64::from)
+}
+
+fn batch(commands: Vec<Json>, label: String) -> Vec<Json> {
+    vec![json!({"op": "batch", "commands": commands, "label": label})]
 }
 
 /// The commands that make `edit` on the song in `doc`: none when the edit
@@ -410,6 +585,250 @@ pub fn commands(doc: &Doc, edit: &Edit) -> Result<Vec<Json>> {
             Ok(vec![command])
         }
         Edit::PointRemove { point } => Ok(vec![json!({"op": "point.remove", "point": handle_text(*point)})]),
+        Edit::Steps { pattern: name, pad, steps, level } => {
+            let p = pattern(project, name)?;
+            let grid = p.grid_exact();
+            let count = step_count(&p.length_exact(), &grid)?;
+            let level = step_char(*level)?;
+            if let Some(step) = steps.iter().find(|s| **s as usize >= count) {
+                return Err(format!("Pattern {name} has {count} steps, so no step {}", step + 1));
+            }
+            // An existing row keeps its spaces and bar lines.
+            let written = match p.steps.get(pad) {
+                Some(row) => {
+                    let mut cell = 0;
+                    let row: String = row
+                        .chars()
+                        .map(|c| {
+                            if aaw_model::pyfmt::is_py_space(c) || c == '|' {
+                                return c;
+                            }
+                            cell += 1;
+                            if steps.contains(&(cell - 1)) { level } else { c }
+                        })
+                        .collect();
+                    if aaw_model::step_cells(&row).iter().any(|c| *c != '.') {
+                        Some(json!({"op": "pattern.steps", "pattern": name, "pad": pad, "row": row}))
+                    } else {
+                        Some(json!({"op": "pattern.steps", "pattern": name, "pad": pad}))
+                    }
+                }
+                None => {
+                    let cells: Vec<char> = (0..count as u32).map(|i| if steps.contains(&i) { level } else { '.' }).collect();
+                    steps_command(name, pad, &cells, &grid, false)
+                }
+            };
+            Ok(written.into_iter().collect())
+        }
+        Edit::EventAdd { pattern: name, pad, at, free, pitch, steps } => {
+            let p = pattern(project, name)?;
+            let grid = p.grid_exact();
+            let at = if *free {
+                aaw_model::beat(&Beat::Float(at.max(0.0)))?
+            } else {
+                // The nearest step that starts inside the pattern.
+                let step = (at.max(0.0) / grid.to_f64().unwrap_or(1.0)).round();
+                let last = ((p.length_exact() / &grid).ceil() - BigRational::from_integer(1.into())).max(BigRational::zero());
+                BigRational::from_float(step).unwrap_or_default().min(last) * &grid
+            };
+            let mut command = json!({"op": "event.add", "pattern": name, "at": beat(&at), "pad": pad});
+            if let Some(pitch) = pitch {
+                command["note"] = json!(note_name((*pitch).into())?);
+            }
+            if *steps > 0 {
+                command["duration"] = beat(&(grid * BigRational::from_integer((*steps).into())));
+            }
+            Ok(vec![command])
+        }
+        Edit::EventMove { event: key, steps, by, semitones } => {
+            if *steps == 0 && *by == 0.0 && *semitones == 0 {
+                return Ok(Vec::new());
+            }
+            let tree = doc.tree();
+            let (name, p, e) = event(project, &tree, *key)?;
+            let mut command = json!({"op": "event.set", "event": handle_text(*key)});
+            if *steps != 0 || *by != 0.0 {
+                let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
+                let by = if *by < 0.0 { -distance } else { distance };
+                let at = e.at_exact() + p.grid_exact() * BigRational::from_integer((*steps).into()) + by;
+                if at < BigRational::zero() {
+                    return Err("An event cannot start before its pattern".into());
+                }
+                command["at"] = beat(&at);
+            }
+            if *semitones != 0 {
+                let from = match e.note.as_deref().filter(|n| !n.is_empty()) {
+                    Some(note) => midi(note)?,
+                    None => pad_root(project, name, &e.pad)
+                        .ok_or_else(|| format!("Pad {} plays a sample without a root note, so its events have no pitch", e.pad))?,
+                };
+                command["note"] = json!(note_name(from + i64::from(*semitones))?);
+            }
+            Ok(vec![command])
+        }
+        Edit::EventEnd { event: key, step } => {
+            let tree = doc.tree();
+            let (_, p, e) = event(project, &tree, *key)?;
+            let duration = p.grid_exact() * BigRational::from_integer((*step).into()) - e.at_exact();
+            if duration <= BigRational::zero() {
+                return Err("An event ends after it starts".into());
+            }
+            Ok(vec![json!({"op": "event.set", "event": handle_text(*key), "duration": beat(&duration)})])
+        }
+        Edit::EventSet { event: key, at, duration, velocity, transpose, note } => {
+            let mut command = json!({"op": "event.set", "event": handle_text(*key)});
+            if let Some(at) = at {
+                command["at"] = typed_beat(at);
+            }
+            if let Some(duration) = duration {
+                command["duration"] = if duration.trim().is_empty() { Json::Null } else { typed_beat(duration) };
+            }
+            if let Some(velocity) = velocity {
+                command["velocity"] = json!(velocity);
+            }
+            if let Some(transpose) = transpose {
+                command["transpose"] = number(*transpose);
+            }
+            if let Some(note) = note {
+                command["note"] = if note.trim().is_empty() { Json::Null } else { json!(note.trim()) };
+            }
+            Ok(vec![command])
+        }
+        Edit::EventRemove { event } => Ok(vec![json!({"op": "event.remove", "event": handle_text(*event)})]),
+        Edit::PatternSwing { pattern: name, swing } => {
+            pattern(project, name)?;
+            Ok(vec![json!({"op": "set", "path": format!("patterns.{name}.swing"), "value": swing})])
+        }
+        Edit::PatternLength { pattern: name, beats } => {
+            let p = pattern(project, name)?;
+            let length = typed_exact(beats)?;
+            if length == p.length_exact() {
+                return Ok(Vec::new());
+            }
+            let grid = p.grid_exact();
+            let mut commands = vec![json!({"op": "set", "path": format!("patterns.{name}.length_beats"), "value": typed_beat(beats)})];
+            if !p.steps.is_empty() {
+                let count = step_count(&length, &grid)?;
+                for (pad, row) in &p.steps {
+                    let mut cells = aaw_model::step_cells(row);
+                    cells.resize(count, '.');
+                    commands.extend(steps_command(name, pad, &cells, &grid, true));
+                }
+            }
+            // Events past the new end go, last first so that the others keep their places.
+            let tree = doc.tree();
+            let events = tree.get("patterns").and_then(|n| n.get(name)).map(|n| items(n, "events")).unwrap_or(&[]);
+            for (e, item) in p.events.iter().zip(events).rev() {
+                if e.at_exact() >= length {
+                    commands.push(json!({"op": "event.remove", "event": handle_text(item.handle)}));
+                }
+            }
+            Ok(batch(commands, format!("Set the length of pattern {name} to {} beats", beats.trim())))
+        }
+        Edit::PatternGrid { pattern: name, grid } => {
+            let p = pattern(project, name)?;
+            let (old, new) = (p.grid_exact(), typed_exact(grid)?);
+            if new == old {
+                return Ok(Vec::new());
+            }
+            if new <= BigRational::zero() {
+                return Err("A step has a length".into());
+            }
+            let mut commands = vec![json!({"op": "set", "path": format!("patterns.{name}.grid"), "value": typed_beat(grid)})];
+            if !p.steps.is_empty() {
+                let count = step_count(&p.length_exact(), &new)?;
+                let ratio = &old / &new;
+                for (pad, row) in &p.steps {
+                    let cells = aaw_model::step_cells(row);
+                    let mut written = vec!['.'; count];
+                    for (i, c) in cells.iter().enumerate().filter(|(_, c)| **c != '.') {
+                        // Where the step falls on the new grid, if it does.
+                        let at = BigRational::from_integer(i.into()) * &ratio;
+                        let place = at.is_integer().then(|| at.to_integer().to_usize()).flatten().filter(|k| *k < count);
+                        let Some(k) = place else {
+                            return Err(format!("Step {} of {pad} does not fall on a grid of {} beats", i + 1, grid.trim()));
+                        };
+                        written[k] = *c;
+                    }
+                    commands.extend(steps_command(name, pad, &written, &new, true));
+                }
+            }
+            Ok(batch(commands, format!("Set the grid of pattern {name} to {} beats", grid.trim())))
+        }
+        Edit::ClipNew { track, at } => {
+            let tree = doc.tree();
+            let place = items(&tree, "tracks").iter().position(|i| i.handle == *track);
+            let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
+            let at = aaw_model::beat(&Beat::Float(at.max(0.0)))?;
+            // One bar, or what is left of the song.
+            let left = project.session.length_exact() - &at;
+            if left <= BigRational::zero() {
+                return Err("A clip starts inside the song".into());
+            }
+            let length = left.min(BigRational::from_integer(4.into()));
+            let name = (1..).map(|n| format!("{}-{n}", t.id)).find(|n| !project.patterns.contains_key(n)).expect("a free name");
+            Ok(batch(
+                vec![
+                    json!({"op": "pattern.add", "pattern": name, "length_beats": beat(&length)}),
+                    json!({"op": "clip.add", "track": handle_text(*track), "pattern": name, "at": beat(&at)}),
+                ],
+                format!("Add clip {name} to {}", t.id),
+            ))
+        }
+        Edit::ClipOwnPattern { clip: key } => {
+            let tree = doc.tree();
+            let at = placed(project, &tree, *key)?;
+            let j = items(&items(&tree, "tracks")[at.track].node, "clips").iter().position(|c| c.handle == *key).expect("the clip");
+            let from = &project.tracks[at.track].clips[j].pattern;
+            // A copy of `verse` is `verse-2`, and a copy of that `verse-3`.
+            let stem = match from.rsplit_once('-') {
+                Some((stem, n)) if !stem.is_empty() && !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) => stem,
+                _ => from.as_str(),
+            };
+            let to = (2..).map(|n| format!("{stem}-{n}")).find(|n| !project.patterns.contains_key(n)).expect("a free name");
+            Ok(batch(
+                vec![
+                    json!({"op": "pattern.duplicate", "pattern": from, "to": to}),
+                    json!({"op": "set", "path": format!("{}.pattern", clip(key)), "value": to}),
+                ],
+                format!("Give clip {from} at {} its own pattern {to}", beat(&at.start)),
+            ))
+        }
+        Edit::SampleAdd { asset, name, track, index } => {
+            let tree = doc.tree();
+            let stem = ident(name);
+            let mut commands = Vec::new();
+            // A file that is in the song already is the same sample.
+            let sample = match project.samples.iter().find(|(_, s)| s.path == asset.path) {
+                Some((id, _)) => id.clone(),
+                None => {
+                    let id = unique(&stem, |n| project.samples.contains_key(n));
+                    let mut entry = json!({"path": asset.path, "sha256": asset.sha256, "source": asset.source});
+                    if let Some(root) = &asset.root_note {
+                        entry["root_note"] = json!(root);
+                    }
+                    commands.push(json!({"op": "set", "path": format!("samples.{id}"), "value": entry}));
+                    id
+                }
+            };
+            let label = match track {
+                Some(key) => {
+                    let place = items(&tree, "tracks").iter().position(|i| i.handle == *key);
+                    let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
+                    let pad = unique(&stem, |n| t.pads.contains_key(n));
+                    commands.push(json!({"op": "pad.add", "track": handle_text(*key), "pad": pad, "sample": sample}));
+                    format!("Add pad {pad} to {}", t.id)
+                }
+                None => {
+                    let taken = |n: &str| project.tracks.iter().any(|t| t.id == n) || project.returns.iter().any(|r| r.id == n);
+                    let id = unique(&stem, taken);
+                    commands.push(json!({"op": "track.add", "id": id, "index": (*index as usize).min(project.tracks.len())}));
+                    commands.push(json!({"op": "pad.add", "track": id, "pad": stem, "sample": sample}));
+                    format!("Add track {id} with pad {stem}")
+                }
+            };
+            Ok(batch(commands, label))
+        }
     }
 }
 

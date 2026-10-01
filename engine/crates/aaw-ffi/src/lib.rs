@@ -5,7 +5,9 @@
 //! and its edits become the host's commands here.
 
 pub mod edits;
+pub mod library;
 pub mod view;
+pub mod waveform;
 
 use aaw_host::client::Request;
 use aaw_host::command::{Command, Origin};
@@ -16,6 +18,7 @@ use serde_json::{json, Value as Json};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 pub use view::{Arrangement, Touch};
+pub use waveform::Waveforms;
 
 uniffi::setup_scaffolding!();
 
@@ -151,6 +154,10 @@ pub trait SongObserver: Send + Sync {
     /// song.yaml holds an external edit that does not load, or it was fixed.
     fn invalid(&self, error: Option<String>);
     fn warning(&self, message: String);
+    /// The waveforms of a revision, after its `changed`: which audio each
+    /// track has, and peaks the app has not been sent. Called on a thread of
+    /// its own, in order.
+    fn waveforms(&self, waveforms: Waveforms);
     /// The host has saved and shut down, as after `daw close`.
     fn closed(&self);
 }
@@ -180,6 +187,7 @@ impl Song {
         let shown = latest.clone();
         let doc = Arc::new(Mutex::new(None::<Doc>));
         let current = doc.clone();
+        let waveforms = waveform::Worker::new(observer.clone());
         let options = Options {
             buffer: BUFFER,
             play: None,
@@ -205,6 +213,11 @@ impl Song {
                     undo: HistoryStep::from(history.undo),
                     redo: HistoryStep::from(history.redo),
                 });
+            }
+            Event::Compiled { revision, program } => {
+                if let Some(doc) = locked(&current).as_ref() {
+                    waveforms.compiled(revision, &program, doc);
+                }
             }
             Event::Transport(t) => observer.transport(TransportView {
                 playing: t.playing,
@@ -307,6 +320,12 @@ impl Song {
 
 fn closed() -> String {
     "The song is closed".into()
+}
+
+/// A MIDI number as a note name, such as `C3`, for a row of a pattern's notes.
+#[uniffi::export]
+pub fn note_name(midi: i32) -> String {
+    aaw_model::rules::note_name(midi.into()).unwrap_or_default()
 }
 
 /// The host's reason for refusing a command, as a person reads it: the

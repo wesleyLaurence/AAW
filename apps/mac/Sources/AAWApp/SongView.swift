@@ -1,8 +1,9 @@
 import AAWCore
 import SwiftUI
 
-/// A song's window: the transport bar over the arrangement and the devices of
-/// the selected row, with the activity panel beside them.
+/// A song's window: the transport bar over the arrangement and the detail
+/// panel, which shows the devices of the selected row or the pattern of the
+/// selected clip, with the sample browser and the activity panel beside them.
 struct SongView: View {
     let model: SongModel
 
@@ -18,11 +19,15 @@ struct SongView: View {
                 )
             }
             HStack(spacing: 0) {
+                if model.showsBrowser {
+                    BrowserView(model: model)
+                    Divider()
+                }
                 VStack(spacing: 0) {
                     ArrangementPane(model: model)
-                    if model.showsDevices {
+                    if model.showsDetail {
                         Divider()
-                        DeviceView(model: model)
+                        DetailView(model: model)
                     }
                 }
                 if model.showsActivity {
@@ -82,6 +87,13 @@ struct TransportBar: View {
         let a = model.arrangement
         let playing = model.transport.playing
         HStack(spacing: 12) {
+            Button {
+                model.showsBrowser.toggle()
+            } label: {
+                Image(systemName: "sidebar.left").frame(width: 18, height: 18)
+            }
+            .help("Show or hide the sample browser")
+
             Button {
                 model.togglePlay()
             } label: {

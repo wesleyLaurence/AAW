@@ -95,6 +95,54 @@ private struct ClipVisual {
     var y: Animated
     var alpha: Animated
     var removing = false
+    /// What the clip plays: its track's waveform from the beat the clip was
+    /// at when the waveform was made. It moves with the clip, and is replaced
+    /// when the host has worked out what the clip plays where it is now.
+    var wave: (peaks: Waveform, at: Double)?
+}
+
+/// Where a dragged sample would land.
+private enum DropTarget: Equatable {
+    /// As a pad of this track.
+    case track(UInt64)
+    /// As a new track after the others.
+    case newTrack
+}
+
+/// How long the arrangement took to draw each frame of a run of scrolling and
+/// zooming, in milliseconds, and how far apart the frames were.
+struct DrawTimes {
+    var draws: [Double] = []
+    var intervals: [Double] = []
+
+    private static func ms(_ x: Double) -> Double { (x * 100).rounded() / 100 }
+
+    private static func stats(_ values: [Double]) -> [String: Double] {
+        let sorted = values.sorted()
+        guard let last = sorted.last else { return [:] }
+        let pick = { (q: Double) in sorted[Int((Double(sorted.count - 1) * q).rounded())] }
+        return ["mean": ms(sorted.reduce(0, +) / Double(sorted.count)), "median": ms(pick(0.5)), "p95": ms(pick(0.95)), "max": ms(last)]
+    }
+
+    /// The report: what a draw took and the time between frames, with how
+    /// many draws took longer than a sixtieth of a second.
+    var report: [String: Any] {
+        [
+            "frames": draws.count,
+            "draw_ms": Self.stats(draws),
+            "interval_ms": Self.stats(intervals),
+            "draws_over_16_7_ms": draws.filter { $0 > 1000.0 / 60 }.count,
+        ]
+    }
+}
+
+/// A run of frames being measured.
+private struct Measuring {
+    var frames: Int
+    var left: Int
+    var times = DrawTimes()
+    var last: CFTimeInterval?
+    var then: @MainActor (DrawTimes) -> Void
 }
 
 private struct SliderDrag {
@@ -185,8 +233,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var layout = TimelineLayout()
     private var rows: [RowID: RowVisual] = [:]
     private var clips: [UInt64: ClipVisual] = [:]
+    /// The clips' keys in order, oldest first: the order they are drawn in.
+    /// Kept from frame to frame, since sorting a thousand clips costs more
+    /// than drawing them.
+    private var clipOrder: [UInt64] = []
     private var glows: [GlowKey: Glow] = [:]
-    private var colors: [UInt64: Int] = [:]
     private var link: CADisplayLink?
     private let playheadView = PlayheadView()
     private var fitted = false
@@ -198,6 +249,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var lanesShown: Set<RowID> = []
     private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
+    private var dropTarget: DropTarget?
+    private var measuring: Measuring?
 
     init(model: SongModel) {
         self.model = model
@@ -218,6 +271,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             guard let self else { return }
             self.window?.makeFirstResponder(self)
         }
+        model.onWaveforms = { [weak self] in self?.takeWaveforms() }
+        model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
+        registerForDraggedTypes([.fileURL, .string])
     }
 
     @available(*, unavailable)
@@ -258,12 +314,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     // MARK: Revisions
-
-    private func color(for track: UInt64) -> NSColor {
-        let index = colors[track] ?? colors.count
-        colors[track] = index
-        return Theme.palette[index % Theme.palette.count]
-    }
 
     private static func chain(_ effects: [EffectView]) -> String {
         effects.filter { !$0.bypass }.map(\.kind).joined(separator: " · ")
@@ -357,7 +407,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
 
         for track in a.tracks {
-            let color = color(for: track.key)
+            let color = model.color(of: track.key)
             let sends = unfolded.contains(track.key) ? a.returns.count : 0
             let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
                 + lanesHeight(.track(track.key), track.lanes)
@@ -414,6 +464,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         if !animated { dropRemoved(at: now) }
         if let renaming, !liveRows.contains(renaming.row) { endRename(commit: false) }
+        if clips.count != clipOrder.count || !liveClips.isSubset(of: clipOrder) { clipOrder = clips.keys.sorted() }
+        takeWaveforms()
 
         layout.contentHeight = y
         layout.beatsPerBar = Double(a.beatsPerBar)
@@ -442,6 +494,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         link?.isPaused = false
     }
 
+    /// Gives each clip the waveform of what it plays, for the tracks whose
+    /// waveforms have arrived for the revision shown. Until then a clip keeps
+    /// the one it had, which moves with it, and a new clip has none.
+    private func takeWaveforms() {
+        for track in model.arrangement.tracks {
+            guard let peaks = model.waveform(of: track.key) else { continue }
+            for clip in track.clips { clips[clip.key]?.wave = (peaks, clip.at) }
+        }
+        needsDisplay = true
+    }
+
     /// Puts back what was shown ahead of the host, after the host refused it.
     private func revert() {
         held.removeAll()
@@ -466,8 +529,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     private func dropRemoved(at now: CFTimeInterval) {
-        rows = rows.filter { !($0.value.removing && !$0.value.alpha.isRunning(at: now)) }
-        clips = clips.filter { !($0.value.removing && !$0.value.alpha.isRunning(at: now)) }
+        // Most frames have nothing to drop.
+        if rows.values.contains(where: { $0.removing && !$0.alpha.isRunning(at: now) }) {
+            rows = rows.filter { !($0.value.removing && !$0.value.alpha.isRunning(at: now)) }
+        }
+        if clips.values.contains(where: { $0.removing && !$0.alpha.isRunning(at: now) }) {
+            clips = clips.filter { !($0.value.removing && !$0.value.alpha.isRunning(at: now)) }
+            clipOrder = clips.keys.sorted()
+        }
     }
 
     // MARK: Frames
@@ -485,7 +554,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             heldPoints = heldPoints.filter { $0.value.until.map { now <= $0 } ?? true }
             needsDisplay = true
         }
-        var busy = !glows.isEmpty || held.values.contains { $0.until != nil } || heldPoints.values.contains { $0.until != nil }
+        var busy = stepMeasure(at: now) || !glows.isEmpty || held.values.contains { $0.until != nil }
+            || heldPoints.values.contains { $0.until != nil }
             || rows.values.contains {
                 $0.y.isRunning(at: now) || $0.height.isRunning(at: now) || $0.gain.isRunning(at: now)
                     || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now)
@@ -512,6 +582,50 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             needsDisplay = true
             link.isPaused = true
         }
+    }
+
+    // MARK: Measuring
+
+    /// Scrolls and zooms through the song for `frames` frames, timing each
+    /// draw, then reports the times.
+    private func measure(frames: Int, then: @escaping @MainActor (DrawTimes) -> Void) {
+        layout.fit()
+        measuring = Measuring(frames: max(3, frames), left: max(3, frames), then: then)
+        needsDisplay = true
+        link?.isPaused = false
+    }
+
+    /// Moves the view for the next measured frame: a third of the run zooming
+    /// in around the middle, a third scrolling through the song there, and a
+    /// third zooming back out. True while a run goes on.
+    private func stepMeasure(at now: CFTimeInterval) -> Bool {
+        guard var m = measuring else { return false }
+        if let last = m.last { m.times.intervals.append((now - last) * 1000) }
+        m.last = now
+        guard m.left > 0 else {
+            measuring = nil
+            layout.fit()
+            needsDisplay = true
+            m.then(m.times)
+            return false
+        }
+        let third = max(1, m.frames / 3)
+        let center = TimelineLayout.headerWidth + layout.lanesWidth / 2
+        switch (m.frames - m.left) / third {
+        case 0: layout.zoom(by: pow(8, 1 / CGFloat(third)), anchorX: center)
+        case 1:
+            // There and back, so that the last third zooms out from the middle.
+            let span = max(0, layout.contentWidth - layout.lanesWidth)
+            let step = 2 * span / CGFloat(third)
+            layout.scroll.x += (m.frames - m.left) % third < third / 2 ? step : -step
+            layout.scroll.y = layout.scroll.y == 0 ? 40 : 0
+            layout.clamp()
+        default: layout.zoom(by: pow(1 / 8, 1 / CGFloat(third)), anchorX: center)
+        }
+        m.left -= 1
+        measuring = m
+        needsDisplay = true
+        return true
     }
 
     private func placePlayhead(at beat: Double) {
@@ -674,9 +788,23 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
             clipDown(hit.clip, rect: hit.rect, at: p, event)
         } else {
+            let free = event.modifierFlags.contains(.option)
+            if event.clickCount == 2, let track = track(atLane: p) {
+                // Twice on an empty part of a track: a new clip in the grid
+                // step under the pointer, with a new pattern to fill in.
+                model.addClip(to: track, at: layout.step(atX: p.x, free: free))
+                return
+            }
             if p.y >= TimelineLayout.rulerHeight { model.select(clips: []) }
-            model.locate(layout.target(atX: p.x, free: event.modifierFlags.contains(.option)))
+            model.locate(layout.target(atX: p.x, free: free))
         }
+    }
+
+    /// The track whose strip of clips is at a point of the timeline.
+    private func track(atLane p: CGPoint) -> UInt64? {
+        guard p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id,
+              let frame = frame(of: id), p.y < frame.top + TimelineLayout.trackHeight else { return nil }
+        return key
     }
 
     private func headerDown(at p: CGPoint, _ event: NSEvent) {
@@ -821,17 +949,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if event.modifierFlags.contains(.shift) {
             // Shift adds a clip to the selection, or takes it out.
             if selection.remove(clip.key) == nil { selection.insert(clip.key) }
-            model.select(clips: selection)
-            guard selection.contains(clip.key) else { return }
-        } else if !selection.contains(clip.key) {
+            guard selection.contains(clip.key) else {
+                model.select(clips: selection)
+                return
+            }
+        } else if !selection.contains(clip.key) || onResizeEdge(p, of: rect) {
             selection = [clip.key]
-            model.select(clips: selection)
-        } else if onResizeEdge(p, of: rect) {
-            selection = [clip.key]
-            model.select(clips: selection)
         } else if selection.count > 1 {
             collapse = clip.key
         }
+        // The detail panel shows the pattern of the clip that was clicked.
+        model.select(clips: selection, focus: clip.key)
         if selection.count == 1, onResizeEdge(p, of: rect) {
             drag = .resize(clip: clip, repeats: Int(clip.repeats))
             return
@@ -977,6 +1105,58 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
     }
 
+    // MARK: Dropped samples
+
+    /// The height of the tracks, among the rows: where a new track would go.
+    private var tracksHeight: CGFloat {
+        model.arrangement.tracks.last.flatMap { rows[.track($0.key)] }.map { CGFloat($0.y.to + $0.height.to) } ?? 0
+    }
+
+    /// The sample a drag carries: one from the browser, or an audio file from
+    /// anywhere else.
+    private func sample(of drag: NSDraggingInfo) -> (path: String, name: String, note: String?)? {
+        if drag.draggingSource != nil, let sample = model.browser.dragged {
+            return (sample.path, Browser.padName(of: sample), sample.rootNote)
+        }
+        let urls = drag.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
+        guard let url = urls?.first, Browser.extensions.contains(url.pathExtension.lowercased()) else { return nil }
+        return (url.path, url.deletingPathExtension().lastPathComponent, nil)
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        draggingUpdated(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard sample(of: sender) != nil else { return [] }
+        let p = convert(sender.draggingLocation, from: nil)
+        var target = DropTarget.newTrack
+        if p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id { target = .track(key) }
+        if target != dropTarget {
+            dropTarget = target
+            needsDisplay = true
+        }
+        return .copy
+    }
+
+    override func draggingExited(_ sender: NSDraggingInfo?) {
+        dropTarget = nil
+        needsDisplay = true
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        defer {
+            dropTarget = nil
+            model.browser.dragged = nil
+            needsDisplay = true
+        }
+        guard let sample = sample(of: sender), let target = dropTarget else { return false }
+        var track: UInt64?
+        if case .track(let key) = target { track = key }
+        model.addSample(path: sample.path, name: sample.name, note: sample.note, to: track)
+        return true
+    }
+
     // MARK: Keys
 
     override func keyDown(with event: NSEvent) {
@@ -1093,8 +1273,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         .left: paragraph(.left), .right: paragraph(.right), .center: paragraph(.center),
     ]
 
+    /// One line of text, shortened with an ellipsis where it does not fit.
     private func text(_ string: String, in rect: CGRect, font: NSFont, color: NSColor, align: NSTextAlignment = .left) {
         guard rect.width > 4 else { return }
+        // Text that fits is drawn from a line laid out once.
+        if TextLines.shared.draw(string, in: rect, font: font, color: color, align: align) { return }
         (string as NSString).draw(
             with: rect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
             attributes: [.font: font, .foregroundColor: color, .paragraphStyle: Self.styles[align]!]
@@ -1135,6 +1318,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         let now = CACurrentMediaTime()
+        defer {
+            if measuring != nil { measuring?.times.draws.append((CACurrentMediaTime() - now) * 1000) }
+        }
         let header = TimelineLayout.headerWidth
         let ruler = TimelineLayout.rulerHeight
         fill(bounds, Theme.background)
@@ -1154,6 +1340,20 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
              in: CGRect(x: 12, y: ruler - 17, width: header - 24, height: 14), font: Self.smallFont, color: Theme.faintText)
         fill(CGRect(x: header - 1, y: 0, width: 1, height: bounds.height), Theme.separator)
         fill(CGRect(x: 0, y: ruler - 1, width: bounds.width, height: 1), Theme.separator)
+
+        // Where a dragged sample would land: on a track as a pad, or under
+        // the tracks as a new one.
+        switch dropTarget {
+        case .track(let key):
+            if let frame = frame(of: .track(key)) {
+                let top = max(frame.top, ruler)
+                fill(CGRect(x: 0, y: top, width: bounds.width, height: frame.top + frame.height - 1 - top), Theme.insertion.withAlphaComponent(0.2))
+            }
+        case .newTrack:
+            let y = max(ruler, layout.y(tracksHeight))
+            fill(CGRect(x: 0, y: y - 1.5, width: bounds.width, height: 2), Theme.insertion)
+        case nil: break
+        }
 
         // Where a dragged row would land.
         if case .reorder(let r) = drag, let slot = r.slot {
@@ -1203,8 +1403,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                  Theme.gray(1, 0.035))
         }
 
-        for (key, clip) in clips.sorted(by: { drawOrder($0.key) < drawOrder($1.key) }) {
-            drawClip(key, clip, selected: model.selectedClips.contains(key), at: now)
+        // Selected clips over the others, as a dragged clip should be, and
+        // newer clips over older.
+        let selected = model.selectedClips
+        for chosen in [false, true] {
+            for key in clipOrder where selected.contains(key) == chosen {
+                if let clip = clips[key] { drawClip(key, clip, selected: chosen, at: now) }
+            }
         }
         for item in lanes { drawLane(item.lane, in: item.rect, alpha: item.alpha) }
 
@@ -1221,7 +1426,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let alpha = CGFloat(clip.alpha.value(at: now))
         let rect = clipRect(at: clip.at.value(at: now), length: clip.length.value(at: now),
                             top: layout.y(CGFloat(clip.y.value(at: now))))
-        guard rect.maxX >= TimelineLayout.headerWidth, rect.minX <= bounds.width else { return }
+        guard rect.maxX >= TimelineLayout.headerWidth, rect.minX <= bounds.width,
+              rect.maxY >= TimelineLayout.rulerHeight, rect.minY <= bounds.height else { return }
         let color = clip.muted ? Theme.gray(0.45) : clip.color
         let shape = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
         color.withAlphaComponent((selected ? 0.62 : 0.42) * alpha).setFill()
@@ -1241,9 +1447,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
             }
             NSGraphicsContext.restoreGraphicsState()
-            let label = clip.repeats > 1 ? "\(clip.pattern) ×\(clip.repeats)" : clip.pattern
-            text(label, in: CGRect(x: rect.minX + 4, y: rect.minY, width: rect.width - 6, height: 13),
-                 font: Self.clipFont, color: Theme.gray(0.08, alpha))
+            drawWaveform(of: clip, in: CGRect(x: rect.minX, y: title.maxY + 1, width: rect.width, height: rect.height - title.height - 2),
+                         alpha: alpha)
+            // The name is cut where the clip ends: a clip too narrow for a
+            // few letters has none.
+            if rect.width >= 16 {
+                let label = clip.repeats > 1 ? "\(clip.pattern) ×\(clip.repeats)" : clip.pattern
+                _ = TextLines.shared.draw(label, in: CGRect(x: rect.minX + 4, y: rect.minY, width: rect.width - 6, height: 13),
+                                          font: Self.clipFont, color: Theme.gray(0.08, alpha), cuts: true)
+            }
         }
         if selected {
             Theme.selectedClip.withAlphaComponent(alpha).setStroke()
@@ -1259,6 +1471,22 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             outline.lineWidth = 2
             outline.stroke()
         }
+    }
+
+    /// What a clip plays, under its title: its waveform, or while the host is
+    /// still working that out, a line in its place.
+    private func drawWaveform(of clip: ClipVisual, in body: CGRect, alpha: CGFloat) {
+        guard body.height >= 8 else { return }
+        guard let wave = clip.wave else {
+            fill(CGRect(x: body.minX, y: body.midY.rounded(), width: body.width, height: 1), Theme.waveform.withAlphaComponent(0.3 * alpha))
+            return
+        }
+        let visible = CGRect(x: TimelineLayout.headerWidth, y: body.minY, width: bounds.width - TimelineLayout.headerWidth, height: body.height)
+        let columns = wave.peaks.columns(in: body, clippedTo: visible, fromBeat: wave.at, pixelsPerBeat: layout.pixelsPerBeat,
+                                         step: 1 / (window?.backingScaleFactor ?? 2))
+        guard !columns.isEmpty, let context = NSGraphicsContext.current?.cgContext else { return }
+        context.setFillColor(Theme.waveform.withAlphaComponent(0.78 * alpha).cgColor)
+        context.fill(columns)
     }
 
     /// A lane's values over time: a line through its points, which holds the

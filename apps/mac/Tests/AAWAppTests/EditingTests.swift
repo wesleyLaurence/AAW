@@ -202,5 +202,37 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(a.characters, "a")
         XCTAssertTrue(a.typed && !redo.typed)
         XCTAssertEqual(launch.actions[8], .wait(2))
+        XCTAssertNil(launch.measure)
+        // A run that times the drawing, and takes a picture after.
+        let timed = Launch(arguments: ["song.yaml", "--measure", "/tmp/times.json", "--frames", "90", "--snapshot", "/tmp/window.png", "--size", "1200x700"])
+        XCTAssertEqual(timed.measure?.lastPathComponent, "times.json")
+        XCTAssertEqual(timed.frames, 90)
+        XCTAssertEqual(timed.snapshot?.lastPathComponent, "window.png")
+        XCTAssertEqual(timed.size, CGSize(width: 1200, height: 700))
+        XCTAssertEqual(Launch(arguments: ["--measure", "/tmp/times.json"]).frames, 240)
+    }
+
+    func testDrawTimesAreSummedUp() {
+        var times = DrawTimes()
+        XCTAssertEqual(times.report["frames"] as? Int, 0)
+        times.draws = [2, 4, 6, 8, 30]
+        times.intervals = [16.6, 16.7, 16.8, 33.4]
+        let report = times.report
+        XCTAssertEqual(report["frames"] as? Int, 5)
+        XCTAssertEqual(report["draws_over_16_7_ms"] as? Int, 1)
+        XCTAssertEqual(report["draw_ms"] as? [String: Double], ["mean": 10, "median": 6, "p95": 30, "max": 30])
+        XCTAssertEqual((report["interval_ms"] as? [String: Double])?["max"], 33.4)
+    }
+
+    @MainActor
+    func testANumbersBarTakesItsRangeFromAField() {
+        let field = FieldView(
+            name: "cutoff_hz", label: "Cutoff", kind: .number, value: .number(value: 800), min: 10, max: 20000, unit: "Hz", log: true,
+            choices: [], optional: false, initial: .number(value: 1000), live: true, param: "effects.0.cutoff_hz", lane: 12, band: nil
+        )
+        XCTAssertEqual(BarSpec(field), BarSpec(value: 800, min: 10, max: 20000, log: true, unit: "Hz", initial: 1000, live: true, dimmed: true))
+        var off = field
+        (off.value, off.initial, off.lane, off.live) = (.absent, .absent, nil, false)
+        XCTAssertEqual(BarSpec(off), BarSpec(value: nil, min: 10, max: 20000, log: true, unit: "Hz", initial: nil, live: false, dimmed: false))
     }
 }

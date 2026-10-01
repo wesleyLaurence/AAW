@@ -425,6 +425,20 @@ fn map_node(fields: &Fields) -> Result<Node> {
     Ok(Node::new(&json_value(&Json::Object(fields.clone()))?))
 }
 
+/// A new object with the lists and maps it has when empty, so that later
+/// commands of the same batch can add to them: a clip to a track just added.
+fn with_empty(fields: &Fields, lists: &[&str], maps: &[&str]) -> Result<Node> {
+    let mut node = map_node(fields)?;
+    let map = node.map_mut().expect("an object");
+    for key in lists {
+        map.entry(key.to_string()).or_insert_with(|| Node::List(Vec::new()));
+    }
+    for key in maps {
+        map.entry(key.to_string()).or_insert_with(|| Node::Map(indexmap::IndexMap::new()));
+    }
+    Ok(node)
+}
+
 /// A lane parameter's effect reference and the rest: `effects.REF.REST`.
 fn effect_ref(param: &str) -> Option<(&str, &str)> {
     let rest = param.strip_prefix("effects.")?;
@@ -764,11 +778,11 @@ impl<'a> Edit<'a> {
                 };
                 let mut f = Fields::new();
                 f.insert("id".into(), Json::String(id.clone()));
-                if key == "tracks" {
-                    f.insert("pads".into(), Json::Object(Map::new()));
-                }
                 f.extend(fields.clone());
-                let node = map_node(&f)?;
+                let node = match key {
+                    "tracks" => with_empty(&f, &["clips", "effects", "sends", "automation"], &["pads"])?,
+                    _ => with_empty(&f, &["effects", "automation"], &[])?,
+                };
                 out.made.push(self.insert(&[], key, *index, node)?);
                 out.label = format!("Add {what} {id}");
             }
@@ -899,7 +913,7 @@ impl<'a> Edit<'a> {
                 if patterns.contains_key(pattern) {
                     return Err(format!("Pattern {pattern} already exists"));
                 }
-                let node = map_node(fields)?;
+                let node = with_empty(fields, &["events"], &["steps"])?;
                 self.root.get_mut("patterns").and_then(Node::map_mut).expect("patterns").insert(pattern.clone(), node);
                 out.label = format!("Add pattern {pattern}");
             }
@@ -938,12 +952,13 @@ impl<'a> Edit<'a> {
                 let (owner, i) = self.member(event, "events", "a pattern event")?;
                 let loc = [owner, vec![Step::Key("events".into()), Step::Index(i)]].concat();
                 self.merge(&loc, fields)?;
-                out.label = format!("Change event {}", self.text(&loc));
+                out.label = format!("Change event of {}", self.event_name(&loc));
             }
             EventRemove { event } => {
                 let (owner, i) = self.member(event, "events", "a pattern event")?;
                 let loc = [owner, vec![Step::Key("events".into()), Step::Index(i)]].concat();
-                out.label = format!("Remove event {}", self.remove_at(&loc)?);
+                out.label = format!("Remove event of {}", self.event_name(&loc));
+                self.remove_at(&loc)?;
             }
             PadAdd { track, pad, fields } => {
                 let loc = [self.track(track)?, vec![Step::Key("pads".into())]].concat();
@@ -1144,6 +1159,21 @@ impl<'a> Edit<'a> {
     /// The ID of the track or return at `loc`, for labels.
     fn name(&self, loc: &[Step]) -> String {
         self.node(loc).field("id").unwrap_or("?").to_string()
+    }
+
+    /// An event described by its pattern, pad and beat, which a person can
+    /// find, for labels: `line: sub at 2`.
+    fn event_name(&self, loc: &[Step]) -> String {
+        let pattern = match loc {
+            [Step::Key(_), Step::Key(name), ..] => name.as_str(),
+            _ => "?",
+        };
+        let n = self.node(loc);
+        format!(
+            "{pattern}: {} at {}",
+            n.field("pad").unwrap_or("?"),
+            n.get("at").map_or_else(|| "?".into(), |a| short(&node_json(a)))
+        )
     }
 
     /// A clip described by its pattern and track, for labels.

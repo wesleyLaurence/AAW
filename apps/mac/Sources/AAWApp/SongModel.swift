@@ -1,5 +1,5 @@
 import AAWCore
-import Foundation
+import AppKit
 import Observation
 import QuartzCore
 
@@ -30,6 +30,19 @@ struct DeviceChain {
     static let kinds = ["filter", "eq", "compressor", "limiter", "delay", "reverb"]
 }
 
+/// What the detail panel shows: a row's devices, or a clip's pattern.
+enum Detail {
+    case devices, pattern
+}
+
+/// The pattern the detail panel edits: a clip's, with the track whose pads it
+/// plays.
+struct PatternContext: Equatable {
+    var clip: ClipView
+    var track: TrackView
+    var pattern: PatternView
+}
+
 /// A song open in the app. It shows what the session host reports and sends
 /// the person's edits and the transport's commands; the song and every rule
 /// about it live in the host, which the agent's `daw` commands reach as well.
@@ -55,6 +68,13 @@ public final class SongModel {
     private(set) var selectedPoint: UInt64?
     /// The row whose devices the detail panel shows: the last one selected.
     private(set) var deviceRow: RowID?
+    /// What the detail panel shows: devices after a row is selected, and a
+    /// pattern after a clip is.
+    var detail = Detail.devices
+    /// The clip whose pattern the detail panel edits: the last one selected.
+    private(set) var patternClip: UInt64?
+    /// The selected event of that pattern.
+    private(set) var selectedEvent: UInt64?
     /// True for a moment after each change by the agent.
     public private(set) var agentWorking = false
     /// True for a moment after the tempo, title or length changed.
@@ -64,7 +84,10 @@ public final class SongModel {
     /// The position the transport bar shows.
     public var position: Double = 0
     public var showsActivity = true
-    public var showsDevices = true
+    public var showsDetail = true
+    public var showsBrowser = false
+    /// The sample library, for the browser.
+    let browser: Browser
 
     /// Called with each new revision, for the arrangement view to animate.
     @ObservationIgnored var onUpdate: ((Update) -> Void)?
@@ -81,6 +104,11 @@ public final class SongModel {
     @ObservationIgnored var onShowLanes: ((RowID) -> Void)?
     /// Gives the keys back to the arrangement, after a value was typed.
     @ObservationIgnored var onFocus: (() -> Void)?
+    /// Called when waveforms arrive, for the arrangement to draw them.
+    @ObservationIgnored var onWaveforms: (() -> Void)?
+    /// Asks the arrangement to draw so many frames of scrolling and zooming
+    /// and say how long each took.
+    @ObservationIgnored var onMeasure: ((Int, @escaping @MainActor (DrawTimes) -> Void) -> Void)?
 
     @ObservationIgnored private let song: Song
     /// Commands go to the host in order, off the main thread: the host may be
@@ -97,6 +125,17 @@ public final class SongModel {
     @ObservationIgnored private var dragSent: CFTimeInterval = 0
     @ObservationIgnored private var dragTimer: Task<Void, Never>?
     @ObservationIgnored private var gestures = 0
+    @ObservationIgnored private var waveforms = WaveformStore()
+    /// When the revision shown arrived, to time its waveforms from.
+    @ObservationIgnored private var revisionShown = CACurrentMediaTime()
+    /// How long the waveforms took, in milliseconds: after the song opened,
+    /// and after the last change of some track's audio.
+    @ObservationIgnored private(set) var waveformDelay: (open: Double?, change: Double?)
+    /// Track colors, given out in the order tracks are first seen.
+    @ObservationIgnored private var colors: [UInt64: Int] = [:]
+    /// Samples are copied into the project off the main thread, and off the
+    /// queue of commands: a copy takes a moment, and a fader must not wait.
+    @ObservationIgnored private let imports = DispatchQueue(label: "aaw.imports")
 
     /// A drag sends the host at most this many edits a second.
     static let dragRate = 30.0
@@ -109,6 +148,7 @@ public final class SongModel {
         let relay = Relay()
         song = try Song.open(path: url.path, observer: relay)
         self.url = url
+        browser = Browser(library: libraryPath(song: url.path))
         arrangement = song.arrangement()
         deviceRow = arrangement.tracks.first.map { .track($0.key) }
         relay.model = self
@@ -118,6 +158,7 @@ public final class SongModel {
 
     fileprivate func apply(_ update: Update) {
         arrangement = update.arrangement
+        revisionShown = CACurrentMediaTime()
         undoStep = update.undo
         redoStep = update.redo
         // A drag is one entry, which follows it.
@@ -161,6 +202,30 @@ public final class SongModel {
     fileprivate func hostClosed() {
         closed = true
         onClosed?()
+    }
+
+    fileprivate func apply(_ update: Waveforms) {
+        waveforms.apply(update)
+        // The last of a revision's peaks: how long they took from its change.
+        if !update.peaks.isEmpty, update.revision == arrangement.revision, waveforms.complete {
+            let delay = (CACurrentMediaTime() - revisionShown) * 1000
+            if update.revision == 0 { waveformDelay.open = delay } else { waveformDelay.change = delay }
+        }
+        onWaveforms?()
+    }
+
+    /// What a track's clips play at the revision shown, once the host has
+    /// worked it out; until then, nil.
+    func waveform(of track: UInt64) -> Waveform? {
+        waveforms.waveform(of: track, at: arrangement.revision)
+    }
+
+    /// A track's color: the next of the palette for each track first seen.
+    /// The song format has no color.
+    func color(of track: UInt64) -> NSColor {
+        let index = colors[track] ?? colors.count
+        colors[track] = index
+        return Theme.palette[index % Theme.palette.count]
     }
 
     private func after(_ seconds: Double, _ body: @escaping @MainActor (SongModel) -> Void) -> Task<Void, Never> {
@@ -265,17 +330,58 @@ public final class SongModel {
         return (start, clips.map { $0.at + $0.patternBeats * Double($0.repeats) }.max() ?? start)
     }
 
-    func select(clips: Set<UInt64>) {
+    /// Selects clips. The detail panel shows the pattern of `focus`, the clip
+    /// that was clicked, or of the one clip selected.
+    func select(clips: Set<UInt64>, focus: UInt64? = nil) {
         setSelection(clips: clips, row: nil)
+        if let clip = focus ?? (clips.count == 1 ? clips.first : nil), clips.contains(clip) {
+            if patternClip != clip {
+                patternClip = clip
+                select(event: nil)
+            }
+            detail = .pattern
+        }
+    }
+
+    /// Selects an event of the pattern the detail panel shows.
+    func select(event: UInt64?) {
+        guard event != selectedEvent else { return }
+        selectedEvent = event
+        if event != nil, selectedPoint != nil {
+            selectedPoint = nil
+            onSelection?()
+        }
+        sendSelection()
+    }
+
+    /// The pattern the detail panel edits, with its clip and the clip's track.
+    var patternContext: PatternContext? {
+        guard let key = patternClip else { return nil }
+        for track in arrangement.tracks {
+            if let clip = track.clips.first(where: { $0.key == key }),
+               let pattern = arrangement.patterns.first(where: { $0.name == clip.pattern }) {
+                return PatternContext(clip: clip, track: track, pattern: pattern)
+            }
+        }
+        return nil
+    }
+
+    /// The selected event, in the pattern the detail panel shows.
+    var selectedEventView: EventView? {
+        guard let key = selectedEvent else { return nil }
+        return patternContext?.pattern.events.first { $0.key == key }
     }
 
     func select(row: RowID?) {
         setSelection(clips: [], row: row)
     }
 
-    /// Selects an automation point, in place of clips and rows.
+    /// Selects an automation point, in place of clips, rows and events.
     func select(point: UInt64?) {
-        if point != nil { setSelection(clips: [], row: nil) }
+        if point != nil {
+            setSelection(clips: [], row: nil)
+            select(event: nil)
+        }
         guard point != selectedPoint else { return }
         selectedPoint = point
         onSelection?()
@@ -328,21 +434,28 @@ public final class SongModel {
         guard clips != selectedClips || row != selectedRow else { return }
         selectedClips = clips
         selectedRow = row
+        selectedEvent = nil
         if !clips.isEmpty || row != nil { selectedPoint = nil }
         // The detail panel follows the selection, and stays on the last row.
         if let row {
             deviceRow = row
+            detail = .devices
         } else if let track = placedClips().first(where: { clips.contains($0.clip.key) })?.track {
             deviceRow = .track(arrangement.tracks[track].key)
         }
         onSelection?()
-        // The host keeps the selection for `daw status`, so that an agent can
-        // be asked about "the selected clip".
-        var keys = Array(clips).sorted()
-        switch row {
+        sendSelection()
+    }
+
+    /// The host keeps the selection for `daw status`, so that an agent can be
+    /// asked about "the selected clip" or "the selected note".
+    private func sendSelection() {
+        var keys = Array(selectedClips).sorted()
+        switch selectedRow {
         case .track(let key), .bus(let key): keys.append(key)
         case .master, nil: break
         }
+        if let selectedEvent { keys.append(selectedEvent) }
         commands.async { [song, keys] in try? song.select(keys: keys) }
     }
 
@@ -372,16 +485,20 @@ public final class SongModel {
         case .master, nil: break
         }
         if deviceRow == nil { deviceRow = arrangement.tracks.first.map { .track($0.key) } }
+        if patternClip != nil, patternContext == nil { patternClip = nil }
+        if selectedEvent != nil, selectedEventView == nil { selectedEvent = nil }
     }
 
     public var canDelete: Bool {
-        !selectedClips.isEmpty || selectedPoint != nil || (selectedRow != nil && selectedRow != .master)
+        selectedEvent != nil || !selectedClips.isEmpty || selectedPoint != nil || (selectedRow != nil && selectedRow != .master)
     }
 
-    /// Removes the selected clips, or else the selected automation point,
-    /// track or return.
+    /// Removes the selected event of the pattern being edited, or else the
+    /// selected clips, automation point, track or return.
     public func deleteSelection() {
-        if !selectedClips.isEmpty {
+        if let event = selectedEvent, detail == .pattern, showsDetail {
+            edit(.eventRemove(event: event))
+        } else if !selectedClips.isEmpty {
             edit(.clipsRemove(clips: selectedClips.sorted()))
         } else if let point = selectedPoint {
             edit(.pointRemove(point: point))
@@ -416,6 +533,39 @@ public final class SongModel {
             guard let self, let key = made.first else { return }
             self.select(row: row(key))
             self.onRename?(row(key))
+        }
+    }
+
+    /// Adds a clip of a new, empty pattern to a track and selects it, which
+    /// shows the pattern to fill in.
+    func addClip(to track: UInt64, at beat: Double) {
+        edit(.clipNew(track: track, at: beat)) { [weak self] made in
+            if let clip = made.first { self?.select(clips: [clip], focus: clip) }
+        }
+    }
+
+    /// Adds a sample file to the song: as a pad of `track`, or with no track
+    /// as a new track after the others. The file is copied into the project
+    /// first; the original stays as it is. `name` is what the pad and a new
+    /// track are named after, and `note` the sample's pitch, if it has one.
+    func addSample(path: String, name: String, note: String?, to track: UInt64?) {
+        let (song, index) = (url.path, UInt32(arrangement.tracks.count))
+        imports.async { [weak self] in
+            let copied = Result { try libraryImport(song: song, source: path, rootNote: note) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    switch copied {
+                    case .failure(let error):
+                        self.refuse(Self.reason(error))
+                    case .success(let asset):
+                        self.edit(.sampleAdd(asset: asset, name: name, track: track, index: index)) { [weak self] made in
+                            // The row's pads show in the detail panel.
+                            if let key = track ?? made.first { self?.select(row: .track(key)) }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -531,6 +681,12 @@ public final class SongModel {
         onZoom?(zoom)
     }
 
+    /// Draws `frames` frames of scrolling and zooming and reports how long
+    /// each took to draw.
+    func measure(frames: Int, then: @escaping @MainActor (DrawTimes) -> Void) {
+        onMeasure?(frames, then)
+    }
+
     /// Saves and stops hosting the song; `daw` commands then run headless.
     public func close() {
         endDrag()
@@ -566,6 +722,10 @@ private final class Relay: SongObserver, @unchecked Sendable {
 
     func warning(message: String) {
         onMain { $0.warn(message) }
+    }
+
+    func waveforms(waveforms: Waveforms) {
+        onMain { $0.apply(waveforms) }
     }
 
     func closed() {

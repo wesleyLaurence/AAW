@@ -1,10 +1,12 @@
 # Mac app
 
 The native macOS app of [docs/Rust-Swift-Update.md](../../docs/Rust-Swift-Update.md),
-as far as milestone M6: it opens a song, shows its arrangement, plays it with
-its effects and automation, shows each change as it lands, whoever makes it,
-and lets the person edit the mixer, the clips, the tracks and returns, each
-row's effects and its automation lanes.
+as far as milestone M8: it opens a song, shows its arrangement with what each
+clip plays as a waveform, plays it with its effects and automation, shows each
+change as it lands, whoever makes it, and lets the person edit the mixer, the
+clips, the tracks and returns, each row's effects and its automation lanes, and
+each pattern's steps and events. A browser finds samples in the library's index
+and adds them to the song as pads and tracks.
 
 The app holds no model logic. Opening a song makes the app its session host
 ([engine/README.md](../../engine/README.md)): the Rust core runs inside the app,
@@ -44,9 +46,12 @@ machine that built it.
 | Transport bar | Play or stop, loop, the position as bar.beat.sixteenth, tempo, length, and "Agent editing" while an agent's changes land |
 | Ruler | The loop brace, section markers and bar numbers, with the start position as an orange marker |
 | Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; then the returns and the master. The A mark is orange when the row has automation |
-| Lanes | Clips as blocks named by their pattern, divided at each repeat; clips of a muted track are gray, and selected clips are outlined |
+| Lanes | Clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; clips of a muted track are gray, and selected clips are outlined |
 | Automation | Under a row whose A mark is on: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them |
-| Devices | Under the arrangement, the effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads |
+| Detail panel | Under the arrangement, one of two editors, which the Devices and Pattern marks at its top left change between. A row's header shows Devices and a clip shows Pattern |
+| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads |
+| Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note. While the clip plays, a line shows where |
+| Samples | Left of the arrangement, when shown: the library's samples by search, category and kind, each with its length and what is known of its tempo, key and pitch |
 | Activity | Each change with who made it (agent, you, or an edit of the file), newest first. A drag is one entry |
 
 | Input | Does |
@@ -59,7 +64,8 @@ machine that built it.
 | Scroll, pinch, Command-scroll, ⌘=, ⌘-, ⌘0 | Scroll and zoom; ⌘0 fits the song |
 | Drag a volume, pan or send sideways | Changes it, heard as it moves; with Shift, ten times finer. Double-click sets volume to 0 dB and pan to center, and removes a send |
 | Click M or S | Mutes or solos |
-| Click a clip; Shift-click | Selects it; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
+| Click a clip; Shift-click | Selects it and shows its pattern; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
+| Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in |
 | Drag a clip | Moves the selected clips by grid steps, and to other tracks; with Option, off the grid |
 | Drag a clip's end | Changes its repeats |
 | Arrow keys | Move the selected clips a grid step, or to the next track |
@@ -77,7 +83,20 @@ machine that built it.
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
 | The marks in a device's title | Bypass, move earlier or later in the chain, remove; an equalizer also adds a band |
 | The diamond by a field | Adds a lane for the field, or removes it; filled while a lane moves the field |
-| ⌥⌘D | Shows or hides the device panel |
+| ⌥⌘D, ⌥⌘P | Show the devices or the pattern in the detail panel, or hide the panel when it shows them already |
+| Click a step | Turns it on or off; a drag along the row takes the steps it passes with it. A drag up or down on a step that is on sets how hard it plays, 1 to 9 |
+| Double-click a row of held hits or of notes | Adds an event on the step under the pointer, at the note under it, held for a step on a pad that is held. With Option, a click adds one off the grid, in a row of steps too |
+| Click an event; drag it; drag its end | Selects it; moves it by steps of the pattern's grid, and in a row of notes up and down by notes; ends it on a line of the grid. With Option it moves off the grid |
+| Arrow keys, in the pattern | Move the selected event a step earlier or later, or a note up or down; with Shift, an octave |
+| Double-click an event, or Delete | Removes it |
+| Type a length; choose a step; drag the swing | Change the pattern: step rows grow or shrink with its length, and are written on a new grid when their hits fall on it |
+| Own Copy, by a pattern's name | Gives the clip a copy of the pattern, so that editing it leaves the other clips that play it as they are |
+| Scroll, pinch, Command-scroll, in the pattern | Scroll and zoom the pattern |
+| ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the samples |
+| Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
+| Click a sample | Plays it, as its file is; the speaker mark turns that off |
+| Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
+| Drag a sample, or an audio file from the Finder, onto the arrangement | On a track: a pad of that track. Anywhere else: a new track after the others |
 
 The grid is the finest of bars, beats, eighths and sixteenths that the zoom has
 room to draw, and clicks and drags snap to the lines drawn. A dragged clip moves
@@ -86,6 +105,30 @@ by whole grid steps, so one that starts off the grid stays as far off it.
 A device panel is drawn from what the host says of the effect: each field's
 label, unit, range, default and choices. No panel is made by hand for an
 effect type, so a new field or effect in the engine shows up here by itself.
+
+A clip's waveform is what its track's sampler plays over the clip's span,
+before the track's effects and fader, so a level or an effect does not change
+it. The host works it out again for the tracks an edit changed; until it has, a
+clip keeps the waveform it had, which moves with the clip, and a new clip shows
+a line.
+
+A pad's row in the pattern editor is steps when the pad plays its sample
+through at one pitch, bars of events when the pad is held (`mode: gate`), and
+notes when the pad's sample has a root note. Steps and events of one pad both
+play; steps are on the grid at one of ten levels, and events are anywhere, with
+a velocity, a length and a note. A pattern is shared by every clip that plays
+it, and they all light up when an agent changes it.
+
+A sample added to the song is copied into the project's `samples` folder first,
+as `daw samples import` copies it; the library is never changed. A pad and a
+new track are named after the sample's category, or its file. A sample with a
+measured pitch brings it along as its root note, unless its name says it is a
+drum, an effect or a loop. The sample, the pad and a new track are one undo
+step.
+
+The browser reads the index `daw samples scan` writes: `.daw/library.sqlite` in
+the song's folder or the nearest folder above it, or the file `AAW_LIBRARY`
+names. Searches run in Python, as `daw samples search` does.
 
 An edit shows at once and goes to the host, whose song the window then follows.
 A drag of a level is one undo step, however long, and the song is saved when it
@@ -109,6 +152,11 @@ build/AAW.app/Contents/MacOS/AAW song.yaml --size 1280x560 \
     --click 800,250 --key space --snapshot /tmp/window.png --after 1.5
 ```
 
+`--measure JSON [--frames N]` in place of the picture, or before it, scrolls and
+zooms the arrangement through the song for N frames (240 unless given) and
+writes how long each took to draw, the time between frames, and how long the
+waveforms trailed the song's opening and its last change.
+
 These run in the order given, half a second apart; `--after` is the time
 between the last of them and the picture:
 
@@ -123,9 +171,15 @@ between the last of them and the picture:
 Run `daw` commands against the song meanwhile to see them land in the picture.
 A key that plays is heard on the speakers. Headers are 212 points wide and rows
 start 93 points down: 46 for each track, more while its sends or lanes show
-(46 for each lane). The device panel is the bottom 214 points, its devices from
-x = 212. A menu, such as Add Effect, a choice in a device or + Lane, waits for a
-person and cannot be scripted; use a `daw` command for what it would do.
+(46 for each lane). The detail panel is the bottom 214 points, its devices from
+x = 212. The pattern editor's rows start 16 points down the panel and 96 points
+further right, at x = 308: a row of steps or hits is 24 points high, and rows
+of notes share the rest. A pattern of a few bars fills the panel's width, and
+a longer one scrolls. While the samples show, everything else is 251 points
+further right.
+A menu, such as Add Effect, a choice in a device or + Lane, waits for a person
+and cannot be scripted, and neither can a drag from the samples or the Finder;
+use a `daw` command, or the + by a sample, for what it would do.
 
 ## Layout
 
@@ -133,10 +187,15 @@ person and cannot be scripted; use a `daw` command for what it would do.
 |---|---|
 | `Sources/AAWCore` | The generated bindings (not in Git) |
 | `Sources/AAWApp/SongModel.swift` | A song open in the app: what the host reports, the selection, and the edits and transport commands sent to the host |
-| `Sources/AAWApp/ArrangementView.swift` | The timeline and headers, an AppKit view drawn with Core Graphics, and the mouse and keys that edit them |
+| `Sources/AAWApp/ArrangementView.swift` | The timeline and headers, an AppKit view drawn with Core Graphics, the mouse and keys that edit them, and what a dropped sample lands on |
+| `Sources/AAWApp/Waveform.swift` | The peaks the host sends for each track, and the columns a clip draws from them, tested in `Tests` |
+| `Sources/AAWApp/TextLines.swift` | Lines of text laid out once and drawn many times |
 | `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid and what a click or drag means, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
-| `Sources/AAWApp/DeviceView.swift` | The device panel: a row's chain, a panel for each effect drawn from its fields, and the bar a number is dragged with |
+| `Sources/AAWApp/DeviceView.swift` | The detail panel and its devices: a row's chain, a panel for each effect drawn from its fields, and the bar a number is dragged with |
+| `Sources/AAWApp/PatternEditor.swift` | The pattern editor, an AppKit view, and the fields beside it |
+| `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
+| `Sources/AAWApp/BrowserView.swift` | The samples: searches of the library's index, and the list |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/App.swift` | The app delegate, menus, windows and the command line |
 | `Sources/AAW` | The executable's entry point |
@@ -147,10 +206,19 @@ person and cannot be scripted; use a `daw` command for what it would do.
   the song's latency and the delay the output device reports.
 - Track colors are given out in the order tracks are first seen and are not
   saved; the song format has no color.
-- No waveforms and no pattern editor (M8). Pads and patterns are edited with
-  `daw` commands; the device panel lists a track's pads.
-- A new track has no pads, so no pattern plays on it until an agent or `daw
-  pad add` gives it some.
+- A waveform shows a track's sampler before its effects, fader and sends, with
+  full scale at the clip's height; louder is drawn as full scale.
+- A pad's own settings, such as its level, tuning and whether it is held, are
+  set with `daw pad set`; the device panel lists a track's pads.
+- A new track has no pads until a sample is added to it, and a sample added
+  from the browser plays at its own tempo: a loop is fitted to the song with
+  `daw pad set SONG TRACK PAD --source-bpm BPM`.
+- One event is selected at a time, and events are not copied or pasted. An
+  event's transpose is set with `daw`.
+- A row of notes shows the notes its events play with two more either side; a
+  drag goes as far as that, and the arrow keys further.
+- A sample is played from its file by the system, not through the song's
+  engine, so it is heard at its own level, pitch and tempo.
 - Names are IDs: letters, digits, `-` and `_`, starting with a letter.
 - Several clips cannot be selected by dragging over them, and one automation
   point is selected at a time.

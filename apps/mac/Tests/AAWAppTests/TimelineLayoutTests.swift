@@ -45,6 +45,16 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.target(atX: 0, free: false), 0)
     }
 
+    func testANewClipStartsInTheGridStepUnderThePointer() {
+        let l = layout()
+        // At 10 points a beat the grid is bars: a click late in a bar is still in it.
+        XCTAssertEqual(l.step(atX: l.x(19.9), free: false), 16)
+        XCTAssertEqual(l.step(atX: l.x(20.1), free: false), 20)
+        XCTAssertEqual(l.step(atX: l.x(19.9), free: true), 19.9, accuracy: 1e-9)
+        XCTAssertEqual(l.step(atX: l.x(66), free: false), 60, "the last bar of the song")
+        XCTAssertEqual(l.step(atX: 0, free: false), 0)
+    }
+
     func testADragMakesALoopOnTheGrid() {
         let l = layout()
         let forward = l.loop(fromX: l.x(9), toX: l.x(22))

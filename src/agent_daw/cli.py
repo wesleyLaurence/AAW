@@ -89,7 +89,12 @@ def parser():
     imp = ss.add_parser("import")
     imp.add_argument("sample")
     imp.add_argument("--project", type=Path, required=True)
-    imp.add_argument("--id", required=True)
+    imp.add_argument("--id", help="The sample's ID in the song")
+    imp.add_argument(
+        "--copy-only",
+        action="store_true",
+        help="Copy the file into the project and print its entry; the song is not changed",
+    )
     imp.add_argument(
         "--root-note",
         help="Note with octave, e.g. C2, or auto to use the measured pitch",
@@ -167,11 +172,19 @@ def execute(a):
 def import_sample(a, source):
     """Copies a sample into the project and adds it to the song."""
     from . import library
-    from .model import load, project_hash
+    from .model import load, midi, project_hash
 
-    project = load(a.project)
-    if a.id in project["samples"]:
-        raise ValueError(f"Sample ID already exists: {a.id}")
+    if a.copy_only:
+        # What adds the copy to the song, such as the app, names it then.
+        if a.root_note not in (None, "auto"):
+            midi(a.root_note)
+        project = None
+    elif not a.id:
+        raise ValueError("--id is required unless --copy-only")
+    else:
+        project = load(a.project)
+        if a.id in project["samples"]:
+            raise ValueError(f"Sample ID already exists: {a.id}")
     root_note, measured = a.root_note, None
     if root_note == "auto":
         measured = library.analyze(a.db, source)["pitch"]
@@ -182,15 +195,18 @@ def import_sample(a, source):
             )
         root_note = measured["note"]
     asset = library.import_asset(source, a.project.parent, root_note)
-    # The song takes the sample as an edit, so a running host sees it and can
-    # undo it, and an edit made since the read above is not written over.
-    with tempfile.TemporaryDirectory() as scratch:
-        patch = Path(scratch) / "patch.json"
-        patch.write_text(json.dumps({"samples": {a.id: asset}}))
-        label = f"Import sample {a.id}"
-        sha = project_hash(project)
-        run_engine("apply", a.project, patch, "--expect", sha, "--label", label)
-    result = {"sample_id": a.id, **asset}
+    if a.copy_only:
+        result = dict(asset)
+    else:
+        # The song takes the sample as an edit, so a running host sees it and can
+        # undo it, and an edit made since the read above is not written over.
+        with tempfile.TemporaryDirectory() as scratch:
+            patch = Path(scratch) / "patch.json"
+            patch.write_text(json.dumps({"samples": {a.id: asset}}))
+            label = f"Import sample {a.id}"
+            sha = project_hash(project)
+            run_engine("apply", a.project, patch, "--expect", sha, "--label", label)
+        result = {"sample_id": a.id, **asset}
     if measured:
         result["measured_pitch"] = measured
         if abs(measured["cents"]) > 10:

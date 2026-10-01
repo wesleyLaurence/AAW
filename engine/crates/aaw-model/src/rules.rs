@@ -43,6 +43,15 @@ pub fn midi(note: &str) -> Result<i64, String> {
     Ok(n)
 }
 
+/// The name `midi` reads back as a MIDI number, with sharps: 30 is F#1.
+pub fn note_name(midi: i64) -> Result<String, String> {
+    if !(0..=127).contains(&midi) {
+        return Err(format!("Note outside MIDI range: {midi}"));
+    }
+    const KEYS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    Ok(format!("{}{}", KEYS[(midi % 12) as usize], midi / 12 - 1))
+}
+
 /// How a parameter's values interpolate between points.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Domain {
@@ -478,6 +487,15 @@ mod tests {
         assert_eq!(midi("H2"), Err("Invalid note 'H2'; use e.g. C2 or F#1".into()));
         assert_eq!(midi("G9"), Ok(127));
         assert_eq!(midi("G#9"), Err("Note outside MIDI range: G#9".into()));
+    }
+
+    #[test]
+    fn a_note_name_reads_back_as_its_number() {
+        for n in 0..=127 {
+            assert_eq!(midi(&note_name(n).unwrap()), Ok(n));
+        }
+        assert_eq!((note_name(30).unwrap(), note_name(0).unwrap(), note_name(60).unwrap()), ("F#1".into(), "C-1".into(), "C4".into()));
+        assert!(note_name(128).is_err() && note_name(-1).is_err());
     }
 
     #[test]

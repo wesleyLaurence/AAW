@@ -71,8 +71,9 @@ One native engine, written in Rust, plays the song in real time and renders it
 offline, so what is heard while editing is what is exported. A session host holds
 the open song, applies each edit as a command with undo, and plays it as it
 lands. The agent drives it with the `daw` command; the person drives the same
-host from a native Mac app with an arrangement, a mixer, device panels and
-automation lanes, and sees the agent's changes as they happen. See
+host from a native Mac app with an arrangement that shows each clip's waveform,
+a mixer, device panels, automation lanes, a pattern editor and a sample browser,
+and sees the agent's changes as they happen. See
 [engine/README.md](engine/README.md) and [apps/mac/README.md](apps/mac/README.md).
 
 Samples can be measured from their audio for pitch (with octave), loop tempo and

@@ -71,6 +71,10 @@ pub enum Event {
     Opened(Doc),
     /// A new revision of the song, with what undo and redo would do after it.
     Changed { change: Change, doc: Doc, history: History },
+    /// A revision's program, once it is compiled: after `Opened` or the
+    /// revision's `Changed`, for a host that prepares or plays each revision.
+    /// A revision that does not compile has none.
+    Compiled { revision: u64, program: Arc<Program> },
     /// The play state, the start position or the loop changed.
     Transport(TransportState),
     /// song.yaml holds an external edit that does not load, or it was fixed.
@@ -260,8 +264,13 @@ impl Host {
             return;
         };
         self.playback_error = result.err();
-        if let Some(e) = self.playback_error.clone() {
-            self.warn(format!("playback keeps the previous version: {e}"));
+        match (self.playback_error.clone(), self.program.clone()) {
+            (Some(e), _) => self.warn(format!("playback keeps the previous version: {e}")),
+            (None, Some((_, program))) => self.notify(Event::Compiled {
+                revision: self.session.revision(),
+                program,
+            }),
+            (None, None) => {}
         }
     }
 

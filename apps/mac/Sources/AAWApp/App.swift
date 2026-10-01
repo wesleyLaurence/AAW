@@ -6,8 +6,8 @@ import UniformTypeIdentifiers
 /// How the app was started: `AAW [SONG...]`, and for checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2`, `--key KEY`, `--type TEXT` and `--wait SECONDS`
-/// in the order to perform them, then `--snapshot PNG [--after SECONDS]
-/// [--size WxH]`.
+/// in the order to perform them, then `--measure JSON [--frames N]` and
+/// `--snapshot PNG`, with `--after SECONDS` and `--size WxH`.
 struct Launch {
     /// Input to feed the first window as if a person made it. Points are in
     /// the window's content, from its top left.
@@ -70,6 +70,10 @@ struct Launch {
     var actions: [Action] = []
     /// Write a picture of the first window here, then quit.
     var snapshot: URL?
+    /// Scroll and zoom the arrangement for `frames` frames, write how long
+    /// each took to draw here, then quit.
+    var measure: URL?
+    var frames = 240
     /// Seconds between the last action and the picture.
     var after: Double = 1
     var size: CGSize?
@@ -98,6 +102,10 @@ struct Launch {
                 if let seconds = rest.popFirst().flatMap(Double.init) { actions.append(.wait(seconds)) }
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
+            case "--measure":
+                measure = rest.popFirst().map { URL(fileURLWithPath: $0) }
+            case "--frames":
+                frames = rest.popFirst().flatMap(Int.init) ?? frames
             case "--after":
                 after = rest.popFirst().flatMap(Double.init) ?? after
             case "--size":
@@ -146,7 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         for url in launch.songs { openSong(url) }
         if songs.isEmpty { showWelcome() }
-        if launch.snapshot == nil || !launch.actions.isEmpty {
+        if (launch.snapshot == nil && launch.measure == nil) || !launch.actions.isEmpty {
             NSApp.activate(ignoringOtherApps: true)
         }
         // Scripted input, half a second apart, then the picture. Typed
@@ -165,8 +173,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             delay += 0.5
             previous = action
         }
-        if let snapshot = launch.snapshot {
-            later(delay - 0.5 + launch.after) { $0.snapshot(to: snapshot) }
+        let end = delay - 0.5 + launch.after
+        if let measure = launch.measure {
+            later(end) { $0.measure(to: measure) }
+        } else if let snapshot = launch.snapshot {
+            later(end) { $0.snapshot(to: snapshot) }
         }
     }
 
@@ -223,7 +234,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func closed(_ controller: SongWindowController) {
         songs.removeAll { $0 === controller }
-        if songs.isEmpty, !terminating, launch.snapshot == nil { showWelcome() }
+        if songs.isEmpty, !terminating, launch.snapshot == nil, launch.measure == nil { showWelcome() }
     }
 
     @objc func openDocument(_ sender: Any?) {
@@ -309,6 +320,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Writes how long the first window's arrangement takes to draw while it
+    /// scrolls and zooms, then the picture if one was asked for, and quits.
+    private func measure(to url: URL) {
+        guard let controller = songs.first, let size = controller.window?.contentView?.bounds.size else { exit(1) }
+        let (frames, snapshot) = (launch.frames, launch.snapshot)
+        controller.model.measure(frames: frames) { [weak self] times in
+            let a = controller.model.arrangement
+            var report = times.report
+            report["window"] = [size.width, size.height]
+            report["tracks"] = a.tracks.count
+            report["clips"] = a.tracks.reduce(0) { $0 + $1.clips.count }
+            // How long waveforms trailed the song's opening and its last
+            // change of audio.
+            let round = { (x: Double) in (x * 10).rounded() / 10 }
+            var waveforms: [String: Double] = [:]
+            if let open = controller.model.waveformDelay.open { waveforms["after_open"] = round(open) }
+            if let change = controller.model.waveformDelay.change { waveforms["after_change"] = round(change) }
+            report["waveform_ms"] = waveforms
+            do {
+                try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url)
+            } catch {
+                FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
+            // The view is back at the zoom that shows the whole song.
+            if let snapshot {
+                self?.later(0.3) { $0.snapshot(to: snapshot) }
+            } else {
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
     private func snapshot(to url: URL) {
         guard let view = (songs.first?.window ?? welcome)?.contentView,
               let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
@@ -386,7 +430,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Zoom Out", #selector(SongWindowController.zoomOut(_:)), "-"),
             item("Zoom to Fit", #selector(SongWindowController.zoomToFit(_:)), "0"),
             .separator(),
+            item("Samples", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
+            item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
             item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]),
         ])
         let window = NSMenu(title: "Window")
@@ -471,11 +517,33 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func zoomOut(_ sender: Any?) { model.zoom(.out) }
     @objc func zoomToFit(_ sender: Any?) { model.zoom(.fit) }
     @objc func toggleActivity(_ sender: Any?) { model.showsActivity.toggle() }
-    @objc func toggleDevices(_ sender: Any?) { model.showsDevices.toggle() }
+    @objc func toggleBrowser(_ sender: Any?) { model.showsBrowser.toggle() }
+
+    /// Shows the devices or the pattern in the detail panel, or hides the
+    /// panel when it shows them already.
+    private func toggle(_ detail: Detail) {
+        if model.showsDetail, model.detail == detail {
+            model.showsDetail = false
+        } else {
+            model.showsDetail = true
+            model.detail = detail
+        }
+    }
+
+    @objc func toggleDevices(_ sender: Any?) { toggle(.devices) }
+    @objc func togglePattern(_ sender: Any?) { toggle(.pattern) }
     @objc func undoEdit(_ sender: Any?) { model.undo() }
     @objc func redoEdit(_ sender: Any?) { model.redo() }
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
-    @objc func deleteSelection(_ sender: Any?) { model.deleteSelection() }
+    /// Delete, for what has the keys: in the pattern editor the selected
+    /// event and nothing else, so that it never takes the clip being edited.
+    @objc func deleteSelection(_ sender: Any?) {
+        if window?.firstResponder is PatternEditor, model.selectedEvent == nil {
+            NSSound.beep()
+        } else {
+            model.deleteSelection()
+        }
+    }
     @objc func addTrack(_ sender: Any?) { model.addTrack() }
     @objc func addReturn(_ sender: Any?) { model.addReturn() }
     @objc func renameSelection(_ sender: Any?) { model.renameSelection() }
@@ -501,7 +569,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.state = model.transport.loopRegion == nil ? .off : .on
             return !typing
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
-        case #selector(toggleDevices(_:)): item.state = model.showsDevices ? .on : .off
+        case #selector(toggleDevices(_:)): item.state = model.showsDetail && model.detail == .devices ? .on : .off
+        case #selector(togglePattern(_:)): item.state = model.showsDetail && model.detail == .pattern ? .on : .off
+        case #selector(toggleBrowser(_:)): item.state = model.showsBrowser ? .on : .off
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
         case #selector(togglePlay(_:)): return !typing
         case #selector(undoEdit(_:)):

@@ -2,51 +2,112 @@ import AAWCore
 import AppKit
 import SwiftUI
 
-/// The detail panel: the effect chain of the row last selected, each effect a
-/// panel of controls drawn from its fields as the host describes them. No
-/// panel is made by hand for an effect type. A control's change is an edit to
-/// the host, as an agent's `daw set` is.
-struct DeviceView: View {
+/// The detail panel, under the arrangement: the devices of the row last
+/// selected, or the pattern of the clip last selected. A row's header shows
+/// the first and a clip the second, and the two marks at the top left change
+/// between them.
+struct DetailView: View {
     let model: SongModel
 
     static let height: CGFloat = 214
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            if let chain = model.deviceChain {
-                ChainHeader(model: model, chain: chain)
-                    .frame(width: TimelineLayout.headerWidth - 1)
-                Divider()
-                ScrollView(.horizontal) {
-                    HStack(alignment: .top, spacing: 8) {
-                        ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
-                            DevicePanel(model: model, chain: chain, effect: effect, index: index)
-                        }
-                        if chain.effects.isEmpty {
-                            Text("No effects on \(chain.name). Add one at the left, or ask the agent: its `daw effect add` lands here.")
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .frame(width: 320, alignment: .leading)
-                                .padding(.top, 4)
-                        }
-                    }
-                    .padding(8)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 2) {
+                    tab("Devices", .devices)
+                    tab("Pattern", .pattern)
+                    Spacer(minLength: 0)
                 }
-            } else {
-                Text("Select a track, a return or the master to see its effects.")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                    .padding(12)
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                switch model.detail {
+                case .devices:
+                    if let chain = model.deviceChain {
+                        ChainHeader(model: model, chain: chain)
+                    } else {
+                        hint("Select a track, a return or the master to see its effects.")
+                    }
+                case .pattern:
+                    if let context = model.patternContext {
+                        PatternHeader(model: model, context: context)
+                    } else {
+                        hint("Select a clip to edit its pattern. Double-click an empty part of a track to add a clip.")
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .frame(width: TimelineLayout.headerWidth - 1)
+            Divider()
+            switch model.detail {
+            case .devices:
+                if let chain = model.deviceChain { DeviceView(model: model, chain: chain) }
+            case .pattern:
+                if let context = model.patternContext {
+                    PatternPane(model: model, context: context, color: model.color(of: context.track.key),
+                                playing: model.transport.playing, selected: model.selectedEvent)
+                }
             }
             Spacer(minLength: 0)
         }
         .frame(height: Self.height, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.13)))
     }
+
+    private func tab(_ title: String, _ detail: Detail) -> some View {
+        Button {
+            model.detail = detail
+        } label: {
+            Text(title)
+                .font(.system(size: 11, weight: model.detail == detail ? .semibold : .regular))
+                .foregroundStyle(model.detail == detail ? Color.primary : Color.secondary)
+                .padding(.horizontal, 8)
+                .frame(height: 18)
+                .background(RoundedRectangle(cornerRadius: 4).fill(Color.white.opacity(model.detail == detail ? 0.12 : 0)))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+    }
+
+    private func hint(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+    }
+}
+
+/// A row's effect chain, each effect a panel of controls drawn from its
+/// fields as the host describes them. No panel is made by hand for an effect
+/// type. A control's change is an edit to the host, as an agent's `daw set` is.
+struct DeviceView: View {
+    let model: SongModel
+    let chain: DeviceChain
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
+                    DevicePanel(model: model, chain: chain, effect: effect, index: index)
+                }
+                if chain.effects.isEmpty {
+                    Text("No effects on \(chain.name). Add one at the left, or ask the agent: its `daw effect add` lands here.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 320, alignment: .leading)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(8)
+        }
+    }
 }
 
 /// An effect type or a choice as a person reads it: `low_shelf` is "Low shelf".
-private func readable(_ name: String) -> String {
+func readable(_ name: String) -> String {
     let words = name.replacingOccurrences(of: "_", with: " ")
     return words.prefix(1).uppercased() + words.dropFirst()
 }
@@ -103,7 +164,7 @@ private struct ChainHeader: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 6)
     }
 }
 
@@ -197,7 +258,7 @@ private struct DevicePanel: View {
             .opacity(effect.bypass ? 0.5 : 1)
             Spacer(minLength: 0)
         }
-        .frame(width: effect.kind == "eq" ? 376 : 216, height: DeviceView.height - 16, alignment: .top)
+        .frame(width: effect.kind == "eq" ? 376 : 216, height: DetailView.height - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }
@@ -300,7 +361,9 @@ private struct FieldControl: View {
                     .labelsHidden()
                     .help(field.value == .absent ? "Off" : "On")
                 }
-                KnobBar(model: model, effect: effect, field: field)
+                KnobBar(model: model, spec: BarSpec(field)) { [effect, name = field.name] value in
+                    .effectSet(effect: effect, field: name, value: .number(value: value))
+                }
             }
         case .integer where !field.choices.isEmpty, .choice:
             Picker("", selection: Binding(
@@ -349,10 +412,12 @@ private struct FieldControl: View {
     }
 }
 
-/// A value that is typed: a beat such as `3/4`, or a whole number.
-private struct TypedValue: View {
+/// A value that is typed: a beat such as `3/4`, a note or a whole number.
+struct TypedValue: View {
     let text: String
     let unit: String
+    /// Whether an empty value is kept, as one that takes a field away.
+    var clears = false
     let commit: (String) -> Void
     let done: () -> Void
 
@@ -367,7 +432,7 @@ private struct TypedValue: View {
                 .focused($focused)
                 .onSubmit {
                     let value = typed.trimmingCharacters(in: .whitespaces)
-                    if !value.isEmpty, value != text { commit(value) }
+                    if clears || !value.isEmpty, value != text { commit(value) }
                     typed = text
                     focused = false
                     done()
@@ -384,34 +449,68 @@ private struct TypedValue: View {
     }
 }
 
-/// A number as a bar to drag, in SwiftUI.
-private struct KnobBar: NSViewRepresentable {
+/// What a bar shows and how it is dragged: a number in a range.
+struct BarSpec: Equatable {
+    /// Nil for an optional number that is off.
+    var value: Double?
+    var min: Double
+    var max: Double
+    /// Whether the value moves in equal ratios, as a frequency does.
+    var log = false
+    var unit = ""
+    /// What a double-click puts back, and where an off value starts.
+    var initial: Double?
+    /// Whether the song glides to each value of a drag; otherwise the value
+    /// is sent when the drag ends.
+    var live = true
+    /// Dimmed, as a knob that a lane moves is.
+    var dimmed = false
+    /// Whole numbers only.
+    var whole = false
+    /// The text for a value, where the unit's usual one does not do.
+    var text: String?
+}
+
+extension BarSpec {
+    /// A numeric field of an effect.
+    init(_ field: FieldView) {
+        var value: Double?
+        if case .number(let x) = field.value { value = x }
+        var initial: Double?
+        if case .number(let x) = field.initial { initial = x }
+        self.init(value: value, min: field.min, max: field.max, log: field.log, unit: field.unit, initial: initial,
+                  live: field.live, dimmed: field.lane != nil)
+    }
+}
+
+/// A number as a bar to drag, in SwiftUI. `edit` is the edit that sets it.
+struct KnobBar: NSViewRepresentable {
     let model: SongModel
-    let effect: UInt64
-    let field: FieldView
+    let spec: BarSpec
+    let edit: (Double) -> Edit
 
     func makeNSView(context: Context) -> KnobBarView {
-        KnobBarView(model: model, effect: effect, field: field)
+        KnobBarView(model: model, spec: spec, edit: edit)
     }
 
     func updateNSView(_ view: KnobBarView, context: Context) {
-        view.effect = effect
-        view.field = field
+        view.edit = edit
+        view.spec = spec
     }
 }
 
 /// A number as a bar filled to its place in its range, with its value. A drag
 /// sideways changes it, ten times finer with Shift; a double-click puts it
-/// back to its default. A field the song glides to is heard as it moves, each
+/// back to its default. A value the song glides to is heard as it moves, each
 /// change an edit of one gesture; any other is sent when the drag ends, since
 /// each change would be a fade through silence.
 final class KnobBarView: NSView {
     private let model: SongModel
-    var effect: UInt64
-    var field: FieldView {
+    var edit: (Double) -> Edit
+    var spec: BarSpec {
         didSet {
             // The host's value has arrived.
-            if case .number(let value) = field.value, let shown, abs(value - shown) < 1e-9, drag == nil {
+            if let value = spec.value, let shown, abs(value - shown) < 1e-9, drag == nil {
                 self.shown = nil
             }
             needsDisplay = true
@@ -433,10 +532,10 @@ final class KnobBarView: NSView {
     private var shown: Double?
     private var release = 0
 
-    init(model: SongModel, effect: UInt64, field: FieldView) {
+    init(model: SongModel, spec: BarSpec, edit: @escaping (Double) -> Edit) {
         self.model = model
-        self.effect = effect
-        self.field = field
+        self.spec = spec
+        self.edit = edit
         super.init(frame: .zero)
     }
 
@@ -450,29 +549,21 @@ final class KnobBarView: NSView {
     override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: 16) }
 
     private var scale: ValueScale {
-        ValueScale(min: field.min, max: field.max, log: field.log)
+        ValueScale(min: spec.min, max: spec.max, log: spec.log)
     }
 
-    /// The value in effect: the dragged one, the song's, or the one an absent
-    /// field would start with.
+    /// The value in effect: the dragged one or the song's; nil for a number
+    /// that is off.
     private var value: Double? {
-        if let shown { return shown }
-        if case .number(let value) = field.value { return value }
-        return nil
+        shown ?? spec.value
     }
 
     private var start: Double {
-        if let value { return value }
-        if case .number(let value) = field.initial { return value }
-        return field.min
-    }
-
-    private func edit(_ value: Double) -> Edit {
-        .effectSet(effect: effect, field: field.name, value: .number(value: value))
+        value ?? spec.initial ?? spec.min
     }
 
     override func mouseDown(with event: NSEvent) {
-        if event.clickCount == 2, case .number(let initial) = field.initial {
+        if event.clickCount == 2, let initial = spec.initial {
             drag = nil
             if value != initial {
                 shown = initial
@@ -492,11 +583,12 @@ final class KnobBarView: NSView {
         let fine = event.modifierFlags.contains(.shift)
         d.fraction = min(max(d.fraction + Double((x - d.x) / Self.travel) * (fine ? 0.1 : 1), 0), 1)
         d.x = x
-        let value = scale.value(at: d.fraction)
+        var value = scale.value(at: d.fraction)
+        if spec.whole { value = value.rounded() }
         if value != self.value {
             d.moved = true
             shown = value
-            if field.live { model.drag(edit(value), gesture: d.gesture) }
+            if spec.live { model.drag(edit(value), gesture: d.gesture) }
             needsDisplay = true
         }
         drag = d
@@ -506,7 +598,7 @@ final class KnobBarView: NSView {
         guard let d = drag else { return }
         drag = nil
         guard d.moved, let shown else { return }
-        if field.live {
+        if spec.live {
             model.endDrag()
         } else {
             model.edit(edit(shown))
@@ -544,10 +636,13 @@ final class KnobBarView: NSView {
         }
         NSGraphicsContext.saveGraphicsState()
         shape.addClip()
-        Theme.knob.withAlphaComponent(field.lane == nil ? 1 : 0.45).setFill()
+        Theme.knob.withAlphaComponent(spec.dimmed ? 0.45 : 1).setFill()
         CGRect(x: box.minX, y: box.minY, width: box.width * CGFloat(scale.fraction(value)), height: box.height).fill()
         NSGraphicsContext.restoreGraphicsState()
-        (ValueScale.text(value, unit: field.unit, signed: field.min < 0) as NSString).draw(in: box.insetBy(dx: 3, dy: 1.5), withAttributes: [
+        // A shown value is the dragged one, so its own text is out of date.
+        let text = (shown == nil ? spec.text : nil)
+            ?? (spec.whole ? String(Int(value)) : ValueScale.text(value, unit: spec.unit, signed: spec.min < 0))
+        (text as NSString).draw(in: box.insetBy(dx: 3, dy: 1.5), withAttributes: [
             .font: font, .foregroundColor: Theme.text, .paragraphStyle: style,
         ])
     }
