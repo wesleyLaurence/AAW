@@ -6,6 +6,8 @@ Current analysis commands: [perception.md](perception.md) documents `daw listen`
 and `daw compare`, the implemented subset of the broader perception plan.
 [sample-analysis.md](sample-analysis.md) documents `daw samples analyze`, measured
 search filters, `--root-note auto` and root-note warnings in `daw check`.
+[beat-map.md](beat-map.md) documents `daw samples beats`: a whole song's tempo, beats,
+downbeats and phrase changes, the beats near a timecode, and a click audition.
 [effects.md](effects.md) documents track, return and master insert effects,
 sidechain compression, the limiter, delay and reverb, and sends to return buses.
 [automation.md](automation.md) documents automation lanes for levels, pans, sends

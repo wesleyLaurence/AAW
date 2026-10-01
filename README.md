@@ -141,6 +141,7 @@ uv run daw samples analyze --all
 uv run daw samples search --pitched --note-range C1-B1
 uv run daw samples analyze SAMPLE_ID
 uv run daw samples audition SAMPLE_ID --output /tmp/candidate.wav
+uv run daw samples beats SONG.wav --near 0:41
 
 uv run daw init projects/my-beat --tempo 160 --bars 20
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
@@ -171,6 +172,9 @@ the audio. See [docs/sample-analysis.md](docs/sample-analysis.md).
 `daw samples import` takes a file's path as well as an index ID. An `.m4a` or
 `.mp3` file is decoded once into the project as WAV, and a file the engine cannot
 play is refused; see "Format v1" in [docs/mvp.md](docs/mvp.md).
+`daw samples beats` maps a whole song: its tempo, every beat, the downbeats with
+their alternatives, where the arrangement changes, the beats near a timecode and a
+click audition to check the grid by ear. See [docs/beat-map.md](docs/beat-map.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
 Edits are commands: `set` for any value by path, and verbs for tracks, returns,

@@ -57,7 +57,7 @@ person can see and adjust.
 | # | Feature | Without it | Needed for | Status |
 |---|---|---|---|---|
 | 1 | Decode `.m4a` and `.mp3` on import | The song cannot be loaded at all | Every edit | Done, October 1, 2026 |
-| 2 | Beat and downbeat map of a whole song | The agent cannot find where to cut | Every edit | |
+| 2 | Beat and downbeat map of a whole song | The agent cannot find where to cut | Every edit | Done, October 1, 2026 |
 | 3 | Pitch-preserving time stretch | "Speed it up slightly" changes the pitch | Edits that run long | |
 | 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | |
 | 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | |
@@ -110,6 +110,20 @@ copy-protected and cannot be read. A decoded AAC file can exceed full scale by a
 fraction of a decibel, which matters for feature 6.
 
 ### 2. Beat and downbeat map of a whole song
+
+**Done, October 1, 2026.** `daw samples beats FILE` measures the whole file: the
+tempo and how far the song strays from it, every beat with its bar and beat
+number, the downbeat with a confidence for each of the four places, and phrase
+changes. `--near 0:41` lists the beats around a time, `--click` writes an audition
+with a click on each beat, and `--bpm` and `--downbeat` correct the map, which is
+kept beside the audio as `NAME.beats.json`. It is a numpy tracker; see
+[beat-map.md](beat-map.md) and D49 in [decisions.md](decisions.md). On generated
+songs every beat is within 0.1 ms, and on five local renders within 0.4 ms on four
+and 8 ms on one. No commercially released song was measured, and nobody listened
+to a click audition. The beat map is not yet drawn in the app, which is part of
+feature 4. Open questions 1 and 4 were answered by default: steady tempo first,
+with slow drift followed, and numpy first. What follows is the analysis as it was
+written.
 
 Today (`src/agent_daw/analysis.py`, [sample-analysis.md](sample-analysis.md)):
 
