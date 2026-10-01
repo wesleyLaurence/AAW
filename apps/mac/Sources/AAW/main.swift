@@ -1,0 +1,3 @@
+import AAWApp
+
+AAWMain.run()

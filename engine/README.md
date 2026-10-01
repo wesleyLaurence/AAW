@@ -12,9 +12,9 @@ the cutover (M7).
 | `aaw-engine` | Song compilation, scheduling, mixing, the transport, offline and real-time drivers |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket |
 | `aaw-cli` | The `daw` binary |
+| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, changes and transport |
 
-The Swift bindings and Python bindings join the workspace in the milestones that
-need them.
+The Python bindings join the workspace in the milestone that needs them.
 
 ## Build and test
 
@@ -98,11 +98,22 @@ log, handles and the transport need a host.
   hits at the new position play in full. The audio thread never allocates,
   locks or blocks; replaced programs return to the host to be freed.
 
+A process can embed a host instead of running `daw host`: `host::spawn` runs one
+on its own thread and calls an observer with the opened song, each change with
+the song after it, transport changes, warnings and the close, while `Clock`
+gives the playhead straight from the audio thread. The Mac app does this through
+`aaw-ffi`, whose `Song` turns each revision into the arrangement the app draws
+(`view.rs`) and names the tracks, clips, returns and sections a change touched.
+Such a host is reached through its socket like any other, and compiles each
+revision as it lands so that play starts at once.
+
 `crates/aaw-host/tests` cover every command, handles, undo, batches, external
-edits, concurrent clients and a real-time stress run: random edits compiled and
+edits, concurrent clients, an embedded host and a real-time stress run: random edits compiled and
 swapped in while a thread renders 128-frame blocks on schedule under allocation
 checking. `tests/test_rust_host.py` checks `inspect` and command results against
 the Python model and drives a `daw host` process from outside.
+`crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
+what each kind of change touches, and the transport shared with an agent.
 
 ## Model parity
 

@@ -1,8 +1,103 @@
 # Mac app
 
-The native macOS app planned in
-[docs/Rust-Swift-Update.md](../../docs/Rust-Swift-Update.md): SwiftUI and AppKit
-over the Rust core through UniFFI. It holds no model logic of its own.
+The native macOS app of [docs/Rust-Swift-Update.md](../../docs/Rust-Swift-Update.md),
+as far as milestone M4: it opens a song, shows its arrangement, plays it, and
+shows each change as it lands, whoever makes it. Editing in the window comes in
+M5; until then the agent's `daw` commands and the song file are how a song
+changes.
 
-The Xcode project is created in milestone M4. It needs Xcode 16.2 (Swift 6) and
+The app holds no model logic. Opening a song makes the app its session host
+([engine/README.md](../../engine/README.md)): the Rust core runs inside the app,
+and `daw` commands from a terminal reach that same host, so the person and the
+agent share one song, one transport and one undo history. `daw status` shows
+`"host": true` while a song is open.
+
+## Build and run
+
+It needs Xcode 16.2 (Swift 6), Rust and libsndfile, as the engine does, and
 targets macOS 14.
+
+```sh
+./build.sh                          # build/AAW.app
+open -a build/AAW.app path/to/song.yaml
+./build.sh test                     # the Swift tests
+```
+
+`build.sh` builds the Rust core as a static library, generates the Swift
+bindings from it with UniFFI, wraps both as an XCFramework under `Generated/`,
+builds the Swift package and assembles the bundle. Bindings and build output
+stay out of Git. After a first `build.sh`, `swift build` is enough for
+Swift-only changes, and Xcode opens `Package.swift` directly.
+
+If the checkout lives in a synced folder, exclude `.build`, `build` and
+`Generated` from syncing, as with the engine's `target`. For Dropbox: `xattr -w
+com.dropbox.ignored 1 .build build Generated`.
+
+The bundle is signed ad hoc and links Homebrew's libsndfile, so it runs on the
+machine that built it.
+
+## The window
+
+| Part | Shows |
+|---|---|
+| Transport bar | Play or stop, loop, the position as bar.beat.sixteenth, tempo, length, and "Agent editing" while an agent's changes land |
+| Ruler | The loop brace, section markers and bar numbers, with the start position as an orange marker |
+| Headers | Each track's name, effect chain, mute, solo, volume and pan; then the returns and the master. Display only |
+| Lanes | Clips as blocks named by their pattern, divided at each repeat; clips of a muted track are gray |
+| Activity | Each change with who made it (agent, you, or an edit of the file), newest first |
+
+| Input | Does |
+|---|---|
+| Click in the ruler or lanes | Sets the start position, on the grid; with Option, off it. While playing, playback jumps there |
+| Space | Plays from the start position, or stops |
+| Return | Jumps back to the start position while playing |
+| Drag in the ruler's top strip | Sets the loop |
+| L | Turns the loop off, or on again |
+| Scroll, pinch, Command-scroll, ⌘=, ⌘-, ⌘0 | Scroll and zoom; ⌘0 fits the song |
+
+The grid is the finest of bars, beats, eighths and sixteenths that the zoom has
+room to draw, and clicks snap to the lines drawn.
+
+When a change lands, rows and clips ease to their new places and values. What a
+change by the agent or an edit of the file touched lights up in that origin's
+color for a moment. A clip also lights up when its pattern changed. A
+`song.yaml` edited outside the app that does not load is reported in a banner
+and the last valid song stays open. `daw close SONG` closes the window.
+
+## Checking the app without the screen
+
+The app takes scripted input on its command line, sent to the window as the
+events a person's click or key press makes, and can write a picture of the
+window and quit. Points are in the window's content, from its top left.
+
+```sh
+build/AAW.app/Contents/MacOS/AAW song.yaml --size 1280x560 \
+    --click 800,250 --key space --snapshot /tmp/window.png --after 1.5
+```
+
+`--click X,Y`, `--drag X1,Y1,X2,Y2` and `--key space|return|l` run in the order
+given, half a second apart; `--after` is the time between the last of them and
+the picture. Run `daw` commands against the song meanwhile to see them land in
+the picture. A key that plays is heard on the speakers.
+
+## Layout
+
+| Path | Holds |
+|---|---|
+| `Sources/AAWCore` | The generated bindings (not in Git) |
+| `Sources/AAWApp/SongModel.swift` | A song open in the app: what the host reports, and the transport commands |
+| `Sources/AAWApp/ArrangementView.swift` | The timeline, an AppKit view drawn with Core Graphics |
+| `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid and what a click or drag means, tested in `Tests` |
+| `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
+| `Sources/AAWApp/App.swift` | The app delegate, menus, windows and the command line |
+| `Sources/AAW` | The executable's entry point |
+
+## Limits
+
+- The engine plays without effects, sends, returns and automation until M6; the
+  info mark in the transport bar says what a song is played without.
+- The playhead is drawn where the audio thread is, not yet delayed by the
+  output's latency.
+- Track colors are given out in the order tracks are first seen and are not
+  saved; the song format has no color.
+- No waveforms (M8), no automation lanes or device view (M6).

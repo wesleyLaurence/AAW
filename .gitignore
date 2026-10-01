@@ -17,3 +17,9 @@ projects/*/renders/
 # Personal creative work stays local; this repository versions reusable tooling.
 /projects/
 /content/
+
+# Mac app build output and generated bindings
+apps/mac/.build/
+apps/mac/build/
+apps/mac/Generated/
+apps/mac/Sources/AAWCore/aaw_ffi.swift

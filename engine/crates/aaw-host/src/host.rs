@@ -1,16 +1,19 @@
 //! A running session host: owns a project, answers requests on its socket one
 //! at a time, saves after each change, reloads external edits, and plays the
 //! song, recompiling it after each change so edits are heard during playback.
+//! `run` hosts on the calling thread, as `daw host` does; `spawn` hosts on a
+//! thread of its own for a process that embeds the host and watches its events.
 
 use crate::client::Request;
 use crate::command::{beat_value, json_value, Command, Kind, Origin};
 use crate::registry;
-use crate::session::{Change, Session};
+use crate::session::{Change, Doc, Session};
+use aaw_engine::player::Shared;
 use aaw_engine::program::{compile_cached, Program, SampleCache};
 use aaw_engine::realtime::Transport;
 use aaw_model::Beat;
 use num_rational::BigRational;
-use num_traits::{Signed, Zero};
+use num_traits::{Signed, ToPrimitive, Zero};
 use serde_json::{json, Map, Value as Json};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
@@ -18,13 +21,16 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 type Result<T> = std::result::Result<T, String>;
 
 /// How often the host checks song.yaml for external edits.
 const SYNC_EVERY: Duration = Duration::from_millis(200);
+
+const CLOSING: &str = "The host is closing";
 
 /// Holds the project's advisory lock, as the Python CLI's writers do.
 pub fn lock(project: &Path) -> Result<File> {
@@ -52,11 +58,67 @@ pub struct Options {
     pub seconds: Option<f64>,
     /// Print each change to stderr as a JSON line.
     pub feed: bool,
+    /// Compile each revision as it lands, so the first play starts at once.
+    pub prepare: bool,
 }
+
+/// What a host tells the process that embeds it.
+#[derive(Clone)]
+pub enum Event {
+    /// The song as opened, before any change.
+    Opened(Doc),
+    /// A new revision of the song.
+    Changed { change: Change, doc: Doc },
+    /// The play state, the start position or the loop changed.
+    Transport(TransportState),
+    /// song.yaml holds an external edit that does not load, or it was fixed.
+    Invalid(Option<String>),
+    Warning(String),
+    /// The host has saved and shut down.
+    Closed,
+}
+
+/// The transport as a display needs it, in beats.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TransportState {
+    pub playing: bool,
+    /// Where play starts.
+    pub cue: f64,
+    /// Loop start and length.
+    pub region: Option<(f64, f64)>,
+}
+
+/// The playhead, readable from any thread without waiting for the host.
+#[derive(Default)]
+pub struct Clock {
+    /// What the audio thread publishes, and beats per frame of its program.
+    source: Mutex<Option<(Arc<Shared>, f64)>>,
+}
+
+impl Clock {
+    /// Whether the song is playing and the beat it is at. None until the
+    /// output has been opened by a first play.
+    pub fn now(&self) -> Option<(bool, f64)> {
+        let source = self.source.lock().unwrap_or_else(|e| e.into_inner());
+        source
+            .as_ref()
+            .map(|(shared, beats_per_frame)| (shared.playing.load(Relaxed), shared.position.load(Relaxed) as f64 * beats_per_frame))
+    }
+
+    fn set(&self, source: Option<(Arc<Shared>, f64)>) {
+        *self.source.lock().unwrap_or_else(|e| e.into_inner()) = source;
+    }
+}
+
+type Observer = Box<dyn FnMut(Event) + Send>;
+type Inbox = mpsc::Sender<(Request, mpsc::Sender<Json>)>;
 
 struct Host {
     session: Session,
     opts: Options,
+    observer: Option<Observer>,
+    clock: Arc<Clock>,
+    reported_transport: Option<TransportState>,
     cache: SampleCache,
     /// The compiled song and the SHA it was compiled from.
     program: Option<(String, Arc<Program>)>,
@@ -95,6 +157,17 @@ impl Host {
         }
     }
 
+    fn notify(&mut self, event: Event) {
+        if let Some(observer) = &mut self.observer {
+            observer(event);
+        }
+    }
+
+    fn warn(&mut self, message: String) {
+        eprintln!("{}", json!({"warning": message}));
+        self.notify(Event::Warning(message));
+    }
+
     fn frame(&self, beats: &BigRational) -> usize {
         let s = &self.session.project().session;
         aaw_model::frame(beats, s.tempo, s.sample_rate).max(0) as usize
@@ -119,10 +192,7 @@ impl Host {
         for feature in &p.omitted {
             if !self.warned.contains(feature) {
                 self.warned.push(feature.clone());
-                eprintln!(
-                    "{}",
-                    json!({"warning": format!("playing without {feature}, which the Rust engine does not process yet")})
-                );
+                self.warn(format!("playing without {feature}, which the Rust engine does not process yet"));
             }
         }
         self.program = Some((sha, p.clone()));
@@ -139,42 +209,64 @@ impl Host {
         let mut t = Transport::open(program, self.opts.buffer)?;
         t.control.set_loop(self.loop_frames())?;
         self.transport = Some(t);
+        self.publish_clock();
         Ok(())
     }
 
-    /// Sends the current revision to the audio thread.
-    fn refresh(&mut self) {
-        if self.transport.is_none() {
-            return;
-        }
-        let result = self.program().and_then(|p| {
-            let t = self.transport.as_mut().expect("transport");
-            if p.rate == t.rate {
-                t.control.load(p)?;
-            } else {
-                // Another sample rate needs another stream, at the same beat.
-                let old = self.transport.take().expect("transport");
-                let (playing, frame, old_program) = (old.control.playing(), old.control.position(), old.control.program().clone());
-                drop(old);
-                let beats = BigRational::from_float(frame as f64 * old_program.tempo / 60.0 / old_program.rate as f64)
-                    .unwrap_or_default();
-                self.open_transport(p)?;
-                if playing {
-                    let f = self.frame(&beats);
-                    self.transport.as_mut().expect("transport").control.play(f)?;
-                }
+    /// Points the clock at the open output and its program's tempo.
+    fn publish_clock(&self) {
+        self.clock.set(self.transport.as_ref().map(|t| {
+            let p = t.control.program();
+            (t.control.shared().clone(), p.tempo / 60.0 / p.rate as f64)
+        }));
+    }
+
+    /// Sends the current revision to the open output.
+    fn reload(&mut self) -> Result<()> {
+        let p = self.program()?;
+        let t = self.transport.as_mut().expect("transport");
+        if p.rate == t.rate {
+            t.control.load(p)?;
+        } else {
+            // Another sample rate needs another stream, at the same beat.
+            let old = self.transport.take().expect("transport");
+            let (playing, frame, old_program) = (old.control.playing(), old.control.position(), old.control.program().clone());
+            drop(old);
+            let beats =
+                BigRational::from_float(frame as f64 * old_program.tempo / 60.0 / old_program.rate as f64).unwrap_or_default();
+            self.open_transport(p)?;
+            if playing {
+                let f = self.frame(&beats);
+                self.transport.as_mut().expect("transport").control.play(f)?;
             }
-            let region = self.loop_frames();
-            self.transport.as_mut().expect("transport").control.set_loop(region)
-        });
+        }
+        self.publish_clock();
+        let region = self.loop_frames();
+        self.transport.as_mut().expect("transport").control.set_loop(region)
+    }
+
+    /// Sends the current revision to the audio thread, or with `prepare` and
+    /// no output open yet, compiles it for the first play.
+    fn refresh(&mut self) {
+        let result = if self.transport.is_some() {
+            self.reload()
+        } else if self.opts.prepare {
+            self.program().map(|_| ())
+        } else {
+            return;
+        };
         self.playback_error = result.err();
-        if let Some(e) = &self.playback_error {
-            eprintln!("{}", json!({"warning": format!("playback keeps the previous version: {e}")}));
+        if let Some(e) = self.playback_error.clone() {
+            self.warn(format!("playback keeps the previous version: {e}"));
         }
     }
 
     fn changed(&mut self, change: &Change) {
         self.emit(json!({"change": change}));
+        self.notify(Event::Changed {
+            change: change.clone(),
+            doc: self.session.doc().clone(),
+        });
         self.refresh();
     }
 
@@ -187,7 +279,29 @@ impl Host {
             if let Some(e) = &invalid {
                 self.emit(json!({"warning": format!("song.yaml does not load; edits wait until it is fixed: {e}")}));
             }
+            self.notify(Event::Invalid(invalid.clone()));
             self.reported_invalid = invalid;
+        }
+    }
+
+    fn transport_state(&self) -> TransportState {
+        let beats = |x: &BigRational| x.to_f64().unwrap_or(0.0);
+        TransportState {
+            playing: self.transport.as_ref().is_some_and(|t| t.control.playing()),
+            cue: beats(&self.cue),
+            region: self.region.as_ref().map(|(start, length)| (beats(start), beats(length))),
+        }
+    }
+
+    /// Tells the observer when the transport's state has changed.
+    fn report_transport(&mut self) {
+        if self.observer.is_none() {
+            return;
+        }
+        let state = self.transport_state();
+        if self.reported_transport.as_ref() != Some(&state) {
+            self.reported_transport = Some(state.clone());
+            self.notify(Event::Transport(state));
         }
     }
 
@@ -340,7 +454,9 @@ impl Host {
                 Command::Fmt => {
                     let _lock = lock(self.session.path())?;
                     self.session.write()?;
-                    self.reported_invalid = None;
+                    if self.reported_invalid.take().is_some() {
+                        self.notify(Event::Invalid(None));
+                    }
                     Ok(json!({"project": self.session.path(), "formatted": true}))
                 }
                 Command::Close => {
@@ -377,7 +493,7 @@ impl Host {
 }
 
 /// Reads one request from a connection and writes the host's reply.
-fn serve(stream: UnixStream, requests: mpsc::Sender<(Request, mpsc::Sender<Json>)>) {
+fn answer(stream: UnixStream, requests: Inbox) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
     let mut line = String::new();
     let Ok(read) = stream.try_clone() else { return };
@@ -389,9 +505,9 @@ fn serve(stream: UnixStream, requests: mpsc::Sender<(Request, mpsc::Sender<Json>
         Ok(request) => {
             let (tx, rx) = mpsc::channel();
             if requests.send((request, tx)).is_err() {
-                json!({"error": "The host is closing"})
+                json!({"error": CLOSING})
             } else {
-                rx.recv().unwrap_or_else(|_| json!({"error": "The host is closing"}))
+                rx.recv().unwrap_or_else(|_| json!({"error": CLOSING}))
             }
         }
     };
@@ -399,14 +515,14 @@ fn serve(stream: UnixStream, requests: mpsc::Sender<(Request, mpsc::Sender<Json>
     let _ = writeln!(stream, "{reply}");
 }
 
-fn listen(listener: UnixListener, requests: mpsc::Sender<(Request, mpsc::Sender<Json>)>, done: Arc<AtomicBool>) {
+fn listen(listener: UnixListener, requests: Inbox, done: Arc<AtomicBool>) {
     let _ = listener.set_nonblocking(true);
     while !done.load(Relaxed) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let _ = stream.set_nonblocking(false);
                 let tx = requests.clone();
-                std::thread::spawn(move || serve(stream, tx));
+                std::thread::spawn(move || answer(stream, tx));
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(Duration::from_millis(5)),
             Err(_) => std::thread::sleep(Duration::from_millis(20)),
@@ -414,23 +530,31 @@ fn listen(listener: UnixListener, requests: mpsc::Sender<(Request, mpsc::Sender<
     }
 }
 
-/// Hosts a project until `interrupted` is set, a `close` request arrives or,
-/// with `exit_on_stop`, playback stops. Returns a summary, with the audio
-/// report when the song played.
-pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Result<Json> {
+/// A host with its socket open, ready to serve.
+struct Serving {
+    rx: mpsc::Receiver<(Request, mpsc::Sender<Json>)>,
+    done: Arc<AtomicBool>,
+    listening: JoinHandle<()>,
+    claim: registry::Claim,
+}
+
+/// Claims the project, loads it and starts listening on its socket.
+fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Clock>) -> Result<(Host, Serving, Inbox)> {
     let entry = registry::entry(project)?;
     let (listener, claim) = registry::claim(&entry)?;
     let session = Session::open(project, true)?;
     let (tx, rx) = mpsc::channel::<(Request, mpsc::Sender<Json>)>();
     let done = Arc::new(AtomicBool::new(false));
     let listening = {
-        let done = done.clone();
+        let (tx, done) = (tx.clone(), done.clone());
         std::thread::spawn(move || listen(listener, tx, done))
     };
-    let play = opts.play.clone();
     let mut host = Host {
         session,
         opts,
+        observer,
+        clock,
+        reported_transport: None,
         cache: SampleCache::default(),
         program: None,
         transport: None,
@@ -450,9 +574,23 @@ pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Resul
         "socket": entry.socket,
         "revision": 0,
     }}));
-    let started = match &play {
-        Some(from) => host.play(Some(from)).map(|_| ()),
-        None => Ok(()),
+    let doc = host.session.doc().clone();
+    host.notify(Event::Opened(doc));
+    host.report_transport();
+    Ok((host, Serving { rx, done, listening, claim }, tx))
+}
+
+/// Answers requests until `interrupted` is set, a `close` request arrives or,
+/// with `exit_on_stop`, playback stops. Then saves, unregisters and returns a
+/// summary, with the audio report when the song played.
+fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Result<Json> {
+    let Serving { rx, done, listening, claim } = serving;
+    let started = match host.opts.play.clone() {
+        Some(from) => host.play(Some(&from)).map(|_| ()),
+        None => {
+            host.refresh();
+            Ok(())
+        }
     };
     let mut last_sync = Instant::now();
     while started.is_ok() {
@@ -471,7 +609,9 @@ pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Resul
             host.sync();
             last_sync = Instant::now();
         }
-        if host.tick() || host.closing || interrupted.load(Relaxed) {
+        let finished = host.tick();
+        host.report_transport();
+        if finished || host.closing || interrupted.load(Relaxed) {
             break;
         }
     }
@@ -479,7 +619,7 @@ pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Resul
     let _ = listening.join();
     // Answer requests that arrived while closing.
     while let Ok((_, reply)) = rx.try_recv() {
-        let _ = reply.send(json!({"error": "The host is closing"}));
+        let _ = reply.send(json!({"error": CLOSING}));
     }
     drop(claim);
     if let Some(t) = &mut host.transport {
@@ -489,6 +629,8 @@ pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Resul
         }
     }
     let saved = host.session.save();
+    host.clock.set(None);
+    host.notify(Event::Closed);
     started?;
     saved?;
     let mut summary = Map::new();
@@ -506,4 +648,89 @@ pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Resul
         t.close();
     }
     Ok(Json::Object(summary))
+}
+
+/// Hosts a project on the calling thread until `interrupted` is set, a `close`
+/// request arrives or, with `exit_on_stop`, playback stops. Returns a summary,
+/// with the audio report when the song played.
+pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Result<Json> {
+    let (host, serving, _) = open(project, opts, None, Arc::new(Clock::default()))?;
+    serve(host, serving, interrupted)
+}
+
+/// A host on its own thread, for a process that embeds one, such as the app.
+/// Other processes reach it through its socket as they reach `daw host`.
+pub struct Running {
+    requests: Inbox,
+    clock: Arc<Clock>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<Result<Json>>>,
+}
+
+/// Starts a host for a project. `observer` is called on the host's thread,
+/// first with `Event::Opened`, and must return promptly.
+pub fn spawn(project: &Path, opts: Options, observer: impl FnMut(Event) + Send + 'static) -> Result<Running> {
+    let stop = Arc::new(AtomicBool::new(false));
+    let clock = Arc::new(Clock::default());
+    let (ready_tx, ready_rx) = mpsc::channel::<Result<Inbox>>();
+    let thread = {
+        let (project, stop, clock) = (project.to_path_buf(), stop.clone(), clock.clone());
+        std::thread::Builder::new()
+            .name("aaw-host".into())
+            .spawn(move || match open(&project, opts, Some(Box::new(observer)), clock) {
+                Ok((host, serving, requests)) => {
+                    let _ = ready_tx.send(Ok(requests));
+                    serve(host, serving, stop)
+                }
+                Err(e) => {
+                    let _ = ready_tx.send(Err(e.clone()));
+                    Err(e)
+                }
+            })
+            .map_err(|e| e.to_string())?
+    };
+    let requests = ready_rx.recv().map_err(|_| "The host stopped while opening".to_string())??;
+    Ok(Running {
+        requests,
+        clock,
+        stop,
+        thread: Some(thread),
+    })
+}
+
+impl Running {
+    /// Sends a request and waits for the host's answer, as a client does over
+    /// the socket.
+    pub fn request(&self, request: Request) -> Result<Json> {
+        let (tx, rx) = mpsc::channel();
+        self.requests.send((request, tx)).map_err(|_| CLOSING.to_string())?;
+        let reply = rx.recv().map_err(|_| CLOSING.to_string())?;
+        match reply.get("error") {
+            Some(e) => Err(e.as_str().unwrap_or_default().to_string()),
+            None => Ok(reply.get("ok").cloned().unwrap_or(Json::Null)),
+        }
+    }
+
+    pub fn clock(&self) -> &Arc<Clock> {
+        &self.clock
+    }
+
+    fn join(&mut self) -> Result<Json> {
+        self.stop.store(true, Relaxed);
+        match self.thread.take() {
+            Some(t) => t.join().map_err(|_| "The host thread panicked".to_string())?,
+            None => Err(CLOSING.into()),
+        }
+    }
+
+    /// Saves, unregisters and stops the host. Returns the summary `run` returns.
+    pub fn close(mut self) -> Result<Json> {
+        self.join()
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let _ = self.join();
+    }
 }
