@@ -326,8 +326,8 @@ fn stale_expectations_are_refused() {
     let (_d, mut s) = open(true);
     let sha = s.doc().sha.clone();
     let c = cmd(json!({"op": "set", "path": "tracks.drums.pan", "value": 0.5}));
-    assert_eq!(s.edit(&c, Origin::Agent, Some("0".repeat(64).as_str())).unwrap_err(), "Stale project revision; inspect and retry");
-    s.edit(&c, Origin::Agent, Some(&sha)).unwrap();
+    assert_eq!(s.edit(&c, Origin::Agent, Some("0".repeat(64).as_str()), None).unwrap_err(), "Stale project revision; inspect and retry");
+    s.edit(&c, Origin::Agent, Some(&sha), None).unwrap();
 }
 
 #[test]
@@ -373,7 +373,7 @@ fn apply_merges_into_the_song_and_keeps_handles() {
         {"id": "drums", "pads": {"h": {"sample": "hit"}}, "clips": [{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 16, "repeats": 4}], "gain_db": -1},
         {"id": "bass", "pads": {"t": {"sample": "tone", "mode": "gate", "release_ms": 20}}, "clips": [{"pattern": "bass"}]},
     ]});
-    let r = s.edit(&Command::Apply { patch }, Origin::Agent, None).unwrap().0;
+    let r = s.edit(&Command::Apply { patch }, Origin::Agent, None, None).unwrap().0;
     assert_eq!(r["label"], json!("Apply a merge patch"));
     assert_eq!(refs(&s, "tracks.drums.clips"), clips);
     assert_eq!(get(&s, "session.tempo"), json!(90.0));
@@ -389,10 +389,130 @@ fn reordering_keys_is_a_change_although_the_sha_is_the_same() {
         {"id": "drums", "pads": {"k": {"sample": "hit"}, "h": {"sample": "hit"}}, "clips": [{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 16, "repeats": 4}]},
         get(&s, "tracks.bass"),
     ]});
-    let r = s.edit(&Command::Apply { patch }, Origin::Agent, None).unwrap().0;
+    let r = s.edit(&Command::Apply { patch }, Origin::Agent, None, None).unwrap().0;
     assert_eq!(r["changed"], json!(true));
     assert_eq!(s.doc().sha, sha);
     s.save().unwrap();
     let saved = aaw_model::load(s.path(), false).unwrap();
     assert_eq!(saved.tracks[0].pads.keys().collect::<Vec<_>>(), ["k", "h"]);
+}
+
+/// An edit that is part of a drag, as the app sends it.
+fn drag(s: &mut Session, gesture: &str, j: Json) -> Json {
+    s.edit(&cmd(j), Origin::User, None, Some(gesture)).unwrap().0
+}
+
+fn gain(db: f64) -> Json {
+    json!({"op": "set", "path": "tracks.drums.gain_db", "value": db})
+}
+
+#[test]
+fn a_gesture_is_one_undo_step_and_one_log_entry() {
+    let (_d, mut s) = open(true);
+    let start = s.doc().sha.clone();
+    for db in [-1.0, -2.5, -3.0] {
+        drag(&mut s, "g1", gain(db));
+    }
+    // Three revisions, one step named for the whole move, one log entry.
+    assert_eq!(s.revision(), 3);
+    let label = "Set tracks.drums.gain_db: 0.0 → -3.0";
+    assert_eq!(s.history().undo, Some((label.to_string(), Origin::User)));
+    let log = s.changes(0);
+    let entries = log["changes"].as_array().unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!((&entries[0]["revision"], &entries[0]["label"], &entries[0]["gesture"]), (&json!(3), &json!(label), &json!("g1")));
+    assert_eq!(entries[0]["command"]["value"], json!(-3.0));
+    // An agent that had seen the drag begin is told where it ended.
+    assert_eq!(s.changes(1)["changes"].as_array().unwrap().len(), 1);
+    s.undo(Origin::User, false).unwrap();
+    assert_eq!(s.doc().sha, start);
+    s.undo(Origin::User, true).unwrap();
+    assert_eq!(get(&s, "tracks.drums.gain_db"), json!(-3.0));
+
+    // Another gesture is another step, as is the same one after someone
+    // else's edit, or made by someone else.
+    drag(&mut s, "g2", gain(-4.0));
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.pan", "value": 0.2})).unwrap();
+    drag(&mut s, "g2", gain(-5.0));
+    s.edit(&cmd(gain(-6.0)), Origin::Agent, None, Some("g2")).unwrap();
+    let labels: Vec<String> = (0..4).map(|_| s.undo(Origin::User, false).unwrap().0["label"].as_str().unwrap().to_string()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Undo Set tracks.drums.gain_db: -5.0 → -6.0 (agent)",
+            "Undo Set tracks.drums.gain_db: -4.0 → -5.0 (user)",
+            "Undo Set tracks.bass.pan: 0.0 → 0.2 (agent)",
+            "Undo Set tracks.drums.gain_db: -3.0 → -4.0 (user)",
+        ]
+    );
+
+    // A drag that ends where it began leaves nothing to undo.
+    let top = s.history().undo;
+    drag(&mut s, "g3", gain(-9.0));
+    drag(&mut s, "g3", gain(-3.0));
+    assert_eq!(s.history().undo, top);
+    // Commands of other kinds merge too, under the latest label.
+    drag(&mut s, "g4", json!({"op": "send.set", "track": "drums", "to": "plate", "gain_db": -20}));
+    drag(&mut s, "g4", json!({"op": "send.set", "track": "drums", "to": "plate", "gain_db": -10}));
+    assert_eq!(s.history().undo, Some(("Set send drums → plate".to_string(), Origin::User)));
+    s.undo(Origin::User, false).unwrap();
+    assert_eq!(get(&s, "tracks.drums.sends"), json!([]));
+}
+
+#[test]
+fn references_work_wherever_names_do() {
+    let (_d, mut s) = open(true);
+    let tracks = refs(&s, "tracks");
+    let plate = refs(&s, "returns")[0].clone();
+    // A return renamed by handle takes its sends and their lanes with it.
+    let r = edit(&mut s, json!({"op": "return.rename", "return": plate, "to": "hall"})).unwrap();
+    assert_eq!(r["label"], json!("Rename return plate to hall"));
+    assert_eq!(get(&s, "tracks.bass.sends.0.to"), json!("hall"));
+    assert_eq!(get(&s, "tracks.bass.automation.0.param"), json!("sends.hall.gain_db"));
+    // Labels name objects, however the command referred to them.
+    let r = edit(&mut s, json!({"op": "send.set", "track": tracks[0], "to": "hall", "gain_db": -9})).unwrap();
+    assert_eq!(r["label"], json!("Set send drums → hall"));
+    let r = edit(&mut s, json!({"op": "track.move", "track": tracks[1], "index": 0})).unwrap();
+    assert_eq!(r["label"], json!("Move track bass to position 0"));
+    assert_eq!(refs(&s, "tracks"), [tracks[1].clone(), tracks[0].clone()]);
+    let r = edit(&mut s, json!({"op": "set", "path": format!("tracks.{}.gain_db", tracks[0]), "value": -2})).unwrap();
+    assert_eq!(r["label"], json!("Set tracks.drums.gain_db: 0.0 → -2"));
+
+    // Returns move as tracks do.
+    edit(&mut s, json!({"op": "return.add", "id": "room"})).unwrap();
+    let r = edit(&mut s, json!({"op": "return.move", "return": "room", "index": 0})).unwrap();
+    assert_eq!(r["label"], json!("Move return room to position 0"));
+    assert_eq!(get(&s, "returns.0.id"), json!("room"));
+    assert_eq!(refs(&s, "returns")[1], plate);
+    let e = edit(&mut s, json!({"op": "return.move", "return": "room", "index": 2})).unwrap_err();
+    assert_eq!(e, "returns index 2 is past the end (2 items)");
+}
+
+#[test]
+fn a_batch_reports_what_it_made() {
+    let (_d, mut s) = open(true);
+    let clips = refs(&s, "tracks.drums.clips");
+    let r = edit(
+        &mut s,
+        json!({"op": "batch", "commands": [
+            {"op": "clip.repeats", "clip": clips[1], "repeats": 2},
+            {"op": "clip.duplicate", "clip": clips[1]},
+            {"op": "clip.duplicate", "clip": clips[0], "at": 8},
+        ]}),
+    )
+    .unwrap();
+    assert_eq!(r["paths"], json!(["tracks.drums.clips.3", "tracks.drums.clips.1"]));
+    let made: Vec<&str> = r["handles"].as_array().unwrap().iter().map(|h| h.as_str().unwrap()).collect();
+    let now = refs(&s, "tracks.drums.clips");
+    assert_eq!(made, [now[3].as_str(), now[1].as_str()]);
+    assert_eq!(get(&s, "tracks.drums.clips.3.at"), json!(24));
+    assert_eq!(r["label"].as_str().unwrap().matches("Duplicate clip beat at").count(), 2);
+    // A batch can say what it does as a whole.
+    let named = json!({"op": "batch", "label": "Thin the drums", "commands": [
+        {"op": "clip.remove", "clip": now[3]},
+        {"op": "set", "path": "tracks.drums.gain_db", "value": -3},
+    ]});
+    assert_eq!(cmd(named.clone()).json(), named);
+    assert_eq!(edit(&mut s, named).unwrap()["label"], json!("Thin the drums"));
+    assert_eq!(s.history().undo, Some(("Thin the drums".to_string(), Origin::Agent)));
 }

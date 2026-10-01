@@ -28,14 +28,7 @@ fn registry_dir() -> &'static Path {
 }
 
 fn request(project: &Path, j: Json, origin: Origin) -> Result<Option<Json>, String> {
-    client::send(
-        project,
-        &Request {
-            command: cmd(j),
-            origin,
-            expect: None,
-        },
-    )
+    client::send(project, &Request::new(cmd(j), origin))
 }
 
 struct Running {
@@ -263,23 +256,18 @@ fn an_embedded_host_reports_what_changes() {
 
     // An edit from another process arrives with its origin and the new song.
     request(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -6}), Origin::Agent).unwrap();
-    let Event::Changed { change, doc } = next(&events, &mut warnings) else {
+    let Event::Changed { change, doc, history } = next(&events, &mut warnings) else {
         panic!("expected a change")
     };
     assert_eq!((change.revision, change.origin), (1, Origin::Agent));
     assert_eq!(change.label, "Set tracks.drums.gain_db: 0.0 → -6");
     assert_eq!(doc.project.tracks[0].gain_db, -6.0);
+    assert_eq!((history.undo, history.redo), (Some((change.label.clone(), Origin::Agent)), None));
     // `prepare` compiled the song, which found what the engine leaves out.
     assert!(warnings.iter().any(|w| w.contains("playing without")), "{warnings:?}");
 
     // Requests made in-process are answered as over the socket.
-    let ask = |j: Json| {
-        running.request(Request {
-            command: cmd(j),
-            origin: Origin::User,
-            expect: None,
-        })
-    };
+    let ask = |j: Json| running.request(Request::new(cmd(j), Origin::User));
     assert_eq!(ask(json!({"op": "locate", "at": 8})).unwrap()["cue"], json!(8));
     assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(8.0, None)));
     ask(json!({"op": "loop", "start": 8, "length": 4})).unwrap();
@@ -297,4 +285,71 @@ fn an_embedded_host_reports_what_changes() {
     assert_eq!(summary["revision"], json!(1));
     assert!(matches!(next(&events, &mut warnings), Event::Closed));
     assert!(request(&path, json!({"op": "status"}), Origin::Agent).unwrap().is_none());
+}
+
+#[test]
+fn a_drag_is_saved_when_it_pauses() {
+    let h = Running::start();
+    let saved = || std::fs::read_to_string(&h.path).unwrap();
+    let original = saved();
+    let drag = |db: f64| {
+        let request = Request {
+            gesture: Some("drag-1".into()),
+            ..Request::new(cmd(json!({"op": "set", "path": "tracks.drums.gain_db", "value": db})), Origin::User)
+        };
+        client::send(&h.path, &request).unwrap().unwrap()
+    };
+    for db in [-1.0, -2.0, -3.0] {
+        assert_eq!(drag(db)["changed"], json!(true));
+    }
+    // The host answers from memory at once; the file follows the pause.
+    let status = h.send(json!({"op": "status"})).unwrap();
+    assert_eq!((&status["revision"], &status["saved_revision"]), (&json!(3), &json!(0)));
+    assert_eq!(status["undo"]["label"], json!("Set tracks.drums.gain_db: 0.0 → -3.0"));
+    assert_eq!(saved(), original);
+    let started = Instant::now();
+    while !saved().contains("gain_db: -3.0") {
+        assert!(started.elapsed() < Duration::from_secs(5), "the drag was not saved");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(h.send(json!({"op": "status"})).unwrap()["saved_revision"], json!(3));
+    assert_eq!(h.send(json!({"op": "changes"})).unwrap()["changes"].as_array().unwrap().len(), 1);
+
+    // Any other edit saves at once, with the drag before it.
+    drag(-4.0);
+    h.send(json!({"op": "toggle", "path": "tracks.bass.mute"})).unwrap();
+    assert!(saved().contains("gain_db: -4.0") && saved().contains("mute: true"));
+    // So does closing.
+    drag(-5.0);
+    h.send(json!({"op": "close"})).unwrap();
+    while !saved().contains("gain_db: -5.0") {
+        assert!(started.elapsed() < Duration::from_secs(10), "closing did not save the drag");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn status_lists_what_the_person_selected() {
+    let h = Running::start();
+    assert_eq!(h.send(json!({"op": "status"})).unwrap()["selection"], json!([]));
+    let inspect = h.send(json!({"op": "inspect"})).unwrap();
+    let clip = inspect["tracks"][1]["clips"][2]["ref"].as_str().unwrap().to_string();
+    let r = h.send(json!({"op": "select", "items": [clip, "tracks.drums", clip]})).unwrap();
+    let selection = r["selection"].as_array().unwrap();
+    assert_eq!(selection.len(), 2);
+    assert_eq!(selection[0], json!({"ref": clip, "path": "tracks.bass.clips.2"}));
+    assert_eq!(selection[1]["path"], json!("tracks.drums"));
+    // The selection follows its objects through edits, and forgets removed ones.
+    h.send(json!({"op": "clip.remove", "clip": "tracks.bass.clips.0"})).unwrap();
+    h.send(json!({"op": "track.rename", "track": "drums", "to": "kit"})).unwrap();
+    let status = h.send(json!({"op": "status"})).unwrap();
+    assert_eq!(status["selection"], json!([{"ref": clip, "path": "tracks.bass.clips.1"}, {"ref": selection[1]["ref"], "path": "tracks.kit"}]));
+    h.send(json!({"op": "clip.remove", "clip": clip})).unwrap();
+    assert_eq!(h.send(json!({"op": "status"})).unwrap()["selection"].as_array().unwrap().len(), 1);
+    // Only objects can be selected, and selecting is not a change.
+    let e = h.send(json!({"op": "select", "items": ["tracks.kit.gain_db"]})).unwrap_err();
+    assert!(e.contains("is not a track, a clip or another object with a handle"), "{e}");
+    assert!(h.send(json!({"op": "select", "items": ["@9999"]})).is_err());
+    assert_eq!(h.send(json!({"op": "select"})).unwrap()["selection"], json!([]));
+    assert_eq!(h.send(json!({"op": "changes"})).unwrap()["changes"].as_array().unwrap().len(), 3);
 }

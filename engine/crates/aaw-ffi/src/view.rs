@@ -41,11 +41,18 @@ pub struct TrackView {
     pub mute: bool,
     pub solo: bool,
     pub effects: Vec<EffectView>,
-    /// The returns the track sends to.
-    pub sends: Vec<String>,
+    pub sends: Vec<SendView>,
     /// The parameters with automation lanes.
     pub automation: Vec<String>,
     pub clips: Vec<ClipView>,
+}
+
+/// A send from a track to a return.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SendView {
+    /// The return's ID.
+    pub to: String,
+    pub gain_db: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -154,7 +161,14 @@ pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
                 mute: t.mute,
                 solo: t.solo,
                 effects: effects(&t.effects),
-                sends: t.sends.iter().map(|s| s.to.clone()).collect(),
+                sends: t
+                    .sends
+                    .iter()
+                    .map(|s| SendView {
+                        to: s.to.clone(),
+                        gain_db: s.gain_db,
+                    })
+                    .collect(),
                 automation: params(&t.automation),
                 clips: t
                     .clips

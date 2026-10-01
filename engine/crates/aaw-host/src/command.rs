@@ -79,6 +79,12 @@ pub enum Command {
         id: String,
         to: String,
     },
+    #[serde(rename = "return.move")]
+    ReturnMove {
+        #[serde(rename = "return")]
+        id: String,
+        index: usize,
+    },
 
     // Clips
     #[serde(rename = "clip.add")]
@@ -218,7 +224,12 @@ pub enum Command {
     #[serde(rename = "apply")]
     Apply { patch: Json },
     #[serde(rename = "batch")]
-    Batch { commands: Vec<Command> },
+    Batch {
+        commands: Vec<Command>,
+        /// What the batch does as a whole, for the change log and undo.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
 
     // History
     #[serde(rename = "undo")]
@@ -260,6 +271,13 @@ pub enum Command {
         #[serde(default)]
         path: String,
     },
+    /// What the person has selected in the app, as references; `status` reports
+    /// it. It is host state like the loop: not saved, and not a change.
+    #[serde(rename = "select")]
+    Select {
+        #[serde(default)]
+        items: Vec<String>,
+    },
     /// Writes the song in canonical form.
     #[serde(rename = "fmt")]
     Fmt,
@@ -284,7 +302,7 @@ impl Command {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } => Kind::Read,
-            Fmt | Close => Kind::Host,
+            Select { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }
     }
@@ -305,12 +323,16 @@ impl Command {
 #[derive(Default)]
 pub struct Outcome {
     pub label: String,
-    /// The object the command created, by handle.
-    pub made: Option<u64>,
-    /// A `set`'s previous value.
+    /// The objects the command created, by handle.
+    pub made: Vec<u64>,
+    /// A `set`'s readable path and previous value.
+    pub path: Option<String>,
     pub before: Option<Json>,
     /// Changes the command made to keep references valid.
     pub also: Vec<String>,
+    /// Whether the command changed mixer values only: a track's gain, pan,
+    /// mute or solo, or the master gain. Playback then needs no recompile.
+    pub mix: bool,
 }
 
 /// Applies edits to a tree. Created objects get handles at once.
@@ -356,6 +378,23 @@ fn short(j: &Json) -> String {
         format!("{}…", s.chars().take(59).collect::<String>())
     } else {
         s
+    }
+}
+
+/// A `set`'s label: the path, the value before it if there was one, and the new one.
+pub fn set_label(path: &str, before: Option<&Json>, value: &Json) -> String {
+    match before {
+        Some(b) => format!("Set {path}: {} → {}", short(b), short(value)),
+        None => format!("Set {path}: {}", short(value)),
+    }
+}
+
+/// Whether a location is a mixer value that playback applies without recompiling.
+fn is_mix(loc: &[Step]) -> bool {
+    match loc {
+        [Step::Key(a), Step::Index(_), Step::Key(k)] => a == "tracks" && matches!(k.as_str(), "gain_db" | "pan" | "mute" | "solo"),
+        [Step::Key(a), Step::Key(k)] => a == "session" && k == "master_gain_db",
+        _ => false,
     }
 }
 
@@ -708,11 +747,10 @@ impl<'a> Edit<'a> {
                     None => return Err("Set a field of the song, not the whole song; use apply".into()),
                 };
                 let path = self.text(&loc);
-                out.label = match &before {
-                    Some(b) => format!("Set {path}: {} → {}", short(b), short(value)),
-                    None => format!("Set {path}: {}", short(value)),
-                };
+                out.label = set_label(&path, before.as_ref(), value);
+                out.path = Some(path);
                 out.before = before;
+                out.mix = is_mix(&loc);
             }
             Toggle { path } => {
                 let loc = self.at(path)?;
@@ -722,6 +760,7 @@ impl<'a> Edit<'a> {
                 };
                 *self.node_mut(&loc) = Node::Leaf(Value::Bool(now));
                 out.label = format!("Toggle {} to {now}", self.text(&loc));
+                out.mix = is_mix(&loc);
             }
             Remove { path } => {
                 let loc = self.at(path)?;
@@ -739,7 +778,7 @@ impl<'a> Edit<'a> {
                 }
                 f.extend(fields.clone());
                 let node = map_node(&f)?;
-                out.made = Some(self.insert(&[], key, *index, node)?);
+                out.made.push(self.insert(&[], key, *index, node)?);
                 out.label = format!("Add {what} {id}");
             }
             TrackRemove { track } => {
@@ -766,6 +805,7 @@ impl<'a> Edit<'a> {
             }
             ReturnRename { id, to } => {
                 let loc = self.at(&format!("returns.{id}"))?;
+                let id = &self.name(&loc);
                 self.set_leaf(&loc, "id", Value::str(to));
                 let (old_lane, new_lane) = (format!("sends.{id}.gain_db"), format!("sends.{to}.gain_db"));
                 for i in 0..self.root.get("tracks").map_or(0, |n| n.items().len()) {
@@ -783,17 +823,22 @@ impl<'a> Edit<'a> {
                 }
                 out.label = format!("Rename return {id} to {to}");
             }
-            TrackMove { track, index } => {
-                let loc = self.track(track)?;
+            TrackMove { track: id, index } | ReturnMove { id, index } => {
+                let (key, what) = match cmd {
+                    TrackMove { .. } => ("tracks", "track"),
+                    _ => ("returns", "return"),
+                };
+                let loc = self.at(&format!("{key}.{id}"))?;
+                let name = self.name(&loc);
                 let Some(Step::Index(from)) = loc.last().cloned() else { unreachable!() };
-                self.move_item(&[], "tracks", from, *index)?;
-                out.label = format!("Move track {track} to position {index}");
+                self.move_item(&[], key, from, *index)?;
+                out.label = format!("Move {what} {name} to position {index}");
             }
             ClipAdd { track, fields } => {
                 let loc = self.track(track)?;
-                out.made = Some(self.insert(&loc, "clips", None, map_node(fields)?)?);
+                out.made.push(self.insert(&loc, "clips", None, map_node(fields)?)?);
                 let pattern = fields.get("pattern").and_then(Json::as_str).unwrap_or("?");
-                out.label = format!("Add clip of {pattern} to {track}");
+                out.label = format!("Add clip of {pattern} to {}", self.name(&loc));
             }
             ClipMove { clip, track, at } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
@@ -847,8 +892,9 @@ impl<'a> Edit<'a> {
                     m.insert("at".into(), Node::Leaf(at));
                 }
                 let index = (dest == owner).then_some(i + 1);
-                out.made = Some(self.insert(&dest, "clips", index, copy)?);
-                out.label = format!("Duplicate clip {clip}");
+                let name = self.clip_name(&[owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat());
+                out.made.push(self.insert(&dest, "clips", index, copy)?);
+                out.label = format!("Duplicate clip {name}");
             }
             ClipRemove { clip } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
@@ -894,7 +940,7 @@ impl<'a> Edit<'a> {
             }
             EventAdd { pattern, fields } => {
                 let loc = self.at(&format!("patterns.{pattern}"))?;
-                out.made = Some(self.insert(&loc, "events", None, map_node(fields)?)?);
+                out.made.push(self.insert(&loc, "events", None, map_node(fields)?)?);
                 out.label = format!("Add event to {pattern}");
             }
             EventSet { event, fields } => {
@@ -931,7 +977,7 @@ impl<'a> Edit<'a> {
             EffectAdd { owner, index, fields } => {
                 let loc = self.owner(owner)?;
                 let at = index.unwrap_or(self.node(&loc).get("effects").map_or(0, |e| e.items().len()));
-                out.made = Some(self.insert(&loc, "effects", Some(at), map_node(fields)?)?);
+                out.made.push(self.insert(&loc, "effects", Some(at), map_node(fields)?)?);
                 self.remap_lanes(&loc, |j| Some(if j >= at { j + 1 } else { j }), None)?;
                 let kind = fields.get("type").map_or_else(|| "effect".to_string(), |t| t.as_str().unwrap_or("effect").to_string());
                 out.label = format!("Add {kind} to {}", self.text(&loc));
@@ -974,22 +1020,23 @@ impl<'a> Edit<'a> {
                 let existing = self.list(&loc, "sends")?.iter().position(|s| s.node.field("to") == Some(to.as_str()));
                 match existing {
                     Some(i) => {
-                        let send = [loc, vec![Step::Key("sends".into()), Step::Index(i)]].concat();
+                        let send = [loc.clone(), vec![Step::Key("sends".into()), Step::Index(i)]].concat();
                         self.merge(&send, fields)?;
                     }
                     None => {
                         let mut f = Fields::new();
                         f.insert("to".into(), Json::String(to.clone()));
                         f.extend(fields.clone());
-                        out.made = Some(self.insert(&loc, "sends", None, map_node(&f)?)?);
+                        out.made.push(self.insert(&loc, "sends", None, map_node(&f)?)?);
                     }
                 }
-                out.label = format!("Set send {track} → {to}");
+                out.label = format!("Set send {} → {to}", self.name(&loc));
             }
             SendRemove { track, to } => {
+                let name = self.name(&self.track(track)?);
                 let loc = self.at(&format!("tracks.{track}.sends.{to}"))?;
                 self.remove_at(&loc)?;
-                out.label = format!("Remove send {track} → {to}");
+                out.label = format!("Remove send {name} → {to}");
             }
             LaneSet { owner, param, points } => {
                 let loc = self.owner(owner)?;
@@ -1003,7 +1050,7 @@ impl<'a> Edit<'a> {
                         let mut lane = indexmap::IndexMap::new();
                         lane.insert("param".to_string(), Node::Leaf(Value::str(param)));
                         lane.insert("points".to_string(), points);
-                        out.made = Some(self.insert(&loc, "automation", None, Node::Map(lane))?);
+                        out.made.push(self.insert(&loc, "automation", None, Node::Map(lane))?);
                     }
                 }
                 out.label = format!("Set lane {} {param}", self.text(&loc));
@@ -1022,7 +1069,7 @@ impl<'a> Edit<'a> {
                     Some(i) => {
                         let lane = [loc.clone(), vec![Step::Key("automation".into()), Step::Index(i)]].concat();
                         let slot = Self::point_slot(self.node(&lane).get("points").map_or(&[], Node::items), at.as_ref());
-                        out.made = Some(self.insert(&lane, "points", Some(slot), point)?);
+                        out.made.push(self.insert(&lane, "points", Some(slot), point)?);
                     }
                     None => {
                         let mut lane = indexmap::IndexMap::new();
@@ -1031,7 +1078,7 @@ impl<'a> Edit<'a> {
                         self.insert(&loc, "automation", None, Node::Map(lane))?;
                         let i = self.lane(&loc, param).expect("lane");
                         let lane = [loc.clone(), vec![Step::Key("automation".into()), Step::Index(i)]].concat();
-                        out.made = Some(self.insert(&lane, "points", None, point)?);
+                        out.made.push(self.insert(&lane, "points", None, point)?);
                     }
                 }
                 out.label = format!("Add point to {} {param}", self.text(&loc));
@@ -1059,7 +1106,7 @@ impl<'a> Edit<'a> {
                 f.insert("id".into(), Json::String(id.clone()));
                 f.insert("at".into(), at.clone());
                 f.insert("length_beats".into(), length_beats.clone());
-                out.made = Some(self.insert(&[], "sections", None, map_node(&f)?)?);
+                out.made.push(self.insert(&[], "sections", None, map_node(&f)?)?);
                 out.label = format!("Add section {id}");
             }
             SectionMove { section, at } => {
@@ -1071,9 +1118,10 @@ impl<'a> Edit<'a> {
                 let loc = self.at(&format!("sections.{section}"))?;
                 out.label = format!("Remove {}", self.remove_at(&loc)?);
             }
-            Batch { commands } => {
+            Batch { commands, label } => {
                 let mut labels = Vec::new();
                 let mut also = Vec::new();
+                out.mix = !commands.is_empty();
                 for (n, c) in commands.iter().enumerate() {
                     if c.kind() != Kind::Edit || matches!(c, Apply { .. }) {
                         return Err(format!("batch command {n}: {} cannot be batched", c.op()));
@@ -1081,11 +1129,14 @@ impl<'a> Edit<'a> {
                     let o = self.run(c).map_err(|e| format!("batch command {n} ({}): {e}", c.op()))?;
                     labels.push(o.label);
                     also.extend(o.also);
+                    out.made.extend(o.made);
+                    out.mix &= o.mix;
                 }
                 self.also = also;
-                out.label = match labels.len() {
-                    1 => labels.remove(0),
-                    n => format!("Batch of {n}: {}", labels.join("; ")),
+                out.label = match (label, labels.len()) {
+                    (Some(label), _) => label.clone(),
+                    (None, 1) => labels.remove(0),
+                    (None, n) => format!("Batch of {n}: {}", labels.join("; ")),
                 };
             }
             Apply { .. } => return Err("apply replaces the whole song; the session applies it".into()),
@@ -1093,6 +1144,11 @@ impl<'a> Edit<'a> {
         }
         out.also = std::mem::take(&mut self.also);
         Ok(out)
+    }
+
+    /// The ID of the track or return at `loc`, for labels.
+    fn name(&self, loc: &[Step]) -> String {
+        self.node(loc).field("id").unwrap_or("?").to_string()
     }
 
     /// A clip described by its pattern and track, for labels.

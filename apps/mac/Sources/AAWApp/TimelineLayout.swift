@@ -100,6 +100,27 @@ public struct TimelineLayout: Equatable {
         return (start, end - start)
     }
 
+    /// How far a drag of `dx` points moves clips, in beats: whole grid steps,
+    /// or with `free` thousandths of a beat, and no further than `range`, which
+    /// is how far the clips can move and stay in the song.
+    public func move(byX dx: CGFloat, free: Bool, within range: ClosedRange<Double>) -> Double {
+        let step = free ? 0.001 : grid
+        let steps = (Double(dx / pixelsPerBeat) / step).rounded()
+        let least = (range.lowerBound / step).rounded(.up)
+        let most = (range.upperBound / step).rounded(.down)
+        guard least <= most else { return 0 }
+        return min(max(steps, least), most) * step
+    }
+
+    /// The repeats that bring the end of a clip nearest `x`: at least one, and
+    /// no more than fit in the song.
+    public func repeats(atX x: CGFloat, clipAt at: Double, patternBeats: Double) -> Int {
+        guard patternBeats > 0 else { return 1 }
+        let wanted = ((beat(atX: x) - at) / patternBeats).rounded()
+        let fit = ((lengthBeats - at) / patternBeats + 1e-9).rounded(.down)
+        return Int(max(1, min(wanted, fit)))
+    }
+
     public mutating func clamp() {
         pixelsPerBeat = min(max(pixelsPerBeat, minPixelsPerBeat), Self.maxPixelsPerBeat)
         scroll.x = min(max(0, scroll.x), max(0, contentWidth - lanesWidth))

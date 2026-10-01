@@ -100,6 +100,8 @@ def test_commands_write_what_python_would(rust_daw, tmp_path, registry):
             ["send", "set", path, track, "plate", "--pre-fader"],
             lambda d: d["tracks"][0]["sends"][0].update(pre_fader=True),
         ),
+        (["return", "add", path, "room"], lambda d: d["returns"].append({"id": "room"})),
+        (["return", "move", path, "room", "0"], lambda d: d["returns"].insert(0, d["returns"].pop())),
     ]
     for argv, change in cases:
         expected = python_edit(path, change)

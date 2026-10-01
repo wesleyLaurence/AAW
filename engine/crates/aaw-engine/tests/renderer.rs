@@ -68,3 +68,38 @@ fn processing_never_allocates() {
         });
     }
 }
+
+#[test]
+fn a_remixed_program_plays_as_a_compiled_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = common::write_song(dir.path());
+    let base = common::program(&path, |_| {});
+    let edits: [fn(&mut aaw_model::Project); 2] = [
+        |p| {
+            p.tracks[0].gain_db = -7.5;
+            p.tracks[0].pan = 0.25;
+            p.tracks[1].mute = true;
+            p.session.master_gain_db = -3.0;
+        },
+        |p| {
+            p.tracks[1].solo = true;
+            p.tracks[2].solo = true;
+            p.tracks[2].mute = true;
+        },
+    ];
+    for edit in edits {
+        let compiled = common::program(&path, edit);
+        let mut project = aaw_model::load(&path, true).unwrap();
+        edit(&mut project);
+        let remixed = Arc::new(base.remix(&project).expect("the same tracks"));
+        let (expected, heard) = (render(&compiled, 0, &mut || 512), render(&remixed, 0, &mut || 512));
+        assert_eq!(expected, heard);
+        assert_ne!(expected.0, render(&base, 0, &mut || 512).0, "the edit is audible");
+    }
+    // Other tracks need a compile.
+    let mut project = aaw_model::load(&path, true).unwrap();
+    project.tracks[0].id = "sub".into();
+    assert!(base.remix(&project).is_none());
+    project.tracks.pop();
+    assert!(base.remix(&project).is_none());
+}

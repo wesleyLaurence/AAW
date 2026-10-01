@@ -17,9 +17,6 @@ struct SongView: View {
                     detail: invalid
                 )
             }
-            if let refusal = model.refusal {
-                Banner(icon: "xmark.octagon.fill", tint: .red, text: refusal, detail: nil)
-            }
             HStack(spacing: 0) {
                 ArrangementPane(model: model)
                 if model.showsActivity {
@@ -28,6 +25,16 @@ struct SongView: View {
                         .frame(width: 270)
                 }
             }
+            // Over the arrangement, so that a refused edit does not move what
+            // the person is working on.
+            .overlay(alignment: .bottom) {
+                if let refusal = model.refusal {
+                    Banner(icon: "xmark.octagon.fill", tint: .red, text: refusal, detail: nil)
+                        .background(Color(nsColor: Theme.background))
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeOut(duration: 0.2), value: model.refusal)
         }
         .background(Color(nsColor: Theme.background))
         .preferredColorScheme(.dark)

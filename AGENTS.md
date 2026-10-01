@@ -12,8 +12,10 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
   `engine/target/release/daw host` or `play`; `daw status` shows `"host": true`), edit through
   the Rust `daw` commands (`set`, `clip move`, `effect add`, `undo`; see engine/README.md)
   rather than `apply`: the person sees and hears each edit, and it lands in one undo history
-  with your origin. Read `daw changes --since REV` for what the person changed. Python writers
-  still work; the host loads them as external edits.
+  with your origin. Read `daw changes --since REV` for what the person changed, and `daw status`
+  for what they have selected in the app. Give a `daw batch` a `--label` that says what it does;
+  the person sees it in the activity panel and the Undo menu. Python writers still work; the
+  host loads them as external edits.
 - Index samples with `daw samples scan`; filename metadata is a hint, never guaranteed.
 - Import selected samples into the project. Never modify the original Splice library.
 - Read `daw inspect` before editing; use its SHA with `daw apply --expect` for revisions.

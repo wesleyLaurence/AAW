@@ -33,12 +33,6 @@ struct Animated {
     }
 }
 
-enum RowID: Hashable {
-    case track(UInt64)
-    case bus(UInt64)
-    case master
-}
-
 /// What can light up when a change touches it.
 private enum GlowKey: Hashable {
     case row(RowID)
@@ -51,18 +45,33 @@ private struct Glow {
     var color: NSColor
 }
 
+/// A level the person can drag.
+private enum Slider: Hashable {
+    case gain(RowID)
+    case pan(RowID)
+    case send(track: UInt64, to: String)
+}
+
+/// A level shown ahead of the host: while it is dragged, and after the drag
+/// until the host's song has it, or `until` passes.
+private struct Held {
+    var value: Double
+    var until: CFTimeInterval?
+}
+
 private struct RowVisual {
     var name: String
     var detail: String
     var color: NSColor?
     var mute = false
     var solo = false
-    var isTrack: Bool
-    var hasPan: Bool
-    var height: CGFloat
+    var kind: HeaderLayout.Kind
     var y: Animated
+    var height: Animated
     var gain: Animated
     var pan: Animated
+    /// The level of each send, by return.
+    var sends: [String: Animated] = [:]
     var alpha: Animated
     var removing = false
 }
@@ -79,13 +88,63 @@ private struct ClipVisual {
     var removing = false
 }
 
+private struct SliderDrag {
+    var slider: Slider
+    var edit: (Double) -> Edit
+    /// Where the drag has the level, before it is put on the control's steps.
+    var value: Double
+    /// The level shown and last sent.
+    var shown: Double
+    var lastX: CGFloat
+    var perPoint: Double
+    var range: ClosedRange<Double>
+    var step: Double
+    var gesture: String
+    var moved = false
+}
+
+private struct ClipDrag {
+    var start: CGPoint
+    /// Where each dragged clip was: its beat and its track's place.
+    var origin: [UInt64: (at: Double, track: Int)]
+    /// How far the clips can move and stay in the song and among the tracks.
+    var range: ClosedRange<Double>
+    var rowRange: ClosedRange<Int>
+    var by = 0.0
+    var rows = 0
+    var moved = false
+    /// The clip to select alone if the press turns out to be a click.
+    var collapse: UInt64?
+}
+
+private struct ReorderDrag {
+    var row: RowID
+    var startY: CGFloat
+    /// The row's place among its kind, and the gap it would move to.
+    var from: Int
+    var slot: Int?
+}
+
+private enum Drag {
+    /// A loop being dragged out in the ruler.
+    case loop(anchor: CGFloat, region: (start: Double, length: Double)?)
+    case slider(SliderDrag)
+    case clips(ClipDrag)
+    case resize(clip: ClipView, repeats: Int)
+    case reorder(ReorderDrag)
+}
+
 /// The arrangement: a ruler with the loop brace, sections and bars; a header
 /// for each track, return and the master; and the tracks' clips on a timeline.
 /// It draws the host's arrangement and eases to each new revision, lighting
-/// up what an agent's or an external change touched. Headers are display only.
-final class ArrangementView: NSView {
+/// up what an agent's or an external change touched. The person edits here:
+/// levels, mute and solo in the headers, clips on the timeline. Each edit is
+/// shown at once and sent to the host, whose song the view then follows.
+final class ArrangementView: NSView, NSTextFieldDelegate {
     private static let moveTime: CFTimeInterval = 0.3
     private static let glowTime: CFTimeInterval = 1.8
+    /// How near a clip's end a press resizes it, in points.
+    private static let resizeEdge: CGFloat = 6
 
     private let model: SongModel
     private var layout = TimelineLayout()
@@ -96,8 +155,11 @@ final class ArrangementView: NSView {
     private var link: CADisplayLink?
     private let playheadView = PlayheadView()
     private var fitted = false
-    /// A loop being dragged out in the ruler.
-    private var loopDrag: (anchor: CGFloat, region: (start: Double, length: Double)?)?
+    private var drag: Drag?
+    private var held: [Slider: Held] = [:]
+    /// The tracks whose sends are shown.
+    private var unfolded: Set<UInt64> = []
+    private var renaming: (row: RowID, field: NSTextField)?
 
     init(model: SongModel) {
         self.model = model
@@ -110,6 +172,9 @@ final class ArrangementView: NSView {
         model.onUpdate = { [weak self] update in self?.apply(update) }
         model.onTransport = { [weak self] in self?.transportChanged() }
         model.onZoom = { [weak self] zoom in self?.zoom(zoom) }
+        model.onRefusal = { [weak self] in self?.revert() }
+        model.onSelection = { [weak self] in self?.needsDisplay = true }
+        model.onRename = { [weak self] row in self?.beginRename(row) }
     }
 
     @available(*, unavailable)
@@ -130,6 +195,12 @@ final class ArrangementView: NSView {
         link.add(to: .main, forMode: .common)
         self.link = link
         window.makeFirstResponder(self)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas { removeTrackingArea(area) }
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -155,53 +226,96 @@ final class ArrangementView: NSView {
         effects.filter { !$0.bypass }.map(\.kind).joined(separator: " · ")
     }
 
+    /// The clips whose place the person holds in a drag.
+    private var draggedClips: Set<UInt64> {
+        switch drag {
+        case .clips(let d) where d.moved: Set(d.origin.keys)
+        case .resize(let clip, _): [clip.key]
+        default: []
+        }
+    }
+
     /// Takes a revision's arrangement as the target every row and clip eases to.
     private func show(_ a: Arrangement, animated: Bool) {
         let now = CACurrentMediaTime()
         let time = animated ? Self.moveTime : 0
         var liveRows = Set<RowID>()
         var liveClips = Set<UInt64>()
+        let dragged = draggedClips
         var y: CGFloat = 0
 
+        // A level eases to the host's value, unless the person holds it.
+        func level(_ slider: Slider, from shown: Animated, to target: Double) -> Animated {
+            if let hold = held[slider] {
+                if hold.until != nil, abs(hold.value - target) < 1e-9 {
+                    held[slider] = nil
+                    return Animated(target)
+                }
+                return Animated(hold.value)
+            }
+            var shown = shown
+            shown.move(to: target, at: now, over: time)
+            return shown
+        }
+
         func place(_ id: RowID, name: String, detail: String, color: NSColor?, mute: Bool, solo: Bool,
-                   gain: Double, pan: Double?, height: CGFloat) {
+                   gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = []) {
             liveRows.insert(id)
-            if var row = rows[id], !row.removing {
-                row.name = name
-                row.detail = detail
-                row.mute = mute
-                row.solo = solo
+            var row: RowVisual
+            if let old = rows[id], !old.removing {
+                row = old
                 row.y.move(to: y, at: now, over: time)
-                row.gain.move(to: gain, at: now, over: time)
-                row.pan.move(to: pan ?? 0, at: now, over: time)
-                rows[id] = row
+                row.height.move(to: height, at: now, over: time)
             } else {
                 var alpha = Animated(animated ? 0 : 1)
                 alpha.move(to: 1, at: now, over: time)
-                rows[id] = RowVisual(
-                    name: name, detail: detail, color: color, mute: mute, solo: solo,
-                    isTrack: color != nil, hasPan: pan != nil, height: height,
-                    y: Animated(y), gain: Animated(gain), pan: Animated(pan ?? 0), alpha: alpha
+                row = RowVisual(
+                    name: name, detail: detail, color: color, kind: kind, y: Animated(y), height: Animated(height),
+                    gain: Animated(gain), pan: Animated(pan), alpha: alpha
                 )
             }
+            row.name = name
+            row.detail = detail
+            row.mute = mute
+            row.solo = solo
+            row.gain = level(.gain(id), from: row.gain, to: gain)
+            row.pan = level(.pan(id), from: row.pan, to: pan)
+            if case .track(let key) = id {
+                var levels: [String: Animated] = [:]
+                for send in sends {
+                    // A new send rises from the bottom of its bar.
+                    let shown = row.sends[send.to] ?? Animated(Fader.send.lowerBound)
+                    levels[send.to] = level(.send(track: key, to: send.to), from: shown, to: send.gainDb)
+                }
+                // A send the person is dragging into being.
+                for (slider, hold) in held {
+                    if case .send(track: key, to: let to) = slider, levels[to] == nil { levels[to] = Animated(hold.value) }
+                }
+                row.sends = levels
+            }
+            rows[id] = row
         }
 
         for track in a.tracks {
             let color = color(for: track.key)
+            let sends = unfolded.contains(track.key) ? a.returns.count : 0
+            let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
             place(.track(track.key), name: track.id, detail: Self.chain(track.effects), color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
-                  height: TimelineLayout.trackHeight)
+                  kind: .track, height: height, sends: track.sends)
             for clip in track.clips {
                 liveClips.insert(clip.key)
                 let length = clip.patternBeats * Double(clip.repeats)
                 if var v = clips[clip.key], !v.removing {
                     v.pattern = clip.pattern
-                    v.repeats = Int(clip.repeats)
                     v.color = color
                     v.muted = track.mute
-                    v.at.move(to: clip.at, at: now, over: time)
-                    v.length.move(to: length, at: now, over: time)
-                    v.y.move(to: y, at: now, over: time)
+                    if !dragged.contains(clip.key) {
+                        v.repeats = Int(clip.repeats)
+                        v.at.move(to: clip.at, at: now, over: time)
+                        v.length.move(to: length, at: now, over: time)
+                        v.y.move(to: y, at: now, over: time)
+                    }
                     clips[clip.key] = v
                 } else {
                     var alpha = Animated(animated ? 0 : 1)
@@ -212,16 +326,16 @@ final class ArrangementView: NSView {
                     )
                 }
             }
-            y += TimelineLayout.trackHeight
+            y += height
         }
         y += TimelineLayout.busGap
         for bus in a.returns {
             place(.bus(bus.key), name: bus.id, detail: Self.chain(bus.effects), color: nil,
-                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, height: TimelineLayout.busHeight)
+                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: TimelineLayout.busHeight)
             y += TimelineLayout.busHeight
         }
         place(.master, name: "Master", detail: Self.chain(a.master.effects), color: nil,
-              mute: false, solo: false, gain: a.master.gainDb, pan: nil, height: TimelineLayout.busHeight)
+              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, height: TimelineLayout.busHeight)
         y += TimelineLayout.busHeight
 
         // What is gone fades out, then is dropped.
@@ -234,12 +348,14 @@ final class ArrangementView: NSView {
             clips[key]?.alpha.move(to: 0, at: now, over: time)
         }
         if !animated { dropRemoved(at: now) }
+        if let renaming, !liveRows.contains(renaming.row) { endRename(commit: false) }
 
         layout.contentHeight = y
         layout.beatsPerBar = Double(a.beatsPerBar)
         layout.lengthBeats = a.lengthBeats
         layout.clamp()
         needsDisplay = true
+        link?.isPaused = false
     }
 
     private func apply(_ update: Update) {
@@ -261,6 +377,13 @@ final class ArrangementView: NSView {
         link?.isPaused = false
     }
 
+    /// Puts back what was shown ahead of the host, after the host refused it.
+    private func revert() {
+        held.removeAll()
+        if case .slider = drag { drag = nil }
+        show(model.arrangement, animated: true)
+    }
+
     private func transportChanged() {
         needsDisplay = true
         link?.isPaused = false
@@ -277,8 +400,17 @@ final class ArrangementView: NSView {
         let now = CACurrentMediaTime()
         dropRemoved(at: now)
         glows = glows.filter { now - $0.value.start < Self.glowTime }
-        var busy = !glows.isEmpty
-            || rows.values.contains { $0.y.isRunning(at: now) || $0.gain.isRunning(at: now) || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now) }
+        // A level the host never took goes back to the host's.
+        if held.values.contains(where: { $0.until.map { now > $0 } ?? false }) {
+            held = held.filter { $0.value.until.map { now <= $0 } ?? true }
+            show(model.arrangement, animated: true)
+        }
+        var busy = !glows.isEmpty || held.values.contains { $0.until != nil }
+            || rows.values.contains {
+                $0.y.isRunning(at: now) || $0.height.isRunning(at: now) || $0.gain.isRunning(at: now)
+                    || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now)
+                    || $0.sends.values.contains { $0.isRunning(at: now) }
+            }
             || clips.values.contains { $0.at.isRunning(at: now) || $0.length.isRunning(at: now) || $0.y.isRunning(at: now) || $0.alpha.isRunning(at: now) }
         if busy { needsDisplay = true }
 
@@ -321,6 +453,7 @@ final class ArrangementView: NSView {
         case .out: layout.zoom(by: 1 / 1.4, anchorX: center)
         case .fit: layout.fit()
         }
+        endRename(commit: true)
         needsDisplay = true
     }
 
@@ -333,6 +466,7 @@ final class ArrangementView: NSView {
             layout.scroll.y -= event.scrollingDeltaY
             layout.clamp()
         }
+        endRename(commit: true)
         needsDisplay = true
     }
 
@@ -342,48 +476,400 @@ final class ArrangementView: NSView {
         needsDisplay = true
     }
 
-    // MARK: Mouse and keys
+    // MARK: What is where
+
+    /// The header of a row, with its top at `top` in the view.
+    private func header(_ id: RowID, _ row: RowVisual, top: CGFloat) -> HeaderLayout {
+        let returns = model.arrangement.returns.count
+        var sends = 0
+        if case .track(let key) = id, unfolded.contains(key) { sends = returns }
+        return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: row.kind == .track && returns > 0)
+    }
+
+    /// The top and height a row is settling at, in the view.
+    private func frame(of id: RowID) -> (top: CGFloat, height: CGFloat)? {
+        guard let row = rows[id], !row.removing else { return nil }
+        return (layout.y(CGFloat(row.y.to)), CGFloat(row.height.to))
+    }
+
+    private func row(atY y: CGFloat) -> (id: RowID, header: HeaderLayout)? {
+        for (id, row) in rows {
+            guard let frame = frame(of: id), y >= frame.top, y < frame.top + frame.height else { continue }
+            return (id, header(id, row, top: frame.top))
+        }
+        return nil
+    }
+
+    /// The place among the tracks of the track at a height of the view, or of
+    /// the nearest one.
+    private func trackIndex(atY y: CGFloat) -> Int {
+        let tracks = model.arrangement.tracks
+        for (index, track) in tracks.enumerated() {
+            if let frame = frame(of: .track(track.key)), y < frame.top + frame.height { return index }
+        }
+        return max(0, tracks.count - 1)
+    }
+
+    private func clipRect(at: Double, length: Double, top: CGFloat) -> CGRect {
+        CGRect(x: layout.x(at), y: top + 2, width: max(2, CGFloat(length) * layout.pixelsPerBeat - 1),
+               height: TimelineLayout.trackHeight - 5)
+    }
+
+    /// Where a clip is in the order clips are drawn in: selected clips over
+    /// the others, as a dragged clip should be, and newer clips over older.
+    private func drawOrder(_ key: UInt64) -> (Int, UInt64) {
+        (model.selectedClips.contains(key) ? 1 : 0, key)
+    }
+
+    /// The clip at a point: the one drawn on top, where clips overlap.
+    private func clip(at p: CGPoint) -> (clip: ClipView, rect: CGRect)? {
+        var hit: (clip: ClipView, rect: CGRect)?
+        for track in model.arrangement.tracks {
+            guard let frame = frame(of: .track(track.key)) else { continue }
+            for clip in track.clips where hit.map({ drawOrder($0.clip.key) < drawOrder(clip.key) }) ?? true {
+                let rect = clipRect(at: clip.at, length: clip.patternBeats * Double(clip.repeats), top: frame.top)
+                if rect.contains(p) { hit = (clip, rect) }
+            }
+        }
+        return hit
+    }
+
+    /// Whether a point is on the end of a clip, where a drag changes its repeats.
+    private func onResizeEdge(_ p: CGPoint, of rect: CGRect) -> Bool {
+        rect.width >= 16 && p.x >= rect.maxX - Self.resizeEdge
+    }
+
+    /// The rows of a row's kind in their order: the tracks, or the returns.
+    private func siblings(of row: RowID) -> [RowID] {
+        switch row {
+        case .track: model.arrangement.tracks.map { .track($0.key) }
+        case .bus: model.arrangement.returns.map { .bus($0.key) }
+        case .master: []
+        }
+    }
+
+    // MARK: Mouse
 
     override func mouseDown(with event: NSEvent) {
+        endRename(commit: true)
         window?.makeFirstResponder(self)
         let p = convert(event.locationInWindow, from: nil)
-        guard p.x >= TimelineLayout.headerWidth else { return }
-        if p.y < TimelineLayout.loopStrip {
-            loopDrag = (p.x, nil)
+        if p.x < TimelineLayout.headerWidth {
+            if p.y >= TimelineLayout.rulerHeight { headerDown(at: p, event) }
+        } else if p.y < TimelineLayout.loopStrip {
+            drag = .loop(anchor: p.x, region: nil)
+        } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
+            clipDown(hit.clip, rect: hit.rect, at: p, event)
         } else {
+            if p.y >= TimelineLayout.rulerHeight { model.select(clips: []) }
             model.locate(layout.target(atX: p.x, free: event.modifierFlags.contains(.option)))
         }
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        guard let drag = loopDrag else { return }
-        let x = max(convert(event.locationInWindow, from: nil).x, TimelineLayout.headerWidth)
-        if abs(x - drag.anchor) >= 3 || drag.region != nil {
-            loopDrag?.region = layout.loop(fromX: drag.anchor, toX: x)
-            needsDisplay = true
+    private func headerDown(at p: CGPoint, _ event: NSEvent) {
+        guard let (id, header) = row(atY: p.y), let row = rows[id] else {
+            model.select(row: nil)
+            return
         }
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        guard let drag = loopDrag else { return }
-        loopDrag = nil
-        if let region = drag.region {
-            model.setLoop(start: region.start, length: region.length)
-        } else {
-            // A click in the loop strip sets the start position like any other.
-            model.locate(layout.target(atX: drag.anchor, free: event.modifierFlags.contains(.option)))
+        let twice = event.clickCount == 2
+        switch header.part(at: p) {
+        case .mute:
+            rows[id]?.mute.toggle()
+            model.edit(.mute(row: id.row, on: !row.mute))
+        case .solo:
+            guard case .track(let key) = id else { return }
+            rows[id]?.solo.toggle()
+            model.edit(.solo(track: key, on: !row.solo))
+        case .fold:
+            guard case .track(let key) = id else { return }
+            // With Option, every track follows.
+            let keys = event.modifierFlags.contains(.option) ? model.arrangement.tracks.map(\.key) : [key]
+            if unfolded.contains(key) { unfolded.subtract(keys) } else { unfolded.formUnion(keys) }
+            show(model.arrangement, animated: true)
+        case .volume:
+            beginSlider(.gain(id), from: row.gain.to, range: Fader.gain, perPoint: 0.25, step: 0.1,
+                        resetTo: twice ? 0 : nil, at: p) { .gain(row: id.row, db: $0) }
+        case .pan:
+            beginSlider(.pan(id), from: row.pan.to, range: Fader.pan, perPoint: 0.01, step: 0.01,
+                        resetTo: twice ? 0 : nil, at: p) { .pan(row: id.row, pan: $0) }
+        case .send(let index):
+            guard case .track(let key) = id, model.arrangement.returns.indices.contains(index) else { return }
+            let to = model.arrangement.returns[index].id
+            if twice {
+                // Back to no send.
+                if row.sends[to] != nil { model.edit(.sendRemove(track: key, to: to)) }
+                return
+            }
+            beginSlider(.send(track: key, to: to), from: row.sends[to]?.to ?? Fader.send.lowerBound, range: Fader.send,
+                        perPoint: 0.5, step: 0.1, resetTo: nil, at: p) { .send(track: key, to: to, db: $0) }
+        case .name, .body:
+            model.select(row: id)
+            guard id != .master else { return }
+            if twice, header.part(at: p) == .name {
+                beginRename(id)
+            } else if let from = siblings(of: id).firstIndex(of: id) {
+                drag = .reorder(ReorderDrag(row: id, startY: p.y, from: from))
+            }
         }
         needsDisplay = true
     }
 
-    override func keyDown(with event: NSEvent) {
-        // The Transport menu has these keys; this is for when it does not act.
-        switch event.charactersIgnoringModifiers {
-        case " ": model.togglePlay()
-        case "\r": model.returnToStart()
-        case "l": model.toggleLoop()
-        default: super.keyDown(with: event)
+    private func beginSlider(_ slider: Slider, from value: Double, range: ClosedRange<Double>, perPoint: Double,
+                             step: Double, resetTo: Double?, at p: CGPoint, edit: @escaping (Double) -> Edit) {
+        if let resetTo {
+            if value != resetTo { model.edit(edit(resetTo)) }
+            return
         }
+        drag = .slider(SliderDrag(
+            slider: slider, edit: edit, value: value, shown: value, lastX: p.x, perPoint: perPoint,
+            range: range, step: step, gesture: model.newGesture()
+        ))
+    }
+
+    private func showLevel(_ slider: Slider, _ value: Double) {
+        switch slider {
+        case .gain(let id): rows[id]?.gain = Animated(value)
+        case .pan(let id): rows[id]?.pan = Animated(value)
+        case .send(let track, let to): rows[.track(track)]?.sends[to] = Animated(value)
+        }
+    }
+
+    private func clipDown(_ clip: ClipView, rect: CGRect, at p: CGPoint, _ event: NSEvent) {
+        var selection = model.selectedClips
+        var collapse: UInt64?
+        if event.modifierFlags.contains(.shift) {
+            // Shift adds a clip to the selection, or takes it out.
+            if selection.remove(clip.key) == nil { selection.insert(clip.key) }
+            model.select(clips: selection)
+            guard selection.contains(clip.key) else { return }
+        } else if !selection.contains(clip.key) {
+            selection = [clip.key]
+            model.select(clips: selection)
+        } else if onResizeEdge(p, of: rect) {
+            selection = [clip.key]
+            model.select(clips: selection)
+        } else if selection.count > 1 {
+            collapse = clip.key
+        }
+        if selection.count == 1, onResizeEdge(p, of: rect) {
+            drag = .resize(clip: clip, repeats: Int(clip.repeats))
+            return
+        }
+        let placed = model.placedClips().filter { selection.contains($0.clip.key) }
+        let starts = placed.map(\.clip.at)
+        let ends = placed.map { $0.clip.at + $0.clip.patternBeats * Double($0.clip.repeats) }
+        let tracks = placed.map(\.track)
+        guard let first = starts.min(), let last = ends.max(), let top = tracks.min(), let bottom = tracks.max() else { return }
+        drag = .clips(ClipDrag(
+            start: p,
+            origin: Dictionary(uniqueKeysWithValues: placed.map { ($0.clip.key, ($0.clip.at, $0.track)) }),
+            range: min(0, -first)...max(0, layout.lengthBeats - last),
+            rowRange: -top...max(0, model.arrangement.tracks.count - 1 - bottom),
+            collapse: collapse
+        ))
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        switch drag {
+        case .loop(let anchor, let region):
+            let x = max(p.x, TimelineLayout.headerWidth)
+            if abs(x - anchor) >= 3 || region != nil {
+                drag = .loop(anchor: anchor, region: layout.loop(fromX: anchor, toX: x))
+            }
+        case .slider(var s):
+            s.value = Fader.dragged(s.value, byX: p.x - s.lastX, perPoint: s.perPoint,
+                                    fine: event.modifierFlags.contains(.shift), in: s.range)
+            s.lastX = p.x
+            let shown = Fader.stepped(s.value, step: s.step)
+            if shown != s.shown {
+                s.shown = shown
+                s.moved = true
+                held[s.slider] = Held(value: shown, until: nil)
+                showLevel(s.slider, shown)
+                model.drag(s.edit(shown), gesture: s.gesture)
+            }
+            drag = .slider(s)
+        case .clips(var d):
+            if !d.moved, hypot(p.x - d.start.x, p.y - d.start.y) < 3 { return }
+            d.moved = true
+            d.by = layout.move(byX: p.x - d.start.x, free: event.modifierFlags.contains(.option), within: d.range)
+            d.rows = min(max(trackIndex(atY: p.y) - trackIndex(atY: d.start.y), d.rowRange.lowerBound), d.rowRange.upperBound)
+            let tracks = model.arrangement.tracks
+            for (key, origin) in d.origin {
+                clips[key]?.at = Animated(origin.at + d.by)
+                if tracks.indices.contains(origin.track + d.rows), let row = rows[.track(tracks[origin.track + d.rows].key)] {
+                    clips[key]?.y = Animated(row.y.to)
+                }
+            }
+            drag = .clips(d)
+        case .resize(let clip, let repeats):
+            let wanted = layout.repeats(atX: p.x, clipAt: clip.at, patternBeats: clip.patternBeats)
+            if wanted != repeats {
+                clips[clip.key]?.repeats = wanted
+                clips[clip.key]?.length = Animated(clip.patternBeats * Double(wanted))
+                drag = .resize(clip: clip, repeats: wanted)
+            }
+        case .reorder(var r):
+            if r.slot == nil, abs(p.y - r.startY) < 4 { return }
+            // The gap the pointer is nearest: above the first row whose middle is below it.
+            let rows = siblings(of: r.row).compactMap { frame(of: $0) }
+            r.slot = rows.filter { $0.top + $0.height / 2 < p.y }.count
+            drag = .reorder(r)
+        case nil:
+            return
+        }
+        needsDisplay = true
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let ended = drag
+        drag = nil
+        switch ended {
+        case .loop(let anchor, let region):
+            if let region {
+                model.setLoop(start: region.start, length: region.length)
+            } else {
+                // A click in the loop strip sets the start position like any other.
+                model.locate(layout.target(atX: anchor, free: event.modifierFlags.contains(.option)))
+            }
+        case .slider(let s):
+            model.endDrag()
+            // The level stays as dragged until the host's song has it.
+            if s.moved { held[s.slider]?.until = CACurrentMediaTime() + 1 }
+        case .clips(let d):
+            if d.moved {
+                model.edit(.clipsMove(clips: d.origin.keys.sorted(), by: d.by, rows: Int32(d.rows)))
+            } else if let key = d.collapse {
+                model.select(clips: [key])
+            }
+        case .resize(let clip, let repeats):
+            if repeats != Int(clip.repeats) { model.edit(.clipRepeats(clip: clip.key, repeats: UInt32(repeats))) }
+        case .reorder(let r):
+            // Taking the row out moves the gaps below it up by one.
+            if let slot = r.slot {
+                let index = slot > r.from ? slot - 1 : slot
+                if index != r.from { model.edit(.move(row: r.row.row, index: UInt32(index))) }
+            }
+        case nil:
+            return
+        }
+        needsDisplay = true
+        link?.isPaused = false
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        var resize = false
+        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
+            resize = onResizeEdge(p, of: hit.rect)
+        }
+        (resize ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
+    }
+
+    /// Drops a drag that has sent nothing yet. True if there was one.
+    private func cancelDrag() -> Bool {
+        switch drag {
+        case .clips, .resize, .reorder, .loop:
+            drag = nil
+            show(model.arrangement, animated: true)
+            return true
+        case .slider, nil:
+            return false
+        }
+    }
+
+    // MARK: Keys
+
+    override func keyDown(with event: NSEvent) {
+        guard event.modifierFlags.intersection([.command, .control]).isEmpty else {
+            super.keyDown(with: event)
+            return
+        }
+        // The menus have most of these keys; this is for when they do not act.
+        switch event.specialKey {
+        case .delete?, .backspace?, .deleteForward?: model.deleteSelection()
+        case .leftArrow?: nudge(by: -layout.grid, rows: 0)
+        case .rightArrow?: nudge(by: layout.grid, rows: 0)
+        case .upArrow?: nudge(by: 0, rows: -1)
+        case .downArrow?: nudge(by: 0, rows: 1)
+        case .carriageReturn?, .enter?: model.returnToStart()
+        default:
+            switch event.charactersIgnoringModifiers {
+            case " ": model.togglePlay()
+            case "l": model.toggleLoop()
+            case "\u{1b}": if !cancelDrag() { model.select(clips: []) }
+            default: super.keyDown(with: event)
+            }
+        }
+    }
+
+    override func selectAll(_ sender: Any?) {
+        model.selectAllClips()
+    }
+
+    /// Moves the selected clips by a grid step or to the next track, if they
+    /// stay in the song.
+    private func nudge(by: Double, rows: Int) {
+        let placed = model.placedClips().filter { model.selectedClips.contains($0.clip.key) }
+        let starts = placed.map(\.clip.at)
+        let ends = placed.map { $0.clip.at + $0.clip.patternBeats * Double($0.clip.repeats) }
+        let tracks = placed.map(\.track)
+        guard let first = starts.min(), let last = ends.max(), let top = tracks.min(), let bottom = tracks.max() else { return }
+        guard first + by >= 0, last + by <= layout.lengthBeats,
+              top + rows >= 0, bottom + rows < model.arrangement.tracks.count else {
+            NSSound.beep()
+            return
+        }
+        model.edit(.clipsMove(clips: placed.map(\.clip.key).sorted(), by: by, rows: Int32(rows)))
+    }
+
+    // MARK: Names
+
+    /// Lets the person type a track's or a return's name where it is shown.
+    private func beginRename(_ id: RowID) {
+        endRename(commit: true)
+        guard id != .master, let row = rows[id], let frame = frame(of: id) else { return }
+        let name = header(id, row, top: frame.top).name
+        let field = NSTextField(string: row.name)
+        field.font = Self.nameFont
+        field.isBordered = false
+        field.focusRingType = .none
+        field.drawsBackground = true
+        field.backgroundColor = Theme.gray(0.08)
+        field.textColor = Theme.text
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.delegate = self
+        field.frame = CGRect(x: name.minX - 2, y: name.minY - 1, width: name.width + 4, height: 18)
+        addSubview(field)
+        renaming = (id, field)
+        window?.makeFirstResponder(field)
+    }
+
+    private func endRename(commit: Bool) {
+        guard let (row, field) = renaming else { return }
+        renaming = nil
+        let name = field.stringValue.trimmingCharacters(in: .whitespaces)
+        field.delegate = nil
+        field.removeFromSuperview()
+        if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+        if commit, !name.isEmpty, name != rows[row]?.name {
+            model.edit(.rename(row: row.row, to: name))
+        }
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        switch selector {
+        case #selector(insertNewline(_:)): endRename(commit: true)
+        case #selector(cancelOperation(_:)): endRename(commit: false)
+        default: return false
+        }
+        return true
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        endRename(commit: true)
     }
 
     // MARK: Drawing
@@ -418,6 +904,11 @@ final class ArrangementView: NSView {
         rect.fill(using: .sourceOver)
     }
 
+    private func fill(rounded rect: CGRect, radius: CGFloat = 3, _ color: NSColor) {
+        color.setFill()
+        NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius).fill()
+    }
+
     private func clipped(to rect: CGRect, _ body: () -> Void) {
         NSGraphicsContext.saveGraphicsState()
         NSBezierPath(rect: rect).addClip()
@@ -433,7 +924,7 @@ final class ArrangementView: NSView {
     }
 
     private var loopShown: (region: LoopRegion, active: Bool)? {
-        if let region = loopDrag?.region {
+        if case .loop(_, let region?) = drag {
             return (LoopRegion(start: region.start, length: region.length), true)
         }
         if let region = model.transport.loopRegion { return (region, true) }
@@ -461,6 +952,14 @@ final class ArrangementView: NSView {
              in: CGRect(x: 12, y: ruler - 17, width: header - 24, height: 14), font: Self.smallFont, color: Theme.faintText)
         fill(CGRect(x: header - 1, y: 0, width: 1, height: bounds.height), Theme.separator)
         fill(CGRect(x: 0, y: ruler - 1, width: bounds.width, height: 1), Theme.separator)
+
+        // Where a dragged row would land.
+        if case .reorder(let r) = drag, let slot = r.slot {
+            let frames = siblings(of: r.row).compactMap { frame(of: $0) }
+            if let y = slot < frames.count ? frames[slot].top : frames.last.map({ $0.top + $0.height }), y >= ruler {
+                fill(CGRect(x: 0, y: y - 1.5, width: bounds.width, height: 2), Theme.insertion)
+            }
+        }
     }
 
     private func drawLanes(_ order: [(key: RowID, value: RowVisual)], at now: CFTimeInterval) {
@@ -470,8 +969,8 @@ final class ArrangementView: NSView {
         for (_, row) in order {
             let y = layout.y(CGFloat(row.y.value(at: now)))
             let alpha = CGFloat(row.alpha.value(at: now))
-            fill(CGRect(x: header, y: y, width: width, height: row.height - 1),
-                 (row.isTrack ? Theme.lane : Theme.busLane).withAlphaComponent(alpha))
+            fill(CGRect(x: header, y: y, width: width, height: CGFloat(row.height.value(at: now)) - 1),
+                 (row.kind == .track ? Theme.lane : Theme.busLane).withAlphaComponent(alpha))
         }
 
         // Grid: every bar, and finer lines once they have room.
@@ -493,8 +992,8 @@ final class ArrangementView: NSView {
                  Theme.gray(1, 0.035))
         }
 
-        for (key, clip) in clips.sorted(by: { $0.key < $1.key }) {
-            drawClip(key, clip, at: now)
+        for (key, clip) in clips.sorted(by: { drawOrder($0.key) < drawOrder($1.key) }) {
+            drawClip(key, clip, selected: model.selectedClips.contains(key), at: now)
         }
 
         let end = layout.x(layout.lengthBeats)
@@ -506,18 +1005,14 @@ final class ArrangementView: NSView {
              Theme.cue.withAlphaComponent(0.85))
     }
 
-    private func drawClip(_ key: UInt64, _ clip: ClipVisual, at now: CFTimeInterval) {
-        let at = clip.at.value(at: now)
-        let length = clip.length.value(at: now)
+    private func drawClip(_ key: UInt64, _ clip: ClipVisual, selected: Bool, at now: CFTimeInterval) {
         let alpha = CGFloat(clip.alpha.value(at: now))
-        let rect = CGRect(
-            x: layout.x(at), y: layout.y(CGFloat(clip.y.value(at: now))) + 2,
-            width: max(2, CGFloat(length) * layout.pixelsPerBeat - 1), height: TimelineLayout.trackHeight - 5
-        )
+        let rect = clipRect(at: clip.at.value(at: now), length: clip.length.value(at: now),
+                            top: layout.y(CGFloat(clip.y.value(at: now))))
         guard rect.maxX >= TimelineLayout.headerWidth, rect.minX <= bounds.width else { return }
         let color = clip.muted ? Theme.gray(0.45) : clip.color
         let shape = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
-        color.withAlphaComponent(0.42 * alpha).setFill()
+        color.withAlphaComponent((selected ? 0.62 : 0.42) * alpha).setFill()
         shape.fill()
         clipped(to: rect) {
             // A title strip in the track's color over a dimmer body.
@@ -538,6 +1033,12 @@ final class ArrangementView: NSView {
             text(label, in: CGRect(x: rect.minX + 4, y: rect.minY, width: rect.width - 6, height: 13),
                  font: Self.clipFont, color: Theme.gray(0.08, alpha))
         }
+        if selected {
+            Theme.selectedClip.withAlphaComponent(alpha).setStroke()
+            let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
+            outline.lineWidth = 1.5
+            outline.stroke()
+        }
         if let (level, tint) = glow(.clip(key), at: now) {
             tint.withAlphaComponent(0.3 * level).setFill()
             shape.fill()
@@ -548,76 +1049,96 @@ final class ArrangementView: NSView {
         }
     }
 
+    /// A mute or solo badge, lit when on.
+    private func badge(_ letter: String, on: Bool, color: NSColor, in box: CGRect, alpha: CGFloat) {
+        fill(rounded: box, (on ? color : Theme.gray(1)).withAlphaComponent((on ? 1 : 0.07) * alpha))
+        text(letter, in: CGRect(x: box.minX, y: box.minY + 1.5, width: box.width, height: 11),
+             font: Self.badgeFont, color: (on ? Theme.gray(0.08) : Theme.faintText).withAlphaComponent(alpha), align: .center)
+    }
+
+    /// A level as a bar filled from the left.
+    private func bar(_ rect: CGRect, filled: CGFloat, dim: Bool, alpha: CGFloat) {
+        fill(rect, Theme.gray(0, 0.4 * alpha))
+        fill(CGRect(x: rect.minX, y: rect.minY, width: rect.width * filled, height: rect.height),
+             (dim ? Theme.gray(0.5) : Theme.gray(0.82)).withAlphaComponent(alpha))
+    }
+
     private func drawHeader(_ id: RowID, _ row: RowVisual, at now: CFTimeInterval) {
-        let width = TimelineLayout.headerWidth - 1
-        let y = layout.y(CGFloat(row.y.value(at: now)))
+        let top = layout.y(CGFloat(row.y.value(at: now)))
         let alpha = CGFloat(row.alpha.value(at: now))
-        let rect = CGRect(x: 0, y: y, width: width, height: row.height - 1)
+        let rect = CGRect(x: 0, y: top, width: HeaderLayout.width, height: CGFloat(row.height.value(at: now)) - 1)
         guard rect.maxY >= TimelineLayout.rulerHeight, rect.minY <= bounds.height else { return }
-        fill(rect, (row.isTrack ? Theme.header : Theme.busHeader).withAlphaComponent(alpha))
+        fill(rect, (row.kind == .track ? Theme.header : Theme.busHeader).withAlphaComponent(alpha))
+        if model.selectedRow == id { fill(rect, Theme.selectedRow) }
         if let (level, tint) = glow(.row(id), at: now) {
             fill(rect, tint.withAlphaComponent(0.35 * level))
         }
         if let color = row.color {
-            fill(CGRect(x: 0, y: y, width: 5, height: row.height - 1), (row.mute ? Theme.gray(0.45) : color).withAlphaComponent(alpha))
+            fill(CGRect(x: 0, y: top, width: 5, height: rect.height), (row.mute ? Theme.gray(0.45) : color).withAlphaComponent(alpha))
         }
-        let left: CGFloat = 14
+        let header = header(id, row, top: top)
         let gain = row.gain.value(at: now)
-        let gainText = String(format: "%+.1f dB", gain).replacingOccurrences(of: "-", with: "−")
         let textColor = (row.mute ? Theme.dimText : Theme.text).withAlphaComponent(alpha)
         let dim = Theme.dimText.withAlphaComponent(alpha)
 
-        // The name, then the effect chain for as far as there is room.
-        func title(width: CGFloat, y: CGFloat) {
-            let name = NSMutableAttributedString(
-                string: row.name, attributes: [.font: Self.nameFont, .foregroundColor: textColor]
-            )
-            if !row.detail.isEmpty {
-                name.append(NSAttributedString(
-                    string: "  " + row.detail, attributes: [.font: Self.smallFont, .foregroundColor: dim]
-                ))
+        clipped(to: rect) {
+            // The name, then the effect chain for as far as there is room.
+            if renaming?.row != id {
+                let name = NSMutableAttributedString(
+                    string: row.name, attributes: [.font: Self.nameFont, .foregroundColor: textColor]
+                )
+                if !row.detail.isEmpty {
+                    name.append(NSAttributedString(
+                        string: "  " + row.detail, attributes: [.font: Self.smallFont, .foregroundColor: dim]
+                    ))
+                }
+                name.addAttribute(.paragraphStyle, value: Self.styles[.left]!, range: NSRange(location: 0, length: name.length))
+                name.draw(with: header.name, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
             }
-            name.addAttribute(.paragraphStyle, value: Self.styles[.left]!, range: NSRange(location: 0, length: name.length))
-            name.draw(with: CGRect(x: left, y: y, width: width, height: 16),
-                      options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
-        }
 
-        guard row.isTrack else {
-            // Returns and the master: one line.
-            title(width: width - left - 8 - 64, y: y + 7)
-            text(gainText, in: CGRect(x: width - 8 - 60, y: y + 9, width: 60, height: 13),
-                 font: Self.numberFont, color: dim, align: .right)
-            return
-        }
+            guard row.kind == .track else {
+                // Returns and the master: one line, with the volume as a value to drag.
+                fill(rounded: header.volume, Theme.control.withAlphaComponent(0.28 * alpha))
+                text(Fader.text(db: gain), in: header.volumeText, font: Self.numberFont, color: dim, align: .right)
+                if row.kind == .bus { badge("M", on: row.mute, color: Theme.mute, in: header.mute, alpha: alpha) }
+                return
+            }
 
-        // Mute and solo, lit when on.
-        let badges: [(String, Bool, NSColor)] = [("M", row.mute, Theme.mute), ("S", row.solo, Theme.solo)]
-        var badgeX = width - 8 - 18 * CGFloat(badges.count) - 2
-        let nameWidth = badgeX - left - 6
-        for (letter, on, color) in badges {
-            let box = CGRect(x: badgeX, y: y + 6, width: 16, height: 14)
-            let path = NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3)
-            (on ? color : Theme.gray(1)).withAlphaComponent((on ? 1 : 0.07) * alpha).setFill()
-            path.fill()
-            text(letter, in: CGRect(x: box.minX, y: box.minY + 1.5, width: box.width, height: 11),
-                 font: Self.badgeFont, color: (on ? Theme.gray(0.08) : Theme.faintText).withAlphaComponent(alpha), align: .center)
-            badgeX += 18
-        }
-        title(width: nameWidth, y: y + 5)
+            badge("M", on: row.mute, color: Theme.mute, in: header.mute, alpha: alpha)
+            badge("S", on: row.solo, color: Theme.solo, in: header.solo, alpha: alpha)
+            if header.folds {
+                // A mark that points down while the sends are shown.
+                let box = header.fold.insetBy(dx: 2.5, dy: 2.5)
+                let mark = NSBezierPath()
+                if header.sends > 0 {
+                    mark.move(to: CGPoint(x: box.minX, y: box.minY + 1))
+                    mark.line(to: CGPoint(x: box.maxX, y: box.minY + 1))
+                    mark.line(to: CGPoint(x: box.midX, y: box.maxY))
+                } else {
+                    mark.move(to: CGPoint(x: box.minX + 1, y: box.minY))
+                    mark.line(to: CGPoint(x: box.minX + 1, y: box.maxY))
+                    mark.line(to: CGPoint(x: box.maxX, y: box.midY))
+                }
+                mark.close()
+                (row.sends.isEmpty ? Theme.faintText : Theme.dimText).withAlphaComponent(alpha).setFill()
+                mark.fill()
+            }
 
-        // Volume as a bar from −60 to +6 dB, with the value and the pan.
-        let bar = CGRect(x: left, y: y + 30, width: 84, height: 4)
-        fill(bar, Theme.gray(0, 0.4 * alpha))
-        let level = CGFloat(min(max((gain + 60) / 66, 0), 1))
-        fill(CGRect(x: bar.minX, y: bar.minY, width: bar.width * level, height: bar.height),
-             (row.mute ? Theme.gray(0.5) : Theme.gray(0.82)).withAlphaComponent(alpha))
-        text(gainText, in: CGRect(x: bar.maxX + 6, y: y + 25, width: 56, height: 13), font: Self.numberFont, color: dim)
-        if row.hasPan {
-            let pan = row.pan.value(at: now)
-            let percent = Int((abs(pan) * 100).rounded())
-            let panText = percent == 0 ? "C" : (pan < 0 ? "L\(percent)" : "R\(percent)")
-            text(panText, in: CGRect(x: width - 8 - 34, y: y + 25, width: 34, height: 13),
-                 font: Self.numberFont, color: dim, align: .right)
+            // Volume as a bar from −60 to +6 dB, with the value and the pan.
+            bar(header.volumeBar, filled: Fader.fraction(gain, in: Fader.gain), dim: row.mute, alpha: alpha)
+            text(Fader.text(db: gain), in: header.volumeText, font: Self.numberFont, color: dim)
+            fill(rounded: header.pan, Theme.control.withAlphaComponent(0.28 * alpha))
+            text(Fader.text(pan: row.pan.value(at: now)), in: header.pan.insetBy(dx: 2, dy: 1),
+                 font: Self.numberFont, color: dim, align: .center)
+
+            // A level for each return; one the track does not send to is off.
+            for (index, bus) in model.arrangement.returns.enumerated() where index < header.sends {
+                let level = row.sends[bus.id]?.value(at: now)
+                text(bus.id, in: header.sendName(index), font: Self.smallFont, color: level == nil ? Theme.faintText.withAlphaComponent(alpha) : dim)
+                bar(header.sendBar(index), filled: level.map { Fader.fraction($0, in: Fader.send) } ?? 0, dim: row.mute, alpha: alpha)
+                text(level.map(Fader.text(db:)) ?? "off", in: header.sendText(index), font: Self.numberFont,
+                     color: level == nil ? Theme.faintText.withAlphaComponent(alpha) : dim)
+            }
         }
     }
 
@@ -633,8 +1154,7 @@ final class ArrangementView: NSView {
         if let (region, active) = loopShown {
             let rect = CGRect(x: layout.x(region.start), y: 3,
                               width: max(3, CGFloat(region.length) * layout.pixelsPerBeat), height: loopStrip - 6)
-            Theme.loop.withAlphaComponent(active ? 0.95 : 0.25).setFill()
-            NSBezierPath(roundedRect: rect, xRadius: 2, yRadius: 2).fill()
+            fill(rounded: rect, radius: 2, Theme.loop.withAlphaComponent(active ? 0.95 : 0.25))
         }
 
         for section in model.arrangement.sections {

@@ -3,8 +3,8 @@
 //! No audio device is opened.
 
 use aaw_engine::wav::float_wav_bytes;
-use aaw_ffi::view::{Delta, Part, Touch};
-use aaw_ffi::{Song, SongObserver, TransportView, Update, Who};
+use aaw_ffi::view::{Delta, Part, SendView, Touch};
+use aaw_ffi::{Edit, HistoryStep, Row, Song, SongObserver, TransportView, Update, Who};
 use aaw_host::client::{self, Request};
 use aaw_host::command::Origin;
 use serde_json::{json, Value as Json};
@@ -101,11 +101,7 @@ fn open() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>) {
 
 /// A command from another process, as the agent's `daw` sends it.
 fn agent(project: &Path, j: Json) -> Json {
-    let request = Request {
-        command: serde_json::from_value(j).unwrap(),
-        origin: Origin::Agent,
-        expect: None,
-    };
+    let request = Request::new(serde_json::from_value(j).unwrap(), Origin::Agent);
     client::send(project, &request).unwrap().expect("the song is hosted")
 }
 
@@ -138,7 +134,7 @@ fn the_arrangement_is_what_the_app_draws() {
     assert_eq!((a.revision, a.title.as_str(), a.tempo, a.beats_per_bar, a.length_beats), (0, "Demo", 120.0, 4, 32.0));
     assert_eq!(a.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["drums", "perc"]);
     let drums = &a.tracks[0];
-    assert_eq!(drums.sends, ["plate"]);
+    assert_eq!(drums.sends, [SendView { to: "plate".into(), gain_db: -12.0 }]);
     let clips: Vec<_> = drums.clips.iter().map(|c| (c.pattern.as_str(), c.at, c.pattern_beats, c.repeats)).collect();
     assert_eq!(clips, [("beat", 0.0, 4.0, 4), ("fill", 16.0, 2.0, 1)]);
     let perc = &a.tracks[1];
@@ -272,4 +268,218 @@ fn the_app_and_the_agent_share_the_transport() {
     assert!(matches!(next(&seen), Seen::Closed));
     assert!(song.locate(0.0).is_err());
     song.close();
+}
+
+fn step(label: &str, origin: Who) -> Option<HistoryStep> {
+    Some(HistoryStep {
+        label: label.into(),
+        origin,
+    })
+}
+
+#[test]
+fn the_person_edits_the_mixer_in_the_same_history() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let (drums, perc) = (Row::Track { key: start.tracks[0].key }, Row::Track { key: start.tracks[1].key });
+    let plate = Row::Return { key: start.returns[0].key };
+
+    assert!(song.edit(Edit::Gain { row: drums.clone(), db: -6.0 }, None).unwrap().is_empty());
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Set tracks.drums.gain_db: 0.0 → -6"));
+    assert_eq!((u.undo, u.redo), (step("Set tracks.drums.gain_db: 0.0 → -6", Who::User), None));
+    assert_eq!(u.arrangement.tracks[0].gain_db, -6.0);
+
+    // A drag is one step, named for the whole move.
+    for db in [-7.5, -9.0] {
+        song.edit(Edit::Gain { row: drums.clone(), db }, Some("drag".into())).unwrap();
+        assert_eq!(update(&seen).change.gesture.as_deref(), Some("drag"));
+    }
+    song.edit(Edit::Pan { row: perc.clone(), pan: -0.25 }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].pan, -0.25);
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.op, "undo");
+    assert_eq!(u.undo, step("Set tracks.drums.gain_db: -6.0 → -9", Who::User));
+    assert_eq!(u.redo, step("Set tracks.perc.pan: 0.0 → -0.25", Who::User));
+    song.redo().unwrap();
+    assert_eq!(update(&seen).redo, None);
+
+    // The agent's edits are steps in the same history, named as the agent's.
+    agent(&path, json!({"op": "set", "path": "tracks.perc.gain_db", "value": -1}));
+    assert_eq!(update(&seen).undo, step("Set tracks.perc.gain_db: -3.0 → -1", Who::Agent));
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.arrangement.tracks[1].gain_db), (Who::User, -3.0));
+
+    song.edit(Edit::Mute { row: drums.clone(), on: true }, None).unwrap();
+    song.edit(Edit::Solo { track: start.tracks[1].key, on: true }, None).unwrap();
+    update(&seen);
+    let a = update(&seen).arrangement;
+    assert_eq!((a.tracks[0].mute, a.tracks[1].solo), (true, true));
+    song.edit(Edit::Gain { row: plate.clone(), db: -4.0 }, None).unwrap();
+    song.edit(Edit::Mute { row: plate.clone(), on: true }, None).unwrap();
+    song.edit(Edit::Gain { row: Row::Master, db: -3.0 }, None).unwrap();
+    update(&seen);
+    update(&seen);
+    let a = update(&seen).arrangement;
+    assert_eq!((a.returns[0].gain_db, a.returns[0].mute, a.master.gain_db), (-4.0, true, -3.0));
+    assert!(song.edit(Edit::Pan { row: Row::Master, pan: 0.5 }, None).is_err());
+
+    // Sends: a level adds the send, and removing it takes it away.
+    let send = |to: &str, db: f64| Edit::Send { track: start.tracks[1].key, to: to.into(), db };
+    song.edit(send("plate", -9.0), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set send perc → plate");
+    assert_eq!(u.arrangement.tracks[1].sends, [SendView { to: "plate".into(), gain_db: -9.0 }]);
+    song.edit(send("plate", -8.5), None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].sends[0].gain_db, -8.5);
+    song.edit(Edit::SendRemove { track: start.tracks[1].key, to: "plate".into() }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].sends, []);
+    // A refused edit changes nothing and reports why.
+    let e = song.edit(send("nowhere", -9.0), None).unwrap_err().to_string();
+    assert!(e.contains("nowhere"), "{e}");
+    assert!(song.edit(Edit::Gain { row: drums, db: 99.0 }, None).is_err());
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.perc.sends"})), json!([]));
+    song.close();
+}
+
+#[test]
+fn clips_move_resize_and_duplicate_on_exact_beats() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
+    let perc_clip = start.tracks[1].clips[0].key;
+    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(u64, f64, u32)> {
+        a.tracks[track].clips.iter().map(|c| (c.key, c.at, c.repeats)).collect()
+    };
+
+    // Two clips move together: later, and one track down.
+    song.edit(Edit::ClipsMove { clips: vec![fill], by: 4.0, rows: 1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move clip fill at 20");
+    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 2), (fill, 20.0, 1)]);
+    song.edit(Edit::ClipsMove { clips: vec![perc_clip, fill], by: -0.5, rows: -1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move 2 clips"));
+    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 4), (perc_clip, 7.5, 2), (fill, 19.5, 1)]);
+    assert_eq!(u.undo.as_ref().map(|s| s.origin), Some(Who::User));
+    // Nothing to do is no change; no track above the first is refused.
+    assert!(song.edit(Edit::ClipsMove { clips: vec![fill], by: 0.0, rows: 0 }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::ClipsMove { clips: vec![fill], by: 0.0, rows: -1 }, None).is_err());
+    let e = song.edit(Edit::ClipsMove { clips: vec![fill], by: 12.0, rows: 0 }, None).unwrap_err().to_string();
+    assert_eq!(e, "drums: clip exceeds session");
+
+    // A clip on a third of a beat stays on thirds when it moves.
+    let third = agent(&path, json!({"op": "clip.add", "track": "perc", "pattern": "fill", "at": "1/3"}));
+    let third: u64 = third["handle"].as_str().unwrap()[1..].parse().unwrap();
+    update(&seen);
+    song.edit(Edit::ClipsMove { clips: vec![third], by: 4.0, rows: 0 }, None).unwrap();
+    update(&seen);
+    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{third}.at")})), json!("13/3"));
+    song.edit(Edit::ClipsMove { clips: vec![third], by: 0.125, rows: 0 }, None).unwrap();
+    update(&seen);
+    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{third}.at")})), json!("107/24"));
+
+    song.edit(Edit::ClipRepeats { clip: fill, repeats: 3 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(clips(&u.arrangement, 0)[2], (fill, 19.5, 3));
+
+    // Copies go right after what was copied: one clip after itself, a group
+    // after the group. The edit returns the copies.
+    let made = song.edit(Edit::ClipsDuplicate { clips: vec![fill] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(clips(&u.arrangement, 0)[3], (made[0], 25.5, 3));
+    song.undo().unwrap();
+    update(&seen);
+    let made = song.edit(Edit::ClipsDuplicate { clips: vec![perc_clip, first] }, None).unwrap();
+    let u = update(&seen);
+    // The group spans beats 0 to 16, so each copy is 16 beats after its original.
+    let copies: Vec<(u64, f64, u32)> = made.iter().map(|k| *clips(&u.arrangement, 0).iter().find(|c| c.0 == *k).unwrap()).collect();
+    assert_eq!(copies, [(made[0], 23.5, 2), (made[1], 16.0, 4)]);
+    let mut added: Vec<u64> = u.touched.iter().filter(|t| t.delta == Delta::Added).map(|t| t.key).collect();
+    added.sort();
+    assert_eq!(added, { let mut m = made.clone(); m.sort(); m });
+    assert_eq!(u.undo.unwrap().label, "Duplicate 2 clips");
+
+    song.edit(Edit::ClipsRemove { clips: made }, None).unwrap();
+    assert_eq!(clips(&update(&seen).arrangement, 0).len(), 3);
+    song.close();
+}
+
+#[test]
+fn tracks_and_returns_are_added_named_moved_and_removed() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let ids = |a: &aaw_ffi::Arrangement| -> (Vec<String>, Vec<String>) {
+        (a.tracks.iter().map(|t| t.id.clone()).collect(), a.returns.iter().map(|r| r.id.clone()).collect())
+    };
+
+    // A new track gets a free name, which the person then changes.
+    let made = song.edit(Edit::TrackAdd { index: 1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(ids(&u.arrangement).0, ["drums", "track-1", "perc"]);
+    assert_eq!(made, [u.arrangement.tracks[1].key]);
+    let track = Row::Track { key: made[0] };
+    assert_eq!(song.edit(Edit::TrackAdd { index: 99 }, None).unwrap().len(), 1);
+    assert_eq!(ids(&update(&seen).arrangement).0, ["drums", "track-1", "perc", "track-2"]);
+    song.edit(Edit::Rename { row: track.clone(), to: "keys".into() }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Rename track track-1 to keys");
+    let e = song.edit(Edit::Rename { row: track.clone(), to: "two words".into() }, None).unwrap_err().to_string();
+    assert_eq!(e, "tracks.1.id: String should match pattern '^[a-zA-Z][a-zA-Z0-9_-]*$'");
+    assert!(song.edit(Edit::Rename { row: track.clone(), to: "drums".into() }, None).is_err());
+    song.edit(Edit::Move { row: track.clone(), index: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move track keys to position 0");
+    assert_eq!(ids(&u.arrangement).0, ["keys", "drums", "perc", "track-2"]);
+    song.edit(Edit::Remove { row: track }, None).unwrap();
+    assert_eq!(ids(&update(&seen).arrangement).0, ["drums", "perc", "track-2"]);
+
+    // Returns likewise; a renamed return keeps its sends.
+    let made = song.edit(Edit::ReturnAdd { index: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(ids(&u.arrangement).1, ["return-1", "plate"]);
+    let room = Row::Return { key: made[0] };
+    song.edit(Edit::Move { row: room.clone(), index: 1 }, None).unwrap();
+    assert_eq!(ids(&update(&seen).arrangement).1, ["plate", "return-1"]);
+    song.edit(Edit::Rename { row: Row::Return { key: start.returns[0].key }, to: "hall".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[0].sends, [SendView { to: "hall".into(), gain_db: -12.0 }]);
+    song.edit(Edit::Remove { row: room }, None).unwrap();
+    assert_eq!(ids(&update(&seen).arrangement).1, ["hall"]);
+    for edit in [Edit::Rename { row: Row::Master, to: "x".into() }, Edit::Remove { row: Row::Master }, Edit::Move { row: Row::Master, index: 0 }] {
+        assert!(song.edit(edit, None).is_err());
+    }
+
+    // What the person selects, the agent can ask about.
+    let clip = start.tracks[0].clips[1].key;
+    song.select(vec![clip, start.tracks[1].key, 9999]).unwrap();
+    let selection = agent(&path, json!({"op": "status"}))["selection"].clone();
+    assert_eq!(
+        selection,
+        json!([
+            {"ref": format!("@{clip}"), "path": "tracks.drums.clips.1"},
+            {"ref": format!("@{}", start.tracks[1].key), "path": "tracks.perc"},
+        ])
+    );
+    song.select(Vec::new()).unwrap();
+    assert_eq!(agent(&path, json!({"op": "status"}))["selection"], json!([]));
+    song.close();
+    assert!(song.edit(Edit::TrackAdd { index: 0 }, None).is_err());
+}
+
+#[test]
+fn refusals_read_plainly() {
+    let one = "1 validation error for Project\n  Value error, bass: unknown pad p [type=value_error]";
+    assert_eq!(aaw_ffi::plain(one), "bass: unknown pad p");
+    let two = "2 validation errors for Project\nsession.tempo\n  Input should be less than or equal to 400 \
+               [type=less_than_equal]\ntracks.0.pan\n  Input should be greater than or equal to -1 [type=greater_than_equal]";
+    assert_eq!(
+        aaw_ffi::plain(two),
+        "session.tempo: Input should be less than or equal to 400; tracks.0.pan: Input should be greater than or equal to -1"
+    );
+    assert_eq!(aaw_ffi::plain("locate 99 is at or after the session end"), "locate 99 is at or after the session end");
 }
