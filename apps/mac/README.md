@@ -1,12 +1,13 @@
 # Mac app
 
 The native macOS app of [docs/Rust-Swift-Update.md](../../docs/Rust-Swift-Update.md),
-as far as milestone M8: it opens a song, shows its arrangement with what each
-clip plays as a waveform, plays it with its effects and automation, shows each
-change as it lands, whoever makes it, and lets the person edit the mixer, the
-clips, the tracks and returns, each row's effects and its automation lanes, and
-each pattern's steps and events. A browser finds samples in the library's index
-and adds them to the song as pads and tracks.
+through its last milestone, M9: it opens a song, shows its arrangement with what
+each clip plays as a waveform, plays it with its effects and automation, shows
+each change as it lands, whoever makes it, and lets the person edit the mixer,
+the clips, the tracks and returns, each row's effects and its automation lanes,
+and each pattern's steps and events. A browser finds samples in the library's
+index and adds them to the song as pads and tracks. The bundle holds `daw` and
+the libraries it needs, and a menu item puts `daw` on the PATH.
 
 The app holds no model logic. Opening a song makes the app its session host
 ([engine/README.md](../../engine/README.md)): the Rust core runs inside the app,
@@ -24,20 +25,98 @@ targets macOS 14.
 ./build.sh                          # build/AAW.app
 open -a build/AAW.app path/to/song.yaml
 ./build.sh test                     # the Swift tests
+./build.sh dist                     # build/AAW-0.1.0.zip, to share
 ```
 
 `build.sh` builds the Rust core as a static library, generates the Swift
 bindings from it with UniFFI, wraps both as an XCFramework under `Generated/`,
-builds the Swift package and assembles the bundle. Bindings and build output
-stay out of Git. After a first `build.sh`, `swift build` is enough for
-Swift-only changes, and Xcode opens `Package.swift` directly.
+builds the Swift package and `daw`, and assembles and signs the bundle.
+Bindings and build output stay out of Git. After a first `build.sh`, `swift
+build` is enough to compile Swift-only changes, and Xcode opens `Package.swift`
+directly; the app to run is the one `build.sh` assembles.
 
 If the checkout lives in a synced folder, exclude `.build`, `build` and
 `Generated` from syncing, as with the engine's `target`. For Dropbox: `xattr -w
 com.dropbox.ignored 1 .build build Generated`.
 
-The bundle is signed ad hoc and links Homebrew's libsndfile, so it runs on the
-machine that built it.
+## The bundle
+
+| In `AAW.app/Contents` | Holds |
+|---|---|
+| `MacOS/AAW` | The app, with the Rust core linked into it |
+| `Helpers/daw` | The `daw` binary, built as the tests build it |
+| `Frameworks` | libsndfile and the seven libraries it links (Ogg, Vorbis and its encoder, FLAC, Opus, mpg123 and LAME), copied from Homebrew |
+| `Resources/Licenses` | The licenses of those libraries |
+
+The app and `daw` load the libraries from `Frameworks`, so the bundle runs from
+any folder, and on a Mac without Homebrew. `build.sh` stops if anything in the
+bundle still links outside it and the system, or was built for a newer macOS
+than `Info.plist` says the app runs on, which Homebrew's libraries are when the
+Mac that builds is newer than that. It then runs the bundle's `daw` once. The
+bundle is for the kind of Mac that built it, Apple silicon or Intel, not both.
+
+The sample library, sample analysis and perception are Python and are not in
+the bundle. The bundle's `daw` and the app's browser run them in the `.venv` of
+the checkout the bundle was built from, or the Python `AAW_PYTHON` names. On a
+Mac with neither, `samples`, `listen`, `compare`, `check` and the browser say
+that Python was not found, and every other command works.
+
+## The command line tool
+
+**AAW › Install Command Line Tool…** makes `/usr/local/bin/daw` a link to the
+bundle's `daw`. That folder is on the PATH of every shell, so a terminal or an
+agent can then run `daw` from any folder, and its commands for a song open in
+the app reach the app. The folder belongs to the system, so macOS asks for an
+administrator's password. The app says what it will change first:
+
+| At `/usr/local/bin/daw` | The menu item |
+|---|---|
+| Nothing | Offers to make the link |
+| A link to this app's `daw` | Says so, and offers to remove it |
+| A link to anything else, such as a copy of the app that has moved | Says where it points, and offers to point it here |
+| A file that is no link | Leaves it, and says to move it away |
+
+The link is to where the app is, so moving the app breaks it: choose the item
+again from the app's new place. A downloaded app that has not been moved out of
+its folder is run by macOS from a temporary copy, and asks to be moved first.
+To make the link by hand, or in a folder of your own:
+
+```sh
+ln -s "$PWD/build/AAW.app/Contents/Helpers/daw" ~/bin/daw
+```
+
+In this checkout, keep to `uv run daw`. It runs the engine as it was last
+built, where the link runs the copy made when the app was last built.
+
+## Sharing the app
+
+```sh
+AAW_SIGN_IDENTITY="Developer ID Application: NAME (TEAM)" AAW_NOTARY_PROFILE=aaw ./build.sh dist
+```
+
+| Variable | Does |
+|---|---|
+| `AAW_SIGN_IDENTITY` | Signs the libraries, `daw` and the app with this certificate, the hardened runtime and a timestamp. Without it they are signed ad hoc |
+| `AAW_NOTARY_PROFILE` | In `dist`, has Apple notarize the zip and staples the ticket to the app. It names a keychain profile, made once with `xcrun notarytool store-credentials aaw --apple-id ID --team-id TEAM` |
+
+`dist` writes `build/AAW-VERSION.zip`. A notarized app opens on another Mac
+as any downloaded app does. An ad hoc one is refused there until its user
+allows it under Privacy & Security in System Settings. The app is not for the
+Mac App Store, whose sandbox would keep `daw` from the app's socket and the app
+from songs in folders of the person's choosing.
+
+Signing with a certificate and notarizing have not been run: the Mac this was
+built on has no Developer ID. What was tried in their place is in the plan's
+[progress](../../docs/Rust-Swift-Update.md#progress). Three things to know
+before sharing a build:
+
+- An ad hoc signature cannot use the hardened runtime: macOS then refuses the
+  bundle's libraries, which have no team to match the app's. A certificate
+  gives every part the same team.
+- The binaries hold paths of the Mac that built them: the checkout, where
+  `daw` looks for Python, and Cargo's folders, in the text of error messages.
+- The libraries' licenses are in the bundle; those of the Rust crates the
+  engine uses are not gathered.
 
 ## The window
 
@@ -179,7 +258,8 @@ a longer one scrolls. While the samples show, everything else is 251 points
 further right.
 A menu, such as Add Effect, a choice in a device or + Lane, waits for a person
 and cannot be scripted, and neither can a drag from the samples or the Finder;
-use a `daw` command, or the + by a sample, for what it would do.
+use a `daw` command, or the + by a sample, for what it would do. Install
+Command Line Tool asks in an alert, which also waits for a person.
 
 ## Layout
 
@@ -197,6 +277,7 @@ use a `daw` command, or the + by a sample, for what it would do.
 | `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/BrowserView.swift` | The samples: searches of the library's index, and the list |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
+| `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
 | `Sources/AAWApp/App.swift` | The app delegate, menus, windows and the command line |
 | `Sources/AAW` | The executable's entry point |
 
@@ -227,3 +308,4 @@ use a `daw` command, or the + by a sample, for what it would do.
 - An effect's ID is set with `daw set`; the panel shows it.
 - An effect added, removed, bypassed or moved while the song plays is heard
   after a 10 ms dip, and so is a change to a field that reshapes a device.
+- The app has no icon, and the Python tools are not in its bundle.

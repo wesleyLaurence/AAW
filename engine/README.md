@@ -39,7 +39,9 @@ silicon needs `rustup target add x86_64-apple-darwin`. To check it alone:
 `PYO3_PYTHON=../.venv/bin/python cargo check -p aaw-py`.
 
 `daw` is not on the PATH. Run it as `target/release/daw`, or as `uv run daw`,
-which runs that binary (or the one `AAW_DAW` names). It implements:
+which runs that binary (or the one `AAW_DAW` names). The Mac app's bundle holds
+a copy, which the app's menu links onto the PATH
+([apps/mac/README.md](../apps/mac/README.md)). It implements:
 
 | Command | Does |
 |---|---|

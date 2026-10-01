@@ -11,10 +11,10 @@ sidechain compression, the limiter, delay and reverb, and sends to return buses.
 [automation.md](automation.md) documents automation lanes for levels, pans, sends
 and effect parameters.
 
-In progress: [Rust-Swift-Update.md](Rust-Swift-Update.md) plans a native macOS app
+Built: [Rust-Swift-Update.md](Rust-Swift-Update.md) plans a native macOS app
 with a real-time Rust engine that a person and an agent operate together. The engine
 has replaced the Python one, and the app edits and plays songs, shows waveforms, edits
-patterns and browses the sample library; packaging remains. The Rust workspace is in [../engine](../engine) and the
+patterns and browses the sample library, and its bundle carries `daw` and puts it on the PATH. The Rust workspace is in [../engine](../engine) and the
 app in [../apps/mac](../apps/mac).
 
 Dated design notes: [design-notes-2026-09-07.md](design-notes-2026-09-07.md) is a

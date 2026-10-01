@@ -12,7 +12,8 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
   (`agent_daw.aaw_py`) and drives both. Python reads songs only through that model.
 - The Mac app in `apps/mac/` builds with `./build.sh`; run `./build.sh test` after Swift changes
   and see its README for checking the window with `--snapshot` and timing its drawing with
-  `--measure`.
+  `--measure`. Its bundle holds a copy of `daw`, which the app's menu can link onto the PATH;
+  in this checkout keep to `uv run daw`, which runs the engine as last built.
 - Edit a song with commands (`set`, `clip move`, `effect add`, `undo`; see engine/README.md).
   While a session host runs for the song (it is open in the Mac app, or `daw host` or
   `daw play` is running; `daw status` shows `"host": true`), prefer them to `apply`: the
