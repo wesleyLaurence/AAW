@@ -14,8 +14,7 @@ import pyloudnorm as pyln
 import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
-from .engine import schedule
-from .model import atomic_text, beat, digest, frame, hash_matches, load
+from .model import atomic_text, beat, digest, frame, hash_matches, load, schedule
 
 VERSION = 1
 BANDS = {
@@ -137,7 +136,8 @@ def context(folder, x, rate):
     project = load(folder / "song.snapshot.yaml", verify_assets=False)
     if not hash_matches(project, manifest["project_sha256"]):
         raise ValueError("Render snapshot hash mismatch")
-    if rate != project.session.sample_rate or len(x) != manifest["mix"]["frames"]:
+    session = project["session"]
+    if rate != session["sample_rate"] or len(x) != manifest["mix"]["frames"]:
         raise ValueError("Render audio dimensions do not match its manifest")
     # Reports from before previews have no target; they are full renders, which
     # the timeline check below confirms.
@@ -146,20 +146,24 @@ def context(folder, x, rate):
     expected_end = (
         region[1]
         if region
-        else frame(project.session.length_beats, project.session.tempo, rate)
+        else frame(session["length_beats"], session["tempo"], rate)
     )
     if offset < 0 or expected_end - offset != len(x):
         raise ValueError("Render timeline does not match its manifest")
     sections = []
-    for sec in project.sections:
-        start = max(offset, frame(sec.at, project.session.tempo, rate))
+    for sec in project["sections"]:
+        start = max(offset, frame(sec["at"], session["tempo"], rate))
         end = min(
             offset + len(x),
-            frame(beat(sec.at) + beat(sec.length_beats), project.session.tempo, rate),
+            frame(beat(sec["at"]) + beat(sec["length_beats"]), session["tempo"], rate),
         )
         if end > start:
             sections.append(
-                {"id": sec.id, "start_frame": start - offset, "end_frame": end - offset}
+                {
+                    "id": sec["id"],
+                    "start_frame": start - offset,
+                    "end_frame": end - offset,
+                }
             )
     return project, manifest, offset, sections
 
@@ -167,7 +171,7 @@ def context(folder, x, rate):
 def timeline(x, rate, project, offset):
     # One beat per energy bin, or one second when musical timing is unknown.
     if project:
-        tempo = project.session.tempo
+        tempo = project["session"]["tempo"]
         first = int(np.floor(offset / rate * tempo / 60))
         last = int(np.ceil((offset + len(x)) / rate * tempo / 60))
         boundaries = (
@@ -187,7 +191,7 @@ def timeline(x, rate, project, offset):
             {
                 "start_seconds": (offset + start) / rate,
                 "end_seconds": (offset + end) / rate,
-                "at_beat": (offset + start) / rate * project.session.tempo / 60
+                "at_beat": (offset + start) / rate * project["session"]["tempo"] / 60
                 if project
                 else None,
                 "rms_dbfs": db(float(np.mean(x[start:end] ** 2))),
@@ -220,12 +224,13 @@ def timeline(x, rate, project, offset):
 def musical_context(project, manifest, offset, count, sections):
     if project is None:
         return None
-    rate, tempo = project.session.sample_rate, project.session.tempo
+    rate, tempo = project["session"]["sample_rate"], project["session"]["tempo"]
     triggers = schedule(project)
+    any_solo = any(t["solo"] for t in project["tracks"])
     result = {}
     ranges = [{"id": "whole_render", "start_frame": 0, "end_frame": count}, *sections]
-    for track in project.tracks:
-        if track.id not in manifest["tracks"]:
+    for track in project["tracks"]:
+        if track["id"] not in manifest["tracks"]:
             continue
         regions = []
         for region in ranges:
@@ -233,19 +238,18 @@ def musical_context(project, manifest, offset, count, sections):
             hits = [
                 tr
                 for tr in triggers
-                if tr.track == track.id and start <= tr.start < end
+                if tr.track == track["id"] and start <= tr.start < end
             ]
             placements = []
-            for clip in track.clips:
-                pattern = project.patterns[clip.pattern]
-                for repeat in range(clip.repeats):
-                    at = beat(clip.at) + repeat * beat(pattern.length_beats)
-                    stop = at + beat(pattern.length_beats)
+            for clip in track["clips"]:
+                length = beat(project["patterns"][clip["pattern"]]["length_beats"])
+                for repeat in range(clip["repeats"]):
+                    at = beat(clip["at"]) + repeat * length
                     if (
                         frame(at, tempo, rate) < end
-                        and frame(stop, tempo, rate) > start
+                        and frame(at + length, tempo, rate) > start
                     ):
-                        placements.append(clip.pattern)
+                        placements.append(clip["pattern"])
             regions.append(
                 {
                     "id": region["id"],
@@ -257,9 +261,8 @@ def musical_context(project, manifest, offset, count, sections):
                     },
                 }
             )
-        result[track.id] = {
-            "audible_in_render": not track.mute
-            and (not any(t.solo for t in project.tracks) or track.solo),
+        result[track["id"]] = {
+            "audible_in_render": not track["mute"] and (not any_solo or track["solo"]),
             "regions": regions,
         }
     return {
@@ -284,7 +287,7 @@ def analyze(source):
             "frames": len(x),
             "channels": x.shape[1],
             "start_seconds": offset / rate,
-            "tempo": project.session.tempo if project else None,
+            "tempo": project["session"]["tempo"] if project else None,
         },
         "methods": {
             "loudness": "pyloudnorm BS.1770-4 K-weighting, 400 ms absolute/relative gating; null below gate or under 400 ms",

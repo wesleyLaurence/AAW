@@ -1,11 +1,11 @@
 //! Convolution reverb with a seeded synthetic impulse response.
 //!
-//! The response follows `effects.reverb_ir`: Gaussian noise shaped in the
-//! short-time Fourier domain so each frequency decays exponentially, with a
-//! 3 ms raised-cosine onset, a width control, a 12 dB/octave low cut, energy
-//! normalization per channel and a predelay. Its noise comes from this file's
-//! own generator rather than numpy's, so a response is statistically
-//! equivalent to the Python engine's and not sample-identical (D40).
+//! The response is Gaussian noise shaped in the short-time Fourier domain so
+//! each frequency decays exponentially, with a 3 ms raised-cosine onset, a
+//! width control, a 12 dB/octave low cut, energy normalization per channel and
+//! a predelay. Its noise comes from this file's own generator rather than
+//! numpy's, so a response is statistically equivalent to the first (Python)
+//! engine's and not sample-identical (D40).
 //!
 //! The noise generator: SplitMix64 expands the reverb's `seed` into the state
 //! of xoshiro256++, whose outputs make uniform doubles from their top 53 bits.

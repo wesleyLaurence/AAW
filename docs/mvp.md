@@ -1,30 +1,56 @@
-# Sampler MVP — implemented September 22, 2026
+# Sampler MVP — implemented September 22, 2026; on the Rust engine since October 1, 2026
 
 ## Scope and architecture
 
-A Python core with a JSON-first CLI. The agent is the composer/operator; the engine
-provides deterministic editing, sample retrieval, sequencing, rendering and technical
-inspection. There is no embedded autonomous composer or visual editor.
+A Rust core with a JSON-first CLI, a Mac app over the same core, and Python tools
+for the sample library and perception. The agent is the composer/operator; the
+engine provides deterministic editing, sample retrieval, sequencing, playback,
+rendering and technical inspection. There is no embedded autonomous composer.
 
-- `model.py`: strict schema v1, exact musical time, stable YAML, validation and hashes.
+The MVP was first built in Python and rendered offline only. The plan in
+[Rust-Swift-Update.md](Rust-Swift-Update.md) rebuilt the model, the sampler, the
+effects and automation in Rust against that engine as the reference, and its
+milestone M7 retired the Python engine. The document format, the fingerprints, the
+render artifacts and the semantics below did not change.
+
+Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
+
+- `aaw-model`: strict schema v1, exact musical time, stable YAML, validation,
+  hashes, the event schedule and the schema `daw describe` prints.
+- `aaw-dsp`: bandlimited repitch, lane envelopes, and the filter, EQ,
+  compressor/sidechain, limiter, delay and reverb devices with explicit block
+  state; see [effects.md](effects.md) and [automation.md](automation.md).
+- `aaw-engine`: compiles a song into a program of voices, chains, routing and
+  latency-aligning delays, and runs it as one stream for real-time playback and
+  for WAV/stem export.
+- `aaw-host`: the session host. It holds an open song, applies edits as commands
+  with origins, handles and undo, saves after each, and plays the song as edits land.
+- `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
+  and errors.
+- `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see
+  [../apps/mac/README.md](../apps/mac/README.md).
+- `aaw-py`: the song model for Python, built into the package as `agent_daw.aaw_py`.
+
+Python, in `src/agent_daw`:
+
+- `model.py`: reads, validates and saves songs through `aaw_py`. A song is plain
+  data, the full dump of the validated document.
 - `analysis.py`: audio-derived pitch, onsets, tempo and loop/one-shot kind; see
   [sample-analysis.md](sample-analysis.md). Cached in the index by `library.py`.
 - `library.py`: incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
-- `engine.py`: event scheduling, sample decoding and bandlimited repitch, explicit
-  block-processing voice state, sidechain-ordered track rendering, master gain and
-  WAV/stem export.
-- `effects.py`: filter, EQ, compressor/sidechain, limiter, delay and reverb devices
-  with explicit block state and compensated latency; see [effects.md](effects.md).
-- `automation.py`: lane envelopes evaluated at timeline frames for levels, pans,
-  sends and effect parameters; see [automation.md](automation.md).
-- `cli.py`: thin command shell with machine-readable results and errors.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
+- `cli.py`: `samples`, `listen`, `compare` and `check`. `check` is `inspect` with
+  measured root notes and automation warnings. Every other command is passed to the
+  Rust `daw`, which passes these four back, so there is one command either way. A
+  sample import copies the file and adds it to the song with `daw apply`, so a
+  running host takes it as an undoable edit.
 
-The sampler preloads/resamples source files and mixes voices in blocks. This is an
-offline implementation, not a realtime-safe callback. It intentionally uses the same
-sampler for full mixes, stems and previews. No second playback engine exists.
+The sampler preloads and resamples source files. One renderer serves playback, full
+mixes, stems and previews: its output does not depend on how the stream is cut into
+blocks, so a song played from the start equals its offline render, and its
+processing never allocates, so it runs in the audio callback. No second engine exists.
 
 ## Format v1
 
@@ -106,7 +132,38 @@ The 4× oversampled peak reported by the engine is an estimate, not a certified
 true-peak measurement. An independent FFmpeg EBU R128/peak check can supplement these measurements.
 Listening determines musical quality; these numerical checks do not.
 
+## Playback and live editing
+
+`daw play PROJECT --from BEAT` plays through the default output from any beat.
+Samples already sounding at that position are picked up partway through; effects
+start empty when the stream does and then run on, so a reverb rings through a
+locate or a stop. `daw stop`, `locate` and `loop` move a running transport.
+
+While a session host runs for a song (the Mac app has it open, or `daw host` or
+`daw play` is running), every edit is a command to that host, from the agent or the
+person. The host validates it against the whole song, saves `song.yaml`, records it
+in one undo history and change log with its origin, and plays it: levels, pans,
+sends and the knobs automation can move glide to their new values over 5 ms, and a
+change of structure, such as an added effect, fades through a 10 ms dip. Automation
+written in the document is never smoothed, and a render reads only the saved values,
+so playback from the start and a render are the same audio. With no host, the same
+commands edit the file. [../engine/README.md](../engine/README.md) lists the commands
+and describes the host; decisions D36 to D38, D41 and D44 record the choices.
+
 ## Verification
+
+`uv run pytest -q` drives the built `daw` and the Python tools; `cargo test` in
+`engine/` tests each crate, including every device, the scheduler, the host's
+commands and playback under allocation checking.
+
+The model is held to what the Python model did when it was retired: for a generated
+corpus of valid songs, broken copies and YAML edge cases, `tests/golden_model.json`
+pins each document's canonical YAML and fingerprints, or its errors' locations, types
+and messages, and the outcomes of generated `fmt` and `apply` edits. Fingerprints of
+each earlier schema are pinned too, so reports from every engine still verify. The
+published schema is checked against validation field by field. Generated songs in
+every sample format are rendered whole, in other block sizes, as sections and as
+single channels, and the results are held to each other.
 
 Tests cover timing/fractions, schema errors, references, pitch, source-rate conversion,
 choke groups, swing, gate release, block-size invariance, stems reconstruction,
@@ -123,11 +180,12 @@ frequencies, localized arrangement edits, previews and tampered render artifacts
 
 ## Deliberately deferred
 
-Realtime playback, recording, UI, saturation, groups, synths,
+Recording, saturation, groups, synths,
 plugin hosting, time stretching, MIDI import/export, modulation (LFOs), tempo
 automation, semantic/audio embedding search,
 key/chord detection, downbeat and swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
 perception layer is implemented; see [perception.md](perception.md). Monophonic pitch
 and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md). The CLI is ready
-for agent-driven iterative use.
+for agent-driven iterative use. Waveforms, the pattern editor and a sample browser in the
+app, and packaging, are the remaining milestones of [Rust-Swift-Update.md](Rust-Swift-Update.md).

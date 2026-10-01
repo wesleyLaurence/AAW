@@ -1,5 +1,5 @@
 //! Rules that span models: note names, automation targets and the references
-//! `Project.references` checks, with the Python engine's messages.
+//! a project is checked for, with the messages the Python model gave.
 
 use crate::beat::{float_fraction, parse_fraction};
 use crate::pyfmt::{float_repr, format_g};
@@ -14,7 +14,7 @@ use std::sync::LazyLock;
 static NOTE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\A([A-Ga-g])([#b]?)(-?[0-9]+)\z").expect("note pattern"));
 
-/// `model.midi`: a note name with octave, such as C2 or F#1, as a MIDI number.
+/// A note name with octave, such as C2 or F#1, as a MIDI number.
 pub fn midi(note: &str) -> Result<i64, String> {
     let caps = NOTE
         .captures(note)
@@ -190,7 +190,7 @@ fn is_ascii_digits(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
 }
 
-/// `model.target`: resolves gain_db, pan, sends.RETURN.gain_db,
+/// A lane's target: resolves gain_db, pan, sends.RETURN.gain_db,
 /// effects.REF.FIELD or effects.REF.bands.N.FIELD for an owner.
 pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
     let parts: Vec<&str> = param.split('.').collect();

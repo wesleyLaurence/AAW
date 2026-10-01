@@ -16,7 +16,7 @@ pub fn project_hash(project: &Project) -> String {
     sha(&project.dump(true))
 }
 
-/// `model.LEGACY_FIELDS`, newest first: the fields each schema change added, at
+/// Newest first: the fields each schema change added, at
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Value> {
     vec![
@@ -26,7 +26,7 @@ fn legacy_fields() -> Vec<Value> {
     ]
 }
 
-/// `model._without`: drops, anywhere in the dump, keys equal to those defaults.
+/// Drops, anywhere in the dump, keys equal to those defaults.
 fn without(data: &Value, fields: &Dict) -> Value {
     match data {
         Value::List(items) => Value::List(items.iter().map(|x| without(x, fields)).collect()),

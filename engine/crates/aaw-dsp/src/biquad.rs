@@ -106,7 +106,7 @@ pub fn butter(order: usize, cutoff_hz: f64, highpass: bool, rate: f64) -> Vec<Se
     sections
 }
 
-/// The RBJ audio EQ cookbook biquad for a band, as `effects.band_sos`.
+/// The RBJ audio EQ cookbook biquad for a band.
 pub fn band(band: &EqBand, rate: f64) -> Section {
     let a = 10f64.powf(band.gain_db / 40.0);
     let w = 2.0 * PI * band.freq_hz / rate;

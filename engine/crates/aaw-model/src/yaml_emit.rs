@@ -1,6 +1,6 @@
 //! The canonical `song.yaml` writer: a port of PyYAML's `SafeDumper` with the
 //! project's flow-style rule, `sort_keys=False`, `allow_unicode=True` and
-//! `width=110`, so Rust writes the bytes the Python engine writes.
+//! `width=110`, the bytes every `song.yaml` has been written in.
 
 use crate::pyfmt::float_repr;
 use crate::value::Value;
@@ -23,7 +23,7 @@ enum Event {
     },
 }
 
-/// `model._represent_mapping`: which mappings the project writes in flow style.
+/// Which mappings the project writes in flow style.
 /// It looks only at the keys, so it applies to any mapping with those keys.
 fn flow_mapping(keys: &[&str]) -> bool {
     let has = |k: &str| keys.contains(&k);

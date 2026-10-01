@@ -1,24 +1,24 @@
-"""The Rust session host and its commands, against the Python model and CLI.
+"""The session host and its commands, driven from outside.
 
 A `daw host` process is started for a generated song and driven the way an agent
-drives it: set, undo, changes, an external edit and close. No audio device is
-opened; `daw play` is exercised by hand. Skipped without a Rust toolchain.
+drives it: set, undo, changes, a sample import, an external edit and close. No
+audio device is opened; `daw play` is exercised by hand.
 """
 
 import json
-import os
 import random
 import subprocess
 import tempfile
 import time
 
+import numpy as np
 import pytest
+import soundfile as sf
 import yaml
 
-from agent_daw.cli import execute, parser
-from agent_daw.model import Project, load, project_hash, save
-from test_rust_engine_parity import make_song
-from test_rust_model_parity import rust_daw  # noqa: F401  (session fixture)
+from agent_daw.model import frame, load, project_hash, save, schedule
+from helpers import cli
+from song_fixtures import make_song
 
 
 @pytest.fixture
@@ -50,37 +50,75 @@ def song_with_routing(rng, directory):
     return path
 
 
-def python(argv):
-    return json.loads(json.dumps(execute(parser().parse_args([str(a) for a in argv]))))
-
-
-def test_inspect_matches_python(rust_daw, tmp_path, registry):
+def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
     rng = random.Random(21)
     for i in range(6):
         directory = tmp_path / f"song{i}"
         directory.mkdir()
         path = song_with_routing(rng, directory) if i % 2 else make_song(rng, directory)
-        rust = daw(rust_daw, "inspect", path)
-        for track in rust["tracks"]:
-            clips = track.pop("clips")
-            assert [c["ref"] for c in clips] == [f"tracks.{track['id']}.clips.{n}" for n in range(len(clips))]
-        assert rust == python(["inspect", path])
+        song = load(path)
+        session = song["session"]
+        triggers = schedule(song)
+        types = lambda owner: [e["type"] for e in owner["effects"]]
+        params = lambda owner: [lane["param"] for lane in owner["automation"]]
+        keys = lambda owner: [e["sidechain"] for e in owner["effects"] if e.get("sidechain")]
+        assert daw(rust_daw, "inspect", path) == {
+            "valid": True,
+            "project_sha256": project_hash(song),
+            "session": session,
+            "duration_seconds": frame(session["length_beats"], session["tempo"], session["sample_rate"]) / session["sample_rate"],
+            "samples": len(song["samples"]),
+            "patterns": len(song["patterns"]),
+            "tracks": [
+                {
+                    "id": t["id"],
+                    "events": sum(tr.track == t["id"] for tr in triggers),
+                    "gain_db": t["gain_db"],
+                    "mute": t["mute"],
+                    "solo": t["solo"],
+                    "effects": types(t),
+                    "sidechain": keys(t),
+                    "sends": t["sends"],
+                    "automation": params(t),
+                    "clips": [
+                        {"ref": f"tracks.{t['id']}.clips.{n}", "pattern": c["pattern"], "at": c["at"], "repeats": c["repeats"]}
+                        for n, c in enumerate(t["clips"])
+                    ],
+                }
+                for t in song["tracks"]
+            ],
+            "returns": [
+                {
+                    "id": r["id"],
+                    "gain_db": r["gain_db"],
+                    "mute": r["mute"],
+                    "effects": types(r),
+                    "sidechain": keys(r),
+                    "senders": [t["id"] for t in song["tracks"] if any(s["to"] == r["id"] for s in t["sends"])],
+                    "automation": params(r),
+                }
+                for r in song["returns"]
+            ],
+            "master_effects": types(song["master"]),
+            "master_automation": params(song["master"]),
+            "sections": song["sections"],
+        }
 
 
-def python_edit(path, change):
-    """The song after `change` edits its full dump, as Python would save it."""
-    data = load(path).model_dump(mode="json")
+def edited(path, change):
+    """The song after `change` edits its full dump, as the model saves it."""
+    data = load(path)
     change(data)
     copy = path.with_name("expected.yaml")
-    save(Project.model_validate(data), copy)
+    save(data, copy)
     return copy.read_text()
 
 
-def test_commands_write_what_python_would(rust_daw, tmp_path, registry):
+def test_commands_write_the_edited_song(rust_daw, tmp_path, registry):
     path = song_with_routing(random.Random(3), tmp_path)
     daw(rust_daw, "fmt", path)
-    track = load(path).tracks[0].id
-    pattern = next(iter(load(path).patterns))
+    track = load(path)["tracks"][0]["id"]
+    pattern = next(iter(load(path)["patterns"]))
     cases = [
         (["set", path, f"tracks.{track}.gain_db", "-4.5"], lambda d: d["tracks"][0].update(gain_db=-4.5)),
         (
@@ -104,7 +142,7 @@ def test_commands_write_what_python_would(rust_daw, tmp_path, registry):
         (["return", "move", path, "room", "0"], lambda d: d["returns"].insert(0, d["returns"].pop())),
     ]
     for argv, change in cases:
-        expected = python_edit(path, change)
+        expected = edited(path, change)
         result = daw(rust_daw, *argv)
         assert result["project_sha256"] == project_hash(load(path)), argv
         assert path.read_text() == expected, argv
@@ -125,19 +163,19 @@ def test_a_host_takes_commands_from_other_processes(rust_daw, tmp_path, registry
     path = song_with_routing(random.Random(8), tmp_path)
     daw(rust_daw, "fmt", path)
     original = path.read_text()
-    track = load(path).tracks[0].id
+    track = load(path)["tracks"][0]["id"]
     host = subprocess.Popen([str(rust_daw), "host", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
         status = wait_for_host(rust_daw, path, host)
         assert status["revision"] == 0 and status["playing"] is False
 
         # The exit test's edit, without the audio: the file updates at once.
-        expected = python_edit(path, lambda d: d["tracks"][0].update(gain_db=-6.0))
+        expected = edited(path, lambda d: d["tracks"][0].update(gain_db=-6.0))
         result = daw(rust_daw, "set", path, f"tracks.{track}.gain_db", "-6")
         assert result["revision"] == 1
         assert path.read_text() == expected
         # Python reads the host's song from the file.
-        assert python(["inspect", path])["project_sha256"] == result["project_sha256"]
+        assert project_hash(load(path)) == result["project_sha256"]
 
         undone = daw(rust_daw, "undo", path)
         assert undone["revision"] == 2
@@ -149,11 +187,22 @@ def test_a_host_takes_commands_from_other_processes(rust_daw, tmp_path, registry
         moved = daw(rust_daw, "--origin", "user", "clip", "move", path, clip, "--at", "0")
         assert moved["revision"] in (2, 3)
 
-        # A Python writer is an external edit, picked up as one undoable step.
-        sha = daw(rust_daw, "status", path)["project_sha256"]
-        patch = tmp_path / "patch.json"
-        patch.write_text(json.dumps({"session": {"title": "External"}}))
-        python(["apply", path, patch, "--expect", sha])
+        # A sample imported by the Python library reaches the song through the
+        # host, as an edit that can be undone.
+        sf.write(tmp_path / "blip.wav", np.zeros(480), 48000)
+        before = daw(rust_daw, "status", path)["revision"]
+        code, imported = cli("samples", "--db", tmp_path / "library.sqlite", "import", tmp_path / "blip.wav", "--project", path, "--id", "blip")
+        assert code == 0, imported
+        status = daw(rust_daw, "status", path)
+        assert status["revision"] == before + 1
+        assert load(path)["samples"]["blip"]["sha256"] == imported["sha256"]
+
+        # A file written from outside is an external edit, picked up as one
+        # undoable step.
+        sha = status["project_sha256"]
+        song = load(path)
+        song["session"]["title"] = "External"
+        save(song, path)
         deadline = time.time() + 5
         while daw(rust_daw, "status", path)["project_sha256"] == sha:
             assert time.time() < deadline, "the external edit was not loaded"
@@ -162,7 +211,8 @@ def test_a_host_takes_commands_from_other_processes(rust_daw, tmp_path, registry
         changes = daw(rust_daw, "changes", path, "--since", "0")["changes"]
         rows = [(c["op"], c["origin"]) for c in changes]
         assert rows[:2] == [("set", "agent"), ("undo", "agent")]
-        assert rows[-1] == ("reload", "external")
+        assert rows[-2:] == [("apply", "agent"), ("reload", "external")]
+        assert changes[-2]["label"] == "Import sample blip"
         before = yaml.safe_load(original)["tracks"][0].get("gain_db", 0.0)
         assert changes[0]["label"] == f"Set tracks.{track}.gain_db: {json.dumps(float(before))} → -6"
 

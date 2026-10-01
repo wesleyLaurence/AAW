@@ -52,7 +52,7 @@ impl Beat {
         crate::value::py_eq(&self.to_value(), &other.to_value())
     }
 
-    /// The exact value, or the error message `model.beat` raises.
+    /// The exact value, or why it is not a beat.
     pub fn exact(&self) -> Result<BigRational, String> {
         beat(self)
     }
@@ -183,7 +183,7 @@ pub fn parse_fraction(text: &str) -> Result<BigRational, FractionError> {
     Ok(BigRational::new(numerator, denominator))
 }
 
-/// `model.beat`: the exact nonnegative value of a written beat.
+/// The exact nonnegative value of a written beat.
 pub fn beat(value: &Beat) -> Result<BigRational, String> {
     match parse_fraction(&value.text()) {
         Ok(x) if x.is_negative() => Err("Beat values must be nonnegative".into()),
@@ -203,7 +203,7 @@ pub fn float_fraction(x: f64) -> BigRational {
     }
 }
 
-/// `model.frame`: the frame a beat falls on, rounding half up from absolute time.
+/// The frame a beat falls on, rounding half up from absolute time.
 pub fn frame(position: &BigRational, tempo: f64, rate: i64) -> i64 {
     let x = position * BigRational::from_integer(BigInt::from(60 * rate)) / float_fraction(tempo);
     let (n, d) = (x.numer(), x.denom());

@@ -1,5 +1,5 @@
-//! Automation envelopes evaluated at timeline frames, as `automation.Envelope`,
-//! and parameters that follow them.
+//! Automation envelopes evaluated at timeline frames, and parameters that
+//! follow them.
 //!
 //! A lane holds its first value before its first point and its last value after
 //! its last point. A point's curve shapes the segment after it: linear moves in

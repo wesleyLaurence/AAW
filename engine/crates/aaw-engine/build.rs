@@ -1,5 +1,5 @@
-//! Links libsndfile, the library behind Python's `soundfile`, so decoded audio
-//! and written PCM match the Python engine. Set SNDFILE_LIB_DIR to choose a
+//! Links libsndfile, the library the first engine decoded samples with, so a
+//! song's samples decode to the same audio. Set SNDFILE_LIB_DIR to choose a
 //! copy; otherwise Homebrew's is used when present, then the linker's defaults.
 
 use std::process::Command;

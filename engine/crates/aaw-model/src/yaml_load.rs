@@ -1,6 +1,6 @@
 //! `yaml.safe_load`: libyaml events composed and constructed with PyYAML's YAML 1.1
 //! resolver and safe constructors, so `010` is 8, `1e5` is a string, `yes` is true
-//! and merge keys apply, exactly as the Python engine reads a song.
+//! and merge keys apply, as songs have always been read.
 
 use crate::value::{Dict, Key, Value};
 use libyaml_safer::{EventData, Mark, Parser};

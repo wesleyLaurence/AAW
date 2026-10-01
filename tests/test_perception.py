@@ -3,17 +3,15 @@
 import copy
 import hashlib
 import json
-import subprocess
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 import soundfile as sf
 
-from agent_daw.engine import render
-from agent_daw.model import Project, save
+from agent_daw.model import save, validate
 from agent_daw.perception import analyze, compare, listen, measure
+from helpers import cli, daw, render
 
 RATE = 48000
 
@@ -96,7 +94,7 @@ def test_frequency_change_and_silence(tmp_path):
 @pytest.fixture
 def rendered(tmp_path):
     write(tmp_path / "source.wav", tone(100, seconds=4))
-    p = Project.model_validate(
+    p = validate(
         {
             "session": {"tempo": 120, "length_beats": 8, "end_fade_ms": 0},
             "samples": {"tone": {"path": "source.wav"}},
@@ -127,7 +125,7 @@ def test_snapshot_sections_preview_and_hashes(rendered):
     path, p, full, preview = rendered
     # Analysis must work after original assets disappear and the project changes.
     (path.parent / "source.wav").unlink()
-    p.session.tempo = 160
+    p["session"]["tempo"] = 160
     save(p, path)
     a, _ = analyze(full)
     b, _ = analyze(preview)
@@ -158,23 +156,11 @@ def test_render_resolution_cli_and_images(rendered):
     for source in (full, full / "report.json", full / "mix.wav"):
         other, _ = analyze(source)
         assert other["mix"] == data["mix"]
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "agent_daw.cli",
-            "compare",
-            str(pointer),
-            str(full),
-            "--no-images",
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    output = json.loads(result.stdout)
+    code, output = cli("compare", pointer, full, "--no-images")
+    assert code == 0, output
     assert output["mix"]["actual_delta"]["rms_dbfs"] == 0
+    # The Rust daw passes the command on to Python.
+    assert daw("compare", pointer, full, "--no-images")["mix"] == output["mix"]
     compared = compare(pointer, full)
     assert Path(compared["images"][0]).is_file()
 
@@ -189,14 +175,10 @@ def test_invalid_audio_and_short_measurements(tmp_path):
     nonfinite = write(tmp_path / "nan.wav", np.full(100, np.nan))
     with pytest.raises(ValueError, match="finite"):
         analyze(nonfinite)
-    result = subprocess.run(
-        [sys.executable, "-m", "agent_daw.cli", "listen", str(invalid)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 1
-    assert "error" in json.loads(result.stderr)
+    code, result = cli("listen", invalid)
+    assert code == 1 and "error" in result
+    with pytest.raises(ValueError, match="mono/stereo"):
+        daw("listen", invalid)
 
 
 def test_mix_and_snapshot_tamper_rejected(rendered):
@@ -217,7 +199,12 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     _, p, full, _ = rendered
     report = full / "report.json"
     manifest = json.loads(report.read_text())
-    dump = p.model_dump(mode="json")
+    # What the Python engines recorded about themselves, where the Rust engine
+    # names its build.
+    del manifest["engine"]
+    manifest["python"] = "3.12.4"
+    manifest["dependencies"] = {"numpy": "2.2.0", "scipy": "1.15.0", "soundfile": "0.13.0"}
+    dump = copy.deepcopy(p)
     track = dump["tracks"][0]
     forms = [copy.deepcopy(dump)]
     del track["automation"], dump["master"]["automation"]
@@ -260,7 +247,7 @@ def test_reports_from_before_previews_are_full_renders(rendered):
     for folder in (full, preview):
         report = folder / "report.json"
         manifest = json.loads(report.read_text())
-        manifest = {k: manifest[k] for k in earliest}
+        manifest = {k: manifest.get(k, "3.12.4") for k in earliest}
         manifest["tracks"] = {
             name: {"peak_dbfs": t["peak_dbfs"], "events": t["events"]}
             for name, t in manifest["tracks"].items()
@@ -279,12 +266,13 @@ def test_reports_from_before_previews_are_full_renders(rendered):
 
 def test_localized_changes_and_musical_deltas(rendered):
     path, p, full, _ = rendered
-    p.patterns["busier"] = p.patterns["hit"].model_copy(deep=True)
-    from agent_daw.model import Clip, Event
-
-    p.patterns["busier"].events.append(Event(at=2, pad="tone"))
-    p.tracks[0].clips = [Clip(pattern="hit", at=0), Clip(pattern="busier", at=4)]
-    p.tracks[0].gain_db = -3
+    p["patterns"]["busier"] = copy.deepcopy(p["patterns"]["hit"])
+    p["patterns"]["busier"]["events"].append({"at": 2, "pad": "tone"})
+    p["tracks"][0]["clips"] = [
+        {"pattern": "hit", "at": 0},
+        {"pattern": "busier", "at": 4},
+    ]
+    p["tracks"][0]["gain_db"] = -3
     save(p, path)
     after = render(path)
     result = compare(full, Path(after["directory"]), images=False)
@@ -303,9 +291,8 @@ def test_localized_changes_and_musical_deltas(rendered):
 
 def test_changed_section_bounds_and_track_ids(rendered):
     path, p, full, _ = rendered
-    p.sections[1].at = 5
-    p.sections[1].length_beats = 3
-    p.tracks[0].id = "new_bass"
+    p["sections"][1].update(at=5, length_beats=3)
+    p["tracks"][0]["id"] = "new_bass"
     save(p, path)
     after = render(path)
     report = compare(full, Path(after["directory"]), images=False)

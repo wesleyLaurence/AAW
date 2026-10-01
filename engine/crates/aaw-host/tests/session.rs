@@ -373,11 +373,15 @@ fn apply_merges_into_the_song_and_keeps_handles() {
         {"id": "drums", "pads": {"h": {"sample": "hit"}}, "clips": [{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 16, "repeats": 4}], "gain_db": -1},
         {"id": "bass", "pads": {"t": {"sample": "tone", "mode": "gate", "release_ms": 20}}, "clips": [{"pattern": "bass"}]},
     ]});
-    let r = s.edit(&Command::Apply { patch }, Origin::Agent, None, None).unwrap().0;
+    let r = s.edit(&Command::Apply { patch, label: None }, Origin::Agent, None, None).unwrap().0;
     assert_eq!(r["label"], json!("Apply a merge patch"));
     assert_eq!(refs(&s, "tracks.drums.clips"), clips);
     assert_eq!(get(&s, "session.tempo"), json!(90.0));
     let _: Json = get(&s, "tracks");
+    // A patch may say what it does, as a batch may.
+    let named = json!({"op": "apply", "patch": {"session": {"tempo": 91}}, "label": "Slow down"});
+    assert_eq!(edit(&mut s, named).unwrap()["label"], json!("Slow down"));
+    assert_eq!(s.history().undo.unwrap().0, "Slow down");
 }
 
 #[test]
@@ -389,7 +393,7 @@ fn reordering_keys_is_a_change_although_the_sha_is_the_same() {
         {"id": "drums", "pads": {"k": {"sample": "hit"}, "h": {"sample": "hit"}}, "clips": [{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 16, "repeats": 4}]},
         get(&s, "tracks.bass"),
     ]});
-    let r = s.edit(&Command::Apply { patch }, Origin::Agent, None, None).unwrap().0;
+    let r = s.edit(&Command::Apply { patch, label: None }, Origin::Agent, None, None).unwrap().0;
     assert_eq!(r["changed"], json!(true));
     assert_eq!(s.doc().sha, sha);
     s.save().unwrap();

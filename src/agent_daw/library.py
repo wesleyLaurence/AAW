@@ -9,7 +9,7 @@ import json
 import numpy as np
 import soundfile as sf
 from . import analysis
-from .model import Sample, digest
+from .model import digest
 
 EXTENSIONS = {".wav", ".aif", ".aiff", ".flac"}
 
@@ -343,12 +343,12 @@ def import_asset(source: Path, project_dir: Path, root_note=None):
         shutil.copy2(source, target)
     if digest(target) != checksum:
         raise ValueError(f"Imported asset mismatch: {target}")
-    return Sample(
-        path=str(target.relative_to(project_dir)),
-        sha256=checksum,
-        source=str(source.resolve()),
-        root_note=root_note,
-    )
+    return {
+        "path": str(target.relative_to(project_dir)),
+        "sha256": checksum,
+        "source": str(source.resolve()),
+        "root_note": root_note,
+    }
 
 
 def audition(path: Path, output: Path, seconds=8.0):

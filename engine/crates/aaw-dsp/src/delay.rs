@@ -1,4 +1,4 @@
-//! Tempo-synced feedback delay, as `effects.DelayDevice`:
+//! Tempo-synced feedback delay:
 //! `wet[n] = F(input[n - D] + feedback * wet[n - D])`.
 //!
 //! F is the optional low and high cut, so every repeat passes through it again

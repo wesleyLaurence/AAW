@@ -1,24 +1,22 @@
 import copy
 import hashlib
 import json
-import subprocess
-import sys
 import numpy as np
 import pytest
 import soundfile as sf
 import yaml
 from agent_daw.model import (
-    Project,
     beat,
     frame,
     save,
     load,
     project_hash,
-    digest,
     hash_matches,
+    schedule,
+    validate,
 )
-from agent_daw.engine import render, schedule, Sampler, Voice, wav_atomic
 from agent_daw.library import scan, search, import_asset
+from helpers import cli, render, stem
 
 
 @pytest.fixture
@@ -51,8 +49,7 @@ def song(tmp_path):
             }
         ],
     }
-    p = Project.model_validate(data)
-    save(p, tmp_path / "song.yaml")
+    save(data, tmp_path / "song.yaml")
     return tmp_path / "song.yaml", data
 
 
@@ -81,22 +78,21 @@ def test_validation(song, change):
     path, d = song
     change(d)
     with pytest.raises(ValueError):
-        Project.model_validate(d)
+        validate(d)
 
 
-def test_pitch_and_gate(song):
+def test_pitch_and_gate(song, tmp_path):
     path, d = song
     d["patterns"]["main"]["events"][0]["note"] = "A4"
-    p = Project.model_validate(d)
-    tr = schedule(p)[0]
-    voice = Sampler(p, path.parent).voice(p.tracks[0].pads["a"], tr)
-    x = voice.process(48000)
-    # Octave up halves the original one-second sample.
-    assert len(x) == 24000
+    save(d, path)
+    render(path, tmp_path / "out")
+    x = stem(tmp_path / "out", "bass")
+    # Octave up halves the original one-second sample, which the gate then
+    # releases on the same frame: one beat at 120 BPM.
+    assert np.flatnonzero(x.any(axis=1))[-1] == 23998
     spec = abs(np.fft.rfft(x[1000:20000, 0]))
     peak = np.fft.rfftfreq(19000, 1 / 48000)[np.argmax(spec)]
     assert abs(peak - 440) < 3
-    assert abs(x[-1]).max() == 0
 
 
 def test_choke_and_swing(song):
@@ -108,8 +104,7 @@ def test_choke_and_swing(song):
         "swing": 0.6,
         "steps": {"a": "xx......"},
     }
-    p = Project.model_validate(d)
-    tr = schedule(p)
+    tr = schedule(d)
     assert tr[1].start == 14400
     assert tr[0].cutoff == 14400
 
@@ -129,7 +124,7 @@ def test_block_size_invariance_and_stems(song, tmp_path):
             "clips": [{"pattern": "main"}],
         }
     )
-    save(Project.model_validate(d), path)
+    save(d, path)
     a = render(path, tmp_path / "a", 127)
     b = render(path, tmp_path / "b", 4096)
     assert a["audio_sha256"] == b["audio_sha256"]
@@ -142,24 +137,11 @@ def test_block_size_invariance_and_stems(song, tmp_path):
     assert a["mix"]["over_range_samples"] == 0
 
 
-def test_float_stem_bytes_match_earlier_renders(tmp_path):
-    # The hash of the libsndfile writer this replaced: equal audio keeps equal stem
-    # bytes across writes and engine versions. The audio spans several write blocks.
-    x = np.arange(140002).reshape(-1, 2) / 70001 - 1
-    wav_atomic(tmp_path / "stem.wav", x, 48000, "FLOAT")
-    assert digest(tmp_path / "stem.wav") == (
-        "c2554ec4d5acecc5494a73b6bcae7d474a4e6f1e3f0af74f31f4c7bd3e5281e0"
-    )
-    y, sr = sf.read(tmp_path / "stem.wav", dtype="float32")
-    assert sr == 48000 and np.array_equal(y, x.astype(np.float32))
-    assert sf.info(tmp_path / "stem.wav").subtype == "FLOAT"
-
-
 def test_mute_solo(song, tmp_path):
     path, d = song
     d["tracks"][0]["mute"] = True
     d["tracks"][0]["solo"] = True
-    save(Project.model_validate(d), path)
+    save(d, path)
     report = render(path, tmp_path / "silent")
     assert report["mix"]["peak_dbfs"] == -240
 
@@ -167,7 +149,7 @@ def test_mute_solo(song, tmp_path):
 def test_clipping_refuses_publication(song, tmp_path):
     path, d = song
     d["session"]["master_gain_db"] = 24
-    save(Project.model_validate(d), path)
+    save(d, path)
     with pytest.raises(ValueError, match="Unsafe PCM"):
         render(path, tmp_path / "bad")
     assert not (tmp_path / "bad/mix.wav").exists()
@@ -178,11 +160,11 @@ def test_import_portability_and_tamper(song, tmp_path):
     projectdir = tmp_path / "portable"
     projectdir.mkdir()
     asset = import_asset(tmp_path / "tone.wav", projectdir, "A3")
-    d["samples"]["tone"] = asset.model_dump()
-    save(Project.model_validate(d), projectdir / "song.yaml")
+    d["samples"]["tone"] = asset
+    save(d, projectdir / "song.yaml")
     (tmp_path / "tone.wav").unlink()
     assert load(projectdir / "song.yaml")
-    (projectdir / asset.path).write_bytes(b"changed")
+    (projectdir / asset["path"]).write_bytes(b"changed")
     with pytest.raises(ValueError, match="content changed"):
         load(projectdir / "song.yaml")
 
@@ -209,21 +191,12 @@ def test_format_and_revision_edit(song, tmp_path):
     assert path.read_text() == original
     patch = tmp_path / "patch.json"
     patch.write_text(json.dumps({"session": {"tempo": 160}}))
-    cmd = [
-        sys.executable,
-        "-m",
-        "agent_daw.cli",
-        "apply",
-        str(path),
-        str(patch),
-        "--expect",
-        project_hash(p),
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    assert result.returncode == 1 and "Stale" in result.stderr
-    assert load(path).session.tempo == 160
+    cmd = ["apply", path, patch, "--expect", project_hash(p)]
+    code, result = cli(*cmd)
+    assert code == 0, result
+    code, result = cli(*cmd)
+    assert code == 1 and "Stale" in result["error"]
+    assert load(path)["session"]["tempo"] == 160
 
 
 def test_project_hash_fingerprints_the_saved_form(song):
@@ -299,23 +272,22 @@ EARLIER_FINGERPRINTS = [
 
 
 def test_fingerprints_of_earlier_engines_still_verify():
-    # hash_matches rebuilds these forms from today's full dump, so a field added to
-    # any model breaks them here until it is listed in model.LEGACY_FIELDS.
+    # The forms are rebuilt from today's full dump, so a field added to any model
+    # breaks them here until the Rust model lists it among its legacy fields.
     for data, sha in zip(projects_by_schema(), EARLIER_FINGERPRINTS, strict=True):
-        p = Project.model_validate(data)
-        assert project_hash(p) != sha and hash_matches(p, sha)
+        assert project_hash(data) != sha and hash_matches(data, sha)
 
 
 def test_region_is_full_render_slice(song, tmp_path):
     path, d = song
     d["sections"] = [{"id": "tail", "at": "1/2", "length_beats": 1}]
-    save(Project.model_validate(d), path)
+    save(d, path)
     render(path, tmp_path / "full")
     preview = render(path, tmp_path / "region", section="tail")
     full, sr = sf.read(tmp_path / "full/mix.wav")
     region, _ = sf.read(tmp_path / "region/mix.wav")
     assert np.array_equal(region, full[12000:36000])
-    assert preview["target"]["source_frames"] == (12000, 36000)
+    assert preview["target"]["source_frames"] == [12000, 36000]
     # Section preview must not replace the full-mix pointer.
     assert json.loads((path.parent / "renders/latest.json").read_text())[
         "directory"
@@ -332,21 +304,29 @@ def test_track_preview_and_missing_target(song, tmp_path):
             "clips": [{"pattern": "main"}],
         }
     )
-    save(Project.model_validate(d), path)
+    save(d, path)
     r = render(path, tmp_path / "track", track_id="bass")
     assert list(r["tracks"]) == ["bass"]
     with pytest.raises(ValueError, match="Unknown track"):
         render(path, track_id="absent")
 
 
-def test_voice_release_continuity():
-    v = Voice(np.ones((1000, 2)), 0, 100, 300)
-    a = v.process(227)
-    b = v.process(1000)
-    x = np.concatenate([a, b])
-    assert len(x) == 400
-    assert x[-1, 0] == 0
-    assert np.max(abs(np.diff(x[:, 0]))) <= 0.010001
+def test_gate_release_is_a_continuous_ramp(song, tmp_path):
+    # A constant sample gated after 300 frames with a 100-frame release: the
+    # voice lasts 400 frames, falls by a hundredth of its level each frame and
+    # ends on zero.
+    path, d = song
+    sf.write(path.parent / "tone.wav", np.full((1000, 2), 0.5), 48000, subtype="FLOAT")
+    d["session"].update(master_gain_db=0, end_fade_ms=0)
+    d["tracks"][0]["pads"]["a"].update(attack_ms=0, release_ms=100 / 48)
+    d["patterns"]["main"]["events"] = [
+        {"at": 0, "pad": "a", "duration": "1/80", "velocity": 127}
+    ]
+    save(d, path)
+    render(path, tmp_path / "out", 227)
+    x = stem(tmp_path / "out", "bass")[:, 0]
+    assert np.flatnonzero(x)[-1] == 398 and x[299] == 0.5 and x[399] == 0
+    assert np.max(abs(np.diff(x[:400]))) <= 0.0050001
 
 
 def test_resampling_44100_to_48000(song, tmp_path):
@@ -357,12 +337,13 @@ def test_resampling_44100_to_48000(song, tmp_path):
         44100,
         subtype="FLOAT",
     )
-    p = Project.model_validate(d)
-    s = Sampler(p, path.parent)
-    audio = s.prepare(p.tracks[0].pads["a"], p.patterns["main"].events[0])
-    assert len(audio) == 48000
-    n = 48000
-    freq = np.argmax(abs(np.fft.rfft(audio[:, 0]))) * 48000 / n
+    d["tracks"][0]["pads"]["a"]["mode"] = "one_shot"
+    save(d, path)
+    render(path, tmp_path / "out")
+    audio = stem(tmp_path / "out", "bass")
+    # One second at 44.1 kHz is 48000 frames of the session, at the same pitch.
+    assert 47000 < np.flatnonzero(audio.any(axis=1))[-1] < 48000
+    freq = np.argmax(abs(np.fft.rfft(audio[:48000, 0])))
     assert abs(freq - 220) < 1
 
 
@@ -371,7 +352,7 @@ def test_output_refuses_different_render(song, tmp_path):
     render(path, tmp_path / "shared")
     original = (tmp_path / "shared/mix.wav").read_bytes()
     d["session"]["tempo"] = 130
-    save(Project.model_validate(d), path)
+    save(d, path)
     with pytest.raises(ValueError, match="different render"):
         render(path, tmp_path / "shared")
     assert (tmp_path / "shared/mix.wav").read_bytes() == original
@@ -379,7 +360,7 @@ def test_output_refuses_different_render(song, tmp_path):
 
 def test_tiny_session_rejected_before_export(tmp_path):
     path = tmp_path / "song.yaml"
-    save(Project.model_validate({"session": {"length_beats": "1/1000000000"}}), path)
+    save({"session": {"length_beats": "1/1000000000"}}, path)
     with pytest.raises(ValueError, match="at least one audio frame"):
         render(path)
 
@@ -387,10 +368,6 @@ def test_tiny_session_rejected_before_export(tmp_path):
 def test_malformed_yaml_has_json_error(tmp_path):
     path = tmp_path / "song.yaml"
     path.write_text("session: [oops")
-    result = subprocess.run(
-        [sys.executable, "-m", "agent_daw.cli", "check", str(path)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert "error" in json.loads(result.stderr)
+    for command in ("check", "inspect"):
+        code, result = cli(command, path)
+        assert code == 1 and "error" in result

@@ -1,5 +1,4 @@
-//! The compressor and the limiter, as `effects.Dynamics` and
-//! `effects.LimiterDevice`.
+//! The compressor and the limiter.
 
 use crate::envelope::Knob;
 use crate::{Clock, Frame};

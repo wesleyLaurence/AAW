@@ -1,5 +1,6 @@
-//! Schema v1 types, validated as `model.Project` validates and dumped as
-//! `model_dump(mode="json")` dumps, in full or in the saved form without defaults.
+//! Schema v1 types, validated as pydantic validated the Python model's and
+//! dumped as its `model_dump(mode="json")` dumped them, in full or in the saved
+//! form without defaults.
 
 use crate::beat::{beat as exact_beat, Beat};
 use crate::rules;

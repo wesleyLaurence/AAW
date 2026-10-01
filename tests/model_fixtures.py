@@ -1,4 +1,4 @@
-"""Generated song documents for comparing the Python and Rust models.
+"""Generated song documents the model is tested on, valid and not.
 
 Everything here is synthetic: seeded random projects that cover the schema, the
 same projects with one field broken, and hand-written YAML edge cases. No
@@ -469,7 +469,7 @@ EDGE_CASES = [
     'session: {title: "double \\u00e9 \\t tab"}',
     "session: {title: |\n    literal\n    block\n}",
     "session:\n  title: >\n    folded\n    text\n",
-    # Coercions pydantic applies.
+    # Coercions the model applies, as pydantic did.
     "session: {tempo: ' 120 ', sample_rate: 44100.0, length_beats: true}",
     "session: {tempo: '1_20'}",
     "session: {tempo: '1__20'}",

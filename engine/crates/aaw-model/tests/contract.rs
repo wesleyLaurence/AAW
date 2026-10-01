@@ -1,0 +1,279 @@
+//! The schema `daw describe` publishes must be the one validation enforces.
+//!
+//! A song with one of every model, giving only what each requires, is walked
+//! beside the schema: every model has exactly the schema's fields, a field left
+//! out takes the schema's default, a required field is missed when removed, and
+//! a number or choice is accepted up to the schema's limits and refused past them.
+
+use aaw_model::contract;
+use aaw_model::value::{Key, Value};
+use aaw_model::{yaml_load, Project};
+use serde_json::Value as Json;
+use std::collections::BTreeSet;
+
+const SONG: &str = r#"
+session: {}
+samples: {s: {path: s.wav}}
+patterns: {p: {length_beats: 4, events: [{at: 0, pad: a}]}}
+tracks:
+  - id: t
+    pads: {a: {sample: s}}
+    clips: [{pattern: p}]
+    effects:
+      - {type: filter, mode: lowpass, cutoff_hz: 1000}
+      - {type: eq, bands: [{shape: bell, freq_hz: 1000, gain_db: 0}]}
+      - {type: compressor, threshold_db: -20}
+      - {type: limiter}
+      - {type: delay, time_beats: 1}
+      - {type: reverb}
+    sends: [{to: r}]
+    automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
+returns: [{id: r}]
+sections: [{id: a, at: 0, length_beats: 4}]
+master: {}
+"#;
+
+#[derive(Clone)]
+enum Step {
+    Key(String),
+    Index(usize),
+}
+
+fn at<'a>(root: &'a Value, path: &[Step]) -> &'a Value {
+    path.iter().fold(root, |node, step| match (node, step) {
+        (Value::Dict(d), Step::Key(k)) => &d[&Key::str(k)],
+        (Value::List(l), Step::Index(i)) => &l[*i],
+        _ => panic!("the path leaves the document"),
+    })
+}
+
+/// The document with the value at `path` replaced, or removed for None.
+fn with(root: &Value, path: &[Step], value: Option<Value>) -> Value {
+    let Some((step, rest)) = path.split_first() else {
+        return value.expect("a root cannot be removed");
+    };
+    match (root, step) {
+        (Value::Dict(d), Step::Key(k)) => {
+            let mut d = d.clone();
+            match (rest.is_empty(), value) {
+                (true, None) => {
+                    d.shift_remove(&Key::str(k));
+                }
+                (_, value) => {
+                    let inner = with(&d[&Key::str(k)], rest, value);
+                    d.insert(Key::str(k), inner);
+                }
+            }
+            Value::Dict(d)
+        }
+        (Value::List(l), Step::Index(i)) => {
+            let mut l = l.clone();
+            l[*i] = with(&l[*i], rest, value);
+            Value::List(l)
+        }
+        _ => panic!("the path leaves the document"),
+    }
+}
+
+fn number(v: &Value) -> Option<f64> {
+    match v {
+        Value::Int(n) => n.to_string().parse().ok(),
+        Value::Float(f) => Some(*f),
+        _ => None,
+    }
+}
+
+fn same(value: &Value, json: &Json) -> bool {
+    match (value, json) {
+        (Value::None, Json::Null) => true,
+        (Value::Bool(a), Json::Bool(b)) => a == b,
+        (Value::Str(a), Json::String(b)) => a == b,
+        (v, Json::Number(n)) => number(v).is_some_and(|x| Some(x) == n.as_f64()),
+        _ => false,
+    }
+}
+
+struct Walk {
+    schema: &'static Json,
+    song: Value,
+    models: BTreeSet<String>,
+    limits: usize,
+    choices: usize,
+    defaults: usize,
+}
+
+impl Walk {
+    /// Whether the song with `value` at `path` is refused at that field.
+    fn refused(&self, path: &[Step], loc: &[String], value: Option<Value>) -> bool {
+        let loc = loc.join(".");
+        match Project::validate(&with(&self.song, path, value)) {
+            Ok(_) => false,
+            Err(e) => e.errors.iter().any(|x| x.loc_text() == loc),
+        }
+    }
+
+    fn resolve(&mut self, node: &'static Json) -> &'static Json {
+        match node.get("$ref").and_then(Json::as_str) {
+            Some(r) => {
+                let name = r.strip_prefix("#/$defs/").expect("a local reference");
+                self.models.insert(name.to_string());
+                &self.schema["$defs"][name]
+            }
+            None => node,
+        }
+    }
+
+    /// A field's limits and choices, which sit beside `type` or, for a field
+    /// that may be null, in the other branch of its `anyOf`.
+    fn field(&mut self, prop: &'static Json, path: &[Step], loc: &[String]) {
+        let branches: Vec<&'static Json> = match prop.get("anyOf").and_then(Json::as_array) {
+            Some(options) => options.iter().collect(),
+            None => vec![prop],
+        };
+        for branch in branches {
+            let whole = branch.get("type").and_then(Json::as_str) == Some("integer");
+            let make = |x: f64| if whole { Value::int(x as i64) } else { Value::Float(x) };
+            let beyond = |x: f64, up: bool| match (whole, up) {
+                (true, true) => x + 1.0,
+                (true, false) => x - 1.0,
+                (false, true) => x.next_up(),
+                (false, false) => x.next_down(),
+            };
+            for (key, up, open) in [
+                ("minimum", false, false),
+                ("maximum", true, false),
+                ("exclusiveMinimum", false, true),
+                ("exclusiveMaximum", true, true),
+            ] {
+                let Some(limit) = branch.get(key).and_then(Json::as_f64) else {
+                    continue;
+                };
+                let name = loc.join(".");
+                // An inclusive limit is accepted and the next value past it is
+                // not; an exclusive one is refused and the next value inside is not.
+                assert_eq!(self.refused(path, loc, Some(make(limit))), open, "{name} at its {key} {limit}");
+                let other = beyond(limit, up != open);
+                assert_eq!(self.refused(path, loc, Some(make(other))), !open, "{name} at {other}, past its {key}");
+                self.limits += 1;
+            }
+            if let Some(options) = branch.get("enum").and_then(Json::as_array) {
+                for option in options {
+                    let value = match option {
+                        Json::String(s) => Value::str(s),
+                        other => Value::int(other.as_i64().expect("a choice is text or a whole number")),
+                    };
+                    assert!(!self.refused(path, loc, Some(value)), "{} = {option}", loc.join("."));
+                }
+                assert!(self.refused(path, loc, Some(Value::str("no such choice"))), "{}", loc.join("."));
+                self.choices += 1;
+            }
+        }
+    }
+
+    /// `tag` names the field that picks this model in a union, which is missed
+    /// at the union, not in the model.
+    fn model(&mut self, node: &'static Json, path: &[Step], loc: &[String], tag: Option<&str>) {
+        let model = self.resolve(node);
+        let properties = model["properties"].as_object().expect("a model has properties");
+        let Value::Dict(dumped) = at(&self.song, path) else {
+            panic!("{} is not a mapping", loc.join("."));
+        };
+        let names: Vec<&str> = dumped.keys().filter_map(Key::as_str).collect();
+        assert_eq!(names, properties.keys().map(String::as_str).collect::<Vec<_>>(), "{}", model["title"]);
+        let required: Vec<&str> = model
+            .get("required")
+            .and_then(Json::as_array)
+            .map(|r| r.iter().filter_map(Json::as_str).collect())
+            .unwrap_or_default();
+        for (name, prop) in properties {
+            let path = [path, &[Step::Key(name.clone())]].concat();
+            let loc = [loc, &[name.clone()]].concat();
+            if required.contains(&name.as_str()) && tag != Some(name.as_str()) {
+                assert!(self.refused(&path, &loc, None), "{} is required", loc.join("."));
+            }
+            // SONG gives only required fields and collections, which have no
+            // default in the schema, so every default here was filled in.
+            if let Some(default) = prop.get("default") {
+                assert!(same(at(&self.song, &path), default), "{} defaults to {default}", loc.join("."));
+                self.defaults += 1;
+            }
+            self.field(prop, &path, &loc);
+            self.inside(prop, &path, &loc);
+        }
+    }
+
+    /// The models inside a field: one, a list of them or a map of them.
+    fn inside(&mut self, prop: &'static Json, path: &[Step], loc: &[String]) {
+        if prop.get("$ref").is_some() {
+            return self.model(prop, path, loc, None);
+        }
+        if let Some(items) = prop.get("items") {
+            let Value::List(list) = at(&self.song, path) else { panic!() };
+            for i in 0..list.len() {
+                let path = [path, &[Step::Index(i)]].concat();
+                let mut loc = [loc, &[i.to_string()]].concat();
+                match items.get("discriminator") {
+                    // A tagged union: the tag picks the model and is part of
+                    // the location errors name.
+                    Some(d) => {
+                        let field = d["propertyName"].as_str().expect("a tag field");
+                        let Some(Value::Str(tag)) = at(&self.song, &path).get(field).cloned() else { panic!() };
+                        assert!(self.refused(&[&path[..], &[Step::Key(field.into())]].concat(), &loc, None), "{} needs its {field}", loc.join("."));
+                        loc.push(tag.clone());
+                        let branch = items["oneOf"].as_array().unwrap().iter().find(|b| b["$ref"] == d["mapping"][&tag]);
+                        self.model(branch.expect("a branch for each tag"), &path, &loc, Some(field));
+                    }
+                    None if items.get("$ref").is_some() => self.model(items, &path, &loc, None),
+                    None => {}
+                }
+            }
+        }
+        if let Some(values) = prop.get("additionalProperties").filter(|v| v.get("$ref").is_some()) {
+            let Value::Dict(d) = at(&self.song, path) else { panic!() };
+            for key in d.keys().filter_map(Key::as_str).map(str::to_string).collect::<Vec<_>>() {
+                let path = [path, &[Step::Key(key.clone())]].concat();
+                self.model(values, &path, &[loc, &[key]].concat(), None);
+            }
+        }
+    }
+}
+
+#[test]
+fn the_schema_is_what_validation_enforces() {
+    let schema = contract::schema();
+    let given = yaml_load::load(SONG).unwrap();
+    let project = Project::validate(&given).unwrap_or_else(|e| panic!("{e}"));
+    let mut walk = Walk {
+        schema,
+        song: project.dump(false),
+        models: BTreeSet::new(),
+        limits: 0,
+        choices: 0,
+        defaults: 0,
+    };
+    // The full dump is itself a valid song, which the checks then vary.
+    Project::validate(&walk.song).unwrap();
+    walk.model(schema, &[], &[], None);
+    let all: BTreeSet<String> = schema["$defs"].as_object().unwrap().keys().cloned().collect();
+    assert_eq!(walk.models, all, "the song has one of every model");
+    assert!(walk.limits >= 80 && walk.choices >= 6 && walk.defaults >= 60, "{} limits, {} choices, {} defaults", walk.limits, walk.choices, walk.defaults);
+}
+
+#[test]
+fn each_topic_describes_its_models() {
+    for topic in contract::TOPICS {
+        let described = contract::describe(topic).unwrap();
+        assert!(described["semantics"].as_object().is_some_and(|s| !s.is_empty()), "{topic}");
+    }
+    assert!(contract::describe("other").is_none());
+    let effects = contract::describe("effects").unwrap();
+    let kinds: Vec<&String> = effects["schema"].as_object().unwrap().keys().collect();
+    assert_eq!(kinds, aaw_model::EFFECT_TYPES.iter().collect::<Vec<_>>());
+    // A model on its own carries the models it refers to, and no others.
+    assert_eq!(effects["schema"]["eq"]["$defs"].as_object().unwrap().keys().collect::<Vec<_>>(), ["EqBand"]);
+    assert!(effects["schema"]["filter"].get("$defs").is_none());
+    assert!(effects["routing"]["return"]["$defs"].get("Point").is_some());
+    let automation = contract::describe("automation").unwrap();
+    assert_eq!(automation["automatable"]["effects"]["eq"]["q"], "log");
+    assert!(automation["automatable"]["effects"].get("limiter").is_none());
+}

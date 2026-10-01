@@ -146,7 +146,7 @@ fn read_project(path: &Path) -> Result<(Project, Vec<u8>)> {
 }
 
 impl Session {
-    /// Loads a song and verifies its samples, as `model.load` does.
+    /// Loads a song and verifies its samples.
     pub fn open(path: &Path, hosted: bool) -> Result<Session> {
         let dir = match path.parent() {
             Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
@@ -348,12 +348,12 @@ impl Session {
             return Err("Stale project revision; inspect and retry".into());
         }
         let (project, node, outcome) = match cmd {
-            Command::Apply { patch } => {
+            Command::Apply { patch, label } => {
                 let merged = aaw_model::merge(&self.doc.project.dump(false), &json_value(patch)?);
                 let project = Project::validate(&merged).map_err(|e| e.to_string())?;
                 let node = tree::matched(&project.dump(false), Some(&self.doc.tree()), &mut self.next);
                 let outcome = Outcome {
-                    label: "Apply a merge patch".into(),
+                    label: label.clone().unwrap_or_else(|| "Apply a merge patch".into()),
                     ..Outcome::default()
                 };
                 (project, node, outcome)
@@ -572,12 +572,12 @@ impl Session {
         }
     }
 
-    /// `daw inspect`: the Python CLI's summary, plus each clip's reference and,
+    /// `daw inspect`: a summary of the song, with each clip's reference and,
     /// while hosted, the revision.
     pub fn inspect(&self) -> Json {
         let p = &self.doc.project;
         let root = self.doc.tree();
-        let triggers = aaw_engine::schedule::schedule(p);
+        let triggers = aaw_model::schedule::schedule(p);
         let rate = p.session.sample_rate;
         let frames = aaw_model::frame(&p.session.length_exact(), p.session.tempo, rate);
         fn types(effects: &[aaw_model::Effect]) -> Vec<&str> {
