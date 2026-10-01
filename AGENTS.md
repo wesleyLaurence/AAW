@@ -3,19 +3,23 @@
 Read README.md and docs/mvp.md for the implemented MVP. Older design documents are
 future scope, not a requirement to add effects, UI or broad infrastructure.
 
-- Use `uv run daw ...`; all commands emit JSON. Run `uv run pytest -q` after engine changes.
-- The Rust rebuild in `engine/` follows docs/Rust-Swift-Update.md; run `cargo test` there after
-  Rust changes. The Python engine stays the reference until each part passes parity.
+- Use `uv run daw ...`; all commands emit JSON. `daw` is the Rust binary, which `uv run daw`
+  runs from `engine/target/release/daw`; `samples`, `listen`, `compare` and `check` run in
+  Python, and either entry point passes the other its commands.
+- The engine, the song model and the session host are Rust, in `engine/`
+  (docs/Rust-Swift-Update.md). After Rust changes run `cargo test` there, then
+  `uv run pytest -q`, which rebuilds the release `daw` and the package's song model
+  (`agent_daw.aaw_py`) and drives both. Python reads songs only through that model.
 - The Mac app in `apps/mac/` builds with `./build.sh`; run `./build.sh test` after Swift changes
   and see its README for checking the window with `--snapshot`.
-- While a Rust session host runs for a song (the song is open in the Mac app, or
-  `engine/target/release/daw host` or `play`; `daw status` shows `"host": true`), edit through
-  the Rust `daw` commands (`set`, `clip move`, `effect add`, `undo`; see engine/README.md)
-  rather than `apply`: the person sees and hears each edit, and it lands in one undo history
-  with your origin. Read `daw changes --since REV` for what the person changed, and `daw status`
-  for what they have selected in the app. Give a `daw batch` a `--label` that says what it does;
-  the person sees it in the activity panel and the Undo menu. Python writers still work; the
-  host loads them as external edits.
+- Edit a song with commands (`set`, `clip move`, `effect add`, `undo`; see engine/README.md).
+  While a session host runs for the song (it is open in the Mac app, or `daw host` or
+  `daw play` is running; `daw status` shows `"host": true`), prefer them to `apply`: the
+  person sees and hears each edit, and it lands in one undo history with your origin. Read
+  `daw changes --since REV` for what the person changed, and `daw status` for what they have
+  selected in the app. Give a `daw batch` a `--label` that says what it does; the person
+  sees it in the activity panel and the Undo menu. `apply` and raw file edits still work;
+  a host loads a file changed from outside as an external edit.
 - Index samples with `daw samples scan`; filename metadata is a hint, never guaranteed.
 - Import selected samples into the project. Never modify the original Splice library.
 - Read `daw inspect` before editing; use its SHA with `daw apply --expect` for revisions.

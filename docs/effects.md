@@ -5,8 +5,8 @@ the most common mix moves in sample-based work: removing low end from melodic
 material, ducking a bass under a kick, putting sounds in a shared space with
 reverb and tempo-synced echoes, and reaching a safe peak level without turning
 the whole mix down. Every parameter is in real units. Effects are deterministic
-and run in the same offline renderer as the sampler, so mixes, stems and previews
-all use a single implementation.
+and run in the one engine that plays and renders, so playback, mixes, stems and
+previews all use a single implementation.
 
 Run `uv run daw describe effects` for the generated schema, bounds and defaults.
 
@@ -97,7 +97,7 @@ render with and without it and use `daw compare`.
   Without it, each channel echoes itself.
 - **reverb**: convolution with a synthetic stereo impulse response generated
   from the parameters and `seed`; the same document always produces the same
-  tail. The response is Gaussian noise shaped so each frequency decays
+  tail. The response is seeded Gaussian noise shaped so each frequency decays
   exponentially: `decay_seconds` is the RT60 (time to fall 60 dB) up to
   `damping_hz`, and above it the RT60 falls in proportion to 1/f, so highs die
   first. It has a 3 ms onset, a `lowcut_hz` 12 dB/octave highpass and
@@ -106,8 +106,9 @@ render with and without it and use `daw compare`.
   decorrelated ones. The input is summed to mono, so a hard-panned source still
   gets a centred tail. The response is energy-normalized: steady white noise in
   gives a wet signal of the same RMS. Tonal material varies with the tail's
-  spectrum. Convolution runs in fixed partitions of 4096–65536 frames; one
-  partition is declared latency and compensated exactly.
+  spectrum. The reverb adds no latency. Its noise comes from the Rust engine's
+  own generator, so a tail has the decay, spectrum and energy of the same reverb
+  in a render made by the earlier Python engine, but not its samples.
 - **mix_percent**: delay and reverb output `input × (1 − mix) + wet × mix`. The
   default 100 is fully wet, which is what a return needs. When using them as a
   track insert, set it lower. `mix_percent: 0` passes the input through
@@ -163,33 +164,48 @@ labels them with the same `kind`; `daw compare` diffs them.
 
 ## Implementation and verification
 
-Effects live in `src/agent_daw/effects.py` as block-processing devices with
-explicit state. Output does not depend on the block size. Filter state carries
-across blocks, and the dynamics detector is vectorized as a running maximum.
-The limiter's smoothing sums in fixed point, so partitioning cannot change its
-rounding. The delay's recursion is computed in chunks no longer than the delay
-time, each depending only on earlier output. The reverb buffers input into fixed
-partitions aligned to its own stream and uses uniformly partitioned overlap-save
-FFT convolution, so the caller's blocks never change its arithmetic. Python with
-numpy/scipy is the device language (decision D25).
+Effects live in `engine/crates/aaw-dsp` as block-processing devices with explicit
+state, and `aaw-engine` runs each chain on the timeline. Output does not depend
+on the block size, and processing never allocates, so the same devices run in the
+audio callback and in a render. Filters are Butterworth sections designed as
+`scipy.signal.butter` designs them and EQ bands are RBJ biquads; their state
+carries across blocks. The compressor's and limiter's release hold is a recurrence
+on the required reduction, and the limiter's smoothing sums in fixed point, so
+partitioning cannot change its rounding. The delay reads a line as long as its
+time and feeds back through its filters. The reverb's convolution is
+non-uniformly partitioned: the first 64 taps run directly and the rest in
+overlap-save FFT blocks of 64 to 16384 frames, each covering the response from at
+least its own length in, with the larger blocks' work spread over the block that
+follows; nothing waits for a block, so there is no latency, and the reverb counts
+its own input, so the caller's blocks never change its arithmetic.
 
-Tests use generated audio. They cover filter attenuation at each slope, bell and
-shelf gains, the compressor's steady-state curve and reduction report,
-below-threshold transparency, limiter ceiling and latency compensation,
-block-partition invariance, bypass, sidechain ducking, pre-fader keys,
+Only the limiter has latency. The engine aligns it by delay: tracks are delayed
+to the slowest before their faders and sends, a track keyed by a source with
+latency renders its voices that much later, and a render runs that many frames
+longer and places every stem on the timeline.
+
+The devices were ported from the Python engine operation for operation and held
+to it until it was retired (decisions D34, D40 and D44): over generated songs
+with effects, returns and automation the largest difference in any mix or stem
+was 4e-9, and reverb tails agreed in decay time, octave levels and energy.
+
+Tests use generated audio. In Rust they cover each device: filter designs
+against scipy's, the cookbook bands, the compressor's curve, a keyed compressor,
+the limiter's ceiling and look-ahead, exact echo frames and feedback gains,
+ping-pong and darkening repeats, the reverb's decay, damping, predelay, energy,
+seeding, width, low cut, equality with direct convolution and steady-noise level,
+and block-partition invariance of each. Through `daw render` the Python suite
+covers filter attenuation at each slope, bell and shelf gains, the compressor's
+steady-state curve and reduction report, below-threshold transparency, limiter
+ceiling and latency compensation, bypass, sidechain ducking, pre-fader keys,
 preview/stem equivalence, hot mixes rescued by a master limiter, validation
-errors, dependency ordering and round-trip formatting. Delay tests check exact
-echo frames and gains at fractional beat times, ping-pong alternation and
-darkening repeats. Reverb tests check measured RT60, faster high-frequency
-decay, predelay, equality with direct convolution after latency compensation,
-seeding, width, energy normalization and the low cut. Routing tests check pre-
-and post-fader sends, mute and solo, return stems summing with track stems to
-the mix, return previews, section tails, a return ducked by a sidechain and
-block-size invariance of whole renders.
+errors and round-trip formatting; pre- and post-fader sends, mute and solo,
+return stems summing with track stems to the mix, return previews, section
+tails, a return ducked by a sidechain and block-size invariance of whole renders.
 
-On a 3-minute generated project, adding a 1.8 s plate reverb return and a
-ping-pong delay return raised render time from 12.7 s to 15.8 s in the Linux
-development container.
+A 179-second local song with 12 tracks, 3 returns, 32 effects and 10 lanes
+renders in about 9 seconds on an M2, where the Python engine took over 30, and
+plays at 128-frame buffers using about 0.1 ms of each 2.67 ms callback.
 
 Not yet implemented: saturation, chorus and other modulation effects, groups,
 return-to-return sends, sidechain filtering, RMS detection, true-peak limiting,

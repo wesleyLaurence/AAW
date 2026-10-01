@@ -1,0 +1,1299 @@
+{
+  "$defs": {
+    "Clip": {
+      "additionalProperties": false,
+      "properties": {
+        "pattern": {
+          "title": "Pattern",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 0,
+          "title": "At"
+        },
+        "repeats": {
+          "default": 1,
+          "maximum": 10000,
+          "minimum": 1,
+          "title": "Repeats",
+          "type": "integer"
+        },
+        "velocity_scale": {
+          "default": 1,
+          "exclusiveMinimum": 0,
+          "maximum": 2,
+          "title": "Velocity Scale",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pattern"
+      ],
+      "title": "Clip",
+      "type": "object"
+    },
+    "Compressor": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "compressor",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "threshold_db": {
+          "maximum": 0,
+          "minimum": -60,
+          "title": "Threshold Db",
+          "type": "number"
+        },
+        "ratio": {
+          "default": 4,
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Ratio",
+          "type": "number"
+        },
+        "attack_ms": {
+          "default": 10,
+          "maximum": 500,
+          "minimum": 0,
+          "title": "Attack Ms",
+          "type": "number"
+        },
+        "release_ms": {
+          "default": 120,
+          "maximum": 5000,
+          "minimum": 1,
+          "title": "Release Ms",
+          "type": "number"
+        },
+        "knee_db": {
+          "default": 6,
+          "maximum": 24,
+          "minimum": 0,
+          "title": "Knee Db",
+          "type": "number"
+        },
+        "makeup_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -24,
+          "title": "Makeup Db",
+          "type": "number"
+        },
+        "sidechain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sidechain"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "threshold_db"
+      ],
+      "title": "Compressor",
+      "type": "object"
+    },
+    "Delay": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "delay",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "time_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Time Beats"
+        },
+        "feedback_percent": {
+          "default": 35,
+          "maximum": 95,
+          "minimum": 0,
+          "title": "Feedback Percent",
+          "type": "number"
+        },
+        "lowcut_hz": {
+          "anyOf": [
+            {
+              "maximum": 20000,
+              "minimum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lowcut Hz"
+        },
+        "highcut_hz": {
+          "anyOf": [
+            {
+              "maximum": 20000,
+              "minimum": 10,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Highcut Hz"
+        },
+        "ping_pong": {
+          "default": false,
+          "title": "Ping Pong",
+          "type": "boolean"
+        },
+        "mix_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Mix Percent",
+          "type": "number"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "time_beats"
+      ],
+      "title": "Delay",
+      "type": "object"
+    },
+    "Eq": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "eq",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/EqBand"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "title": "Bands",
+          "type": "array"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "bands"
+      ],
+      "title": "Eq",
+      "type": "object"
+    },
+    "EqBand": {
+      "additionalProperties": false,
+      "properties": {
+        "shape": {
+          "enum": [
+            "bell",
+            "low_shelf",
+            "high_shelf"
+          ],
+          "title": "Shape",
+          "type": "string"
+        },
+        "freq_hz": {
+          "maximum": 20000,
+          "minimum": 20,
+          "title": "Freq Hz",
+          "type": "number"
+        },
+        "gain_db": {
+          "maximum": 24,
+          "minimum": -24,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "q": {
+          "default": 0.71,
+          "maximum": 18,
+          "minimum": 0.1,
+          "title": "Q",
+          "type": "number"
+        }
+      },
+      "required": [
+        "shape",
+        "freq_hz",
+        "gain_db"
+      ],
+      "title": "EqBand",
+      "type": "object"
+    },
+    "Event": {
+      "additionalProperties": false,
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "At"
+        },
+        "pad": {
+          "title": "Pad",
+          "type": "string"
+        },
+        "velocity": {
+          "default": 100,
+          "maximum": 127,
+          "minimum": 1,
+          "title": "Velocity",
+          "type": "integer"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration"
+        },
+        "transpose": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "title": "Transpose",
+          "type": "number"
+        }
+      },
+      "required": [
+        "at",
+        "pad"
+      ],
+      "title": "Event",
+      "type": "object"
+    },
+    "Filter": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "filter",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "mode": {
+          "enum": [
+            "highpass",
+            "lowpass"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "cutoff_hz": {
+          "maximum": 20000,
+          "minimum": 10,
+          "title": "Cutoff Hz",
+          "type": "number"
+        },
+        "slope_db_per_octave": {
+          "default": 12,
+          "enum": [
+            12,
+            24,
+            36,
+            48
+          ],
+          "title": "Slope Db Per Octave",
+          "type": "integer"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "mode",
+        "cutoff_hz"
+      ],
+      "title": "Filter",
+      "type": "object"
+    },
+    "Lane": {
+      "additionalProperties": false,
+      "description": "Automation for one parameter. It overrides the static value for the whole song.",
+      "properties": {
+        "param": {
+          "title": "Param",
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "$ref": "#/$defs/Point"
+          },
+          "maxItems": 10000,
+          "minItems": 1,
+          "title": "Points",
+          "type": "array"
+        }
+      },
+      "required": [
+        "param",
+        "points"
+      ],
+      "title": "Lane",
+      "type": "object"
+    },
+    "Limiter": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "limiter",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "ceiling_db": {
+          "default": -1,
+          "maximum": -0.1,
+          "minimum": -24,
+          "title": "Ceiling Db",
+          "type": "number"
+        },
+        "release_ms": {
+          "default": 60,
+          "maximum": 2000,
+          "minimum": 1,
+          "title": "Release Ms",
+          "type": "number"
+        },
+        "lookahead_ms": {
+          "default": 3,
+          "maximum": 20,
+          "minimum": 0.5,
+          "title": "Lookahead Ms",
+          "type": "number"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Limiter",
+      "type": "object"
+    },
+    "Master": {
+      "additionalProperties": false,
+      "properties": {
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "reverb": "#/$defs/Reverb"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array"
+        },
+        "automation": {
+          "items": {
+            "$ref": "#/$defs/Lane"
+          },
+          "maxItems": 64,
+          "title": "Automation",
+          "type": "array"
+        }
+      },
+      "title": "Master",
+      "type": "object"
+    },
+    "Pad": {
+      "additionalProperties": false,
+      "properties": {
+        "sample": {
+          "title": "Sample",
+          "type": "string"
+        },
+        "mode": {
+          "default": "one_shot",
+          "enum": [
+            "one_shot",
+            "gate"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "transpose": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "title": "Transpose",
+          "type": "number"
+        },
+        "start_seconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Start Seconds",
+          "type": "number"
+        },
+        "end_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Seconds"
+        },
+        "attack_ms": {
+          "default": 0.3,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Attack Ms",
+          "type": "number"
+        },
+        "release_ms": {
+          "default": 8,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Release Ms",
+          "type": "number"
+        },
+        "choke_group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Choke Group"
+        },
+        "reverse": {
+          "default": false,
+          "title": "Reverse",
+          "type": "boolean"
+        },
+        "source_bpm": {
+          "anyOf": [
+            {
+              "maximum": 400,
+              "minimum": 20,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Bpm"
+        },
+        "mono": {
+          "default": false,
+          "title": "Mono",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sample"
+      ],
+      "title": "Pad",
+      "type": "object"
+    },
+    "Pattern": {
+      "additionalProperties": false,
+      "properties": {
+        "length_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Length Beats"
+        },
+        "grid": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": "1/4",
+          "title": "Grid"
+        },
+        "steps": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Steps",
+          "type": "object"
+        },
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "title": "Events",
+          "type": "array"
+        },
+        "swing": {
+          "default": 0.5,
+          "maximum": 0.75,
+          "minimum": 0.5,
+          "title": "Swing",
+          "type": "number"
+        }
+      },
+      "required": [
+        "length_beats"
+      ],
+      "title": "Pattern",
+      "type": "object"
+    },
+    "Point": {
+      "additionalProperties": false,
+      "description": "An automation breakpoint. curve shapes the segment from here to the next point.",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "At"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "curve": {
+          "default": "linear",
+          "enum": [
+            "linear",
+            "hold"
+          ],
+          "title": "Curve",
+          "type": "string"
+        }
+      },
+      "required": [
+        "at",
+        "value"
+      ],
+      "title": "Point",
+      "type": "object"
+    },
+    "Return": {
+      "additionalProperties": false,
+      "description": "A return bus: the sum of track sends through its own chain, then to master.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "mute": {
+          "default": false,
+          "title": "Mute",
+          "type": "boolean"
+        },
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "reverb": "#/$defs/Reverb"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array"
+        },
+        "automation": {
+          "items": {
+            "$ref": "#/$defs/Lane"
+          },
+          "maxItems": 64,
+          "title": "Automation",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Return",
+      "type": "object"
+    },
+    "Reverb": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "reverb",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "decay_seconds": {
+          "default": 1.5,
+          "maximum": 12,
+          "minimum": 0.1,
+          "title": "Decay Seconds",
+          "type": "number"
+        },
+        "predelay_ms": {
+          "default": 10,
+          "maximum": 250,
+          "minimum": 0,
+          "title": "Predelay Ms",
+          "type": "number"
+        },
+        "damping_hz": {
+          "default": 6000,
+          "maximum": 20000,
+          "minimum": 500,
+          "title": "Damping Hz",
+          "type": "number"
+        },
+        "lowcut_hz": {
+          "default": 100,
+          "maximum": 2000,
+          "minimum": 20,
+          "title": "Lowcut Hz",
+          "type": "number"
+        },
+        "width_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Width Percent",
+          "type": "number"
+        },
+        "mix_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Mix Percent",
+          "type": "number"
+        },
+        "seed": {
+          "default": 0,
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Reverb",
+      "type": "object"
+    },
+    "Sample": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sha256"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source"
+        },
+        "root_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Root Note"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "Sample",
+      "type": "object"
+    },
+    "Section": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "At"
+        },
+        "length_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Length Beats"
+        }
+      },
+      "required": [
+        "id",
+        "at",
+        "length_beats"
+      ],
+      "title": "Section",
+      "type": "object"
+    },
+    "Send": {
+      "additionalProperties": false,
+      "properties": {
+        "to": {
+          "title": "To",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 12,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pre_fader": {
+          "default": false,
+          "title": "Pre Fader",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "to"
+      ],
+      "title": "Send",
+      "type": "object"
+    },
+    "Session": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "default": "Untitled",
+          "title": "Title",
+          "type": "string"
+        },
+        "tempo": {
+          "default": 144,
+          "maximum": 400,
+          "minimum": 20,
+          "title": "Tempo",
+          "type": "number"
+        },
+        "time_signature": {
+          "const": "4/4",
+          "default": "4/4",
+          "title": "Time Signature",
+          "type": "string"
+        },
+        "sample_rate": {
+          "default": 48000,
+          "enum": [
+            44100,
+            48000
+          ],
+          "title": "Sample Rate",
+          "type": "integer"
+        },
+        "length_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 16,
+          "title": "Length Beats"
+        },
+        "master_gain_db": {
+          "default": -6,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Master Gain Db",
+          "type": "number"
+        },
+        "end_fade_ms": {
+          "default": 20,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "End Fade Ms",
+          "type": "number"
+        }
+      },
+      "title": "Session",
+      "type": "object"
+    },
+    "Track": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "mute": {
+          "default": false,
+          "title": "Mute",
+          "type": "boolean"
+        },
+        "solo": {
+          "default": false,
+          "title": "Solo",
+          "type": "boolean"
+        },
+        "pads": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Pad"
+          },
+          "title": "Pads",
+          "type": "object"
+        },
+        "clips": {
+          "items": {
+            "$ref": "#/$defs/Clip"
+          },
+          "title": "Clips",
+          "type": "array"
+        },
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "reverb": "#/$defs/Reverb"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array"
+        },
+        "sends": {
+          "items": {
+            "$ref": "#/$defs/Send"
+          },
+          "maxItems": 16,
+          "title": "Sends",
+          "type": "array"
+        },
+        "automation": {
+          "items": {
+            "$ref": "#/$defs/Lane"
+          },
+          "maxItems": 64,
+          "title": "Automation",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "pads"
+      ],
+      "title": "Track",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "session": {
+      "$ref": "#/$defs/Session"
+    },
+    "samples": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Sample"
+      },
+      "title": "Samples",
+      "type": "object"
+    },
+    "patterns": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Pattern"
+      },
+      "title": "Patterns",
+      "type": "object"
+    },
+    "tracks": {
+      "items": {
+        "$ref": "#/$defs/Track"
+      },
+      "title": "Tracks",
+      "type": "array"
+    },
+    "returns": {
+      "items": {
+        "$ref": "#/$defs/Return"
+      },
+      "title": "Returns",
+      "type": "array"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/Section"
+      },
+      "title": "Sections",
+      "type": "array"
+    },
+    "master": {
+      "$ref": "#/$defs/Master"
+    }
+  },
+  "required": [
+    "session"
+  ],
+  "title": "Project",
+  "type": "object"
+}

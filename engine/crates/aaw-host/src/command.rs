@@ -222,7 +222,12 @@ pub enum Command {
 
     // Whole-document edits
     #[serde(rename = "apply")]
-    Apply { patch: Json },
+    Apply {
+        patch: Json,
+        /// What the patch does, for the change log and undo.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        label: Option<String>,
+    },
     #[serde(rename = "batch")]
     Batch {
         commands: Vec<Command>,

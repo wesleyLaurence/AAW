@@ -1,5 +1,4 @@
-//! A filter or equalizer whose coefficients follow automation, as
-//! `effects.AutomatedSos`.
+//! A filter or equalizer whose coefficients follow automation.
 //!
 //! Each second-order section is a trapezoidal state-variable filter (Simper's
 //! "Linear Trap SVF"). Its two integrator states stay near signal level, so they

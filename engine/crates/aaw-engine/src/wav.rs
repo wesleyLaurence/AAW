@@ -1,10 +1,11 @@
-//! WAV files byte-identical to the Python engine's.
+//! WAV files whose bytes depend only on the audio, and are those the first
+//! (Python) engine wrote for it.
 //!
-//! Float stems follow `engine.float_wav`: libsndfile timestamps the PEAK chunk of
-//! float WAVs, so equal audio could hash unequally, and this is the layout it
-//! writes with that chunk switched off, zeroed PAD chunk included. The 24-bit mix
-//! follows the libsndfile that Python's `soundfile` bundles; libsndfile builds
-//! differ in how they round, so the conversion is done here.
+//! libsndfile timestamps the PEAK chunk of float WAVs, so equal audio could hash
+//! unequally. Float stems have the layout it writes with that chunk switched
+//! off, zeroed PAD chunk included. The 24-bit mix follows the libsndfile that
+//! Python's `soundfile` bundles; libsndfile builds differ in how they round, so
+//! the conversion is done here.
 
 use std::io::Write;
 use std::path::Path;
@@ -86,4 +87,23 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     temp.write_all(bytes).map_err(|e| e.to_string())?;
     temp.persist(path).map_err(|e| e.error.to_string())?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sha2::{Digest, Sha256};
+
+    #[test]
+    fn float_stems_keep_the_bytes_of_earlier_renders() {
+        // The hash of the libsndfile writer the first engine used: equal audio
+        // keeps equal stem bytes across writes and engine versions.
+        let frames: Vec<[f32; 2]> = (0..70001)
+            .map(|i| [2 * i, 2 * i + 1].map(|n| (n as f64 / 70001.0 - 1.0) as f32))
+            .collect();
+        let bytes = float_wav_bytes(&frames, 48000);
+        let hash: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hash, "c2554ec4d5acecc5494a73b6bcae7d474a4e6f1e3f0af74f31f4c7bd3e5281e0");
+        assert!(!bytes.windows(4).any(|w| w == b"PEAK"));
+    }
 }

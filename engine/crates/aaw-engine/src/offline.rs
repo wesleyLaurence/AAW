@@ -1,5 +1,5 @@
 //! Offline export: the mix, stems, snapshot and `report.json` a render leaves, in
-//! the Python engine's formats so `daw listen` and `daw compare` read them.
+//! the formats renders have always had, which `daw listen` and `daw compare` read.
 
 use crate::program::{amplitude, compile_scoped, Cache, Scope};
 use crate::render::{DeviceReport, Frame, Renderer};
@@ -40,7 +40,7 @@ fn db(x: f64) -> f64 {
     20.0 * x.max(1e-12).log10()
 }
 
-/// `engine.metrics`: level and safety measurements of a stereo render.
+/// Level and safety measurements of a stereo render.
 pub fn metrics(x: &[Frame], rate: u32) -> Value {
     let flat: Vec<f64> = x.iter().flat_map(|f| [f[0], f[1]]).collect();
     let n = flat.len();

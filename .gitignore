@@ -10,6 +10,8 @@ __pycache__/
 *.mp3
 .DS_Store
 engine/target/
+# The Rust song model, built into the Python package
+src/agent_daw/*.so
 
 .daw.lock
 projects/*/renders/

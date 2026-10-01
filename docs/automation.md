@@ -100,7 +100,7 @@ ceiling. Values must lie within the limits the static parameter accepts.
 - **Positions**: points may lie anywhere from 0 to the session length.
 - **Timing**: values are evaluated at every audio frame of the timeline and the
   chain's latency compensation includes them, so a change at beat 16 lands on
-  beat 16 even after a look-ahead limiter or a reverb. `gain_db`, `pan`, send
+  beat 16 even after a look-ahead limiter. `gain_db`, `pan`, send
   levels, compressor thresholds and makeup, delay feedback and mix, and reverb mix
   change every frame. Filter and EQ coefficients are recomputed every 64 frames,
   counted from the start of the song even after upstream latency, from the value
@@ -137,43 +137,46 @@ params per track and return and under `master_automation`. The report's
 
 ## Implementation and verification
 
-Lanes are validated in `model.py`: the target must exist and be automatable,
-values must be in bounds, points in order and inside the session.
-`automation.py` evaluates a lane at any set of timeline frames with
-`numpy.searchsorted`, and over a run of consecutive frames by filling each
-segment in place in one output array. The renderer builds one per-frame array for
-each moving channel gain, pan and send lane, 8 bytes per frame (345 MB for 15
-minutes at 48 kHz). A constant lane is its static value: channel lanes return a
-scalar, and effects are built from their spec with the lane's value in place, so
+Lanes are validated by the model (`engine/crates/aaw-model`): the target must
+exist and be automatable, values must be in bounds, points in order and inside
+the session. `aaw-dsp` evaluates a lane at any timeline frame, and over a run of
+consecutive frames by filling each segment in place, without allocating; the
+engine reads each moving level, pan and send lane for the frames of the block it
+is processing. A constant lane is its static value: the engine reads it as a
+number, and effects are built from their spec with the lane's value in place, so
 they run the static device. Effects receive the envelopes of their moving lanes
-and each device reads the value for the frames it is processing, offset by the
-latency of the devices before it. Automated filters and EQs compute trapezoidal
-state-variable filter parameters (Simper's formulas) for every 64-frame period in
-one vectorized step, so each section's response matches the static Butterworth
-section or RBJ band. Each run of equal coefficients goes through `lfilter` as the
-equivalent direct form II biquad. When coefficients change, the direct form's
-history is converted so the SVF's integrator states carry over; those stay near
-signal level, so a jump does not burst as a carried direct-form state does.
-Unautomated effects run the same code as before, so projects without automation
-render bit-identically, and so do projects whose lanes are all constant.
+and each device reads the value for the frames it is processing, on the timeline,
+whatever latency sits before it. Automated filters and EQs compute trapezoidal
+state-variable filter parameters (Simper's formulas) for every 64-frame period,
+so each section's response matches the static Butterworth section or RBJ band.
+Each run of equal coefficients runs as the equivalent direct form II biquad.
+When coefficients change, the direct form's history is converted so the SVF's
+integrator states carry over; those stay near signal level, so a jump does not
+burst as a carried direct-form state does. Unautomated effects take the static
+path, so projects without automation render as they did before lanes existed,
+and so do projects whose lanes are all constant.
 
-Tests use generated audio. They cover envelope holds, interpolation, `hold`,
-jumps and log-domain ratios, that evaluating a run of frames matches evaluating
-each frame, and that a lane over the timeline takes one array. They check that
-constant lanes render exactly as static values on filters, EQs, compressors,
-delays, reverbs and track gain, that the state-variable path matches static
-filters and EQs, and that cutoff and EQ jumps stay bounded. They also check filter
-sweeps and EQ ramps, and block-partition invariance of a chain where every
-automatable device is automated. Further tests cover changes and filter updates
-landing on the timeline after latency compensation, track gain ramps measured in
-stems, pan, send and return lanes, and master gain in stems and mix. The rest
-cover section previews, block-size invariance of whole renders, validation errors,
-id and index collisions, round-trip formatting, `inspect`, `check` and `describe`.
+Automation in the document is exact in playback as in a render. Only a value
+changed by a live edit glides, over 5 ms, from what was playing to what the
+document now says (decision D44).
 
-A 12 dB filter or one-band EQ costs about 1.5 seconds per minute of continuous
-change on an x86 Mac, and each further section about 0.8 seconds more; a 48 dB
-filter has four. Constant stretches of a lane cost nothing extra, and a constant
-lane costs nothing.
+Tests use generated audio. In Rust they cover envelope holds, interpolation,
+`hold`, jumps and log-domain ratios, that evaluating a run of frames matches
+evaluating each frame, that the state-variable path matches static filters and
+EQs, and that a sweep does not depend on blocks. Through `daw render` the Python
+suite checks that constant lanes render exactly as static values on filters, EQs,
+compressors, delays, reverbs and track gain, and that cutoff and EQ jumps stay
+bounded. It also checks filter sweeps and EQ ramps, and block-partition
+invariance of a chain where every automatable device is automated. Further tests
+cover changes and filter updates landing on the timeline after latency
+compensation, track gain ramps measured in stems, pan, send and return lanes, and
+master gain in stems and mix. The rest cover section previews, block-size
+invariance of whole renders, validation errors, a lane's limits matching its
+field's, id and index collisions, round-trip formatting, `inspect`, `check` and
+`describe`.
+
+A moving lane costs little. A minute of continuous change on a 48 dB filter or
+an EQ band adds less than a tenth of a second to a render on an M2.
 
 Not yet implemented: smoothing options and curved segments beyond linear and
 hold. Also missing are LFOs and other modulation, automation of switches and

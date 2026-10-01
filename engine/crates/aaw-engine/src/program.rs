@@ -4,18 +4,18 @@
 //! audio thread; a `Renderer` plays it.
 //!
 //! Latency. Only the limiter delays its input, by its look-ahead. Every other
-//! path is delayed to match, as the Python engine's chains compensate theirs:
+//! path is delayed to match:
 //! a track keyed by a source with latency renders its voices that much later,
 //! tracks are delayed to the slowest track before their faders and sends,
 //! returns to the slowest return, and the output trails a voice by `latency`
 //! frames in all.
 
-use crate::schedule::{track_triggers, Trigger};
 use crate::sndfile;
 use aaw_dsp::device::{Kernels, Plan};
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
 use aaw_model::rules::{midi, target, Owner, TargetKind};
+use aaw_model::schedule::{track_triggers, Trigger};
 use aaw_model::{frame, Effect, Event, Lane, Pad, Project};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
@@ -382,7 +382,7 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
     }
 }
 
-/// Loads and prepares pad audio through a cache, as `engine.Sampler`.
+/// Loads and prepares pad audio through a cache.
 pub struct Sampler<'a> {
     project: &'a Project,
     directory: PathBuf,

@@ -1,20 +1,21 @@
 # Rust engine
 
-The Cargo workspace for the native rebuild planned in
-[docs/Rust-Swift-Update.md](../docs/Rust-Swift-Update.md). The Python package in
-`src/agent_daw` remains the reference implementation and the shipping CLI until
-the cutover (M7).
+The Cargo workspace of the native build planned in
+[docs/Rust-Swift-Update.md](../docs/Rust-Swift-Update.md): the song model, the
+engine that plays and renders, the session host and the `daw` command. It
+replaced the Python engine at that plan's cutover (M7). The Python package in
+`src/agent_daw` keeps the sample library, sample analysis and perception, and
+reads songs through `aaw-py`.
 
 | Crate | Responsibility |
 |---|---|
-| `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints |
+| `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
 | `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes and the six effects |
-| `aaw-engine` | Song compilation, scheduling, routing, latency alignment, mixing, the transport, offline and real-time drivers |
+| `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket |
 | `aaw-cli` | The `daw` binary |
 | `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, changes and transport |
-
-The Python bindings join the workspace in the milestone that needs them.
+| `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module |
 
 ## Build and test
 
@@ -30,15 +31,26 @@ If the checkout lives in a synced folder, exclude `target/` from syncing. For
 Dropbox: `mkdir -p target && xattr -w com.dropbox.ignored 1 target`, repeated
 after `cargo clean`, which deletes the directory.
 
-The Rust `daw` is not on the PATH; `uv run daw` remains the Python CLI. Run the
-Rust one as `target/release/daw` or `cargo run -q -p aaw-cli --`. It implements:
+`aaw-py` is a Python extension module, so plain `cargo` commands leave it out
+(the workspace's `default-members`). The Python package builds it for its own
+interpreter with setuptools-rust: `uv sync`, and `uv run` after a change to the
+model, as [pyproject.toml](../pyproject.toml) sets up. An Intel Python on Apple
+silicon needs `rustup target add x86_64-apple-darwin`. To check it alone:
+`PYO3_PYTHON=../.venv/bin/python cargo check -p aaw-py`.
+
+`daw` is not on the PATH. Run it as `target/release/daw`, or as `uv run daw`,
+which runs that binary (or the one `AAW_DAW` names). It implements:
 
 | Command | Does |
 |---|---|
-| `daw fmt`, `daw apply` | As the Python verbs |
+| `daw init DIRECTORY [--tempo T] [--bars N]` | Creates `DIRECTORY/song.yaml`, an empty song |
+| `daw describe [project\|sampler\|effects\|automation]` | The authoring contract: the schema and what its fields mean |
+| `daw fmt PROJECT` | Rewrites the song in canonical form |
+| `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
+| `daw samples ...`, `daw listen`, `daw compare`, `daw check` | Run in Python, with the same arguments and output: the sample library, perception, and `inspect` with measured root notes and warnings. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
 | `daw model PATH...` | Canonical YAML and fingerprints, or validation errors |
 | `daw schedule PROJECT` | Every hit's start frame, track, pad and release frame |
-| `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json` in the Python engine's formats |
+| `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read |
 | `daw host PROJECT` | Runs a session host until interrupted or `daw close` |
 | `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output; see below |
 | `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device, and a compile, a recompile and building a renderer |
@@ -64,7 +76,7 @@ delays that align latency. A `Renderer` (`render.rs`) plays a program as one
 stream, for export and for playback alike. Output does not depend on how the
 stream is cut into blocks, and processing never allocates.
 
-- **Devices** (`aaw-dsp`) are the Python engine's, operation for operation:
+- **Devices** (`aaw-dsp`) were ported from the Python engine operation for operation:
   Butterworth filters designed as `scipy.signal.butter` designs them, RBJ
   equalizer bands, the state-variable filter that automation moves, the
   compressor, the look-ahead limiter and the tempo-synced delay. A lane whose
@@ -94,8 +106,8 @@ as long as it plays. Each change prints to the host's stderr as a JSON line.
 Every other command reaches the running host of its project through a Unix
 socket registered under `~/Library/Application Support/AAW/hosts` (or
 `AAW_HOST_DIR`), outside the project because projects may be synced. With no
-host, commands run headless: load, apply, save, exit, under the `.daw.lock` the
-Python writers take. Edits behave the same either way; undo, redo, the change
+host, commands run headless: load, apply, save, exit, under the project's
+`.daw.lock`. Edits behave the same either way; undo, redo, the change
 log, handles and the transport need a host.
 
 - **Commands** validate the whole resulting song before they apply and carry an
@@ -122,8 +134,8 @@ log, handles and the transport need a host.
 - **Selection.** `daw status` lists what the person has selected in the app as
   `{"ref", "path"}` pairs, so a request about "the selected clip" can be
   answered with `daw get PATH`. The app sets it with the `select` command.
-- **External edits**, such as a text edit, `git checkout` or a Python `daw
-  apply`, load as one undoable `external` change. A file that does not validate
+- **External edits**, such as a text edit or `git checkout`, load as one
+  undoable `external` change. A file that does not validate
   pauses edits, with the error in `daw status`, until it is fixed; `daw fmt`
   writes the host's song over it instead.
 - **Playback** recompiles the song after each edit and the audio thread swaps
@@ -160,69 +172,85 @@ revision as it lands so that play starts at once.
 the selection, external edits, concurrent clients, an embedded host and a
 real-time stress run: random edits compiled and
 swapped in while a thread renders 128-frame blocks on schedule under allocation
-checking. `tests/test_rust_host.py` checks `inspect` and command results against
-the Python model and drives a `daw host` process from outside.
+checking. `tests/test_host.py` checks `inspect` and command results against
+the model as Python reads it, and drives a `daw host` process from outside,
+including a sample import that reaches the song through the host.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
 what each kind of change touches, the person's edits and their place in the
 shared history, the fields a device panel is drawn from, edits of effects,
 equalizer bands, lanes and points, and the transport shared with an agent.
 
-## Model parity
+## The model
 
-`aaw-model` ports `model.py` exactly: it accepts and rejects the same documents,
-`save` writes the same bytes, and `project_sha256` and the legacy fingerprints
-are the same, so existing projects, render reports and `--expect` SHAs carry over.
-It reads YAML with PyYAML's YAML 1.1 rules (`010` is 8, `1e5` is a string, `yes`
-is true, merge keys apply), applies pydantic's coercions, and writes with a port
-of PyYAML's emitter.
+`aaw-model` is the one implementation of the document. It began as an exact port
+of the Python model (pydantic and PyYAML): it accepts and rejects the same
+documents, `save` writes the same bytes, and `project_sha256` and the legacy
+fingerprints are the same, so existing projects, render reports and `--expect`
+SHAs carried over. It reads YAML with PyYAML's YAML 1.1 rules (`010` is 8, `1e5`
+is a string, `yes` is true, merge keys apply), applies pydantic's coercions, and
+writes with a port of PyYAML's emitter.
 
 `daw model PATH...` prints each document's canonical YAML and fingerprints, or its
-validation errors as `{loc, type, msg}`, which match pydantic's. The pytest file
-`tests/test_rust_model_parity.py` compares both models over a generated corpus
-of valid songs, the same songs with one field broken, and YAML edge cases, and
-compares `fmt` and `apply` end to end. `AAW_PARITY_SIZE=2000 uv run pytest
-tests/test_rust_model_parity.py` runs a larger corpus.
+validation errors as `{loc, type, msg}`, which are pydantic's. Before the Python
+model was deleted the two agreed on a generated corpus of 6,133 documents: valid
+songs, the same songs with one field broken, and YAML edge cases. What the Python
+model did with 533 of them, and with 120 generated `fmt` and `apply` edits, is
+pinned in `tests/golden_model.json`, and `tests/test_model.py` holds the Rust model
+to it. `AAW_UPDATE_GOLDEN=1 uv run pytest tests/test_model.py` accepts a
+deliberate change. `crates/aaw-model/tests` pin the fingerprints each earlier
+schema wrote, and walk a song with one of every model beside the schema `daw
+describe` prints: every field, default, limit and choice in it is what validation
+enforces.
 
-Known differences, all in input no tool writes:
+Differences from the Python model, all in input no tool writes:
 
 - An escaped UTF-16 surrogate pair in a double-quoted string, such as
-  `"\ud83c\udfb5"`, is rejected. PyYAML keeps it as two lone surrogates; libyaml
+  `"\ud83c\udfb5"`, is rejected. PyYAML kept it as two lone surrogates; libyaml
   and the YAML spec reject it. JSON written with `ensure_ascii` produces these.
-- Beats and note octaves accept ASCII digits only; Python also accepts other
+- Beats and note octaves accept ASCII digits only; Python also accepted other
   Unicode decimal digits.
 - YAML syntax errors are reported in libyaml's words rather than PyYAML's.
 - Error messages quote values with an approximation of Python's `repr` for
   unprintable characters.
 
-## Engine parity
+## What holds the engine to the Python engine's sound
 
-`tests/test_rust_engine_parity.py` renders generated songs with generated audio
-in every format the library reads (8- to 32-bit PCM, float and double WAV, AIFF
-and FLAC at 22.05 to 96 kHz) with both engines and compares the mix, every
-stem, the schedules and the reports.
+The engine was ported against the Python engine and compared with it until the
+cutover. The last comparison, on October 1, 2026:
 
-- **Without effects**, renders are byte-identical to the Python engine's:
-  `mix.wav`, every stem and the snapshot.
-- **With effects, sends, returns and automation**, audio must match within
-  -120 dBFS; over 120 generated songs the largest difference was 3.7e-9, and
-  most files were identical. Previews of a track, a return and a section are
-  among them, and each effect's reported latency, lanes and gain reduction.
-- **Reverb** is compared on what its tail is made of: the frame it starts on,
-  its energy and width, and over several seeds its decay time and the level of
-  each octave.
+- **Without effects**, renders of 60 generated songs, with generated audio in
+  every format the library reads (8- to 32-bit PCM, float and double WAV, AIFF
+  and FLAC at 22.05 to 96 kHz), were byte-identical: `mix.wav`, every stem and
+  the snapshot, with the same schedules.
+- **With effects, sends, returns and automation**, over 60 generated songs the
+  largest difference in any of 257 mixes and stems was 5.8e-11, and the reports
+  agreed on each effect's latency, lanes and gain reduction.
+- **Reverb** tails come from another noise generator (D40), so they were
+  compared on what a tail is made of: the frame it starts on, its energy and
+  width, and over several seeds its decay time and the level of each octave.
+- **Copies of five local songs**: one was refused by both engines for clipping,
+  with the same message; one without effects was byte-identical in all 11 files;
+  in the other three every stem without reverb was within 6e-8, reverb returns
+  within 0.45 dB and mixes within 0.02 dB in level.
 
-The engine's own tests prove that output does not depend on block partition,
-with and without effects, that playing from the middle equals the same frames
-of a render from the start, that stems sum to the mix before master effects,
-that a preview is its channel's stem, and that processing never allocates.
-`crates/aaw-engine/tests/player.rs` plays through the transport: a song with
-latency against its render, levels and knobs stepped thirty times a second
-without a click, a tail ringing through an edit, a locate and a stop, a change
-of structure fading through silence, and a stopped stream coming to rest.
-
-Two details keep effect-free bytes equal. The repitch is a port of
-`resample_poly`, including `firwin`'s Kaiser window, Cephes `i0` and numpy's
-pairwise sum; it matches scipy to a few units in the last place. Decoding uses
-libsndfile, but the 24-bit mix is written here: Homebrew's libsndfile rounds
+Two details keep effect-free bytes equal to the Python engine's. The repitch is a
+port of `resample_poly`, including `firwin`'s Kaiser window, Cephes `i0` and
+numpy's pairwise sum; it matches scipy to a few units in the last place. Decoding
+uses libsndfile, but the 24-bit mix is written here: Homebrew's libsndfile rounds
 24-bit PCM differently from the build that Python's `soundfile` bundles, and
 the engine writes `lrint(x * 2**31) >> 8` as the latter does.
+
+With the reference gone, tests hold the engine to its own promises. The engine's
+tests prove that output does not depend on block partition, with and without
+effects, that playing from the middle equals the same frames of a render from
+the start, that stems sum to the mix before master effects, that a preview is
+its channel's stem, that float stems keep the bytes of the first renders, and
+that processing never allocates. Each device has tests of what it does
+(`crates/aaw-dsp`). `crates/aaw-engine/tests/player.rs` plays through the
+transport: a song with latency against its render, levels and knobs stepped
+thirty times a second without a click, a tail ringing through an edit, a locate
+and a stop, a change of structure fading through silence, and a stopped stream
+coming to rest. The Python suite drives `daw render`: `tests/test_renders.py`
+renders generated songs whole, in other block sizes, as sections and as single
+channels and holds the results to each other and to the song, and the effect,
+routing and automation tests run chains and songs with generated audio.

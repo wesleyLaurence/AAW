@@ -1,33 +1,27 @@
-"""Delay, reverb, sends and returns, tested with generated audio."""
+"""Delay, reverb, sends and returns, tested with generated audio.
 
-import json
-import subprocess
-import sys
+An effect chain is run on its own by rendering a song that plays the test signal
+once on a track with those effects; the track's stem is the chain's output.
+"""
+
 import numpy as np
 import pytest
 import soundfile as sf
 from scipy.signal import butter, sosfilt
-from agent_daw.effects import Chain, reverb_ir
-from agent_daw.engine import render
-from agent_daw.model import Compressor, Delay, Project, Reverb, load, save
+from agent_daw.model import load, save, validate
 from agent_daw.perception import compare, listen
+from helpers import SR, cli, level_db, render, run_chain, stem
 
-SR = 48000
 
-
-def impulse(seconds):
+def impulse(seconds, amp=0.5):
     x = np.zeros((round(seconds * SR), 2))
-    x[0] = 1
+    x[0] = amp
     return x
 
 
 def noise(seconds, seed=1, amp=0.1):
     n = np.random.default_rng(seed).normal(0, amp, round(seconds * SR))
     return np.column_stack([n, n])
-
-
-def level_db(x):
-    return 20 * np.log10(np.sqrt(np.mean(x**2)))
 
 
 def decay_time(x, low, high):
@@ -39,31 +33,32 @@ def decay_time(x, low, high):
 
 
 def delay(**kw):
-    return Delay(type="delay", **{"time_beats": "1/2", **kw})
+    return {"type": "delay", "time_beats": "1/2", **kw}
 
 
 def reverb(**kw):
-    return Reverb(type="reverb", **kw)
+    return {"type": "reverb", **kw}
 
 
-def test_delay_echoes_land_on_tempo_synced_frames():
+def test_delay_echoes_land_on_tempo_synced_frames(tmp_path):
     # A third of a beat at 120 BPM is exactly 8000 frames.
-    y = Chain([delay(time_beats="1/3", feedback_percent=50)], SR, 120).run(impulse(1))
+    spec = delay(time_beats="1/3", feedback_percent=50)
+    y, _ = run_chain(tmp_path / "a", [spec], impulse(1))
     assert list(np.flatnonzero(y[:30000, 0])) == [8000, 16000, 24000]
-    assert list(y[[8000, 16000, 24000], 0]) == [1, 0.5, 0.25]
+    assert list(y[[8000, 16000, 24000], 0]) == [0.5, 0.25, 0.125]
     assert np.array_equal(y[:, 0], y[:, 1])
 
 
-def test_ping_pong_starts_left_and_alternates():
+def test_ping_pong_starts_left_and_alternates(tmp_path):
     spec = delay(feedback_percent=50, ping_pong=True)
-    y = Chain([spec], SR, 120).run(impulse(2))
-    assert list(y[[12000, 24000, 36000], 0]) == [1, 0, 0.25]
-    assert list(y[[12000, 24000, 36000], 1]) == [0, 0.5, 0]
+    y, _ = run_chain(tmp_path / "a", [spec], impulse(2))
+    assert list(y[[12000, 24000, 36000], 0]) == [0.5, 0, 0.125]
+    assert list(y[[12000, 24000, 36000], 1]) == [0, 0.25, 0]
 
 
-def test_delay_highcut_darkens_each_repeat():
+def test_delay_highcut_darkens_each_repeat(tmp_path):
     spec = delay(feedback_percent=80, highcut_hz=3000)
-    y = Chain([spec], SR, 120).run(impulse(2))[:, 0]
+    y = run_chain(tmp_path / "a", [spec], impulse(2))[0][:, 0]
     bright = []
     for k in (1, 2, 3):
         echo = y[k * 12000 : k * 12000 + 4000]
@@ -73,72 +68,65 @@ def test_delay_highcut_darkens_each_repeat():
     assert bright[0] > bright[1] > bright[2]
 
 
-def test_reverb_decay_damping_and_predelay():
+def test_reverb_decay_damping_and_predelay(tmp_path):
     spec = reverb(decay_seconds=2, predelay_ms=20, damping_hz=3000)
-    y = Chain([spec], SR).run(impulse(4))
+    y, report = run_chain(tmp_path / "a", [spec], impulse(4))
     mid = decay_time(y[:, 0], 700, 1400)
     assert mid == pytest.approx(2, rel=0.1)
     # Above damping_hz the decay time falls as 1/f: about 0.6 s at 10 kHz.
     assert decay_time(y[:, 0], 8000, 12000) < 0.5 * mid
     assert np.max(abs(y[:960])) < 1e-12  # 20 ms at 48 kHz
     assert np.max(abs(y[960:1500])) > 1e-3
-    assert np.sum(y**2, axis=0) == pytest.approx([1, 1], rel=1e-6)
+    # Each channel's response has the energy of its input.
+    assert np.sum(y**2, axis=0) == pytest.approx([0.25, 0.25], rel=1e-4)
+    assert report == [{"type": "reverb", "latency_frames": 0}]
 
 
-def test_reverb_matches_direct_convolution_after_latency():
-    spec = reverb(decay_seconds=0.4, predelay_ms=5)
-    chain = Chain([spec], SR)
-    x = noise(1)
-    y = chain.run(x)
-    ir = reverb_ir(spec, SR)
-    expected = np.convolve(x[:, 0], ir[:, 1])[: len(x)]
-    assert np.allclose(y[:, 1], expected, atol=1e-12)
-    assert chain.report() == [{"type": "reverb", "latency_frames": 4096}]
-
-
-def test_reverb_is_seeded_and_width_controls_correlation():
+def test_reverb_is_seeded_and_width_controls_correlation(tmp_path):
     x = noise(2)
-    a = Chain([reverb()], SR).run(x)
-    assert np.array_equal(a, Chain([reverb()], SR).run(x))
-    assert not np.allclose(a, Chain([reverb(seed=1)], SR).run(x))
+    a, _ = run_chain(tmp_path / "a", [reverb()], x)
+    assert np.array_equal(a, run_chain(tmp_path / "again", [reverb()], x)[0])
+    assert not np.allclose(a, run_chain(tmp_path / "seed", [reverb(seed=1)], x)[0])
     assert abs(np.corrcoef(a[:, 0], a[:, 1])[0, 1]) < 0.1
-    mono = Chain([reverb(width_percent=0)], SR).run(x)
+    mono, _ = run_chain(tmp_path / "mono", [reverb(width_percent=0)], x)
     assert np.array_equal(mono[:, 0], mono[:, 1])
 
 
-def test_reverb_level_is_energy_normalized():
+def test_reverb_level_is_energy_normalized(tmp_path):
     x = noise(6, amp=0.1)
-    y = Chain([reverb(decay_seconds=1)], SR).run(x)
+    y, _ = run_chain(tmp_path / "a", [reverb(decay_seconds=1)], x)
     assert level_db(y[3 * SR :]) == pytest.approx(level_db(x[3 * SR :]), abs=0.5)
 
 
-def test_reverb_lowcut_removes_low_end():
+def test_reverb_lowcut_removes_low_end(tmp_path):
     t = np.arange(3 * SR) / SR
     x = np.column_stack([0.3 * np.sin(2 * np.pi * 60 * t)] * 2)
-    full = Chain([reverb(lowcut_hz=20)], SR).run(x)
-    cut = Chain([reverb(lowcut_hz=400)], SR).run(x)
+    full, _ = run_chain(tmp_path / "full", [reverb(lowcut_hz=20)], x)
+    cut, _ = run_chain(tmp_path / "cut", [reverb(lowcut_hz=400)], x)
     assert level_db(cut[SR:]) < level_db(full[SR:]) - 15
 
 
-def test_zero_mix_is_identity():
+def test_zero_mix_is_identity(tmp_path):
     x = noise(1)
-    assert np.array_equal(Chain([delay(mix_percent=0)], SR, 120).run(x), x)
-    assert np.array_equal(Chain([reverb(mix_percent=0)], SR).run(x), x)
+    dry = x.astype(np.float32)
+    assert np.array_equal(run_chain(tmp_path / "d", [delay(mix_percent=0)], x)[0], dry)
+    assert np.array_equal(run_chain(tmp_path / "r", [reverb(mix_percent=0)], x)[0], dry)
 
 
-def test_new_devices_are_block_partition_invariant():
+def test_new_devices_are_block_partition_invariant(tmp_path):
     specs = [
         delay(time_beats="3/4", ping_pong=True, lowcut_hz=200, highcut_hz=5000),
         reverb(decay_seconds=0.5, predelay_ms=12),
-        Compressor(type="compressor", threshold_db=-24, sidechain="kick"),
+        {"type": "compressor", "threshold_db": -24, "sidechain": "kick"},
         reverb(decay_seconds=3, mix_percent=30, seed=7),
     ]
     rng = np.random.default_rng(3)
     x = rng.normal(0, 0.3, (3 * SR, 2))
     keys = {"kick": rng.normal(0, 0.5, (3 * SR, 2))}
-    a = Chain(specs, SR, 128).run(x, keys, 127)
-    b = Chain(specs, SR, 128).run(x, keys, 4096)
-    c = Chain(specs, SR, 128).run(x, keys, 6 * SR)
+    a, b, c = (
+        run_chain(tmp_path / str(size), specs, x, keys=keys, tempo=128, block_size=size)[0]
+        for size in (127, 4096, 6 * SR)
+    )
     assert np.array_equal(a, b) and np.array_equal(b, c)
 
 
@@ -191,16 +179,12 @@ def mix(tmp_path):
         "sections": [{"id": "end", "at": 4, "length_beats": 4}],
     }
     path = tmp_path / "song.yaml"
-    save(Project.model_validate(data), path)
+    save(data, path)
     return path, data
 
 
-def stem(directory, name):
-    return sf.read(directory / "stems" / f"{name}.wav", always_2d=True)[0]
-
-
 def rerender(path, data, directory, **kw):
-    save(Project.model_validate(data), path)
+    save(data, path)
     render(path, directory, **kw)
     return directory
 
@@ -307,7 +291,7 @@ def test_return_compressor_ducks_under_sidechain(mix, tmp_path):
             "sidechain": "kick",
         }
     )
-    save(Project.model_validate(data), path)
+    save(data, path)
     report = render(path, tmp_path / "duck")
     plate = stem(tmp_path / "duck", "plate")
     beat = SR // 2
@@ -382,7 +366,7 @@ def test_routing_validation(mix, change, message):
     path, data = mix
     change(data)
     with pytest.raises(ValueError, match=message):
-        Project.model_validate(data)
+        validate(data)
 
 
 def test_routing_round_trip_and_cli(mix, tmp_path):
@@ -392,13 +376,8 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
     assert path.read_text() == text
     assert "- {to: plate, gain_db: -6.0}" in text
     assert "time_beats: 3/4" in text
-    out = subprocess.run(
-        [sys.executable, "-m", "agent_daw.cli", "inspect", str(path)],
-        capture_output=True,
-        text=True,
-    )
-    assert out.returncode == 0, out.stderr
-    inspected = json.loads(out.stdout)
+    code, inspected = cli("inspect", path)
+    assert code == 0, inspected
     assert inspected["returns"][0] == {
         "id": "plate",
         "gain_db": 0,
@@ -410,12 +389,7 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
     }
     snare = inspected["tracks"][0]
     assert snare["sends"][0] == {"to": "plate", "gain_db": -6, "pre_fader": False}
-    out = subprocess.run(
-        [sys.executable, "-m", "agent_daw.cli", "describe", "effects"],
-        capture_output=True,
-        text=True,
-    )
-    described = json.loads(out.stdout)
+    code, described = cli("describe", "effects")
     assert {"delay", "reverb"} <= set(described["schema"])
     assert set(described["routing"]) == {"send", "return"}
     assert "returns" in described["semantics"]

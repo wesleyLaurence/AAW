@@ -1,5 +1,4 @@
-//! An effect built for processing: the device its spec and lanes call for, as
-//! `effects.device` chooses it.
+//! An effect built for processing: the device its spec and lanes call for.
 //!
 //! A constant lane becomes the spec's static value, so the device renders
 //! exactly as the static spec would; only moving lanes take the automated path.

@@ -1,8 +1,8 @@
 //! Fingerprints the earlier Python engines wrote must still verify.
 //!
-//! The projects and hashes are `projects_by_schema` and `EARLIER_FINGERPRINTS`
-//! from tests/test_daw.py: each project uses every model of one schema, and each
-//! hash is what the engine of that schema recorded in its render reports.
+//! The projects and hashes are those of tests/test_daw.py: each project uses
+//! every model of one schema, and each hash is what the engine of that schema
+//! recorded in its render reports.
 
 const PROJECTS: [(&str, &str, &str, &str); 4] = [
     (

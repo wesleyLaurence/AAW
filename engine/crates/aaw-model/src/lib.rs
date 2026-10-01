@@ -1,14 +1,18 @@
 //! Schema v1 song model: types, validation, exact beats, canonical YAML and fingerprints.
 //!
-//! This is a port of the Python engine's `model.py`. The two must agree exactly:
-//! the same documents are accepted, `save` writes the same bytes, and
-//! `project_sha256` is the same, so `--expect` SHAs and render reports carry over.
+//! This began as a port of the first engine's Python model (pydantic and PyYAML)
+//! and keeps its behavior exactly: the same documents are accepted, `save`
+//! writes the same bytes and `project_sha256` is the same, so existing projects,
+//! render reports and `--expect` SHAs carry over. tests/test_model.py pins that
+//! behavior on a generated corpus.
 
 pub mod beat;
+pub mod contract;
 pub mod describe;
 pub mod hash;
 pub mod pyfmt;
 pub mod rules;
+pub mod schedule;
 pub mod schema;
 pub mod validate;
 pub mod value;
@@ -115,7 +119,7 @@ pub fn verify_assets(project: &Project, root: &Path) -> Result<(), ModelError> {
     Ok(())
 }
 
-/// `model.load`: reads, validates and optionally verifies the samples.
+/// Reads and validates a song, and optionally verifies its samples.
 pub fn load(path: &Path, check_assets: bool) -> Result<Project, ModelError> {
     let text = std::fs::read_to_string(path)?;
     let project = parse(&text)?;
@@ -142,7 +146,7 @@ pub fn atomic_write(path: &Path, text: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-/// `model.save`.
+/// Writes a song's canonical YAML.
 pub fn save(project: &Project, path: &Path) -> std::io::Result<()> {
     atomic_write(path, &to_yaml(project))
 }
@@ -176,7 +180,7 @@ pub fn json_value(text: &str) -> Result<Value, ModelError> {
     Ok(convert(parsed))
 }
 
-/// RFC 7386 JSON merge patch as `cli.merge`: objects merge, null deletes, and
+/// RFC 7386 JSON merge patch: objects merge, null deletes, and
 /// anything else replaces.
 pub fn merge(target: &Value, patch: &Value) -> Value {
     let Value::Dict(changes) = patch else {

@@ -1,30 +1,45 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=68", "setuptools-rust>=1.12"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-daw"
 version = "0.1.0"
-description = "Offline sample workstation for agents"
+description = "Sample library, sample analysis and perception for Agent DAW"
 requires-python = ">=3.12"
 dependencies = [
     "numpy>=2,<3",
     "scipy>=1.15,<2",
     "soundfile>=0.13,<1",
-    "PyYAML>=6,<7",
-    "pydantic>=2.10,<3",
     "pyloudnorm>=0.1.1,<0.2",
     "matplotlib>=3.9,<4",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8,<10"]
+dev = ["pytest>=8,<10", "PyYAML>=6,<7"]
 
 [project.scripts]
 daw = "agent_daw.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The song model is the Rust one: engine/crates/aaw-py builds into the package
+# as agent_daw.aaw_py, for the interpreter the package is installed into.
+[[tool.setuptools-rust.ext-modules]]
+target = "agent_daw.aaw_py"
+path = "engine/crates/aaw-py/Cargo.toml"
+binding = "PyO3"
+debug = false
+
+# Rebuild the module when the Rust model changes.
+[tool.uv]
+cache-keys = [
+    { file = "pyproject.toml" },
+    { file = "engine/Cargo.lock" },
+    { file = "engine/crates/aaw-py/**" },
+    { file = "engine/crates/aaw-model/**" },
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

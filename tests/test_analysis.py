@@ -8,7 +8,7 @@ import soundfile as sf
 
 from agent_daw.analysis import analyze, compare_root, measure_pitch
 from agent_daw.library import analyze as analyze_indexed, analyze_all, scan, search
-from agent_daw.model import Project, save
+from agent_daw.model import load, save
 
 SR = 48000
 
@@ -166,7 +166,7 @@ def test_cli_auto_root_and_check_warnings(tmp_path):
     )
     project = tmp_path / "song" / "song.yaml"
     project.parent.mkdir()
-    save(Project.model_validate({"session": {"tempo": 120}}), project)
+    save({"session": {"tempo": 120}}, project)
     db = tmp_path / "index.sqlite"
     code, result = run(
         "samples",
@@ -183,6 +183,14 @@ def test_cli_auto_root_and_check_warnings(tmp_path):
     )
     assert code == 0 and result["root_note"] == "A2"
     assert result["measured_pitch"]["note"] == "A2"
+    # The song has the sample, by a path inside the project.
+    imported = load(project)["samples"]["bass"]
+    assert imported["root_note"] == "A2" and imported["sha256"] == result["sha256"]
+    assert (project.parent / imported["path"]).is_file()
+    code, again = run(
+        "samples", "--db", db, "import", source, "--project", project, "--id", "bass"
+    )
+    assert code == 1 and "already exists" in again["error"]
     code, result = run(
         "samples",
         "--db",

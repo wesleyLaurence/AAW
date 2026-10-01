@@ -62,9 +62,18 @@ decision log, and design notes.
 
 ## What works today
 
-The current MVP is an offline, agent-operated sample workstation. Search a local
-sample library, copy sounds into a project, sequence drum and pitched notes, and
-render a mix and stems. It also provides render analysis and comparisons.
+AAW today is a sample workstation that an agent and a person operate together.
+Search a local sample library, copy sounds into a project, sequence drum and
+pitched notes, play the song from any beat and render a mix and stems. It also
+provides render analysis and comparisons.
+
+One native engine, written in Rust, plays the song in real time and renders it
+offline, so what is heard while editing is what is exported. A session host holds
+the open song, applies each edit as a command with undo, and plays it as it
+lands. The agent drives it with the `daw` command; the person drives the same
+host from a native Mac app with an arrangement, a mixer, device panels and
+automation lanes, and sees the agent's changes as they happen. See
+[engine/README.md](engine/README.md) and [apps/mac/README.md](apps/mac/README.md).
 
 Samples can be measured from their audio for pitch (with octave), loop tempo and
 one-shot/loop kind.
@@ -78,15 +87,14 @@ Automation lanes move track, return and master levels, pans, send levels and
 effect parameters over time, such as a filter sweep into a drop or a quieter
 second chorus. See [docs/automation.md](docs/automation.md).
 
-The broader workspace described above is the vision. UI, saturation, groups,
-synths, plugin hosting, MIDI import/export, recording, and a realtime engine are
-not implemented.
+The broader workspace described above is the vision. Saturation, groups, synths,
+plugin hosting, MIDI import/export and recording are not implemented.
 [docs/mvp.md](docs/mvp.md) describes the implemented behavior.
 
 ## Repository scope
 
-This repository tracks the tools for creating music: the engine, CLI, tests,
-documentation, and generic examples. Personal songs and their arrangements, samples,
+This repository tracks the tools for creating music: the engine, the app, the CLI,
+tests, documentation, and generic examples. Personal songs and their arrangements, samples,
 source manifests, notes, revisions, renders, exports, and composition scripts stay
 local under ignored `projects/` or `content/`, or outside this repository.
 Song version history can be maintained separately in a private repository.
@@ -95,13 +103,29 @@ The original sample library is never modified.
 ## Setup
 
 ```sh
-uv sync --extra dev --locked
+brew install libsndfile                # the engine decodes samples with it
+(cd engine && cargo build --release)   # the daw binary
+uv sync --extra dev --locked           # the Python tools, with the Rust song model
 uv run daw --help
-uv run pytest -q
+uv run pytest -q && (cd engine && cargo test)
 ```
 
-Python 3.12+; the MVP is developed for macOS. Dependencies are pinned in `uv.lock`.
+It needs Rust stable from [rustup](https://rustup.rs) and Python 3.12+, and is
+developed for macOS. Dependencies are pinned in `engine/Cargo.lock` and `uv.lock`.
 The runtime is local and does not call a model or require a Splice connection.
+
+The engine, the song model, the session host and every command that reads, edits,
+plays or renders a song are Rust (`engine/`). The sample library, sample analysis
+and perception are Python (`src/agent_daw`), and read songs through the Rust model,
+which `uv sync` builds into the package as `agent_daw.aaw_py`. If uv's Python is an
+Intel build on Apple silicon, add its Rust target first: `rustup target add
+x86_64-apple-darwin`.
+
+`daw` is one command. `uv run daw` and `engine/target/release/daw` each pass the
+other the commands it does not own (`samples`, `listen`, `compare` and `check` run
+in Python), so either works for everything. `uv run daw` runs the release build, or
+the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
+or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`.
 
 ## Agent workflow
 
@@ -125,6 +149,8 @@ uv run daw describe project
 
 uv run daw check projects/my-beat/song.yaml
 uv run daw inspect projects/my-beat/song.yaml
+uv run daw set projects/my-beat/song.yaml tracks.drums.gain_db -4.5
+uv run daw play projects/my-beat/song.yaml --from 32
 uv run daw render projects/my-beat/song.yaml
 uv run daw render projects/my-beat/song.yaml --track drums
 uv run daw listen projects/my-beat/renders/latest.json
@@ -140,18 +166,28 @@ uses the measured note, and `daw check` warns when a declared root disagrees wit
 the audio. See [docs/sample-analysis.md](docs/sample-analysis.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
-`inspect` returns the current `project_sha256`. To revise a project safely, write a
-JSON merge patch and run:
+Edits are commands: `set` for any value by path, and verbs for tracks, returns,
+clips, patterns, pads, effects, sends, lanes and sections (`daw --help` lists them,
+and [engine/README.md](engine/README.md) describes them). Each validates the whole
+resulting song before it is written. While a host runs for the song, because it is
+open in the Mac app or `daw host` or `daw play` is running, commands go to that host:
+the edit is heard and shown as it lands, `daw undo` takes it back, and `daw changes`
+lists what the person and the agent did. With no host, a command loads the file,
+applies the edit and saves.
+
+`inspect` returns the current `project_sha256`. To revise several fields at once,
+write a JSON merge patch and run:
 
 ```sh
 uv run daw apply projects/my-beat/song.yaml /tmp/revision.json --expect SHA_FROM_INSPECT
 ```
 
 Objects merge, arrays replace, and null removes a field. The edit is validated before
-an atomic write; stale expected revisions fail. CLI writes use an advisory project
-lock. Raw file editing is also supported, but outside that concurrency contract.
-`fmt` produces stable compact YAML. `check` validates schema, references and asset
-hashes; the renderer additionally validates audio content and trim bounds.
+an atomic write; stale expected revisions fail. Writers without a host use an advisory
+project lock. Raw file editing is also supported, but outside that concurrency
+contract; a running host loads it as an external edit. `fmt` produces stable compact
+YAML. `check` validates schema, references and asset hashes; the renderer
+additionally validates audio content and trim bounds.
 
 ## Authoring contract
 
@@ -224,16 +260,17 @@ no automatic normalization. Unsafe PCM clipping aborts export; lower
 `renders/latest.json` points to the latest full mix; previews have their own pointer.
 Render directories are keyed by project, actual sample content, engine code,
 dependencies and target. Re-rendering the same identity replaces its equivalent
-artifacts. A different render cannot overwrite an occupied `--output` directory. Reports record engine/dependency versions, asset hashes, audio hash,
-peak/RMS, a 4× oversampled peak estimate, track event counts, effect gain
-reduction, and render time.
+artifacts. A different render cannot overwrite an occupied `--output` directory. Reports
+record the engine build, asset hashes, audio hash, peak/RMS, a 4× oversampled peak
+estimate, track event counts, effect gain reduction, and render time.
 Bit-identical output is checked in the same environment, not promised across machines
-or dependency upgrades. Restore `song.snapshot.yaml` into the original project root
-to use its project-relative sample paths.
+or engine builds. Restore `song.snapshot.yaml` into the original project root
+to use its project-relative sample paths. Renders made by the earlier Python engine
+still verify with `daw listen` and `daw compare`.
 
 Track and section previews evaluate the original timeline before slicing, so notes
-and tails beginning before a section are retained. They currently perform full-track
-work; there is no incremental cache yet.
+and tails beginning before a section are retained. A render is many times faster
+than real time: a three-minute song with thirty effects takes about nine seconds.
 
 ## Perception and comparison
 
@@ -245,7 +282,7 @@ Outputs live under `analysis/` inside the render directory or beside standalone
 audio. Reports use the saved project snapshot and do not change the song or audio.
 See [docs/perception.md](docs/perception.md) for definitions and limitations.
 
-The older files in `docs/` describe the broader product vision. The implemented MVP
+The older files in `docs/` describe the broader product vision. What is implemented
 is deliberately narrower; `docs/mvp.md` is authoritative for the current build.
 
 ## License

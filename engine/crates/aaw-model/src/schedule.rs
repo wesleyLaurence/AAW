@@ -1,6 +1,6 @@
-//! Event scheduling: every hit's start frame, from exact beats, as `engine.schedule`.
+//! Event scheduling: every hit's start frame, from exact beats.
 
-use aaw_model::{frame, Event, PadMode, Project};
+use crate::{frame, Event, PadMode, Project};
 use num_rational::BigRational;
 use std::collections::HashMap;
 

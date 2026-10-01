@@ -34,7 +34,7 @@ const SAVE_AFTER: Duration = Duration::from_millis(250);
 
 const CLOSING: &str = "The host is closing";
 
-/// Holds the project's advisory lock, as the Python CLI's writers do.
+/// Holds the project's advisory lock, which every writer without a host takes.
 pub fn lock(project: &Path) -> Result<File> {
     let dir = match project.parent() {
         Some(d) if !d.as_os_str().is_empty() => d,

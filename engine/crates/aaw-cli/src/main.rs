@@ -4,19 +4,23 @@
 //! running (`daw host`, or `daw play` while it plays), so the change is heard and
 //! recorded in its history. Otherwise they run headless: load, apply, save, exit.
 //!
+//! The sample library and the perception tools are Python: `samples`, `listen`,
+//! `compare` and `check` run there, with this process's arguments and output.
+//!
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
-//! with exit status 1, as the Python CLI does.
+//! with exit status 1.
 
 use aaw_engine::offline::{render, RenderOptions};
 use aaw_engine::program::{compile_cached, Cache};
 use aaw_engine::realtime::{benchmark, PlayOptions};
-use aaw_engine::schedule::schedule;
 use aaw_host::client::{self, Request};
 use aaw_host::command::{Command, Fields, Kind, Origin};
 use aaw_host::host::{self, lock};
 use aaw_host::session::Session;
+use aaw_model::schedule::schedule;
 use aaw_model::validate::ValidationError;
-use aaw_model::{frame, Beat, ModelError};
+use aaw_model::value::{dict, Value};
+use aaw_model::{contract, frame, Beat, ModelError, Project};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
@@ -30,7 +34,7 @@ use std::sync::Arc;
 static ALLOCATOR: assert_no_alloc::AllocDisabler = assert_no_alloc::AllocDisabler;
 
 #[derive(Parser)]
-#[command(name = "daw", about = "Agent DAW engine (Rust). Emits JSON.")]
+#[command(name = "daw", about = "Agent DAW. Emits JSON; run `daw describe` for the authoring contract.")]
 struct Cli {
     /// Who makes the change, as the change log records it.
     #[arg(long, global = true, value_enum, default_value = "agent")]
@@ -57,13 +61,59 @@ struct FieldArgs {
     fields: Vec<String>,
 }
 
+/// The arguments of a command that runs in Python, passed on as given.
+#[derive(Args)]
+struct Forwarded {
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true, value_name = "ARGS")]
+    args: Vec<String>,
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Topic {
+    Project,
+    Sampler,
+    Effects,
+    Automation,
+}
+
 #[derive(Subcommand)]
 enum Top {
+    /// Create DIRECTORY/song.yaml, an empty song.
+    Init {
+        directory: PathBuf,
+        #[arg(long, default_value_t = 144.0)]
+        tempo: f64,
+        #[arg(long, default_value_t = 16)]
+        bars: i64,
+    },
+    /// The authoring contract: the song's schema and what its fields mean.
+    Describe {
+        #[arg(value_enum, default_value = "project")]
+        topic: Topic,
+    },
+    /// The sample library: scan, search, analyze, inspect, audition, import.
+    #[command(disable_help_flag = true)]
+    Samples(Forwarded),
+    /// Measure a saved render or WAV; writes analysis JSON and images.
+    #[command(disable_help_flag = true)]
+    Listen(Forwarded),
+    /// Compare two renders: actual and loudness-matched differences.
+    #[command(disable_help_flag = true)]
+    Compare(Forwarded),
+    /// `inspect`, plus each sample's root note against its measured pitch and
+    /// warnings about automation.
+    #[command(disable_help_flag = true)]
+    Check(Forwarded),
     /// Rewrite a project in canonical form.
     Fmt { project: PathBuf },
     /// Validate and atomically replace project fields from a JSON merge patch.
-    /// Requires --expect.
-    Apply { project: PathBuf, patch: PathBuf },
+    /// Requires --expect. --label names the edit in the change log and for undo.
+    Apply {
+        project: PathBuf,
+        patch: PathBuf,
+        #[arg(long)]
+        label: Option<String>,
+    },
     /// Validate documents with the Rust model and print each one's canonical
     /// YAML and fingerprints, or its errors. Reads only; samples are not checked.
     Model { paths: Vec<PathBuf> },
@@ -76,6 +126,9 @@ enum Top {
         track: Option<String>,
         #[arg(long)]
         section: Option<String>,
+        /// Frames rendered at a time; the output does not depend on it.
+        #[arg(long, hide = true)]
+        block_size: Option<usize>,
     },
     /// List every scheduled hit: its start frame, track, pad and release frame.
     Schedule { project: PathBuf },
@@ -562,21 +615,33 @@ fn run(cli: &Cli) -> Result<Json> {
     use Command as C;
     let edit = |project: &PathBuf, c: Command| route(cli, project, c, None);
     match &cli.command {
+        Top::Init { directory, tempo, bars } => init(directory, *tempo, *bars),
+        Top::Describe { topic } => {
+            let name = topic.to_possible_value().expect("a topic has a name");
+            contract::describe(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
+        }
+        Top::Samples(_) | Top::Listen(_) | Top::Compare(_) | Top::Check(_) => {
+            unreachable!("Python commands are forwarded before this")
+        }
         Top::Render {
             project,
             output,
             track,
             section,
-        } => render(
-            project,
-            &RenderOptions {
-                output: output.clone(),
-                track: track.clone(),
-                section: section.clone(),
-                ..RenderOptions::default()
-            },
-        )
-        .map(value),
+            block_size,
+        } => {
+            let defaults = RenderOptions::default();
+            render(
+                project,
+                &RenderOptions {
+                    output: output.clone(),
+                    track: track.clone(),
+                    section: section.clone(),
+                    block_size: block_size.unwrap_or(defaults.block_size),
+                },
+            )
+            .map(value)
+        }
         Top::Schedule { project } => {
             let p = aaw_model::load(project, false).map_err(text)?;
             let triggers: Vec<Json> = schedule(&p)
@@ -591,14 +656,15 @@ fn run(cli: &Cli) -> Result<Json> {
             reply["project"] = json!(project);
             Ok(reply)
         }
-        Top::Apply { project, patch } => {
+        Top::Apply { project, patch, label } => {
             if cli.expect.is_none() {
                 return Err("apply requires --expect with the project SHA256 from inspect".into());
             }
             let body = std::fs::read_to_string(patch).map_err(text)?;
             let patch: Json = serde_json::from_str(&body).map_err(text)?;
-            let reply = edit(project, C::Apply { patch })?;
-            // The Python CLI's result, plus the revision while a host runs.
+            let label = label.clone();
+            let reply = edit(project, C::Apply { patch, label })?;
+            // The new fingerprint, and the revision while a host runs.
             let mut out = serde_json::Map::new();
             for key in ["revision", "project_sha256"] {
                 if let Some(v) = reply.get(key) {
@@ -980,6 +1046,12 @@ fn run(cli: &Cli) -> Result<Json> {
 fn name(top: &Top) -> String {
     let group = |g: &str, s: &str| format!("{g} {s}");
     match top {
+        Top::Init { .. } => "init".into(),
+        Top::Describe { .. } => "describe".into(),
+        Top::Samples(_) => "samples".into(),
+        Top::Listen(_) => "listen".into(),
+        Top::Compare(_) => "compare".into(),
+        Top::Check(_) => "check".into(),
         Top::Fmt { .. } => "fmt".into(),
         Top::Apply { .. } => "apply".into(),
         Top::Model { .. } => "model".into(),
@@ -1015,8 +1087,68 @@ fn name(top: &Top) -> String {
     .to_string()
 }
 
+/// `daw init`: a song of so many 4/4 bars, with everything else at its default.
+fn init(directory: &Path, tempo: f64, bars: i64) -> Result<Json> {
+    let path = directory.join("song.yaml");
+    if path.exists() {
+        return Err(format!("Project already exists: {}", path.display()));
+    }
+    if bars <= 0 {
+        return Err("bars must be positive".into());
+    }
+    let length = bars.checked_mul(4).ok_or("bars is too large")?;
+    let session = dict(vec![("tempo", Value::Float(tempo)), ("length_beats", Value::int(length))]);
+    let project = Project::validate(&dict(vec![("session", session)])).map_err(text)?;
+    aaw_model::save(&project, &path).map_err(text)?;
+    Ok(json!({"project": std::fs::canonicalize(&path).map_err(text)?}))
+}
+
+/// The Python that has the `agent_daw` package: AAW_PYTHON, or the environment
+/// of the checkout this binary was built from.
+fn python() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("AAW_PYTHON") {
+        return Ok(path.into());
+    }
+    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
+    let python = checkout.join(".venv/bin/python");
+    if python.exists() {
+        return Ok(python);
+    }
+    Err(format!(
+        "This command runs in Python, which was not found at {}; run `uv sync` in the checkout or set AAW_PYTHON",
+        python.display()
+    ))
+}
+
+/// Runs a Python command with this process's arguments, input and output, and
+/// returns its exit status. What that command asks of `daw` in turn, as `check`
+/// asks for `inspect`, comes back to this binary.
+fn forward(command: &str, args: &[String]) -> Result<ExitCode> {
+    let mut python = std::process::Command::new(python()?);
+    if std::env::var_os("AAW_DAW").is_none() {
+        python.env("AAW_DAW", std::env::current_exe().map_err(text)?);
+    }
+    let status = python
+        .args(["-m", "agent_daw.cli", command])
+        .args(args)
+        .status()
+        .map_err(|e| format!("Could not start Python: {e}"))?;
+    Ok(match status.code() {
+        Some(0) => ExitCode::SUCCESS,
+        Some(code) => ExitCode::from(code.clamp(1, 255) as u8),
+        None => ExitCode::FAILURE,
+    })
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    if let Top::Samples(f) | Top::Listen(f) | Top::Compare(f) | Top::Check(f) = &cli.command {
+        let command = name(&cli.command);
+        return forward(&command, &f.args).unwrap_or_else(|error| {
+            eprintln!("{}", json!({"error": error, "command": command}));
+            ExitCode::FAILURE
+        });
+    }
     match run(&cli) {
         Ok(result) => {
             println!("{}", serde_json::to_string_pretty(&result).expect("json"));

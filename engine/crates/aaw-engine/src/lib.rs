@@ -5,6 +5,5 @@ pub mod player;
 pub mod program;
 pub mod realtime;
 pub mod render;
-pub mod schedule;
 pub mod sndfile;
 pub mod wav;
