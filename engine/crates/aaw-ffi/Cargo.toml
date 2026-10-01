@@ -19,6 +19,7 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 aaw-model.workspace = true
+aaw-engine.workspace = true
 aaw-host.workspace = true
 num-rational = { version = "0.4", features = ["num-bigint"] }
 num-traits = "0.2.19"
@@ -26,5 +27,4 @@ serde_json = { version = "1.0.151", features = ["preserve_order"] }
 uniffi = "0.32.2"
 
 [dev-dependencies]
-aaw-engine.workspace = true
 tempfile = "3.27.0"

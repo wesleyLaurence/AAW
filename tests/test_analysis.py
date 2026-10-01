@@ -217,3 +217,26 @@ def test_cli_auto_root_and_check_warnings(tmp_path):
     assert code == 0 and result["pitch"]["note"] == "A2" and not result["indexed"]
     code, result = run("samples", "--db", db, "search", "--note-range", "C2")
     assert code == 1 and "note-range" in result["error"]
+
+
+def test_a_copy_only_import_leaves_the_song_as_it_is(tmp_path):
+    source = write(tmp_path / "bass.wav", harmonic(110))
+    project = tmp_path / "song" / "song.yaml"
+    project.parent.mkdir()
+    save({"session": {"tempo": 120}}, project)
+    before = project.read_text()
+    db = tmp_path / "index.sqlite"
+    args = ("samples", "--db", db, "import", source, "--project", project)
+    code, copied = run(*args, "--copy-only", "--root-note", "A2")
+    assert code == 0, copied
+    # The copy is in the project and described as the song would list it.
+    assert sorted(copied) == ["path", "root_note", "sha256", "source"]
+    assert (project.parent / copied["path"]).is_file()
+    assert copied["root_note"] == "A2" and copied["source"] == str(source.resolve())
+    assert project.read_text() == before
+    # Copying again finds the copy; the song's own import still needs an ID.
+    assert run(*args, "--copy-only") == (0, {**copied, "root_note": None})
+    code, result = run(*args, "--copy-only", "--root-note", "H9")
+    assert code == 1 and "Invalid note" in result["error"]
+    code, result = run(*args)
+    assert code == 1 and "--id is required" in result["error"]

@@ -44,7 +44,7 @@ struct Active {
 const DONE: usize = usize::MAX;
 
 /// A track's sounding voices.
-struct Voices {
+pub(crate) struct Voices {
     /// The next voice not yet started.
     next: usize,
     /// Sounding voices in the order they started.
@@ -55,7 +55,7 @@ struct Voices {
 }
 
 impl Voices {
-    fn new(voices: &[Voice], max_block: usize) -> Voices {
+    pub(crate) fn new(voices: &[Voice], max_block: usize) -> Voices {
         // A voice stays listed from the block it starts in to the block it
         // ends in, so capacity covers overlaps widened by one block.
         let capacity = overlap(voices, max_block);
@@ -69,7 +69,7 @@ impl Voices {
 
     /// Moves to timeline frame `at` and picks up the voices sounding there,
     /// fading them in when `ramp` is set.
-    fn seek(&mut self, voices: &[Voice], at: i64, ramp: bool) {
+    pub(crate) fn seek(&mut self, voices: &[Voice], at: i64, ramp: bool) {
         self.active.clear();
         self.next = 0;
         for (i, v) in voices.iter().enumerate() {
@@ -88,6 +88,12 @@ impl Voices {
         }
     }
 
+    /// Whether nothing sounds before timeline frame `end`: no voice is
+    /// sounding and none starts by then.
+    pub(crate) fn idle(&self, voices: &[Voice], end: i64) -> bool {
+        self.active.is_empty() && voices.get(self.next).is_none_or(|v| v.start >= end)
+    }
+
     /// Lets the sounding voices ring out over `fade` frames.
     fn release(&mut self, fade: usize) {
         std::mem::swap(&mut self.active, &mut self.ringing);
@@ -97,7 +103,7 @@ impl Voices {
 
     /// Adds the voices for timeline frames from `start` to `out`, starting
     /// those that begin in the block. Nothing sounds past `total`.
-    fn render(&mut self, voices: &[Voice], out: &mut [Frame], start: i64, total: i64, ramp: usize) {
+    pub(crate) fn render(&mut self, voices: &[Voice], out: &mut [Frame], start: i64, total: i64, ramp: usize) {
         let end = (start + out.len() as i64).min(total);
         if end <= start {
             return;

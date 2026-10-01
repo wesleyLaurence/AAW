@@ -5,9 +5,10 @@
 use aaw_host::session::Doc;
 use aaw_host::tree::{Item, Node};
 use aaw_model::describe::{self, Initial, Kind};
-use aaw_model::rules::{target, Domain, Owner, TargetKind};
+use aaw_model::rules::{midi, target, Domain, Owner, TargetKind};
 use aaw_model::value::{py_eq, Value};
-use aaw_model::{Curve, Effect, Lane, Project};
+use aaw_model::{step_cells, Curve, Effect, Lane, Project};
+use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet};
 
@@ -23,6 +24,7 @@ pub struct Arrangement {
     pub returns: Vec<ReturnView>,
     pub master: MasterView,
     pub sections: Vec<SectionView>,
+    pub patterns: Vec<PatternView>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -133,6 +135,56 @@ pub struct PadView {
     pub gain_db: f64,
     /// Whether events hold the sample for their duration.
     pub gate: bool,
+    /// The sample's root note as a MIDI number, for a pad that events can
+    /// play at other pitches.
+    pub root: Option<i32>,
+}
+
+/// A row of a pattern's step grid: a pad's hits on the pattern's grid.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct StepRow {
+    pub pad: String,
+    /// Each step's level: 0 for none, 1 to 9 for the row's digits, softest
+    /// to hardest, and 10 for an `x`.
+    pub cells: Vec<u8>,
+}
+
+/// A hit a pattern places by itself, off the grid or with a pitch or a length.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct EventView {
+    pub key: u64,
+    /// Beats from the pattern's start, and as the song writes them, such as `4/3`.
+    pub at: f64,
+    pub at_text: String,
+    pub pad: String,
+    /// 1 to 127.
+    pub velocity: u32,
+    pub note: Option<String>,
+    /// The note as a MIDI number.
+    pub pitch: Option<i32>,
+    /// How long a gated pad is held, in beats.
+    pub duration: Option<f64>,
+    pub duration_text: Option<String>,
+    pub transpose: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PatternView {
+    pub name: String,
+    /// The length in beats, and as the song writes it.
+    pub length_beats: f64,
+    pub length_text: String,
+    /// The length of a step, in beats, and as the song writes it, such as `1/4`.
+    pub grid: f64,
+    pub grid_text: String,
+    /// How far each second step is pushed late: 0.5 is straight.
+    pub swing: f64,
+    /// Whether the length is a whole number of steps, as step rows need.
+    pub steps: Option<u32>,
+    pub rows: Vec<StepRow>,
+    pub events: Vec<EventView>,
+    /// How many clips play the pattern.
+    pub clips: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -495,6 +547,68 @@ fn handle(items: &[Item], index: usize) -> u64 {
     items.get(index).map_or(0, |i| i.handle)
 }
 
+/// A sample's root note as a MIDI number.
+pub fn root(p: &Project, sample: &str) -> Option<i32> {
+    let note = p.samples.get(sample)?.root_note.as_deref().filter(|n| !n.is_empty())?;
+    midi(note).ok().map(|n| n as i32)
+}
+
+/// A step's level as a row writes it: `.`, a digit or `x`.
+pub fn step_level(c: char) -> u8 {
+    match c {
+        'x' => 10,
+        _ => c.to_digit(10).map_or(0, |d| d as u8),
+    }
+}
+
+fn patterns(p: &Project, tree: &Node) -> Vec<PatternView> {
+    let float = |x: &BigRational| x.to_f64().unwrap_or(0.0);
+    let nodes = tree.get("patterns");
+    p.patterns
+        .iter()
+        .map(|(name, pattern)| {
+            let event_items = nodes.and_then(|n| n.get(name)).map(|n| items(n, "events")).unwrap_or(&[]);
+            let (length, grid) = (pattern.length_exact(), pattern.grid_exact());
+            let steps = &length / &grid;
+            PatternView {
+                name: name.clone(),
+                length_beats: float(&length),
+                length_text: pattern.length_beats.text(),
+                grid: float(&grid),
+                grid_text: pattern.grid.text(),
+                swing: pattern.swing,
+                steps: steps.is_integer().then(|| steps.to_integer().to_u32()).flatten(),
+                rows: pattern
+                    .steps
+                    .iter()
+                    .map(|(pad, row)| StepRow {
+                        pad: pad.clone(),
+                        cells: step_cells(row).into_iter().map(step_level).collect(),
+                    })
+                    .collect(),
+                events: pattern
+                    .events
+                    .iter()
+                    .enumerate()
+                    .map(|(i, e)| EventView {
+                        key: handle(event_items, i),
+                        at: float(&e.at_exact()),
+                        at_text: e.at.text(),
+                        pad: e.pad.clone(),
+                        velocity: e.velocity.clamp(0, 127) as u32,
+                        note: e.note.clone().filter(|n| !n.is_empty()),
+                        pitch: e.note.as_deref().and_then(|n| midi(n).ok()).map(|n| n as i32),
+                        duration: e.duration_exact().map(|d| float(&d)),
+                        duration_text: e.duration.as_ref().map(|d| d.text()),
+                        transpose: e.transpose,
+                    })
+                    .collect(),
+                clips: p.tracks.iter().flat_map(|t| &t.clips).filter(|c| &c.pattern == name).count() as u32,
+            }
+        })
+        .collect()
+}
+
 /// The arrangement of a revision.
 pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
     let p = &doc.project;
@@ -536,6 +650,7 @@ pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
                         sample: pad.sample.clone(),
                         gain_db: pad.gain_db,
                         gate: pad.mode == aaw_model::PadMode::Gate,
+                        root: root(p, &pad.sample),
                     })
                     .collect(),
                 clips: t
@@ -608,6 +723,7 @@ pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
             lane_targets: master_targets,
         },
         sections,
+        patterns: patterns(p, &tree),
     }
 }
 

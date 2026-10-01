@@ -13,8 +13,8 @@ and effect parameters.
 
 In progress: [Rust-Swift-Update.md](Rust-Swift-Update.md) plans a native macOS app
 with a real-time Rust engine that a person and an agent operate together. The engine
-has replaced the Python one and the app edits and plays songs; waveforms, the pattern
-editor and packaging remain. The Rust workspace is in [../engine](../engine) and the
+has replaced the Python one, and the app edits and plays songs, shows waveforms, edits
+patterns and browses the sample library; packaging remains. The Rust workspace is in [../engine](../engine) and the
 app in [../apps/mac](../apps/mac).
 
 Dated design notes: [design-notes-2026-09-07.md](design-notes-2026-09-07.md) is a

@@ -11,10 +11,10 @@ reads songs through `aaw-py`.
 |---|---|
 | `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
 | `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes and the six effects |
-| `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers |
+| `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket |
 | `aaw-cli` | The `daw` binary |
-| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, changes and transport |
+| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, patterns, waveforms, changes and transport, and the sample library |
 | `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module |
 
 ## Build and test
@@ -53,7 +53,7 @@ which runs that binary (or the one `AAW_DAW` names). It implements:
 | `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read |
 | `daw host PROJECT` | Runs a session host until interrupted or `daw close` |
 | `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output; see below |
-| `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device, and a compile, a recompile and building a renderer |
+| `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device, and a compile, a recompile, building a renderer and each track's waveform peaks |
 | `daw stop`, `daw locate PROJECT BEAT`, `daw loop PROJECT START LENGTH`, `daw loop PROJECT off` | Transport of a running host |
 | `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
@@ -94,6 +94,11 @@ stream is cut into blocks, and processing never allocates.
   audio and reverb kernels are kept from the last compile, so after a level or
   knob edit it takes under a millisecond. Pad audio a first compile lacks is
   repitched on several threads.
+- **Peaks** (`peaks.rs`) are what a track's voices sum to, before its inserts
+  and fader, as the least and greatest sample of every 64 frames and of
+  coarser stretches four times as long each, for a display to draw at any
+  zoom. A track's program carries an identity of what its voices are made
+  from, so peaks are worked out again only for the tracks an edit changed.
 
 ## Session host
 
@@ -122,6 +127,9 @@ log, handles and the transport need a host.
   handles such as `@12` that keep naming the same object as other edits land.
   `daw inspect` lists each clip's reference and `daw get` puts one on every list
   item.
+- **A batch builds on itself.** A track, return or pattern a batch adds can be
+  added to by its later commands: a pad and a clip on a new track, steps and
+  events in a new pattern.
 - **References stay valid.** Renaming a track renames the sidechains naming it;
   renaming or removing a return updates or removes its sends and their lanes;
   inserting, moving or removing an effect rewrites or removes the lanes that
@@ -157,16 +165,29 @@ log, handles and the transport need a host.
 
 A process can embed a host instead of running `daw host`: `host::spawn` runs one
 on its own thread and calls an observer with the opened song, each change with
-the song after it, transport changes, warnings and the close, while `Clock`
-gives the playhead straight from the audio thread. The Mac app does this through
-`aaw-ffi`, whose `Song` turns each revision into the arrangement the app draws
-(`view.rs`), with every effect's fields as a control needs them and every
-lane's points, names the tracks, clips, returns and sections a change touched,
-and turns the person's edits into commands (`edits.rs`), working out exact
-beats from the song for a clip moved by so many beats or copied after itself.
+the song after it, each revision's program once it is compiled, transport
+changes, warnings and the close, while `Clock` gives the playhead straight from
+the audio thread. The Mac app does this through `aaw-ffi`, whose `Song` turns
+each revision into the arrangement the app draws (`view.rs`), with every
+effect's fields as a control needs them, every lane's points and every
+pattern's steps and events, names the tracks, clips, returns and sections a
+change touched, and turns the person's edits into commands (`edits.rs`),
+working out exact beats from the song for a clip moved by so many beats or
+copied after itself, and for an event moved by steps of its pattern's grid.
 What a device panel shows of an effect type comes from `aaw_model::describe`.
 Such a host is reached through its socket like any other, and compiles each
 revision as it lands so that play starts at once.
+
+Waveforms follow each compile (`waveform.rs`): a thread of its own works out
+the peaks of the tracks whose identity it has not seen, a few at a time, and
+tells the app which audio each track has at the revision and the peaks it has
+not been sent. Only the latest revision is worked on, and peaks are kept for a
+while, so undo and redo find theirs.
+
+The app's sample browser asks Python (`library.rs`, `aaw_host::python`):
+`daw samples search` for what it lists, and `daw samples import --copy-only`
+to copy a chosen file into the project, which the song then takes as one edit
+with the pad, and the track if it is new, that plays it.
 
 `crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
 the selection, external edits, concurrent clients, an embedded host and a
@@ -178,7 +199,11 @@ including a sample import that reaches the song through the host.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
 what each kind of change touches, the person's edits and their place in the
 shared history, the fields a device panel is drawn from, edits of effects,
-equalizer bands, lanes and points, and the transport shared with an agent.
+equalizer bands, lanes and points, the transport shared with an agent, the
+waveforms that follow each kind of edit, patterns as the editor draws them,
+edits of steps, events, lengths and grids, a sample added as a pad or a track,
+and, where the checkout's Python is there, a search of a generated library and
+a copy from it.
 
 ## The model
 

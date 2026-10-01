@@ -87,6 +87,16 @@ public struct TimelineLayout: Equatable {
         return max(0, beat)
     }
 
+    /// The start of the grid step that holds `x`, or with `free` the beat
+    /// there to a thousandth, inside the song: where a new clip goes.
+    public func step(atX x: CGFloat, free: Bool) -> Double {
+        let raw = beat(atX: x)
+        let g = grid
+        let beat = free ? (raw * 1000).rounded() / 1000 : (raw / g).rounded(.down) * g
+        let last = free ? lengthBeats - 0.001 : ((lengthBeats / g).rounded(.up) - 1) * g
+        return max(0, min(beat, last))
+    }
+
     /// A beat on the grid, or with `free` to a thousandth of a beat, from the
     /// song's start to its end: where an automation point can be.
     public func snapped(_ beat: Double, free: Bool) -> Double {

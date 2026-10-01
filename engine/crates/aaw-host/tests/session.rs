@@ -255,6 +255,23 @@ fn a_batch_is_one_step_and_all_or_nothing() {
     assert_eq!(s.doc().sha, before);
     let nested = json!({"op": "batch", "commands": [{"op": "undo"}]});
     assert!(edit(&mut s, nested).unwrap_err().contains("undo cannot be batched"));
+    // What a batch makes, its later commands can add to.
+    let built = json!({"op": "batch", "commands": [
+        {"op": "track.add", "id": "lead"},
+        {"op": "pad.add", "track": "lead", "pad": "t", "sample": "tone"},
+        {"op": "effect.add", "owner": "tracks.lead", "type": "limiter"},
+        {"op": "pattern.add", "pattern": "riff", "length_beats": 2},
+        {"op": "pattern.steps", "pattern": "riff", "pad": "t", "row": "x...x..."},
+        {"op": "event.add", "pattern": "riff", "at": 1.5, "pad": "t"},
+        {"op": "clip.add", "track": "lead", "pattern": "riff", "at": 4},
+        {"op": "return.add", "id": "room"},
+        {"op": "effect.add", "owner": "returns.room", "type": "reverb"},
+        {"op": "send.set", "track": "lead", "to": "room", "gain_db": -6},
+    ]});
+    edit(&mut s, built).unwrap();
+    assert_eq!(get(&s, "tracks.lead.clips"), json!([{"pattern": "riff", "at": 4}]));
+    assert_eq!(get(&s, "patterns.riff"), json!({"length_beats": 2, "steps": {"t": "x...x..."}, "events": [{"at": 1.5, "pad": "t"}]}));
+    assert_eq!(get(&s, "returns.room.effects.0.type"), json!("reverb"));
 }
 
 #[test]

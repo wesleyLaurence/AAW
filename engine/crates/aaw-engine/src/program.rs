@@ -136,6 +136,10 @@ pub struct TrackProgram {
     /// Voices in trigger order, shared with every program compiled while the
     /// track's clips, patterns and pads stay as they are.
     pub voices: Arc<Vec<Voice>>,
+    /// Equal for tracks whose voices are the same hits of the same audio
+    /// within the same session length, so that what was worked out from
+    /// them, such as waveform peaks, can be kept.
+    pub voices_id: u64,
     pub chain: ChainProgram,
     /// Level in dB and pan, static or automated.
     pub gain: Param,
@@ -711,6 +715,11 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     let mut tracks: Vec<TrackProgram> = Vec::new();
     for t in order {
         let key = keys.remove(t.id.as_str()).expect("a key for each track");
+        let voices_id = {
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            (&key, total).hash(&mut h);
+            h.finish()
+        };
         let voices = voices(p, index[t.id.as_str()], key, directory, cache)?;
         let mut lanes = Lanes::new(Owner::Track(t), &t.automation, p);
         let mut chain = chain(&t.effects, &mut lanes, p, &mut cache.kernels);
@@ -740,6 +749,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         tracks.push(TrackProgram {
             id: t.id.clone(),
             voices,
+            voices_id,
             chain,
             gain: lanes.channel("gain_db", t.gain_db),
             pan: lanes.channel("pan", t.pan),

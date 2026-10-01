@@ -208,11 +208,23 @@ fn transport_settings_without_a_device() {
     assert_eq!(h.send(json!({"op": "stop"})).unwrap()["playing"], json!(false));
 }
 
-/// The next event that is not a warning; warnings are collected.
-fn next(events: &std::sync::mpsc::Receiver<Event>, warnings: &mut Vec<String>) -> Event {
+/// What a host reports beside the events a test waits for: its warnings, and
+/// each revision it compiled with the program's tracks.
+#[derive(Default)]
+struct Aside {
+    warnings: Vec<String>,
+    compiled: Vec<(u64, Vec<String>)>,
+}
+
+/// The next event that is not a warning or a compiled program, which are
+/// collected.
+fn next(events: &std::sync::mpsc::Receiver<Event>, aside: &mut Aside) -> Event {
     loop {
         match events.recv_timeout(Duration::from_secs(10)).expect("an event") {
-            Event::Warning(w) => warnings.push(w),
+            Event::Warning(w) => aside.warnings.push(w),
+            Event::Compiled { revision, program } => {
+                aside.compiled.push((revision, program.tracks.iter().map(|t| t.id.clone()).collect()));
+            }
             other => return other,
         }
     }
@@ -236,7 +248,7 @@ fn an_embedded_host_reports_what_changes() {
         let _ = tx.send(e);
     })
     .unwrap();
-    let mut warnings = Vec::new();
+    let mut warnings = Aside::default();
     let Event::Opened(doc) = next(&events, &mut warnings) else {
         panic!("the first event is the opened song")
     };
@@ -263,8 +275,9 @@ fn an_embedded_host_reports_what_changes() {
     assert_eq!(change.label, "Set tracks.drums.gain_db: 0.0 → -6");
     assert_eq!(doc.project.tracks[0].gain_db, -6.0);
     assert_eq!((history.undo, history.redo), (Some((change.label.clone(), Origin::Agent)), None));
-    // `prepare` compiled the song, effects and all, for the first play.
-    assert!(warnings.is_empty(), "{warnings:?}");
+    // `prepare` compiled the song, effects and all, for the first play, and
+    // each revision's program is reported once it is compiled.
+    assert!(warnings.warnings.is_empty(), "{:?}", warnings.warnings);
     let status = request(&path, json!({"op": "status"}), Origin::Agent).unwrap().unwrap();
     assert_eq!(status["latency_frames"], json!(0));
     assert_eq!(status["playback_error"], Json::Null);
@@ -287,6 +300,8 @@ fn an_embedded_host_reports_what_changes() {
     let summary = running.close().unwrap();
     assert_eq!(summary["revision"], json!(1));
     assert!(matches!(next(&events, &mut warnings), Event::Closed));
+    let tracks = vec!["drums".to_string(), "bass".to_string()];
+    assert_eq!(warnings.compiled, [(0, tracks.clone()), (1, tracks)]);
     assert!(request(&path, json!({"op": "status"}), Origin::Agent).unwrap().is_none());
 }
 

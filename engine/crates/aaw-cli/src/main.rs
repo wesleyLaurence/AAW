@@ -718,11 +718,27 @@ fn run(cli: &Cli) -> Result<Json> {
                     seconds: *seconds,
                     buffer: *buffer,
                 };
+                // What the app's waveforms cost: each track's peaks over the
+                // whole song, one track at a time.
+                let peaks: Vec<std::time::Duration> = program
+                    .tracks
+                    .iter()
+                    .map(|t| {
+                        let started = std::time::Instant::now();
+                        drop(aaw_engine::peaks::peaks(&t.voices, program.total));
+                        started.elapsed()
+                    })
+                    .collect();
                 let mut report = value(benchmark(program, &opts));
                 let ms = |d: std::time::Duration| json!((d.as_secs_f64() * 1e5).round() / 100.0);
                 report["compile_ms"] = ms(cold);
                 report["recompile_ms"] = ms(warm);
                 report["renderer_ms"] = ms(deck);
+                report["peaks_ms"] = json!({
+                    "tracks": peaks.len(),
+                    "all": ms(peaks.iter().sum()),
+                    "slowest_track": ms(peaks.iter().max().copied().unwrap_or_default()),
+                });
                 return Ok(report);
             }
             let play = PlayArgs {
@@ -1103,33 +1119,15 @@ fn init(directory: &Path, tempo: f64, bars: i64) -> Result<Json> {
     Ok(json!({"project": std::fs::canonicalize(&path).map_err(text)?}))
 }
 
-/// The Python that has the `agent_daw` package: AAW_PYTHON, or the environment
-/// of the checkout this binary was built from.
-fn python() -> Result<PathBuf> {
-    if let Some(path) = std::env::var_os("AAW_PYTHON") {
-        return Ok(path.into());
-    }
-    let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let python = checkout.join(".venv/bin/python");
-    if python.exists() {
-        return Ok(python);
-    }
-    Err(format!(
-        "This command runs in Python, which was not found at {}; run `uv sync` in the checkout or set AAW_PYTHON",
-        python.display()
-    ))
-}
-
 /// Runs a Python command with this process's arguments, input and output, and
 /// returns its exit status. What that command asks of `daw` in turn, as `check`
 /// asks for `inspect`, comes back to this binary.
 fn forward(command: &str, args: &[String]) -> Result<ExitCode> {
-    let mut python = std::process::Command::new(python()?);
+    let mut python = aaw_host::python::command(command)?;
     if std::env::var_os("AAW_DAW").is_none() {
         python.env("AAW_DAW", std::env::current_exe().map_err(text)?);
     }
     let status = python
-        .args(["-m", "agent_daw.cli", command])
         .args(args)
         .status()
         .map_err(|e| format!("Could not start Python: {e}"))?;

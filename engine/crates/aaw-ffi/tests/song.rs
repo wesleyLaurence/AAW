@@ -3,8 +3,8 @@
 //! No audio device is opened.
 
 use aaw_engine::wav::float_wav_bytes;
-use aaw_ffi::view::{Delta, EffectView, FieldKind, FieldValue, FieldView, LaneView, Part, SendView, Touch};
-use aaw_ffi::{Edit, HistoryStep, Row, Song, SongObserver, TransportView, Update, Who};
+use aaw_ffi::view::{Delta, EffectView, FieldKind, FieldValue, FieldView, LaneView, Part, PatternView, SendView, Touch};
+use aaw_ffi::{Edit, HistoryStep, Row, Song, SongObserver, TransportView, Update, Waveforms, Who};
 use aaw_host::client::{self, Request};
 use aaw_host::command::Origin;
 use serde_json::{json, Value as Json};
@@ -66,7 +66,8 @@ enum Seen {
     Closed,
 }
 
-struct Watcher(Mutex<Sender<Seen>>);
+/// Waveforms come from a thread of their own, so they are watched apart.
+struct Watcher(Mutex<Sender<Seen>>, Mutex<Sender<Waveforms>>);
 
 impl Watcher {
     fn send(&self, seen: Seen) {
@@ -85,18 +86,28 @@ impl SongObserver for Watcher {
         self.send(Seen::Invalid(error));
     }
     fn warning(&self, _message: String) {}
+    fn waveforms(&self, waveforms: Waveforms) {
+        let _ = self.1.lock().unwrap().send(waveforms);
+    }
     fn closed(&self) {
         self.send(Seen::Closed);
     }
 }
 
 fn open() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>) {
+    let (dir, path, song, seen, _) = open_with_waveforms();
+    (dir, path, song, seen)
+}
+
+fn open_with_waveforms() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>, Receiver<Waveforms>) {
     registry_dir();
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
     let (tx, rx) = channel();
-    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(Watcher(Mutex::new(tx)))).unwrap();
-    (dir, path, song, rx)
+    let (waves_tx, waves) = channel();
+    let watcher = Watcher(Mutex::new(tx), Mutex::new(waves_tx));
+    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(watcher)).unwrap();
+    (dir, path, song, rx, waves)
 }
 
 /// A command from another process, as the agent's `daw` sends it.
@@ -712,5 +723,504 @@ fn equalizer_bands_come_and_go_with_their_lanes() {
     let u = update(&seen);
     assert_eq!((u.arrangement.tracks[0].effects[0].bands, u.arrangement.tracks[0].lanes.len()), (3, 3));
     assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.drums.automation.0.param"})), json!("effects.0.bands.1.gain_db"));
+    song.close();
+}
+
+/// The waveforms of a revision, with every track's peaks arrived: updates
+/// until none of the revision's audio is missing from what has been sent.
+fn waveforms(waves: &Receiver<Waveforms>, revision: u64, have: &mut std::collections::HashMap<u64, aaw_ffi::waveform::TrackPeaks>) -> Waveforms {
+    let mut sent = Vec::new();
+    loop {
+        let mut w = waves.recv_timeout(Duration::from_secs(10)).expect("waveforms");
+        if w.revision < revision {
+            continue;
+        }
+        assert_eq!(w.revision, revision);
+        have.retain(|id, _| w.tracks.iter().any(|t| t.identity == *id));
+        for p in &w.peaks {
+            have.insert(p.identity, p.clone());
+        }
+        sent.append(&mut w.peaks);
+        if w.tracks.iter().all(|t| have.contains_key(&t.identity)) {
+            w.peaks = sent;
+            return w;
+        }
+    }
+}
+
+#[test]
+fn waveforms_follow_the_audio_of_each_track() {
+    let (_dir, path, song, seen, waves) = open_with_waveforms();
+    transport(&seen);
+    let start = song.arrangement();
+    let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
+    let mut have = std::collections::HashMap::new();
+
+    // Opening the song gives every track its peaks.
+    let first = waveforms(&waves, 0, &mut have);
+    assert_eq!(first.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, perc]);
+    assert_eq!(first.peaks.len(), 2);
+    let identity = |w: &Waveforms, track: u64| w.tracks.iter().find(|t| t.track == track).unwrap().identity;
+    let drum_peaks = have[&identity(&first, drums)].clone();
+    // 120 beats a minute at 48 kHz, over 32 beats.
+    assert_eq!((drum_peaks.frames_per_beat, drum_peaks.frames), (24000.0, 768000));
+    let finest = &drum_peaks.levels[0];
+    assert_eq!((finest.frames_per_bucket, finest.data.len()), (64, 2 * 12000));
+    assert!(drum_peaks.levels.len() > 1 && drum_peaks.levels.last().unwrap().data.len() <= 2 * 2048);
+    // The first hit is at the start, above zero only: half of full scale at
+    // a step's velocity. Beats 18 to 32 of the drums have no clip and are silent.
+    assert_eq!((finest.data[0] as i8, finest.data[1] as i8), (0, 49));
+    let bucket = |beat: f64| 2 * (beat * 24000.0 / 64.0) as usize;
+    assert!(finest.data[bucket(18.5)..].iter().all(|x| *x == 0));
+    assert!(finest.data[bucket(16.0)..bucket(18.0)].iter().any(|x| *x != 0));
+
+    // A fader changes no audio: the same identities, and nothing to send.
+    agent(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -6}));
+    let faded = waveforms(&waves, 1, &mut have);
+    assert_eq!((faded.tracks.clone(), faded.peaks.len()), (first.tracks.clone(), 0));
+
+    // A moved clip changes its track's audio and no other's.
+    let clip = start.tracks[1].clips[0].key;
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: 8.0, rows: 0 }, None).unwrap();
+    let moved = waveforms(&waves, 2, &mut have);
+    assert_eq!(identity(&moved, drums), identity(&first, drums));
+    assert_ne!(identity(&moved, perc), identity(&first, perc));
+    assert_eq!(moved.peaks.iter().map(|p| p.identity).collect::<Vec<_>>(), [identity(&moved, perc)]);
+    let perc_peaks = &moved.peaks[0].levels[0].data;
+    assert!(perc_peaks[..bucket(15.9)].iter().all(|x| *x == 0) && perc_peaks[bucket(16.0)..bucket(16.1)].iter().any(|x| *x != 0));
+
+    // Undo brings the old audio back, from what was kept.
+    song.undo().unwrap();
+    let undone = waveforms(&waves, 3, &mut have);
+    assert_eq!(undone.tracks, first.tracks);
+    assert_eq!(undone.peaks.len(), 1);
+    assert!(undone.peaks[0].levels[0].data[..bucket(8.0)].iter().all(|x| *x == 0));
+
+    // A new track has peaks of its own: silence, until it plays something.
+    let added = song.edit(Edit::TrackAdd { index: 2 }, None).unwrap()[0];
+    let grown = waveforms(&waves, 4, &mut have);
+    assert_eq!(grown.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, perc, added]);
+    assert!(have[&identity(&grown, added)].levels[0].data.iter().all(|x| *x == 0));
+    song.close();
+}
+
+fn pattern<'a>(a: &'a aaw_ffi::Arrangement, name: &str) -> &'a PatternView {
+    a.patterns.iter().find(|p| p.name == name).unwrap_or_else(|| panic!("no pattern {name}"))
+}
+
+/// The song with a pad that is held, a pad with a pitch, and a pattern that
+/// plays them with events.
+fn open_with_notes() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>) {
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    let tone: Vec<[f32; 2]> = (0..24000).map(|i| [((i as f64 * 0.03).sin() * 0.3) as f32; 2]).collect();
+    std::fs::write(dir.path().join("tone.wav"), float_wav_bytes(&tone, 48000)).unwrap();
+    agent(
+        &path,
+        json!({"op": "batch", "commands": [
+            {"op": "set", "path": "samples.tone", "value": {"path": "tone.wav", "root_note": "A2"}},
+            {"op": "track.add", "id": "bass"},
+            {"op": "pad.add", "track": "bass", "pad": "t", "sample": "tone", "mode": "gate"},
+            {"op": "pad.add", "track": "bass", "pad": "k", "sample": "hit"},
+            {"op": "pattern.add", "pattern": "line", "length_beats": 4, "events": [
+                {"at": 0, "pad": "t", "note": "C3", "duration": 1},
+                {"at": "4/3", "pad": "t", "duration": "2/3", "velocity": 80},
+                {"at": 2.5, "pad": "k"},
+            ]},
+            {"op": "clip.add", "track": "bass", "pattern": "line", "at": 8, "repeats": 2},
+        ]}),
+    );
+    update(&seen);
+    (dir, path, song, seen)
+}
+
+#[test]
+fn a_pattern_is_what_the_editor_draws() {
+    let (_dir, _path, song, _seen) = open_with_notes();
+    let a = song.arrangement();
+    assert_eq!(a.patterns.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["beat", "fill", "line"]);
+    let beat = pattern(&a, "beat");
+    assert_eq!((beat.length_beats, beat.grid, beat.grid_text.as_str(), beat.swing, beat.steps, beat.clips), (4.0, 0.25, "1/4", 0.5, Some(16), 2));
+    assert_eq!(beat.length_text, "4");
+    assert_eq!(beat.rows.len(), 1);
+    assert_eq!((beat.rows[0].pad.as_str(), &beat.rows[0].cells[..4]), ("h", &[10u8, 0, 10, 0][..]));
+    assert!(beat.events.is_empty());
+
+    let line = pattern(&a, "line");
+    assert_eq!((line.rows.len(), line.clips), (0, 1));
+    let events: Vec<_> = line.events.iter().map(|e| (e.at, e.pad.as_str(), e.velocity, e.note.as_deref(), e.pitch, e.duration)).collect();
+    assert_eq!(
+        events,
+        [
+            (0.0, "t", 100, Some("C3"), Some(48), Some(1.0)),
+            (4.0 / 3.0, "t", 80, None, None, Some(2.0 / 3.0)),
+            (2.5, "k", 100, None, None, None),
+        ]
+    );
+    assert!(line.events.iter().all(|e| e.key != 0));
+    let written: Vec<_> = line.events.iter().map(|e| (e.at_text.as_str(), e.duration_text.as_deref())).collect();
+    assert_eq!(written, [("0", Some("1")), ("4/3", Some("2/3")), ("2.5", None)]);
+    // A pad says whether it is held and what pitch its sample has.
+    let pads: Vec<_> = a.tracks[2].pads.iter().map(|p| (p.name.as_str(), p.gate, p.root)).collect();
+    assert_eq!(pads, [("t", true, Some(45)), ("k", false, None)]);
+    assert_eq!((aaw_ffi::note_name(45), aaw_ffi::note_name(61), aaw_ffi::note_name(200)), ("A2".into(), "C#4".into(), String::new()));
+    song.close();
+}
+
+#[test]
+fn steps_are_set_on_a_pattern_s_grid() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let steps = |pad: &str, steps: Vec<u32>, level: u32| Edit::Steps { pattern: "beat".into(), pad: pad.into(), steps, level };
+    let row = |pad: &str| agent(&path, json!({"op": "get", "path": format!("patterns.beat.steps.{pad}")}));
+
+    // Steps go on and off where they are, and a row keeps how it was written.
+    agent(&path, json!({"op": "pattern.steps", "pattern": "beat", "pad": "h", "row": "x.x. x.x. | x.x. x.x."}));
+    update(&seen);
+    song.edit(steps("h", vec![1, 2], 10), None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Set beat steps for h"));
+    assert_eq!(row("h"), json!("xxx. x.x. | x.x. x.x."));
+    song.edit(steps("h", vec![0, 8], 0), None).unwrap();
+    song.edit(steps("h", vec![15], 3), None).unwrap();
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!(row("h"), json!(".xx. x.x. | ..x. x.x3"));
+    assert_eq!(pattern(&u.arrangement, "beat").rows[0].cells[12..], [10, 0, 10, 3]);
+    // Both clips of the pattern play the new steps.
+    assert_eq!(u.touched.iter().filter(|t| t.part == Part::Clip && t.delta == Delta::Changed).count(), 2);
+
+    // A row left without steps goes; clearing nothing is no change.
+    song.edit(steps("h", (0..16).collect(), 0), None).unwrap();
+    assert!(pattern(&update(&seen).arrangement, "beat").rows.is_empty());
+    assert!(song.edit(steps("h", vec![3], 0), None).unwrap().is_empty());
+    // A pad's first step writes its row, a beat to a group.
+    song.edit(steps("h", vec![0, 6], 10), None).unwrap();
+    update(&seen);
+    assert_eq!(row("h"), json!("x... ..x. .... ...."));
+    // No such step, level or pad.
+    assert!(song.edit(steps("h", vec![16], 10), None).unwrap_err().to_string().contains("has 16 steps"));
+    assert!(song.edit(steps("h", vec![0], 11), None).is_err());
+    assert_eq!(song.edit(steps("nope", vec![0], 10), None).unwrap_err().to_string(), "drums: unknown pad nope");
+    song.close();
+}
+
+#[test]
+fn events_are_added_moved_and_shaped() {
+    let (_dir, path, song, seen) = open_with_notes();
+    let get = |key: u64| agent(&path, json!({"op": "get", "path": format!("@{key}")}));
+    let fields = |key: u64| {
+        let mut j = get(key);
+        j.as_object_mut().unwrap().remove("ref");
+        j
+    };
+    let line = pattern(&song.arrangement(), "line").clone();
+    let (first, second, kick) = (line.events[0].key, line.events[1].key, line.events[2].key);
+
+    // On the grid a new event is on an exact step, held for as many steps as asked; off it, where it was put.
+    let add = |pad: &str, at: f64, free: bool, pitch: Option<i32>, steps: u32| Edit::EventAdd { pattern: "line".into(), pad: pad.into(), at, free, pitch, steps };
+    let made = song.edit(add("t", 3.26, false, Some(52), 2), None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Add event to line"));
+    assert_eq!(fields(made), json!({"at": 3.25, "pad": "t", "note": "E3", "duration": 0.5}));
+    assert_eq!(pattern(&u.arrangement, "line").events[3].pitch, Some(52));
+    let free = song.edit(add("k", 1.2345678, true, None, 0), None).unwrap()[0];
+    update(&seen);
+    assert_eq!(fields(free), json!({"at": 1.2345678, "pad": "k"}));
+    // The last step is the latest an event can start.
+    let late = song.edit(add("k", 4.0, false, None, 0), None).unwrap()[0];
+    update(&seen);
+    assert_eq!(fields(late)["at"], json!(3.75));
+    // A held pad needs a length, and a pitch needs a root note.
+    assert_eq!(song.edit(add("t", 0.0, false, None, 0), None).unwrap_err().to_string(), "bass.t: gated events need positive duration");
+    assert_eq!(song.edit(add("k", 0.0, false, Some(60), 0), None).unwrap_err().to_string(), "hit needs root_note for pitched events");
+
+    // A move is by exact steps: an event on a third stays on thirds.
+    song.edit(Edit::EventMove { event: second, steps: 2, by: 0.0, semitones: 0 }, None).unwrap();
+    update(&seen);
+    assert_eq!(get(second)["at"], json!("11/6"));
+    song.edit(Edit::EventMove { event: second, steps: -1, by: 0.125, semitones: 0 }, None).unwrap();
+    update(&seen);
+    assert_eq!(get(second)["at"], json!("41/24"));
+    // In pitch it moves from its note, or from its sample's root when it has none.
+    song.edit(Edit::EventMove { event: first, steps: 0, by: 0.0, semitones: -5 }, None).unwrap();
+    update(&seen);
+    assert_eq!(get(first)["note"], json!("G2"));
+    song.edit(Edit::EventMove { event: second, steps: 0, by: 0.0, semitones: 3 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((get(second)["note"].clone(), pattern(&u.arrangement, "line").events[1].pitch), (json!("C3"), Some(48)));
+    assert!(song.edit(Edit::EventMove { event: first, steps: 0, by: 0.0, semitones: 0 }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::EventMove { event: first, steps: -1, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("before its pattern"));
+    assert!(song.edit(Edit::EventMove { event: first, steps: 99, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("outside pattern"));
+    assert!(song.edit(Edit::EventMove { event: kick, steps: 0, by: 0.0, semitones: 1 }, None).unwrap_err().to_string().contains("without a root note"));
+    assert!(song.edit(Edit::EventMove { event: first, steps: 0, by: 0.0, semitones: 120 }, None).is_err());
+
+    // Its end goes to a line of the grid; it cannot end before it starts.
+    song.edit(Edit::EventEnd { event: first, step: 6 }, None).unwrap();
+    update(&seen);
+    assert_eq!(get(first)["duration"], json!(1.5));
+    song.edit(Edit::EventEnd { event: second, step: 8 }, None).unwrap();
+    update(&seen);
+    assert_eq!(get(second)["duration"], json!("7/24"));
+    assert!(song.edit(Edit::EventEnd { event: second, step: 6 }, None).is_err());
+
+    // Typed values are written as typed; an empty one takes the field away.
+    let set = |event: u64, at: Option<&str>, duration: Option<&str>, velocity: Option<u32>, transpose: Option<f64>, note: Option<&str>| Edit::EventSet {
+        event,
+        at: at.map(str::to_string),
+        duration: duration.map(str::to_string),
+        velocity,
+        transpose,
+        note: note.map(str::to_string),
+    };
+    song.edit(set(kick, Some("7/3"), Some(" 0.5 "), Some(64), Some(-12.0), None), None).unwrap();
+    update(&seen);
+    assert_eq!(fields(kick), json!({"at": "7/3", "pad": "k", "velocity": 64, "duration": 0.5, "transpose": -12.0}));
+    song.edit(set(kick, Some("2"), Some(""), None, Some(0.0), None), None).unwrap();
+    update(&seen);
+    assert_eq!(fields(kick), json!({"at": 2, "pad": "k", "velocity": 64}));
+    song.edit(set(first, None, None, None, None, Some("")), None).unwrap();
+    update(&seen);
+    assert_eq!(get(first).get("note"), None);
+    assert!(song.edit(set(first, None, None, Some(200), None, None), None).is_err());
+    assert!(song.edit(set(first, None, None, None, None, Some("H2")), None).is_err());
+
+    // A velocity drag is one undo step.
+    for velocity in [70, 90, 110] {
+        song.edit(set(first, None, None, Some(velocity), None, None), Some("velocity".into())).unwrap();
+    }
+    update(&seen);
+    update(&seen);
+    assert_eq!(update(&seen).undo.unwrap().label, "Change event of line: t at 0");
+    song.undo().unwrap();
+    assert_eq!(pattern(&update(&seen).arrangement, "line").events[0].velocity, 100);
+
+    song.edit(Edit::EventRemove { event: free }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Remove event of line: k at 1.2345678");
+    assert!(pattern(&u.arrangement, "line").events.iter().all(|e| e.key != free));
+    assert!(song.edit(Edit::EventRemove { event: free }, None).is_err());
+    assert!(song.edit(Edit::EventMove { event: free, steps: 1, by: 0.0, semitones: 0 }, None).is_err());
+
+    // What the person selects in the editor, the agent can ask about.
+    song.select(vec![first]).unwrap();
+    assert_eq!(agent(&path, json!({"op": "status"}))["selection"], json!([{"ref": format!("@{first}"), "path": "patterns.line.events.0"}]));
+    song.close();
+}
+
+#[test]
+fn a_pattern_s_length_grid_and_swing_change_with_its_steps() {
+    let (_dir, path, song, seen) = open_with_notes();
+    let steps = |name: &str| agent(&path, json!({"op": "get", "path": format!("patterns.{name}.steps")}));
+    let length = |pattern: &str, beats: &str| Edit::PatternLength { pattern: pattern.into(), beats: beats.into() };
+    let grid = |pattern: &str, grid: &str| Edit::PatternGrid { pattern: pattern.into(), grid: grid.into() };
+
+    song.edit(Edit::PatternSwing { pattern: "fill".into(), swing: 0.62 }, None).unwrap();
+    assert_eq!(pattern(&update(&seen).arrangement, "fill").swing, 0.62);
+    assert!(song.edit(Edit::PatternSwing { pattern: "fill".into(), swing: 0.9 }, None).is_err());
+    assert!(song.edit(Edit::PatternSwing { pattern: "nope".into(), swing: 0.6 }, None).is_err());
+
+    // A shorter pattern keeps the steps and events that still fit, as one step.
+    song.edit(length("fill", "1"), None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Set the length of pattern fill to 1 beats"));
+    assert_eq!((steps("fill"), pattern(&u.arrangement, "fill").length_beats), (json!({"h": "xxxx"}), 1.0));
+    song.edit(length("fill", "3/2"), None).unwrap();
+    update(&seen);
+    assert_eq!(steps("fill"), json!({"h": "xxxx .."}));
+    song.edit(length("line", "2"), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(pattern(&u.arrangement, "line").events.iter().map(|e| e.at).collect::<Vec<_>>(), [0.0, 4.0 / 3.0]);
+    song.undo().unwrap();
+    assert_eq!(pattern(&update(&seen).arrangement, "line").events.len(), 3);
+    // A length that is not a whole number of steps cannot hold step rows, and
+    // clips must still fit the song.
+    assert!(song.edit(length("fill", "1.1"), None).unwrap_err().to_string().contains("whole number of steps"));
+    assert_eq!(song.edit(length("beat", "16"), None).unwrap_err().to_string(), "drums: clip exceeds session");
+    assert!(song.edit(length("fill", "3/2"), None).unwrap().is_empty());
+
+    // A finer grid spreads the steps out; a coarser one takes them if they fall on it.
+    song.edit(length("fill", "1"), None).unwrap();
+    update(&seen);
+    song.edit(grid("fill", "1/8"), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the grid of pattern fill to 1/8 beats");
+    assert_eq!((steps("fill"), pattern(&u.arrangement, "fill").steps), (json!({"h": "x.x.x.x."}), Some(8)));
+    song.edit(grid("fill", "1/4"), None).unwrap();
+    update(&seen);
+    assert_eq!(steps("fill"), json!({"h": "xxxx"}));
+    let e = song.edit(grid("fill", "1/2"), None).unwrap_err().to_string();
+    assert_eq!(e, "Step 2 of h does not fall on a grid of 1/2 beats");
+    // Thirds: the steps on whole beats carry over.
+    song.edit(Edit::Steps { pattern: "fill".into(), pad: "h".into(), steps: vec![1, 2, 3], level: 0 }, None).unwrap();
+    update(&seen);
+    song.edit(grid("fill", "1/3"), None).unwrap();
+    assert_eq!((update(&seen).arrangement.patterns[1].grid_text.as_str(), steps("fill")), ("1/3", json!({"h": "x.."})));
+    assert!(song.edit(grid("fill", "0"), None).is_err());
+    song.close();
+}
+
+#[test]
+fn a_clip_gets_a_new_pattern_or_a_copy_of_its_own() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
+
+    // A new clip plays a new pattern one bar long, named for its track.
+    let made = song.edit(Edit::ClipNew { track: perc, at: 24.0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Add clip perc-1 to perc"));
+    let clip = u.arrangement.tracks[1].clips.last().unwrap();
+    assert_eq!((made.as_slice(), clip.pattern.as_str(), clip.at, clip.pattern_beats), (&[clip.key][..], "perc-1", 24.0, 4.0));
+    assert_eq!(pattern(&u.arrangement, "perc-1").steps, Some(16));
+    // Near the end it is as long as what is left of the song.
+    song.edit(Edit::ClipNew { track: perc, at: 30.0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(pattern(&u.arrangement, "perc-2").length_beats, 2.0);
+    assert!(song.edit(Edit::ClipNew { track: perc, at: 32.0 }, None).is_err());
+    assert!(song.edit(Edit::ClipNew { track: 9999, at: 0.0 }, None).is_err());
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.patterns.iter().all(|p| p.name != "perc-2"));
+
+    // A clip's own pattern: a copy, which the other clips do not play.
+    let second = start.tracks[0].clips[0].key;
+    song.edit(Edit::ClipOwnPattern { clip: second }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Give clip beat at 0 its own pattern beat-2");
+    assert_eq!(u.arrangement.tracks[0].clips[0].pattern, "beat-2");
+    assert_eq!((pattern(&u.arrangement, "beat").clips, pattern(&u.arrangement, "beat-2").clips), (1, 1));
+    assert_eq!(pattern(&u.arrangement, "beat-2").rows, pattern(&u.arrangement, "beat").rows);
+    song.edit(Edit::ClipOwnPattern { clip: second }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[0].clips[0].pattern, "beat-3");
+    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{drums}.clips.0.pattern")})), json!("beat-3"));
+    song.close();
+}
+
+#[test]
+fn a_sample_becomes_a_pad_or_a_track() {
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let drums = start.tracks[0].key;
+    // A file as the library's import leaves it: copied into the project.
+    std::fs::create_dir(dir.path().join("samples")).unwrap();
+    let copy = |name: &str| {
+        let to = format!("samples/{name}");
+        std::fs::copy(dir.path().join("hit.wav"), dir.path().join(&to)).unwrap();
+        aaw_ffi::library::Asset {
+            sha256: aaw_model::digest(&dir.path().join(&to)).unwrap(),
+            path: to,
+            source: "/library/Kicks/808 Kick (Hard).wav".into(),
+            root_note: None,
+        }
+    };
+    let kick = copy("0123_kick.wav");
+    let add = |asset: &aaw_ffi::library::Asset, name: &str, track: Option<u64>| Edit::SampleAdd { asset: asset.clone(), name: name.into(), track, index: 1 };
+
+    // On a track it is a new pad, in one step with the sample it plays.
+    assert!(song.edit(add(&kick, "Kick", Some(drums)), None).unwrap().is_empty());
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.op.as_str(), u.change.label.as_str()), (Who::User, "batch", "Add pad kick to drums"));
+    assert_eq!(u.arrangement.tracks[0].pads.iter().map(|p| (p.name.as_str(), p.sample.as_str())).collect::<Vec<_>>(), [("h", "hit"), ("kick", "kick")]);
+    assert_eq!(
+        agent(&path, json!({"op": "get", "path": "samples.kick"})),
+        json!({"path": "samples/0123_kick.wav", "sha256": kick.sha256, "source": "/library/Kicks/808 Kick (Hard).wav"})
+    );
+    // The same file again is the same sample, under another pad.
+    song.edit(add(&kick, "kick", Some(drums)), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[0].pads.iter().map(|p| (p.name.as_str(), p.sample.as_str())).collect::<Vec<_>>()[2], ("kick-2", "kick"));
+    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(2));
+
+    // With no track it is a new track, named after it, which the edit makes.
+    let mut tone = copy("4567_tone.wav");
+    tone.root_note = Some("C2".into());
+    let made = song.edit(add(&tone, "808 Sub (C)", None), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add track s-808-sub-c with pad s-808-sub-c");
+    let track = &u.arrangement.tracks[1];
+    assert_eq!((made.as_slice(), track.id.as_str()), (&[track.key][..], "s-808-sub-c"));
+    assert_eq!(track.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.root)).collect::<Vec<_>>(), [("s-808-sub-c", "s-808-sub-c", Some(36))]);
+    // One undo takes back the track, the pad and the sample.
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks.len(), 2);
+    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(2));
+    // A name taken by a track or a return gets a number.
+    song.edit(add(&tone, "plate", None), None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].id, "plate-2");
+
+    // A file that is not in the project is refused, and nothing changes.
+    let missing = aaw_ffi::library::Asset { path: "samples/none.wav".into(), sha256: kick.sha256.clone(), source: String::new(), root_note: None };
+    assert_eq!(song.edit(add(&missing, "none", Some(drums)), None).unwrap_err().to_string(), "Missing asset none");
+    assert_eq!(aaw_ffi::edits::ident("  Hi-Hat #3 (Open)  "), "hi-hat-3-open");
+    assert_eq!((aaw_ffi::edits::ident("808"), aaw_ffi::edits::ident("!!!"), aaw_ffi::edits::ident("Ünïcode")), ("s-808".into(), "sample".into(), "n-code".into()));
+    song.close();
+}
+
+#[test]
+fn the_library_is_searched_and_a_sample_copied_in() {
+    // The index and the copy are Python's; without it there is nothing to ask.
+    if aaw_host::python::interpreter().is_err() {
+        eprintln!("skipped: no Python with agent_daw; run `uv sync`");
+        return;
+    }
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    let library = dir.path().join("library");
+    for folder in ["Pack/Drum_Hits/Kicks", "Pack/Loops"] {
+        std::fs::create_dir_all(library.join(folder)).unwrap();
+    }
+    for name in ["Pack/Drum_Hits/Kicks/deep_kick_01.wav", "Pack/Drum_Hits/Kicks/soft_kick_02.wav", "Pack/Loops/drum_loop_120_Am.wav"] {
+        std::fs::copy(dir.path().join("hit.wav"), library.join(name)).unwrap();
+    }
+    // Tones, which measure as a pitch: one named as a kick, one as nothing in particular.
+    let tone: Vec<[f32; 2]> = (0..48000).map(|i| [((i as f64 * 2.0 * std::f64::consts::PI * 110.0 / 48000.0).sin() * 0.4) as f32; 2]).collect();
+    for name in ["Pack/Drum_Hits/Kicks/tuned_kick_03.wav", "Pack/Drum_Hits/sub_tone.wav"] {
+        std::fs::write(library.join(name), float_wav_bytes(&tone, 48000)).unwrap();
+    }
+    let db = dir.path().join(".daw/library.sqlite").to_string_lossy().into_owned();
+    aaw_host::python::run("samples", &["--db", &db, "scan", &library.to_string_lossy()]).unwrap();
+    aaw_host::python::run("samples", &["--db", &db, "analyze", "--all"]).unwrap();
+    let song_path = path.to_string_lossy().into_owned();
+    assert_eq!(aaw_ffi::library::library_path(song_path.clone()), Some(db.clone()));
+    assert!(aaw_ffi::library::library_categories().contains(&"kick".to_string()));
+
+    let search = |query: &str, category: Option<&str>, kind: Option<&str>| {
+        let found = aaw_ffi::library::library_search(db.clone(), query.into(), category.map(str::to_string), kind.map(str::to_string), 50).unwrap();
+        found.into_iter().map(|s| (s.name, s.category, s.kind, s.bpm, s.key)).collect::<Vec<_>>()
+    };
+    let hit = |name: &str| (name.to_string(), "kick".to_string(), "one-shot".to_string(), None, None);
+    assert_eq!(search("", Some("kick"), None), [hit("deep_kick_01.wav"), hit("soft_kick_02.wav"), hit("tuned_kick_03.wav")]);
+    assert_eq!(search("deep kick", None, None), [hit("deep_kick_01.wav")]);
+    assert_eq!(search("", None, Some("loop")), [("drum_loop_120_Am.wav".to_string(), "other".to_string(), "loop".to_string(), Some(120), Some("Am".to_string()))]);
+    assert_eq!(search("", None, None).len(), 5);
+    // A measured pitch is the root note to add a sample with, unless its name says it is a drum.
+    let notes = |query: &str| {
+        let found = aaw_ffi::library::library_search(db.clone(), query.into(), None, None, 1).unwrap().remove(0);
+        (found.note, found.root_note)
+    };
+    assert_eq!(notes("sub_tone"), (Some("A2".to_string()), Some("A2".to_string())));
+    assert_eq!(notes("tuned_kick"), (Some("A2".to_string()), None));
+    assert_eq!(notes("deep_kick"), (None, None));
+    let e = aaw_ffi::library::library_search(db.clone(), String::new(), None, Some("nope".into()), 50).unwrap_err().to_string();
+    assert!(e.contains("invalid choice"), "{e}");
+
+    // The chosen file is copied into the project, and the original left alone.
+    let found = aaw_ffi::library::library_search(db, "deep".into(), None, None, 1).unwrap().remove(0);
+    assert_eq!((found.pack.as_str(), found.channels, found.seconds, found.note), ("Pack", 2, 0.1, None));
+    let asset = aaw_ffi::library::library_import(song_path.clone(), found.path.clone(), Some("C2".into())).unwrap();
+    assert!(asset.path.starts_with("samples/") && asset.path.ends_with("_deep_kick_01.wav"));
+    assert_eq!((asset.source.as_str(), asset.root_note.as_deref()), (found.path.as_str(), Some("C2")));
+    assert_eq!(std::fs::read(dir.path().join(&asset.path)).unwrap(), std::fs::read(&found.path).unwrap());
+    assert_eq!(aaw_ffi::library::library_import(song_path.clone(), found.path.clone(), None).unwrap().path, asset.path);
+    assert!(aaw_ffi::library::library_import(song_path, "/nowhere.wav".into(), None).unwrap_err().to_string().contains("nowhere.wav"));
+
+    // As a track of the song.
+    song.edit(Edit::SampleAdd { asset, name: found.category, track: None, index: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.tracks[0].id.as_str(), u.arrangement.tracks[0].pads[0].root), ("kick", Some(36)));
     song.close();
 }
