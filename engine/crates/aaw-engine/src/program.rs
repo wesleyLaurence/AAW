@@ -1,13 +1,25 @@
-//! A song compiled for playback: prepared sample buffers and every voice's
-//! parameters, computed off the audio thread as the Python `Sampler` does.
+//! A song compiled for playback: every voice's prepared audio and parameters,
+//! each channel's effect chain and levels with their automation, the routing
+//! between them and the delays that align their latencies. Compiled off the
+//! audio thread; a `Renderer` plays it.
+//!
+//! Latency. Only the limiter delays its input, by its look-ahead. Every other
+//! path is delayed to match, as the Python engine's chains compensate theirs:
+//! a track keyed by a source with latency renders its voices that much later,
+//! tracks are delayed to the slowest track before their faders and sends,
+//! returns to the slowest return, and the output trails a voice by `latency`
+//! frames in all.
 
-use crate::schedule::{schedule, Trigger};
+use crate::schedule::{track_triggers, Trigger};
 use crate::sndfile;
+use aaw_dsp::device::{Kernels, Plan};
+use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
-use aaw_model::rules::midi;
-use aaw_model::{frame, Event, Pad, Project};
-use std::collections::HashMap;
+use aaw_model::rules::{midi, target, Owner, TargetKind};
+use aaw_model::{frame, Effect, Event, Lane, Pad, Project};
+use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -82,16 +94,88 @@ pub fn amplitude(db: f64) -> f64 {
     10f64.powf(db / 20.0)
 }
 
+/// The sidechain of a device: the track whose audio keys it, by its place
+/// among the program's tracks, and the delay that lines the key up with the
+/// audio reaching the device.
+#[derive(Debug)]
+pub struct Key {
+    pub source: usize,
+    pub delay: usize,
+}
+
+#[derive(Debug)]
+pub struct DeviceProgram {
+    pub plan: Plan,
+    /// The latency of the devices before this one in its chain.
+    pub upstream: usize,
+    pub key: Option<Key>,
+}
+
+/// A channel's inserts. Bypassed effects are not processed.
+#[derive(Debug, Default)]
+pub struct ChainProgram {
+    pub devices: Vec<DeviceProgram>,
+    /// For each effect of the document, its type and its place among
+    /// `devices`, or None when it is bypassed.
+    pub effects: Vec<(&'static str, Option<usize>)>,
+    pub latency: usize,
+}
+
+/// A track's send to a return. A track has one for every return, so that a
+/// send added or removed during playback is a level that fades.
+#[derive(Debug)]
+pub struct SendProgram {
+    pub pre_fader: bool,
+    /// The level in dB; None when the track does not send to the return.
+    pub level: Option<Param>,
+}
+
 #[derive(Debug)]
 pub struct TrackProgram {
     pub id: String,
-    /// Voices in trigger order.
-    pub voices: Vec<Voice>,
-    /// Balance gains of the track's stereo sum.
-    pub pan: [f64; 2],
-    pub gain: f64,
+    /// Voices in trigger order, shared with every program compiled while the
+    /// track's clips, patterns and pads stay as they are.
+    pub voices: Arc<Vec<Voice>>,
+    pub chain: ChainProgram,
+    /// Level in dB and pan, static or automated.
+    pub gain: Param,
+    pub pan: Param,
     /// Muted, or solo-muted.
     pub silent: bool,
+    /// A send for each of the program's returns.
+    pub sends: Vec<SendProgram>,
+    /// Frames by which the track's voices trail the transport, so that its
+    /// sidechain keys have come through their own chains.
+    pub delay: usize,
+    /// Frames the track's inserts' output is delayed to line up with the
+    /// slowest track.
+    pub align: usize,
+    /// Whether the track is heard and has a stem. A preview's helper tracks,
+    /// which only key or feed the target, are not.
+    pub in_mix: bool,
+    /// The parameters of the track's lanes.
+    pub automation: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct ReturnProgram {
+    pub id: String,
+    pub chain: ChainProgram,
+    pub gain: Param,
+    pub pan: Param,
+    pub mute: bool,
+    /// Frames the return's output is delayed to line up with the slowest return.
+    pub align: usize,
+    pub senders: Vec<String>,
+    pub automation: Vec<String>,
+}
+
+#[derive(Debug)]
+pub struct MasterProgram {
+    /// The master level in dB: the session's, or a lane's.
+    pub gain: Param,
+    pub chain: ChainProgram,
+    pub automation: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -101,12 +185,21 @@ pub struct Program {
     pub tempo: f64,
     /// The session length in frames.
     pub total: usize,
-    /// Tracks in render order.
+    /// Tracks in render order: sidechain sources first.
     pub tracks: Vec<TrackProgram>,
-    pub master: f64,
+    pub returns: Vec<ReturnProgram>,
+    pub master: MasterProgram,
     pub fade: usize,
-    /// Features the engine does not process yet, which this program leaves out.
-    pub omitted: Vec<String>,
+    /// Frames by which the slowest track's inserts trail the transport: the
+    /// timeline the faders, sends and return inputs share.
+    pub track_offset: usize,
+    /// The slowest return's latency.
+    pub return_latency: usize,
+    /// Frames by which the output trails the transport.
+    pub latency: usize,
+    /// Equal for programs whose channels, devices and delays line up one to
+    /// one, so that one can take over from the other without a break.
+    pub structure: u64,
 }
 
 impl Program {
@@ -128,44 +221,15 @@ impl Program {
     }
 
     /// The master gain and end fade at a frame.
-    #[inline]
     pub fn envelope(&self, f: usize) -> f64 {
-        self.fader(f) * self.master
+        self.fader(f) * amplitude(self.master.gain.at(f as i64))
     }
 
-    /// This program with the mixer of `p`: each track's gain, pan, mute and solo
-    /// and the master gain. It equals `compile(p)` when `p` differs from the
-    /// project this program was compiled from in those values only, and takes
-    /// no scheduling or sample preparation. None when the tracks are not the
-    /// same ones.
-    pub fn remix(&self, p: &Project) -> Option<Program> {
-        if p.tracks.len() != self.tracks.len() {
-            return None;
-        }
-        let any_solo = p.tracks.iter().any(|t| t.solo);
-        let tracks = self
-            .tracks
-            .iter()
-            .map(|old| {
-                let t = p.tracks.iter().find(|t| t.id == old.id)?;
-                Some(TrackProgram {
-                    id: old.id.clone(),
-                    voices: old.voices.clone(),
-                    pan: pan_gains(2, t.pan),
-                    gain: amplitude(t.gain_db),
-                    silent: t.mute || (any_solo && !t.solo),
-                })
-            })
-            .collect::<Option<Vec<_>>>()?;
-        Some(Program {
-            rate: self.rate,
-            tempo: self.tempo,
-            total: self.total,
-            tracks,
-            master: amplitude(p.session.master_gain_db),
-            fade: self.fade,
-            omitted: self.omitted.clone(),
-        })
+    /// Where each stem is: tracks in render order, then returns. The name, and
+    /// whether it is a return.
+    pub fn stems(&self) -> Vec<(&str, bool)> {
+        let tracks = self.tracks.iter().filter(|t| t.in_mix).map(|t| (t.id.as_str(), false));
+        tracks.chain(self.returns.iter().map(|r| (r.id.as_str(), true))).collect()
     }
 }
 
@@ -188,24 +252,133 @@ struct PrepKey {
     rate: i64,
 }
 
-/// Decoded and prepared pad audio kept between compiles, so recompiling after an
-/// edit prepares only what changed. Entries a compile does not use are dropped.
+/// A track's voices as last compiled, with what they were compiled from.
+struct TrackEntry {
+    generation: u64,
+    key: String,
+    voices: Arc<Vec<Voice>>,
+    prepared: Vec<PrepKey>,
+    originals: Vec<PathBuf>,
+}
+
+/// What is kept between compiles, so recompiling after an edit redoes only
+/// what the edit changed: decoded and prepared pad audio, each track's voices
+/// and reverb kernels. Entries a compile does not use are dropped.
 #[derive(Default)]
-pub struct SampleCache {
+pub struct Cache {
     generation: u64,
     original: HashMap<PathBuf, (u64, Stamp, Arc<sndfile::Audio>)>,
     prepared: HashMap<PrepKey, (u64, Arc<Prepared>)>,
+    tracks: HashMap<String, TrackEntry>,
+    kernels: Kernels,
 }
 
-impl SampleCache {
+impl Cache {
     fn begin(&mut self) {
         self.generation += 1;
+        self.kernels.begin();
     }
 
     fn finish(&mut self) {
         let g = self.generation;
         self.original.retain(|_, e| e.0 == g);
         self.prepared.retain(|_, e| e.0 == g);
+        self.tracks.retain(|_, e| e.generation == g);
+        self.kernels.finish();
+    }
+}
+
+fn stamp(path: &Path) -> Result<Stamp, String> {
+    let meta = std::fs::metadata(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(Stamp {
+        len: meta.len(),
+        modified: meta.modified().ok(),
+    })
+}
+
+/// A pad's audio to prepare: the decoded file and what to do with it.
+struct Job {
+    key: PrepKey,
+    audio: Arc<sndfile::Audio>,
+    sample: String,
+}
+
+impl Job {
+    /// Trims, reverses, downmixes and repitches, as `Sampler.prepare`.
+    fn make(&self) -> Result<Prepared, String> {
+        let (x, k) = (&self.audio, &self.key);
+        let frames = x.frames();
+        let source_rate = x.rate as f64;
+        let start = (f64::from_bits(k.start) * source_rate).round_ties_even() as usize;
+        let end = match k.end {
+            Some(e) => (f64::from_bits(e) * source_rate).round_ties_even() as usize,
+            None => frames,
+        };
+        if start >= frames || end > frames {
+            return Err(format!("{}: trim outside sample", self.sample));
+        }
+        let ch = x.channels;
+        let mut rows: Vec<&[f64]> = (start..end.max(start)).map(|i| &x.data[i * ch..(i + 1) * ch]).collect();
+        if k.reverse {
+            rows.reverse();
+        }
+        let (channels, mut data): (usize, Vec<f64>) = if k.mono {
+            let mean = |r: &[f64]| r.iter().fold(0.0, |s, v| s + v) / ch as f64;
+            (1, rows.iter().map(|r| mean(r)).collect())
+        } else {
+            (ch, rows.concat())
+        };
+        if let Some((up, down)) = repitch_ratio(k.rate as u32, x.rate, f64::from_bits(k.speed)) {
+            if !data.is_empty() {
+                data = resample_poly(&data, channels, up, down);
+            }
+        }
+        Ok(Prepared { channels, data })
+    }
+}
+
+/// Prepares, side by side, the pad audio that tracks about to be compiled
+/// need and the cache lacks. Repitching is most of a first compile. What
+/// cannot be prepared is left for the compile to report.
+fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usize]) {
+    let mut jobs: Vec<Job> = Vec::new();
+    let mut seen: std::collections::HashSet<PrepKey> = std::collections::HashSet::new();
+    let mut sampler = Sampler::new(p, directory, cache);
+    'tracks: for &ti in tracks {
+        let t = &p.tracks[ti];
+        for tr in track_triggers(p, ti) {
+            let Ok(job) = sampler.job(&t.pads[&tr.pad], &tr.event) else { break 'tracks };
+            if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
+                jobs.push(job);
+            }
+        }
+    }
+    if jobs.len() < 2 {
+        return;
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(2, |n| n.get()).min(jobs.len());
+    let made: Vec<(usize, Prepared)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut made = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        let Some(job) = jobs.get(i) else { break };
+                        if let Ok(prepared) = job.make() {
+                            made.push((i, prepared));
+                        }
+                    }
+                    made
+                })
+            })
+            .collect();
+        handles.into_iter().flat_map(|h| h.join().expect("a sample preparation panicked")).collect()
+    });
+    let g = cache.generation;
+    for (i, prepared) in made {
+        cache.prepared.insert(jobs[i].key.clone(), (g, Arc::new(prepared)));
     }
 }
 
@@ -213,15 +386,20 @@ impl SampleCache {
 pub struct Sampler<'a> {
     project: &'a Project,
     directory: PathBuf,
-    cache: &'a mut SampleCache,
+    cache: &'a mut Cache,
+    /// What the voices made so far were prepared from.
+    prepared: Vec<PrepKey>,
+    originals: Vec<PathBuf>,
 }
 
 impl<'a> Sampler<'a> {
-    pub fn new(project: &'a Project, directory: &Path, cache: &'a mut SampleCache) -> Self {
+    pub fn new(project: &'a Project, directory: &Path, cache: &'a mut Cache) -> Self {
         Sampler {
             project,
             directory: directory.to_path_buf(),
             cache,
+            prepared: Vec::new(),
+            originals: Vec::new(),
         }
     }
 
@@ -233,11 +411,7 @@ impl<'a> Sampler<'a> {
                 return Ok((path, stamp.clone(), audio.clone()));
             }
         }
-        let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-        let stamp = Stamp {
-            len: meta.len(),
-            modified: meta.modified().ok(),
-        };
+        let stamp = stamp(&path)?;
         if let Some((used, known, audio)) = self.cache.original.get_mut(&path) {
             if *known == stamp {
                 *used = g;
@@ -256,9 +430,13 @@ impl<'a> Sampler<'a> {
         Ok((path, stamp, audio))
     }
 
-    pub fn prepare(&mut self, pad: &Pad, event: &Event) -> Result<Arc<Prepared>, String> {
+    /// What a pad's audio for an event is prepared from.
+    fn job(&mut self, pad: &Pad, event: &Event) -> Result<Job, String> {
         let asset = &self.project.samples[&pad.sample];
-        let (path, stamp, x) = self.original(&pad.sample)?;
+        let (path, stamp, audio) = self.original(&pad.sample)?;
+        if !self.originals.contains(&path) {
+            self.originals.push(path.clone());
+        }
         let mut semitones = pad.transpose + event.transpose;
         if let Some(note) = &event.note {
             let root = asset.root_note.as_deref().expect("validated root note");
@@ -268,49 +446,35 @@ impl<'a> Sampler<'a> {
         if let Some(bpm) = pad.source_bpm {
             speed *= self.project.session.tempo / bpm;
         }
-        let key = PrepKey {
-            path,
-            stamp,
-            start: pad.start_seconds.to_bits(),
-            end: pad.end_seconds.map(f64::to_bits),
-            reverse: pad.reverse,
-            mono: pad.mono,
-            speed: speed.to_bits(),
-            rate: self.project.session.sample_rate,
-        };
+        Ok(Job {
+            key: PrepKey {
+                path,
+                stamp,
+                start: pad.start_seconds.to_bits(),
+                end: pad.end_seconds.map(f64::to_bits),
+                reverse: pad.reverse,
+                mono: pad.mono,
+                speed: speed.to_bits(),
+                rate: self.project.session.sample_rate,
+            },
+            audio,
+            sample: pad.sample.clone(),
+        })
+    }
+
+    pub fn prepare(&mut self, pad: &Pad, event: &Event) -> Result<Arc<Prepared>, String> {
+        let job = self.job(pad, event)?;
         let g = self.cache.generation;
-        if let Some((used, p)) = self.cache.prepared.get_mut(&key) {
+        if let Some((used, p)) = self.cache.prepared.get_mut(&job.key) {
             *used = g;
+            if !self.prepared.contains(&job.key) {
+                self.prepared.push(job.key);
+            }
             return Ok(p.clone());
         }
-        let frames = x.frames();
-        let source_rate = x.rate as f64;
-        let start = (pad.start_seconds * source_rate).round_ties_even() as usize;
-        let end = match pad.end_seconds {
-            Some(e) => (e * source_rate).round_ties_even() as usize,
-            None => frames,
-        };
-        if start >= frames || end > frames {
-            return Err(format!("{}: trim outside sample", pad.sample));
-        }
-        let ch = x.channels;
-        let mut rows: Vec<&[f64]> = (start..end.max(start)).map(|i| &x.data[i * ch..(i + 1) * ch]).collect();
-        if pad.reverse {
-            rows.reverse();
-        }
-        let (channels, mut data): (usize, Vec<f64>) = if pad.mono {
-            let mean = |r: &[f64]| r.iter().fold(0.0, |s, v| s + v) / ch as f64;
-            (1, rows.iter().map(|r| mean(r)).collect())
-        } else {
-            (ch, rows.concat())
-        };
-        if let Some((up, down)) = repitch_ratio(self.project.session.sample_rate as u32, x.rate, speed) {
-            if !data.is_empty() {
-                data = resample_poly(&data, channels, up, down);
-            }
-        }
-        let prepared = Arc::new(Prepared { channels, data });
-        self.cache.prepared.insert(key, (g, prepared.clone()));
+        let prepared = Arc::new(job.make()?);
+        self.prepared.push(job.key.clone());
+        self.cache.prepared.insert(job.key, (g, prepared.clone()));
         Ok(prepared)
     }
 
@@ -340,70 +504,315 @@ impl<'a> Sampler<'a> {
     }
 }
 
-/// Features of a project that this engine does not process yet.
-pub fn unsupported(p: &Project) -> Vec<String> {
-    let mut out = Vec::new();
-    let active = |effects: &[aaw_model::Effect]| effects.iter().any(|e| !e.bypass());
-    if p.tracks.iter().any(|t| active(&t.effects)) {
-        out.push("track effects".to_string());
+/// Everything a track's voices are made from, as text: its pads and clips,
+/// the patterns it plays, its samples and their files, the tempo and rate.
+fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
+    use std::fmt::Write;
+    let t = &p.tracks[ti];
+    let mut key = format!("{:?}|{:?}|{}|{}", t.pads, t.clips, p.session.tempo.to_bits(), p.session.sample_rate);
+    let mut seen: Vec<&str> = Vec::new();
+    for c in &t.clips {
+        if !seen.contains(&c.pattern.as_str()) {
+            seen.push(&c.pattern);
+            let _ = write!(key, "|{}={:?}", c.pattern, p.patterns.get(&c.pattern));
+        }
     }
-    if active(&p.master.effects) {
-        out.push("master effects".to_string());
+    seen.clear();
+    for pad in t.pads.values() {
+        if !seen.contains(&pad.sample.as_str()) {
+            seen.push(&pad.sample);
+            let asset = p.samples.get(&pad.sample);
+            let file = asset.map(|a| stamp(&directory.join(&a.path)).ok());
+            let _ = write!(key, "|{}={:?}@{:?}", pad.sample, asset, file);
+        }
     }
-    if !p.returns.is_empty() || p.tracks.iter().any(|t| !t.sends.is_empty()) {
-        out.push("sends and returns".to_string());
+    key
+}
+
+/// A track's voices, from the cache when nothing they are made from changed.
+/// `key` is the track's `voices_key`.
+fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cache) -> Result<Arc<Vec<Voice>>, String> {
+    let t = &p.tracks[ti];
+    let g = cache.generation;
+    if let Some(entry) = cache.tracks.get_mut(&t.id) {
+        if entry.key == key {
+            entry.generation = g;
+            // What the voices play stays prepared for the next edit of the track.
+            for k in &entry.prepared {
+                if let Some(e) = cache.prepared.get_mut(k) {
+                    e.0 = g;
+                }
+            }
+            for path in &entry.originals {
+                if let Some(e) = cache.original.get_mut(path) {
+                    e.0 = g;
+                }
+            }
+            return Ok(entry.voices.clone());
+        }
     }
-    let lanes = p.tracks.iter().any(|t| !t.automation.is_empty())
-        || p.returns.iter().any(|r| !r.automation.is_empty())
-        || !p.master.automation.is_empty();
-    if lanes {
-        out.push("automation".to_string());
+    let mut sampler = Sampler::new(p, directory, cache);
+    let mut voices = Vec::new();
+    for tr in track_triggers(p, ti) {
+        voices.push(sampler.voice(&t.pads[&tr.pad], &tr)?);
+    }
+    let voices = Arc::new(voices);
+    let (prepared, originals) = (sampler.prepared, sampler.originals);
+    cache.tracks.insert(
+        t.id.clone(),
+        TrackEntry {
+            generation: g,
+            key,
+            voices: voices.clone(),
+            prepared,
+            originals,
+        },
+    );
+    Ok(voices)
+}
+
+/// An owner's lanes as envelopes, by what they drive.
+#[derive(Default)]
+struct Lanes {
+    channel: HashMap<String, Arc<Envelope>>,
+    sends: HashMap<String, Arc<Envelope>>,
+    /// By effect index, then parameter name.
+    effects: HashMap<usize, BTreeMap<String, Arc<Envelope>>>,
+    params: Vec<String>,
+}
+
+impl Lanes {
+    fn new(owner: Owner, lanes: &[Lane], p: &Project) -> Lanes {
+        let mut out = Lanes::default();
+        for lane in lanes {
+            out.params.push(lane.param.clone());
+            let Ok(t) = target(owner, &lane.param) else { continue };
+            let env = Arc::new(Envelope::new(lane, t.domain, p.session.tempo, p.session.sample_rate));
+            match &t.kind {
+                TargetKind::Channel => {
+                    out.channel.insert(t.field.clone(), env);
+                }
+                TargetKind::Send(to) => {
+                    out.sends.insert(to.clone(), env);
+                }
+                TargetKind::Effect { index, .. } => {
+                    out.effects.entry(*index).or_default().insert(t.name(), env);
+                }
+            }
+        }
+        out
+    }
+
+    fn channel(&self, field: &str, value: f64) -> Param {
+        Param::new(value, self.channel.get(field))
+    }
+}
+
+/// A chain without its sidechain routing, which needs every chain's latency.
+fn chain(effects: &[Effect], lanes: &mut Lanes, p: &Project, kernels: &mut Kernels) -> ChainProgram {
+    let mut out = ChainProgram::default();
+    for (i, effect) in effects.iter().enumerate() {
+        if effect.bypass() {
+            out.effects.push((effect.kind(), None));
+            continue;
+        }
+        let plan = Plan::new(
+            effect,
+            lanes.effects.remove(&i).unwrap_or_default(),
+            p.session.sample_rate,
+            p.session.tempo,
+            kernels,
+        );
+        out.effects.push((effect.kind(), Some(out.devices.len())));
+        let upstream = out.latency;
+        out.latency += plan.latency;
+        out.devices.push(DeviceProgram {
+            plan,
+            upstream,
+            key: None,
+        });
     }
     out
 }
 
-/// Compiles a project whose samples live under `directory`. Features the engine
-/// does not process are left out and listed in `Program::omitted`.
-pub fn compile(p: &Project, directory: &Path) -> Result<Program, String> {
-    compile_cached(p, directory, &mut SampleCache::default())
+/// Routes a chain's sidechains: `offset(source)` is how far the source's
+/// output trails the audio entering this chain.
+fn route(chain: &mut ChainProgram, tracks: &[TrackProgram], lead: impl Fn(&TrackProgram) -> usize) {
+    for d in &mut chain.devices {
+        let Some(name) = d.plan.effect.sidechain() else { continue };
+        if let Some(source) = tracks.iter().position(|t| t.id == name) {
+            d.key = Some(Key {
+                source,
+                delay: lead(&tracks[source]) + d.upstream,
+            });
+        }
+    }
 }
 
-/// `compile`, reusing and then pruning a cache of prepared sample audio.
-pub fn compile_cached(p: &Project, directory: &Path, cache: &mut SampleCache) -> Result<Program, String> {
+/// What to compile: the song, or one track or return as its stem, with only
+/// the tracks that key or feed it.
+#[derive(Clone, Copy, Debug)]
+pub enum Scope<'a> {
+    Song,
+    Channel(&'a str),
+}
+
+/// Compiles a project whose samples live under `directory`.
+pub fn compile(p: &Project, directory: &Path) -> Result<Program, String> {
+    compile_cached(p, directory, &mut Cache::default())
+}
+
+/// `compile`, reusing and then pruning what earlier compiles made.
+pub fn compile_cached(p: &Project, directory: &Path, cache: &mut Cache) -> Result<Program, String> {
+    compile_scoped(p, directory, cache, Scope::Song)
+}
+
+pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: Scope) -> Result<Program, String> {
     let rate = p.session.sample_rate;
     let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
-    let triggers = schedule(p);
+    // A preview needs the target's sidechain sources; a return's also needs
+    // its senders and theirs. Only the target is heard.
+    let is_return = |id: &str| p.returns.iter().any(|r| r.id == id);
+    let (needed, heard, returns): (Vec<String>, Vec<&str>, Vec<&aaw_model::Return>) = match scope {
+        Scope::Song => (
+            p.tracks.iter().map(|t| t.id.clone()).collect(),
+            p.tracks.iter().map(|t| t.id.as_str()).collect(),
+            p.returns.iter().collect(),
+        ),
+        Scope::Channel(id) if is_return(id) => {
+            let mut needed: Vec<String> = p.senders(id).into_iter().map(str::to_string).collect();
+            for sender in p.senders(id) {
+                needed.extend(p.sidechain_sources(sender));
+            }
+            needed.extend(p.sidechain_sources(id));
+            (needed, Vec::new(), p.returns.iter().filter(|r| r.id == id).collect())
+        }
+        Scope::Channel(id) if p.track(id).is_some() => {
+            let mut needed = p.sidechain_sources(id);
+            needed.push(id.to_string());
+            (needed, vec![id], Vec::new())
+        }
+        Scope::Channel(id) => return Err(format!("Unknown track or return: {id}")),
+    };
     cache.begin();
-    let mut sampler = Sampler::new(p, directory, cache);
-    let mut per_track: Vec<Vec<Voice>> = vec![Vec::new(); p.tracks.len()];
-    for tr in &triggers {
-        let pad = &p.tracks[tr.track].pads[&tr.pad];
-        per_track[tr.track].push(sampler.voice(pad, tr)?);
-    }
-    cache.finish();
     let any_solo = p.tracks.iter().any(|t| t.solo);
     let index: HashMap<&str, usize> = p.tracks.iter().enumerate().map(|(i, t)| (t.id.as_str(), i)).collect();
-    let tracks = p
-        .render_order()
-        .into_iter()
-        .map(|t| {
-            let voices = std::mem::take(&mut per_track[index[t.id.as_str()]]);
-            TrackProgram {
-                id: t.id.clone(),
-                voices,
-                pan: pan_gains(2, t.pan),
-                gain: amplitude(t.gain_db),
-                silent: t.mute || (any_solo && !t.solo),
-            }
-        })
+    let order: Vec<&aaw_model::Track> = p.render_order().into_iter().filter(|t| needed.contains(&t.id)).collect();
+    let mut keys: HashMap<&str, String> = order
+        .iter()
+        .map(|t| (t.id.as_str(), voices_key(p, index[t.id.as_str()], directory)))
         .collect();
+    let stale: Vec<usize> = order
+        .iter()
+        .filter(|t| cache.tracks.get(&t.id).is_none_or(|e| e.key != keys[t.id.as_str()]))
+        .map(|t| index[t.id.as_str()])
+        .collect();
+    prepare_ahead(p, directory, cache, &stale);
+    let mut tracks: Vec<TrackProgram> = Vec::new();
+    for t in order {
+        let key = keys.remove(t.id.as_str()).expect("a key for each track");
+        let voices = voices(p, index[t.id.as_str()], key, directory, cache)?;
+        let mut lanes = Lanes::new(Owner::Track(t), &t.automation, p);
+        let mut chain = chain(&t.effects, &mut lanes, p, &mut cache.kernels);
+        // The track waits for the slowest of its keys.
+        let delay = chain
+            .devices
+            .iter()
+            .filter_map(|d| d.plan.effect.sidechain())
+            .filter_map(|name| tracks.iter().find(|s| s.id == name))
+            .map(|s| s.delay + s.chain.latency)
+            .max()
+            .unwrap_or(0);
+        route(&mut chain, &tracks, |source| delay - (source.delay + source.chain.latency));
+        let sends = returns
+            .iter()
+            .map(|r| match t.sends.iter().find(|s| s.to == r.id) {
+                Some(s) => SendProgram {
+                    pre_fader: s.pre_fader,
+                    level: Some(Param::new(s.gain_db, lanes.sends.get(&r.id))),
+                },
+                None => SendProgram {
+                    pre_fader: false,
+                    level: None,
+                },
+            })
+            .collect();
+        tracks.push(TrackProgram {
+            id: t.id.clone(),
+            voices,
+            chain,
+            gain: lanes.channel("gain_db", t.gain_db),
+            pan: lanes.channel("pan", t.pan),
+            silent: t.mute || (any_solo && !t.solo),
+            sends,
+            delay,
+            align: 0,
+            in_mix: heard.contains(&t.id.as_str()),
+            automation: lanes.params,
+        });
+    }
+    let track_offset = tracks.iter().map(|t| t.delay + t.chain.latency).max().unwrap_or(0);
+    for t in &mut tracks {
+        t.align = track_offset - (t.delay + t.chain.latency);
+    }
+    let mut buses: Vec<ReturnProgram> = Vec::new();
+    for r in returns {
+        let mut lanes = Lanes::new(Owner::Return(r), &r.automation, p);
+        let mut chain = chain(&r.effects, &mut lanes, p, &mut cache.kernels);
+        route(&mut chain, &tracks, |source| track_offset - (source.delay + source.chain.latency));
+        buses.push(ReturnProgram {
+            id: r.id.clone(),
+            chain,
+            gain: lanes.channel("gain_db", r.gain_db),
+            pan: lanes.channel("pan", r.pan),
+            mute: r.mute,
+            align: 0,
+            senders: p.senders(&r.id).into_iter().map(str::to_string).collect(),
+            automation: lanes.params,
+        });
+    }
+    let return_latency = buses.iter().map(|r| r.chain.latency).max().unwrap_or(0);
+    for r in &mut buses {
+        r.align = return_latency - r.chain.latency;
+    }
+    // Track and return previews are stems, so they omit the master chain.
+    let mut lanes = Lanes::new(Owner::Master(&p.master), &p.master.automation, p);
+    let master_effects: &[Effect] = if matches!(scope, Scope::Song) { &p.master.effects } else { &[] };
+    let master = MasterProgram {
+        gain: lanes.channel("gain_db", p.session.master_gain_db),
+        chain: chain(master_effects, &mut lanes, p, &mut cache.kernels),
+        automation: lanes.params,
+    };
+    cache.finish();
+    let latency = track_offset + return_latency + master.chain.latency;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    let devices = |chain: &ChainProgram, h: &mut std::collections::hash_map::DefaultHasher| {
+        for d in &chain.devices {
+            (d.plan.signature, d.upstream, d.key.as_ref().map(|k| (k.source, k.delay))).hash(h);
+        }
+        chain.devices.len().hash(h);
+    };
+    (rate, track_offset, return_latency, latency).hash(&mut h);
+    for t in &tracks {
+        (&t.id, t.delay, t.align, t.in_mix).hash(&mut h);
+        devices(&t.chain, &mut h);
+    }
+    for r in &buses {
+        (&r.id, r.align).hash(&mut h);
+        devices(&r.chain, &mut h);
+    }
+    devices(&master.chain, &mut h);
     Ok(Program {
         rate: rate as u32,
         tempo: p.session.tempo,
         total,
         tracks,
-        master: amplitude(p.session.master_gain_db),
+        returns: buses,
+        master,
         fade: total.min((p.session.end_fade_ms * rate as f64 / 1000.0).round_ties_even() as usize),
-        omitted: unsupported(p),
+        track_offset,
+        return_latency,
+        latency,
+        structure: h.finish(),
     })
 }

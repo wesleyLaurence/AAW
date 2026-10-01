@@ -8,11 +8,11 @@ the cutover (M7).
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`); devices later |
-| `aaw-engine` | Song compilation, scheduling, mixing, the transport, offline and real-time drivers |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes and the six effects |
+| `aaw-engine` | Song compilation, scheduling, routing, latency alignment, mixing, the transport, offline and real-time drivers |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket |
 | `aaw-cli` | The `daw` binary |
-| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, changes and transport |
+| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, changes and transport |
 
 The Python bindings join the workspace in the milestone that needs them.
 
@@ -41,19 +41,47 @@ Rust one as `target/release/daw` or `cargo run -q -p aaw-cli --`. It implements:
 | `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json` in the Python engine's formats |
 | `daw host PROJECT` | Runs a session host until interrupted or `daw close` |
 | `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output; see below |
-| `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device |
+| `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device, and a compile, a recompile and building a renderer |
 | `daw stop`, `daw locate PROJECT BEAT`, `daw loop PROJECT START LENGTH`, `daw loop PROJECT off` | Transport of a running host |
 | `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
-The engine covers the sampler: scheduling, choke groups, gates, repitch, trim,
-reverse, downmix, pan laws, track gain, pan, mute and solo, master gain and the
-end fade. Effects, sends, returns and automation come in M6. Until then `render`
-refuses a song that uses them and `play` plays it without them, with a warning.
-A bypassed effect is not processed, so it does not count. Commands edit all of
-them already.
+The engine covers the whole song: the sampler (scheduling, choke groups, gates,
+repitch, trim, reverse, downmix, pan laws), the six effects on tracks, returns
+and the master, sidechains, pre- and post-fader sends, automation lanes, track
+gain, pan, mute and solo, master gain and the end fade. `render` writes the
+mix, a stem for each track and return, the snapshot and `report.json` with what
+each effect did; `--track` renders a track or a return as its stem, with only
+the tracks that key or feed it.
+
+## The engine
+
+A song is compiled into a program (`program.rs`): each track's voices, each
+channel's effect chain with the envelopes of its lanes, the routing, and the
+delays that align latency. A `Renderer` (`render.rs`) plays a program as one
+stream, for export and for playback alike. Output does not depend on how the
+stream is cut into blocks, and processing never allocates.
+
+- **Devices** (`aaw-dsp`) are the Python engine's, operation for operation:
+  Butterworth filters designed as `scipy.signal.butter` designs them, RBJ
+  equalizer bands, the state-variable filter that automation moves, the
+  compressor, the look-ahead limiter and the tempo-synced delay. A lane whose
+  points share one value is that static value.
+- **The reverb** has the Python engine's impulse response except for its noise,
+  which comes from a generator of its own (D40, D44), so a tail is statistically
+  the same and not sample-identical. Its convolution is non-uniformly
+  partitioned and adds no latency.
+- **Latency.** Only the limiter delays its input. A track keyed by a source
+  with latency renders its voices that much later, tracks are delayed to the
+  slowest before their faders and sends, and the output trails the transport by
+  the total; `daw status` reports it as `latency_frames`. An offline render
+  runs that much longer and places every stem on the timeline.
+- **A compile redoes only what changed.** Each track's voices, prepared pad
+  audio and reverb kernels are kept from the last compile, so after a level or
+  knob edit it takes under a millisecond. Pad audio a first compile lacks is
+  repitched on several threads.
 
 ## Session host
 
@@ -90,8 +118,7 @@ log, handles and the transport need a host.
 - **Gestures.** A request may carry a `gesture` ID, as the app's drags do.
   Edits of one gesture and origin that land one after another are one undo
   step and one change-log entry, named for the whole move, and are saved once
-  they pause for 250 ms instead of after each. A change of mixer values alone
-  (track gain, pan, mute and solo, master gain) plays without a recompile.
+  they pause for 250 ms instead of after each.
 - **Selection.** `daw status` lists what the person has selected in the app as
   `{"ref", "path"}` pairs, so a request about "the selected clip" can be
   answered with `daw get PATH`. The app sets it with the `select` command.
@@ -99,21 +126,33 @@ log, handles and the transport need a host.
   apply`, load as one undoable `external` change. A file that does not validate
   pauses edits, with the error in `daw status`, until it is fixed; `daw fmt`
   writes the host's song over it instead.
-- **Playback** recompiles the song after each edit, reusing prepared sample
-  audio, and the audio thread crossfades into it over 5 ms at the same beat. A
-  tempo change keeps the beat. Stop, locate and loop jumps let the old position
-  ring out for 5 ms without new hits and fade in voices picked up mid-sample;
-  hits at the new position play in full. The audio thread never allocates,
-  locks or blocks; replaced programs return to the host to be freed.
+- **Playback** recompiles the song after each edit and the audio thread swaps
+  to the new program between blocks, at the same beat; a tempo change keeps the
+  beat. A program with the same channels and devices takes over in place:
+  devices keep their state, so tails ring on; levels, pans, sends, mutes and
+  the knobs automation can move glide to their new values over 5 ms; a filter
+  or equalizer crosses over to its new setting; and where a track's voices
+  changed, the old ones ring out under the new. A program with another
+  structure, such as an added, removed or bypassed effect, another delay time
+  or reverb response, or an added or removed track, is swapped in at the bottom
+  of a 5 ms fade out and back in, and the devices still there keep their state.
+- **The transport** moves only the voices. Stop, locate and loop jumps let the
+  old position ring out for 5 ms without new hits and fade in voices picked up
+  mid-sample; hits at the new position play in full. Effects run on, so a
+  reverb rings through a locate and after a stop; the stream rests once it has
+  been silent for a second. The audio thread never allocates, locks or blocks;
+  replaced programs return to the host to be freed.
 
 A process can embed a host instead of running `daw host`: `host::spawn` runs one
 on its own thread and calls an observer with the opened song, each change with
 the song after it, transport changes, warnings and the close, while `Clock`
 gives the playhead straight from the audio thread. The Mac app does this through
 `aaw-ffi`, whose `Song` turns each revision into the arrangement the app draws
-(`view.rs`), names the tracks, clips, returns and sections a change touched,
+(`view.rs`), with every effect's fields as a control needs them and every
+lane's points, names the tracks, clips, returns and sections a change touched,
 and turns the person's edits into commands (`edits.rs`), working out exact
 beats from the song for a clip moved by so many beats or copied after itself.
+What a device panel shows of an effect type comes from `aaw_model::describe`.
 Such a host is reached through its socket like any other, and compiles each
 revision as it lands so that play starts at once.
 
@@ -125,7 +164,8 @@ checking. `tests/test_rust_host.py` checks `inspect` and command results against
 the Python model and drives a `daw host` process from outside.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
 what each kind of change touches, the person's edits and their place in the
-shared history, and the transport shared with an agent.
+shared history, the fields a device panel is drawn from, edits of effects,
+equalizer bands, lanes and points, and the transport shared with an agent.
 
 ## Model parity
 
@@ -156,19 +196,33 @@ Known differences, all in input no tool writes:
 
 ## Engine parity
 
-Rust renders of effect-free songs are byte-identical to the Python engine's:
-`mix.wav`, every stem and the snapshot. `tests/test_rust_engine_parity.py`
-renders generated songs with generated audio in every format the library reads
-(8- to 32-bit PCM, float and double WAV, AIFF and FLAC at 22.05 to 96 kHz) with
-both engines, requires audio within -120 dBFS, and compares schedules. The
-engine's own tests prove that output does not depend on block partition, that
-playing from the middle equals the same frames of a render from the start, and
-that processing never allocates.
+`tests/test_rust_engine_parity.py` renders generated songs with generated audio
+in every format the library reads (8- to 32-bit PCM, float and double WAV, AIFF
+and FLAC at 22.05 to 96 kHz) with both engines and compares the mix, every
+stem, the schedules and the reports.
 
-Two details keep the bytes equal. The repitch is a port of `resample_poly`,
-including `firwin`'s Kaiser window, Cephes `i0` and numpy's pairwise sum; it
-matches scipy to a few units in the last place. Decoding uses libsndfile, but
-the 24-bit mix is written here: Homebrew's libsndfile rounds 24-bit PCM
-differently from the build that Python's `soundfile` bundles, and the engine
-writes `lrint(x * 2**31) >> 8` as the latter does.
+- **Without effects**, renders are byte-identical to the Python engine's:
+  `mix.wav`, every stem and the snapshot.
+- **With effects, sends, returns and automation**, audio must match within
+  -120 dBFS; over 120 generated songs the largest difference was 3.7e-9, and
+  most files were identical. Previews of a track, a return and a section are
+  among them, and each effect's reported latency, lanes and gain reduction.
+- **Reverb** is compared on what its tail is made of: the frame it starts on,
+  its energy and width, and over several seeds its decay time and the level of
+  each octave.
 
+The engine's own tests prove that output does not depend on block partition,
+with and without effects, that playing from the middle equals the same frames
+of a render from the start, that stems sum to the mix before master effects,
+that a preview is its channel's stem, and that processing never allocates.
+`crates/aaw-engine/tests/player.rs` plays through the transport: a song with
+latency against its render, levels and knobs stepped thirty times a second
+without a click, a tail ringing through an edit, a locate and a stop, a change
+of structure fading through silence, and a stopped stream coming to rest.
+
+Two details keep effect-free bytes equal. The repitch is a port of
+`resample_poly`, including `firwin`'s Kaiser window, Cephes `i0` and numpy's
+pairwise sum; it matches scipy to a few units in the last place. Decoding uses
+libsndfile, but the 24-bit mix is written here: Homebrew's libsndfile rounds
+24-bit PCM differently from the build that Python's `soundfile` bundles, and
+the engine writes `lrint(x * 2**31) >> 8` as the latter does.

@@ -9,7 +9,7 @@ use crate::command::{beat_value, json_value, Command, Kind, Origin};
 use crate::registry;
 use crate::session::{Change, Doc, History, Session};
 use aaw_engine::player::Shared;
-use aaw_engine::program::{compile_cached, Program, SampleCache};
+use aaw_engine::program::{compile_cached, Cache, Program};
 use aaw_engine::realtime::Transport;
 use aaw_model::Beat;
 use num_rational::BigRational;
@@ -98,13 +98,16 @@ pub struct Clock {
 }
 
 impl Clock {
-    /// Whether the song is playing and the beat it is at. None until the
-    /// output has been opened by a first play.
+    /// Whether the song is playing and the beat that is being heard: where
+    /// the audio thread is, less what the output has yet to play. None until
+    /// the output has been opened by a first play.
     pub fn now(&self) -> Option<(bool, f64)> {
         let source = self.source.lock().unwrap_or_else(|e| e.into_inner());
-        source
-            .as_ref()
-            .map(|(shared, beats_per_frame)| (shared.playing.load(Relaxed), shared.position.load(Relaxed) as f64 * beats_per_frame))
+        source.as_ref().map(|(shared, beats_per_frame)| {
+            let playing = shared.playing.load(Relaxed);
+            let ahead = if playing { shared.output_latency.load(Relaxed) } else { 0 };
+            (playing, shared.position.load(Relaxed).saturating_sub(ahead) as f64 * beats_per_frame)
+        })
     }
 
     fn set(&self, source: Option<(Arc<Shared>, f64)>) {
@@ -121,7 +124,7 @@ struct Host {
     observer: Option<Observer>,
     clock: Arc<Clock>,
     reported_transport: Option<TransportState>,
-    cache: SampleCache,
+    cache: Cache,
     /// The compiled song and the SHA it was compiled from.
     program: Option<(String, Arc<Program>)>,
     transport: Option<Transport>,
@@ -129,7 +132,6 @@ struct Host {
     cue: BigRational,
     /// Loop start and length, in beats.
     region: Option<(BigRational, BigRational)>,
-    warned: Vec<String>,
     playback_error: Option<String>,
     reported_invalid: Option<String>,
     /// What the person has selected in the app, by handle.
@@ -186,30 +188,17 @@ impl Host {
         Ok(())
     }
 
-    /// The program for the current revision, compiling it if needed. `mixed`
-    /// is the SHA of a revision that differs from this one in mixer values
-    /// only; its program is given the new values instead of compiling again.
-    fn program(&mut self, mixed: Option<&str>) -> Result<Arc<Program>> {
+    /// The program for the current revision, compiling it if needed. A compile
+    /// redoes only what the revision changed: each track's voices, prepared
+    /// sample audio and reverb kernels are kept from the last one.
+    fn program(&mut self) -> Result<Arc<Program>> {
         let sha = self.session.doc().sha.clone();
-        let mut remixed = None;
         if let Some((s, p)) = &self.program {
             if *s == sha {
                 return Ok(p.clone());
             }
-            if mixed == Some(s.as_str()) {
-                remixed = p.remix(self.session.project());
-            }
         }
-        let p = Arc::new(match remixed {
-            Some(p) => p,
-            None => compile_cached(self.session.project(), self.session.dir(), &mut self.cache)?,
-        });
-        for feature in &p.omitted {
-            if !self.warned.contains(feature) {
-                self.warned.push(feature.clone());
-                self.warn(format!("playing without {feature}, which the Rust engine does not process yet"));
-            }
-        }
+        let p = Arc::new(compile_cached(self.session.project(), self.session.dir(), &mut self.cache)?);
         self.program = Some((sha, p.clone()));
         Ok(p)
     }
@@ -237,8 +226,8 @@ impl Host {
     }
 
     /// Sends the current revision to the open output.
-    fn reload(&mut self, mixed: Option<&str>) -> Result<()> {
-        let p = self.program(mixed)?;
+    fn reload(&mut self) -> Result<()> {
+        let p = self.program()?;
         let t = self.transport.as_mut().expect("transport");
         if p.rate == t.rate {
             t.control.load(p)?;
@@ -262,11 +251,11 @@ impl Host {
 
     /// Sends the current revision to the audio thread, or with `prepare` and
     /// no output open yet, compiles it for the first play.
-    fn refresh(&mut self, mixed: Option<&str>) {
+    fn refresh(&mut self) {
         let result = if self.transport.is_some() {
-            self.reload(mixed)
+            self.reload()
         } else if self.opts.prepare {
-            self.program(mixed).map(|_| ())
+            self.program().map(|_| ())
         } else {
             return;
         };
@@ -276,22 +265,20 @@ impl Host {
         }
     }
 
-    /// Reports a change and plays it. `before` is the SHA the change was made
-    /// from, which lets a change of mixer values skip the compile.
-    fn changed(&mut self, change: &Change, before: &str) {
+    /// Reports a change and plays it.
+    fn changed(&mut self, change: &Change) {
         self.emit(json!({"change": change}));
         self.notify(Event::Changed {
             change: change.clone(),
             doc: self.session.doc().clone(),
             history: self.session.history(),
         });
-        self.refresh(change.mix.then_some(before));
+        self.refresh();
     }
 
     fn sync(&mut self) {
-        let before = self.session.doc().sha.clone();
         if let Some(c) = self.session.sync() {
-            self.changed(&c, &before);
+            self.changed(&c);
         }
         let invalid = self.session.invalid().map(str::to_string);
         if invalid != self.reported_invalid {
@@ -331,7 +318,7 @@ impl Host {
         };
         self.check_in_song(&cue, "--from")?;
         self.cue = cue;
-        let program = self.program(None)?;
+        let program = self.program()?;
         if self.transport.is_none() {
             self.open_transport(program)?;
         }
@@ -421,7 +408,11 @@ impl Host {
                         "device": r["device"],
                         "sample_rate": r["sample_rate"],
                         "buffer_frames": r["buffer_frames"],
+                        "output_latency_frames": r["output_latency_frames"],
+                        "budget_ms": r["budget_ms"],
+                        "mean_callback_ms": r["mean_callback_ms"],
                         "max_callback_ms": r["max_callback_ms"],
+                        "over_budget_callbacks": r["over_budget_callbacks"],
                         "xruns": r["xruns"],
                     })
                 }
@@ -429,7 +420,7 @@ impl Host {
             },
         );
         if let Some((_, p)) = &self.program {
-            m.insert("omitted".into(), json!(p.omitted));
+            m.insert("latency_frames".into(), json!(p.latency));
         }
         m.insert("playback_error".into(), json!(self.playback_error));
         m.insert("selection".into(), json!(self.selected()));
@@ -462,7 +453,6 @@ impl Host {
             Kind::Edit | Kind::History => {
                 let _lock = lock(self.session.path())?;
                 self.sync();
-                let before = self.session.doc().sha.clone();
                 let (reply, change) = match &command {
                     Command::Undo => self.session.undo(origin, false).map(|(r, c)| (r, Some(c)))?,
                     Command::Redo => self.session.undo(origin, true).map(|(r, c)| (r, Some(c)))?,
@@ -476,7 +466,7 @@ impl Host {
                     self.save_at = None;
                 }
                 if let Some(c) = change {
-                    self.changed(&c, &before);
+                    self.changed(&c);
                 }
                 Ok(reply)
             }
@@ -628,12 +618,11 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         observer,
         clock,
         reported_transport: None,
-        cache: SampleCache::default(),
+        cache: Cache::default(),
         program: None,
         transport: None,
         cue: BigRational::zero(),
         region: None,
-        warned: Vec::new(),
         playback_error: None,
         reported_invalid: None,
         selection: Vec::new(),
@@ -663,7 +652,7 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
     let started = match host.opts.play.clone() {
         Some(from) => host.play(Some(&from)).map(|_| ()),
         None => {
-            host.refresh(None);
+            host.refresh();
             Ok(())
         }
     };
@@ -716,9 +705,6 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
         if let Json::Object(report) = crate::session::value_json(&t.report()) {
             summary.insert("from_beat".into(), crate::session::value_json(&beat_value(&host.from)));
             summary.extend(report);
-        }
-        if let Some((_, p)) = &host.program {
-            summary.insert("omitted".into(), json!(p.omitted));
         }
         t.close();
     }

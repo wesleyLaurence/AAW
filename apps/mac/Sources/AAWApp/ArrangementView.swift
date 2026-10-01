@@ -59,12 +59,21 @@ private struct Held {
     var until: CFTimeInterval?
 }
 
+/// A point shown ahead of the host, as a level is.
+private struct HeldPoint {
+    var at: Double
+    var value: Double
+    var until: CFTimeInterval?
+}
+
 private struct RowVisual {
     var name: String
     var detail: String
     var color: NSColor?
     var mute = false
     var solo = false
+    /// Whether the row has automation lanes.
+    var automated = false
     var kind: HeaderLayout.Kind
     var y: Animated
     var height: Animated
@@ -125,6 +134,19 @@ private struct ReorderDrag {
     var slot: Int?
 }
 
+private struct PointDrag {
+    var lane: LaneView
+    var point: UInt64
+    /// The lane on the timeline when the drag began.
+    var rect: CGRect
+    /// Where the point can go in time: no further than its neighbors.
+    var range: ClosedRange<Double>
+    var gesture: String
+    var at: Double
+    var value: Double
+    var moved = false
+}
+
 private enum Drag {
     /// A loop being dragged out in the ruler.
     case loop(anchor: CGFloat, region: (start: Double, length: Double)?)
@@ -132,14 +154,27 @@ private enum Drag {
     case clips(ClipDrag)
     case resize(clip: ClipView, repeats: Int)
     case reorder(ReorderDrag)
+    case point(PointDrag)
+}
+
+/// A parameter chosen from the menu that adds a lane.
+private final class LaneChoice: NSObject {
+    let row: RowID
+    let param: String
+
+    init(row: RowID, param: String) {
+        self.row = row
+        self.param = param
+    }
 }
 
 /// The arrangement: a ruler with the loop brace, sections and bars; a header
 /// for each track, return and the master; and the tracks' clips on a timeline.
 /// It draws the host's arrangement and eases to each new revision, lighting
 /// up what an agent's or an external change touched. The person edits here:
-/// levels, mute and solo in the headers, clips on the timeline. Each edit is
-/// shown at once and sent to the host, whose song the view then follows.
+/// levels, mute and solo in the headers, clips on the timeline, and the points
+/// of the automation lanes that fold out under a row. Each edit is shown at
+/// once and sent to the host, whose song the view then follows.
 final class ArrangementView: NSView, NSTextFieldDelegate {
     private static let moveTime: CFTimeInterval = 0.3
     private static let glowTime: CFTimeInterval = 1.8
@@ -159,6 +194,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var held: [Slider: Held] = [:]
     /// The tracks whose sends are shown.
     private var unfolded: Set<UInt64> = []
+    /// The rows whose automation lanes are shown.
+    private var lanesShown: Set<RowID> = []
+    private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
 
     init(model: SongModel) {
@@ -175,6 +213,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onRefusal = { [weak self] in self?.revert() }
         model.onSelection = { [weak self] in self?.needsDisplay = true }
         model.onRename = { [weak self] row in self?.beginRename(row) }
+        model.onShowLanes = { [weak self] row in self?.showLanes(of: row) }
+        model.onFocus = { [weak self] in
+            guard let self else { return }
+            self.window?.makeFirstResponder(self)
+        }
     }
 
     @available(*, unavailable)
@@ -258,8 +301,24 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             return shown
         }
 
+        // A point eases to the host's place, unless the person holds it.
+        for lane in a.tracks.flatMap(\.lanes) + a.returns.flatMap(\.lanes) + a.master.lanes {
+            for point in lane.points {
+                if let hold = heldPoints[point.key], hold.until != nil,
+                   abs(hold.at - point.at) < 1e-9, abs(hold.value - point.value) < 1e-9 {
+                    heldPoints[point.key] = nil
+                }
+            }
+        }
+
+        /// How much taller a row is for its lanes, while they are shown.
+        func lanesHeight(_ id: RowID, _ lanes: [LaneView]) -> CGFloat {
+            HeaderLayout.extraHeight(lanes: lanesShown.contains(id) ? lanes.count : nil)
+        }
+
         func place(_ id: RowID, name: String, detail: String, color: NSColor?, mute: Bool, solo: Bool,
-                   gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = []) {
+                   gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = [],
+                   lanes: Int) {
             liveRows.insert(id)
             var row: RowVisual
             if let old = rows[id], !old.removing {
@@ -278,6 +337,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             row.detail = detail
             row.mute = mute
             row.solo = solo
+            row.automated = lanes > 0
             row.gain = level(.gain(id), from: row.gain, to: gain)
             row.pan = level(.pan(id), from: row.pan, to: pan)
             if case .track(let key) = id {
@@ -300,9 +360,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let color = color(for: track.key)
             let sends = unfolded.contains(track.key) ? a.returns.count : 0
             let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
+                + lanesHeight(.track(track.key), track.lanes)
             place(.track(track.key), name: track.id, detail: Self.chain(track.effects), color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
-                  kind: .track, height: height, sends: track.sends)
+                  kind: .track, height: height, sends: track.sends, lanes: track.lanes.count)
             for clip in track.clips {
                 liveClips.insert(clip.key)
                 let length = clip.patternBeats * Double(clip.repeats)
@@ -330,13 +391,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         y += TimelineLayout.busGap
         for bus in a.returns {
+            let height = TimelineLayout.busHeight + lanesHeight(.bus(bus.key), bus.lanes)
             place(.bus(bus.key), name: bus.id, detail: Self.chain(bus.effects), color: nil,
-                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: TimelineLayout.busHeight)
-            y += TimelineLayout.busHeight
+                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: height,
+                  lanes: bus.lanes.count)
+            y += height
         }
+        let masterHeight = TimelineLayout.busHeight + lanesHeight(.master, a.master.lanes)
         place(.master, name: "Master", detail: Self.chain(a.master.effects), color: nil,
-              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, height: TimelineLayout.busHeight)
-        y += TimelineLayout.busHeight
+              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, height: masterHeight,
+              lanes: a.master.lanes.count)
+        y += masterHeight
 
         // What is gone fades out, then is dropped.
         for id in rows.keys where !liveRows.contains(id) && rows[id]?.removing == false {
@@ -380,7 +445,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// Puts back what was shown ahead of the host, after the host refused it.
     private func revert() {
         held.removeAll()
-        if case .slider = drag { drag = nil }
+        heldPoints.removeAll()
+        switch drag {
+        case .slider, .point: drag = nil
+        default: break
+        }
+        show(model.arrangement, animated: true)
+    }
+
+    /// Unfolds a row's automation lanes.
+    private func showLanes(of row: RowID) {
+        guard !lanesShown.contains(row) else { return }
+        lanesShown.insert(row)
         show(model.arrangement, animated: true)
     }
 
@@ -405,7 +481,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             held = held.filter { $0.value.until.map { now <= $0 } ?? true }
             show(model.arrangement, animated: true)
         }
-        var busy = !glows.isEmpty || held.values.contains { $0.until != nil }
+        if heldPoints.values.contains(where: { $0.until.map { now > $0 } ?? false }) {
+            heldPoints = heldPoints.filter { $0.value.until.map { now <= $0 } ?? true }
+            needsDisplay = true
+        }
+        var busy = !glows.isEmpty || held.values.contains { $0.until != nil } || heldPoints.values.contains { $0.until != nil }
             || rows.values.contains {
                 $0.y.isRunning(at: now) || $0.height.isRunning(at: now) || $0.gain.isRunning(at: now)
                     || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now)
@@ -483,7 +563,38 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let returns = model.arrangement.returns.count
         var sends = 0
         if case .track(let key) = id, unfolded.contains(key) { sends = returns }
-        return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: row.kind == .track && returns > 0)
+        return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: row.kind == .track && returns > 0,
+                            lanes: lanesShown.contains(id) ? model.lanes(of: id).count : nil)
+    }
+
+    /// The lanes shown under a row whose top is at `top`, each with its
+    /// rectangle on the timeline.
+    private func laneRects(_ id: RowID, _ row: RowVisual, top: CGFloat) -> [(lane: LaneView, rect: CGRect)] {
+        guard lanesShown.contains(id) else { return [] }
+        let header = header(id, row, top: top)
+        let x = TimelineLayout.headerWidth
+        return model.lanes(of: id).enumerated().map { index, lane in
+            (lane, CGRect(x: x, y: header.lane(index).minY, width: max(0, bounds.width - x), height: HeaderLayout.laneHeight - 1))
+        }
+    }
+
+    /// The lane at a point of the timeline.
+    private func lane(at p: CGPoint) -> (lane: LaneView, rect: CGRect)? {
+        for (id, row) in rows {
+            guard let frame = frame(of: id) else { continue }
+            if let hit = laneRects(id, row, top: frame.top).first(where: { $0.rect.contains(p) }) { return hit }
+        }
+        return nil
+    }
+
+    /// Where a lane's points are, in the view: the host's, or the person's
+    /// while they hold one.
+    private func positions(_ lane: LaneView, in rect: CGRect) -> [(point: PointView, at: CGPoint)] {
+        let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
+        return lane.points.map { point in
+            let hold = heldPoints[point.key]
+            return (point, CGPoint(x: layout.x(hold?.at ?? point.at), y: scale.y(hold?.value ?? point.value, in: rect)))
+        }
     }
 
     /// The top and height a row is settling at, in the view.
@@ -558,6 +669,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             if p.y >= TimelineLayout.rulerHeight { headerDown(at: p, event) }
         } else if p.y < TimelineLayout.loopStrip {
             drag = .loop(anchor: p.x, region: nil)
+        } else if p.y >= TimelineLayout.rulerHeight, let hit = lane(at: p) {
+            laneDown(hit.lane, rect: hit.rect, at: p, event)
         } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
             clipDown(hit.clip, rect: hit.rect, at: p, event)
         } else {
@@ -573,6 +686,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         let twice = event.clickCount == 2
         switch header.part(at: p) {
+        case .auto:
+            // With Option, every row follows.
+            let all = event.modifierFlags.contains(.option) ? rows.filter { !$0.value.removing }.map(\.key) : [id]
+            if lanesShown.contains(id) { lanesShown.subtract(all) } else { lanesShown.formUnion(all) }
+            show(model.arrangement, animated: true)
+        case .laneRemove(let index):
+            let lanes = model.lanes(of: id)
+            if lanes.indices.contains(index) { model.edit(.laneRemove(lane: lanes[index].key)) }
+        case .laneAdd:
+            chooseLane(for: id, at: p)
+        case .lane:
+            model.select(row: id)
         case .mute:
             rows[id]?.mute.toggle()
             model.edit(.mute(row: id.row, on: !row.mute))
@@ -631,6 +756,62 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .gain(let id): rows[id]?.gain = Animated(value)
         case .pan(let id): rows[id]?.pan = Animated(value)
         case .send(let track, let to): rows[.track(track)]?.sends[to] = Animated(value)
+        }
+    }
+
+    /// Offers the parameters of a row that have no lane yet.
+    private func chooseLane(for id: RowID, at p: CGPoint) {
+        let menu = NSMenu()
+        let targets = model.laneTargets(of: id)
+        if targets.isEmpty {
+            menu.addItem(NSMenuItem(title: "Everything that can be automated here has a lane", action: nil, keyEquivalent: ""))
+        }
+        for target in targets {
+            let item = NSMenuItem(title: target.label, action: #selector(addLane(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = LaneChoice(row: id, param: target.param)
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: p, in: self)
+    }
+
+    @objc private func addLane(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? LaneChoice else { return }
+        model.edit(.laneAdd(row: choice.row.row, param: choice.param))
+    }
+
+    /// A press in a lane: on a point it selects it and may drag it, twice it
+    /// removes it, with Option it changes whether it holds; twice on the lane
+    /// it adds a point there.
+    private func laneDown(_ lane: LaneView, rect: CGRect, at p: CGPoint, _ event: NSEvent) {
+        let near = positions(lane, in: rect).enumerated()
+            .map { (index: $0.offset, point: $0.element.point, distance: hypot($0.element.at.x - p.x, $0.element.at.y - p.y)) }
+            .filter { $0.distance <= 7 }
+            .min { $0.distance < $1.distance }
+        guard let near else {
+            if event.clickCount == 2 {
+                let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
+                let at = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.option))
+                model.edit(.pointAdd(lane: lane.key, at: at, value: scale.value(atY: p.y, in: rect))) { [weak self] made in
+                    self?.model.select(point: made.first)
+                }
+            } else {
+                model.select(point: nil)
+            }
+            return
+        }
+        model.select(point: near.point.key)
+        if event.clickCount == 2 {
+            model.edit(.pointRemove(point: near.point.key))
+        } else if event.modifierFlags.contains(.option) {
+            model.edit(.pointSet(point: near.point.key, at: nil, value: nil, hold: !near.point.hold))
+        } else {
+            let before = near.index > 0 ? lane.points[near.index - 1].at : 0
+            let after = near.index + 1 < lane.points.count ? lane.points[near.index + 1].at : layout.lengthBeats
+            drag = .point(PointDrag(
+                lane: lane, point: near.point.key, rect: rect, range: before...max(before, after),
+                gesture: model.newGesture(), at: near.point.at, value: near.point.value
+            ))
         }
     }
 
@@ -710,6 +891,19 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 clips[clip.key]?.length = Animated(clip.patternBeats * Double(wanted))
                 drag = .resize(clip: clip, repeats: wanted)
             }
+        case .point(var d):
+            let scale = ValueScale(min: d.lane.min, max: d.lane.max, log: d.lane.log)
+            let wanted = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.option))
+            let at = min(max(wanted, d.range.lowerBound), d.range.upperBound)
+            let value = scale.value(atY: p.y, in: d.rect)
+            if at != d.at || value != d.value {
+                d.at = at
+                d.value = value
+                d.moved = true
+                heldPoints[d.point] = HeldPoint(at: at, value: value, until: nil)
+                model.drag(.pointSet(point: d.point, at: at, value: value, hold: nil), gesture: d.gesture)
+            }
+            drag = .point(d)
         case .reorder(var r):
             if r.slot == nil, abs(p.y - r.startY) < 4 { return }
             // The gap the pointer is nearest: above the first row whose middle is below it.
@@ -745,6 +939,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         case .resize(let clip, let repeats):
             if repeats != Int(clip.repeats) { model.edit(.clipRepeats(clip: clip.key, repeats: UInt32(repeats))) }
+        case .point(let d):
+            model.endDrag()
+            // The point stays as dragged until the host's song has it.
+            if d.moved { heldPoints[d.point]?.until = CACurrentMediaTime() + 1 }
         case .reorder(let r):
             // Taking the row out moves the gaps below it up by one.
             if let slot = r.slot {
@@ -774,7 +972,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             drag = nil
             show(model.arrangement, animated: true)
             return true
-        case .slider, nil:
+        case .slider, .point, nil:
             return false
         }
     }
@@ -798,7 +996,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             switch event.charactersIgnoringModifiers {
             case " ": model.togglePlay()
             case "l": model.toggleLoop()
-            case "\u{1b}": if !cancelDrag() { model.select(clips: []) }
+            case "\u{1b}":
+                if !cancelDrag() {
+                    model.select(clips: [])
+                    model.select(point: nil)
+                }
             default: super.keyDown(with: event)
             }
         }
@@ -972,6 +1174,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             fill(CGRect(x: header, y: y, width: width, height: CGFloat(row.height.value(at: now)) - 1),
                  (row.kind == .track ? Theme.lane : Theme.busLane).withAlphaComponent(alpha))
         }
+        // Automation lanes are a shade darker than the row they belong to.
+        var lanes: [(lane: LaneView, rect: CGRect, alpha: CGFloat)] = []
+        for (id, row) in order {
+            let alpha = CGFloat(row.alpha.value(at: now))
+            for item in laneRects(id, row, top: layout.y(CGFloat(row.y.value(at: now)))) {
+                fill(item.rect, Theme.automationLane.withAlphaComponent(alpha))
+                lanes.append((item.lane, item.rect, alpha))
+            }
+        }
 
         // Grid: every bar, and finer lines once they have room.
         let grid = layout.grid
@@ -995,6 +1206,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         for (key, clip) in clips.sorted(by: { drawOrder($0.key) < drawOrder($1.key) }) {
             drawClip(key, clip, selected: model.selectedClips.contains(key), at: now)
         }
+        for item in lanes { drawLane(item.lane, in: item.rect, alpha: item.alpha) }
 
         let end = layout.x(layout.lengthBeats)
         if end < bounds.width {
@@ -1049,6 +1261,55 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
     }
 
+    /// A lane's values over time: a line through its points, which holds the
+    /// first value before the first point and the last after the last.
+    private func drawLane(_ lane: LaneView, in rect: CGRect, alpha: CGFloat) {
+        guard rect.maxY >= TimelineLayout.rulerHeight, rect.minY <= bounds.height else { return }
+        let placed = positions(lane, in: rect)
+        guard let first = placed.first, let last = placed.last else { return }
+        clipped(to: rect) {
+            let line = NSBezierPath()
+            line.move(to: CGPoint(x: min(rect.minX, first.at.x), y: first.at.y))
+            line.line(to: first.at)
+            for (a, b) in zip(placed, placed.dropFirst()) {
+                // A point that holds keeps its value until the next.
+                if a.point.hold { line.line(to: CGPoint(x: b.at.x, y: a.at.y)) }
+                line.line(to: b.at)
+            }
+            line.line(to: CGPoint(x: max(rect.maxX, last.at.x), y: last.at.y))
+            line.lineWidth = 1.5
+            line.lineJoinStyle = .round
+            Theme.automation.withAlphaComponent(alpha).setStroke()
+            line.stroke()
+            for (point, at) in placed {
+                let selected = model.selectedPoint == point.key
+                let radius: CGFloat = selected ? 4.5 : 3
+                let dot = NSBezierPath(ovalIn: CGRect(x: at.x - radius, y: at.y - radius, width: 2 * radius, height: 2 * radius))
+                (selected ? Theme.selectedClip : Theme.automation).withAlphaComponent(alpha).setFill()
+                dot.fill()
+                guard selected else { continue }
+                Theme.automation.withAlphaComponent(alpha).setStroke()
+                dot.lineWidth = 1.5
+                dot.stroke()
+                // The selected point's value, beside it.
+                let value = heldPoints[point.key]?.value ?? point.value
+                let x = at.x + 80 > rect.maxX ? at.x - 78 : at.x + 9
+                let y = at.y - 6 < rect.minY ? rect.minY : min(at.y - 6, rect.maxY - 13)
+                text(ValueScale.text(value, unit: lane.unit), in: CGRect(x: x, y: y, width: 70, height: 13),
+                     font: Self.numberFont, color: Theme.text.withAlphaComponent(alpha), align: at.x + 80 > rect.maxX ? .right : .left)
+            }
+        }
+    }
+
+    /// The mark that shows a row's lanes: lit while they are shown, and in
+    /// the lanes' color when the row has any.
+    private func lanesBadge(_ row: RowVisual, in box: CGRect, shown: Bool, alpha: CGFloat) {
+        fill(rounded: box, (shown ? Theme.automation : Theme.gray(1)).withAlphaComponent((shown ? 1 : 0.07) * alpha))
+        let color = shown ? Theme.gray(0.08) : (row.automated ? Theme.automation : Theme.faintText)
+        text("A", in: CGRect(x: box.minX, y: box.minY + 1.5, width: box.width, height: 11),
+             font: Self.badgeFont, color: color.withAlphaComponent(alpha), align: .center)
+    }
+
     /// A mute or solo badge, lit when on.
     private func badge(_ letter: String, on: Bool, color: NSColor, in box: CGRect, alpha: CGFloat) {
         fill(rounded: box, (on ? color : Theme.gray(1)).withAlphaComponent((on ? 1 : 0.07) * alpha))
@@ -1096,6 +1357,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 name.draw(with: header.name, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
             }
 
+            lanesBadge(row, in: header.auto, shown: header.lanes != nil, alpha: alpha)
             guard row.kind == .track else {
                 // Returns and the master: one line, with the volume as a value to drag.
                 fill(rounded: header.volume, Theme.control.withAlphaComponent(0.28 * alpha))
@@ -1139,6 +1401,24 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 text(level.map(Fader.text(db:)) ?? "off", in: header.sendText(index), font: Self.numberFont,
                      color: level == nil ? Theme.faintText.withAlphaComponent(alpha) : dim)
             }
+        }
+
+        // Each lane's parameter and range beside it, with the mark that
+        // removes it, and under them the mark that adds one.
+        guard let shown = header.lanes else { return }
+        clipped(to: rect) {
+            for (index, lane) in model.lanes(of: id).enumerated() where index < shown {
+                let box = header.lane(index)
+                fill(CGRect(x: 5, y: box.minY, width: box.width - 5, height: box.height - 1),
+                     Theme.automationLane.withAlphaComponent(alpha))
+                text(lane.label, in: header.laneName(index), font: Self.smallFont, color: Theme.text.withAlphaComponent(alpha))
+                text("\(ValueScale.text(lane.min, unit: lane.unit)) to \(ValueScale.text(lane.max, unit: lane.unit))",
+                     in: header.laneRange(index), font: Self.smallFont, color: Theme.faintText.withAlphaComponent(alpha))
+                let mark = header.laneRemove(index)
+                text("×", in: CGRect(x: mark.minX, y: mark.minY - 1, width: mark.width, height: 14),
+                     font: Self.nameFont, color: dim, align: .center)
+            }
+            text("+ Lane", in: header.laneAdd, font: Self.smallFont, color: dim)
         }
     }
 

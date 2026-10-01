@@ -245,10 +245,10 @@ impl Song {
             let doc = locked(&self.doc);
             edits::commands(doc.as_ref().ok_or_else(closed)?, &edit)?
         };
-        let command = match commands.len() {
-            0 => return Ok(Vec::new()),
-            1 => commands.remove(0),
-            n => json!({"op": "batch", "commands": commands, "label": edits::label(&edit, n)}),
+        let command = match (commands.len(), edits::label(&edit, commands.len())) {
+            (0, _) => return Ok(Vec::new()),
+            (1, None) => commands.remove(0),
+            (_, label) => json!({"op": "batch", "commands": commands, "label": label}),
         };
         Ok(edits::made(&self.request(command, gesture)?))
     }

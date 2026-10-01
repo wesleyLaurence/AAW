@@ -266,7 +266,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Scripted input and snapshot
 
-    /// Sends the first window an event as if a person had made it, so that it
+    /// Gives the first window an event as if a person had made it, so that it
     /// takes the path a real click or key press takes.
     private func perform(_ action: Launch.Action) {
         guard let window = songs.first?.window, let content = window.contentView else { return }
@@ -277,7 +277,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 with: type, location: at, modifierFlags: flags, timestamp: now, windowNumber: window.windowNumber,
                 context: nil, eventNumber: 0, clickCount: count, pressure: 1
             ) {
-                NSApp.sendEvent(event)
+                // Queued, as a person's are: a button follows a press by
+                // waiting for the release in the queue.
+                NSApp.postEvent(event, atStart: false)
             }
         }
         switch action {
@@ -384,6 +386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Zoom Out", #selector(SongWindowController.zoomOut(_:)), "-"),
             item("Zoom to Fit", #selector(SongWindowController.zoomToFit(_:)), "0"),
             .separator(),
+            item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
             item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]),
         ])
         let window = NSMenu(title: "Window")
@@ -428,7 +431,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         window.isReleasedWhenClosed = false
         window.tabbingMode = .disallowed
         window.appearance = NSAppearance(named: .darkAqua)
-        window.minSize = CGSize(width: 720, height: 360)
+        window.minSize = CGSize(width: 720, height: 480)
         window.representedURL = model.url
         window.subtitle = model.url.deletingLastPathComponent().lastPathComponent
         window.contentView = NSHostingView(rootView: SongView(model: model))
@@ -468,6 +471,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func zoomOut(_ sender: Any?) { model.zoom(.out) }
     @objc func zoomToFit(_ sender: Any?) { model.zoom(.fit) }
     @objc func toggleActivity(_ sender: Any?) { model.showsActivity.toggle() }
+    @objc func toggleDevices(_ sender: Any?) { model.showsDevices.toggle() }
     @objc func undoEdit(_ sender: Any?) { model.undo() }
     @objc func redoEdit(_ sender: Any?) { model.redo() }
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
@@ -497,6 +501,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.state = model.transport.loopRegion == nil ? .off : .on
             return !typing
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
+        case #selector(toggleDevices(_:)): item.state = model.showsDevices ? .on : .off
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
         case #selector(togglePlay(_:)): return !typing
         case #selector(undoEdit(_:)):

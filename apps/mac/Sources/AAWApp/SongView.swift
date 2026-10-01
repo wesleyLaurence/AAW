@@ -1,8 +1,8 @@
 import AAWCore
 import SwiftUI
 
-/// A song's window: the transport bar over the arrangement, with the activity
-/// panel beside it.
+/// A song's window: the transport bar over the arrangement and the devices of
+/// the selected row, with the activity panel beside them.
 struct SongView: View {
     let model: SongModel
 
@@ -18,7 +18,13 @@ struct SongView: View {
                 )
             }
             HStack(spacing: 0) {
-                ArrangementPane(model: model)
+                VStack(spacing: 0) {
+                    ArrangementPane(model: model)
+                    if model.showsDevices {
+                        Divider()
+                        DeviceView(model: model)
+                    }
+                }
                 if model.showsActivity {
                     Divider()
                     ActivityPanel(model: model)

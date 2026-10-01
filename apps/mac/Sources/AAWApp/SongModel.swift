@@ -19,6 +19,17 @@ enum RowID: Hashable {
     }
 }
 
+/// The channel whose devices the detail panel shows.
+struct DeviceChain {
+    var row: RowID
+    var name: String
+    var effects: [EffectView]
+    /// A track's pads.
+    var pads: [PadView]
+    /// The song's effect types, for adding one.
+    static let kinds = ["filter", "eq", "compressor", "limiter", "delay", "reverb"]
+}
+
 /// A song open in the app. It shows what the session host reports and sends
 /// the person's edits and the transport's commands; the song and every rule
 /// about it live in the host, which the agent's `daw` commands reach as well.
@@ -38,9 +49,12 @@ public final class SongModel {
     /// What undo and redo would do, and whose change each is.
     public private(set) var undoStep: HistoryStep?
     public private(set) var redoStep: HistoryStep?
-    /// The selected clips, or else the selected row.
+    /// The selected clips, or else the selected row or automation point.
     private(set) var selectedClips: Set<UInt64> = []
     private(set) var selectedRow: RowID?
+    private(set) var selectedPoint: UInt64?
+    /// The row whose devices the detail panel shows: the last one selected.
+    private(set) var deviceRow: RowID?
     /// True for a moment after each change by the agent.
     public private(set) var agentWorking = false
     /// True for a moment after the tempo, title or length changed.
@@ -50,6 +64,7 @@ public final class SongModel {
     /// The position the transport bar shows.
     public var position: Double = 0
     public var showsActivity = true
+    public var showsDevices = true
 
     /// Called with each new revision, for the arrangement view to animate.
     @ObservationIgnored var onUpdate: ((Update) -> Void)?
@@ -62,6 +77,10 @@ public final class SongModel {
     @ObservationIgnored var onSelection: (() -> Void)?
     /// Asks the view to let the person type a row's name.
     @ObservationIgnored var onRename: ((RowID) -> Void)?
+    /// Asks the view to unfold a row's automation lanes.
+    @ObservationIgnored var onShowLanes: ((RowID) -> Void)?
+    /// Gives the keys back to the arrangement, after a value was typed.
+    @ObservationIgnored var onFocus: (() -> Void)?
 
     @ObservationIgnored private let song: Song
     /// Commands go to the host in order, off the main thread: the host may be
@@ -91,6 +110,7 @@ public final class SongModel {
         song = try Song.open(path: url.path, observer: relay)
         self.url = url
         arrangement = song.arrangement()
+        deviceRow = arrangement.tracks.first.map { .track($0.key) }
         relay.model = self
     }
 
@@ -253,6 +273,53 @@ public final class SongModel {
         setSelection(clips: [], row: row)
     }
 
+    /// Selects an automation point, in place of clips and rows.
+    func select(point: UInt64?) {
+        if point != nil { setSelection(clips: [], row: nil) }
+        guard point != selectedPoint else { return }
+        selectedPoint = point
+        onSelection?()
+    }
+
+    /// Shows a row's devices without selecting it.
+    func showDevices(of row: RowID) {
+        deviceRow = row
+    }
+
+    /// The devices of the row the detail panel shows.
+    var deviceChain: DeviceChain? {
+        switch deviceRow {
+        case .track(let key):
+            return arrangement.tracks.first { $0.key == key }
+                .map { DeviceChain(row: .track(key), name: $0.id, effects: $0.effects, pads: $0.pads) }
+        case .bus(let key):
+            return arrangement.returns.first { $0.key == key }
+                .map { DeviceChain(row: .bus(key), name: $0.id, effects: $0.effects, pads: []) }
+        case .master:
+            return DeviceChain(row: .master, name: "Master", effects: arrangement.master.effects, pads: [])
+        case nil:
+            return nil
+        }
+    }
+
+    /// A row's automation lanes.
+    func lanes(of row: RowID) -> [LaneView] {
+        switch row {
+        case .track(let key): arrangement.tracks.first { $0.key == key }?.lanes ?? []
+        case .bus(let key): arrangement.returns.first { $0.key == key }?.lanes ?? []
+        case .master: arrangement.master.lanes
+        }
+    }
+
+    /// The parameters of a row that could have a lane and have none.
+    func laneTargets(of row: RowID) -> [LaneTarget] {
+        switch row {
+        case .track(let key): arrangement.tracks.first { $0.key == key }?.laneTargets ?? []
+        case .bus(let key): arrangement.returns.first { $0.key == key }?.laneTargets ?? []
+        case .master: arrangement.master.laneTargets
+        }
+    }
+
     public func selectAllClips() {
         select(clips: Set(placedClips().map(\.clip.key)))
     }
@@ -261,6 +328,13 @@ public final class SongModel {
         guard clips != selectedClips || row != selectedRow else { return }
         selectedClips = clips
         selectedRow = row
+        if !clips.isEmpty || row != nil { selectedPoint = nil }
+        // The detail panel follows the selection, and stays on the last row.
+        if let row {
+            deviceRow = row
+        } else if let track = placedClips().first(where: { clips.contains($0.clip.key) })?.track {
+            deviceRow = .track(arrangement.tracks[track].key)
+        }
         onSelection?()
         // The host keeps the selection for `daw status`, so that an agent can
         // be asked about "the selected clip".
@@ -281,21 +355,36 @@ public final class SongModel {
         case .bus(let key): if !arrangement.returns.contains(where: { $0.key == key }) { row = nil }
         case .master, nil: break
         }
-        if clips != selectedClips || row != selectedRow {
+        var point = selectedPoint
+        if let key = point {
+            let lanes = arrangement.tracks.flatMap(\.lanes) + arrangement.returns.flatMap(\.lanes) + arrangement.master.lanes
+            if !lanes.contains(where: { $0.points.contains { $0.key == key } }) { point = nil }
+        }
+        if clips != selectedClips || row != selectedRow || point != selectedPoint {
             selectedClips = clips
             selectedRow = row
+            selectedPoint = point
             onSelection?()
         }
+        switch deviceRow {
+        case .track(let key): if !arrangement.tracks.contains(where: { $0.key == key }) { deviceRow = nil }
+        case .bus(let key): if !arrangement.returns.contains(where: { $0.key == key }) { deviceRow = nil }
+        case .master, nil: break
+        }
+        if deviceRow == nil { deviceRow = arrangement.tracks.first.map { .track($0.key) } }
     }
 
     public var canDelete: Bool {
-        !selectedClips.isEmpty || (selectedRow != nil && selectedRow != .master)
+        !selectedClips.isEmpty || selectedPoint != nil || (selectedRow != nil && selectedRow != .master)
     }
 
-    /// Removes the selected clips, or else the selected track or return.
+    /// Removes the selected clips, or else the selected automation point,
+    /// track or return.
     public func deleteSelection() {
         if !selectedClips.isEmpty {
             edit(.clipsRemove(clips: selectedClips.sorted()))
+        } else if let point = selectedPoint {
+            edit(.pointRemove(point: point))
         } else if let row = selectedRow, row != .master {
             edit(.remove(row: row.row))
         }

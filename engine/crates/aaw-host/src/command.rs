@@ -330,9 +330,6 @@ pub struct Outcome {
     pub before: Option<Json>,
     /// Changes the command made to keep references valid.
     pub also: Vec<String>,
-    /// Whether the command changed mixer values only: a track's gain, pan,
-    /// mute or solo, or the master gain. Playback then needs no recompile.
-    pub mix: bool,
 }
 
 /// Applies edits to a tree. Created objects get handles at once.
@@ -386,15 +383,6 @@ pub fn set_label(path: &str, before: Option<&Json>, value: &Json) -> String {
     match before {
         Some(b) => format!("Set {path}: {} → {}", short(b), short(value)),
         None => format!("Set {path}: {}", short(value)),
-    }
-}
-
-/// Whether a location is a mixer value that playback applies without recompiling.
-fn is_mix(loc: &[Step]) -> bool {
-    match loc {
-        [Step::Key(a), Step::Index(_), Step::Key(k)] => a == "tracks" && matches!(k.as_str(), "gain_db" | "pan" | "mute" | "solo"),
-        [Step::Key(a), Step::Key(k)] => a == "session" && k == "master_gain_db",
-        _ => false,
     }
 }
 
@@ -750,7 +738,6 @@ impl<'a> Edit<'a> {
                 out.label = set_label(&path, before.as_ref(), value);
                 out.path = Some(path);
                 out.before = before;
-                out.mix = is_mix(&loc);
             }
             Toggle { path } => {
                 let loc = self.at(path)?;
@@ -760,7 +747,6 @@ impl<'a> Edit<'a> {
                 };
                 *self.node_mut(&loc) = Node::Leaf(Value::Bool(now));
                 out.label = format!("Toggle {} to {now}", self.text(&loc));
-                out.mix = is_mix(&loc);
             }
             Remove { path } => {
                 let loc = self.at(path)?;
@@ -1094,12 +1080,18 @@ impl<'a> Edit<'a> {
                     let slot = Self::point_slot(self.node(&lane).get("points").map_or(&[], Node::items), at.as_ref());
                     self.list(&lane, "points")?.insert(slot, item);
                 }
-                out.label = format!("Change point {point}");
+                // Named for its lane, which a person can find, not its handle.
+                let param = self.node(&lane).field("param").unwrap_or_default().to_string();
+                let owner = self.text(&lane[..lane.len().saturating_sub(2)]);
+                out.label = format!("Change point of {owner} {param}");
             }
             PointRemove { point } => {
                 let (lane, i) = self.member(point, "points", "an automation point")?;
+                let param = self.node(&lane).field("param").unwrap_or_default().to_string();
+                let owner = self.text(&lane[..lane.len().saturating_sub(2)]);
                 let loc = [lane, vec![Step::Key("points".into()), Step::Index(i)]].concat();
-                out.label = format!("Remove point {}", self.remove_at(&loc)?);
+                self.remove_at(&loc)?;
+                out.label = format!("Remove point of {owner} {param}");
             }
             SectionAdd { id, at, length_beats } => {
                 let mut f = Fields::new();
@@ -1121,7 +1113,6 @@ impl<'a> Edit<'a> {
             Batch { commands, label } => {
                 let mut labels = Vec::new();
                 let mut also = Vec::new();
-                out.mix = !commands.is_empty();
                 for (n, c) in commands.iter().enumerate() {
                     if c.kind() != Kind::Edit || matches!(c, Apply { .. }) {
                         return Err(format!("batch command {n}: {} cannot be batched", c.op()));
@@ -1130,7 +1121,6 @@ impl<'a> Edit<'a> {
                     labels.push(o.label);
                     also.extend(o.also);
                     out.made.extend(o.made);
-                    out.mix &= o.mix;
                 }
                 self.also = also;
                 out.label = match (label, labels.len()) {

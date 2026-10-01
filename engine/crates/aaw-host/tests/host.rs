@@ -263,8 +263,11 @@ fn an_embedded_host_reports_what_changes() {
     assert_eq!(change.label, "Set tracks.drums.gain_db: 0.0 → -6");
     assert_eq!(doc.project.tracks[0].gain_db, -6.0);
     assert_eq!((history.undo, history.redo), (Some((change.label.clone(), Origin::Agent)), None));
-    // `prepare` compiled the song, which found what the engine leaves out.
-    assert!(warnings.iter().any(|w| w.contains("playing without")), "{warnings:?}");
+    // `prepare` compiled the song, effects and all, for the first play.
+    assert!(warnings.is_empty(), "{warnings:?}");
+    let status = request(&path, json!({"op": "status"}), Origin::Agent).unwrap().unwrap();
+    assert_eq!(status["latency_frames"], json!(0));
+    assert_eq!(status["playback_error"], Json::Null);
 
     // Requests made in-process are answered as over the socket.
     let ask = |j: Json| running.request(Request::new(cmd(j), Origin::User));
