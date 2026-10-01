@@ -82,7 +82,7 @@ fn random_edits_during_playback_never_allocate_on_the_audio_thread() {
         };
         let result = match edit["op"].as_str() {
             Some("undo") => s.undo(Origin::Agent, false).map(|_| ()),
-            _ => s.edit(&cmd(edit), Origin::Agent, None).map(|_| ()),
+            _ => s.edit(&cmd(edit), Origin::Agent, None, None).map(|_| ()),
         };
         if result.is_ok() {
             applied += 1;

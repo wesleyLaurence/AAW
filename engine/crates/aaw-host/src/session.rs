@@ -4,7 +4,7 @@
 //! A host keeps one session for as long as it runs. Headless commands open one,
 //! apply a single command, save and exit; they have no history or handles.
 
-use crate::command::{json_value, node_json, Command, Edit, Kind, Origin, Outcome};
+use crate::command::{json_value, node_json, set_label, Command, Edit, Kind, Origin, Outcome};
 use crate::tree::{self, Node};
 use aaw_model::{project_hash, Project};
 use serde::Serialize;
@@ -54,6 +54,21 @@ struct Step {
     after: Doc,
     label: String,
     origin: Origin,
+    gesture: Option<Gesture>,
+}
+
+/// The drag a step was made by, which later edits of the drag extend.
+struct Gesture {
+    id: String,
+    /// A `set`'s path and the value before the gesture's first edit.
+    set: Option<(String, Option<Json>)>,
+}
+
+/// What `undo` and `redo` would do next: each step's label and origin.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct History {
+    pub undo: Option<(String, Origin)>,
+    pub redo: Option<(String, Origin)>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -68,6 +83,13 @@ pub struct Change {
     pub project_sha256: String,
     /// Unix time in seconds.
     pub time: f64,
+    /// The drag the change belongs to. A gesture's changes replace one another
+    /// in the log, so the log holds its latest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gesture: Option<String>,
+    /// Whether only mixer values changed, so playback needs no recompile.
+    #[serde(skip)]
+    pub mix: bool,
 }
 
 /// A file's identity on disk, to notice changes without reading it.
@@ -234,18 +256,23 @@ impl Session {
         Ok(())
     }
 
-    fn record(&mut self, origin: Origin, op: &str, label: String, also: Vec<String>, command: Json) -> Change {
+    fn record(&mut self, origin: Origin, op: &str, outcome: Outcome, command: Json, gesture: Option<&str>) -> Change {
         self.revision += 1;
         let change = Change {
             revision: self.revision,
             origin,
             op: op.to_string(),
-            label,
-            also,
+            label: outcome.label,
+            also: outcome.also,
             command,
             project_sha256: self.doc.sha.clone(),
             time: now(),
+            gesture: gesture.map(str::to_string),
+            mix: outcome.mix,
         };
+        if gesture.is_some() && self.log.back().is_some_and(|c| c.gesture == change.gesture && c.origin == origin) {
+            self.log.pop_back();
+        }
         self.log.push_back(change.clone());
         if self.log.len() > LOG_LIMIT {
             self.log.pop_front();
@@ -253,30 +280,72 @@ impl Session {
         change
     }
 
-    /// Makes `project` current as one undoable step. None if nothing changed.
-    fn commit(&mut self, project: Project, handles: Vec<u64>, outcome: Outcome, origin: Origin, command: Json) -> Option<Change> {
+    /// Makes `project` current as one undoable step, or as more of the step on
+    /// top of the history when that step is the same gesture's. None if nothing
+    /// changed.
+    fn commit(
+        &mut self,
+        project: Project,
+        handles: Vec<u64>,
+        mut outcome: Outcome,
+        origin: Origin,
+        command: Json,
+        gesture: Option<&str>,
+    ) -> Option<Change> {
         let doc = Doc::new(project, handles);
         if doc.yaml == self.doc.yaml {
             return None;
         }
         let before = std::mem::replace(&mut self.doc, doc);
-        self.undo.push(Step {
-            before,
-            after: self.doc.clone(),
-            label: outcome.label.clone(),
-            origin,
+        let set = outcome.path.clone().map(|path| (path, outcome.before.clone()));
+        let continued = self.undo.last_mut().filter(|step| {
+            gesture.is_some() && step.origin == origin && step.gesture.as_ref().map(|g| g.id.as_str()) == gesture
         });
-        if self.undo.len() > UNDO_LIMIT {
-            self.undo.remove(0);
+        match continued {
+            Some(step) => {
+                // A drag of one value reads as one move, from where it began.
+                if let (Some(Gesture { set: Some((path, first)), .. }), Some((now, _))) = (&step.gesture, &set) {
+                    if path == now {
+                        outcome.label = set_label(path, first.as_ref(), &command["value"]);
+                    }
+                }
+                step.after = self.doc.clone();
+                step.label = outcome.label.clone();
+                if step.before.yaml == step.after.yaml {
+                    // The drag came back to where it began: nothing to undo.
+                    self.undo.pop();
+                }
+            }
+            None => {
+                self.undo.push(Step {
+                    before,
+                    after: self.doc.clone(),
+                    label: outcome.label.clone(),
+                    origin,
+                    gesture: gesture.map(|id| Gesture { id: id.to_string(), set }),
+                });
+                if self.undo.len() > UNDO_LIMIT {
+                    self.undo.remove(0);
+                }
+            }
         }
         self.redo.clear();
         self.dirty = true;
         let op = command.get("op").and_then(Json::as_str).unwrap_or("edit").to_string();
-        Some(self.record(origin, &op, outcome.label, outcome.also, command))
+        Some(self.record(origin, &op, outcome, command, gesture))
     }
 
-    /// Applies an edit command. `expect` refuses it unless the song's SHA matches.
-    pub fn edit(&mut self, cmd: &Command, origin: Origin, expect: Option<&str>) -> Result<(Json, Option<Change>)> {
+    /// Applies an edit command. `expect` refuses it unless the song's SHA
+    /// matches. `gesture` names the drag the edit is part of: while the step on
+    /// top of the history is the same gesture's, the edit extends that step and
+    /// its log entry instead of adding new ones.
+    pub fn edit(
+        &mut self,
+        cmd: &Command,
+        origin: Origin,
+        expect: Option<&str>,
+        gesture: Option<&str>,
+    ) -> Result<(Json, Option<Change>)> {
         debug_assert_eq!(cmd.kind(), Kind::Edit);
         self.check_editable()?;
         if expect.is_some_and(|x| x != self.doc.sha) {
@@ -304,16 +373,29 @@ impl Session {
             }
         };
         self.verify_changed(&project)?;
-        let made = outcome.made.and_then(|h| tree::find(&node, h).map(|loc| (h, tree::path_text(&node, &loc))));
+        let batch = matches!(cmd, Command::Batch { .. });
+        let made: Vec<(u64, String)> = outcome
+            .made
+            .iter()
+            .filter_map(|h| tree::find(&node, *h).map(|loc| (*h, tree::path_text(&node, &loc))))
+            .collect();
         let before = outcome.before.clone();
         let label = outcome.label.clone();
         let also = outcome.also.clone();
-        let change = self.commit(project, tree::handles(&node), outcome, origin, cmd.json());
+        let change = self.commit(project, tree::handles(&node), outcome, origin, cmd.json(), gesture);
         let mut reply = self.stamp_reply(change.is_some());
+        // A gesture's edits share a label, which names the whole drag.
+        let label = change.as_ref().map_or(label, |c| c.label.clone());
         reply.insert("label".into(), json!(label));
-        if let Some((h, path)) = made {
+        if batch {
+            // What a batch made, in the order its commands made it.
             if self.hosted {
-                reply.insert("handle".into(), json!(tree::handle_text(h)));
+                reply.insert("handles".into(), json!(made.iter().map(|(h, _)| tree::handle_text(*h)).collect::<Vec<_>>()));
+            }
+            reply.insert("paths".into(), json!(made.iter().map(|(_, path)| path).collect::<Vec<_>>()));
+        } else if let Some((h, path)) = made.first() {
+            if self.hosted {
+                reply.insert("handle".into(), json!(tree::handle_text(*h)));
             }
             reply.insert("path".into(), json!(path));
         }
@@ -350,7 +432,11 @@ impl Session {
         }
         self.dirty = true;
         let op = verb.to_lowercase();
-        let change = self.record(origin, &op, label.clone(), Vec::new(), json!({"op": op}));
+        let outcome = Outcome {
+            label: label.clone(),
+            ..Outcome::default()
+        };
+        let change = self.record(origin, &op, outcome, json!({"op": op}), None);
         let mut reply = self.stamp_reply(true);
         reply.insert("label".into(), json!(label));
         Ok((Json::Object(reply), change))
@@ -420,7 +506,7 @@ impl Session {
                     ..Outcome::default()
                 };
                 let dirty = self.dirty;
-                let change = self.commit(project, tree::handles(&node), outcome, Origin::External, json!({"op": "reload"}));
+                let change = self.commit(project, tree::handles(&node), outcome, Origin::External, json!({"op": "reload"}), None);
                 // The file already holds this revision.
                 self.dirty = dirty && change.is_none();
                 change
@@ -431,6 +517,30 @@ impl Session {
     pub fn changes(&self, since: u64) -> Json {
         let changes: Vec<&Change> = self.log.iter().filter(|c| c.revision > since).collect();
         json!({"revision": self.revision, "session": self.id, "changes": changes})
+    }
+
+    pub fn history(&self) -> History {
+        let top = |steps: &[Step]| steps.last().map(|s| (s.label.clone(), s.origin));
+        History {
+            undo: top(&self.undo),
+            redo: top(&self.redo),
+        }
+    }
+
+    /// Where a selected object is now, as `status` lists it. None once the
+    /// object is gone.
+    pub fn located(&self, root: &Node, handle: u64) -> Option<Json> {
+        let loc = tree::find(root, handle)?;
+        Some(json!({"ref": tree::handle_text(handle), "path": tree::path_text(root, &loc)}))
+    }
+
+    /// The handle of the list item a reference names, such as a clip or a track.
+    pub fn handle(&self, root: &Node, reference: &str) -> Result<u64> {
+        let loc = tree::resolve(root, reference, self.hosted)?;
+        match tree::handle_at(root, &loc) {
+            0 => Err(format!("{reference} is not a track, a clip or another object with a handle")),
+            h => Ok(h),
+        }
     }
 
     fn step_json(step: Option<&Step>) -> Json {

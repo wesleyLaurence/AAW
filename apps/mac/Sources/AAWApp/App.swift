@@ -4,16 +4,66 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// How the app was started: `AAW [SONG...]`, and for checking the app without
-/// anyone at the screen, `--click X,Y`, `--drag X1,Y1,X2,Y2` and `--key
-/// space|return|l` in the order to perform them, then `--snapshot PNG [--after
-/// SECONDS] [--size WxH]`.
+/// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
+/// X,Y`, `--drag X1,Y1,X2,Y2`, `--key KEY`, `--type TEXT` and `--wait SECONDS`
+/// in the order to perform them, then `--snapshot PNG [--after SECONDS]
+/// [--size WxH]`.
 struct Launch {
     /// Input to feed the first window as if a person made it. Points are in
     /// the window's content, from its top left.
-    enum Action {
-        case click(CGPoint)
+    enum Action: Equatable {
+        case click(CGPoint, shift: Bool = false, count: Int = 1)
         case drag(CGPoint, CGPoint)
-        case key(String)
+        case key(Key)
+        /// Time for something else to happen, such as an agent's command.
+        case wait(Double)
+    }
+
+    /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
+    /// after any of `cmd+`, `shift+` and `opt+`.
+    struct Key: Equatable {
+        var characters: String
+        var code: UInt16
+        var modifiers: NSEvent.ModifierFlags = []
+        /// One character of typed text, rather than a key of its own.
+        var typed = false
+
+        /// Where each letter is on the keyboard, which menus match keys by.
+        private static let letters: [Character: UInt16] = [
+            "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
+            "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38,
+            "k": 40, "n": 45, "m": 46,
+        ]
+        private static let named: [String: (String, UInt16)] = [
+            "space": (" ", 49), "return": ("\r", 36), "delete": ("\u{7f}", 51), "escape": ("\u{1b}", 53),
+            "left": ("\u{f702}", 123), "right": ("\u{f703}", 124), "down": ("\u{f701}", 125), "up": ("\u{f700}", 126),
+        ]
+        private static let modifierNames: [String: NSEvent.ModifierFlags] = [
+            "cmd": .command, "shift": .shift, "opt": .option,
+        ]
+
+        init?(_ text: String) {
+            var parts = text.split(separator: "+").map(String.init)
+            guard let name = parts.popLast() else { return nil }
+            for part in parts {
+                guard let flag = Self.modifierNames[part] else { return nil }
+                modifiers.insert(flag)
+            }
+            if let (characters, code) = Self.named[name] {
+                (self.characters, self.code) = (characters, code)
+                // AppKit marks arrow keys as function keys.
+                if (123...126).contains(code) { modifiers.insert([.function, .numericPad]) }
+            } else if name.count == 1 {
+                (characters, code) = (name, Self.letters[Character(name)] ?? 0)
+            } else {
+                return nil
+            }
+        }
+
+        init(typing character: Character) {
+            (characters, code) = (String(character), Self.letters[character] ?? 0)
+            typed = true
+        }
     }
 
     var songs: [URL] = []
@@ -31,15 +81,21 @@ struct Launch {
                 (rest.popFirst() ?? "").split(separator: ",").compactMap { Double($0) }
             }
             switch argument {
-            case "--click":
+            case "--click", "--shift-click", "--double-click":
                 let n = numbers()
-                if n.count == 2 { actions.append(.click(CGPoint(x: n[0], y: n[1]))) }
+                if n.count == 2 {
+                    actions.append(.click(CGPoint(x: n[0], y: n[1]), shift: argument == "--shift-click",
+                                          count: argument == "--double-click" ? 2 : 1))
+                }
             case "--drag":
                 let n = numbers()
                 if n.count == 4 { actions.append(.drag(CGPoint(x: n[0], y: n[1]), CGPoint(x: n[2], y: n[3]))) }
             case "--key":
-                let keys = ["space": " ", "return": "\r"]
-                if let name = rest.popFirst() { actions.append(.key(keys[name] ?? name)) }
+                if let key = rest.popFirst().flatMap(Key.init) { actions.append(.key(key)) }
+            case "--type":
+                actions += (rest.popFirst() ?? "").map { .key(Key(typing: $0)) }
+            case "--wait":
+                if let seconds = rest.popFirst().flatMap(Double.init) { actions.append(.wait(seconds)) }
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
             case "--after":
@@ -93,11 +149,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if launch.snapshot == nil || !launch.actions.isEmpty {
             NSApp.activate(ignoringOtherApps: true)
         }
-        // Scripted input, half a second apart, then the picture.
+        // Scripted input, half a second apart, then the picture. Typed
+        // characters follow one another closely.
         var delay = 0.5
+        var previous: Launch.Action?
         for action in launch.actions {
+            if case .wait(let seconds) = action {
+                delay += seconds
+                continue
+            }
+            if case .key(let key) = action, case .key(let last)? = previous, key.typed, last.typed {
+                delay -= 0.45
+            }
             later(delay) { $0.perform(action) }
             delay += 0.5
+            previous = action
         }
         if let snapshot = launch.snapshot {
             later(delay - 0.5 + launch.after) { $0.snapshot(to: snapshot) }
@@ -205,32 +271,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func perform(_ action: Launch.Action) {
         guard let window = songs.first?.window, let content = window.contentView else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        func mouse(_ type: NSEvent.EventType, _ p: CGPoint) {
+        func mouse(_ type: NSEvent.EventType, _ p: CGPoint, flags: NSEvent.ModifierFlags = [], count: Int = 1) {
             let at = CGPoint(x: p.x, y: content.bounds.height - p.y)
             if let event = NSEvent.mouseEvent(
-                with: type, location: at, modifierFlags: [], timestamp: now, windowNumber: window.windowNumber,
-                context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+                with: type, location: at, modifierFlags: flags, timestamp: now, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: count, pressure: 1
             ) {
                 NSApp.sendEvent(event)
             }
         }
         switch action {
-        case .click(let p):
-            mouse(.leftMouseDown, p)
-            mouse(.leftMouseUp, p)
+        case .click(let p, let shift, let count):
+            for n in 1...count {
+                mouse(.leftMouseDown, p, flags: shift ? .shift : [], count: n)
+                mouse(.leftMouseUp, p, flags: shift ? .shift : [], count: n)
+            }
         case .drag(let from, let to):
             mouse(.leftMouseDown, from)
             mouse(.leftMouseDragged, CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2))
             mouse(.leftMouseDragged, to)
             mouse(.leftMouseUp, to)
-        case .key(let characters):
-            if let event = NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: [], timestamp: now, windowNumber: window.windowNumber,
-                context: nil, characters: characters, charactersIgnoringModifiers: characters, isARepeat: false,
-                keyCode: characters == " " ? 49 : characters == "\r" ? 36 : 37
-            ) {
-                NSApp.sendEvent(event)
-            }
+        case .key(let key):
+            // With Shift, a letter arrives as its capital, which menus match.
+            let characters = key.modifiers.contains(.shift) ? key.characters.uppercased() : key.characters
+            guard let event = NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: key.modifiers, timestamp: now,
+                windowNumber: window.windowNumber, context: nil, characters: key.characters,
+                charactersIgnoringModifiers: characters, isARepeat: false, keyCode: key.code
+            ) else { return }
+            // A key with Command is a menu's, as it is when a person presses it.
+            if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
+            NSApp.sendEvent(event)
+        case .wait:
+            break
         }
     }
 
@@ -282,6 +355,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             recent,
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
+        ])
+        add("Edit", [
+            item("Undo", #selector(SongWindowController.undoEdit(_:)), "z"),
+            item("Redo", #selector(SongWindowController.redoEdit(_:)), "Z"),
+            .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x"),
+            item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"),
+            item("Duplicate", #selector(SongWindowController.duplicateSelection(_:)), "d"),
+            item("Delete", #selector(SongWindowController.deleteSelection(_:)), "\u{8}", []),
+            .separator(),
+            item("Select All", #selector(NSResponder.selectAll(_:)), "a"),
+        ])
+        add("Track", [
+            item("Add Track", #selector(SongWindowController.addTrack(_:)), "t"),
+            item("Add Return", #selector(SongWindowController.addReturn(_:)), "t", [.command, .option]),
+            .separator(),
+            item("Rename", #selector(SongWindowController.renameSelection(_:)), "r"),
         ])
         add("Transport", [
             item("Play or Stop", #selector(SongWindowController.togglePlay(_:)), " ", []),
@@ -377,12 +468,47 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func zoomOut(_ sender: Any?) { model.zoom(.out) }
     @objc func zoomToFit(_ sender: Any?) { model.zoom(.fit) }
     @objc func toggleActivity(_ sender: Any?) { model.showsActivity.toggle() }
+    @objc func undoEdit(_ sender: Any?) { model.undo() }
+    @objc func redoEdit(_ sender: Any?) { model.redo() }
+    @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
+    @objc func deleteSelection(_ sender: Any?) { model.deleteSelection() }
+    @objc func addTrack(_ sender: Any?) { model.addTrack() }
+    @objc func addReturn(_ sender: Any?) { model.addReturn() }
+    @objc func renameSelection(_ sender: Any?) { model.renameSelection() }
+
+    /// "Undo" with the step it would undo, and whose it is when not the
+    /// person's own: "Undo Agent: Move clip beat at 16".
+    static func title(_ verb: String, _ step: HistoryStep?) -> String {
+        guard let step else { return verb }
+        var label = step.label
+        if label.count > 60 { label = label.prefix(59) + "…" }
+        switch step.origin {
+        case .user: return "\(verb) \(label)"
+        case .agent: return "\(verb) Agent: \(label)"
+        case .external: return "\(verb) File Edit: \(label)"
+        }
+    }
 
     func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        // While a name is typed, the keys are the text's.
+        let typing = window?.firstResponder is NSText
         switch item.action {
-        case #selector(toggleLoop(_:)): item.state = model.transport.loopRegion == nil ? .off : .on
+        case #selector(toggleLoop(_:)):
+            item.state = model.transport.loopRegion == nil ? .off : .on
+            return !typing
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
-        case #selector(returnToStart(_:)): return model.transport.playing
+        case #selector(returnToStart(_:)): return model.transport.playing && !typing
+        case #selector(togglePlay(_:)): return !typing
+        case #selector(undoEdit(_:)):
+            item.title = Self.title("Undo", model.undoStep)
+            return model.undoStep != nil && !typing
+        case #selector(redoEdit(_:)):
+            item.title = Self.title("Redo", model.redoStep)
+            return model.redoStep != nil && !typing
+        case #selector(duplicateSelection(_:)): return !model.selectedClips.isEmpty && !typing
+        case #selector(deleteSelection(_:)): return model.canDelete && !typing
+        case #selector(renameSelection(_:)): return model.canRename && !typing
+        case #selector(addTrack(_:)), #selector(addReturn(_:)): return !typing
         default: break
         }
         return true

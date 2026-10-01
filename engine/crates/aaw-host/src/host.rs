@@ -7,7 +7,7 @@
 use crate::client::Request;
 use crate::command::{beat_value, json_value, Command, Kind, Origin};
 use crate::registry;
-use crate::session::{Change, Doc, Session};
+use crate::session::{Change, Doc, History, Session};
 use aaw_engine::player::Shared;
 use aaw_engine::program::{compile_cached, Program, SampleCache};
 use aaw_engine::realtime::Transport;
@@ -29,6 +29,8 @@ type Result<T> = std::result::Result<T, String>;
 
 /// How often the host checks song.yaml for external edits.
 const SYNC_EVERY: Duration = Duration::from_millis(200);
+/// How long after a gesture's last edit the host saves.
+const SAVE_AFTER: Duration = Duration::from_millis(250);
 
 const CLOSING: &str = "The host is closing";
 
@@ -67,8 +69,8 @@ pub struct Options {
 pub enum Event {
     /// The song as opened, before any change.
     Opened(Doc),
-    /// A new revision of the song.
-    Changed { change: Change, doc: Doc },
+    /// A new revision of the song, with what undo and redo would do after it.
+    Changed { change: Change, doc: Doc, history: History },
     /// The play state, the start position or the loop changed.
     Transport(TransportState),
     /// song.yaml holds an external edit that does not load, or it was fixed.
@@ -130,6 +132,10 @@ struct Host {
     warned: Vec<String>,
     playback_error: Option<String>,
     reported_invalid: Option<String>,
+    /// What the person has selected in the app, by handle.
+    selection: Vec<u64>,
+    /// When to save a gesture's edits, which are not saved one by one.
+    save_at: Option<Instant>,
     heard: bool,
     stopped_at: Option<Instant>,
     closing: bool,
@@ -180,15 +186,24 @@ impl Host {
         Ok(())
     }
 
-    /// The program for the current revision, compiling it if needed.
-    fn program(&mut self) -> Result<Arc<Program>> {
+    /// The program for the current revision, compiling it if needed. `mixed`
+    /// is the SHA of a revision that differs from this one in mixer values
+    /// only; its program is given the new values instead of compiling again.
+    fn program(&mut self, mixed: Option<&str>) -> Result<Arc<Program>> {
         let sha = self.session.doc().sha.clone();
+        let mut remixed = None;
         if let Some((s, p)) = &self.program {
             if *s == sha {
                 return Ok(p.clone());
             }
+            if mixed == Some(s.as_str()) {
+                remixed = p.remix(self.session.project());
+            }
         }
-        let p = Arc::new(compile_cached(self.session.project(), self.session.dir(), &mut self.cache)?);
+        let p = Arc::new(match remixed {
+            Some(p) => p,
+            None => compile_cached(self.session.project(), self.session.dir(), &mut self.cache)?,
+        });
         for feature in &p.omitted {
             if !self.warned.contains(feature) {
                 self.warned.push(feature.clone());
@@ -222,8 +237,8 @@ impl Host {
     }
 
     /// Sends the current revision to the open output.
-    fn reload(&mut self) -> Result<()> {
-        let p = self.program()?;
+    fn reload(&mut self, mixed: Option<&str>) -> Result<()> {
+        let p = self.program(mixed)?;
         let t = self.transport.as_mut().expect("transport");
         if p.rate == t.rate {
             t.control.load(p)?;
@@ -247,11 +262,11 @@ impl Host {
 
     /// Sends the current revision to the audio thread, or with `prepare` and
     /// no output open yet, compiles it for the first play.
-    fn refresh(&mut self) {
+    fn refresh(&mut self, mixed: Option<&str>) {
         let result = if self.transport.is_some() {
-            self.reload()
+            self.reload(mixed)
         } else if self.opts.prepare {
-            self.program().map(|_| ())
+            self.program(mixed).map(|_| ())
         } else {
             return;
         };
@@ -261,18 +276,22 @@ impl Host {
         }
     }
 
-    fn changed(&mut self, change: &Change) {
+    /// Reports a change and plays it. `before` is the SHA the change was made
+    /// from, which lets a change of mixer values skip the compile.
+    fn changed(&mut self, change: &Change, before: &str) {
         self.emit(json!({"change": change}));
         self.notify(Event::Changed {
             change: change.clone(),
             doc: self.session.doc().clone(),
+            history: self.session.history(),
         });
-        self.refresh();
+        self.refresh(change.mix.then_some(before));
     }
 
     fn sync(&mut self) {
+        let before = self.session.doc().sha.clone();
         if let Some(c) = self.session.sync() {
-            self.changed(&c);
+            self.changed(&c, &before);
         }
         let invalid = self.session.invalid().map(str::to_string);
         if invalid != self.reported_invalid {
@@ -312,7 +331,7 @@ impl Host {
         };
         self.check_in_song(&cue, "--from")?;
         self.cue = cue;
-        let program = self.program()?;
+        let program = self.program(None)?;
         if self.transport.is_none() {
             self.open_transport(program)?;
         }
@@ -413,11 +432,29 @@ impl Host {
             m.insert("omitted".into(), json!(p.omitted));
         }
         m.insert("playback_error".into(), json!(self.playback_error));
+        m.insert("selection".into(), json!(self.selected()));
         Json::Object(m)
     }
 
+    /// The selection as references and paths, without what has been removed.
+    fn selected(&mut self) -> Vec<Json> {
+        let root = self.session.doc().tree();
+        let located: Vec<(u64, Json)> = self
+            .selection
+            .iter()
+            .filter_map(|h| self.session.located(&root, *h).map(|j| (*h, j)))
+            .collect();
+        self.selection = located.iter().map(|(h, _)| *h).collect();
+        located.into_iter().map(|(_, j)| j).collect()
+    }
+
     fn handle(&mut self, request: Request) -> Result<Json> {
-        let Request { command, origin, expect } = request;
+        let Request {
+            command,
+            origin,
+            expect,
+            gesture,
+        } = request;
         if origin == Origin::External {
             return Err("external is the origin of edits made to the file".into());
         }
@@ -425,14 +462,21 @@ impl Host {
             Kind::Edit | Kind::History => {
                 let _lock = lock(self.session.path())?;
                 self.sync();
+                let before = self.session.doc().sha.clone();
                 let (reply, change) = match &command {
                     Command::Undo => self.session.undo(origin, false).map(|(r, c)| (r, Some(c)))?,
                     Command::Redo => self.session.undo(origin, true).map(|(r, c)| (r, Some(c)))?,
-                    _ => self.session.edit(&command, origin, expect.as_deref())?,
+                    _ => self.session.edit(&command, origin, expect.as_deref(), gesture.as_deref())?,
                 };
-                self.session.save()?;
+                // A drag sends many edits a second; they are saved once it pauses.
+                if gesture.is_some() && matches!(command.kind(), Kind::Edit) {
+                    self.save_at = Some(Instant::now() + SAVE_AFTER);
+                } else {
+                    self.session.save()?;
+                    self.save_at = None;
+                }
                 if let Some(c) = change {
-                    self.changed(&c);
+                    self.changed(&c, &before);
                 }
                 Ok(reply)
             }
@@ -451,6 +495,18 @@ impl Host {
                 }
             }
             Kind::Host => match command {
+                Command::Select { items } => {
+                    let root = self.session.doc().tree();
+                    let mut selection = Vec::new();
+                    for item in &items {
+                        let handle = self.session.handle(&root, item)?;
+                        if !selection.contains(&handle) {
+                            selection.push(handle);
+                        }
+                    }
+                    self.selection = selection;
+                    Ok(json!({"selection": self.selected()}))
+                }
                 Command::Fmt => {
                     let _lock = lock(self.session.path())?;
                     self.session.write()?;
@@ -468,8 +524,25 @@ impl Host {
         }
     }
 
+    /// Saves a gesture's edits once it has paused.
+    fn save_due(&mut self) {
+        if self.save_at.is_none_or(|at| Instant::now() < at) {
+            return;
+        }
+        self.save_at = None;
+        let saved = lock(self.session.path()).and_then(|_lock| {
+            // An edit of the file made meanwhile is loaded, not overwritten.
+            self.sync();
+            self.session.save()
+        });
+        if let Err(e) = saved {
+            self.warn(format!("song.yaml was not saved: {e}"));
+        }
+    }
+
     /// Housekeeping between requests. True when the host should exit.
     fn tick(&mut self) -> bool {
+        self.save_due();
         if let Some(t) = &mut self.transport {
             t.control.collect();
             let played = t.control.shared().played.load(Relaxed);
@@ -563,6 +636,8 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         warned: Vec::new(),
         playback_error: None,
         reported_invalid: None,
+        selection: Vec::new(),
+        save_at: None,
         heard: false,
         stopped_at: None,
         closing: false,
@@ -588,7 +663,7 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
     let started = match host.opts.play.clone() {
         Some(from) => host.play(Some(&from)).map(|_| ()),
         None => {
-            host.refresh();
+            host.refresh(None);
             Ok(())
         }
     };

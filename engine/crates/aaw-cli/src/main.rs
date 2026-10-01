@@ -146,8 +146,14 @@ enum Top {
     Toggle { project: PathBuf, path: String },
     /// Remove an object or map entry by path, or reset a field to its default.
     Remove { project: PathBuf, path: String },
-    /// Apply a JSON list of commands as one step.
-    Batch { project: PathBuf, file: PathBuf },
+    /// Apply a JSON list of commands as one step. --label names the step in
+    /// the change log and for undo.
+    Batch {
+        project: PathBuf,
+        file: PathBuf,
+        #[arg(long)]
+        label: Option<String>,
+    },
     #[command(subcommand)]
     Track(TrackCmd),
     #[command(subcommand)]
@@ -197,6 +203,7 @@ enum ReturnCmd {
     Remove { project: PathBuf, id: String },
     /// Rename a return, its sends and their lanes.
     Rename { project: PathBuf, id: String, to: String },
+    Move { project: PathBuf, id: String, index: usize },
 }
 
 /// Clips, addressed by reference: @N while a host runs, else tracks.T.clips.I.
@@ -482,12 +489,14 @@ fn no_host(project: &Path, what: &str) -> String {
 
 /// Runs a command without a host.
 fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<Json> {
-    let Request { command, origin, expect } = request;
+    let Request {
+        command, origin, expect, ..
+    } = request;
     match command.kind() {
         Kind::Edit => {
             let _lock = lock(project)?;
             let mut s = Session::open(project, false)?;
-            let (reply, _) = s.edit(&command, origin, expect.as_deref())?;
+            let (reply, _) = s.edit(&command, origin, expect.as_deref(), None)?;
             s.write()?;
             Ok(reply)
         }
@@ -541,6 +550,7 @@ fn route(cli: &Cli, project: &Path, command: Command, play: Option<PlayArgs>) ->
             Who::User => Origin::User,
         },
         expect: cli.expect.clone(),
+        gesture: None,
     };
     match client::send(project, &request)? {
         Some(reply) => Ok(reply),
@@ -666,16 +676,26 @@ fn run(cli: &Cli) -> Result<Json> {
         ),
         Top::Toggle { project, path } => edit(project, C::Toggle { path: path.clone() }),
         Top::Remove { project, path } => edit(project, C::Remove { path: path.clone() }),
-        Top::Batch { project, file } => {
+        Top::Batch { project, file, label } => {
             let body = std::fs::read_to_string(file).map_err(text)?;
             let parsed: Json = serde_json::from_str(&body).map_err(text)?;
-            let list = match parsed {
-                Json::Object(mut m) => m.remove("commands").unwrap_or(Json::Null),
-                other => other,
+            // A list of commands, or an object with them and perhaps a label.
+            let (list, named) = match parsed {
+                Json::Object(mut m) => (
+                    m.remove("commands").unwrap_or(Json::Null),
+                    m.remove("label").and_then(|l| l.as_str().map(str::to_string)),
+                ),
+                other => (other, None),
             };
             let commands: Vec<Command> =
                 serde_json::from_value(list).map_err(|e| format!("{}: {e}", file.display()))?;
-            edit(project, C::Batch { commands })
+            edit(
+                project,
+                C::Batch {
+                    commands,
+                    label: label.clone().or(named),
+                },
+            )
         }
         Top::Track(t) => match t {
             TrackCmd::Add { project, id, f } => {
@@ -711,6 +731,13 @@ fn run(cli: &Cli) -> Result<Json> {
                 C::ReturnRename {
                     id: id.clone(),
                     to: to.clone(),
+                },
+            ),
+            ReturnCmd::Move { project, id, index } => edit(
+                project,
+                C::ReturnMove {
+                    id: id.clone(),
+                    index: *index,
                 },
             ),
         },

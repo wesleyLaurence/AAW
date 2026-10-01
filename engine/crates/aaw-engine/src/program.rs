@@ -132,6 +132,41 @@ impl Program {
     pub fn envelope(&self, f: usize) -> f64 {
         self.fader(f) * self.master
     }
+
+    /// This program with the mixer of `p`: each track's gain, pan, mute and solo
+    /// and the master gain. It equals `compile(p)` when `p` differs from the
+    /// project this program was compiled from in those values only, and takes
+    /// no scheduling or sample preparation. None when the tracks are not the
+    /// same ones.
+    pub fn remix(&self, p: &Project) -> Option<Program> {
+        if p.tracks.len() != self.tracks.len() {
+            return None;
+        }
+        let any_solo = p.tracks.iter().any(|t| t.solo);
+        let tracks = self
+            .tracks
+            .iter()
+            .map(|old| {
+                let t = p.tracks.iter().find(|t| t.id == old.id)?;
+                Some(TrackProgram {
+                    id: old.id.clone(),
+                    voices: old.voices.clone(),
+                    pan: pan_gains(2, t.pan),
+                    gain: amplitude(t.gain_db),
+                    silent: t.mute || (any_solo && !t.solo),
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(Program {
+            rate: self.rate,
+            tempo: self.tempo,
+            total: self.total,
+            tracks,
+            master: amplitude(p.session.master_gain_db),
+            fade: self.fade,
+            omitted: self.omitted.clone(),
+        })
+    }
 }
 
 /// A sample file's identity on disk: a replaced file is decoded again.

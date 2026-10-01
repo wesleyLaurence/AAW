@@ -46,7 +46,7 @@ Rust one as `target/release/daw` or `cargo run -q -p aaw-cli --`. It implements:
 | `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
-| `daw undo`, `daw redo`, `daw batch PROJECT FILE` | History of a running host; a JSON list of commands as one step |
+| `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the sampler: scheduling, choke groups, gates, repitch, trim,
 reverse, downmix, pan laws, track gain, pan, mute and solo, master gain and the
@@ -87,6 +87,14 @@ log, handles and the transport need a host.
   inserting, moving or removing an effect rewrites or removes the lanes that
   address effects by index; a lane's last point takes the lane with it. Removing
   something still referenced, such as a pad a pattern plays, is refused.
+- **Gestures.** A request may carry a `gesture` ID, as the app's drags do.
+  Edits of one gesture and origin that land one after another are one undo
+  step and one change-log entry, named for the whole move, and are saved once
+  they pause for 250 ms instead of after each. A change of mixer values alone
+  (track gain, pan, mute and solo, master gain) plays without a recompile.
+- **Selection.** `daw status` lists what the person has selected in the app as
+  `{"ref", "path"}` pairs, so a request about "the selected clip" can be
+  answered with `daw get PATH`. The app sets it with the `select` command.
 - **External edits**, such as a text edit, `git checkout` or a Python `daw
   apply`, load as one undoable `external` change. A file that does not validate
   pauses edits, with the error in `daw status`, until it is fixed; `daw fmt`
@@ -103,17 +111,21 @@ on its own thread and calls an observer with the opened song, each change with
 the song after it, transport changes, warnings and the close, while `Clock`
 gives the playhead straight from the audio thread. The Mac app does this through
 `aaw-ffi`, whose `Song` turns each revision into the arrangement the app draws
-(`view.rs`) and names the tracks, clips, returns and sections a change touched.
+(`view.rs`), names the tracks, clips, returns and sections a change touched,
+and turns the person's edits into commands (`edits.rs`), working out exact
+beats from the song for a clip moved by so many beats or copied after itself.
 Such a host is reached through its socket like any other, and compiles each
 revision as it lands so that play starts at once.
 
-`crates/aaw-host/tests` cover every command, handles, undo, batches, external
-edits, concurrent clients, an embedded host and a real-time stress run: random edits compiled and
+`crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
+the selection, external edits, concurrent clients, an embedded host and a
+real-time stress run: random edits compiled and
 swapped in while a thread renders 128-frame blocks on schedule under allocation
 checking. `tests/test_rust_host.py` checks `inspect` and command results against
 the Python model and drives a `daw host` process from outside.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
-what each kind of change touches, and the transport shared with an agent.
+what each kind of change touches, the person's edits and their place in the
+shared history, and the transport shared with an agent.
 
 ## Model parity
 

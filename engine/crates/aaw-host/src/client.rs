@@ -1,7 +1,7 @@
 //! The socket protocol: one JSON request line, one JSON reply line.
 //!
-//! Request: `{"command": {"op": ...}, "origin": "agent", "expect": SHA|null}`.
-//! Reply: `{"ok": RESULT}` or `{"error": MESSAGE}`.
+//! Request: `{"command": {"op": ...}, "origin": "agent", "expect": SHA|null,
+//! "gesture": ID|null}`. Reply: `{"ok": RESULT}` or `{"error": MESSAGE}`.
 
 use crate::command::{Command, Origin};
 use crate::registry;
@@ -17,6 +17,22 @@ pub struct Request {
     pub origin: Origin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expect: Option<String>,
+    /// Names the drag an edit belongs to. Edits of one gesture that land one
+    /// after another are one undo step and one entry in the change log, and
+    /// the host saves when they pause rather than after each.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gesture: Option<String>,
+}
+
+impl Request {
+    pub fn new(command: Command, origin: Origin) -> Request {
+        Request {
+            command,
+            origin,
+            expect: None,
+            gesture: None,
+        }
+    }
 }
 
 /// Sends a request to the project's running host. `Ok(None)` when no host runs;

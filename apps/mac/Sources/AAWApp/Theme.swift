@@ -22,6 +22,14 @@ enum Theme {
     static let busLane = gray(0.135)
     static let header = gray(0.2)
     static let busHeader = gray(0.17)
+    /// Over the header of the selected row.
+    static let selectedRow = gray(1, 0.1)
+    /// Around a selected clip.
+    static let selectedClip = gray(1)
+    /// Behind a value that can be dragged.
+    static let control = gray(0, 0.28)
+    /// Where a dragged row would land.
+    static let insertion = rgb(0x4aa8ff)
     static let ruler = gray(0.15)
     static let separator = gray(0.07)
     static let barLine = gray(1, 0.13)

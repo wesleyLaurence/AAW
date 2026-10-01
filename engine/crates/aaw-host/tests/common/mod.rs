@@ -62,7 +62,7 @@ pub fn cmd(j: Json) -> Command {
 }
 
 pub fn edit(s: &mut Session, j: Json) -> Result<Json, String> {
-    let (reply, _) = s.edit(&cmd(j), Origin::Agent, None)?;
+    let (reply, _) = s.edit(&cmd(j), Origin::Agent, None, None)?;
     Ok(reply)
 }
 
