@@ -107,6 +107,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - A subtractive synth with text patches, and modulation: LFOs, envelopes,
   velocity, seeded randomness. Agents wrote scripts to synthesize subs, pads and
   glides the DAW then could not see.
+- Generated audio: a sound, a loop or a whole song from a description, with the
+  person's own ElevenLabs key kept in the Keychain, saved in the project as a
+  sample; a `daw generate` command for the agent and a panel in the app.
+  [features/generated-audio.md](features/generated-audio.md)
 - Glide and a sustain loop on the sampler.
 - More effects: utility, chorus, phaser, gate, transient shaper, multiband
   compressor, pitch shift.
