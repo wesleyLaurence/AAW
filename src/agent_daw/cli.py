@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, perception, `check` and `export`.
+"""The Python part of `daw`: the sample library, perception, `check`, `joins` and `export`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_DB = Path(".daw/library.sqlite")
-COMMANDS = ("samples", "listen", "compare", "check", "export")
+COMMANDS = ("samples", "listen", "compare", "check", "joins", "export")
 
 
 def engine() -> Path:
@@ -49,7 +49,7 @@ def parser():
 
     p = argparse.ArgumentParser(
         prog="daw",
-        description="The sample library, perception, check and export. Run daw --help for every command.",
+        description="The sample library, perception, check, joins and export. Run daw --help for every command.",
     )
     sub = p.add_subparsers(dest="command", required=True)
     samples = sub.add_parser("samples")
@@ -140,6 +140,16 @@ def parser():
     compare.add_argument("before", type=Path)
     compare.add_argument("after", type=Path)
     compare.add_argument("--no-images", action="store_true")
+    joins = sub.add_parser(
+        "joins",
+        help="Check a render's joins between parts of a song, and its length",
+    )
+    joins.add_argument("source", type=Path, help="A render: its folder, report or pointer")
+    joins.add_argument("--limit", type=float, help="The longest the file may be, seconds")
+    joins.add_argument(
+        "--seconds", type=float, default=4, help="Length of each join's excerpt"
+    )
+    joins.add_argument("--no-excerpts", action="store_true")
     export = sub.add_parser(
         "export",
         help="Write the song's render as a named WAV, AAC or MP3 file, at a stated level",
@@ -172,6 +182,12 @@ def execute(a):
         return perception.compare(a.before, a.after, images=not a.no_images)
     if a.command == "check":
         return check(a.project)
+    if a.command == "joins":
+        from . import joins
+
+        if not 0 < a.seconds <= 30 or (a.limit is not None and a.limit <= 0):
+            raise ValueError("seconds must be >0 and <=30, and limit >0")
+        return joins.check(a.source, a.limit, a.seconds, not a.no_excerpts)
     if a.command == "export":
         from .export import export
 

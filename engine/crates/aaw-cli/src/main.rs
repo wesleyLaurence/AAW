@@ -104,6 +104,9 @@ enum Top {
     /// warnings about automation.
     #[command(disable_help_flag = true)]
     Check(Forwarded),
+    /// Check a render's joins between parts of a song, and its length.
+    #[command(disable_help_flag = true)]
+    Joins(Forwarded),
     /// Write the song's render as a named WAV, AAC or MP3 file, at a stated level.
     #[command(disable_help_flag = true)]
     Export(Forwarded),
@@ -623,7 +626,7 @@ fn run(cli: &Cli) -> Result<Json> {
             let name = topic.to_possible_value().expect("a topic has a name");
             contract::describe(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
         }
-        Top::Samples(_) | Top::Listen(_) | Top::Compare(_) | Top::Check(_) | Top::Export(_) => {
+        Top::Samples(_) | Top::Listen(_) | Top::Compare(_) | Top::Check(_) | Top::Joins(_) | Top::Export(_) => {
             unreachable!("Python commands are forwarded before this")
         }
         Top::Render {
@@ -1071,6 +1074,7 @@ fn name(top: &Top) -> String {
         Top::Listen(_) => "listen".into(),
         Top::Compare(_) => "compare".into(),
         Top::Check(_) => "check".into(),
+        Top::Joins(_) => "joins".into(),
         Top::Export(_) => "export".into(),
         Top::Fmt { .. } => "fmt".into(),
         Top::Apply { .. } => "apply".into(),
@@ -1144,7 +1148,9 @@ fn forward(command: &str, args: &[String]) -> Result<ExitCode> {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    if let Top::Samples(f) | Top::Listen(f) | Top::Compare(f) | Top::Check(f) | Top::Export(f) = &cli.command {
+    if let Top::Samples(f) | Top::Listen(f) | Top::Compare(f) | Top::Check(f) | Top::Joins(f) | Top::Export(f) =
+        &cli.command
+    {
         let command = name(&cli.command);
         return forward(&command, &f.args).unwrap_or_else(|error| {
             eprintln!("{}", json!({"error": error, "command": command}));
