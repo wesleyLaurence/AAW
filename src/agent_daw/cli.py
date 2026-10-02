@@ -153,6 +153,9 @@ def parser():
         "--fit", action="store_true", help="Set the session's length to where its sound ends"
     )
     timeline.add_argument("--tail", type=float, default=0, help="Beats to leave after it, with --fit")
+    timeline.add_argument(
+        "--tempo-for", type=float, metavar="SECONDS", help="The tempo at which the song is this long"
+    )
     joins = sub.add_parser(
         "joins",
         help="Check a render's joins between parts of a song, and its length",
@@ -198,7 +201,9 @@ def execute(a):
     if a.command == "timeline":
         from . import timeline
 
-        return timeline.report(a.project, a.seconds, a.beats, a.end_at, a.pad, a.fit, a.tail)
+        return timeline.report(
+            a.project, a.seconds, a.beats, a.end_at, a.pad, a.fit, a.tail, a.tempo_for
+        )
     if a.command == "joins":
         from . import joins
 

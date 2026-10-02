@@ -116,7 +116,9 @@ before sharing a build:
 - The binaries hold paths of the Mac that built them: the checkout, where
   `daw` looks for Python, and Cargo's folders, in the text of error messages.
 - The libraries' licenses are in the bundle; those of the Rust crates the
-  engine uses are not gathered.
+  engine uses are not gathered, among them Signalsmith Stretch (MIT), which
+  the engine links for time stretching. The `rubberband` program a song can
+  name instead is not in the bundle.
 
 ## The window
 

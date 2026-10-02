@@ -20,6 +20,8 @@ let package = Package(
             linkerSettings: [
                 .unsafeFlags(["-L\(sndfile)"]),
                 .linkedLibrary("sndfile"),
+                // The engine's built-in time stretcher is C++.
+                .linkedLibrary("c++"),
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AudioToolbox"),
                 .linkedFramework("AudioUnit"),

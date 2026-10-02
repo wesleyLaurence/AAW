@@ -97,7 +97,7 @@ def position(beats: float, tempo: float) -> dict:
     }
 
 
-def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, tail=0.0):
+def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, tail=0.0, tempo_for=None):
     from .beats import seconds as parse
     from .cli import run_engine
 
@@ -142,6 +142,25 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
         }
         for track, hits in found.items()
     }
+    if tempo_for is not None:
+        # The session's length is in beats, so its seconds follow the tempo.
+        if tempo_for <= 0:
+            raise ValueError("tempo-for must be more than 0 seconds")
+        faster = length * 60 / tempo_for
+        follows = [
+            {"pad": f"{t['id']}.{name}", "stretch": pad_["stretch"], "source_bpm": pad_["source_bpm"]}
+            for t in project["tracks"]
+            for name, pad_ in t["pads"].items()
+            if pad_["source_bpm"]
+        ]
+        result["tempo_for"] = {
+            "seconds": tempo_for,
+            "tempo": round(faster, 4),
+            "change_percent": round((faster / tempo - 1) * 100, 3),
+            "pads_that_follow_tempo": follows,
+            "note": "Pads without source_bpm keep their length in seconds, so a sound after "
+            "the last beat takes more beats at a faster tempo; fit the length again.",
+        }
     if seconds:
         result["seconds"] = [position(parse(text) * tempo / 60, tempo) for text in seconds]
     if beats:

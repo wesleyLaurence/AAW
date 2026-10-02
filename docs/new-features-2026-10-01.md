@@ -58,7 +58,7 @@ person can see and adjust.
 |---|---|---|---|---|
 | 1 | Decode `.m4a` and `.mp3` on import | The song cannot be loaded at all | Every edit | Done, October 1, 2026 |
 | 2 | Beat and downbeat map of a whole song | The agent cannot find where to cut | Every edit | Done, October 1, 2026 |
-| 3 | Pitch-preserving time stretch | "Speed it up slightly" changes the pitch | Edits that run long | |
+| 3 | Pitch-preserving time stretch | "Speed it up slightly" changes the pitch | Edits that run long | Done, October 1, 2026 |
 | 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | |
 | 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | Done, October 1, 2026 |
 | 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | Done, October 1, 2026 |
@@ -169,6 +169,20 @@ only. Songs with a drifting tempo need per-beat times rather than one tempo, whi
 the output above already gives.
 
 ### 3. Pitch-preserving time stretch
+
+**Done, October 1, 2026.** A pad has `stretch: repitch` (the default) or
+`preserve_pitch`; with `source_bpm` set to the song's tempo, raising
+`session.tempo` plays the song faster at its own pitch and leaves one-shots alone.
+It is done where repitching is, when a pad's audio is prepared. Open question 2
+was answered by the person: both stretchers, with Signalsmith Stretch (MIT) linked
+in as the default and Rubber Band run as the installed program when
+`session.stretcher` names it. Each region is stretched with a margin either side.
+`daw timeline --tempo-for SECONDS` turns a target length into a tempo, and
+`daw check` warns past about 8%. A render's report names the stretcher and its
+version when the song stretches. See [time-stretch.md](time-stretch.md) and D53 in
+[decisions.md](decisions.md). Timing was measured for each candidate; nobody has
+listened to a stretched render, which is what the choice between the two is for.
+What follows is the analysis as it was written.
 
 Today: the only way to change a sample's speed is bandlimited repitch. A pad's
 `source_bpm` multiplies its playback speed by session tempo over source tempo

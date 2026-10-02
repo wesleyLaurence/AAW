@@ -10,6 +10,7 @@ uv run daw timeline SONG --seconds 0:41 1:43.5        # times as beats, and as b
 uv run daw timeline SONG --beats 16 82.5 1/3          # beats as seconds and m:ss
 uv run daw timeline SONG --end-at 64 --pad fx.swell   # where the pad starts to end on beat 64
 uv run daw timeline SONG --fit --tail 1               # end the session a beat after the sound
+uv run daw timeline SONG --tempo-for 58               # the tempo at which the song lasts 58 s
 ```
 
 - A place is given as `beats`, `seconds`, `time` (`m:ss.mmm`), and `bar` and
@@ -26,5 +27,9 @@ uv run daw timeline SONG --fit --tail 1               # end the session a beat a
   plus `--tail` beats, through `daw set`, so a running host sees it and it can be
   undone. A session holds its clips whole, so it does not end before the last clip
   does; the result says when a clip held it longer.
+
+- `--tempo-for SECONDS` gives the tempo at which the session is that long, the
+  change in percent, and the pads that follow the tempo with their stretch mode;
+  see [time-stretch.md](time-stretch.md).
 
 A hit that an event transposes is measured without that transposition.
