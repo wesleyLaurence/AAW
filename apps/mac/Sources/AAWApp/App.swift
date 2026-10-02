@@ -3,7 +3,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// How the app was started: `AAW [SONG...]`, and for checking the app without
+/// How the app was started: `AAW [PROJECT...]`, each a project's folder or its
+/// song file, and with none a new Untitled project. For checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2`, `--key KEY`, `--type TEXT` and `--wait SECONDS`
 /// in the order to perform them, then `--measure JSON [--frames N]` and
@@ -139,9 +140,19 @@ public enum AAWMain {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let launch: Launch
     private var songs: [SongWindowController] = []
-    private var welcome: NSWindow?
+    /// The projects the app knows, which Open Recent shows.
+    private var index = ProjectIndex(file: ProjectIndex.standard)
+    /// The Untitled project launch made. A project opened while it holds
+    /// nothing takes its place.
+    private weak var launched: SongWindowController?
+    /// The project whose window is in front, as its host is told.
+    private weak var front: SongWindowController?
     private var recentMenu = NSMenu(title: "Open Recent")
-    private var terminating = false
+    /// A scripted run asks nothing: nobody is there to answer.
+    private var scripted: Bool { launch.snapshot != nil || launch.measure != nil }
+
+    /// How many projects Open Recent lists.
+    static let recentLimit = 15
 
     init(launch: Launch) {
         self.launch = launch
@@ -152,9 +163,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        restoreIndex()
         for url in launch.songs { openSong(url) }
-        if songs.isEmpty { showWelcome() }
-        if (launch.snapshot == nil && launch.measure == nil) || !launch.actions.isEmpty {
+        if songs.isEmpty { launched = newProject() }
+        if !scripted || !launch.actions.isEmpty {
             NSApp.activate(ignoringOtherApps: true)
         }
         // Scripted input, half a second apart, then the picture. Typed
@@ -195,51 +207,144 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         true
     }
 
-    func applicationWillTerminate(_ notification: Notification) {
-        terminating = true
-        songs.forEach { $0.model.close() }
+    /// Quitting asks about each Untitled project that holds something, in
+    /// turn. Cancel in any of them keeps the app open.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        for controller in songs where !controller.mayClose() {
+            songs.forEach { $0.keep() }
+            return .terminateCancel
+        }
+        return .terminateNow
     }
 
-    // MARK: Songs
+    func applicationWillTerminate(_ notification: Notification) {
+        for controller in songs { closed(controller, deleted: controller.finish()) }
+    }
 
-    /// A song's file: `song.yaml` in a folder, or the file itself.
+    // MARK: Projects
+
+    /// A project's song file: `song.yaml` in a folder, or the file itself.
     private static func songFile(_ url: URL) -> URL {
         var isFolder: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder)
-        let file = exists && isFolder.boolValue ? url.appendingPathComponent("song.yaml") : url
-        return file.standardizedFileURL.resolvingSymlinksInPath()
+        return SongModel.normal(exists && isFolder.boolValue ? url.appendingPathComponent("song.yaml") : url)
     }
 
-    func openSong(_ url: URL) {
+    private func failed(_ what: String, _ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = what
+        alert.informativeText = SongModel.reason(error)
+        alert.runModal()
+    }
+
+    private func saveIndex() {
+        do {
+            try index.save()
+        } catch {
+            FileHandle.standardError.write(Data("The project index was not saved: \(error.localizedDescription)\n".utf8))
+        }
+    }
+
+    /// Brings the index up to date with the disk at launch. A project whose
+    /// folder moved is found again. An Untitled project a crash left is
+    /// deleted if it holds nothing, and otherwise listed in Open Recent.
+    private func restoreIndex() {
+        if !index.existed {
+            // Before there was an index, Open Recent was the system's list.
+            for (n, url) in NSDocumentController.shared.recentDocumentURLs.enumerated() {
+                index.keep(Self.songFile(url), title: ProjectIndex.name(of: url), untitled: false, at: Date().addingTimeInterval(-Double(n)))
+            }
+        }
+        let left = projectSweepUntitled().map { Self.songFile(URL(fileURLWithPath: $0)) }
+        index.resolve()
+        for entry in index.entries where entry.untitled && entry.missing { index.remove(entry.url) }
+        for song in left { index.keep(song, title: ProjectIndex.name(of: song), untitled: true) }
+        saveIndex()
+    }
+
+    /// File › New: a blank project called Untitled, in a window of its own.
+    @objc func newDocument(_ sender: Any?) {
+        newProject()
+    }
+
+    @discardableResult
+    private func newProject() -> SongWindowController? {
+        do {
+            return openSong(URL(fileURLWithPath: try projectNewUntitled()))
+        } catch {
+            failed("A new project could not be made", error)
+            return nil
+        }
+    }
+
+    @discardableResult
+    func openSong(_ url: URL) -> SongWindowController? {
         let file = Self.songFile(url)
         if let shown = songs.first(where: { $0.model.url == file }) {
             shown.showWindow(nil)
-            return
+            return shown
         }
+        // A project saved from this one answers `daw` commands for its path
+        // until the project itself is opened.
+        for other in songs where other.model.formerURLs.contains(file) { other.model.release(file) }
         do {
-            let controller = SongWindowController(model: try SongModel(url: file), size: launch.size)
-            controller.onClose = { [weak self] closed in self?.closed(closed) }
+            let controller = SongWindowController(model: try SongModel(url: file), size: launch.size, asks: !scripted)
+            controller.onClose = { [weak self] closed, deleted in
+                self?.songs.removeAll { $0 === closed }
+                self?.closed(closed, deleted: deleted)
+            }
+            controller.onMain = { [weak self] main in self?.cameToFront(main) }
+            controller.model.onMoved = { [weak self, weak controller] old in
+                if let controller { self?.moved(controller, from: old) }
+            }
             songs.append(controller)
             controller.showWindow(nil)
-            NSDocumentController.shared.noteNewRecentDocumentURL(file)
-            welcome?.close()
-            welcome = nil
+            index.note(file, title: controller.model.arrangement.title, untitled: controller.model.untitled)
+            saveIndex()
+            if let blank = launched, blank.model.untitled, blank.model.untouched { blank.close() }
+            launched = nil
+            return controller
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "\(file.deletingLastPathComponent().lastPathComponent)/\(file.lastPathComponent) could not be opened"
-            alert.informativeText = error.localizedDescription
-            alert.runModal()
+            failed("“\(ProjectIndex.name(of: file))” could not be opened", error)
+            // What Open Recent offers is checked again.
+            index.resolve()
+            saveIndex()
+            return nil
         }
     }
 
-    private func closed(_ controller: SongWindowController) {
-        songs.removeAll { $0 === controller }
-        if songs.isEmpty, !terminating, launch.snapshot == nil, launch.measure == nil { showWelcome() }
+    /// A project is no longer open: deleted, or known as it was left.
+    private func closed(_ controller: SongWindowController, deleted: Bool) {
+        let model = controller.model
+        if deleted {
+            index.remove(model.url)
+        } else {
+            index.note(model.url, title: model.arrangement.title, untitled: model.untitled)
+        }
+        saveIndex()
+    }
+
+    /// A project was saved under a name. An Untitled one moved, and is that
+    /// project now; one that had a name was copied, and is still known.
+    private func moved(_ controller: SongWindowController, from old: URL) {
+        if projectIsUntitled(path: old.path) { index.remove(old) }
+        let url = controller.model.url
+        index.note(url, title: ProjectIndex.name(of: url), untitled: controller.model.untitled)
+        saveIndex()
+    }
+
+    /// The host of the project in front says so to `daw projects`, so that
+    /// an agent in a terminal knows which one the person is looking at.
+    private func cameToFront(_ controller: SongWindowController) {
+        guard front !== controller else { return }
+        front?.model.setFront(false)
+        controller.model.setFront(true)
+        front = controller
     }
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.message = "Choose a song.yaml, or the folder that holds one"
+        panel.message = "Choose a project's folder, or its song.yaml"
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = [.yaml, .folder]
@@ -256,28 +361,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func clearRecent(_ sender: Any?) {
-        NSDocumentController.shared.clearRecentDocuments(sender)
-    }
-
-    private func showWelcome() {
-        if welcome == nil {
-            let view = WelcomeView(
-                recents: NSDocumentController.shared.recentDocumentURLs,
-                choose: { [weak self] in self?.openDocument(nil) },
-                open: { [weak self] url in self?.openSong(url) }
-            )
-            let window = NSWindow(
-                contentRect: CGRect(x: 0, y: 0, width: 440, height: 320),
-                styleMask: [.titled, .closable], backing: .buffered, defer: false
-            )
-            window.title = "AAW"
-            window.isReleasedWhenClosed = false
-            window.appearance = NSAppearance(named: .darkAqua)
-            window.contentView = NSHostingView(rootView: view)
-            window.center()
-            welcome = window
-        }
-        welcome?.makeKeyAndOrderFront(nil)
+        index.clear(keeping: Set(songs.map(\.model.url.path)))
+        saveIndex()
     }
 
     // MARK: Scripted input and snapshot
@@ -359,7 +444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func snapshot(to url: URL) {
-        guard let view = (songs.first?.window ?? welcome)?.contentView,
+        guard let view = songs.first?.window?.contentView,
               let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             exit(1)
         }
@@ -403,8 +488,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         recentMenu.delegate = self
         recent.submenu = recentMenu
         add("File", [
+            item("New", #selector(newDocument(_:)), "n"),
             item("Open…", #selector(openDocument(_:)), "o"),
             recent,
+            .separator(),
+            item("Save As…", #selector(SongWindowController.saveDocumentAs(_:)), "S"),
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
         ])
@@ -454,28 +542,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         guard menu === recentMenu else { return }
         menu.removeAllItems()
-        let urls = NSDocumentController.shared.recentDocumentURLs
-        for url in urls {
-            let entry = item(WelcomeView.name(of: url), #selector(openRecent(_:)))
+        let entries = index.entries.prefix(Self.recentLimit)
+        for project in entries {
+            // A project that is not found is listed and cannot be chosen.
+            let entry = item(project.name, project.missing ? nil : #selector(openRecent(_:)))
             entry.target = self
-            entry.representedObject = url
-            entry.toolTip = url.path
+            entry.representedObject = project.url
+            let folder = project.url.deletingLastPathComponent().path
+            entry.toolTip = project.missing ? "Not found: \(folder)" : project.untitled ? "Not saved under a name yet" : folder
             menu.addItem(entry)
         }
-        if !urls.isEmpty { menu.addItem(.separator()) }
-        let clear = item("Clear Menu", urls.isEmpty ? nil : #selector(clearRecent(_:)))
+        if !entries.isEmpty { menu.addItem(.separator()) }
+        let clear = item("Clear Menu", entries.isEmpty ? nil : #selector(clearRecent(_:)))
         clear.target = self
         menu.addItem(clear)
     }
 }
 
-/// A song's window. Menu commands reach it through the responder chain.
+/// A project's window. Menu commands reach it through the responder chain.
 final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     let model: SongModel
-    var onClose: ((SongWindowController) -> Void)?
+    /// Called when the window closed, with whether the project was deleted.
+    var onClose: ((SongWindowController, Bool) -> Void)?
+    /// Called when the window became the one in front.
+    var onMain: ((SongWindowController) -> Void)?
+    /// Whether closing asks about an Untitled project that holds something.
+    private let asks: Bool
+    /// The person chose Delete for an Untitled project.
+    private var discard = false
+    /// Whether the project was deleted when it closed; nil while it is open.
+    private var deleted: Bool?
 
-    init(model: SongModel, size: CGSize?) {
+    init(model: SongModel, size: CGSize?, asks: Bool = true) {
         self.model = model
+        self.asks = asks
         let window = NSWindow(
             contentRect: CGRect(origin: .zero, size: size ?? CGSize(width: 1280, height: 760)),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
@@ -484,8 +584,6 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         window.tabbingMode = .disallowed
         window.appearance = NSAppearance(named: .darkAqua)
         window.minSize = CGSize(width: 720, height: 480)
-        window.representedURL = model.url
-        window.subtitle = model.url.deletingLastPathComponent().lastPathComponent
         window.contentView = NSHostingView(rootView: SongView(model: model))
         window.center()
         if size == nil { window.setFrameAutosaveName("song") }
@@ -500,10 +598,15 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         fatalError("not used")
     }
 
-    /// Keeps the window's title the song's title.
+    /// Keeps the window's title the song's title, with the project's folder
+    /// beside it when that has another name. A project without a name shows
+    /// no folder: its own is the app's.
     private func followTitle() {
         withObservationTracking {
-            window?.title = model.arrangement.title
+            let (title, folder) = (model.arrangement.title, ProjectIndex.name(of: model.url))
+            window?.title = title
+            window?.subtitle = model.untitled || folder == title ? "" : folder
+            window?.representedURL = model.untitled ? nil : model.url
         } onChange: { [weak self] in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { self?.followTitle() }
@@ -511,9 +614,88 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         }
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func windowDidBecomeMain(_ notification: Notification) {
+        onMain?(self)
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        mayClose()
+    }
+
+    /// Whether the project may close. An Untitled project that holds
+    /// something is asked about: Save… gives it a name and a place, Delete
+    /// lets it close and be deleted, and Cancel keeps it open.
+    func mayClose() -> Bool {
+        guard asks, !discard, deleted == nil,
+              Closing.of(untitled: model.untitled, untouched: model.untouched) == .ask else { return true }
+        showWindow(nil)
+        switch Closing.ask(model.arrangement.title) {
+        case .save: return saveAs()
+        case .delete:
+            discard = true
+            return true
+        case .cancel: return false
+        }
+    }
+
+    /// Takes back a Delete answered while quitting, when the quit was cancelled.
+    func keep() {
+        discard = false
+    }
+
+    /// Stops hosting the project, and deletes an Untitled one that holds
+    /// nothing or that the person chose to delete. Returns whether it was
+    /// deleted.
+    @discardableResult
+    func finish() -> Bool {
+        if let deleted { return deleted }
+        let delete = model.untitled && (discard || model.untouched)
+        let url = model.url
         model.close()
-        onClose?(self)
+        if delete { try? projectDeleteUntitled(path: url.path) }
+        deleted = delete
+        return delete
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose?(self, finish())
+    }
+
+    @objc func saveDocumentAs(_ sender: Any?) {
+        saveAs()
+    }
+
+    /// File › Save As…: asks for a name and a place, and saves the project
+    /// there. An Untitled project moves; one that has a name is copied, and
+    /// the window carries on in the copy. False when the person cancelled or
+    /// the project could not be saved there.
+    @discardableResult
+    func saveAs() -> Bool {
+        let panel = NSSavePanel()
+        let title = model.arrangement.title
+        panel.title = "Save As"
+        panel.prompt = "Save"
+        panel.nameFieldLabel = "Name:"
+        panel.canCreateDirectories = true
+        if model.untitled {
+            panel.message = "Choose a name and a place for the project, which is kept as a folder."
+            panel.nameFieldStringValue = title
+        } else {
+            panel.message = "Choose a name and a place for a copy of the project. This window carries on in the copy."
+            panel.nameFieldStringValue = "\(title) copy"
+            panel.directoryURL = model.url.deletingLastPathComponent().deletingLastPathComponent()
+        }
+        guard panel.runModal() == .OK, let folder = panel.url else { return false }
+        do {
+            try model.saveAs(folder)
+            return true
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "The project could not be saved as “\(folder.lastPathComponent)”"
+            alert.informativeText = SongModel.reason(error)
+            alert.runModal()
+            return false
+        }
     }
 
     @objc func togglePlay(_ sender: Any?) { model.togglePlay() }
@@ -589,49 +771,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(duplicateSelection(_:)): return !model.selectedClips.isEmpty && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
-        case #selector(addTrack(_:)), #selector(addReturn(_:)): return !typing
+        case #selector(addTrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
         default: break
         }
         return true
-    }
-}
-
-struct WelcomeView: View {
-    let recents: [URL]
-    let choose: () -> Void
-    let open: (URL) -> Void
-
-    /// A song by its folder, which is how songs are told apart.
-    static func name(of url: URL) -> String {
-        url.deletingLastPathComponent().lastPathComponent
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("AAW").font(.system(size: 28, weight: .bold))
-            Text("Open a song to see its arrangement and play it. While it is open, an agent's `daw` commands for the song land here as they are made.")
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            Button("Open Song…", action: choose)
-                .keyboardShortcut(.defaultAction)
-            if !recents.isEmpty {
-                Divider()
-                Text("Recent").font(.caption).foregroundStyle(.secondary)
-                ForEach(recents.prefix(6), id: \.self) { url in
-                    Button {
-                        open(url)
-                    } label: {
-                        Label(Self.name(of: url), systemImage: "music.note.list")
-                    }
-                    .buttonStyle(.link)
-                    .help(url.path)
-                }
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(24)
-        .frame(width: 440, height: 320, alignment: .topLeading)
-        .background(Color(nsColor: Theme.gray(0.14)))
-        .preferredColorScheme(.dark)
     }
 }

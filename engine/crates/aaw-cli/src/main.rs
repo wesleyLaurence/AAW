@@ -17,10 +17,10 @@ use aaw_host::client::{self, Request};
 use aaw_host::command::{Command, Fields, Kind, Origin};
 use aaw_host::host::{self, lock};
 use aaw_host::session::Session;
+use aaw_host::{project, registry};
 use aaw_model::schedule::schedule;
 use aaw_model::validate::ValidationError;
-use aaw_model::value::{dict, Value};
-use aaw_model::{contract, frame, Beat, ModelError, Project};
+use aaw_model::{contract, frame, Beat, ModelError};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
@@ -61,6 +61,24 @@ struct FieldArgs {
     fields: Vec<String>,
 }
 
+/// A command's PROJECT: the song's file, or the folder that holds `song.yaml`.
+#[derive(Clone)]
+struct Song(PathBuf);
+
+impl From<std::ffi::OsString> for Song {
+    fn from(path: std::ffi::OsString) -> Song {
+        Song(project::song_file(Path::new(&path)))
+    }
+}
+
+impl std::ops::Deref for Song {
+    type Target = Path;
+
+    fn deref(&self) -> &Path {
+        &self.0
+    }
+}
+
 /// The arguments of a command that runs in Python, passed on as given.
 #[derive(Args)]
 struct Forwarded {
@@ -90,6 +108,19 @@ enum Top {
         #[arg(long, default_value_t = 16)]
         bars: i64,
     },
+    /// The projects open in the app or another host, with each one's title
+    /// and whether its window is in front.
+    Projects {
+        /// Also the projects the app knows that are not open.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Move the project's folder to NEW_FOLDER and name the song after it. A
+    /// running host carries on there and still answers at the old path.
+    Move { project: Song, new_folder: PathBuf },
+    /// Copy the project's folder to NEW_FOLDER and name the copy after it. A
+    /// running host carries on in the copy and leaves the original as it was.
+    Copy { project: Song, new_folder: PathBuf },
     /// The authoring contract: the song's schema and what its fields mean.
     Describe {
         #[arg(value_enum, default_value = "project")]
@@ -118,11 +149,11 @@ enum Top {
     #[command(disable_help_flag = true)]
     Export(Forwarded),
     /// Rewrite a project in canonical form.
-    Fmt { project: PathBuf },
+    Fmt { project: Song },
     /// Validate and atomically replace project fields from a JSON merge patch.
     /// Requires --expect. --label names the edit in the change log and for undo.
     Apply {
-        project: PathBuf,
+        project: Song,
         patch: PathBuf,
         #[arg(long)]
         label: Option<String>,
@@ -132,7 +163,7 @@ enum Top {
     Model { paths: Vec<PathBuf> },
     /// Render the mix and stems, one track or return as its stem, or one section.
     Render {
-        project: PathBuf,
+        project: Song,
         #[arg(long)]
         output: Option<PathBuf>,
         #[arg(long)]
@@ -144,22 +175,22 @@ enum Top {
         block_size: Option<usize>,
     },
     /// List every scheduled hit: its start frame, track, pad and release frame.
-    Schedule { project: PathBuf },
+    Schedule { project: Song },
 
     /// Run a session host for the project until interrupted or closed. Other
     /// `daw` commands reach it; each change prints to stderr as it lands.
     Host {
-        project: PathBuf,
+        project: Song,
         /// Output buffer in frames.
         #[arg(long, default_value_t = 128)]
         buffer: u32,
     },
     /// Ask the project's host to save and exit.
-    Close { project: PathBuf },
+    Close { project: Song },
     /// Play from a beat. With a host running, the host plays; otherwise this
     /// command hosts the project until playback stops.
     Play {
-        project: PathBuf,
+        project: Song,
         /// Start position in beats; sounding samples are picked up mid-sample.
         #[arg(long)]
         from: Option<String>,
@@ -174,48 +205,48 @@ enum Top {
         benchmark: bool,
     },
     /// Stop playback, with a short fade.
-    Stop { project: PathBuf },
+    Stop { project: Song },
     /// Move the playhead to a beat; while stopped, play starts there.
-    Locate { project: PathBuf, beat: String },
+    Locate { project: Song, beat: String },
     /// Loop START LENGTH (beats), or `loop PROJECT off`.
     Loop {
-        project: PathBuf,
+        project: Song,
         start: String,
         length: Option<String>,
     },
     /// Transport, revision, undo and redo state.
-    Status { project: PathBuf },
+    Status { project: Song },
     /// The host's change log after a revision, with each change's origin.
     Changes {
-        project: PathBuf,
+        project: Song,
         #[arg(long, default_value_t = 0)]
         since: u64,
     },
     /// Summary of the song, with a reference for each clip.
-    Inspect { project: PathBuf },
+    Inspect { project: Song },
     /// Part of the song by path, e.g. tracks.drums.clips; list items start with
     /// the reference commands use for them.
-    Get { project: PathBuf, path: Option<String> },
+    Get { project: Song, path: Option<String> },
     /// Undo the last change, whoever made it.
-    Undo { project: PathBuf },
+    Undo { project: Song },
     /// Redo the last undone change.
-    Redo { project: PathBuf },
+    Redo { project: Song },
     /// Set any value by path, e.g. tracks.drums.gain_db -4.5. VALUE is JSON,
     /// or text when it does not parse as JSON.
     Set {
-        project: PathBuf,
+        project: Song,
         path: String,
         #[arg(allow_hyphen_values = true)]
         value: String,
     },
     /// Flip a boolean, e.g. tracks.drums.mute.
-    Toggle { project: PathBuf, path: String },
+    Toggle { project: Song, path: String },
     /// Remove an object or map entry by path, or reset a field to its default.
-    Remove { project: PathBuf, path: String },
+    Remove { project: Song, path: String },
     /// Apply a JSON list of commands as one step. --label names the step in
     /// the change log and for undo.
     Batch {
-        project: PathBuf,
+        project: Song,
         file: PathBuf,
         #[arg(long)]
         label: Option<String>,
@@ -247,31 +278,31 @@ enum Top {
 enum TrackCmd {
     /// Add a track; --index places it.
     Add {
-        project: PathBuf,
+        project: Song,
         id: String,
         #[command(flatten)]
         f: FieldArgs,
     },
-    Remove { project: PathBuf, track: String },
+    Remove { project: Song, track: String },
     /// Rename a track and the sidechains that name it.
-    Rename { project: PathBuf, track: String, to: String },
-    Move { project: PathBuf, track: String, index: usize },
+    Rename { project: Song, track: String, to: String },
+    Move { project: Song, track: String, index: usize },
 }
 
 /// Returns.
 #[derive(Subcommand)]
 enum ReturnCmd {
     Add {
-        project: PathBuf,
+        project: Song,
         id: String,
         #[command(flatten)]
         f: FieldArgs,
     },
     /// Remove a return with the sends to it and their lanes.
-    Remove { project: PathBuf, id: String },
+    Remove { project: Song, id: String },
     /// Rename a return, its sends and their lanes.
-    Rename { project: PathBuf, id: String, to: String },
-    Move { project: PathBuf, id: String, index: usize },
+    Rename { project: Song, id: String, to: String },
+    Move { project: Song, id: String, index: usize },
 }
 
 /// Audio clips: parts of a sample file on a track, addressed by reference: @N
@@ -281,7 +312,7 @@ enum AudioCmd {
     /// Add an audio clip: --at, --source-start-seconds, --source-end-seconds,
     /// --lead-ms, --fade-in-ms, --fade-out-ms, --source-bpm and --stretch are optional.
     Add {
-        project: PathBuf,
+        project: Song,
         track: String,
         sample: String,
         #[command(flatten)]
@@ -289,14 +320,14 @@ enum AudioCmd {
     },
     /// Make two clips of one at a beat inside it.
     Split {
-        project: PathBuf,
+        project: Song,
         clip: String,
         #[arg(long)]
         at: String,
     },
     /// Move a clip's start or end to a beat; its audio stays where it is.
     Trim {
-        project: PathBuf,
+        project: Song,
         clip: String,
         #[arg(long)]
         start: Option<String>,
@@ -305,7 +336,7 @@ enum AudioCmd {
     },
     /// Crossfade a clip with the one before it on its track.
     Crossfade {
-        project: PathBuf,
+        project: Song,
         clip: String,
         /// The fade out of the clip before, 12 ms unless given.
         #[arg(long)]
@@ -319,7 +350,7 @@ enum AudioCmd {
     },
     /// Remove a range of beats from a track's audio clips and close the gap.
     Cut {
-        project: PathBuf,
+        project: Song,
         track: String,
         #[arg(long)]
         from: String,
@@ -339,7 +370,7 @@ enum AudioCmd {
 enum ClipCmd {
     /// Add a clip: --at, --repeats and --velocity-scale are optional.
     Add {
-        project: PathBuf,
+        project: Song,
         track: String,
         pattern: String,
         #[command(flatten)]
@@ -347,45 +378,45 @@ enum ClipCmd {
     },
     /// Move a clip to another beat and/or track.
     Move {
-        project: PathBuf,
+        project: Song,
         clip: String,
         #[arg(long)]
         track: Option<String>,
         #[arg(long)]
         at: Option<String>,
     },
-    Repeats { project: PathBuf, clip: String, repeats: String },
+    Repeats { project: Song, clip: String, repeats: String },
     /// Copy a clip, by default right after the original.
     Duplicate {
-        project: PathBuf,
+        project: Song,
         clip: String,
         #[arg(long)]
         track: Option<String>,
         #[arg(long)]
         at: Option<String>,
     },
-    Remove { project: PathBuf, clip: String },
+    Remove { project: Song, clip: String },
 }
 
 /// Patterns and their events.
 #[derive(Subcommand)]
 enum PatternCmd {
     Add {
-        project: PathBuf,
+        project: Song,
         pattern: String,
         #[command(flatten)]
         f: FieldArgs,
     },
     /// Set a pad's step row, e.g. "x... x... x... x...", or --clear it.
     Steps {
-        project: PathBuf,
+        project: Song,
         pattern: String,
         pad: String,
         row: Option<String>,
         #[arg(long)]
         clear: bool,
     },
-    Duplicate { project: PathBuf, pattern: String, to: String },
+    Duplicate { project: Song, pattern: String, to: String },
     #[command(subcommand)]
     Event(EventCmd),
 }
@@ -395,19 +426,19 @@ enum PatternCmd {
 enum EventCmd {
     /// Add an event: --at and --pad, optionally --note, --duration, --velocity, --transpose.
     Add {
-        project: PathBuf,
+        project: Song,
         pattern: String,
         #[command(flatten)]
         f: FieldArgs,
     },
     /// Change an event's fields; a null value resets one.
     Set {
-        project: PathBuf,
+        project: Song,
         event: String,
         #[command(flatten)]
         f: FieldArgs,
     },
-    Remove { project: PathBuf, event: String },
+    Remove { project: Song, event: String },
 }
 
 /// Pads.
@@ -415,7 +446,7 @@ enum EventCmd {
 enum PadCmd {
     /// Add a pad: --sample, and any pad field.
     Add {
-        project: PathBuf,
+        project: Song,
         track: String,
         pad: String,
         #[command(flatten)]
@@ -423,13 +454,13 @@ enum PadCmd {
     },
     /// Change a pad's fields; a null value resets one.
     Set {
-        project: PathBuf,
+        project: Song,
         track: String,
         pad: String,
         #[command(flatten)]
         f: FieldArgs,
     },
-    Remove { project: PathBuf, track: String, pad: String },
+    Remove { project: Song, track: String, pad: String },
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -443,17 +474,17 @@ enum OnOff {
 enum EffectCmd {
     /// Add an effect: --type, optionally --id, --index and parameters.
     Add {
-        project: PathBuf,
+        project: Song,
         owner: String,
         #[command(flatten)]
         f: FieldArgs,
     },
     /// Remove an effect and the lanes that automate it.
-    Remove { project: PathBuf, effect: String },
+    Remove { project: Song, effect: String },
     /// Move an effect in its chain; lanes addressing effects by index follow.
-    Move { project: PathBuf, effect: String, index: usize },
+    Move { project: Song, effect: String, index: usize },
     Bypass {
-        project: PathBuf,
+        project: Song,
         effect: String,
         #[arg(value_enum, default_value = "on")]
         state: OnOff,
@@ -465,22 +496,22 @@ enum EffectCmd {
 enum SendCmd {
     /// Add or change a send: --gain-db, --pre-fader.
     Set {
-        project: PathBuf,
+        project: Song,
         track: String,
         to: String,
         #[command(flatten)]
         f: FieldArgs,
     },
     /// Remove a send and the lane that automates it.
-    Remove { project: PathBuf, track: String, to: String },
+    Remove { project: Song, track: String, to: String },
 }
 
 /// Automation lanes on tracks.T, returns.R or master.
 #[derive(Subcommand)]
 enum LaneCmd {
     /// Replace or create a whole lane from a JSON list of points.
-    Set { project: PathBuf, owner: String, param: String, points: String },
-    Remove { project: PathBuf, owner: String, param: String },
+    Set { project: Song, owner: String, param: String, points: String },
+    Remove { project: Song, owner: String, param: String },
     #[command(subcommand)]
     Point(PointCmd),
 }
@@ -490,7 +521,7 @@ enum LaneCmd {
 enum PointCmd {
     /// Add a point in time order, creating the lane if needed: --at, --value, --curve, --shape.
     Add {
-        project: PathBuf,
+        project: Song,
         owner: String,
         param: String,
         #[command(flatten)]
@@ -498,21 +529,21 @@ enum PointCmd {
     },
     /// Change a point's --at, --value, --curve or --shape.
     Move {
-        project: PathBuf,
+        project: Song,
         point: String,
         #[command(flatten)]
         f: FieldArgs,
     },
     /// Remove a point; a lane's last point takes the lane with it.
-    Remove { project: PathBuf, point: String },
+    Remove { project: Song, point: String },
 }
 
 /// Sections.
 #[derive(Subcommand)]
 enum SectionCmd {
-    Add { project: PathBuf, id: String, at: String, length: String },
-    Move { project: PathBuf, section: String, at: String },
-    Remove { project: PathBuf, section: String },
+    Add { project: Song, id: String, at: String, length: String },
+    Move { project: Song, section: String, at: String },
+    Remove { project: Song, section: String },
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -664,6 +695,13 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
                 aaw_model::save(&p, project).map_err(text)?;
                 Ok(json!({"project": project, "formatted": true}))
             }
+            Command::Move { ref to } | Command::Copy { ref to } => {
+                let _lock = lock(project)?;
+                let copy = matches!(command, Command::Copy { .. });
+                let mut s = Session::open(project, false)?;
+                let (reply, _) = s.relocate(Path::new(to), copy, origin, command.json())?;
+                Ok(reply)
+            }
             _ => Err(format!("No host is running for {}", project.display())),
         },
     }
@@ -680,17 +718,106 @@ fn route(cli: &Cli, project: &Path, command: Command, play: Option<PlayArgs>) ->
         expect: cli.expect.clone(),
         gesture: None,
     };
-    match client::send(project, &request)? {
-        Some(reply) => Ok(reply),
+    // A move's own reply says where the project went.
+    let moving = matches!(request.command, Command::Move { .. } | Command::Copy { .. });
+    match client::ask(project, &request)? {
+        Some(reply) => {
+            // A project saved under another name since the path was given:
+            // the command landed there, and the agent is told where that is.
+            let now = reply.moved().filter(|_| !moving).map(Path::to_path_buf);
+            let mut result = reply.result;
+            if let Some(now) = now {
+                notice(&reply.asked, &now);
+                if let Json::Object(fields) = &mut result {
+                    fields.insert("project".into(), json!(now));
+                }
+            }
+            Ok(result)
+        }
         None => headless(project, request, play),
     }
 }
 
+fn notice(asked: &Path, now: &Path) {
+    let notice = format!("{} is now at {}", project::shown(asked).display(), project::shown(now).display());
+    eprintln!("{}", json!({"notice": notice, "project": now}));
+}
+
+/// The song file of a command that reads the project's files itself, such
+/// as `render`: the path given, or where the project was saved since, if
+/// the host that has it open still answers for the path.
+fn files(project: &Song) -> PathBuf {
+    match registry::moved_to(project) {
+        Some(now) => {
+            notice(project, &now);
+            now
+        }
+        None => project.0.clone(),
+    }
+}
+
+/// An argument that names a folder, as the host needs it: absolute.
+fn absolute(path: &Path) -> Result<String> {
+    let path = std::path::absolute(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// `daw projects`: every project a host has open, and with `all` the ones
+/// the app's index knows besides.
+fn projects(all: bool) -> Result<Json> {
+    let status = Request::new(Command::Status, Origin::Agent);
+    let mut rows: Vec<Json> = Vec::new();
+    let mut open: Vec<PathBuf> = Vec::new();
+    for listed in registry::list().iter().filter(|l| l.now.is_none()) {
+        // A registration nothing answers at is a host that has gone.
+        let Ok(Some(reply)) = client::ask_socket(listed, &status) else {
+            continue;
+        };
+        let s = &reply.result;
+        rows.push(json!({
+            "project": project::shown(&listed.project),
+            "title": s["title"],
+            "open": true,
+            "front": s["front"],
+            "untitled": s["untitled"],
+            "revision": s["revision"],
+            "playing": s["playing"],
+            "pid": s["pid"],
+        }));
+        open.push(listed.project.clone());
+    }
+    // The window in front first.
+    rows.sort_by_key(|row| row["front"] != json!(true));
+    if all {
+        for known in project::known() {
+            let song = project::resolved(&known.song).unwrap_or_else(|_| known.song.clone());
+            if open.contains(&song) {
+                continue;
+            }
+            rows.push(json!({
+                "project": project::shown(&known.song),
+                "title": known.title,
+                "open": false,
+                "untitled": known.untitled,
+                "missing": !known.song.exists(),
+                "opened": known.opened,
+            }));
+        }
+    }
+    Ok(json!({"projects": rows}))
+}
+
 fn run(cli: &Cli) -> Result<Json> {
     use Command as C;
-    let edit = |project: &PathBuf, c: Command| route(cli, project, c, None);
+    let edit = |project: &Song, c: Command| route(cli, project, c, None);
     match &cli.command {
-        Top::Init { directory, tempo, bars } => init(directory, *tempo, *bars),
+        Top::Init { directory, tempo, bars } => {
+            let path = project::create(directory, *tempo, *bars, None)?;
+            Ok(json!({"project": std::fs::canonicalize(&path).map_err(text)?}))
+        }
+        Top::Projects { all } => projects(*all),
+        Top::Move { project, new_folder } => edit(project, C::Move { to: absolute(new_folder)? }),
+        Top::Copy { project, new_folder } => edit(project, C::Copy { to: absolute(new_folder)? }),
         Top::Describe { topic } => {
             let name = topic.to_possible_value().expect("a topic has a name");
             contract::describe(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
@@ -713,7 +840,7 @@ fn run(cli: &Cli) -> Result<Json> {
         } => {
             let defaults = RenderOptions::default();
             render(
-                project,
+                &files(project),
                 &RenderOptions {
                     output: output.clone(),
                     track: track.clone(),
@@ -724,7 +851,7 @@ fn run(cli: &Cli) -> Result<Json> {
             .map(value)
         }
         Top::Schedule { project } => {
-            let p = aaw_model::load(project, false).map_err(text)?;
+            let p = aaw_model::load(&files(project), false).map_err(text)?;
             let triggers: Vec<Json> = schedule(&p)
                 .iter()
                 .map(|t| json!({"start": t.start, "track": t.track_id, "pad": t.pad, "cutoff": t.cutoff}))
@@ -734,7 +861,11 @@ fn run(cli: &Cli) -> Result<Json> {
         Top::Model { paths } => Ok(Json::Array(paths.iter().map(|p| model_entry(p)).collect())),
         Top::Fmt { project } => {
             let mut reply = route(cli, project, C::Fmt, None)?;
-            reply["project"] = json!(project);
+            // The path as it was given, unless the project has moved from it.
+            let at = reply["project"].as_str().map(|p| project::resolved(Path::new(p)));
+            if at == Some(project::resolved(project)) {
+                reply["project"] = json!(&project.0);
+            }
             Ok(reply)
         }
         Top::Apply { project, patch, label } => {
@@ -775,6 +906,7 @@ fn run(cli: &Cli) -> Result<Json> {
             benchmark: bench,
         } => {
             if *bench {
+                let project = &files(project);
                 let p = aaw_model::load(project, true).map_err(text)?;
                 let from_beat = aaw_model::beat(&Beat::Str(from.clone().unwrap_or_else(|| "0".into())))?;
                 let start = frame(&from_beat, p.session.tempo, p.session.sample_rate).max(0) as usize;
@@ -1187,6 +1319,9 @@ fn name(top: &Top) -> String {
     let group = |g: &str, s: &str| format!("{g} {s}");
     match top {
         Top::Init { .. } => "init".into(),
+        Top::Projects { .. } => "projects".into(),
+        Top::Move { .. } => "move".into(),
+        Top::Copy { .. } => "copy".into(),
         Top::Describe { .. } => "describe".into(),
         Top::Samples(_) => "samples".into(),
         Top::Listen(_) => "listen".into(),
@@ -1229,22 +1364,6 @@ fn name(top: &Top) -> String {
     }
     .trim()
     .to_string()
-}
-
-/// `daw init`: a song of so many 4/4 bars, with everything else at its default.
-fn init(directory: &Path, tempo: f64, bars: i64) -> Result<Json> {
-    let path = directory.join("song.yaml");
-    if path.exists() {
-        return Err(format!("Project already exists: {}", path.display()));
-    }
-    if bars <= 0 {
-        return Err("bars must be positive".into());
-    }
-    let length = bars.checked_mul(4).ok_or("bars is too large")?;
-    let session = dict(vec![("tempo", Value::Float(tempo)), ("length_beats", Value::int(length))]);
-    let project = Project::validate(&dict(vec![("session", session)])).map_err(text)?;
-    aaw_model::save(&project, &path).map_err(text)?;
-    Ok(json!({"project": std::fs::canonicalize(&path).map_err(text)?}))
 }
 
 /// Runs a Python command with this process's arguments, input and output, and

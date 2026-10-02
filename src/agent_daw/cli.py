@@ -30,6 +30,19 @@ def engine() -> Path:
     return binary
 
 
+def song_file(path) -> Path:
+    """The song file a PROJECT names: the file itself, or song.yaml in a folder.
+
+    A path that is not there is a folder unless it is written as a YAML file, as
+    the Rust `daw` takes it.
+    """
+    path = Path(path)
+    written_as_file = path.suffix.lower() in (".yaml", ".yml")
+    if path.is_dir() or not (written_as_file or path.exists()):
+        return path / "song.yaml"
+    return path
+
+
 def run_engine(*args):
     """A Rust `daw` command's result, or its error as ValueError."""
     out = subprocess.run(
@@ -114,7 +127,7 @@ def parser():
         help="Copy a file into the project and add it to the song; .m4a and .mp3 are decoded to WAV",
     )
     imp.add_argument("sample")
-    imp.add_argument("--project", type=Path, required=True)
+    imp.add_argument("--project", type=song_file, required=True)
     imp.add_argument("--id", help="The sample's ID in the song")
     imp.add_argument(
         "--copy-only",
@@ -128,7 +141,7 @@ def parser():
     check = sub.add_parser(
         "check", help="inspect, plus root notes against measured pitch and warnings"
     )
-    check.add_argument("project", type=Path)
+    check.add_argument("project", type=song_file)
     listen = sub.add_parser(
         "listen", help="Measure a saved render or WAV; write analysis JSON and images"
     )
@@ -144,7 +157,7 @@ def parser():
         "timeline",
         help="The song in beats and seconds: where its sounds are, conversions, and its length",
     )
-    timeline.add_argument("project", type=Path)
+    timeline.add_argument("project", type=song_file)
     timeline.add_argument("--seconds", nargs="+", default=[], help="Times, as seconds or m:ss, to give in beats")
     timeline.add_argument("--beats", nargs="+", default=[], help="Beats to give in seconds")
     timeline.add_argument("--end-at", help="A beat for --pad to end on; gives the beat it starts on")
@@ -170,7 +183,7 @@ def parser():
         "export",
         help="Write the song's render as a named WAV, AAC or MP3 file, at a stated level",
     )
-    export.add_argument("project", type=Path)
+    export.add_argument("project", type=song_file)
     export.add_argument("--to", type=Path, required=True, help="NAME.wav, .m4a or .mp3")
     export.add_argument("--bits", type=int, choices=[16, 24], default=24, help="For .wav")
     export.add_argument("--bitrate", type=int, help="kb/s: 256 for .m4a, 320 for .mp3")

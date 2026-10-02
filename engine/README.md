@@ -12,9 +12,9 @@ reads songs through `aaw-py`.
 | `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
 | `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes and the six effects |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
-| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket |
+| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
-| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, patterns, waveforms, changes and transport, and the sample library |
+| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, patterns, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
 | `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module |
 
 ## Build and test
@@ -41,11 +41,14 @@ silicon needs `rustup target add x86_64-apple-darwin`. To check it alone:
 `daw` is not on the PATH. Run it as `target/release/daw`, or as `uv run daw`,
 which runs that binary (or the one `AAW_DAW` names). The Mac app's bundle holds
 a copy, which the app's menu links onto the PATH
-([apps/mac/README.md](../apps/mac/README.md)). It implements:
+([apps/mac/README.md](../apps/mac/README.md)). A command's PROJECT is the
+project's folder or the song file in it. It implements:
 
 | Command | Does |
 |---|---|
 | `daw init DIRECTORY [--tempo T] [--bars N]` | Creates `DIRECTORY/song.yaml`, an empty song |
+| `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
+| `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
 | `daw describe [project\|sampler\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, and how to edit a finished song, map its beats, check its joins and export it |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
@@ -145,6 +148,20 @@ log, handles and the transport need a host.
 - **Selection.** `daw status` lists what the person has selected in the app as
   `{"ref", "path"}` pairs, so a request about "the selected clip" can be
   answered with `daw get PATH`. The app sets it with the `select` command.
+- **Saved under another name.** `daw move` and `daw copy`, and Save As… in the
+  app, are commands to the host (`project.move`, `project.copy`). It saves,
+  moves or copies the folder to a path where nothing is yet, names the song
+  after it, registers under the new path and records one change, which is not
+  an undo step. History, handles and playback carry on. The host keeps
+  answering at the path it had: a command sent there lands, its result's
+  `project` is the new path and a `notice` on stderr says so. After a copy the
+  original cannot be reached by its path until the host closes or is asked to
+  release it (`project.release`). Without a host the two commands do the same
+  to the files. [The feature's file](../docs/features/new-and-untitled-projects.md)
+  has the rest.
+- **The window in front.** The app tells its host which project's window is
+  in front, with the `front` command, and `daw status` and `daw projects`
+  report it.
 - **External edits**, such as a text edit or `git checkout`, load as one
   undoable `external` change. A file that does not validate
   pauses edits, with the error in `daw status`, until it is fixed; `daw fmt`
@@ -187,18 +204,28 @@ tells the app which audio each track has at the revision and the peaks it has
 not been sent. Only the latest revision is worked on, and peaks are kept for a
 while, so undo and redo find theirs.
 
+A project as the app needs it is in `projects.rs`: a new Untitled project in
+the app's data folder (`AAW_DATA_DIR`, or `~/Library/Application Support/AAW`),
+the ones a crash left there, and whether one holds nothing and can be deleted
+unasked. `Song` saves its project under another name and reports the new path
+to its observer.
+
 The app's sample browser asks Python (`library.rs`, `aaw_host::python`):
 `daw samples search` for what it lists, and `daw samples import --copy-only`
 to copy a chosen file into the project, which the song then takes as one edit
 with the pad, and the track if it is new, that plays it.
 
 `crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
-the selection, external edits, concurrent clients, an embedded host and a
+the selection, external edits, concurrent clients, an embedded host, a project
+moved and copied under a running host with its old path still answering,
+Untitled projects, and a
 real-time stress run: random edits compiled and
 swapped in while a thread renders 128-frame blocks on schedule under allocation
 checking. `tests/test_host.py` checks `inspect` and command results against
 the model as Python reads it, and drives a `daw host` process from outside,
 including a sample import that reaches the song through the host.
+`tests/test_projects.py` does the same for a folder as PROJECT, `daw projects`,
+`daw move` and `daw copy`.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
 what each kind of change touches, the person's edits and their place in the
 shared history, the fields a device panel is drawn from, edits of effects,

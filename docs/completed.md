@@ -7,6 +7,7 @@ backlog.
 
 | Date | What | PR | Tried by a person |
 |---|---|---|---|
+| 2026-10-02 | The app opens on an Untitled project; File › New and Save As…; the question on closing; the project index, `daw projects`, `daw move`, `daw copy` and a folder as PROJECT ([new and untitled projects](features/new-and-untitled-projects.md), D58) | #33 | Scripted runs only: launch on Untitled, ⌘N, a move and a copy from a terminal with the app open, a project left after quitting. Not the Save As… panel, the question on closing or Open Recent |
 | 2026-10-01 | A shape on an automation point that bends its segment ([automation](features/automation.md), D55) | #31 | Not heard. The app draws the segment straight |
 | 2026-10-01 | Audio clips: parts of a song on a track, and `daw audio add`, `cut`, `split`, `trim`, `crossfade` ([audio clips](features/audio-clips.md), D54) | #30 | Not heard. The app plays them and does not draw them |
 | 2026-10-01 | A pad or audio clip stretched in time at its own pitch ([time stretch](features/time-stretch.md), D53) | #29 | Not heard |

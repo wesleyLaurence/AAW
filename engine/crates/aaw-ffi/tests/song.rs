@@ -53,8 +53,12 @@ fn registry_dir() {
     static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
     DIR.get_or_init(|| {
         let dir = tempfile::Builder::new().prefix("aaw").tempdir_in("/tmp").unwrap();
-        // SAFETY: set once, before any test reads it; every test calls this first.
-        unsafe { std::env::set_var("AAW_HOST_DIR", dir.path()) };
+        // SAFETY: set once, before any test reads them; every test calls this first.
+        unsafe {
+            std::env::set_var("AAW_HOST_DIR", dir.path());
+            // Untitled projects go here, not into the person's own.
+            std::env::set_var("AAW_DATA_DIR", dir.path().join("data"));
+        }
         dir
     });
 }
@@ -63,6 +67,7 @@ enum Seen {
     Changed(Update),
     Transport(TransportView),
     Invalid(Option<String>),
+    Moved(String),
     Closed,
 }
 
@@ -84,6 +89,9 @@ impl SongObserver for Watcher {
     }
     fn invalid(&self, error: Option<String>) {
         self.send(Seen::Invalid(error));
+    }
+    fn moved(&self, path: String) {
+        self.send(Seen::Moved(path));
     }
     fn warning(&self, _message: String) {}
     fn waveforms(&self, waveforms: Waveforms) {
@@ -1227,4 +1235,107 @@ fn the_library_is_searched_and_a_sample_copied_in() {
     let u = update(&seen);
     assert_eq!((u.arrangement.tracks[0].id.as_str(), u.arrangement.tracks[0].pads[0].root), ("kick", Some(36)));
     song.close();
+}
+
+/// Opens the song at a path, with what its observer is told.
+fn open_at(path: &str) -> (Arc<Song>, Receiver<Seen>) {
+    let (tx, rx) = channel();
+    let (waves_tx, _) = channel();
+    let song = Song::open(path.into(), Arc::new(Watcher(Mutex::new(tx), Mutex::new(waves_tx)))).unwrap();
+    (song, rx)
+}
+
+#[test]
+fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
+    registry_dir();
+    use aaw_ffi::projects::*;
+    let first = project_new_untitled().unwrap();
+    assert!(first.ends_with("/Untitled/Untitled/song.yaml") && project_is_untitled(first.clone()));
+    assert!(first.starts_with(&project_data_dir()));
+    // A folder opens as its song file does.
+    let folder = Path::new(&first).parent().unwrap().to_path_buf();
+    assert_eq!(project_song_file(folder.to_string_lossy().into_owned()), first);
+    let (song, seen) = open_at(&folder.to_string_lossy());
+    transport(&seen);
+    let a = song.arrangement();
+    assert_eq!((a.title.as_str(), a.tempo, a.length_beats, a.tracks.len()), ("Untitled", 120.0, 128.0, 0));
+    assert_eq!((song.path(), song.is_untitled(), song.untouched()), (first.clone(), true, true));
+    // While it is open it is not swept away, and a second takes the next name.
+    assert_eq!(project_sweep_untitled(), Vec::<String>::new());
+    assert!(Path::new(&first).exists());
+    assert!(project_new_untitled().unwrap().ends_with("/Untitled/Untitled 2/song.yaml"));
+    assert_eq!(project_sweep_untitled(), Vec::<String>::new());
+    assert!(!folder.with_file_name("Untitled 2").exists());
+
+    // The window in front is reported to whoever asks.
+    assert_eq!(agent(Path::new(&first), json!({"op": "status"}))["front"], json!(false));
+    song.set_front(true).unwrap();
+    let status = agent(Path::new(&first), json!({"op": "status"}));
+    assert_eq!((status["front"].clone(), status["untitled"].clone(), status["title"].clone()), (json!(true), json!(true), json!("Untitled")));
+
+    // A track by hand and one from a terminal are in one history, and make
+    // the project one that holds something.
+    song.edit(Edit::TrackAdd { index: 0 }, None).unwrap();
+    update(&seen);
+    agent(Path::new(&first), json!({"op": "track.add", "id": "bass"}));
+    assert_eq!(update(&seen).change.origin, Who::Agent);
+    assert!(!song.untouched());
+
+    // Save As… on an Untitled project moves it and names the song.
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let named = root.join("My Beat");
+    let at = song.save_as(named.to_string_lossy().into_owned()).unwrap();
+    assert_eq!(at, named.join("song.yaml").to_string_lossy());
+    assert!(matches!(next(&seen), Seen::Moved(path) if path == at));
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str(), u.change.origin), ("project.move", "Saved as My Beat", Who::User));
+    assert_eq!(u.arrangement.title, "My Beat");
+    assert!(u.touched.contains(&touch(Part::Session, 0, Delta::Changed)));
+    assert_eq!((song.path(), song.is_untitled(), folder.exists()), (at.clone(), false, false));
+    // Undo is still the agent's track, and a command for the old path lands.
+    assert_eq!(u.undo, step("Add track bass", Who::Agent));
+    let reply = client::ask(Path::new(&first), &Request::new(serde_json::from_value(json!({"op": "undo"})).unwrap(), Origin::Agent)).unwrap().unwrap();
+    assert_eq!(reply.moved(), Some(Path::new(&at)));
+    assert_eq!(update(&seen).arrangement.tracks.len(), 1);
+
+    // Save As… on a project that has a name copies it; the song carries on
+    // in the copy, and the original is as it was.
+    let before = std::fs::read_to_string(&at).unwrap();
+    let copy = root.join("My Beat 2");
+    let second = song.save_as(copy.to_string_lossy().into_owned()).unwrap();
+    assert!(matches!(next(&seen), Seen::Moved(path) if path == second));
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.arrangement.title.as_str()), ("project.copy", "My Beat 2"));
+    assert_eq!(std::fs::read_to_string(&at).unwrap(), before);
+    song.undo().unwrap();
+    assert_eq!(update(&seen).arrangement.tracks.len(), 0);
+    assert_eq!(std::fs::read_to_string(&at).unwrap(), before);
+    // A name that is taken is refused, and the song stays where it is.
+    let e = song.save_as(named.to_string_lossy().into_owned()).unwrap_err().to_string();
+    assert!(e.contains("already there"), "{e}");
+    assert_eq!(song.path(), second);
+
+    // The original opens once its path is released, beside the copy.
+    assert!(Song::open(at.clone(), Arc::new(Watcher(Mutex::new(channel().0), Mutex::new(channel().0)))).is_err());
+    song.release(at.clone()).unwrap();
+    let (original, _seen) = open_at(&at);
+    assert_eq!((original.arrangement().title.as_str(), original.arrangement().tracks.len()), ("My Beat", 1));
+    original.close();
+    song.close();
+
+    // An Untitled project that holds something is left for the person; one
+    // that holds nothing is swept. Only an Untitled project is deleted.
+    let kept = project_new_untitled().unwrap();
+    let (song, seen) = open_at(&kept);
+    transport(&seen);
+    song.edit(Edit::TrackAdd { index: 0 }, None).unwrap();
+    update(&seen);
+    song.close();
+    let blank = project_new_untitled().unwrap();
+    assert_eq!(project_sweep_untitled(), [kept.clone()]);
+    assert!(!Path::new(&blank).exists());
+    assert!(project_delete_untitled(second).unwrap_err().to_string().contains("not an Untitled project"));
+    project_delete_untitled(kept.clone()).unwrap();
+    assert!(!Path::new(&kept).parent().unwrap().exists());
 }

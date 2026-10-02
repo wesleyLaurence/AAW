@@ -329,6 +329,24 @@ pub enum Command {
         #[serde(default)]
         items: Vec<String>,
     },
+    /// Whether the project's window is the one in front in the app; `status`
+    /// and `daw projects` report it. Host state, as the selection is.
+    #[serde(rename = "front")]
+    Front { front: bool },
+    /// Moves the project's folder to `to`, an absolute path where nothing is
+    /// yet, and names the song after it. The host carries on at the new path
+    /// with its history, and still answers at the old one.
+    #[serde(rename = "project.move")]
+    Move { to: String },
+    /// Copies the project's folder to `to` and carries on in the copy, named
+    /// after it; the original stays as it was. The host still answers at the
+    /// original's path until that is released.
+    #[serde(rename = "project.copy")]
+    Copy { to: String },
+    /// Stops answering for a path the project had before it was saved under
+    /// another name, so that the project there can be opened.
+    #[serde(rename = "project.release")]
+    Release { project: String },
     /// Writes the song in canonical form.
     #[serde(rename = "fmt")]
     Fmt,
@@ -353,7 +371,7 @@ impl Command {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } => Kind::Read,
-            Select { .. } | Fmt | Close => Kind::Host,
+            Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }
     }

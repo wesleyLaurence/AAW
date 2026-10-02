@@ -1,6 +1,6 @@
 # The agent panel — proposed October 2, 2026
 
-Status: proposed, not built. Backlog item 6. What it should feel like is in
+Status: proposed, not built. Backlog item 5. What it should feel like is in
 [concept.md](../concept.md#the-agent-in-the-window); this file is how, and what
 was checked about Claude Code on October 2, 2026 (version 2.1.287 on this Mac).
 
@@ -21,7 +21,7 @@ conversations are not tied to the project.
 1. **A terminal beside the app.** Works today: the agent's edits reach the app's
    host and are seen and heard.
 2. **A native panel over the person's own Claude Code.** This file.
-3. **Other agents and sign-in in the app.** Backlog item 8.
+3. **Other agents and sign-in in the app.** Backlog item 7.
 
 ## What Claude Code gives
 
@@ -71,9 +71,9 @@ has.
 
 ## Depends on
 
-- Backlog item 1, for a project there from the first moment and a path that
-  follows Save As….
-- Backlog item 5, for the workspace, `SONG.md` and where skills live.
+- [New and Untitled projects](new-and-untitled-projects.md), which is built, for
+  a project there from the first moment and a path that follows Save As….
+- Backlog item 4, for the workspace, `SONG.md` and where skills live.
 - Turns in the host (Later) would let the panel keep or revert a request as one.
   The panel is useful without them.
 

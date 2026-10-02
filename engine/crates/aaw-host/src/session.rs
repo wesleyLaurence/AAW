@@ -510,6 +510,74 @@ impl Session {
         }
     }
 
+    /// Gives every revision in the history a title, as after the project
+    /// was saved under a name: undoing an earlier edit then keeps the name.
+    fn retitle(&mut self, title: &str) {
+        // Steps share revisions, and each is made once.
+        let mut made: HashMap<*const String, Doc> = HashMap::new();
+        let mut titled = |doc: &Doc| -> Doc {
+            if doc.project.session.title == title {
+                return doc.clone();
+            }
+            made.entry(Arc::as_ptr(&doc.yaml))
+                .or_insert_with(|| {
+                    let mut project = (*doc.project).clone();
+                    project.session.title = title.to_string();
+                    Doc::new(project, (*doc.handles).clone())
+                })
+                .clone()
+        };
+        self.doc = titled(&self.doc);
+        for steps in [&mut self.undo, &mut self.redo] {
+            for step in steps.iter_mut() {
+                step.before = titled(&step.before);
+                step.after = titled(&step.after);
+            }
+            // A step that only changed the title has nothing left to undo.
+            steps.retain(|step| step.before.yaml != step.after.yaml);
+        }
+    }
+
+    /// Saves the project as the folder `to`, where nothing is yet, and names
+    /// the song after it: a move of the folder, or with `copy` a copy that
+    /// leaves the original as it was. The session carries on at the new path
+    /// with its history. It is one change in the log and not an undo step.
+    pub fn relocate(&mut self, to: &Path, copy: bool, origin: Origin, command: Json) -> Result<(Json, Change)> {
+        self.check_editable()?;
+        self.save()?;
+        let from = std::fs::canonicalize(&self.dir).map_err(|e| format!("{}: {e}", self.dir.display()))?;
+        let to = crate::project::target(to, &from)?;
+        let name = to.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let file = self.path.file_name().map(PathBuf::from).unwrap_or_else(|| crate::project::SONG_FILE.into());
+        if copy {
+            crate::project::copy_folder(&from, &to)?;
+        } else {
+            crate::project::move_folder(&from, &to)?;
+        }
+        let was = from.join(&file);
+        self.path = to.join(&file);
+        self.dir = to;
+        self.digests.clear();
+        self.retitle(&name);
+        // The file there holds the old title. A save that fails is tried
+        // again with the next edit.
+        self.disk_bytes.clear();
+        self.disk_stamp = Stamp::of(&self.path);
+        self.dirty = true;
+        let _ = self.save();
+        let outcome = Outcome {
+            label: format!("Saved as {name}"),
+            ..Outcome::default()
+        };
+        let op = command.get("op").and_then(Json::as_str).unwrap_or("project.move").to_string();
+        let change = self.record(origin, &op, outcome, command, None);
+        let mut reply = self.stamp_reply(true);
+        reply.insert("label".into(), json!(change.label));
+        reply.insert("project".into(), json!(self.path));
+        reply.insert("from".into(), json!(was));
+        Ok((Json::Object(reply), change))
+    }
+
     pub fn changes(&self, since: u64) -> Json {
         let changes: Vec<&Change> = self.log.iter().filter(|c| c.revision > since).collect();
         json!({"revision": self.revision, "session": self.id, "changes": changes})
@@ -547,6 +615,7 @@ impl Session {
     pub fn status(&self) -> Map<String, Json> {
         let mut m = Map::new();
         m.insert("project".into(), json!(self.path));
+        m.insert("title".into(), json!(self.doc.project.session.title));
         m.insert("host".into(), json!(self.hosted));
         if self.hosted {
             m.insert("session".into(), json!(self.id));

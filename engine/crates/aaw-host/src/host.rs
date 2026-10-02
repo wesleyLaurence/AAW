@@ -18,7 +18,7 @@ use serde_json::{json, Map, Value as Json};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
@@ -79,6 +79,9 @@ pub enum Event {
     Transport(TransportState),
     /// song.yaml holds an external edit that does not load, or it was fixed.
     Invalid(Option<String>),
+    /// The project was saved under another name and the song is now at this
+    /// path. The `Changed` that records it follows.
+    Moved(PathBuf),
     Warning(String),
     /// The host has saved and shut down.
     Closed,
@@ -122,8 +125,26 @@ impl Clock {
 type Observer = Box<dyn FnMut(Event) + Send>;
 type Inbox = mpsc::Sender<(Request, mpsc::Sender<Json>)>;
 
+/// A path the host answers at: its registration and the thread that
+/// listens on its socket.
+struct Door {
+    claim: registry::Claim,
+    listening: JoinHandle<()>,
+    /// Set to stop this door alone; `done` stops them all.
+    shut: Arc<AtomicBool>,
+}
+
 struct Host {
     session: Session,
+    /// The song's path as the registry has it, which each reply carries.
+    canonical: PathBuf,
+    /// Where the host answers: the project's path, and the paths it had
+    /// before it was saved under another name.
+    doors: Vec<Door>,
+    inbox: Inbox,
+    done: Arc<AtomicBool>,
+    /// Whether the project's window is in front in the app.
+    front: bool,
     opts: Options,
     observer: Option<Observer>,
     clock: Arc<Clock>,
@@ -433,6 +454,8 @@ impl Host {
         }
         m.insert("playback_error".into(), json!(self.playback_error));
         m.insert("selection".into(), json!(self.selected()));
+        m.insert("front".into(), json!(self.front));
+        m.insert("untitled".into(), json!(crate::project::is_untitled(&self.canonical)));
         Json::Object(m)
     }
 
@@ -506,6 +529,13 @@ impl Host {
                     self.selection = selection;
                     Ok(json!({"selection": self.selected()}))
                 }
+                Command::Front { front } => {
+                    self.front = front;
+                    Ok(json!({"front": front}))
+                }
+                Command::Move { ref to } => self.relocate(to, false, origin, command.json()),
+                Command::Copy { ref to } => self.relocate(to, true, origin, command.json()),
+                Command::Release { project } => self.release(Path::new(&project)),
                 Command::Fmt => {
                     let _lock = lock(self.session.path())?;
                     self.session.write()?;
@@ -521,6 +551,72 @@ impl Host {
                 _ => unreachable!("not a host command"),
             },
         }
+    }
+
+    /// Starts answering at a registration.
+    fn listen_at(&mut self, listener: UnixListener, claim: registry::Claim) {
+        let shut = Arc::new(AtomicBool::new(false));
+        let listening = {
+            let (tx, done, shut) = (self.inbox.clone(), self.done.clone(), shut.clone());
+            std::thread::spawn(move || listen(listener, tx, done, shut))
+        };
+        self.doors.push(Door { claim, listening, shut });
+    }
+
+    /// Saves the project as the folder `to`: a move, or a copy that leaves
+    /// the original. The host carries on there with its history and what is
+    /// playing, registers under the new path and keeps answering at the old.
+    fn relocate(&mut self, to: &str, copy: bool, origin: Origin, command: Json) -> Result<Json> {
+        let _lock = lock(self.session.path())?;
+        self.sync();
+        self.save_at = None;
+        let from = std::fs::canonicalize(self.session.dir()).map_err(|e| e.to_string())?;
+        let folder = crate::project::target(Path::new(to), &from)?;
+        let file = self.session.path().file_name().map(PathBuf::from).unwrap_or_default();
+        // Claimed before anything moves, so that a refusal changes nothing.
+        let entry = registry::entry(&folder.join(&file))?;
+        let (listener, claim) = registry::claim(&entry)?;
+        let (reply, change) = self.session.relocate(&folder, copy, origin, command)?;
+        self.canonical = std::fs::canonicalize(self.session.path()).unwrap_or_else(|_| entry.project.clone());
+        let stale: Vec<String> = self
+            .doors
+            .iter()
+            .filter_map(|door| {
+                let said = door.claim.moved(&self.canonical);
+                said.err().map(|e| format!("{} was not updated: {e}", door.claim.entry().info.display()))
+            })
+            .collect();
+        stale.into_iter().for_each(|message| self.warn(message));
+        self.listen_at(listener, claim);
+        // The folder as the file system names it, if that is not as it was written.
+        if self.canonical != entry.project {
+            match registry::entry(&self.canonical).and_then(|e| registry::claim(&e)) {
+                Ok((listener, claim)) => self.listen_at(listener, claim),
+                Err(e) => self.warn(format!("{} is not registered: {e}", self.canonical.display())),
+            }
+        }
+        self.emit(json!({"host": {"project": self.canonical, "pid": std::process::id(), "revision": change.revision}}));
+        self.notify(Event::Moved(self.session.path().to_path_buf()));
+        self.changed(&change);
+        Ok(reply)
+    }
+
+    /// Stops answering for a path the project had, so that the project there
+    /// can have a host of its own.
+    fn release(&mut self, project: &Path) -> Result<Json> {
+        let entry = registry::entry(project)?;
+        let released = entry.project != self.canonical
+            && self.doors.iter().any(|door| door.claim.entry().socket == entry.socket);
+        if released {
+            let (gone, kept): (Vec<Door>, Vec<Door>) =
+                std::mem::take(&mut self.doors).into_iter().partition(|door| door.claim.entry().socket == entry.socket);
+            self.doors = kept;
+            for door in gone {
+                door.shut.store(true, Relaxed);
+                let _ = door.listening.join();
+            }
+        }
+        Ok(json!({"released": released, "project": entry.project}))
     }
 
     /// Saves a gesture's edits once it has paused.
@@ -587,9 +683,9 @@ fn answer(stream: UnixStream, requests: Inbox) {
     let _ = writeln!(stream, "{reply}");
 }
 
-fn listen(listener: UnixListener, requests: Inbox, done: Arc<AtomicBool>) {
+fn listen(listener: UnixListener, requests: Inbox, done: Arc<AtomicBool>, shut: Arc<AtomicBool>) {
     let _ = listener.set_nonblocking(true);
-    while !done.load(Relaxed) {
+    while !done.load(Relaxed) && !shut.load(Relaxed) {
         match listener.accept() {
             Ok((stream, _)) => {
                 let _ = stream.set_nonblocking(false);
@@ -602,12 +698,9 @@ fn listen(listener: UnixListener, requests: Inbox, done: Arc<AtomicBool>) {
     }
 }
 
-/// A host with its socket open, ready to serve.
+/// What a host with its socket open serves from.
 struct Serving {
     rx: mpsc::Receiver<(Request, mpsc::Sender<Json>)>,
-    done: Arc<AtomicBool>,
-    listening: JoinHandle<()>,
-    claim: registry::Claim,
 }
 
 /// Claims the project, loads it and starts listening on its socket.
@@ -616,13 +709,13 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
     let (listener, claim) = registry::claim(&entry)?;
     let session = Session::open(project, true)?;
     let (tx, rx) = mpsc::channel::<(Request, mpsc::Sender<Json>)>();
-    let done = Arc::new(AtomicBool::new(false));
-    let listening = {
-        let (tx, done) = (tx.clone(), done.clone());
-        std::thread::spawn(move || listen(listener, tx, done))
-    };
     let mut host = Host {
         session,
+        canonical: entry.project.clone(),
+        doors: Vec::new(),
+        inbox: tx.clone(),
+        done: Arc::new(AtomicBool::new(false)),
+        front: false,
         opts,
         observer,
         clock,
@@ -641,6 +734,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         closing: false,
         from: BigRational::zero(),
     };
+    host.listen_at(listener, claim);
     host.emit(json!({"host": {
         "project": host.session.path(),
         "pid": std::process::id(),
@@ -650,14 +744,14 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
     let doc = host.session.doc().clone();
     host.notify(Event::Opened(doc));
     host.report_transport();
-    Ok((host, Serving { rx, done, listening, claim }, tx))
+    Ok((host, Serving { rx }, tx))
 }
 
 /// Answers requests until `interrupted` is set, a `close` request arrives or,
 /// with `exit_on_stop`, playback stops. Then saves, unregisters and returns a
 /// summary, with the audio report when the song played.
 fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Result<Json> {
-    let Serving { rx, done, listening, claim } = serving;
+    let Serving { rx } = serving;
     let started = match host.opts.play.clone() {
         Some(from) => host.play(Some(&from)).map(|_| ()),
         None => {
@@ -671,7 +765,7 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
             Ok((request, reply)) => {
                 let result = host.handle(request);
                 let _ = reply.send(match result {
-                    Ok(v) => json!({"ok": v}),
+                    Ok(v) => json!({"ok": v, "project": host.canonical}),
                     Err(e) => json!({"error": e}),
                 });
             }
@@ -688,13 +782,20 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
             break;
         }
     }
-    done.store(true, Relaxed);
-    let _ = listening.join();
+    host.done.store(true, Relaxed);
+    let doors = std::mem::take(&mut host.doors);
+    let claims: Vec<registry::Claim> = doors
+        .into_iter()
+        .map(|door| {
+            let _ = door.listening.join();
+            door.claim
+        })
+        .collect();
     // Answer requests that arrived while closing.
     while let Ok((_, reply)) = rx.try_recv() {
         let _ = reply.send(json!({"error": CLOSING}));
     }
-    drop(claim);
+    drop(claims);
     if let Some(t) = &mut host.transport {
         if t.control.playing() {
             let _ = t.control.stop();

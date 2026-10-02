@@ -73,7 +73,9 @@ the open song, applies each edit as a command with undo, and plays it as it
 lands. The agent drives it with the `daw` command; the person drives the same
 host from a native Mac app with an arrangement that shows each clip's waveform,
 a mixer, device panels, automation lanes, a pattern editor and a sample browser,
-and sees the agent's changes as they happen. See
+and sees the agent's changes as they happen. The app opens on a blank project
+called Untitled, which Save As… gives a name and a place, and `daw projects`
+lists what is open in it. See
 [engine/README.md](engine/README.md) and [apps/mac/README.md](apps/mac/README.md).
 
 Samples can be measured from their audio for pitch (with octave), loop tempo and
@@ -165,7 +167,13 @@ uv run daw joins projects/my-beat/renders/latest.json --limit 60
 uv run daw export projects/my-beat/song.yaml --to projects/my-beat/exports/my-beat-v1.wav
 ```
 
-All commands emit JSON. Errors emit JSON to stderr and exit nonzero. The index is
+All commands emit JSON. Errors emit JSON to stderr and exit nonzero. A command's
+PROJECT is the project's folder or the `song.yaml` in it: `projects/my-beat`
+works wherever `projects/my-beat/song.yaml` does. `daw projects` lists the
+projects open in the Mac app, the window in front first, and `daw move` and
+`daw copy` save a project under another name; see
+[docs/features/new-and-untitled-projects.md](docs/features/new-and-untitled-projects.md).
+The index is
 `.daw/library.sqlite`; supply `daw samples --db /path/index.sqlite ...` to use another.
 Filename BPM/key/category are **hints**, not audio-derived facts. Names with C/F/etc.
 do not establish an octave. `daw samples analyze` measures pitch with octave and
