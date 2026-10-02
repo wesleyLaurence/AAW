@@ -37,6 +37,9 @@ Python, in `src/agent_daw`:
   data, the full dump of the validated document.
 - `analysis.py`: audio-derived pitch, onsets, tempo and loop/one-shot kind; see
   [sample-analysis.md](sample-analysis.md). Cached in the index by `library.py`.
+- `beats.py`: the beat and downbeat map of a whole song, its phrase changes and a
+  click audition; see [beat-map.md](beat-map.md). Kept beside the audio by
+  `library.py`.
 - `library.py`: incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
@@ -200,10 +203,11 @@ frequencies, localized arrangement edits, previews and tampered render artifacts
 Recording, saturation, groups, synths,
 plugin hosting, time stretching, MIDI import/export, modulation (LFOs), tempo
 automation, semantic/audio embedding search,
-key/chord detection, downbeat and swing detection, sample sustain looping, incremental render caching,
+key/chord detection, swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
 perception layer is implemented; see [perception.md](perception.md). Monophonic pitch
-and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md). The CLI is ready
+and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md).
+A whole song's beats and downbeats are measured; see [beat-map.md](beat-map.md). The CLI is ready
 for agent-driven iterative use. The milestones of
 [Rust-Swift-Update.md](Rust-Swift-Update.md) are done; the app is packaged as a
 bundle with `daw` inside it, and has not yet been signed with a Developer ID.

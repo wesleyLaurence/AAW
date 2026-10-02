@@ -307,6 +307,46 @@ def analyze_all(db: Path, refresh=False):
     }
 
 
+def beat_map(db: Path, path: Path, bpm=None, downbeat=None, refresh=False):
+    """A file's beat map, measured once and kept beside it as NAME.beats.json.
+
+    The saved map is used while the audio and the measuring code are unchanged.
+    `bpm` and `downbeat` correct it and are kept with it, so later calls give the
+    corrected map; `refresh` measures again without them. Nothing is written
+    beside a file in the library index, whose map is measured on each call.
+    """
+    from . import beats
+    from .model import atomic_text
+
+    path = path.resolve()
+    sidecar = path.with_name(f"{path.stem}.beats.json")
+    sha, asked = digest(path), {"bpm": None, "downbeat": None}
+    if sidecar.is_file() and not refresh:
+        saved = json.loads(sidecar.read_text())
+        if saved.get("sha256") == sha and saved.get("analyzer") == beats.ANALYZER:
+            if bpm is None and downbeat is None:
+                return {"path": str(path), **saved, "map": str(sidecar), "cached": True}
+            asked = saved["requested"]
+    asked = {
+        "bpm": asked["bpm"] if bpm is None else bpm,
+        "downbeat": asked["downbeat"] if downbeat is None else downbeat,
+    }
+    report = beats.measure(path, asked["bpm"], asked["downbeat"])
+    report = {**report, "sha256": sha, "requested": asked}
+    con = connect(db)
+    try:
+        row = con.execute("SELECT 1 FROM samples WHERE path=?", (str(path),))
+        indexed = row.fetchone()
+    finally:
+        con.close()
+    if indexed:
+        return {**report, "map": None, "cached": False}
+    # The map goes where its audio goes, so it does not name where that is.
+    kept = {k: v for k, v in report.items() if k != "path"}
+    atomic_text(sidecar, json.dumps(kept, indent=1) + "\n")
+    return {**report, "map": str(sidecar), "cached": False}
+
+
 def resolve(db: Path, value: str) -> Path:
     path = Path(value).expanduser()
     if path.is_file():

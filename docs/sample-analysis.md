@@ -79,7 +79,9 @@ different root is sometimes wanted.
 
 Pitch is a single-voice estimate. It does not detect keys, chords, scales or
 melodies, and it summarizes a glide as its median. Tempo assumes 4/4 and a steady
-tempo. It does not detect downbeats, swing, or pickups before the first downbeat.
+tempo, and reads the first two minutes. It does not detect downbeats, swing, or
+pickups before the first downbeat; for a whole song's beats, downbeats and pickup
+use `daw samples beats` ([beat-map.md](beat-map.md)).
 Half and double time cannot be resolved from audio alone. Very short or quiet
 material may return no pitch or no onsets. Analysis never modifies the sample,
 the project or the original library.

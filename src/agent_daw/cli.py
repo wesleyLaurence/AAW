@@ -80,6 +80,29 @@ def parser():
     target.add_argument("sample", nargs="?")
     target.add_argument("--all", action="store_true", help="Every indexed sample")
     analyze.add_argument("--refresh", action="store_true", help="Ignore the cache")
+    beats = ss.add_parser(
+        "beats",
+        help="Beat and downbeat map of a whole song: tempo, every beat, bars and phrases",
+    )
+    beats.add_argument("sample")
+    beats.add_argument("--near", help="List the beats around a time, as seconds or m:ss")
+    beats.add_argument(
+        "--window", type=float, default=3.0, help="Seconds either side of --near"
+    )
+    beats.add_argument("--all", action="store_true", help="List every beat")
+    beats.add_argument(
+        "--bpm", type=float, help="The song's tempo, to settle half or double time"
+    )
+    beats.add_argument("--downbeat", help="A time whose nearest beat is a downbeat")
+    beats.add_argument(
+        "--refresh", action="store_true", help="Measure again, without corrections"
+    )
+    beats.add_argument(
+        "--click", type=Path, help="Write part of the song with a click on each beat"
+    )
+    beats.add_argument(
+        "--seconds", type=float, default=20, help="Length of the --click audition"
+    )
     inspect = ss.add_parser("inspect")
     inspect.add_argument("sample")
     aud = ss.add_parser("audition")
@@ -163,6 +186,8 @@ def execute(a):
     source = library.resolve(a.db, a.sample)
     if a.action == "analyze":
         return library.analyze(a.db, source, a.refresh)
+    if a.action == "beats":
+        return beat_map(a, source)
     if a.action == "inspect":
         return library.inspect(source)
     if a.action == "audition":
@@ -170,6 +195,29 @@ def execute(a):
             raise ValueError("seconds must be >0 and <=60")
         return library.audition(source, a.output, a.seconds)
     return import_sample(a, source)
+
+
+def beat_map(a, source):
+    """A song's beat map: its summary, and the beats asked for."""
+    from . import beats, library
+
+    if a.bpm is not None and not beats.MIN_BPM <= a.bpm <= beats.MAX_BPM:
+        raise ValueError(f"bpm must be {beats.MIN_BPM:g}–{beats.MAX_BPM:g}")
+    if a.window <= 0 or not 0 < a.seconds <= 60:
+        raise ValueError("window must be >0, and seconds >0 and <=60")
+    downbeat = None if a.downbeat is None else beats.seconds(a.downbeat)
+    at = None if a.near is None else beats.seconds(a.near)
+    report = library.beat_map(a.db, source, a.bpm, downbeat, a.refresh)
+    rows = report.pop("beats")
+    if a.all:
+        report["beats"] = rows
+    if at is not None:
+        report["near"] = beats.near(rows, at, a.window)
+    if a.click:
+        # Around the time asked about, or else from just before the first downbeat.
+        start = report["first_downbeat_seconds"] - 0.5 if at is None else at - a.seconds / 2
+        report["click"] = beats.click(source, rows, a.click, start, a.seconds)
+    return report
 
 
 def import_sample(a, source):
