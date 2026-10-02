@@ -60,7 +60,7 @@ person can see and adjust.
 | 2 | Beat and downbeat map of a whole song | The agent cannot find where to cut | Every edit | Done, October 1, 2026 |
 | 3 | Pitch-preserving time stretch | "Speed it up slightly" changes the pitch | Edits that run long | |
 | 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | |
-| 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | |
+| 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | Done, October 1, 2026 |
 | 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | Done, October 1, 2026 |
 | 7 | Personal skills and assets | No place for a skill that Git ignores; nothing documents how to write one | Running the process by name | |
 | 8 | Smaller gaps | See below | Convenience | |
@@ -252,6 +252,18 @@ writes today's pads and events for a list of regions and fades. It removes the
 arithmetic but gives the app nothing to show, so it is a stopgap.
 
 ### 5. Join and length checks
+
+**Done, October 1, 2026.** `daw joins RENDER` reports every join of a rendered
+edit and the file's length against `--limit`. For each join: whether the beat
+carries across it, from the song's beat map placed through both parts and again
+from the transients in the track's stem; how many beats of the song it skips; the
+step in the waveform at the splice; the level either side; flags in words; and an
+excerpt of the mix to hear. It is a command of its own and not part of
+`daw listen`. A join is found from today's pads (two parts of one sample meeting
+on a track) and will be read from audio clips when feature 4 adds them. See
+[join-checks.md](join-checks.md) and D51 in [decisions.md](decisions.md). Checked
+on edits of a generated song; nobody listened to an excerpt. What follows is the
+analysis as it was written.
 
 Today `daw listen` measures loudness, peaks, spectrum, stereo and energy per beat.
 [perception.md](perception.md) says it does not infer tempo or transients. The

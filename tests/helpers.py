@@ -112,3 +112,58 @@ def run_chain(directory, effects, x, automation=None, keys=None, tempo=120, bloc
         directory / "song.yaml", directory / "out", block_size, track_id="chain"
     )
     return stem(directory / "out", "chain"), report["tracks"]["chain"]["effects"]
+
+
+def beat_song(path, bpm=120.0, bars=24, first=0.137, pickup=0, late=None, seed=0):
+    """Writes a song at 44.1 kHz whose grid is known, and returns its beat times.
+
+    A kick on beats one and three, a snare on two and four and a bass note that
+    changes each bar, with eighth-note hats from bar 9 and a higher note from bar
+    17. The first downbeat is beat `pickup`, `first` seconds in or later. `late`
+    gives how many seconds late each beat is, by its number.
+    """
+    RATE = 44100
+    rng = np.random.default_rng(seed)
+    count = bars * 4 + pickup
+    times = first + 60 / bpm * np.arange(count)
+    if late is not None:
+        times = times + late(np.arange(count))
+    x = np.zeros(round((times[-1] + 60 / bpm + 1) * RATE))
+
+    def add(at, sound):
+        start = round(at * RATE)
+        sound = sound[: len(x) - start]
+        x[start : start + len(sound)] += sound
+
+    def kick():
+        t = np.arange(round(0.25 * RATE)) / RATE
+        sweep = np.cumsum(50 + 120 * np.exp(-t / 0.02)) / RATE
+        return 0.8 * np.sin(2 * np.pi * sweep) * np.exp(-t / 0.08)
+
+    def noise(seconds, decay, level):
+        n = round(seconds * RATE)
+        return level * rng.standard_normal(n) * np.exp(-np.arange(n) / (decay * RATE))
+
+    def note(hz, seconds, level=0.2):
+        t = np.arange(round(seconds * RATE)) / RATE
+        shape = np.minimum(1, t / 0.01) * np.minimum(1, (seconds - t) / 0.02)
+        return level * (np.sin(2 * np.pi * hz * t) + 0.4 * np.sin(4 * np.pi * hz * t)) * shape
+
+    roots = [55.0, 65.41, 73.42, 49.0]
+    for i, at in enumerate(times):
+        bar, place = divmod(i - pickup, 4)
+        gap = times[i + 1] - at if i + 1 < count else 60 / bpm
+        if i < pickup:
+            add(at, noise(0.03, 0.004, 0.12))
+            continue
+        phrase = bar // 8
+        add(at, kick() if place in (0, 2) else noise(0.15, 0.03, 0.4))
+        if phrase >= 1:
+            add(at, noise(0.03, 0.004, 0.12))
+            add(at + gap / 2, noise(0.03, 0.004, 0.12))
+        root = roots[bar % 4] * (1.5 if phrase % 2 else 1)
+        add(at, note(root, gap * 0.9))
+        if phrase >= 2:
+            add(at, note(root * 4, gap * 0.9, 0.08))
+    sf.write(path, 0.8 * x / np.abs(x).max(), RATE, subtype="PCM_16")
+    return np.round(times * RATE) / RATE
