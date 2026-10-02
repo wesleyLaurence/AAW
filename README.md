@@ -56,9 +56,9 @@ version history, tasks, and specialized production tools in one shared project.
 
 The goal is **a programmable, agent-native environment for making music**.
 
-See [the project idea](docs/idea.md) for the earlier design principles and
-[the documentation index](docs/README.md) for the specification, build plan,
-decision log, and design notes.
+See [the concept](docs/concept.md) for what AAW should become, and
+[the documentation index](docs/README.md) for the architecture, the backlog, each
+feature and the decision log.
 
 ## What works today
 
@@ -82,15 +82,15 @@ one-shot/loop kind.
 Tracks, returns and the master bus take insert effects: filter, EQ, compressor
 with sidechain, look-ahead limiter, tempo-synced delay and a seeded convolution
 reverb. Tracks send pre- or post-fader to return buses, which render as their own
-stems. See [docs/effects.md](docs/effects.md).
+stems. See [docs/features/effects.md](docs/features/effects.md).
 
 Automation lanes move track, return and master levels, pans, send levels and
 effect parameters over time, such as a filter sweep into a drop or a quieter
-second chorus. See [docs/automation.md](docs/automation.md).
+second chorus. See [docs/features/automation.md](docs/features/automation.md).
 
 The broader workspace described above is the vision. Saturation, groups, synths,
 plugin hosting, MIDI import/export and recording are not implemented.
-[docs/mvp.md](docs/mvp.md) describes the implemented behavior.
+[docs/architecture.md](docs/architecture.md) describes the implemented behavior.
 
 ## Repository scope
 
@@ -171,31 +171,31 @@ Filename BPM/key/category are **hints**, not audio-derived facts. Names with C/F
 do not establish an octave. `daw samples analyze` measures pitch with octave and
 cents, onsets, loop tempo and one-shot/loop kind from the audio. `--root-note auto`
 uses the measured note, and `daw check` warns when a declared root disagrees with
-the audio. See [docs/sample-analysis.md](docs/sample-analysis.md).
+the audio. See [docs/features/sample-analysis.md](docs/features/sample-analysis.md).
 `daw samples import` takes a file's path as well as an index ID. An `.m4a` or
 `.mp3` file is decoded once into the project as WAV, and a file the engine cannot
-play is refused; see "Format v1" in [docs/mvp.md](docs/mvp.md).
+play is refused; see "Format v1" in [docs/architecture.md](docs/architecture.md).
 `daw samples beats` maps a whole song: its tempo, every beat, the downbeats with
 their alternatives, where the arrangement changes, the beats near a timecode and a
-click audition to check the grid by ear. See [docs/beat-map.md](docs/beat-map.md).
+click audition to check the grid by ear. See [docs/features/beat-map.md](docs/features/beat-map.md).
 To edit a finished song from timecodes, the `song-edit` skill in `.claude/skills/`
 says what to do, and `daw describe edit`, `beats`, `joins` and `export` say how.
 Personal skills and the sounds they reuse stay out of Git; see
-[docs/skills.md](docs/skills.md).
+[docs/features/skills.md](docs/features/skills.md).
 A track's `audio` lists audio clips, parts of a sample file placed on beats, and
 `daw audio` adds, cuts, splits, trims and crossfades them: an edit of a song is one
-clip with ranges cut out. See [docs/audio-clips.md](docs/audio-clips.md).
+clip with ranges cut out. See [docs/features/audio-clips.md](docs/features/audio-clips.md).
 A pad or an audio clip with `source_bpm` and `stretch: preserve_pitch` follows the session's tempo at
 its own pitch, so an edit can be made a few percent shorter by raising the tempo.
-See [docs/time-stretch.md](docs/time-stretch.md).
+See [docs/features/time-stretch.md](docs/features/time-stretch.md).
 `daw timeline` gives a song's places in beats and in seconds, where its sound ends,
 the beat a sound starts on to end on another, and fits the session's length. See
-[docs/timeline.md](docs/timeline.md).
+[docs/features/timeline.md](docs/features/timeline.md).
 `daw joins` checks a rendered edit of a song: whether the beat carries across each
 join, whether the splice shows as a step, the level either side and the file's
-length, with an excerpt of each join to hear. See [docs/join-checks.md](docs/join-checks.md).
+length, with an excerpt of each join to hear. See [docs/features/join-checks.md](docs/features/join-checks.md).
 `daw export` writes the song's render as a named WAV, AAC or MP3 file and reports
-the level policy it applied. See [docs/export.md](docs/export.md).
+the level policy it applied. See [docs/features/export.md](docs/features/export.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
 Edits are commands: `set` for any value by path, and verbs for tracks, returns,
@@ -223,7 +223,7 @@ additionally validates audio content and trim bounds.
 
 ## Authoring contract
 
-See [docs/mvp.md](docs/mvp.md) for the implemented schema and timing/audio semantics.
+See [docs/architecture.md](docs/architecture.md) for the implemented schema and timing/audio semantics.
 All musical times are **quarter-note beats**, zero-based. Fractions such as `1/3`
 are accepted. At 160 BPM, 80 beats / 20 bars equals exactly 30 seconds.
 
@@ -312,10 +312,11 @@ loudness-matched deltas plus a comparison chart. Both accept render directories,
 render pointers, `report.json`, or standalone audio. Add `--no-images` for JSON only.
 Outputs live under `analysis/` inside the render directory or beside standalone
 audio. Reports use the saved project snapshot and do not change the song or audio.
-See [docs/perception.md](docs/perception.md) for definitions and limitations.
+See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
 
-The older files in `docs/` describe the broader product vision. What is implemented
-is deliberately narrower; `docs/mvp.md` is authoritative for the current build.
+`docs/concept.md` describes the broader product vision. What is implemented is
+deliberately narrower; `docs/architecture.md` is authoritative for the current build,
+and `docs/backlog.md` lists what is next.
 
 ## License
 

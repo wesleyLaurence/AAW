@@ -1,5 +1,7 @@
 # The idea: an agentic DAW
 
+> Archived October 2, 2026, and kept for history; it is not maintained. The first statement of the idea, from before anything was built. [concept.md](../concept.md) replaces it; its premise of offline rendering only was reversed by D33.
+
 ## In one paragraph
 
 A digital audio workstation built from first principles for an AI agent to operate. It has everything Ableton has that matters: sessions, tracks on an arrangement timeline, audio and MIDI clips, samplers and synthesizers, effect chains, sends and returns, per-track volume and pan, and automation of any parameter over time. It has none of the things Ableton has that only exist for a human with a mouse. A person describes a song, a sound, a beat built from a sample, or a direction, and an agent such as Claude Code or Codex builds it using the same primitives a producer uses, listens to the result through analysis, and iterates. It can work as a collaborator taking direction, or run on its own until a song is finished.

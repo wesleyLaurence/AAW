@@ -1,17 +1,53 @@
-# Sampler MVP — implemented September 22, 2026; on the Rust engine since October 1, 2026
+# Architecture: how AAW is built
 
-## Scope and architecture
+This describes what exists, in the present tense, and is changed in the same pull
+request as the code. What the app should become is in [concept.md](concept.md);
+what is not built yet is in [backlog.md](backlog.md). Three things beside the code
+are more exact than this page and are where the detail lives:
+
+| For | Read |
+|---|---|
+| The song's schema, every field's bounds and defaults, and how to author a song | `daw describe` and its topics, printed from the code |
+| The engine, the session host and every command | [../engine/README.md](../engine/README.md) |
+| The Mac app: its window, its input, its bundle and its limits | [../apps/mac/README.md](../apps/mac/README.md) |
+| One feature | Its file in [features/](features/) |
+
+## The parts
 
 A Rust core with a JSON-first CLI, a Mac app over the same core, and Python tools
 for the sample library and perception. The agent is the composer/operator; the
 engine provides deterministic editing, sample retrieval, sequencing, playback,
 rendering and technical inspection. There is no embedded autonomous composer.
 
-The MVP was first built in Python and rendered offline only. The plan in
-[Rust-Swift-Update.md](Rust-Swift-Update.md) rebuilt the model, the sampler, the
-effects and automation in Rust against that engine as the reference, and its
-milestone M7 retired the Python engine. The document format, the fingerprints, the
-render artifacts and the semantics below did not change.
+```
+  Mac app (Swift, SwiftUI + AppKit)            agent in a terminal
+  arrangement, mixer, device view,             daw set / move / add / play
+  transport, space bar, drag edits                     │
+         │ in-process calls (UniFFI)                   │ local socket
+         ▼                                             ▼
+  ┌──────────────────── session host (Rust) ─────────────────────┐
+  │ in-memory song · commands · undo/redo · change log           │
+  │ revision + project_sha256 · saves each edit · external edits │
+  └───────────┬───────────────────────────────┬─────────────────┘
+              │ compiled program              │ canonical YAML
+              ▼                               ▼
+  ┌──────── engine (Rust) ─────────┐     song.yaml, samples/, renders/
+  │ scheduler · sampler · devices  │
+  │ automation · routing · mixer   │     Python: samples scan/search/
+  │ real-time driver (CoreAudio)   │     analyze/beats/import, listen,
+  │ offline driver (WAV, stems)    │     compare, check, timeline,
+  └────────────────────────────────┘     joins, export
+```
+
+With no app or `daw host` running for a project, `daw` applies a command to the
+file itself and exits, under the project's `.daw.lock`. A running host registers
+its project and socket under `~/Library/Application Support/AAW/hosts`.
+
+The first build was in Python and rendered offline only. The Rust rebuild ported
+the model, the sampler, the effects and automation against that engine as the
+reference and then retired it; the document format, the fingerprints and the
+render artifacts did not change
+([archive/Rust-Swift-Update.md](archive/Rust-Swift-Update.md)).
 
 Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 
@@ -19,7 +55,7 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   hashes, the event schedule and the schema `daw describe` prints.
 - `aaw-dsp`: bandlimited repitch, lane envelopes, and the filter, EQ,
   compressor/sidechain, limiter, delay and reverb devices with explicit block
-  state; see [effects.md](effects.md) and [automation.md](automation.md).
+  state; see [effects.md](features/effects.md) and [automation.md](features/automation.md).
 - `aaw-engine`: compiles a song into a program of voices, chains, routing and
   latency-aligning delays, and runs it as one stream for real-time playback and
   for WAV/stem export.
@@ -36,22 +72,22 @@ Python, in `src/agent_daw`:
 - `model.py`: reads, validates and saves songs through `aaw_py`. A song is plain
   data, the full dump of the validated document.
 - `analysis.py`: audio-derived pitch, onsets, tempo and loop/one-shot kind; see
-  [sample-analysis.md](sample-analysis.md). Cached in the index by `library.py`.
+  [sample-analysis.md](features/sample-analysis.md). Cached in the index by `library.py`.
 - `beats.py`: the beat and downbeat map of a whole song, its phrase changes and a
-  click audition; see [beat-map.md](beat-map.md). Kept beside the audio by
+  click audition; see [beat-map.md](features/beat-map.md). Kept beside the audio by
   `library.py`.
 - `library.py`: incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
 - `export.py`: a named deliverable from a render, as WAV, AAC or MP3, with one gain
-  for the level and a record of the render beside it; see [export.md](export.md).
+  for the level and a record of the render beside it; see [export.md](features/export.md).
 - `joins.py`: checks of a rendered edit of a song: each join's beat, splice and
   level, the file's length, and an excerpt of each join; see
-  [join-checks.md](join-checks.md).
+  [join-checks.md](features/join-checks.md).
 - `timeline.py`: a song's places in beats and seconds, where each track's sound is,
   the start of a sound that ends on a beat, and fitting the session's length; see
-  [timeline.md](timeline.md).
+  [timeline.md](features/timeline.md).
 - `cli.py`: `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and
   `export`. `check` is `inspect` with measured root notes and automation warnings.
   Every other command is passed to the Rust `daw`, which passes these seven back, so
@@ -67,11 +103,12 @@ processing never allocates, so it runs in the audio callback. No second engine e
 ## Format v1
 
 Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
-`sections` and `master`; `schema_version` is 1. Unknown fields are rejected. Run `daw describe`
+`returns`, `sections` and `master`; `schema_version` is 1. Unknown fields are rejected. Run `daw describe`
 for the exact generated JSON schema, bounds and defaults.
 
 Session: `title`, `tempo`, `time_signature` (4/4), `sample_rate` (44100 or 48000),
-`length_beats`, `master_gain_db`, `end_fade_ms`.
+`length_beats`, `master_gain_db`, `end_fade_ms`, and `stretcher` (`signalsmith` or
+`rubberband`; see [time-stretch.md](features/time-stretch.md)).
 
 Sample: relative `path`, optional `sha256`, original `source`, optional
 `source_sha256` and optional `root_note` with octave. Selected assets are copied
@@ -96,7 +133,7 @@ two channels), and `daw check` warns of a sample like that in a song.
 
 Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
 `audio` (audio clips: parts of a sample file on the timeline; see
-[audio-clips.md](audio-clips.md)), `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
+[audio-clips.md](features/audio-clips.md)), `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
 one per return.
 
 Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute`,
@@ -110,18 +147,19 @@ Effects: `filter`, `eq`, `compressor` (optional `sidechain` track), `limiter`,
 or `master.effects`, each with an optional `id` unique within its chain. Track
 inserts come before track gain and pan; return effects precede return gain and pan;
 master effects follow `master_gain_db` and precede the end fade. See
-[effects.md](effects.md) for parameters and semantics.
+[effects.md](features/effects.md) for parameters and semantics.
 
 Automation: `tracks[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` or
-`effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve}`
-are in time order; `curve` is `linear` or `hold`. A lane overrides the static value
+`effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
+are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
-[automation.md](automation.md).
+[automation.md](features/automation.md).
 
 Pad: `sample`, `mode` (`one_shot` or `gate`), `gain_db`, `pan`, `transpose` in
 semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional
-`choke_group`, `reverse`, optional `source_bpm`, and `mono` for downmixing.
+`choke_group`, `reverse`, optional `source_bpm`, `stretch` (`repitch` or
+`preserve_pitch`), and `mono` for downmixing.
 
 Pattern: positive `length_beats`, `grid` in beats per step, `steps` mapping pad IDs
 to strings, optional explicit `events`, `swing` (0.5…0.75). Step rows and explicit
@@ -143,8 +181,10 @@ step intervals. This differs from the older draft's bar.beat.fraction notation.
 
 Velocity maps linearly to sample amplitude. A target note is relative to the sample's
 explicit root note. Transposition and source-tempo matching use bandlimited repitch:
-changing pitch changes playback duration. There is no pitch-preserving stretching,
-ADSR sustain loop, glide or automatic root/tempo detection.
+changing pitch changes playback duration, unless the pad or audio clip is stretched
+at its own pitch ([time-stretch.md](features/time-stretch.md)). There is no sustain
+loop or glide. The engine does not detect a sample's root note or tempo;
+`daw samples analyze` measures them ([sample-analysis.md](features/sample-analysis.md)).
 
 Gate note-off starts a linear release; natural sample end also fades. A note cannot
 outlast its source. Choke groups are scoped to each track and release the previous
@@ -208,17 +248,8 @@ latency-compensated timing, block-partition invariance and validation.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
 
-## Deliberately deferred
+## What is not built
 
-Recording, saturation, groups, synths,
-plugin hosting, MIDI import/export, modulation (LFOs), tempo
-automation, semantic/audio embedding search,
-key/chord detection, swing detection, sample sustain looping, incremental render caching,
-masking diagnosis, reference alignment and autonomous listening/revision. A bounded
-perception layer is implemented; see [perception.md](perception.md). Monophonic pitch
-and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md).
-A whole song's beats and downbeats are measured; see [beat-map.md](beat-map.md).
-A pad can follow the tempo at its own pitch; see [time-stretch.md](time-stretch.md). The CLI is ready
-for agent-driven iterative use. The milestones of
-[Rust-Swift-Update.md](Rust-Swift-Update.md) are done; the app is packaged as a
-bundle with `daw` inside it, and has not yet been signed with a Developer ID.
+[backlog.md](backlog.md) lists it, in order. Each feature's own limits are in its
+file under [features/](features/), and the app's in
+[../apps/mac/README.md](../apps/mac/README.md).

@@ -1,6 +1,8 @@
 # Specification
 
-Status: design draft, nothing built. This is the technical companion to [idea.md](idea.md). Where a choice is settled, [decisions.md](decisions.md) records why. Where it is not, it is listed under open questions in [plan.md](plan.md).
+> Archived October 2, 2026, and kept for history; it is not maintained. The first specification, from before anything was built; it describes a Python stack, a daemon and pattern files that were never made. [architecture.md](../architecture.md) says what exists and [concept.md](../concept.md) what is intended.
+
+Status: design draft, nothing built. This is the technical companion to [idea.md](idea.md). Where a choice is settled, [decisions.md](../decisions.md) records why. Where it is not, it is listed under open questions in [plan.md](plan.md).
 
 Contents
 
@@ -49,7 +51,7 @@ Session globals, set early and rarely changed:
 | length | Total length in bars. Derived from the arrangement if omitted. |
 | notes | Free prose. This is where tonal intent lives, e.g. "mostly F minor, chorus borrows from the parallel major." Never a constraint. |
 
-There is deliberately no `key` field. See [decisions.md](decisions.md) D6.
+There is deliberately no `key` field. See [decisions.md](../decisions.md) D6.
 
 **Sections** are named ranges on the timeline: intro, verse, drop, bridge, outro. They are the unit the agent thinks in when arranging and the unit perception reports on.
 

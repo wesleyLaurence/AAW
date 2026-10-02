@@ -1,5 +1,7 @@
 # Song edits from timecodes: what is missing — October 1, 2026
 
+> Archived October 2, 2026, and kept for history; it is not maintained. The analysis behind the song-edit features, all built on October 1, 2026 except the Mac app's part of audio clips, which is item 3 of [backlog.md](../backlog.md). Each feature's reference is in [../features/](../features/).
+
 An analysis of the codebase against one use case, and the features the repository
 needs before an agent can carry it out end to end. It lists what to add; it is not
 a build plan with milestones. Each feature is built on its own branch, and the
@@ -75,8 +77,8 @@ replaces the hand arithmetic and gives the Mac app something to draw and drag.
 project as 32-bit float WAV, with `afconvert` or `ffmpeg`, and records the
 original's hash as `source_sha256`. It refuses a file the engine cannot play, and
 `daw check` warns of one already in a song. The Mac app takes the same files
-dropped from the Finder. See "Format v1" in [mvp.md](mvp.md) and D48 in
-[decisions.md](decisions.md). Checked on generated audio encoded here; no
+dropped from the Finder. See "Format v1" in [mvp.md](../architecture.md) and D48 in
+[decisions.md](../decisions.md). Checked on generated audio encoded here; no
 purchased file and no drop onto the app's window was tried. What follows is the
 analysis as it was written.
 
@@ -117,7 +119,7 @@ number, the downbeat with a confidence for each of the four places, and phrase
 changes. `--near 0:41` lists the beats around a time, `--click` writes an audition
 with a click on each beat, and `--bpm` and `--downbeat` correct the map, which is
 kept beside the audio as `NAME.beats.json`. It is a numpy tracker; see
-[beat-map.md](beat-map.md) and D49 in [decisions.md](decisions.md). On generated
+[beat-map.md](../features/beat-map.md) and D49 in [decisions.md](../decisions.md). On generated
 songs every beat is within 0.1 ms, and on five local renders within 0.4 ms on four
 and 8 ms on one. No commercially released song was measured, and nobody listened
 to a click audition. The beat map is not yet drawn in the app, which is part of
@@ -125,7 +127,7 @@ feature 4. Open questions 1 and 4 were answered by default: steady tempo first,
 with slow drift followed, and numpy first. What follows is the analysis as it was
 written.
 
-Today (`src/agent_daw/analysis.py`, [sample-analysis.md](sample-analysis.md)):
+Today (`src/agent_daw/analysis.py`, [sample-analysis.md](../features/sample-analysis.md)):
 
 - Only the first 120 seconds are analysed (`RHYTHM_SECONDS`).
 - A tempo is reported only when the file is judged a loop, as one number for the
@@ -179,8 +181,8 @@ in as the default and Rubber Band run as the installed program when
 `session.stretcher` names it. Each region is stretched with a margin either side.
 `daw timeline --tempo-for SECONDS` turns a target length into a tempo, and
 `daw check` warns past about 8%. A render's report names the stretcher and its
-version when the song stretches. See [time-stretch.md](time-stretch.md) and D53 in
-[decisions.md](decisions.md). Timing was measured for each candidate; nobody has
+version when the song stretches. See [time-stretch.md](../features/time-stretch.md) and D53 in
+[decisions.md](../decisions.md). Timing was measured for each candidate; nobody has
 listened to a stretched render, which is what the choice between the two is for.
 What follows is the analysis as it was written.
 
@@ -232,7 +234,7 @@ where that one starts, so a join is at one place before the beat. `daw joins`,
 `daw timeline` and `daw inspect` read them, and `daw describe edit` and the
 `song-edit` skill build edits from them. They are `tracks[].audio` and not
 inside `clips`, as the sketch below had them. See
-[audio-clips.md](audio-clips.md) and D54 in [decisions.md](decisions.md). Not
+[audio-clips.md](../features/audio-clips.md) and D54 in [decisions.md](../decisions.md). Not
 built: region edges and fades that drag in the app, and the beat map on the
 waveform; the app plays audio clips and does not draw them. Nobody has listened
 to an edit. What follows is the analysis as it was written.
@@ -291,12 +293,12 @@ step in the waveform at the splice; the level either side; flags in words; and a
 excerpt of the mix to hear. It is a command of its own and not part of
 `daw listen`. A join is found from today's pads (two parts of one sample meeting
 on a track) and will be read from audio clips when feature 4 adds them. See
-[join-checks.md](join-checks.md) and D51 in [decisions.md](decisions.md). Checked
+[join-checks.md](../features/join-checks.md) and D51 in [decisions.md](../decisions.md). Checked
 on edits of a generated song; nobody listened to an excerpt. What follows is the
 analysis as it was written.
 
 Today `daw listen` measures loudness, peaks, spectrum, stereo and energy per beat.
-[perception.md](perception.md) says it does not infer tempo or transients. The
+[perception.md](../features/perception.md) says it does not infer tempo or transients. The
 figures quoted under "What works today" came from a script written for the test.
 
 Needed, as part of `daw listen` or beside it, for a render whose song has regions:
@@ -317,8 +319,8 @@ AAC (`afconvert` or `ffmpeg`) or MP3 (`ffmpeg` or `lame`). The level is as
 rendered, or one gain: `--gain`, `--peak`, `--lufs` or `--match SAMPLE`, held
 under `--ceiling`, and the result says which applied and by how much. A limiter is
 the song's master effect, not the export's. `NAME.EXT.json` beside the file
-records the render it came from. See [export.md](export.md) and D50 in
-[decisions.md](decisions.md). Open question 6 was answered by default with those
+records the render it came from. See [export.md](../features/export.md) and D50 in
+[decisions.md](../decisions.md). Open question 6 was answered by default with those
 four formats. Nobody listened to an export. What follows is the analysis as it was
 written.
 
@@ -347,8 +349,8 @@ for this kind of edit, and a personal skill refers to it and holds only what is
 personal. `daw describe` has the topics `edit`, `beats`, `joins` and `export`,
 with importing under `samples` in `project`. AGENTS.md names personal skills in
 its Git scope and points to the skill and the topics. Reusable sounds live under
-`content/` and are imported by path. See [skills.md](skills.md) and D52 in
-[decisions.md](decisions.md). The generic skill was run once by hand on a
+`content/` and are imported by path. See [skills.md](../features/skills.md) and D52 in
+[decisions.md](../decisions.md). The generic skill was run once by hand on a
 generated song; no personal skill was written or run, and the skill still builds
 parts from pads and has no speed change, until features 4 and 3. What follows is
 the analysis as it was written.
@@ -383,14 +385,14 @@ Needed:
 ### 8. Smaller gaps
 
 **Four done, October 1, 2026.** Three are one command, `daw timeline`
-([timeline.md](timeline.md)): positions in seconds (`--seconds` and `--beats`
+([timeline.md](../features/timeline.md)): positions in seconds (`--seconds` and `--beats`
 convert for a song), end-aligned placement (`--end-at BEAT --pad TRACK.PAD` gives
 the start) and session length (`--fit`, with `--tail`). Commands still take beats;
 the command converts rather than every command accepting `m:ss`. A fitted session
 does not end before its last clip, so a long pattern holds it. The fourth is
 automation curves: a point has a `shape` from -1 to 1 that bends the linear
 segment after it, so a sweep that starts slowly and finishes fast takes two points
-([automation.md](automation.md), D55 in [decisions.md](decisions.md)). Memory and
+([automation.md](../features/automation.md), D55 in [decisions.md](../decisions.md)). Memory and
 time signature are notes, not work: a decoded song is still held whole, and 4/4 is
 still the only time signature, which the beat map assumes. What follows is the
 analysis as it was written.

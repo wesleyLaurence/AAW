@@ -1,6 +1,6 @@
 # Mac app
 
-The native macOS app of [docs/Rust-Swift-Update.md](../../docs/Rust-Swift-Update.md),
+The native macOS app of [docs/archive/Rust-Swift-Update.md](../../docs/archive/Rust-Swift-Update.md),
 through its last milestone, M9: it opens a song, shows its arrangement with what
 each clip plays as a waveform, plays it with its effects and automation, shows
 each change as it lands, whoever makes it, and lets the person edit the mixer,
@@ -107,7 +107,7 @@ from songs in folders of the person's choosing.
 
 Signing with a certificate and notarizing have not been run: the Mac this was
 built on has no Developer ID. What was tried in their place is in the plan's
-[progress](../../docs/Rust-Swift-Update.md#progress). Three things to know
+[progress](../../docs/archive/Rust-Swift-Update.md#progress). Three things to know
 before sharing a build:
 
 - An ad hoc signature cannot use the hardened runtime: macOS then refuses the
