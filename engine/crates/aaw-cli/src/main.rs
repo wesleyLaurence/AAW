@@ -74,6 +74,10 @@ enum Topic {
     Sampler,
     Effects,
     Automation,
+    Edit,
+    Beats,
+    Joins,
+    Export,
 }
 
 #[derive(Subcommand)]

@@ -34,6 +34,10 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
   effects an `id`; ramp levels over a few milliseconds rather than jumping them.
 - Render a short section or isolated track to investigate an edit. Full mix pointer is
   `renders/latest.json`; previews use `renders/latest-preview.json`.
+- To edit a finished song from timecodes, follow the `song-edit` skill and read
+  `daw describe edit`, `beats`, `joins` and `export`. Import an `.m4a` or `.mp3`
+  before measuring it; cut on the downbeats `daw samples beats --near` gives; run
+  `daw joins` on the render before `daw export`.
 - Keep demo composition separate from reusable engine code. Do not hardcode creative
   patterns, sample names or a user's absolute library path in the core package.
 - Preserve editable project, selected source hashes, stems and render report with demos.
@@ -47,6 +51,11 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
 - Keep personal music out of this repository: arrangements, samples, source manifests,
   creative briefs, handoff notes, revisions, renders, exports, and song-specific scripts.
 - Store creative work under ignored `projects/` or `content/`, or outside the repository.
+- A personal skill is personal content like a song: who asks, which sounds, the
+  limits, the file names. Keep it in `.claude/skills/NAME/`, which Git ignores apart
+  from the generic skills `.gitignore` names, or in your own skills folder. A skill
+  names `daw` commands and paths under `projects/` or `content/`, never an absolute
+  library path. See docs/skills.md.
 - Put song-specific automation inside its ignored project directory. Never force-add
   ignored content or embed personal compositions in tooling, tests, or documentation.
 - Generic examples and test fixtures must be independent of personal songs and private
