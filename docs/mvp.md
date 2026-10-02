@@ -44,8 +44,8 @@ Python, in `src/agent_daw`:
 - `cli.py`: `samples`, `listen`, `compare` and `check`. `check` is `inspect` with
   measured root notes and automation warnings. Every other command is passed to the
   Rust `daw`, which passes these four back, so there is one command either way. A
-  sample import copies the file and adds it to the song with `daw apply`, so a
-  running host takes it as an undoable edit.
+  sample import copies the file, or decodes a compressed one, and adds it to the
+  song with `daw apply`, so a running host takes it as an undoable edit.
 
 The sampler preloads and resamples source files. One renderer serves playback, full
 mixes, stems and previews: its output does not depend on how the stream is cut into
@@ -61,9 +61,26 @@ for the exact generated JSON schema, bounds and defaults.
 Session: `title`, `tempo`, `time_signature` (4/4), `sample_rate` (44100 or 48000),
 `length_beats`, `master_gain_db`, `end_fade_ms`.
 
-Sample: relative `path`, optional `sha256`, original `source`, optional `root_note`
-with octave. Selected assets are copied into `samples/HASH_original-name.wav`.
-Supported library formats: WAV, AIFF and FLAC. Mono and stereo rendering only.
+Sample: relative `path`, optional `sha256`, original `source`, optional
+`source_sha256` and optional `root_note` with octave. Selected assets are copied
+into `samples/HASH_original-name.wav`. Supported library formats: WAV, AIFF and
+FLAC. Mono and stereo rendering only.
+
+An import also takes `.m4a` (AAC or Apple Lossless) and `.mp3` by path. The engine
+reads PCM only, so the file is decoded once into the project as 32-bit float WAV at
+its own sample rate, named by the original's hash; `sha256` is the decoded file's
+and `source_sha256` the original's. Importing the same file again finds the copy.
+`afconvert`, which macOS has, decodes it, and `ffmpeg` where that is missing. Both
+leave out the padding an encoder puts before the audio, so positions in the copy
+are the original's; `ffmpeg` keeps about 15 ms of padding after AAC. A decoded
+lossy file can peak a fraction of a decibel above full scale, which float keeps.
+Files bought from the iTunes Store are plain AAC and decode; files downloaded
+through an Apple Music subscription are copy-protected and cannot be read. The
+library index does not list compressed files, and `inspect`, `analyze` and
+`audition` read the decoded copy in the project.
+
+An import refuses a file the engine cannot play (unreadable, empty, or more than
+two channels), and `daw check` warns of a sample like that in a song.
 
 Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
 `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most

@@ -2,9 +2,12 @@
 
 from pathlib import Path
 import hashlib
+import os
 import re
 import shutil
 import sqlite3
+import subprocess
+import tempfile
 import json
 import numpy as np
 import soundfile as sf
@@ -12,6 +15,21 @@ from . import analysis
 from .model import digest
 
 EXTENSIONS = {".wav", ".aif", ".aiff", ".flac"}
+# Compressed files an import decodes into the project; the engine reads PCM only.
+COMPRESSED = {".m4a", ".mp3"}
+# The programs that decode them, in the order tried, each with its arguments
+# before the source and before the target. Each writes 32-bit float WAV at the
+# file's own rate and channels, which keeps peaks above full scale, and leaves out
+# the encoder's padding before the audio. afconvert, which macOS has, also leaves
+# out the padding after AAC; ffmpeg keeps that, about 15 ms.
+DECODERS = {
+    "afconvert": ("-f WAVE -d LEF32", ""),
+    "ffmpeg": (
+        "-v error -nostdin -y -i",
+        "-map 0:a:0 -map_metadata -1 -fflags +bitexact -flags:a +bitexact"
+        " -c:a pcm_f32le -f wav",
+    ),
+}
 
 
 def connect(db: Path):
@@ -335,20 +353,80 @@ def inspect(path: Path):
     }
 
 
+def probe(path: Path):
+    """The format of a file the engine can play: mono or stereo, read by libsndfile."""
+    try:
+        info = sf.info(path)
+    except RuntimeError as e:
+        raise ValueError(f"Cannot read {path.name} as audio: {e}") from None
+    if info.channels not in (1, 2) or not info.frames:
+        raise ValueError(
+            f"{path.name} has {info.channels} channels and {info.frames} frames; "
+            "samples are mono or stereo audio"
+        )
+    return info
+
+
+def decode(source: Path, target: Path, decoder=None):
+    """Writes a compressed file as WAV at `target` and returns the decoder that did."""
+    names = [decoder] if decoder else [n for n in DECODERS if shutil.which(n)]
+    if not names:
+        raise ValueError(
+            f"Decoding {source.name} needs afconvert, which macOS has, or ffmpeg on the PATH"
+        )
+    fd, temp = tempfile.mkstemp(dir=target.parent, prefix=".", suffix=".wav")
+    os.close(fd)
+    failures = []
+    try:
+        for name in names:
+            before, after = (part.split() for part in DECODERS[name])
+            paths = str(source.resolve()), os.path.abspath(temp)
+            command = [name, *before, paths[0], *after, paths[1]]
+            out = subprocess.run(command, capture_output=True, text=True)
+            if out.returncode == 0:
+                probe(Path(temp))
+                os.replace(temp, target)
+                return name
+            said = (out.stderr or out.stdout).strip().splitlines()
+            failures.append(f"{name}: {said[-1] if said else 'failed'}")
+        raise ValueError(
+            f"Could not decode {source.name} ({'; '.join(failures)}). A copy-protected "
+            "file, such as an Apple Music download, cannot be read"
+        )
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
 def import_asset(source: Path, project_dir: Path, root_note=None):
+    """Puts a file in the project's samples and returns its entry for the song.
+
+    A compressed file is decoded there once, as WAV named by the original's hash,
+    and the entry records that hash as `source_sha256`. Any other file is copied
+    as it is. A file the engine cannot read is refused.
+    """
     checksum = digest(source)
-    target = project_dir / "samples" / f"{checksum[:12]}_{source.name}"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if not target.exists():
-        shutil.copy2(source, target)
-    if digest(target) != checksum:
-        raise ValueError(f"Imported asset mismatch: {target}")
-    return {
+    compressed = source.suffix.lower() in COMPRESSED
+    name = f"{source.stem}.wav" if compressed else source.name
+    target = project_dir / "samples" / f"{checksum[:12]}_{name}"
+    asset = {
         "path": str(target.relative_to(project_dir)),
         "sha256": checksum,
         "source": str(source.resolve()),
         "root_note": root_note,
     }
+    if compressed:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            decode(source, target)
+        return {**asset, "sha256": digest(target), "source_sha256": checksum}
+    probe(source)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if not target.exists():
+        shutil.copy2(source, target)
+    if digest(target) != checksum:
+        raise ValueError(f"Imported asset mismatch: {target}")
+    return asset
 
 
 def audition(path: Path, output: Path, seconds=8.0):

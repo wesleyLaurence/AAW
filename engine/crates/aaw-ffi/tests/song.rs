@@ -1113,6 +1113,7 @@ fn a_sample_becomes_a_pad_or_a_track() {
             sha256: aaw_model::digest(&dir.path().join(&to)).unwrap(),
             path: to,
             source: "/library/Kicks/808 Kick (Hard).wav".into(),
+            source_sha256: None,
             root_note: None,
         }
     };
@@ -1135,11 +1136,14 @@ fn a_sample_becomes_a_pad_or_a_track() {
     assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(2));
 
     // With no track it is a new track, named after it, which the edit makes.
+    // A copy decoded from a compressed file brings that file's hash.
     let mut tone = copy("4567_tone.wav");
     tone.root_note = Some("C2".into());
+    tone.source_sha256 = Some("ab".repeat(32));
     let made = song.edit(add(&tone, "808 Sub (C)", None), None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Add track s-808-sub-c with pad s-808-sub-c");
+    assert_eq!(agent(&path, json!({"op": "get", "path": "samples.s-808-sub-c.source_sha256"})), json!("ab".repeat(32)));
     let track = &u.arrangement.tracks[1];
     assert_eq!((made.as_slice(), track.id.as_str()), (&[track.key][..], "s-808-sub-c"));
     assert_eq!(track.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.root)).collect::<Vec<_>>(), [("s-808-sub-c", "s-808-sub-c", Some(36))]);
@@ -1153,7 +1157,7 @@ fn a_sample_becomes_a_pad_or_a_track() {
     assert_eq!(update(&seen).arrangement.tracks[1].id, "plate-2");
 
     // A file that is not in the project is refused, and nothing changes.
-    let missing = aaw_ffi::library::Asset { path: "samples/none.wav".into(), sha256: kick.sha256.clone(), source: String::new(), root_note: None };
+    let missing = aaw_ffi::library::Asset { path: "samples/none.wav".into(), sha256: kick.sha256.clone(), source: String::new(), source_sha256: None, root_note: None };
     assert_eq!(song.edit(add(&missing, "none", Some(drums)), None).unwrap_err().to_string(), "Missing asset none");
     assert_eq!(aaw_ffi::edits::ident("  Hi-Hat #3 (Open)  "), "hi-hat-3-open");
     assert_eq!((aaw_ffi::edits::ident("808"), aaw_ffi::edits::ident("!!!"), aaw_ffi::edits::ident("Ünïcode")), ("s-808".into(), "sample".into(), "n-code".into()));

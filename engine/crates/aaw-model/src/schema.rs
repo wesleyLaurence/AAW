@@ -167,11 +167,13 @@ pub struct Sample {
     pub path: String,
     pub sha256: Option<String>,
     pub source: Option<String>,
+    /// The hash of `source` when the file at `path` was decoded from it.
+    pub source_sha256: Option<String>,
     pub root_note: Option<String>,
 }
 
 impl Sample {
-    const FIELDS: &'static [&'static str] = &["path", "sha256", "source", "root_note"];
+    const FIELDS: &'static [&'static str] = &["path", "sha256", "source", "source_sha256", "root_note"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Sample> {
         let f = Fields::of(ctx, x, "Sample", Self::FIELDS)?;
@@ -181,6 +183,9 @@ impl Sample {
             v::optional(c, x, |c, x| v::pattern(c, x, &SHA_RE, SHA256))
         });
         let source = f.opt(ctx, "source", None, opt_string);
+        let source_sha256 = f.opt(ctx, "source_sha256", None, |c, x| {
+            v::optional(c, x, |c, x| v::pattern(c, x, &SHA_RE, SHA256))
+        });
         let root_note = f.opt(ctx, "root_note", None, |c, x| v::optional(c, x, note_field));
         f.finish(ctx);
         if ctx.count() > before {
@@ -190,6 +195,7 @@ impl Sample {
             path: path?,
             sha256: sha256?,
             source: source?,
+            source_sha256: source_sha256?,
             root_note: root_note?,
         })
     }
@@ -199,6 +205,7 @@ impl Sample {
         o.req("path", Value::str(&self.path));
         o.opt("sha256", opt_str(&self.sha256));
         o.opt("source", opt_str(&self.source));
+        o.opt("source_sha256", opt_str(&self.source_sha256));
         o.opt("root_note", opt_str(&self.root_note));
         o.done()
     }

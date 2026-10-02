@@ -145,6 +145,7 @@ uv run daw samples audition SAMPLE_ID --output /tmp/candidate.wav
 uv run daw init projects/my-beat --tempo 160 --bars 20
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
+uv run daw samples import ~/Music/song.m4a --project projects/my-beat/song.yaml --id song
 uv run daw describe sampler
 uv run daw describe effects
 uv run daw describe automation
@@ -167,6 +168,9 @@ do not establish an octave. `daw samples analyze` measures pitch with octave and
 cents, onsets, loop tempo and one-shot/loop kind from the audio. `--root-note auto`
 uses the measured note, and `daw check` warns when a declared root disagrees with
 the audio. See [docs/sample-analysis.md](docs/sample-analysis.md).
+`daw samples import` takes a file's path as well as an index ID. An `.m4a` or
+`.mp3` file is decoded once into the project as WAV, and a file the engine cannot
+play is refused; see "Format v1" in [docs/mvp.md](docs/mvp.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
 Edits are commands: `set` for any value by path, and verbs for tracks, returns,

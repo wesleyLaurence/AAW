@@ -199,7 +199,8 @@ a velocity, a length and a note. A pattern is shared by every clip that plays
 it, and they all light up when an agent changes it.
 
 A sample added to the song is copied into the project's `samples` folder first,
-as `daw samples import` copies it; the library is never changed. A pad and a
+as `daw samples import` copies it; the library is never changed. An `.m4a` or
+`.mp3` file dropped from the Finder is decoded to WAV there instead. A pad and a
 new track are named after the sample's category, or its file. A sample with a
 measured pitch brings it along as its root note, unless its name says it is a
 drum, an effect or a loop. The sample, the pad and a new track are one undo
