@@ -7,6 +7,7 @@
 pub mod client;
 pub mod command;
 pub mod host;
+pub mod project;
 pub mod python;
 pub mod registry;
 pub mod session;
