@@ -58,7 +58,7 @@ bundle is for the kind of Mac that built it, Apple silicon or Intel, not both.
 The sample library, sample analysis and perception are Python and are not in
 the bundle. The bundle's `daw` and the app's browser run them in the `.venv` of
 the checkout the bundle was built from, or the Python `AAW_PYTHON` names. On a
-Mac with neither, `samples`, `listen`, `compare`, `check` and the browser say
+Mac with neither, `samples`, `listen`, `compare`, `check`, `export` and the browser say
 that Python was not found, and every other command works.
 
 ## The command line tool

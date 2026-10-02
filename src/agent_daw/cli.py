@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, perception and `check`.
+"""The Python part of `daw`: the sample library, perception, `check` and `export`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_DB = Path(".daw/library.sqlite")
-COMMANDS = ("samples", "listen", "compare", "check")
+COMMANDS = ("samples", "listen", "compare", "check", "export")
 
 
 def engine() -> Path:
@@ -49,7 +49,7 @@ def parser():
 
     p = argparse.ArgumentParser(
         prog="daw",
-        description="The sample library, perception and check. Run daw --help for every command.",
+        description="The sample library, perception, check and export. Run daw --help for every command.",
     )
     sub = p.add_subparsers(dest="command", required=True)
     samples = sub.add_parser("samples")
@@ -140,6 +140,26 @@ def parser():
     compare.add_argument("before", type=Path)
     compare.add_argument("after", type=Path)
     compare.add_argument("--no-images", action="store_true")
+    export = sub.add_parser(
+        "export",
+        help="Write the song's render as a named WAV, AAC or MP3 file, at a stated level",
+    )
+    export.add_argument("project", type=Path)
+    export.add_argument("--to", type=Path, required=True, help="NAME.wav, .m4a or .mp3")
+    export.add_argument("--bits", type=int, choices=[16, 24], default=24, help="For .wav")
+    export.add_argument("--bitrate", type=int, help="kb/s: 256 for .m4a, 320 for .mp3")
+    level = export.add_argument_group(
+        "level", "one gain for the whole file, held under --ceiling; as rendered by default"
+    ).add_mutually_exclusive_group()
+    level.add_argument("--gain", type=float, help="A gain in dB")
+    level.add_argument("--peak", type=float, help="Put the true peak at this dBTP")
+    level.add_argument("--lufs", type=float, help="Reach this integrated loudness")
+    level.add_argument("--match", metavar="SAMPLE", help="Be as loud as this sample of the song")
+    export.add_argument(
+        "--ceiling", type=float, default=-0.1, help="The highest sample peak a gain may reach, dBFS"
+    )
+    export.add_argument("--render", type=Path, help="A render to export instead of the latest")
+    export.add_argument("--replace", action="store_true", help="Write over an existing file")
     return p
 
 
@@ -152,6 +172,24 @@ def execute(a):
         return perception.compare(a.before, a.after, images=not a.no_images)
     if a.command == "check":
         return check(a.project)
+    if a.command == "export":
+        from .export import export
+
+        if a.bitrate is not None and not 64 <= a.bitrate <= 320:
+            raise ValueError("bitrate must be 64–320 kb/s")
+        return export(
+            a.project,
+            a.to,
+            bits=a.bits,
+            bitrate=a.bitrate,
+            gain=a.gain,
+            peak=a.peak,
+            lufs=a.lufs,
+            match=a.match,
+            ceiling=a.ceiling,
+            render=a.render,
+            replace=a.replace,
+        )
     from . import library
     from .model import midi
 

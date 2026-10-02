@@ -44,9 +44,12 @@ Python, in `src/agent_daw`:
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
-- `cli.py`: `samples`, `listen`, `compare` and `check`. `check` is `inspect` with
-  measured root notes and automation warnings. Every other command is passed to the
-  Rust `daw`, which passes these four back, so there is one command either way. A
+- `export.py`: a named deliverable from a render, as WAV, AAC or MP3, with one gain
+  for the level and a record of the render beside it; see [export.md](export.md).
+- `cli.py`: `samples`, `listen`, `compare`, `check` and `export`. `check` is
+  `inspect` with measured root notes and automation warnings. Every other command is
+  passed to the Rust `daw`, which passes these five back, so there is one command
+  either way. A
   sample import copies the file, or decodes a compressed one, and adds it to the
   song with `daw apply`, so a running host takes it as an undoable edit.
 

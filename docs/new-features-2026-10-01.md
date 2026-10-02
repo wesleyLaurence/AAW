@@ -61,7 +61,7 @@ person can see and adjust.
 | 3 | Pitch-preserving time stretch | "Speed it up slightly" changes the pitch | Edits that run long | |
 | 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | |
 | 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | |
-| 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | |
+| 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | Done, October 1, 2026 |
 | 7 | Personal skills and assets | No place for a skill that Git ignores; nothing documents how to write one | Running the process by name | |
 | 8 | Smaller gaps | See below | Convenience | |
 
@@ -268,6 +268,17 @@ Needed, as part of `daw listen` or beside it, for a render whose song has region
   whether a join is natural is a listening judgment.
 
 ### 6. Export of a deliverable
+
+**Done, October 1, 2026.** `daw export PROJECT --to exports/NAME.EXT` writes the
+latest full render, rendering first if the song has changed, as 16- or 24-bit WAV,
+AAC (`afconvert` or `ffmpeg`) or MP3 (`ffmpeg` or `lame`). The level is as
+rendered, or one gain: `--gain`, `--peak`, `--lufs` or `--match SAMPLE`, held
+under `--ceiling`, and the result says which applied and by how much. A limiter is
+the song's master effect, not the export's. `NAME.EXT.json` beside the file
+records the render it came from. See [export.md](export.md) and D50 in
+[decisions.md](decisions.md). Open question 6 was answered by default with those
+four formats. Nobody listened to an export. What follows is the analysis as it was
+written.
 
 Today `daw render` writes `renders/<id>/mix.wav` as 24-bit PCM with stems, a
 snapshot and a report. The directory is named by a hash, nothing is normalized, and

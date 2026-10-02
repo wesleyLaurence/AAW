@@ -123,8 +123,8 @@ Intel build on Apple silicon, add its Rust target first: `rustup target add
 x86_64-apple-darwin`.
 
 `daw` is one command. `uv run daw` and `engine/target/release/daw` each pass the
-other the commands it does not own (`samples`, `listen`, `compare` and `check` run
-in Python), so either works for everything. `uv run daw` runs the release build, or
+other the commands it does not own (`samples`, `listen`, `compare`, `check` and
+`export` run in Python), so either works for everything. `uv run daw` runs the release build, or
 the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
 or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`; its
 bundle holds a copy of the binary, which **Install Command Line Tool…** in the app's
@@ -160,6 +160,7 @@ uv run daw render projects/my-beat/song.yaml
 uv run daw render projects/my-beat/song.yaml --track drums
 uv run daw listen projects/my-beat/renders/latest.json
 uv run daw compare projects/my-beat/revisions/before-render.json projects/my-beat/renders/latest.json
+uv run daw export projects/my-beat/song.yaml --to projects/my-beat/exports/my-beat-v1.wav
 ```
 
 All commands emit JSON. Errors emit JSON to stderr and exit nonzero. The index is
@@ -175,6 +176,8 @@ play is refused; see "Format v1" in [docs/mvp.md](docs/mvp.md).
 `daw samples beats` maps a whole song: its tempo, every beat, the downbeats with
 their alternatives, where the arrangement changes, the beats near a timecode and a
 click audition to check the grid by ear. See [docs/beat-map.md](docs/beat-map.md).
+`daw export` writes the song's render as a named WAV, AAC or MP3 file and reports
+the level policy it applied. See [docs/export.md](docs/export.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
 Edits are commands: `set` for any value by path, and verbs for tracks, returns,
