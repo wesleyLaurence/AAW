@@ -124,7 +124,7 @@ x86_64-apple-darwin`.
 
 `daw` is one command. `uv run daw` and `engine/target/release/daw` each pass the
 other the commands it does not own (`samples`, `listen`, `compare`, `check`,
-`joins` and `export` run in Python), so either works for everything. `uv run daw` runs the release build, or
+`timeline`, `joins` and `export` run in Python), so either works for everything. `uv run daw` runs the release build, or
 the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
 or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`; its
 bundle holds a copy of the binary, which **Install Command Line Tool…** in the app's
@@ -160,6 +160,7 @@ uv run daw render projects/my-beat/song.yaml
 uv run daw render projects/my-beat/song.yaml --track drums
 uv run daw listen projects/my-beat/renders/latest.json
 uv run daw compare projects/my-beat/revisions/before-render.json projects/my-beat/renders/latest.json
+uv run daw timeline projects/my-beat/song.yaml --seconds 0:41
 uv run daw joins projects/my-beat/renders/latest.json --limit 60
 uv run daw export projects/my-beat/song.yaml --to projects/my-beat/exports/my-beat-v1.wav
 ```
@@ -181,6 +182,9 @@ To edit a finished song from timecodes, the `song-edit` skill in `.claude/skills
 says what to do, and `daw describe edit`, `beats`, `joins` and `export` say how.
 Personal skills and the sounds they reuse stay out of Git; see
 [docs/skills.md](docs/skills.md).
+`daw timeline` gives a song's places in beats and in seconds, where its sound ends,
+the beat a sound starts on to end on another, and fits the session's length. See
+[docs/timeline.md](docs/timeline.md).
 `daw joins` checks a rendered edit of a song: whether the beat carries across each
 join, whether the splice shows as a step, the level either side and the file's
 length, with an excerpt of each join to hear. See [docs/join-checks.md](docs/join-checks.md).

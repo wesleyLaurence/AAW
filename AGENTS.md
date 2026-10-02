@@ -4,7 +4,7 @@ Read README.md and docs/mvp.md for the implemented MVP. Older design documents a
 future scope, not a requirement to add effects, UI or broad infrastructure.
 
 - Use `uv run daw ...`; all commands emit JSON. `daw` is the Rust binary, which `uv run daw`
-  runs from `engine/target/release/daw`; `samples`, `listen`, `compare`, `check`, `joins` and `export` run in
+  runs from `engine/target/release/daw`; `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and `export` run in
   Python, and either entry point passes the other its commands.
 - The engine, the song model and the session host are Rust, in `engine/`
   (docs/Rust-Swift-Update.md). After Rust changes run `cargo test` there, then

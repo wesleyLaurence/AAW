@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, perception, `check`, `joins` and `export`.
+"""The Python part of `daw`: the sample library, perception, `check`, `timeline`, `joins` and `export`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 
 DEFAULT_DB = Path(".daw/library.sqlite")
-COMMANDS = ("samples", "listen", "compare", "check", "joins", "export")
+COMMANDS = ("samples", "listen", "compare", "check", "timeline", "joins", "export")
 
 
 def engine() -> Path:
@@ -49,7 +49,7 @@ def parser():
 
     p = argparse.ArgumentParser(
         prog="daw",
-        description="The sample library, perception, check, joins and export. Run daw --help for every command.",
+        description="The sample library, perception, check, timeline, joins and export. Run daw --help for every command.",
     )
     sub = p.add_subparsers(dest="command", required=True)
     samples = sub.add_parser("samples")
@@ -140,6 +140,19 @@ def parser():
     compare.add_argument("before", type=Path)
     compare.add_argument("after", type=Path)
     compare.add_argument("--no-images", action="store_true")
+    timeline = sub.add_parser(
+        "timeline",
+        help="The song in beats and seconds: where its sounds are, conversions, and its length",
+    )
+    timeline.add_argument("project", type=Path)
+    timeline.add_argument("--seconds", nargs="+", default=[], help="Times, as seconds or m:ss, to give in beats")
+    timeline.add_argument("--beats", nargs="+", default=[], help="Beats to give in seconds")
+    timeline.add_argument("--end-at", help="A beat for --pad to end on; gives the beat it starts on")
+    timeline.add_argument("--pad", metavar="TRACK.PAD")
+    timeline.add_argument(
+        "--fit", action="store_true", help="Set the session's length to where its sound ends"
+    )
+    timeline.add_argument("--tail", type=float, default=0, help="Beats to leave after it, with --fit")
     joins = sub.add_parser(
         "joins",
         help="Check a render's joins between parts of a song, and its length",
@@ -182,6 +195,10 @@ def execute(a):
         return perception.compare(a.before, a.after, images=not a.no_images)
     if a.command == "check":
         return check(a.project)
+    if a.command == "timeline":
+        from . import timeline
+
+        return timeline.report(a.project, a.seconds, a.beats, a.end_at, a.pad, a.fit, a.tail)
     if a.command == "joins":
         from . import joins
 

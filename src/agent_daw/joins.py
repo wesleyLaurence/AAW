@@ -8,78 +8,20 @@ sounds natural is theirs to judge; nothing here listens.
 """
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 import soundfile as sf
 
 from . import beats, perception
-from .model import digest, load, schedule
+from .model import digest, load
+from .timeline import Region, regions
 
 BEATS = 8  # beats measured either side of a join
 SLIP_MS = 1.0  # a beat this far from where it should be across a join is flagged
 MEASURED_SLIP_MS = 3.0  # the same, for transients, whose attacks differ by instrument
 STEP_RATIO = 2.0  # a step at a splice this many times the largest around it is flagged
 LEVEL_DB = 3.0
-
-
-@dataclass
-class Region:
-    """A hit that plays part of a sample file: where on the timeline, and of the file."""
-
-    track: str
-    pad: str
-    sample: str
-    start: float  # seconds on the timeline
-    length: float  # seconds on the timeline
-    source: float  # seconds into the file where it starts
-    speed: float  # seconds of the file per second of the timeline
-    attack: float
-    release: float
-
-    @property
-    def end(self):
-        return self.start + self.length
-
-    def at(self, source_seconds):
-        """Where a time in the file falls on the timeline."""
-        return self.start + (source_seconds - self.source) / self.speed
-
-
-def regions(project, root: Path):
-    """Every forward hit of the song as a region, by track, in time order."""
-    session = project["session"]
-    rate, tempo = session["sample_rate"], session["tempo"]
-    pads = {(t["id"], name): pad for t in project["tracks"] for name, pad in t["pads"].items()}
-    lengths, found = {}, {}
-    for hit in schedule(project):
-        pad = pads[(hit.track, hit.pad)]
-        if pad["reverse"]:
-            continue
-        if pad["sample"] not in lengths:
-            lengths[pad["sample"]] = sf.info(root / project["samples"][pad["sample"]]["path"]).duration
-        speed = 2 ** (pad["transpose"] / 12)
-        if pad["source_bpm"]:
-            speed *= tempo / pad["source_bpm"]
-        end = pad["end_seconds"] if pad["end_seconds"] is not None else lengths[pad["sample"]]
-        length = (end - pad["start_seconds"]) / speed
-        if hit.cutoff is not None:
-            length = min(length, (hit.cutoff - hit.start) / rate + pad["release_ms"] / 1000)
-        found.setdefault(hit.track, []).append(
-            Region(
-                hit.track,
-                hit.pad,
-                pad["sample"],
-                hit.start / rate,
-                length,
-                pad["start_seconds"],
-                speed,
-                pad["attack_ms"] / 1000,
-                pad["release_ms"] / 1000,
-            )
-        )
-    return found
 
 
 def find(project, root: Path):

@@ -49,10 +49,13 @@ Python, in `src/agent_daw`:
 - `joins.py`: checks of a rendered edit of a song: each join's beat, splice and
   level, the file's length, and an excerpt of each join; see
   [join-checks.md](join-checks.md).
-- `cli.py`: `samples`, `listen`, `compare`, `check`, `joins` and `export`. `check`
-  is `inspect` with measured root notes and automation warnings. Every other command
-  is passed to the Rust `daw`, which passes these six back, so there is one command
-  either way. A
+- `timeline.py`: a song's places in beats and seconds, where each track's sound is,
+  the start of a sound that ends on a beat, and fitting the session's length; see
+  [timeline.md](timeline.md).
+- `cli.py`: `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and
+  `export`. `check` is `inspect` with measured root notes and automation warnings.
+  Every other command is passed to the Rust `daw`, which passes these seven back, so
+  there is one command either way. A
   sample import copies the file, or decodes a compressed one, and adds it to the
   song with `daw apply`, so a running host takes it as an undoable edit.
 
