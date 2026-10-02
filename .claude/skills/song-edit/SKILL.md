@@ -48,7 +48,8 @@ middle of a phrase, say which beat you chose and why, and offer the other.
    open in the app or a host is running, edit with commands so the person sees
    each change; otherwise one labelled `daw apply`.
 5. **Add the other sounds.** Import each by path, on its own track. A sound that
-   leads into a beat starts its own length before that beat.
+   leads into a beat starts its own length before that beat; `daw timeline` gives
+   the beat. Then fit the session's length to the sound with `daw timeline --fit`.
 6. **Level.** The song stays as loud as the original. Put a limiter on the master
    so that what is added on top does not clip, and do not turn the song down.
 7. **Render and check.** `daw render`, then `daw joins` on the render with

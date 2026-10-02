@@ -8,6 +8,8 @@ and `daw compare`, the implemented subset of the broader perception plan.
 search filters, `--root-note auto` and root-note warnings in `daw check`.
 [beat-map.md](beat-map.md) documents `daw samples beats`: a whole song's tempo, beats,
 downbeats and phrase changes, the beats near a timecode, and a click audition.
+[timeline.md](timeline.md) documents `daw timeline`: places in beats and seconds,
+where the sound ends, a sound placed to end on a beat, and fitting the length.
 [join-checks.md](join-checks.md) documents `daw joins`: whether the beat carries
 across each join of an edited song, the splice, the level and the file's length.
 [export.md](export.md) documents `daw export`: a named WAV, AAC or MP3 file from a

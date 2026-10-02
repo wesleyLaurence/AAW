@@ -49,7 +49,7 @@ a copy, which the app's menu links onto the PATH
 | `daw describe [project\|sampler\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, and how to edit a finished song, map its beats, check its joins and export it |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
-| `daw samples ...`, `daw listen`, `daw compare`, `daw check`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, perception, `inspect` with measured root notes and warnings, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
+| `daw samples ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, perception, `inspect` with measured root notes and warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
 | `daw model PATH...` | Canonical YAML and fingerprints, or validation errors |
 | `daw schedule PROJECT` | Every hit's start frame, track, pad and release frame |
 | `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read |
