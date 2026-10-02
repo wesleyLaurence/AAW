@@ -63,7 +63,7 @@ person can see and adjust.
 | 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | Done, October 1, 2026 |
 | 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | Done, October 1, 2026 |
 | 7 | Personal skills and assets | No place for a skill that Git ignores; nothing documents how to write one | Running the process by name | Done, October 1, 2026 |
-| 8 | Smaller gaps | See below | Convenience | Three of six done, October 1, 2026 |
+| 8 | Smaller gaps | See below | Convenience | Four of six done, October 1, 2026; the other two need nothing built |
 
 Features 1, 2, 5, 6 and 7 are enough for a request that needs no speed change,
 using today's pads for the regions. Feature 3 adds the speed change. Feature 4
@@ -382,13 +382,17 @@ Needed:
 
 ### 8. Smaller gaps
 
-**Three done, October 1, 2026**, as one command, `daw timeline`
+**Four done, October 1, 2026.** Three are one command, `daw timeline`
 ([timeline.md](timeline.md)): positions in seconds (`--seconds` and `--beats`
 convert for a song), end-aligned placement (`--end-at BEAT --pad TRACK.PAD` gives
 the start) and session length (`--fit`, with `--tail`). Commands still take beats;
 the command converts rather than every command accepting `m:ss`. A fitted session
-does not end before its last clip, so a long pattern holds it. Automation curves
-with a shape, memory and other time signatures are not done. What follows is the
+does not end before its last clip, so a long pattern holds it. The fourth is
+automation curves: a point has a `shape` from -1 to 1 that bends the linear
+segment after it, so a sweep that starts slowly and finishes fast takes two points
+([automation.md](automation.md), D55 in [decisions.md](decisions.md)). Memory and
+time signature are notes, not work: a decoded song is still held whole, and 4/4 is
+still the only time signature, which the beat map assumes. What follows is the
 analysis as it was written.
 
 - **Positions in seconds.** Commands take beats only. Accepting `m:ss.mmm` where a

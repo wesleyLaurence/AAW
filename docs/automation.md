@@ -53,7 +53,7 @@ master:
 
 `tracks[].automation`, `returns[].automation` and `master.automation` are lists of
 lanes. Each lane has a `param` and at least one point. A point is
-`{at, value, curve}` and points are listed in time order.
+`{at, value, curve, shape}` and points are listed in time order.
 
 ## What can be automated
 
@@ -94,6 +94,15 @@ ceiling. Values must lie within the limits the static parameter accepts.
   percent move linearly. Frequencies and `q` move in equal ratios per beat, so a
   sweep from 200 Hz to 12.8 kHz over six beats rises one octave per beat. `hold`
   keeps the value until the next point.
+- **Shape**: a point's `shape`, from -1 to 1, bends the linear segment after it.
+  Above zero the segment starts slowly and finishes fast: its progress is raised
+  to the power 4 to the `shape`, so at 0.5 it goes as the square and at 1 as the
+  fourth power. Below zero it is the mirror, fast and then slow. Zero is straight
+  and renders exactly as before. The bend is in the parameter's domain, so a
+  frequency sweep with `shape: 0.5` has risen a quarter of its octaves by halfway.
+  A sweep that holds back and then opens takes two points:
+  `[{at: 56, value: 40, shape: 0.6}, {at: 64, value: 2000}]`. A `hold` has no
+  shape.
 - **Jumps**: two points at the same `at` jump from the first value to the second
   at that position. At most two points may share a position. The example's send
   lane opens the echo for one beat, from beat 79 to 80.
@@ -178,7 +187,7 @@ field's, id and index collisions, round-trip formatting, `inspect`, `check` and
 A moving lane costs little. A minute of continuous change on a 48 dB filter or
 an EQ band adds less than a tenth of a second to a render on an M2.
 
-Not yet implemented: smoothing options and curved segments beyond linear and
-hold. Also missing are LFOs and other modulation, automation of switches and
+Not yet implemented: smoothing options and curves other than a bent line and a
+hold. The Mac app draws a shaped segment as a straight line. Also missing are LFOs and other modulation, automation of switches and
 device-rebuilding parameters, automation of pad or sampler parameters, and tempo
 automation.

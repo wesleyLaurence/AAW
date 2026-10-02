@@ -488,7 +488,7 @@ enum LaneCmd {
 /// Automation points, addressed by reference.
 #[derive(Subcommand)]
 enum PointCmd {
-    /// Add a point in time order, creating the lane if needed: --at, --value, --curve.
+    /// Add a point in time order, creating the lane if needed: --at, --value, --curve, --shape.
     Add {
         project: PathBuf,
         owner: String,
@@ -496,7 +496,7 @@ enum PointCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
-    /// Change a point's --at, --value or --curve.
+    /// Change a point's --at, --value, --curve or --shape.
     Move {
         project: PathBuf,
         point: String,

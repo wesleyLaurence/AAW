@@ -49,6 +49,8 @@ middle of a phrase, say which beat you chose and why, and offer the other.
 5. **Add the other sounds.** Import each by path, on its own track. A sound that
    leads into a beat starts its own length before that beat; `daw timeline` gives
    the beat. Then fit the session's length to the sound with `daw timeline --fit`.
+   A sweep into the ending is a filter with a lane on its cutoff; a `shape` on
+   the lane's first point makes it hold back and then open.
 6. **Level.** The song stays as loud as the original. Put a limiter on the master
    so that what is added on top does not clip, and do not turn the song down.
 7. **Render and check.** `daw render`, then `daw joins` on the render with
