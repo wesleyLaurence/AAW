@@ -6,16 +6,18 @@
 
 pub mod edits;
 pub mod library;
+pub mod projects;
 pub mod view;
 pub mod waveform;
 
 use aaw_host::client::Request;
 use aaw_host::command::{Command, Origin};
 use aaw_host::host::{self, Clock, Event, Options, Running};
+use aaw_host::project;
 use aaw_host::session::{Change, Doc};
 pub use edits::{Edit, Row};
 use serde_json::{json, Value as Json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 pub use view::{Arrangement, Touch};
 pub use waveform::Waveforms;
@@ -153,6 +155,10 @@ pub trait SongObserver: Send + Sync {
     fn transport(&self, transport: TransportView);
     /// song.yaml holds an external edit that does not load, or it was fixed.
     fn invalid(&self, error: Option<String>);
+    /// The project was saved under another name, by the person or by `daw
+    /// move` or `daw copy`: the song file is now at this path. The `changed`
+    /// that records it follows.
+    fn moved(&self, path: String);
     fn warning(&self, message: String);
     /// The waveforms of a revision, after its `changed`: which audio each
     /// track has, and peaks the app has not been sent. Called on a thread of
@@ -171,6 +177,8 @@ pub struct Song {
     latest: Arc<Mutex<Option<Arrangement>>>,
     /// The latest revision, which edits are worked out from.
     doc: Arc<Mutex<Option<Doc>>>,
+    /// The song file, which changes when the project is saved under a name.
+    path: Arc<Mutex<PathBuf>>,
 }
 
 fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -179,10 +187,14 @@ fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 
 #[uniffi::export]
 impl Song {
-    /// Opens `song.yaml` at `path` and becomes its host. Fails when the song
-    /// does not load or another host has it open.
+    /// Opens the song at `path`, its file or the folder that holds
+    /// `song.yaml`, and becomes its host. Fails when the song does not load
+    /// or another host has it open.
     #[uniffi::constructor]
     pub fn open(path: String, observer: Arc<dyn SongObserver>) -> Result<Arc<Song>, SongError> {
+        let file = project::song_file(Path::new(&path));
+        let at = Arc::new(Mutex::new(file.clone()));
+        let now = at.clone();
         let latest = Arc::new(Mutex::new(None));
         let shown = latest.clone();
         let doc = Arc::new(Mutex::new(None::<Doc>));
@@ -196,7 +208,7 @@ impl Song {
             feed: false,
             prepare: true,
         };
-        let running = host::spawn(Path::new(&path), options, move |event| match event {
+        let running = host::spawn(&file, options, move |event| match event {
             Event::Opened(doc) => {
                 *locked(&shown) = Some(view::arrangement(&doc, 0));
                 *locked(&current) = Some(doc);
@@ -225,6 +237,10 @@ impl Song {
                 loop_region: t.region.map(|(start, length)| LoopRegion { start, length }),
             }),
             Event::Invalid(error) => observer.invalid(error),
+            Event::Moved(path) => {
+                *locked(&now) = path.clone();
+                observer.moved(path.to_string_lossy().into_owned());
+            }
             Event::Warning(message) => observer.warning(message),
             Event::Closed => observer.closed(),
         })?;
@@ -233,7 +249,55 @@ impl Song {
             running: RwLock::new(Some(running)),
             latest,
             doc,
+            path: at,
         }))
+    }
+
+    /// The song file, where it is now.
+    pub fn path(&self) -> String {
+        locked(&self.path).to_string_lossy().into_owned()
+    }
+
+    /// Whether the project has no name yet: it is one of the Untitled
+    /// projects in the app's data folder.
+    pub fn is_untitled(&self) -> bool {
+        project::is_untitled(&locked(&self.path))
+    }
+
+    /// Whether the project holds nothing: a blank song, and no other file
+    /// in its folder. Closing such an Untitled project deletes it unasked.
+    pub fn untouched(&self) -> bool {
+        let path = locked(&self.path).clone();
+        let doc = locked(&self.doc);
+        match (path.parent(), doc.as_ref()) {
+            (Some(folder), Some(doc)) => project::untouched(folder, &doc.yaml),
+            _ => false,
+        }
+    }
+
+    /// Saves the project as `folder`, an absolute path where nothing is yet,
+    /// and names the song after it. An Untitled project is moved there. A
+    /// project that has a name is copied, and stays as it was while this
+    /// song carries on in the copy. Either way the history, the transport
+    /// and what is playing carry on, and `daw` commands sent to the path the
+    /// project had still land here. Returns the song file's new path. Blocks
+    /// while a large project is copied.
+    pub fn save_as(&self, folder: String) -> Result<String, SongError> {
+        let op = if self.is_untitled() { "project.move" } else { "project.copy" };
+        let reply = self.request(json!({"op": op, "to": folder}), None)?;
+        Ok(reply["project"].as_str().unwrap_or_default().to_string())
+    }
+
+    /// Stops answering `daw` commands for a path this project was saved
+    /// from, so that the project there can be opened.
+    pub fn release(&self, path: String) -> Result<(), SongError> {
+        self.request(json!({"op": "project.release", "project": path}), None).map(|_| ())
+    }
+
+    /// Tells the host whether this project's window is the one in front, for
+    /// `daw projects` and `daw status` to report.
+    pub fn set_front(&self, front: bool) -> Result<(), SongError> {
+        self.request(json!({"op": "front", "front": front}), None).map(|_| ())
     }
 
     /// The arrangement of the latest revision.

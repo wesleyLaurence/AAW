@@ -49,7 +49,14 @@ struct PatternContext: Equatable {
 @MainActor
 @Observable
 public final class SongModel {
-    public let url: URL
+    /// The song file, which changes when the project is saved under a name.
+    public private(set) var url: URL
+    /// Whether the project has no name yet: it is in the app's data folder
+    /// until Save As… gives it a name and a place.
+    public private(set) var untitled: Bool
+    /// The paths the project had before it was saved under another name, at
+    /// which `daw` commands still reach it.
+    private(set) var formerURLs: [URL] = []
     public private(set) var arrangement: Arrangement
     public private(set) var transport = TransportView(playing: false, cue: 0, loopRegion: nil)
     /// Recent changes, newest first.
@@ -104,6 +111,9 @@ public final class SongModel {
     @ObservationIgnored var onShowLanes: ((RowID) -> Void)?
     /// Gives the keys back to the arrangement, after a value was typed.
     @ObservationIgnored var onFocus: (() -> Void)?
+    /// Called when the project was saved under another name, with the song
+    /// file's path before.
+    @ObservationIgnored var onMoved: ((URL) -> Void)?
     /// Called when waveforms arrive, for the arrangement to draw them.
     @ObservationIgnored var onWaveforms: (() -> Void)?
     /// Asks the arrangement to draw so many frames of scrolling and zooming
@@ -148,6 +158,7 @@ public final class SongModel {
         let relay = Relay()
         song = try Song.open(path: url.path, observer: relay)
         self.url = url
+        untitled = song.isUntitled()
         browser = Browser(library: libraryPath(song: url.path))
         arrangement = song.arrangement()
         deviceRow = arrangement.tracks.first.map { .track($0.key) }
@@ -193,6 +204,22 @@ public final class SongModel {
 
     fileprivate func setInvalid(_ error: String?) {
         invalid = error
+    }
+
+    /// A file's URL as the app compares them: without `..` or links.
+    nonisolated static func normal(_ url: URL) -> URL {
+        url.standardizedFileURL.resolvingSymlinksInPath()
+    }
+
+    /// The project is at another path: the person saved it under a name, or
+    /// `daw move` or `daw copy` did.
+    fileprivate func moved(to path: String) {
+        let (old, new) = (url, Self.normal(URL(fileURLWithPath: path)))
+        guard new != old else { return }
+        formerURLs.append(old)
+        url = new
+        untitled = song.isUntitled()
+        onMoved?(old)
     }
 
     fileprivate func warn(_ message: String) {
@@ -687,6 +714,39 @@ public final class SongModel {
         onMeasure?(frames, then)
     }
 
+    // MARK: The project
+
+    /// Whether the project holds nothing: a blank song and no other file.
+    /// Closing such an Untitled project deletes it without a question.
+    var untouched: Bool {
+        song.untouched()
+    }
+
+    /// Saves the project as `folder`, where nothing is yet, and names the
+    /// song after it. An Untitled project moves there; a project that has a
+    /// name is copied and stays as it was, and this window carries on in the
+    /// copy. The history and what is playing carry on either way. Waits for
+    /// the host, which reports the new path as it reports a change.
+    func saveAs(_ folder: URL) throws {
+        endDrag()
+        let path = try commands.sync { try song.saveAs(folder: folder.path) }
+        // Known here at once; the host's own report of it follows.
+        moved(to: path)
+    }
+
+    /// Stops answering `daw` commands for a path the project was saved from,
+    /// so that the project there can be opened.
+    func release(_ former: URL) {
+        commands.sync { try? song.release(path: former.path) }
+        formerURLs.removeAll { $0 == former }
+    }
+
+    /// Tells the host whether this project's window is the one in front,
+    /// which `daw projects` reports.
+    func setFront(_ front: Bool) {
+        commands.async { [song] in try? song.setFront(front: front) }
+    }
+
     /// Saves and stops hosting the song; `daw` commands then run headless.
     public func close() {
         endDrag()
@@ -718,6 +778,10 @@ private final class Relay: SongObserver, @unchecked Sendable {
 
     func invalid(error: String?) {
         onMain { $0.setInvalid(error) }
+    }
+
+    func moved(path: String) {
+        onMain { $0.moved(to: path) }
     }
 
     func warning(message: String) {

@@ -165,7 +165,7 @@ struct BrowserView: View {
             .frame(height: TimelineLayout.rulerHeight - 1)
             Divider()
             if browser.library == nil {
-                note("No sample library was found for this song. Index one with `daw samples scan DIRECTORY` from the folder that holds your songs, or set AAW_LIBRARY to an index.")
+                note("No sample library was found for this project. Index one with `daw samples scan DIRECTORY` from the folder that holds your projects, or set AAW_LIBRARY to an index.")
             } else {
                 filters
                 Divider()

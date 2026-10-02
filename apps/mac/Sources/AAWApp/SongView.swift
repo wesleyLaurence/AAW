@@ -176,7 +176,7 @@ struct ActivityPanel: View {
                 .frame(height: TimelineLayout.rulerHeight - 1, alignment: .leading)
             Divider()
             if model.activity.isEmpty {
-                Text("Changes appear here as they land, with who made them. An agent's `daw` commands for this song arrive while it is open.")
+                Text("Changes appear here as they land, with who made them. An agent's `daw` commands for this project arrive while it is open.")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .padding(12)

@@ -28,7 +28,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>AAW Song</string>
+			<string>AAW Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>
