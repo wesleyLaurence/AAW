@@ -865,7 +865,7 @@
     },
     "Point": {
       "additionalProperties": false,
-      "description": "An automation breakpoint. curve shapes the segment from here to the next point.",
+      "description": "An automation breakpoint. curve and shape are of the segment from here to the next point.",
       "properties": {
         "at": {
           "anyOf": [
@@ -893,6 +893,13 @@
           ],
           "title": "Curve",
           "type": "string"
+        },
+        "shape": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Shape",
+          "type": "number"
         }
       },
       "required": [

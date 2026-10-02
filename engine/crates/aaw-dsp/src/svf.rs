@@ -238,6 +238,7 @@ mod tests {
                     at: Beat::Float(*at),
                     value: *value,
                     curve: Curve::Linear,
+                    shape: 0.0,
                 })
                 .collect(),
         };

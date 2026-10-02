@@ -4,7 +4,9 @@
 //! A lane holds its first value before its first point and its last value after
 //! its last point. A point's curve shapes the segment after it: linear moves in
 //! the parameter's domain (log for frequencies and q), hold keeps the value until
-//! the next point. Two points at one position jump there. Nothing is smoothed.
+//! the next point. A point's shape bends a linear segment: above zero it starts
+//! slowly and finishes fast, below zero the other way. Two points at one
+//! position jump there. Nothing is smoothed.
 
 use aaw_model::rules::Domain;
 use aaw_model::{frame, Curve, Lane};
@@ -16,6 +18,10 @@ pub struct Envelope {
     /// The points' values, or their logarithms in the log domain.
     values: Vec<f64>,
     hold: Vec<bool>,
+    /// Each segment's bend, as the power its progress is raised to; 1 is straight.
+    power: Vec<f64>,
+    /// Whether the bend is toward the segment's end: a slow start.
+    late: Vec<bool>,
     log: bool,
     constant: Option<f64>,
 }
@@ -28,6 +34,8 @@ impl Envelope {
             frames: lane.points.iter().map(|p| frame(&p.at_exact(), tempo, rate)).collect(),
             values: lane.points.iter().map(|p| if log { p.value.ln() } else { p.value }).collect(),
             hold: lane.points.iter().map(|p| p.curve == Curve::Hold).collect(),
+            power: lane.points.iter().map(|p| 4f64.powf(p.shape.abs())).collect(),
+            late: lane.points.iter().map(|p| p.shape > 0.0).collect(),
             log,
             constant: lane.points.iter().all(|p| p.value == first).then_some(first),
         }
@@ -54,7 +62,12 @@ impl Envelope {
             Some(k) if k == last || self.hold[k] => self.values[k],
             Some(k) => {
                 let span = (self.frames[k + 1] - self.frames[k]).max(1);
-                (f - self.frames[k]) as f64 / span as f64 * (self.values[k + 1] - self.values[k]) + self.values[k]
+                let mut along = (f - self.frames[k]) as f64 / span as f64;
+                if self.power[k] != 1.0 {
+                    // A slow start is progress to a power; a slow finish is its mirror.
+                    along = if self.late[k] { along.powf(self.power[k]) } else { 1.0 - (1.0 - along).powf(self.power[k]) };
+                }
+                along * (self.values[k + 1] - self.values[k]) + self.values[k]
             }
         }
     }
@@ -273,6 +286,7 @@ mod tests {
                     at: Beat::Float(*at),
                     value: *value,
                     curve: *curve,
+                    shape: 0.0,
                 })
                 .collect(),
         }
@@ -362,5 +376,46 @@ mod tests {
         same.apply(&mut block);
         assert_eq!(block, [6.0, 7.0, 7.0]);
         assert!(same.resting());
+    }
+
+    #[test]
+    fn a_shape_bends_a_segment_toward_its_end_or_its_start() {
+        let shaped = |shape: f64, domain: Domain| {
+            let mut l = lane(&[(0.0, 0.0, Curve::Linear), (2.0, 8.0, Curve::Linear)]);
+            if domain == Domain::Log {
+                (l.points[0].value, l.points[1].value) = (100.0, 1600.0);
+            }
+            l.points[0].shape = shape;
+            Envelope::new(&l, domain, 120.0, 48000)
+        };
+        // Halfway through two beats at 120 BPM is frame 24000.
+        let straight = shaped(0.0, Domain::Linear);
+        assert_eq!(straight.at(24000), 4.0);
+        // At 0.5 progress goes as its square, at 1 as its fourth power: slow, then fast.
+        assert!((shaped(0.5, Domain::Linear).at(24000) - 2.0).abs() < 1e-9);
+        assert!((shaped(1.0, Domain::Linear).at(24000) - 0.5).abs() < 1e-9);
+        // Below zero it is the mirror: fast, then slow.
+        assert!((shaped(-0.5, Domain::Linear).at(24000) - 6.0).abs() < 1e-9);
+        assert!((shaped(-1.0, Domain::Linear).at(24000) - 7.5).abs() < 1e-9);
+        // Every shape starts and ends on the points, and never leaves their range.
+        for shape in [-1.0, -0.3, 0.3, 1.0] {
+            let e = shaped(shape, Domain::Linear);
+            assert_eq!((e.at(0), e.at(48000), e.at(60000)), (0.0, 8.0, 8.0));
+            let mut last = 0.0;
+            for f in (0..=48000).step_by(480) {
+                assert!(e.at(f) >= last && e.at(f) <= 8.0, "{shape} at {f}");
+                last = e.at(f);
+            }
+        }
+        // In the log domain the bend is of the ratio: four octaves, one by halfway.
+        assert!((shaped(0.5, Domain::Log).at(24000) - 200.0).abs() < 1e-6);
+        // A block is filled as single frames are read, and a hold has no shape.
+        let e = shaped(0.7, Domain::Linear);
+        let mut block = [0.0; 64];
+        e.fill(1000, 1, &mut block);
+        assert!(block.iter().enumerate().all(|(i, v)| *v == e.at(1000 + i as i64)));
+        let mut held = lane(&[(0.0, 1.0, Curve::Hold), (2.0, 8.0, Curve::Linear)]);
+        held.points[0].shape = 1.0;
+        assert_eq!(Envelope::new(&held, Domain::Linear, 120.0, 48000).at(24000), 1.0);
     }
 }

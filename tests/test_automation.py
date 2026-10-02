@@ -286,6 +286,28 @@ def test_track_gain_lane_ramps_the_stem(song, tmp_path):
     assert np.max(np.abs(y + stem(tmp_path / "a", "space") - mix)) < 1e-6
 
 
+@pytest.mark.parametrize("shape, levels", [(0.5, (-22.5, -18, -10.5)), (-0.5, (-13.5, -6, -1.5)), (1, (-23.9, -22.5, -16.4))])
+def test_a_shape_bends_the_gain_ramp(song, tmp_path, shape, levels):
+    # The lane rises 24 dB over four beats. Bent, it is late or early by the
+    # beat: progress to the power two at 0.5, four at 1, and the mirror below zero.
+    path, data = song
+    data["tracks"][0]["automation"][0]["points"][0]["shape"] = shape
+    rerender(path, data, tmp_path / "a")
+    y = stem(tmp_path / "a", "pad")
+    source = tone(220, 5, 0.25)
+    level = np.sqrt(0.5) * 100 / 127
+    for beat_, db in zip((1, 2, 3), levels):
+        i = beat_ * 24000
+        window = slice(i - 600, i + 600)
+        assert rms_db(y[window]) - rms_db(source[window] * level) == pytest.approx(db, abs=0.25)
+    # A straight shape is the lane as it was, to the sample.
+    data["tracks"][0]["automation"][0]["points"][0]["shape"] = 0
+    rerender(path, data, tmp_path / "straight")
+    del data["tracks"][0]["automation"][0]["points"][0]["shape"]
+    rerender(path, data, tmp_path / "plain")
+    assert np.array_equal(stem(tmp_path / "straight", "pad"), stem(tmp_path / "plain", "pad"))
+
+
 def test_constant_gain_lane_matches_static_gain(song, tmp_path):
     path, data = song
     data["tracks"][0]["automation"] = [
@@ -459,6 +481,7 @@ def automate(where, param, pts):
         (automate("master", "pan", points((0, 0))), "unknown automation target"),
         (automate("master", "gain_db", points((0, 30))), "outside -96 to 24"),
         (automate("tracks", "gain_db", []), "at least 1"),
+        (automate("master", "gain_db", [{"at": 0, "value": 0, "shape": 1.5}]), "less than or equal to 1"),
     ],
 )
 def test_automation_validation(song, change, message):

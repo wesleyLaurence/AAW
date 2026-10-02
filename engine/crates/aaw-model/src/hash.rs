@@ -20,6 +20,8 @@ pub fn project_hash(project: &Project) -> String {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Value> {
     vec![
+        // An equalizer band's shape is a word, so only a point's is dropped.
+        dict(vec![("shape", Value::Float(0.0))]),
         dict(vec![("audio", Value::List(vec![]))]),
         dict(vec![("stretch", Value::str("repitch")), ("stretcher", Value::str("signalsmith"))]),
         dict(vec![("source_sha256", Value::None)]),

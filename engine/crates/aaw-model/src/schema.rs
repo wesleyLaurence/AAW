@@ -1196,10 +1196,13 @@ pub struct Point {
     pub at: Beat,
     pub value: f64,
     pub curve: Curve,
+    /// How a linear segment bends: above zero it starts slowly and finishes
+    /// fast, below zero the other way, and at zero it is straight.
+    pub shape: f64,
 }
 
 impl Point {
-    const FIELDS: &'static [&'static str] = &["at", "value", "curve"];
+    const FIELDS: &'static [&'static str] = &["at", "value", "curve", "shape"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Point> {
         let f = Fields::of(ctx, x, "Point", Self::FIELDS)?;
@@ -1215,6 +1218,7 @@ impl Point {
                 }
             })
         });
+        let shape = f.opt(ctx, "shape", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -1223,6 +1227,7 @@ impl Point {
             at: at?,
             value: value?,
             curve: curve?,
+            shape: shape?,
         })
     }
 
@@ -1242,6 +1247,7 @@ impl Point {
             },
             "linear",
         );
+        o.float("shape", self.shape, 0.0);
         o.done()
     }
 }
