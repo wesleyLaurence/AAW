@@ -1,4 +1,4 @@
-# Skills and reusable sounds — October 1, 2026
+# Skills and reusable sounds — implemented October 1, 2026
 
 A skill is a plain-English file that tells an agent how a kind of job is done. The
 repository gives the agent the capabilities and says how each works
@@ -20,7 +20,7 @@ taste. That part is personal and stays out of Git, like the songs.
 
 ## What goes in a personal skill
 
-Only what is personal. The generic [`song-edit`](../.claude/skills/song-edit/SKILL.md)
+Only what is personal. The generic [`song-edit`](../../.claude/skills/song-edit/SKILL.md)
 skill has the mechanics of editing a finished song from timecodes, and the
 `daw describe` topics have how each step is done, so a personal skill reads like
 this:

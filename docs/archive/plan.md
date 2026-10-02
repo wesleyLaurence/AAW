@@ -1,5 +1,7 @@
 # Build plan
 
+> Archived October 2, 2026, and kept for history; it is not maintained. The first build plan, from before anything was built. [backlog.md](../backlog.md) replaces it, and [completed.md](../completed.md) records what was built instead.
+
 Status: nothing built. Phases are ordered so that each ends with something a person can hear, and so that the sample-based workflow (the stated priority) arrives first. Each phase has an exit criterion phrased as a demo a fresh session can run.
 
 The stable contract across all phases is the project document format, the CLI verbs, and the core library API that the CLI and the workspace daemon share. Engine internals may change freely behind them.

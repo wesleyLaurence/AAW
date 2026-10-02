@@ -1,6 +1,8 @@
 # The agent-native DAW: ideas for later
 
-Status: ideas collected September 30, 2026, from a design conversation. Nothing here is scheduled or decided. [Rust-Swift-Update.md](Rust-Swift-Update.md) remains the build plan and [mvp.md](mvp.md) describes what exists. When an idea is picked up, it gets a plan and its choices are recorded in [decisions.md](decisions.md). The earlier review, [design-notes-2026-09-07.md](design-notes-2026-09-07.md), covers some of the same ground; the sections below link to it where it does.
+> Archived October 2, 2026, and kept for history; it is not maintained. Ideas collected before the app existed. They were taken into [concept.md](../concept.md) and [backlog.md](../backlog.md), which are where they are kept now.
+
+Status: ideas collected September 30, 2026, from a design conversation. Nothing here is scheduled or decided. [Rust-Swift-Update.md](Rust-Swift-Update.md) remains the build plan and [mvp.md](../architecture.md) describes what exists. When an idea is picked up, it gets a plan and its choices are recorded in [decisions.md](../decisions.md). The earlier review, [design-notes-2026-09-07.md](design-notes-2026-09-07.md), covers some of the same ground; the sections below link to it where it does.
 
 ## The picture
 

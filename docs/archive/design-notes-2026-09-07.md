@@ -1,5 +1,7 @@
 # Design review and first-principles notes
 
+> Archived October 2, 2026, and kept for history; it is not maintained. A review of the design as it stood before the MVP. What still holds was taken into [concept.md](../concept.md) and [backlog.md](../backlog.md).
+
 Date: 2026-09-07
 
 Reviewed revision: `e572dcb`

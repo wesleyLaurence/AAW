@@ -1,5 +1,7 @@
 # Code review: parameter automation (PR #4), 2026-09-29
 
+> Archived October 2, 2026, and kept for history; it is not maintained. A review of the automation pull request. Every finding was fixed in pull requests #5 to #13.
+
 Scope: the merged automation PR, `5dd2e6c^1..5dd2e6c`: `automation.py` (new),
 `effects.py`, `engine.py`, `model.py`, `cli.py`, docs and tests. The reviewer
 confirmed findings 1–4 with probe scripts on generated audio, and finding 1 also on

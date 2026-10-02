@@ -1,50 +1,60 @@
-# Agentic Audio Workspace (AAW) — design docs
+# AAW docs
 
-Start with the [project introduction](../README.md) for what AAW is and why it is being created.
+Start with the [project introduction](../README.md). Every kind of statement has
+one home here, and [AGENTS.md](../AGENTS.md) says how the files are kept.
 
-Current analysis commands: [perception.md](perception.md) documents `daw listen`
-and `daw compare`, the implemented subset of the broader perception plan.
-[sample-analysis.md](sample-analysis.md) documents `daw samples analyze`, measured
-search filters, `--root-note auto` and root-note warnings in `daw check`.
-[beat-map.md](beat-map.md) documents `daw samples beats`: a whole song's tempo, beats,
-downbeats and phrase changes, the beats near a timecode, and a click audition.
-[audio-clips.md](audio-clips.md) documents audio clips on a track and the `daw audio`
-commands: add, cut a range and close the gap, split, trim and crossfade.
-[time-stretch.md](time-stretch.md) documents `stretch: preserve_pitch` on a pad and
-the two stretchers a song can name, with what was measured of each.
-[timeline.md](timeline.md) documents `daw timeline`: places in beats and seconds,
-where the sound ends, a sound placed to end on a beat, and fitting the length.
-[join-checks.md](join-checks.md) documents `daw joins`: whether the beat carries
-across each join of an edited song, the splice, the level and the file's length.
-[export.md](export.md) documents `daw export`: a named WAV, AAC or MP3 file from a
-render, the level policy and the record beside the file.
-[skills.md](skills.md) says where a personal skill and its sounds live, what the
-tracked `song-edit` skill covers, and which `daw describe` topic explains each step.
-[effects.md](effects.md) documents track, return and master insert effects,
-sidechain compression, the limiter, delay and reverb, and sends to return buses.
-[automation.md](automation.md) documents automation lanes for levels, pans, sends
-and effect parameters.
+| File | Holds | Tense |
+|---|---|---|
+| [concept.md](concept.md) | What AAW should be: the mission, the principles, everything the app does | Should |
+| [backlog.md](backlog.md) | What is not built yet, in order, with an inbox for ideas | Next |
+| [features/](features/) | One file per feature: its design before it is built, its reference after | Will, then is |
+| [architecture.md](architecture.md) | How it is built: the parts, the song format, the semantics | Is |
+| [decisions.md](decisions.md) | Why each choice was made, numbered and never rewritten | Because |
+| [completed.md](completed.md) | What was built, when, and what a person tried | Was |
+| [archive/](archive/) | Superseded documents, kept for history | — |
 
-Built: [Rust-Swift-Update.md](Rust-Swift-Update.md) plans a native macOS app
-with a real-time Rust engine that a person and an agent operate together. The engine
-has replaced the Python one, and the app edits and plays songs, shows waveforms, edits
-patterns and browses the sample library, and its bundle carries `daw` and puts it on the PATH. The Rust workspace is in [../engine](../engine) and the
-app in [../apps/mac](../apps/mac).
+More exact than any of these, for what exists: `daw describe` prints the song's
+schema and the authoring contract from the code, and
+[../engine/README.md](../engine/README.md) and
+[../apps/mac/README.md](../apps/mac/README.md) sit beside the code they describe.
 
-Dated design notes: [design-notes-2026-09-07.md](design-notes-2026-09-07.md) is a
-first-principles review of the original design, written before the MVP.
-[design-notes-2026-09-30.md](design-notes-2026-09-30.md) collects unscheduled ideas for
-the app's agent panel, collaboration, the workspace and song layout, SONG.md and
-taste.md, skills, custom tools and devices, and what interface an agent works best in.
-[new-features-2026-10-01.md](new-features-2026-10-01.md) lists what editing a finished
-song from timecodes needs (decoding, a beat map, time stretch, audio regions, join
-checks, export and skills) and which of those are built.
+## Features
 
-These documents capture the design conversation for an AI-native digital audio workstation: a DAW built to be operated by a coding agent (Claude Code, Codex) rather than by a human clicking a UI. The sampler MVP is now implemented; see [../README.md](../README.md) and [mvp.md](mvp.md) for the current build. The documents below remain the broader design draft. Read in this order:
+Built:
 
-1. **[idea.md](idea.md)** — the vision, the first-principles reframes, and the working rhythm between a person and the agent. Start here.
-2. **[spec.md](spec.md)** — the technical specification: primitives, document format, devices, rendering, perception, library, intent and memory, CLI surface, stack, and the end-state workspace UI.
-3. **[plan.md](plan.md)** — phased build plan with exit criteria per phase, risks, and open questions.
-4. **[decisions.md](decisions.md)** — decision log with rationale, so a future session does not relitigate settled choices.
+| Feature | Covers |
+|---|---|
+| [effects](features/effects.md) | Insert effects on tracks, returns and the master, sidechain compression, the limiter, delay, reverb, and sends to returns |
+| [automation](features/automation.md) | Lanes for levels, pans, sends and effect parameters |
+| [perception](features/perception.md) | `daw listen` and `daw compare` |
+| [sample analysis](features/sample-analysis.md) | `daw samples analyze`, measured search filters, root-note warnings |
+| [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
+| [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
+| [time stretch](features/time-stretch.md) | A pad or audio clip that follows the tempo at its own pitch |
+| [timeline](features/timeline.md) | `daw timeline`: beats and seconds, end alignment, fitting the length |
+| [join checks](features/join-checks.md) | `daw joins`: each join of an edited song, and the file's length |
+| [export](features/export.md) | `daw export`: a named WAV, AAC or MP3 file from a render |
+| [skills](features/skills.md) | Where a personal skill and its sounds live, and the tracked `song-edit` skill |
 
-Conventions used throughout: Ableton vocabulary (session, track, clip, device, rack, send, return, automation) because the models already know it. `daw` is a placeholder CLI name. Time is always in bars and beats. Units are always real-world units.
+Proposed:
+
+| Feature | Backlog item |
+|---|---|
+| [new and untitled projects](features/new-and-untitled-projects.md) | 1 |
+| [the agent panel](features/agent-panel.md) | 6 |
+
+## Archive
+
+| File | Was |
+|---|---|
+| [idea.md](archive/idea.md) | The first statement of the idea; replaced by the concept |
+| [spec.md](archive/spec.md) | The first specification, for a Python build that was not made this way |
+| [plan.md](archive/plan.md) | The first build plan |
+| [design-notes-2026-09-07.md](archive/design-notes-2026-09-07.md) | A first-principles review of the design before the MVP |
+| [design-notes-2026-09-30.md](archive/design-notes-2026-09-30.md) | Ideas for the app, the workspace, memory, skills and devices |
+| [Rust-Swift-Update.md](archive/Rust-Swift-Update.md) | The plan of the Rust and Swift rebuild, with each milestone's exit test |
+| [new-features-2026-10-01.md](archive/new-features-2026-10-01.md) | What editing a finished song from timecodes needed |
+| [2026-09-29-code-review.md](archive/2026-09-29-code-review.md) | A review of the automation pull request |
+
+Conventions throughout: Ableton's vocabulary (session, track, clip, device, send,
+return, automation), positions in zero-based quarter-note beats, and real units.

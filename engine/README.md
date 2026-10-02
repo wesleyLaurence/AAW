@@ -1,7 +1,7 @@
 # Rust engine
 
 The Cargo workspace of the native build planned in
-[docs/Rust-Swift-Update.md](../docs/Rust-Swift-Update.md): the song model, the
+[docs/archive/Rust-Swift-Update.md](../docs/archive/Rust-Swift-Update.md): the song model, the
 engine that plays and renders, the session host and the `daw` command. It
 replaced the Python engine at that plan's cutover (M7). The Python package in
 `src/agent_daw` keeps the sample library, sample analysis and perception, and

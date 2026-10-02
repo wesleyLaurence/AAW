@@ -1,13 +1,14 @@
 # Agent DAW development and composition
 
-Read README.md and docs/mvp.md for the implemented MVP. Older design documents are
-future scope, not a requirement to add effects, UI or broad infrastructure.
+Read README.md and docs/architecture.md for what is built. docs/concept.md is the
+end state and docs/backlog.md the work toward it; neither is a requirement to add
+effects, UI or broad infrastructure beyond the item being worked on. See [Docs](#docs).
 
 - Use `uv run daw ...`; all commands emit JSON. `daw` is the Rust binary, which `uv run daw`
   runs from `engine/target/release/daw`; `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and `export` run in
   Python, and either entry point passes the other its commands.
 - The engine, the song model and the session host are Rust, in `engine/`
-  (docs/Rust-Swift-Update.md). After Rust changes run `cargo test` there, then
+  (docs/architecture.md). After Rust changes run `cargo test` there, then
   `uv run pytest -q`, which rebuilds the release `daw` and the package's song model
   (`agent_daw.aaw_py`) and drives both. Python reads songs only through that model.
 - The Mac app in `apps/mac/` builds with `./build.sh`; run `./build.sh test` after Swift changes
@@ -45,6 +46,34 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
 - Audio files, sample database and environment stay out of Git; no uploads are required.
 - Before continuing an existing song, read its local `HANDOFF.md` if present.
 
+## Docs
+
+Each kind of statement has one home in `docs/`; `docs/README.md` is the index.
+
+- `concept.md` is the end state: what the app should be and why. It never says what
+  is built. Change it when the direction changes, and record the reason in
+  `decisions.md`.
+- `backlog.md` is everything not built, one line an item: Next in the order to
+  build, Verify, Later and Ideas. When the person thinks out loud, put the idea
+  under Ideas in a line. Do not start a new notes or plan file.
+- `features/NAME.md` is one feature. Write it when a backlog item is picked up and
+  needs a design: status proposed, then What, Why, Design, Done when and Open
+  questions. When the feature is built, rewrite the file in the present tense as
+  its reference, with the date it was implemented in the title.
+- `architecture.md`, `engine/README.md`, `apps/mac/README.md` and `daw describe` say
+  what exists. Change them in the pull request that changes the code.
+- `decisions.md` is append-only. A choice gets a new numbered entry, and the entry
+  it replaces gets "Revised by Dn".
+- `completed.md` is what was built, newest first.
+- `archive/` holds superseded documents. Do not update them or build from them.
+- Before building, read the backlog item and its feature file. One item to a
+  branch and a pull request.
+- The pull request that finishes an item also moves its line from `backlog.md` to
+  `completed.md` with the date, the pull request and what a person tried; adds a
+  line under Verify for anything nobody heard or tried by hand; and renumbers Next.
+- A limit that should be lifted gets a backlog line. A limit that is simply true
+  stays in the feature's file.
+
 ## Git scope
 
 - Commit reusable tooling, tests, documentation, and generic instructional examples.
@@ -55,7 +84,7 @@ future scope, not a requirement to add effects, UI or broad infrastructure.
   limits, the file names. Keep it in `.claude/skills/NAME/`, which Git ignores apart
   from the generic skills `.gitignore` names, or in your own skills folder. A skill
   names `daw` commands and paths under `projects/` or `content/`, never an absolute
-  library path. See docs/skills.md.
+  library path. See docs/features/skills.md.
 - Put song-specific automation inside its ignored project directory. Never force-add
   ignored content or embed personal compositions in tooling, tests, or documentation.
 - Generic examples and test fixtures must be independent of personal songs and private
