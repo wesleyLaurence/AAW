@@ -43,6 +43,7 @@ Proposed:
 | Feature | Backlog item |
 |---|---|
 | [the agent panel](features/agent-panel.md) | 4 |
+| [generated audio](features/generated-audio.md) | Later, under Sound |
 
 ## Archive
 
