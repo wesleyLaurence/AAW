@@ -18,7 +18,7 @@ backlog.
 | 2026-10-01 | `daw samples beats`: a whole song's tempo, beats, downbeats and phrases ([beat map](features/beat-map.md), D49) | #24 | Generated audio and five local renders; no released song |
 | 2026-10-01 | `.m4a` and `.mp3` decoded on import (D48) | #23 | Audio encoded here; no purchased file, no drop on the app |
 | 2026-10-01 | The app as a bundle with `daw` inside and a menu item that links it onto the PATH (rebuild M9, D47) | #22 | Not the menu item's alerts, not Developer ID signing, not another Mac |
-| 2026-10-01 | Waveforms on clips, the pattern editor and the sample browser (rebuild M8, D46) | #21 | Not a drag from the browser or the Finder; nothing was played |
+| 2026-10-01 | Waveforms on clips, the pattern editor and the sample browser (rebuild M8, D46) | #21 | A WAV dropped on a track on 2026-10-02 became a pad. Not a drag from the browser or a drop where there is no track; nothing was played by script |
 | 2026-10-01 | The Python engine retired; `daw` is the Rust binary (rebuild M7, D45) | #20 | Renders compared by measurement, not by ear |
 | 2026-10-01 | Effects, sends, returns and automation in the Rust engine, device panels and lanes in the app (rebuild M6, D44) | #19 | Played through the speakers by script; nobody listened |
 | 2026-10-01 | Editing in the app: mixer, clips, tracks and returns, undo by origin (rebuild M5, D43) | #18 | Scripted input only |
