@@ -19,7 +19,7 @@ def test_init_and_describe_through_either_entry_point(tmp_path):
     assert daw("init", tmp_path / "other")["project"] == str((tmp_path / "other" / "song.yaml").resolve())
     assert load(tmp_path / "other" / "song.yaml")["session"]["length_beats"] == 64
 
-    for topic in ["project", "sampler", "effects", "automation"]:
+    for topic in ["project", "sampler", "effects", "automation", "edit", "beats", "joins", "export"]:
         described = daw("describe", topic)
         assert cli("describe", topic) == (0, described)
         assert described["semantics"]

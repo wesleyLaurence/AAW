@@ -62,7 +62,7 @@ person can see and adjust.
 | 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | |
 | 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | Done, October 1, 2026 |
 | 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | Done, October 1, 2026 |
-| 7 | Personal skills and assets | No place for a skill that Git ignores; nothing documents how to write one | Running the process by name | |
+| 7 | Personal skills and assets | No place for a skill that Git ignores; nothing documents how to write one | Running the process by name | Done, October 1, 2026 |
 | 8 | Smaller gaps | See below | Convenience | |
 
 Features 1, 2, 5, 6 and 7 are enough for a request that needs no speed change,
@@ -309,6 +309,19 @@ Needed:
   export should say which was applied and by how much.
 
 ### 7. Personal skills and assets
+
+**Done, October 1, 2026.** A personal skill lives in `.claude/skills/NAME/`, which
+Git ignores apart from the generic skills `.gitignore` names; the person's own
+skills folder works too. `.claude/skills/song-edit/` is the tracked, generic skill
+for this kind of edit, and a personal skill refers to it and holds only what is
+personal. `daw describe` has the topics `edit`, `beats`, `joins` and `export`,
+with importing under `samples` in `project`. AGENTS.md names personal skills in
+its Git scope and points to the skill and the topics. Reusable sounds live under
+`content/` and are imported by path. See [skills.md](skills.md) and D52 in
+[decisions.md](decisions.md). The generic skill was run once by hand on a
+generated song; no personal skill was written or run, and the skill still builds
+parts from pads and has no speed change, until features 4 and 3. What follows is
+the analysis as it was written.
 
 Today nothing in the repository mentions skills except the design notes. There is
 no `.claude/` directory, `.gitignore` covers `/projects/` and `/content/` but not

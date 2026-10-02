@@ -177,6 +177,10 @@ play is refused; see "Format v1" in [docs/mvp.md](docs/mvp.md).
 `daw samples beats` maps a whole song: its tempo, every beat, the downbeats with
 their alternatives, where the arrangement changes, the beats near a timecode and a
 click audition to check the grid by ear. See [docs/beat-map.md](docs/beat-map.md).
+To edit a finished song from timecodes, the `song-edit` skill in `.claude/skills/`
+says what to do, and `daw describe edit`, `beats`, `joins` and `export` say how.
+Personal skills and the sounds they reuse stay out of Git; see
+[docs/skills.md](docs/skills.md).
 `daw joins` checks a rendered edit of a song: whether the beat carries across each
 join, whether the splice shows as a step, the level either side and the file's
 length, with an excerpt of each join to hear. See [docs/join-checks.md](docs/join-checks.md).

@@ -12,6 +12,8 @@ downbeats and phrase changes, the beats near a timecode, and a click audition.
 across each join of an edited song, the splice, the level and the file's length.
 [export.md](export.md) documents `daw export`: a named WAV, AAC or MP3 file from a
 render, the level policy and the record beside the file.
+[skills.md](skills.md) says where a personal skill and its sounds live, what the
+tracked `song-edit` skill covers, and which `daw describe` topic explains each step.
 [effects.md](effects.md) documents track, return and master insert effects,
 sidechain compression, the limiter, delay and reverb, and sends to return buses.
 [automation.md](automation.md) documents automation lanes for levels, pans, sends
