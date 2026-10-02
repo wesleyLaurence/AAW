@@ -151,11 +151,34 @@ fn schedule(data: &Bound<'_, PyAny>) -> PyResult<Vec<(i64, String, String, Optio
     Ok(triggers.into_iter().map(|t| (t.start, t.track_id, t.pad, t.cutoff)).collect())
 }
 
-/// What `daw check` warns about in a valid song: lanes on bypassed effects.
+/// What `daw check` warns about in a valid song: lanes on bypassed effects, and
+/// pads stretched far enough to hear or with nothing to stretch to.
 #[pyfunction]
 fn warnings(data: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     let p = project(data)?;
     let mut out = Vec::new();
+    for t in &p.tracks {
+        for (name, pad) in &t.pads {
+            if pad.stretch != aaw_model::Stretch::PreservePitch {
+                continue;
+            }
+            match pad.source_bpm {
+                None => out.push(format!(
+                    "{}.{name}: stretch is preserve_pitch but source_bpm is not set, so nothing is stretched",
+                    t.id
+                )),
+                Some(bpm) => {
+                    let percent = (p.session.tempo / bpm - 1.0) * 100.0;
+                    if percent.abs() > 8.0 {
+                        out.push(format!(
+                            "{}.{name}: stretched {percent:+.1}% from {bpm} BPM; more than about 8% can be heard",
+                            t.id
+                        ));
+                    }
+                }
+            }
+        }
+    }
     for owner in owners(&p) {
         for lane in owner.automation() {
             let Ok(t) = target(owner, &lane.param) else { continue };

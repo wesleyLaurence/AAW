@@ -674,6 +674,15 @@
           "default": null,
           "title": "Source Bpm"
         },
+        "stretch": {
+          "default": "repitch",
+          "enum": [
+            "repitch",
+            "preserve_pitch"
+          ],
+          "title": "Stretch",
+          "type": "string"
+        },
         "mono": {
           "default": false,
           "title": "Mono",
@@ -1140,6 +1149,15 @@
           "minimum": 0,
           "title": "End Fade Ms",
           "type": "number"
+        },
+        "stretcher": {
+          "default": "signalsmith",
+          "enum": [
+            "signalsmith",
+            "rubberband"
+          ],
+          "title": "Stretcher",
+          "type": "string"
         }
       },
       "title": "Session",

@@ -20,6 +20,7 @@ pub fn project_hash(project: &Project) -> String {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Value> {
     vec![
+        dict(vec![("stretch", Value::str("repitch")), ("stretcher", Value::str("signalsmith"))]),
         dict(vec![("source_sha256", Value::None)]),
         dict(vec![("automation", Value::List(vec![])), ("id", Value::None)]),
         dict(vec![("sends", Value::List(vec![])), ("returns", Value::List(vec![]))]),

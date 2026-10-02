@@ -210,13 +210,14 @@ frequencies, localized arrangement edits, previews and tampered render artifacts
 ## Deliberately deferred
 
 Recording, saturation, groups, synths,
-plugin hosting, time stretching, MIDI import/export, modulation (LFOs), tempo
+plugin hosting, MIDI import/export, modulation (LFOs), tempo
 automation, semantic/audio embedding search,
 key/chord detection, swing detection, sample sustain looping, incremental render caching,
 masking diagnosis, reference alignment and autonomous listening/revision. A bounded
 perception layer is implemented; see [perception.md](perception.md). Monophonic pitch
 and loop tempo measurement is implemented; see [sample-analysis.md](sample-analysis.md).
-A whole song's beats and downbeats are measured; see [beat-map.md](beat-map.md). The CLI is ready
+A whole song's beats and downbeats are measured; see [beat-map.md](beat-map.md).
+A pad can follow the tempo at its own pitch; see [time-stretch.md](time-stretch.md). The CLI is ready
 for agent-driven iterative use. The milestones of
 [Rust-Swift-Update.md](Rust-Swift-Update.md) are done; the app is packaged as a
 bundle with `daw` inside it, and has not yet been signed with a Developer ID.

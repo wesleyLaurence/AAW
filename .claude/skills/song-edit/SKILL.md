@@ -55,8 +55,10 @@ middle of a phrase, say which beat you chose and why, and offer the other.
 7. **Render and check.** `daw render`, then `daw joins` on the render with
    `--limit` when the request gives a length. Fix every flag you can: a beat that
    slips, beats removed that are not whole bars, a first beat inside a fade, a
-   step at a splice. If the file is too long, look for another whole phrase that
-   could come out, and ask.
+   step at a splice. If the file is too long, first look for another whole phrase
+   that could come out, and ask. Otherwise raise the tempo just enough, with the
+   parts set to keep their pitch; say how many percent, and above about 8 ask
+   first.
 8. **Export.** `daw export` to the project's `exports/` folder, under the name
    and in the format the person asked for.
 
@@ -76,8 +78,7 @@ for themselves.
 
 ## Never
 
-- Change the pitch of the song. There is no pitch-preserving speed change yet; if
-  the edit is too long, remove music or ask.
+- Change the pitch of the song. A speed change keeps it (`stretch: preserve_pitch`).
 - Leave a join that is off the beat, even by a little.
 - Edit the original song file or anything in the sample library. Import, and work
   on the copy.

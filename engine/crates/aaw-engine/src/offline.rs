@@ -3,11 +3,11 @@
 
 use crate::program::{amplitude, compile_scoped, Cache, Scope};
 use crate::render::{DeviceReport, Frame, Renderer};
-use crate::{sndfile, wav};
+use crate::{sndfile, stretch, wav};
 use aaw_dsp::resample::{pairwise_sum, Resampler};
 use aaw_model::pyfmt::{json_dumps, json_dumps_indent};
 use aaw_model::value::{dict, Value};
-use aaw_model::{frame, project_hash, Project};
+use aaw_model::{frame, project_hash, Project, Stretch, Stretcher};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -213,10 +213,25 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         sample_hashes.push((name.as_str(), Value::str(&digest)));
     }
     let sample_hashes = dict(sample_hashes);
-    let dependencies = dict(vec![
+    let mut dependencies = vec![
         ("aaw-engine", Value::str(env!("CARGO_PKG_VERSION"))),
         ("libsndfile", Value::str(&sndfile::version())),
-    ]);
+    ];
+    // A song that stretches names what stretched it; one that does not keeps
+    // the identity it had.
+    let stretches = p.tracks.iter().flat_map(|t| t.pads.values()).any(|pad| {
+        pad.stretch == Stretch::PreservePitch && pad.source_bpm.is_some_and(|bpm| bpm != p.session.tempo)
+    });
+    if stretches {
+        dependencies.push((
+            "stretcher",
+            Value::str(&match p.session.stretcher {
+                Stretcher::Signalsmith => stretch::SIGNALSMITH.to_string(),
+                Stretcher::Rubberband => stretch::rubberband_version()?,
+            }),
+        ));
+    }
+    let dependencies = dict(dependencies);
     let opt_str = |s: &Option<String>| s.as_deref().map_or(Value::None, Value::str);
     let render_id = hex(&Sha256::digest(
         json_dumps(&dict(vec![
@@ -363,7 +378,10 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         ("send_policy", Value::str("post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks send nothing; returns are never solo-muted")),
         ("sidechain_policy", Value::str("key is the source track after its inserts, before its gain, pan, mute and solo")),
         ("automation_policy", Value::str("lanes override static values for the whole song, holding the first value before the first point and the last after the last point; a lane whose points share one value renders exactly as that static value; gain, pan and send levels change per frame, compressor, delay and reverb parameters per frame, filter and eq coefficients every 64 frames; no smoothing")),
-        ("pitch_policy", Value::str("bandlimited repitch; pitch changes duration; source_bpm also repitches")),
+        (
+            "pitch_policy",
+            Value::str("bandlimited repitch; pitch changes duration; source_bpm repitches, or stretches in time at the same pitch where the pad's stretch is preserve_pitch"),
+        ),
     ]);
     write_text(&output.join("report.json"), &(json_dumps_indent(&manifest) + "\n"))?;
     aaw_model::save(&p, &output.join("song.snapshot.yaml")).map_err(|e| e.to_string())?;

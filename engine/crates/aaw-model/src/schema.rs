@@ -226,6 +226,42 @@ impl PadMode {
     }
 }
 
+/// What a pad does with a sample whose tempo is not the session's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stretch {
+    /// Plays it faster or slower, and its pitch moves with its speed.
+    Repitch,
+    /// Stretches it in time and keeps its pitch.
+    PreservePitch,
+}
+
+impl Stretch {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stretch::Repitch => "repitch",
+            Stretch::PreservePitch => "preserve_pitch",
+        }
+    }
+}
+
+/// The time stretcher a song's `preserve_pitch` pads are stretched with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Stretcher {
+    /// Signalsmith Stretch, built into the engine.
+    Signalsmith,
+    /// Rubber Band's finer engine, run as the installed `rubberband` program.
+    Rubberband,
+}
+
+impl Stretcher {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Stretcher::Signalsmith => "signalsmith",
+            Stretcher::Rubberband => "rubberband",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Pad {
     pub sample: String,
@@ -240,13 +276,14 @@ pub struct Pad {
     pub choke_group: Option<String>,
     pub reverse: bool,
     pub source_bpm: Option<f64>,
+    pub stretch: Stretch,
     pub mono: bool,
 }
 
 impl Pad {
     const FIELDS: &'static [&'static str] = &[
         "sample", "mode", "gain_db", "pan", "transpose", "start_seconds", "end_seconds",
-        "attack_ms", "release_ms", "choke_group", "reverse", "source_bpm", "mono",
+        "attack_ms", "release_ms", "choke_group", "reverse", "source_bpm", "stretch", "mono",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Pad> {
@@ -276,6 +313,15 @@ impl Pad {
         let source_bpm = f.opt(ctx, "source_bpm", None, |c, x| {
             v::optional(c, x, |c, x| v::float(c, x, Bounds::ge_le("20", "400")))
         });
+        let stretch = f.opt(ctx, "stretch", Stretch::Repitch, |c, x| {
+            v::literal_str(c, x, &["repitch", "preserve_pitch"]).map(|m| {
+                if m == "preserve_pitch" {
+                    Stretch::PreservePitch
+                } else {
+                    Stretch::Repitch
+                }
+            })
+        });
         let mono = f.opt(ctx, "mono", false, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
@@ -294,6 +340,7 @@ impl Pad {
             choke_group: choke_group?,
             reverse: reverse?,
             source_bpm: source_bpm?,
+            stretch: stretch?,
             mono: mono?,
         };
         if pad.end_seconds.is_some_and(|end| end <= pad.start_seconds) {
@@ -317,6 +364,7 @@ impl Pad {
         o.opt("choke_group", opt_str(&self.choke_group));
         o.bool("reverse", self.reverse, false);
         o.opt("source_bpm", self.source_bpm.map(Value::Float));
+        o.str("stretch", self.stretch.as_str(), "repitch");
         o.bool("mono", self.mono, false);
         o.done()
     }
@@ -1377,11 +1425,13 @@ pub struct Session {
     pub length_beats: Beat,
     pub master_gain_db: f64,
     pub end_fade_ms: f64,
+    pub stretcher: Stretcher,
 }
 
 impl Session {
     const FIELDS: &'static [&'static str] = &[
         "title", "tempo", "time_signature", "sample_rate", "length_beats", "master_gain_db", "end_fade_ms",
+        "stretcher",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Session> {
@@ -1409,6 +1459,15 @@ impl Session {
         });
         let master_gain_db = f.opt(ctx, "master_gain_db", -6.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let end_fade_ms = f.opt(ctx, "end_fade_ms", 20.0, |c, x| v::float(c, x, Bounds::ge_le("0", "10000")));
+        let stretcher = f.opt(ctx, "stretcher", Stretcher::Signalsmith, |c, x| {
+            v::literal_str(c, x, &["signalsmith", "rubberband"]).map(|m| {
+                if m == "rubberband" {
+                    Stretcher::Rubberband
+                } else {
+                    Stretcher::Signalsmith
+                }
+            })
+        });
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -1421,6 +1480,7 @@ impl Session {
             length_beats: length_beats?,
             master_gain_db: master_gain_db?,
             end_fade_ms: end_fade_ms?,
+            stretcher: stretcher?,
         })
     }
 
@@ -1437,6 +1497,7 @@ impl Session {
         o.beat("length_beats", &self.length_beats, &Beat::int(16));
         o.float("master_gain_db", self.master_gain_db, -6.0);
         o.float("end_fade_ms", self.end_fade_ms, 20.0);
+        o.str("stretcher", self.stretcher.as_str(), "signalsmith");
         o.done()
     }
 }
@@ -1585,6 +1646,7 @@ impl Default for Project {
                 length_beats: Beat::int(16),
                 master_gain_db: -6.0,
                 end_fade_ms: 20.0,
+                stretcher: Stretcher::Signalsmith,
             },
             samples: IndexMap::new(),
             patterns: IndexMap::new(),

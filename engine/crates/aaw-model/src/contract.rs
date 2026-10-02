@@ -21,7 +21,7 @@ const PROJECT: &[(&str, &str)] = &[
     ("time", "All at/duration/length_beats fields are quarter-note beats. at is zero-based. Use fraction strings for triplets. 4/4 only."),
     ("steps", "x = velocity 100, digits 1–9 = scaled velocities, dot = rest. Whitespace and | ignored. grid is beats per cell; 1/4 = sixteenth note."),
     ("swing", "0.5 straight, 0.75 maximum; delays odd step cells. Explicit events are unswung."),
-    ("pitch", "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. No pitch-preserving stretch. daw samples analyze measures pitch; import --root-note auto uses it; check warns when a declared root disagrees with the audio."),
+    ("pitch", "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. daw samples analyze measures pitch; import --root-note auto uses it; check warns when a declared root disagrees with the audio."),
     ("samples", "sample.path is a file in the project that libsndfile reads: mono or stereo WAV, AIFF or FLAC. daw samples import copies such a file in, and decodes .m4a and .mp3 once to 32-bit float WAV, with the original's hash as source_sha256; a decoded file can peak a little above full scale. Copy-protected files cannot be decoded. check warns of a sample the engine cannot read."),
     ("gate", "Gate mode requires event.duration. Voice releases at note-off; it never sustains beyond sample length."),
     ("choke", "Pads sharing a choke_group within a track release on the next hit in that group."),
@@ -32,7 +32,8 @@ const PROJECT: &[(&str, &str)] = &[
     ("effects", "tracks[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects."),
     ("returns", "returns[] are reverb/delay buses fed by tracks[].sends; see daw describe effects."),
     ("automation", "tracks[].automation, returns[].automation and master.automation move gain, pan, send levels and effect parameters over time; see daw describe automation."),
-    ("limits", "No groups, synths, time stretching or recording."),
+    ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
+    ("limits", "No groups, synths or recording."),
 ];
 
 const EFFECT: &[(&str, &str)] = &[
@@ -71,7 +72,7 @@ const AUTOMATION: &[(&str, &str)] = &[
 
 const EDIT: &[(&str, &str)] = &[
     ("parts", "An edit keeps parts of a finished song and joins them. A part is a pad of the song's sample with start_seconds and end_seconds, played by one event of a pattern on one track. Give each part its own pad."),
-    ("session", "Set session.tempo to the song's measured tempo (daw describe beats), so a beat of the song is a beat of the session. Leave source_bpm unset: it repitches. Set session.sample_rate to the song's own rate when that is 44100 or 48000, so the song is not resampled, and session.master_gain_db to 0, which is -6 in a new song."),
+    ("session", "Set session.tempo to the song's measured tempo (daw describe beats), so a beat of the song is a beat of the session. Set session.sample_rate to the song's own rate when that is 44100 or 48000, so the song is not resampled, and session.master_gain_db to 0, which is -6 in a new song."),
     ("cut", "Cut a few milliseconds before the beat, not on it, so the incoming hit is whole. With lead = 0.005 s, a part that starts on the song's beat at B seconds has start_seconds = B - lead."),
     ("place", "To put that beat on session beat N, the part's event is at N - lead * tempo / 60 beats. A decimal is exact enough: frames are rounded once from the beat."),
     ("join", "The leaving part has end_seconds = E - lead + fade and release_ms = fade * 1000, where E is the song time of the first beat it does not play and fade is the crossfade in seconds. The entering part starts lead before its first beat, as any part does, with attack_ms a little under lead * 1000, so its fade in is over when the beat arrives. A fade of 0.010 to 0.012 s out and 4 ms in suits a cut in the quiet before a hit; use longer only under a sustained sound."),
@@ -81,7 +82,8 @@ const EDIT: &[(&str, &str)] = &[
     ("times", "daw timeline SONG --seconds TIME gives a time on the edit's timeline in beats, and --beats the other way. Times in the original song are another matter: they come from daw samples beats."),
     ("level", "A mastered song is at full scale and a render refuses to clip. Give each part's event velocity 127, since the default 100 plays it 2 dB down. With the song's track and the master at 0 dB, put a limiter on master.effects rather than turning the song down, so the song stays as loud as the original and only what is added on top is taken down; see daw describe effects. daw export --match SAMPLE reports how the file's loudness compares with the song's."),
     ("check", "Render, run daw joins on the render (daw describe joins), then daw export (daw describe export)."),
-    ("limits", "No pitch-preserving speed change yet: a faster session.tempo with source_bpm set raises the pitch. Parts are pads until the song has audio clips."),
+    ("speed", "To make an edit shorter without changing its pitch, give each part's pad source_bpm, the song's measured tempo, and stretch: preserve_pitch, then raise session.tempo. Everything placed in beats stays where it is, so the joins hold; sounds without source_bpm keep their own length. daw timeline SONG --tempo-for SECONDS gives the tempo that makes the song that long. A few percent is the normal range; ask before going past about 8."),
+    ("limits", "Parts are pads until the song has audio clips."),
 ];
 
 const BEATS: &[(&str, &str)] = &[

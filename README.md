@@ -182,6 +182,9 @@ To edit a finished song from timecodes, the `song-edit` skill in `.claude/skills
 says what to do, and `daw describe edit`, `beats`, `joins` and `export` say how.
 Personal skills and the sounds they reuse stay out of Git; see
 [docs/skills.md](docs/skills.md).
+A pad with `source_bpm` and `stretch: preserve_pitch` follows the session's tempo at
+its own pitch, so an edit can be made a few percent shorter by raising the tempo.
+See [docs/time-stretch.md](docs/time-stretch.md).
 `daw timeline` gives a song's places in beats and in seconds, where its sound ends,
 the beat a sound starts on to end on another, and fits the session's length. See
 [docs/timeline.md](docs/timeline.md).

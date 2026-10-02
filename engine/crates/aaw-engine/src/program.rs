@@ -11,12 +11,13 @@
 //! frames in all.
 
 use crate::sndfile;
+use crate::stretch::{self, MARGIN_SECONDS};
 use aaw_dsp::device::{Kernels, Plan};
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
 use aaw_model::rules::{midi, target, Owner, TargetKind};
 use aaw_model::schedule::{track_triggers, Trigger};
-use aaw_model::{frame, Effect, Event, Lane, Pad, Project};
+use aaw_model::{frame, Effect, Event, Lane, Pad, Project, Stretch, Stretcher};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 use std::hash::{Hash, Hasher};
@@ -253,6 +254,9 @@ struct PrepKey {
     reverse: bool,
     mono: bool,
     speed: u64,
+    /// How many times as fast it plays at its own pitch, as bits; 1 for none.
+    stretch: u64,
+    stretcher: Stretcher,
     rate: i64,
 }
 
@@ -308,7 +312,8 @@ struct Job {
 }
 
 impl Job {
-    /// Trims, reverses, downmixes and repitches, as `Sampler.prepare`.
+    /// Trims, reverses, downmixes, stretches and repitches, as `Sampler.prepare`
+    /// did all but the stretching.
     fn make(&self) -> Result<Prepared, String> {
         let (x, k) = (&self.audio, &self.key);
         let frames = x.frames();
@@ -322,16 +327,30 @@ impl Job {
             return Err(format!("{}: trim outside sample", self.sample));
         }
         let ch = x.channels;
-        let mut rows: Vec<&[f64]> = (start..end.max(start)).map(|i| &x.data[i * ch..(i + 1) * ch]).collect();
-        if k.reverse {
-            rows.reverse();
-        }
+        let stretch = f64::from_bits(k.stretch);
+        // A stretched region is stretched with some of the file either side of
+        // it, which is then cut off, so what the stretcher does at its own start
+        // and end is not in the region.
+        let margin = if stretch == 1.0 { 0 } else { (MARGIN_SECONDS * source_rate) as usize };
+        let (from, to) = (start.saturating_sub(margin), (end.max(start) + margin).min(frames));
+        let rows: Vec<&[f64]> = (from..to).map(|i| &x.data[i * ch..(i + 1) * ch]).collect();
         let (channels, mut data): (usize, Vec<f64>) = if k.mono {
             let mean = |r: &[f64]| r.iter().fold(0.0, |s, v| s + v) / ch as f64;
             (1, rows.iter().map(|r| mean(r)).collect())
         } else {
             (ch, rows.concat())
         };
+        if stretch != 1.0 {
+            let whole = stretch::stretch(&data, channels, x.rate, stretch, k.stretcher)
+                .map_err(|e| format!("{}: {e}", self.sample))?;
+            let first = ((start - from) as f64 / stretch).round() as usize;
+            let count = ((end.max(start) - start) as f64 / stretch).round() as usize;
+            let last = (first + count).min(whole.len() / channels);
+            data = whole[first.min(last) * channels..last * channels].to_vec();
+        }
+        if k.reverse {
+            data = data.chunks(channels).rev().flatten().copied().collect();
+        }
         if let Some((up, down)) = repitch_ratio(k.rate as u32, x.rate, f64::from_bits(k.speed)) {
             if !data.is_empty() {
                 data = resample_poly(&data, channels, up, down);
@@ -447,9 +466,16 @@ impl<'a> Sampler<'a> {
             semitones += (midi(note)? - midi(root)?) as f64;
         }
         let mut speed = 2f64.powf(semitones / 12.0);
+        let mut stretch = 1.0;
         if let Some(bpm) = pad.source_bpm {
-            speed *= self.project.session.tempo / bpm;
+            let ratio = self.project.session.tempo / bpm;
+            match pad.stretch {
+                Stretch::Repitch => speed *= ratio,
+                Stretch::PreservePitch => stretch = ratio,
+            }
         }
+        // Audio that is not stretched is the same whichever stretcher the song names.
+        let stretcher = if stretch == 1.0 { Stretcher::Signalsmith } else { self.project.session.stretcher };
         Ok(Job {
             key: PrepKey {
                 path,
@@ -459,6 +485,8 @@ impl<'a> Sampler<'a> {
                 reverse: pad.reverse,
                 mono: pad.mono,
                 speed: speed.to_bits(),
+                stretch: stretch.to_bits(),
+                stretcher,
                 rate: self.project.session.sample_rate,
             },
             audio,
