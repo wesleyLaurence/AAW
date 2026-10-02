@@ -188,6 +188,7 @@ A moving lane costs little. A minute of continuous change on a 48 dB filter or
 an EQ band adds less than a tenth of a second to a render on an M2.
 
 Not yet implemented: smoothing options and curves other than a bent line and a
-hold. The Mac app draws a shaped segment as a straight line. Also missing are LFOs and other modulation, automation of switches and
+hold. The Mac app draws a shaped segment as the curve it plays; a shape is set
+with `daw`, not in the app. Also missing are LFOs and other modulation, automation of switches and
 device-rebuilding parameters, automation of pad or sampler parameters, and tempo
 automation.

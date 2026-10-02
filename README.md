@@ -191,8 +191,10 @@ says what to do, and `daw describe edit`, `beats`, `joins` and `export` say how.
 Personal skills and the sounds they reuse stay out of Git; see
 [docs/features/skills.md](docs/features/skills.md).
 A track's `audio` lists audio clips, parts of a sample file placed on beats, and
-`daw audio` adds, cuts, splits, trims and crossfades them: an edit of a song is one
+`daw audio` adds, moves, cuts, splits, trims and crossfades them: an edit of a song is one
 clip with ranges cut out. See [docs/features/audio-clips.md](docs/features/audio-clips.md).
+In the Mac app an audio file dropped on the timeline is such a clip, which is moved,
+trimmed, faded and split there. See [docs/features/audio-clips-in-app.md](docs/features/audio-clips-in-app.md).
 A pad or an audio clip with `source_bpm` and `stretch: preserve_pitch` follows the session's tempo at
 its own pitch, so an edit can be made a few percent shorter by raising the tempo.
 See [docs/features/time-stretch.md](docs/features/time-stretch.md).

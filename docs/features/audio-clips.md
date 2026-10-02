@@ -62,11 +62,11 @@ what a join in an edit is. `linear` fades keep it across audio that is the same.
 ```sh
 uv run daw track add SONG song
 uv run daw audio add SONG song song --at 4 --source-start-seconds 41.213 --lead-ms 5 --fade-in-ms 2
+uv run daw audio move SONG tracks.song.audio.1 --at 44 --track other   # to a beat, a track or both
 uv run daw audio cut SONG song --from 82 --to 98        # take sixteen beats out and close the gap
 uv run daw audio split SONG tracks.song.audio.0 --at 40
 uv run daw audio trim SONG tracks.song.audio.1 --end 120
 uv run daw audio crossfade SONG tracks.song.audio.1 --ms 20
-uv run daw set SONG tracks.song.audio.1.at 44           # move a clip
 uv run daw remove SONG tracks.song.audio.1              # remove one
 ```
 
@@ -74,6 +74,8 @@ A clip is named by its path, `tracks.TRACK.audio.N`, or by the `@N` reference
 `daw inspect` lists while a host runs. Beats are the session's.
 
 - **`audio add`** takes the clip's fields as `--field value`.
+- **`audio move CLIP --at BEAT --track TRACK`** takes a clip to another beat,
+  another track or both. Its audio goes with it and it keeps its reference.
 - **`audio cut TRACK --from A --to B`** removes those beats from the track's audio
   clips. A clip across the cut becomes two; a clip inside it is removed; clips
   after it move earlier by its length; and the join is crossfaded: 12 ms out, 4 ms
@@ -97,11 +99,15 @@ Each is one step of the host's undo history, like any command.
 - `daw describe edit` has the schema and what the fields mean.
 - The engine plays a clip as one voice of its track, so the track's effects,
   sends, automation and stem are those of any track.
+- The Mac app draws a track's audio clips with their file's waveform, and
+  moves, trims, fades and splits them:
+  [audio-clips-in-app.md](audio-clips-in-app.md).
 
 ## Limits
 
-- The Mac app plays audio clips and does not draw them yet. Dragging a clip's
-  edges and fades, and the beat map on its waveform, are not built.
+- A command leaves the song's length alone: a clip must start inside the song,
+  and what it plays past the song's end is not heard. The Mac app lengthens the
+  song for a clip placed there ([audio-clips-in-app.md](audio-clips-in-app.md)).
 - A cut is of one track. A sound on another track that should move with it is
   moved by hand.
 - A split of a clip that is stretched in time is two regions stretched apart, so
