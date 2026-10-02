@@ -14,14 +14,16 @@ kept.
 
 ## Next
 
-1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **Audio clips in the app.** Draw a track's audio clips with their waveform,
+   drag their edges and fades, and show the beat map on the waveform. An audio
+   file dropped on a track's lane lands as an audio clip at that beat, not as a
+   pad, and a clip is dragged to move it. Draw a shaped automation segment as the
+   curve it plays. Today the app plays audio clips without drawing them, and
+   draws a shaped segment as a straight line.
+2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-2. **Audio clips in the app.** Draw a track's audio clips with their waveform,
-   drag their edges and fades, and show the beat map on the waveform. Draw a
-   shaped automation segment as the curve it plays. Today the app plays audio clips
-   without drawing them, and draws a shaped segment as a straight line.
 3. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
@@ -44,8 +46,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - **How the app sounds.** Nobody listened during the scripted runs of the rebuild:
   the glide of a level or knob, the 10 ms dip when an effect is added or removed
   while playing, tails ringing through an edit, a locate and a stop.
-- **Dragging a sample** from the browser or the Finder onto the arrangement.
-  Scripted input cannot start a drag; only the + beside a sample was tried.
+- **Dragging a sample** from the browser onto the arrangement, and a drop where
+  there is no track. Scripted input cannot start a drag. A WAV dropped on a
+  track was tried on 2026-10-02 and became a pad, as built; the person expected
+  an audio clip, which is item 1 of Next.
 - **Install Command Line Tool:** its alerts and the request for an administrator's
   password.
 - **A stretched render, by ear.** The default stretcher was chosen on licensing,
@@ -117,6 +121,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   reverse or repeat; perhaps one list for pattern clips and audio clips.
 - A join check that places a pad transposed by an event at its transposed length.
 - A long song streamed from disk; a decoded song is held whole in memory.
+- An event's offset in milliseconds, either side of its beat. A push or a drag
+  is written in beats today, so it changes with the tempo, and a hit cannot sit
+  ahead of its pattern's first beat.
+- A grid for each step row. A pattern has one, so triplet hats over straight
+  kicks are steps for one and events for the other.
 
 ### Tools and devices the agent writes
 
@@ -160,6 +169,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - A project made with `daw init` in the app's index.
 - A track's color saved in the song.
 - A pad's own settings (level, tuning, held or not) in the device panel.
+- A sample added as a pad shows where it went. Nothing on the timeline changes,
+  and the person looked for the file on the track.
+- The pattern's step menu in note values: 1/16 and 1/8T, as other DAWs write
+  them. It lists beats, so its 1/4 is a sixteenth note.
 - A loop from the browser fitted to the song's tempo when it is added.
 - Several events selected, copied and pasted; several clips selected by dragging
   over them; several automation points selected.
@@ -189,4 +202,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ## Ideas
 
-Nothing yet. One line each, newest first.
+One line each, newest first.
+
+- A `.mid` file dropped on a track lands as pattern clips: its notes as events
+  of a pitched pad, or of the track's pads by drum note. Wants the MIDI import
+  under Sound, and says what plays a file dropped where there is no pad.
