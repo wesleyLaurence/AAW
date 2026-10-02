@@ -17,7 +17,7 @@ use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
 use aaw_model::rules::{midi, target, Owner, TargetKind};
 use aaw_model::schedule::{track_triggers, Trigger};
-use aaw_model::{frame, Effect, Event, Lane, Pad, Project, Stretch, Stretcher};
+use aaw_model::{frame, AudioClip, Effect, Event, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 use std::hash::{Hash, Hasher};
@@ -50,6 +50,17 @@ pub struct Voice {
     pub attack: usize,
     pub release: usize,
     pub length: usize,
+    /// The shape of its fades: a line for a pad, a clip's own for an audio clip.
+    pub curve: FadeCurve,
+}
+
+/// A fade's level when it is `x` of the way from silence to full.
+#[inline]
+fn shape(curve: FadeCurve, x: f64) -> f64 {
+    match curve {
+        FadeCurve::Linear => x,
+        FadeCurve::EqualPower => (x * PI / 2.0).sin(),
+    }
 }
 
 impl Voice {
@@ -68,13 +79,13 @@ impl Voice {
     fn envelope(&self, i: usize) -> f64 {
         let mut env = 1.0;
         if self.attack != 0 {
-            env *= (i as f64 / self.attack as f64).min(1.0);
+            env *= shape(self.curve, (i as f64 / self.attack as f64).min(1.0));
         }
         // Every natural sample ending fades. A gate releases at the note-off frame.
         let natural = self.release.min(self.length);
         if natural != 0 {
             let remaining = (self.length as f64 - 1.0 - i as f64) / natural.max(1) as f64;
-            env *= remaining.max(0.0).min(1.0);
+            env *= shape(self.curve, remaining.max(0.0).min(1.0));
         }
         env
     }
@@ -375,6 +386,13 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
                 jobs.push(job);
             }
         }
+        for clip in &t.audio {
+            let leaves = sampler.clip_leaves(&t.audio, clip);
+            let Ok(job) = sampler.clip_job(clip, leaves) else { break 'tracks };
+            if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
+                jobs.push(job);
+            }
+        }
     }
     if jobs.len() < 2 {
         return;
@@ -456,20 +474,87 @@ impl<'a> Sampler<'a> {
     /// What a pad's audio for an event is prepared from.
     fn job(&mut self, pad: &Pad, event: &Event) -> Result<Job, String> {
         let asset = &self.project.samples[&pad.sample];
-        let (path, stamp, audio) = self.original(&pad.sample)?;
-        if !self.originals.contains(&path) {
-            self.originals.push(path.clone());
-        }
         let mut semitones = pad.transpose + event.transpose;
         if let Some(note) = &event.note {
             let root = asset.root_note.as_deref().expect("validated root note");
             semitones += (midi(note)? - midi(root)?) as f64;
         }
+        let follow = (pad.source_bpm, pad.stretch);
+        self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow)
+    }
+
+    /// Seconds of an audio clip's file to a second of the timeline.
+    fn clip_speed(&self, clip: &AudioClip) -> f64 {
+        clip.source_bpm.map_or(1.0, |bpm| self.project.session.tempo / bpm)
+    }
+
+    /// The second of the timeline an audio clip's beat is on, before any
+    /// rounding to frames.
+    fn clip_beat(&self, clip: &AudioClip) -> f64 {
+        let beats = num_traits::ToPrimitive::to_f64(&clip.at_exact()).unwrap_or(0.0);
+        beats * 60.0 / self.project.session.tempo
+    }
+
+    /// How many seconds before its beat an audio clip starts: its lead, and no
+    /// earlier than its file's start or the song's.
+    fn clip_lead(&self, clip: &AudioClip) -> f64 {
+        let in_file = clip.source_start_seconds / self.clip_speed(clip);
+        (clip.lead_ms / 1000.0).min(in_file).min(self.clip_beat(clip))
+    }
+
+    /// How many seconds before its end an audio clip starts to leave: the lead
+    /// of the clip of `track` that starts where it ends, so the two meet at one
+    /// place before the beat, and none when no clip does.
+    fn clip_leaves(&self, track: &[AudioClip], clip: &AudioClip) -> f64 {
+        let Some(end) = clip.source_end_seconds else { return 0.0 };
+        let ends = self.clip_beat(clip) + (end - clip.source_start_seconds) / self.clip_speed(clip);
+        track
+            .iter()
+            .find(|next| !std::ptr::eq(*next, clip) && (self.clip_beat(next) - ends).abs() < 0.0005)
+            .map_or(0.0, |next| self.clip_lead(next))
+    }
+
+    /// What an audio clip's audio is prepared from: its file from its lead
+    /// before its start to where it leaves, `leaves` seconds before its end,
+    /// and on through its fade out, as far as the file goes.
+    fn clip_job(&mut self, clip: &AudioClip, leaves: f64) -> Result<Job, String> {
+        let (_, _, audio) = self.original(&clip.sample)?;
+        let length = audio.frames() as f64 / audio.rate as f64;
+        let speed = self.clip_speed(clip);
+        let start = clip.source_start_seconds - self.clip_lead(clip) * speed;
+        let end = match clip.source_end_seconds {
+            Some(end) => (end + (clip.fade_out_ms / 1000.0 - leaves) * speed).min(length),
+            None => length,
+        };
+        if start >= end {
+            return Err(format!("{}: audio clip outside sample", clip.sample));
+        }
+        let follow = (clip.source_bpm, clip.stretch);
+        self.part(&clip.sample, start, Some(end), false, false, 0.0, follow)
+    }
+
+    /// The job for part of a sample: from `start` to `end` seconds of its
+    /// file, moved by `semitones`, and following the tempo as `follow` says.
+    #[allow(clippy::too_many_arguments)]
+    fn part(
+        &mut self,
+        sample: &str,
+        start: f64,
+        end: Option<f64>,
+        reverse: bool,
+        mono: bool,
+        semitones: f64,
+        follow: (Option<f64>, Stretch),
+    ) -> Result<Job, String> {
+        let (path, stamp, audio) = self.original(sample)?;
+        if !self.originals.contains(&path) {
+            self.originals.push(path.clone());
+        }
         let mut speed = 2f64.powf(semitones / 12.0);
         let mut stretch = 1.0;
-        if let Some(bpm) = pad.source_bpm {
+        if let Some(bpm) = follow.0 {
             let ratio = self.project.session.tempo / bpm;
-            match pad.stretch {
+            match follow.1 {
                 Stretch::Repitch => speed *= ratio,
                 Stretch::PreservePitch => stretch = ratio,
             }
@@ -480,22 +565,26 @@ impl<'a> Sampler<'a> {
             key: PrepKey {
                 path,
                 stamp,
-                start: pad.start_seconds.to_bits(),
-                end: pad.end_seconds.map(f64::to_bits),
-                reverse: pad.reverse,
-                mono: pad.mono,
+                start: start.to_bits(),
+                end: end.map(f64::to_bits),
+                reverse,
+                mono,
                 speed: speed.to_bits(),
                 stretch: stretch.to_bits(),
                 stretcher,
                 rate: self.project.session.sample_rate,
             },
             audio,
-            sample: pad.sample.clone(),
+            sample: sample.to_string(),
         })
     }
 
     pub fn prepare(&mut self, pad: &Pad, event: &Event) -> Result<Arc<Prepared>, String> {
         let job = self.job(pad, event)?;
+        self.prepared_for(job)
+    }
+
+    fn prepared_for(&mut self, job: Job) -> Result<Arc<Prepared>, String> {
         let g = self.cache.generation;
         if let Some((used, p)) = self.cache.prepared.get_mut(&job.key) {
             *used = g;
@@ -532,16 +621,56 @@ impl<'a> Sampler<'a> {
             release,
             length,
             audio,
+            curve: FadeCurve::Linear,
+        })
+    }
+
+    /// The voice an audio clip plays: its part of the file, starting its lead
+    /// before its beat, fading in over the start and out over the end. `track`
+    /// is the audio clips of its track.
+    pub fn clip_voice(&mut self, track: &[AudioClip], clip: &AudioClip) -> Result<Voice, String> {
+        let leaves = self.clip_leaves(track, clip);
+        let job = self.clip_job(clip, leaves)?;
+        // Where the first frame of the file it plays belongs on the timeline,
+        // rounded once from the exact place of its beat. A clip split in two
+        // then plays the same frames at the same places as the whole one.
+        let (_, _, file) = self.original(&clip.sample)?;
+        let (speed, file_rate) = (self.clip_speed(clip), file.rate as f64);
+        let first = ((clip.source_start_seconds - self.clip_lead(clip) * speed) * file_rate).round_ties_even();
+        let before = (clip.source_start_seconds * file_rate - first) / file_rate / speed;
+        let audio = self.prepared_for(job)?;
+        let rate = self.project.session.sample_rate as f64;
+        Ok(Voice {
+            start: ((self.clip_beat(clip) - before) * rate).round_ties_even() as i64,
+            // A clip plays its file as it is: a mono file at full level on both sides.
+            pan: [1.0, 1.0],
+            gain: amplitude(clip.gain_db),
+            velocity: 1.0,
+            attack: (clip.fade_in_ms * rate / 1000.0).round_ties_even() as usize,
+            release: (clip.fade_out_ms * rate / 1000.0).round_ties_even() as usize,
+            length: audio.frames(),
+            audio,
+            curve: clip.fade_curve,
         })
     }
 }
 
-/// Everything a track's voices are made from, as text: its pads and clips,
-/// the patterns it plays, its samples and their files, the tempo and rate.
+/// Everything a track's voices are made from, as text: its pads, clips and
+/// audio clips, the patterns it plays, its samples and their files, the tempo,
+/// the rate and the stretcher.
 fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
     use std::fmt::Write;
     let t = &p.tracks[ti];
-    let mut key = format!("{:?}|{:?}|{}|{}", t.pads, t.clips, p.session.tempo.to_bits(), p.session.sample_rate);
+    let session = &p.session;
+    let mut key = format!(
+        "{:?}|{:?}|{:?}|{}|{}|{:?}",
+        t.pads,
+        t.clips,
+        t.audio,
+        session.tempo.to_bits(),
+        session.sample_rate,
+        session.stretcher
+    );
     let mut seen: Vec<&str> = Vec::new();
     for c in &t.clips {
         if !seen.contains(&c.pattern.as_str()) {
@@ -550,12 +679,12 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
         }
     }
     seen.clear();
-    for pad in t.pads.values() {
-        if !seen.contains(&pad.sample.as_str()) {
-            seen.push(&pad.sample);
-            let asset = p.samples.get(&pad.sample);
+    for sample in t.pads.values().map(|pad| &pad.sample).chain(t.audio.iter().map(|clip| &clip.sample)) {
+        if !seen.contains(&sample.as_str()) {
+            seen.push(sample);
+            let asset = p.samples.get(sample);
             let file = asset.map(|a| stamp(&directory.join(&a.path)).ok());
-            let _ = write!(key, "|{}={:?}@{:?}", pad.sample, asset, file);
+            let _ = write!(key, "|{}={:?}@{:?}", sample, asset, file);
         }
     }
     key
@@ -587,6 +716,13 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
     let mut voices = Vec::new();
     for tr in track_triggers(p, ti) {
         voices.push(sampler.voice(&t.pads[&tr.pad], &tr)?);
+    }
+    if !t.audio.is_empty() {
+        for clip in &t.audio {
+            voices.push(sampler.clip_voice(&t.audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
+        }
+        // The renderer takes voices in the order they start.
+        voices.sort_by_key(|v| v.start);
     }
     let voices = Arc::new(voices);
     let (prepared, originals) = (sampler.prepared, sampler.originals);

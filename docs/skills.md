@@ -63,7 +63,7 @@ it is useful.
 
 | Topic | What it covers |
 |---|---|
-| `daw describe edit` | Building an edit of a song: parts, cuts before the beat, placement, fades at a join, level, and `daw timeline` for times, end alignment and length |
+| `daw describe edit` | Building an edit of a song from audio clips: the `daw audio` commands, the lead before a beat, fades at a join, level, speed, and `daw timeline` for times, end alignment and length |
 | `daw describe beats` | `daw samples beats`: tempo, downbeats, the beats near a time, the click audition |
 | `daw describe joins` | `daw joins`: what each measurement of a join means and what the flags say |
 | `daw describe export` | `daw export`: formats, the level policy, the record beside the file |

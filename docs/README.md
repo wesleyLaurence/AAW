@@ -8,6 +8,8 @@ and `daw compare`, the implemented subset of the broader perception plan.
 search filters, `--root-note auto` and root-note warnings in `daw check`.
 [beat-map.md](beat-map.md) documents `daw samples beats`: a whole song's tempo, beats,
 downbeats and phrase changes, the beats near a timecode, and a click audition.
+[audio-clips.md](audio-clips.md) documents audio clips on a track and the `daw audio`
+commands: add, cut a range and close the gap, split, trim and crossfade.
 [time-stretch.md](time-stretch.md) documents `stretch: preserve_pitch` on a pad and
 the two stretchers a song can name, with what was measured of each.
 [timeline.md](timeline.md) documents `daw timeline`: places in beats and seconds,

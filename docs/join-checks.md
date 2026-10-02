@@ -21,9 +21,9 @@ stem and the mix on the song's own timeline.
 ## What a join is
 
 A join is where a track goes from one part of a sample file to another part of
-the same file. With the sampler that is two hits in a row on a track that play the
-same sample from different pads, each for a beat or more, the second starting as
-the first ends, within their fades. A drum hit after another is not a join, and
+the same file: two audio clips in a row on a track, or two hits of different pads,
+that play the same sample, each for a beat or more, the second starting as the
+first ends, within their fades. A drum hit after another is not a join, and
 neither is a loop played again from the same pad.
 
 ## Report
@@ -36,7 +36,8 @@ neither is a loop played again from the same pad.
 
 Each join has:
 
-- `at_seconds` and `at_beats` on the timeline, the `pads` either side, and
+- `at_seconds` and `at_beats` on the timeline, the `parts` either side (`audio.N`
+  for an audio clip, or the pad's name), and
   `source_seconds`: where the song is left and where it is entered.
 - `fade`: its length, the fade out and fade in, and how far the two parts overlap.
 - `grid`, from the song's beat map (`daw samples beats`, kept beside the sample):

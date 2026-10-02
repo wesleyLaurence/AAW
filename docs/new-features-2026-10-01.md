@@ -59,7 +59,7 @@ person can see and adjust.
 | 1 | Decode `.m4a` and `.mp3` on import | The song cannot be loaded at all | Every edit | Done, October 1, 2026 |
 | 2 | Beat and downbeat map of a whole song | The agent cannot find where to cut | Every edit | Done, October 1, 2026 |
 | 3 | Pitch-preserving time stretch | "Speed it up slightly" changes the pitch | Edits that run long | Done, October 1, 2026 |
-| 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | |
+| 4 | Audio regions and crossfades as first-class objects | Each cut is hand arithmetic across pads and events; the person cannot adjust it in the app | Reliability, and the app | Schema, engine and commands done, October 1, 2026; the app is not |
 | 5 | Join and length checks | Nothing measures whether a join is on the beat or clicks | Trusting the result | Done, October 1, 2026 |
 | 6 | Export of a named deliverable | Only `renders/<id>/mix.wav`, 24-bit WAV | Handing the file over | Done, October 1, 2026 |
 | 7 | Personal skills and assets | No place for a skill that Git ignores; nothing documents how to write one | Running the process by name | Done, October 1, 2026 |
@@ -220,6 +220,22 @@ Choices to make:
   version has to be part of that.
 
 ### 4. Audio regions and crossfades
+
+**Schema, engine and commands done, October 1, 2026; the Mac app's part is not.**
+The person answered open question 3: audio clips in the schema now, the app
+later. A track has `audio`, a list of audio clips: the sample, the beat, the
+source range, a lead before the beat, gain, fades with an equal-power or linear
+curve, and the tempo and stretch mode of feature 3. `daw audio add`, `cut`,
+`split`, `trim` and `crossfade` work on them; `cut` removes a range, closes the
+gap and crossfades the join. A clip that ends where another begins leaves from
+where that one starts, so a join is at one place before the beat. `daw joins`,
+`daw timeline` and `daw inspect` read them, and `daw describe edit` and the
+`song-edit` skill build edits from them. They are `tracks[].audio` and not
+inside `clips`, as the sketch below had them. See
+[audio-clips.md](audio-clips.md) and D54 in [decisions.md](decisions.md). Not
+built: region edges and fades that drag in the app, and the beat map on the
+waveform; the app plays audio clips and does not draw them. Nobody has listened
+to an edit. What follows is the analysis as it was written.
 
 Today a region of a file is a pad, and a pad is placed by a pattern event inside a
 clip. For this use case that means:

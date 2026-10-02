@@ -1,5 +1,113 @@
 {
   "$defs": {
+    "AudioClip": {
+      "additionalProperties": false,
+      "properties": {
+        "sample": {
+          "title": "Sample",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 0,
+          "title": "At"
+        },
+        "source_start_seconds": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Source Start Seconds",
+          "type": "number"
+        },
+        "source_end_seconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source End Seconds"
+        },
+        "lead_ms": {
+          "default": 0,
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Lead Ms",
+          "type": "number"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "fade_in_ms": {
+          "default": 0.3,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Fade In Ms",
+          "type": "number"
+        },
+        "fade_out_ms": {
+          "default": 8,
+          "maximum": 10000,
+          "minimum": 0,
+          "title": "Fade Out Ms",
+          "type": "number"
+        },
+        "fade_curve": {
+          "default": "equal_power",
+          "enum": [
+            "equal_power",
+            "linear"
+          ],
+          "title": "Fade Curve",
+          "type": "string"
+        },
+        "source_bpm": {
+          "anyOf": [
+            {
+              "maximum": 400,
+              "minimum": 20,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Bpm"
+        },
+        "stretch": {
+          "default": "repitch",
+          "enum": [
+            "repitch",
+            "preserve_pitch"
+          ],
+          "title": "Stretch",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sample"
+      ],
+      "title": "AudioClip",
+      "type": "object"
+    },
     "Clip": {
       "additionalProperties": false,
       "properties": {
@@ -1207,6 +1315,13 @@
             "$ref": "#/$defs/Clip"
           },
           "title": "Clips",
+          "type": "array"
+        },
+        "audio": {
+          "items": {
+            "$ref": "#/$defs/AudioClip"
+          },
+          "title": "Audio",
           "type": "array"
         },
         "effects": {

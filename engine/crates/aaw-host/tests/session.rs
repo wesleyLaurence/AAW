@@ -25,6 +25,11 @@ fn every_command_round_trips_as_json() {
         json!({"op": "track.add", "id": "keys", "index": 1, "gain_db": -6}),
         json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": "1/3"}),
         json!({"op": "clip.move", "clip": "@4", "at": 8}),
+        json!({"op": "audio.add", "track": "drums", "sample": "tone", "at": 4, "source_start_seconds": 0.1}),
+        json!({"op": "audio.split", "clip": "@9", "at": "13/3"}),
+        json!({"op": "audio.trim", "clip": "tracks.drums.audio.0", "end": 6}),
+        json!({"op": "audio.crossfade", "clip": "@9", "ms": 20.0, "lead_ms": 4.0}),
+        json!({"op": "audio.cut", "track": "drums", "from": 4, "to": 8, "in_ms": 3.0}),
         json!({"op": "effect.add", "owner": "master", "type": "limiter", "ceiling_db": -1}),
         json!({"op": "return.remove", "return": "plate"}),
         json!({"op": "loop", "start": 0, "length": 8}),
@@ -155,6 +160,130 @@ fn clips_add_repeat_and_duplicate() {
     assert_eq!(get(&s, &format!("{}.at", r["path"].as_str().unwrap())), json!(4.5));
     edit(&mut s, json!({"op": "clip.remove", "clip": h})).unwrap();
     assert_eq!(get(&s, "tracks.drums.clips").as_array().unwrap().len(), 3);
+}
+
+/// A song of ten seconds at 120 BPM on a track of its own, as one audio clip
+/// whose second 1 plays on beat 4.
+fn with_song(s: &mut Session) -> String {
+    let song: Vec<[f32; 2]> = (0..480000).map(|i| [((i % 4800) as f32 / 4800.0 - 0.5) * 0.2; 2]).collect();
+    let dir = s.path().parent().unwrap().to_path_buf();
+    std::fs::write(dir.join("song.wav"), aaw_engine::wav::float_wav_bytes(&song, 48000)).unwrap();
+    edit(s, json!({"op": "set", "path": "samples.song", "value": {"path": "song.wav"}})).unwrap();
+    edit(s, json!({"op": "track.add", "id": "song"})).unwrap();
+    let made = edit(s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 4, "source_start_seconds": 1})).unwrap();
+    assert_eq!(made["path"], json!("tracks.song.audio.0"));
+    assert_eq!(made["label"], json!("Add audio clip of song to song"));
+    made["handle"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn audio_clips_split_and_trim_where_their_audio_is() {
+    let (_d, mut s) = open(true);
+    let clip = with_song(&mut s);
+    // Two beats on is a second on at 120 BPM: the halves meet there, unfaded.
+    let r = edit(&mut s, json!({"op": "audio.split", "clip": clip, "at": 6})).unwrap();
+    assert_eq!((r["path"].clone(), r["label"].clone()), (json!("tracks.song.audio.1"), json!("Split audio clip song at 4 at beat 6")));
+    assert_eq!(
+        get(&s, "tracks.song.audio"),
+        json!([
+            {"sample": "song", "at": 4, "source_start_seconds": 1.0, "source_end_seconds": 2.0, "fade_out_ms": 0.0},
+            {"sample": "song", "at": 6, "source_start_seconds": 2.0, "fade_in_ms": 0.0},
+        ])
+    );
+    // The first keeps its handle; a beat outside the clip is refused.
+    assert_eq!(refs(&s, "tracks.song.audio")[0], clip);
+    let outside = edit(&mut s, json!({"op": "audio.split", "clip": clip, "at": 6})).unwrap_err();
+    assert_eq!(outside, "Beat 6 is not inside audio clip song at 4");
+    assert!(edit(&mut s, json!({"op": "audio.split", "clip": clip, "at": 4})).is_err());
+    // An edge moves to a beat and the audio stays where it was: beat 3 plays
+    // half a second earlier in the file, and beat 5.5 ends three quarters in.
+    edit(&mut s, json!({"op": "audio.trim", "clip": clip, "start": 3, "end": 5.5})).unwrap();
+    assert_eq!(
+        get(&s, "tracks.song.audio.0"),
+        json!({"sample": "song", "at": 3, "source_start_seconds": 0.5, "source_end_seconds": 1.75, "fade_out_ms": 0.0})
+    );
+    let early = edit(&mut s, json!({"op": "audio.trim", "clip": clip, "start": 0})).unwrap_err();
+    assert_eq!(early, "Audio clip song at 3 has no audio at beat 0");
+    assert!(edit(&mut s, json!({"op": "audio.trim", "clip": clip})).is_err());
+    assert!(edit(&mut s, json!({"op": "audio.trim", "clip": clip, "end": 2})).is_err());
+    // A clip with a tempo of its own follows the session's, so its beats are
+    // its file's: at 100 BPM a beat is 0.6 s of the file whatever the tempo.
+    edit(&mut s, json!({"op": "set", "path": "tracks.song.audio.1.source_bpm", "value": 100})).unwrap();
+    edit(&mut s, json!({"op": "audio.trim", "clip": "tracks.song.audio.1", "end": 11})).unwrap();
+    assert_eq!(get(&s, "tracks.song.audio.1.source_end_seconds"), json!(5.0));
+    // Moving and removing are the commands every list has.
+    edit(&mut s, json!({"op": "set", "path": "tracks.song.audio.1.at", "value": "25/3"})).unwrap();
+    edit(&mut s, json!({"op": "remove", "path": clip})).unwrap();
+    assert_eq!(get(&s, "tracks.song.audio").as_array().unwrap().len(), 1);
+    assert_eq!(get(&s, "tracks.song.audio.0.at"), json!("25/3"));
+}
+
+#[test]
+fn a_cut_removes_beats_closes_the_gap_and_crossfades_the_join() {
+    let (_d, mut s) = open(true);
+    let clip = with_song(&mut s);
+    edit(&mut s, json!({"op": "audio.trim", "clip": clip, "end": 20})).unwrap();
+    edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 24, "source_end_seconds": 2})).unwrap();
+    // Beats 8 to 12 go: the clip across them becomes two that meet at beat 8,
+    // and the clip after them moves four beats earlier.
+    let r = edit(&mut s, json!({"op": "audio.cut", "track": "song", "from": 8, "to": 12})).unwrap();
+    assert_eq!(r["label"], json!("Cut beats 8 to 12 from song and close the gap"));
+    assert_eq!(
+        get(&s, "tracks.song.audio"),
+        json!([
+            {"sample": "song", "at": 4, "source_start_seconds": 1.0, "source_end_seconds": 3.0, "fade_out_ms": 12.0},
+            {"sample": "song", "at": 8, "source_start_seconds": 5.0, "source_end_seconds": 9.0, "lead_ms": 5.0, "fade_in_ms": 4.0},
+            {"sample": "song", "at": 20, "source_end_seconds": 2.0},
+        ])
+    );
+    assert_eq!(refs(&s, "tracks.song.audio")[0], clip);
+    // One undo takes the cut back.
+    s.undo(Origin::User, false).unwrap();
+    assert_eq!(get(&s, "tracks.song.audio.0.source_end_seconds"), json!(9.0));
+    assert_eq!(get(&s, "tracks.song.audio").as_array().unwrap().len(), 2);
+    // A cut from a clip's start leaves only what follows it, and nothing to crossfade.
+    edit(&mut s, json!({"op": "audio.cut", "track": "song", "from": 0, "to": 6, "ms": 30.0})).unwrap();
+    assert_eq!(
+        get(&s, "tracks.song.audio"),
+        json!([
+            {"sample": "song", "source_start_seconds": 2.0, "source_end_seconds": 9.0},
+            {"sample": "song", "at": 18, "source_end_seconds": 2.0},
+        ])
+    );
+    // A cut that holds a whole clip removes it; the crossfade can be set.
+    edit(&mut s, json!({"op": "audio.cut", "track": "song", "from": 10, "to": 30, "ms": 30.0, "in_ms": 2.0, "lead_ms": 8.0})).unwrap();
+    assert_eq!(
+        get(&s, "tracks.song.audio"),
+        json!([{"sample": "song", "source_start_seconds": 2.0, "source_end_seconds": 7.0}])
+    );
+    assert_eq!(edit(&mut s, json!({"op": "audio.cut", "track": "song", "from": 8, "to": 8})).unwrap_err(), "A cut runs from a beat to a later one");
+    assert!(edit(&mut s, json!({"op": "audio.cut", "track": "nobody", "from": 0, "to": 4})).is_err());
+}
+
+#[test]
+fn a_crossfade_sets_the_fades_of_a_join() {
+    let (_d, mut s) = open(true);
+    let clip = with_song(&mut s);
+    edit(&mut s, json!({"op": "audio.trim", "clip": clip, "end": 8})).unwrap();
+    let r = edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 8, "source_start_seconds": 6})).unwrap();
+    let next = r["handle"].as_str().unwrap().to_string();
+    // The entering clip starts ahead of its beat and fades in within that; the
+    // one before it fades out from there.
+    let r = edit(&mut s, json!({"op": "audio.crossfade", "clip": next})).unwrap();
+    assert_eq!(r["label"], json!("Crossfade audio clips at beat 8"));
+    assert_eq!(get(&s, "tracks.song.audio.0.fade_out_ms"), json!(12.0));
+    assert_eq!(get(&s, "tracks.song.audio.1"), json!({"sample": "song", "at": 8, "source_start_seconds": 6.0, "lead_ms": 5.0, "fade_in_ms": 4.0}));
+    edit(&mut s, json!({"op": "audio.crossfade", "clip": next, "ms": 40.0, "in_ms": 10.0, "lead_ms": 12.0})).unwrap();
+    assert_eq!(get(&s, "tracks.song.audio.0.fade_out_ms"), json!(40.0));
+    assert_eq!(get(&s, "tracks.song.audio.1.lead_ms"), json!(12.0));
+    assert_eq!(get(&s, "tracks.song.audio.1.fade_in_ms"), json!(10.0));
+    let first = edit(&mut s, json!({"op": "audio.crossfade", "clip": clip})).unwrap_err();
+    assert_eq!(first, "No audio clip comes before song at 4 on its track");
+    // What the model refuses, a command is refused for: a sample the song lacks.
+    let unknown = edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "nothing"})).unwrap_err();
+    assert!(unknown.contains("unknown sample nothing"), "{unknown}");
+    let late = edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 32})).unwrap_err();
+    assert!(late.contains("audio clip starts past the session"), "{late}");
 }
 
 #[test]

@@ -32,7 +32,8 @@ const PROJECT: &[(&str, &str)] = &[
     ("effects", "tracks[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects."),
     ("returns", "returns[] are reverb/delay buses fed by tracks[].sends; see daw describe effects."),
     ("automation", "tracks[].automation, returns[].automation and master.automation move gain, pan, send levels and effect parameters over time; see daw describe automation."),
-    ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
+    ("audio", "tracks[].audio lists audio clips: parts of a sample file placed on the track's timeline, for edits of finished songs; see daw describe edit."),
+    ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. An audio clip has the same two fields. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
     ("limits", "No groups, synths or recording."),
 ];
 
@@ -71,19 +72,19 @@ const AUTOMATION: &[(&str, &str)] = &[
 ];
 
 const EDIT: &[(&str, &str)] = &[
-    ("parts", "An edit keeps parts of a finished song and joins them. A part is a pad of the song's sample with start_seconds and end_seconds, played by one event of a pattern on one track. Give each part its own pad."),
+    ("clips", "An edit keeps parts of a finished song and joins them. A part is an audio clip on a track: tracks[].audio lists {sample, at, source_start_seconds, source_end_seconds, lead_ms, gain_db, fade_in_ms, fade_out_ms, fade_curve, source_bpm, stretch}. at is the beat that source_start_seconds of the file plays on; without source_end_seconds the clip plays to the end of the file. A clip plays its file at full level, a mono file on both sides."),
     ("session", "Set session.tempo to the song's measured tempo (daw describe beats), so a beat of the song is a beat of the session. Set session.sample_rate to the song's own rate when that is 44100 or 48000, so the song is not resampled, and session.master_gain_db to 0, which is -6 in a new song."),
-    ("cut", "Cut a few milliseconds before the beat, not on it, so the incoming hit is whole. With lead = 0.005 s, a part that starts on the song's beat at B seconds has start_seconds = B - lead."),
-    ("place", "To put that beat on session beat N, the part's event is at N - lead * tempo / 60 beats. A decimal is exact enough: frames are rounded once from the beat."),
-    ("join", "The leaving part has end_seconds = E - lead + fade and release_ms = fade * 1000, where E is the song time of the first beat it does not play and fade is the crossfade in seconds. The entering part starts lead before its first beat, as any part does, with attack_ms a little under lead * 1000, so its fade in is over when the beat arrives. A fade of 0.010 to 0.012 s out and 4 ms in suits a cut in the quiet before a hit; use longer only under a sustained sound."),
+    ("build", "daw track add SONG TRACK, then daw audio add SONG TRACK SAMPLE --at BEAT --source-start-seconds S: one clip from the song's downbeat at S seconds, the first beat to keep, to the last. Then daw audio cut SONG TRACK --from BEAT --to BEAT for each part to remove: it takes those beats out, moves what follows earlier and crossfades the join. Beats are the session's; daw timeline SONG --seconds TIME converts a time on the edit's timeline, and daw samples beats gives times in the song."),
+    ("commands", "daw audio add, split CLIP --at BEAT, trim CLIP --start BEAT --end BEAT, crossfade CLIP and cut TRACK --from BEAT --to BEAT. CLIP is tracks.TRACK.audio.N, or the @N reference daw inspect lists while a host runs. To move a clip, daw set SONG CLIP.at BEAT; to remove one, daw remove SONG CLIP. A split makes two clips that play exactly as the one did. A trim moves an edge to a beat and leaves the audio where it is."),
+    ("lead", "lead_ms is how long before its beat a clip starts, so a cut sits in the quiet before a hit and the hit is whole; 5 is usual. A clip that ends where another on its track begins leaves from where that one starts, so their join is at one place before the beat whatever each clip's own lead."),
+    ("fades", "fade_in_ms is over the clip's start and should be shorter than its lead. fade_out_ms follows where the clip leaves, so the next clip fades in under it: 12 out and 4 in suit a cut before a hit; use longer only under a sustained sound. fade_curve is equal_power, which keeps the level across two different parts of a song, or linear, which keeps it across audio that is the same. daw audio crossfade CLIP [--ms 12] [--in-ms 4] [--lead-ms 5] sets the join between a clip and the one before it."),
     ("counts", "Keep and remove whole bars so the count carries across a join: every part kept and every part removed is a multiple of four beats and starts on a downbeat."),
-    ("ends", "Give the first part a short attack_ms and the last a release_ms. session.length_beats must reach the end of the last sound: daw timeline SONG --fit sets it there, and a pattern no longer than its last event lets it."),
-    ("one_shots", "A sound added to the edit is its own sample and track. To end a sound on a beat, daw timeline SONG --end-at BEAT --pad TRACK.PAD gives the beat it starts on."),
-    ("times", "daw timeline SONG --seconds TIME gives a time on the edit's timeline in beats, and --beats the other way. Times in the original song are another matter: they come from daw samples beats."),
-    ("level", "A mastered song is at full scale and a render refuses to clip. Give each part's event velocity 127, since the default 100 plays it 2 dB down. With the song's track and the master at 0 dB, put a limiter on master.effects rather than turning the song down, so the song stays as loud as the original and only what is added on top is taken down; see daw describe effects. daw export --match SAMPLE reports how the file's loudness compares with the song's."),
+    ("ends", "Give the first clip a short fade_in_ms and the last a fade_out_ms. session.length_beats must reach the end of the last sound: daw timeline SONG --fit sets it there."),
+    ("one_shots", "A sound added to the edit is its own sample on its own track, as an audio clip or a pad. To end a pad's sound on a beat, daw timeline SONG --end-at BEAT --pad TRACK.PAD gives the beat it starts on."),
+    ("level", "A mastered song is at full scale and a render refuses to clip. With the song's track and the master at 0 dB, put a limiter on master.effects rather than turning the song down, so the song stays as loud as the original and only what is added on top is taken down; see daw describe effects. daw export --match SAMPLE reports how the file's loudness compares with the song's."),
+    ("speed", "To make an edit shorter without changing its pitch, give each clip source_bpm, the song's measured tempo, and stretch: preserve_pitch, then raise session.tempo. Everything placed in beats stays where it is, so the joins hold; sounds without source_bpm keep their own length. daw timeline SONG --tempo-for SECONDS gives the tempo that makes the song that long. A few percent is the normal range; ask before going past about 8."),
     ("check", "Render, run daw joins on the render (daw describe joins), then daw export (daw describe export)."),
-    ("speed", "To make an edit shorter without changing its pitch, give each part's pad source_bpm, the song's measured tempo, and stretch: preserve_pitch, then raise session.tempo. Everything placed in beats stays where it is, so the joins hold; sounds without source_bpm keep their own length. daw timeline SONG --tempo-for SECONDS gives the tempo that makes the song that long. A few percent is the normal range; ask before going past about 8."),
-    ("limits", "Parts are pads until the song has audio clips."),
+    ("pads", "A part can also be a pad with start_seconds and end_seconds, played by a pattern event, as edits were built before audio clips; daw joins checks those too. A pad's event plays at velocity 100 of 127 unless given 127, and a mono pad is 3 dB down."),
 ];
 
 const BEATS: &[(&str, &str)] = &[
@@ -99,7 +100,7 @@ const BEATS: &[(&str, &str)] = &[
 
 const JOINS: &[(&str, &str)] = &[
     ("command", "daw joins RENDER [--limit SECONDS] checks a full render of an edit: each join between two parts of a song on a track, and the file's length. RENDER is the render's folder, its report or renders/latest.json."),
-    ("join", "A join is two hits in a row on a track that play one sample from different pads, each for a beat or more, the second starting as the first ends."),
+    ("join", "A join is two audio clips in a row on a track, or two hits of different pads, that play different parts of one sample, each for a beat or more, the second starting as the first ends. parts names them, as audio.N or the pad."),
     ("grid", "grid is from the sample's beat map. interval_error_ms is how far the beat slips across the join and should be under 1 ms. source_beats_skipped is how many beats of the song were removed and should be whole bars. enters_after_fade_in_ms below zero means the first beat starts inside the fade in. grid is null without a beat map: run daw samples beats on the sample."),
     ("measured", "measured asks the same of the track's stem: where the transients either side sit against session beats. Attacks differ by instrument, so up to about 3 ms can be a change of sound."),
     ("step", "step.ratio over 2 is a jump in the waveform where a part starts or stops: a possible click. A fade prevents it."),
@@ -194,7 +195,7 @@ pub fn describe(topic: &str) -> Option<Json> {
             },
             "semantics": texts(AUTOMATION),
         }),
-        "edit" => json!({"semantics": texts(EDIT)}),
+        "edit" => json!({"schema": {"audio_clip": model("AudioClip")}, "semantics": texts(EDIT)}),
         "beats" => json!({"semantics": texts(BEATS)}),
         "joins" => json!({"semantics": texts(JOINS)}),
         "export" => json!({"semantics": texts(EXPORT)}),

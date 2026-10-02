@@ -607,6 +607,132 @@ impl Clip {
     }
 }
 
+/// The shape of an audio clip's fades.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum FadeCurve {
+    /// A quarter of a sine: two such fades of unlike audio sum to a steady level.
+    EqualPower,
+    /// A straight line: two such fades of the same audio sum to a steady level.
+    Linear,
+}
+
+impl FadeCurve {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FadeCurve::EqualPower => "equal_power",
+            FadeCurve::Linear => "linear",
+        }
+    }
+}
+
+/// Part of a sample file on a track's timeline.
+#[derive(Clone, Debug)]
+pub struct AudioClip {
+    pub sample: String,
+    /// The beat `source_start_seconds` plays on.
+    pub at: Beat,
+    pub source_start_seconds: f64,
+    /// None plays to the end of the file.
+    pub source_end_seconds: Option<f64>,
+    /// How long before `at` the clip starts: a cut placed ahead of the beat, so
+    /// the hit on the beat is whole. A clip that ends where another of its track
+    /// begins leaves from where that one starts.
+    pub lead_ms: f64,
+    pub gain_db: f64,
+    pub fade_in_ms: f64,
+    /// The fade out follows where the clip leaves, so a clip that starts there
+    /// fades in under it.
+    pub fade_out_ms: f64,
+    pub fade_curve: FadeCurve,
+    pub source_bpm: Option<f64>,
+    pub stretch: Stretch,
+}
+
+impl AudioClip {
+    const FIELDS: &'static [&'static str] = &[
+        "sample", "at", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms",
+        "fade_out_ms", "fade_curve", "source_bpm", "stretch",
+    ];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<AudioClip> {
+        let f = Fields::of(ctx, x, "AudioClip", Self::FIELDS)?;
+        let before = ctx.count();
+        let sample = f.req(ctx, "sample", v::string);
+        let at = f.opt(ctx, "at", Beat::int(0), beat_field);
+        let source_start_seconds = f.opt(ctx, "source_start_seconds", 0.0, |c, x| v::float(c, x, Bounds::ge("0")));
+        let source_end_seconds = f.opt(ctx, "source_end_seconds", None, |c, x| {
+            v::optional(c, x, |c, x| v::float(c, x, Bounds::gt("0")))
+        });
+        let lead_ms = f.opt(ctx, "lead_ms", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "1000")));
+        let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
+        let fade_in_ms = f.opt(ctx, "fade_in_ms", 0.3, |c, x| v::float(c, x, Bounds::ge_le("0", "10000")));
+        let fade_out_ms = f.opt(ctx, "fade_out_ms", 8.0, |c, x| v::float(c, x, Bounds::ge_le("0", "10000")));
+        let fade_curve = f.opt(ctx, "fade_curve", FadeCurve::EqualPower, |c, x| {
+            v::literal_str(c, x, &["equal_power", "linear"]).map(|m| {
+                if m == "linear" {
+                    FadeCurve::Linear
+                } else {
+                    FadeCurve::EqualPower
+                }
+            })
+        });
+        let source_bpm = f.opt(ctx, "source_bpm", None, |c, x| {
+            v::optional(c, x, |c, x| v::float(c, x, Bounds::ge_le("20", "400")))
+        });
+        let stretch = f.opt(ctx, "stretch", Stretch::Repitch, |c, x| {
+            v::literal_str(c, x, &["repitch", "preserve_pitch"]).map(|m| {
+                if m == "preserve_pitch" {
+                    Stretch::PreservePitch
+                } else {
+                    Stretch::Repitch
+                }
+            })
+        });
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let clip = AudioClip {
+            sample: sample?,
+            at: at?,
+            source_start_seconds: source_start_seconds?,
+            source_end_seconds: source_end_seconds?,
+            lead_ms: lead_ms?,
+            gain_db: gain_db?,
+            fade_in_ms: fade_in_ms?,
+            fade_out_ms: fade_out_ms?,
+            fade_curve: fade_curve?,
+            source_bpm: source_bpm?,
+            stretch: stretch?,
+        };
+        if clip.source_end_seconds.is_some_and(|end| end <= clip.source_start_seconds) {
+            ctx.value_error("source_end_seconds must exceed source_start_seconds");
+            return None;
+        }
+        Some(clip)
+    }
+
+    pub fn at_exact(&self) -> BigRational {
+        exact(&self.at)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("sample", Value::str(&self.sample));
+        o.beat("at", &self.at, &Beat::int(0));
+        o.float("source_start_seconds", self.source_start_seconds, 0.0);
+        o.opt("source_end_seconds", self.source_end_seconds.map(Value::Float));
+        o.float("lead_ms", self.lead_ms, 0.0);
+        o.float("gain_db", self.gain_db, 0.0);
+        o.float("fade_in_ms", self.fade_in_ms, 0.3);
+        o.float("fade_out_ms", self.fade_out_ms, 8.0);
+        o.str("fade_curve", self.fade_curve.as_str(), "equal_power");
+        o.opt("source_bpm", self.source_bpm.map(Value::Float));
+        o.str("stretch", self.stretch.as_str(), "repitch");
+        o.done()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterMode {
     Highpass,
@@ -1215,6 +1341,7 @@ pub struct Track {
     pub solo: bool,
     pub pads: IndexMap<String, Pad>,
     pub clips: Vec<Clip>,
+    pub audio: Vec<AudioClip>,
     pub effects: Vec<Effect>,
     pub sends: Vec<Send>,
     pub automation: Vec<Lane>,
@@ -1222,7 +1349,7 @@ pub struct Track {
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
-        "id", "gain_db", "pan", "mute", "solo", "pads", "clips", "effects", "sends", "automation",
+        "id", "gain_db", "pan", "mute", "solo", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
@@ -1235,6 +1362,7 @@ impl Track {
         let solo = f.opt(ctx, "solo", false, v::boolean);
         let pads = f.req(ctx, "pads", |c, x| v::str_dict(c, x, Pad::validate));
         let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, Clip::validate));
+        let audio = f.opt(ctx, "audio", Vec::new(), |c, x| v::list(c, x, 0, None, AudioClip::validate));
         let effects = effects_field(ctx, &f);
         let sends = f.opt(ctx, "sends", Vec::new(), |c, x| v::list(c, x, 0, Some(16), Send::validate));
         let automation = automation_field(ctx, &f);
@@ -1250,6 +1378,7 @@ impl Track {
             solo: solo?,
             pads: pads?,
             clips: clips?,
+            audio: audio?,
             effects: effects?,
             sends: sends?,
             automation: automation?,
@@ -1269,6 +1398,7 @@ impl Track {
         o.bool("solo", self.solo, false);
         o.req("pads", str_map(&self.pads, saved, Pad::dump));
         o.coll("clips", list(&self.clips, saved, Clip::dump));
+        o.coll("audio", list(&self.audio, saved, AudioClip::dump));
         o.coll("effects", list(&self.effects, saved, Effect::dump));
         o.coll("sends", list(&self.sends, saved, Send::dump));
         o.coll("automation", list(&self.automation, saved, Lane::dump));

@@ -82,7 +82,7 @@ def test_a_join_on_the_beat_passes_every_check(tmp_path):
     assert code == 0, report
     assert report["tempo"] == 120 and report["flagged"] == [] and len(report["joins"]) == 1
     join = report["joins"][0]
-    assert (join["track"], join["sample"], join["pads"]) == ("song", "song", ["first", "second"])
+    assert (join["track"], join["sample"], join["parts"]) == ("song", "song", ["first", "second"])
     assert join["at_seconds"] == pytest.approx(20 * BEAT - LEAD, abs=1e-4)
     assert join["fade"] == {"seconds": 0.012, "out_ms": 12, "in_ms": 4, "overlap_ms": pytest.approx(12, abs=0.05)}
     # By the song's beat map: beat 16 of the song leaves and beat 25 enters, eight

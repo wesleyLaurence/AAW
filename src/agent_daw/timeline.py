@@ -18,10 +18,14 @@ from .model import load, schedule
 
 @dataclass
 class Region:
-    """A hit that plays part of a sample file: where on the timeline, and of the file."""
+    """Part of a sample file on a track: where on the timeline, and of the file.
+
+    It is a pad's hit or an audio clip; `part` names the pad, or the clip as
+    `audio.N`.
+    """
 
     track: str
-    pad: str
+    part: str
     sample: str
     start: float  # seconds on the timeline
     length: float  # seconds on the timeline
@@ -50,8 +54,43 @@ def played(pad, project, root: Path):
     return speed, (end - pad["start_seconds"]) / speed
 
 
+def clip_region(track, index, clips, project, root: Path):
+    """An audio clip as the engine plays it: from its lead before its beat to where
+    it leaves, which is where a clip that follows it starts, and on through its
+    fade out."""
+    tempo = project["session"]["tempo"]
+
+    def placed(clip):
+        """Its speed, the second its beat is on, and how long before it it starts."""
+        speed = tempo / clip["source_bpm"] if clip["source_bpm"] else 1.0
+        beat = float(Fraction(str(clip["at"]))) * 60 / tempo
+        return speed, beat, min(clip["lead_ms"] / 1000, clip["source_start_seconds"] / speed, beat)
+
+    clip = clips[index]
+    speed, beat, lead = placed(clip)
+    start = clip["source_start_seconds"] - lead * speed
+    end = length = sf.info(root / project["samples"][clip["sample"]]["path"]).duration
+    if clip["source_end_seconds"] is not None:
+        ends = beat + (clip["source_end_seconds"] - clip["source_start_seconds"]) / speed
+        after = [c for i, c in enumerate(clips) if i != index and abs(placed(c)[1] - ends) < 0.0005]
+        leaves = placed(after[0])[2] if after else 0.0
+        end = min(clip["source_end_seconds"] + (clip["fade_out_ms"] / 1000 - leaves) * speed, length)
+    return Region(
+        track,
+        f"audio.{index}",
+        clip["sample"],
+        beat - lead,
+        (end - start) / speed,
+        start,
+        speed,
+        clip["fade_in_ms"] / 1000,
+        clip["fade_out_ms"] / 1000,
+    )
+
+
 def regions(project, root: Path):
-    """Every forward hit of the song as a region, by track, in time order."""
+    """Every forward hit and audio clip of the song as a region, by track, in
+    time order."""
     rate = project["session"]["sample_rate"]
     pads = {(t["id"], name): pad for t in project["tracks"] for name, pad in t["pads"].items()}
     lengths, found = {}, {}
@@ -77,6 +116,10 @@ def regions(project, root: Path):
                 pad["release_ms"] / 1000,
             )
         )
+    for track in project["tracks"]:
+        clips = [clip_region(track["id"], i, track["audio"], project, root) for i in range(len(track["audio"]))]
+        if clips:
+            found[track["id"]] = sorted(found.get(track["id"], []) + clips, key=lambda r: r.start)
     return found
 
 
@@ -116,9 +159,12 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
         # clips whole, so it cannot end before the last of them does.
         patterns = project["patterns"]
         clips = max(
-            Fraction(str(c["at"])) + Fraction(str(patterns[c["pattern"]]["length_beats"])) * c["repeats"]
-            for t in project["tracks"]
-            for c in t["clips"]
+            (
+                Fraction(str(c["at"])) + Fraction(str(patterns[c["pattern"]]["length_beats"])) * c["repeats"]
+                for t in project["tracks"]
+                for c in t["clips"]
+            ),
+            default=Fraction(0),
         )
         wanted = math.ceil(round(sound_ends + tail, 6))
         length = max(wanted, math.ceil(clips))

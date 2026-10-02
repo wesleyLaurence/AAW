@@ -114,6 +114,52 @@ pub enum Command {
     #[serde(rename = "clip.remove")]
     ClipRemove { clip: String },
 
+    // Audio clips
+    #[serde(rename = "audio.add")]
+    AudioAdd {
+        track: String,
+        #[serde(flatten)]
+        fields: Fields,
+    },
+    /// Makes two clips of one at a beat inside it; they play as the one did.
+    #[serde(rename = "audio.split")]
+    AudioSplit { clip: String, at: Json },
+    /// Moves a clip's start or end to a beat, keeping its audio where it is.
+    #[serde(rename = "audio.trim")]
+    AudioTrim {
+        clip: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<Json>,
+    },
+    /// Crossfades a clip with the one before it on its track: that one fades
+    /// out over `ms` under this one, which starts `lead_ms` before its beat.
+    #[serde(rename = "audio.crossfade")]
+    AudioCrossfade {
+        clip: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ms: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        in_ms: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lead_ms: Option<f64>,
+    },
+    /// Removes the beats from `from` to `to` of a track's audio clips, moves
+    /// what follows earlier to close the gap, and crossfades the join.
+    #[serde(rename = "audio.cut")]
+    AudioCut {
+        track: String,
+        from: Json,
+        to: Json,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ms: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        in_ms: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lead_ms: Option<f64>,
+    },
+
     // Patterns
     #[serde(rename = "pattern.add")]
     PatternAdd {
@@ -418,6 +464,68 @@ pub fn beat_value(x: &BigRational) -> Value {
         Value::Float(f)
     } else {
         Value::Str(aaw_model::fraction_str(x))
+    }
+}
+
+fn number(n: Option<&Node>) -> Option<f64> {
+    match n {
+        Some(Node::Leaf(Value::Float(f))) => Some(*f),
+        Some(Node::Leaf(Value::Int(i))) => num_traits::ToPrimitive::to_f64(i),
+        _ => None,
+    }
+}
+
+fn set(node: &mut Node, key: &str, value: Value) {
+    if let Some(map) = node.map_mut() {
+        map.insert(key.to_string(), Node::Leaf(value));
+    }
+}
+
+/// A beat given to a command, exactly.
+fn beat_at(j: &Json) -> Result<BigRational> {
+    let value = json_value(j)?;
+    beat_of(&value)
+        .and_then(|b| aaw_model::beat(&b).ok())
+        .ok_or_else(|| format!("{} is not a beat", short(j)))
+}
+
+fn beat_text(x: &BigRational) -> String {
+    short(&to_json(&beat_value(x)))
+}
+
+/// An audio clip's place: the beat it is at, the seconds of its file it plays,
+/// and how many of those seconds go by in a beat.
+struct Span {
+    at: BigRational,
+    start: f64,
+    end: Option<f64>,
+    per_beat: f64,
+}
+
+impl Span {
+    fn of(clip: &Node, tempo: f64) -> Result<Span> {
+        let at = exact(clip.get("at")).ok_or("An audio clip has no beat")?;
+        // A clip with a tempo of its own follows the session's, so a beat of
+        // the session is a beat of its file.
+        let per_beat = 60.0 / number(clip.get("source_bpm")).unwrap_or(tempo);
+        Ok(Span {
+            at,
+            start: number(clip.get("source_start_seconds")).unwrap_or(0.0),
+            end: number(clip.get("source_end_seconds")),
+            per_beat,
+        })
+    }
+
+    /// The seconds of the file that play on a beat.
+    fn source(&self, beat: &BigRational) -> f64 {
+        let beats = num_traits::ToPrimitive::to_f64(&(beat - &self.at)).unwrap_or(f64::NAN);
+        self.start + beats * self.per_beat
+    }
+
+    /// The beat the clip ends on; None when it plays to the end of its file.
+    fn end_beat(&self) -> Option<BigRational> {
+        let beats = (self.end? - self.start) / self.per_beat;
+        Some(&self.at + BigRational::from_float(beats)?)
     }
 }
 
@@ -780,7 +888,7 @@ impl<'a> Edit<'a> {
                 f.insert("id".into(), Json::String(id.clone()));
                 f.extend(fields.clone());
                 let node = match key {
-                    "tracks" => with_empty(&f, &["clips", "effects", "sends", "automation"], &["pads"])?,
+                    "tracks" => with_empty(&f, &["clips", "audio", "effects", "sends", "automation"], &["pads"])?,
                     _ => with_empty(&f, &["effects", "automation"], &[])?,
                 };
                 out.made.push(self.insert(&[], key, *index, node)?);
@@ -907,6 +1015,140 @@ impl<'a> Edit<'a> {
                 let name = self.clip_name(&loc);
                 self.remove_at(&loc)?;
                 out.label = format!("Remove clip {name}");
+            }
+            AudioAdd { track, fields } => {
+                let loc = self.track(track)?;
+                out.made.push(self.insert(&loc, "audio", None, map_node(fields)?)?);
+                let sample = fields.get("sample").and_then(Json::as_str).unwrap_or("?");
+                out.label = format!("Add audio clip of {sample} to {}", self.name(&loc));
+            }
+            AudioSplit { clip, at } => {
+                let (owner, i) = self.member(clip, "audio", "an audio clip")?;
+                let loc = [owner.clone(), vec![Step::Key("audio".into()), Step::Index(i)]].concat();
+                let span = self.span(&loc)?;
+                let at = beat_at(at)?;
+                if at <= span.at || span.end_beat().is_some_and(|end| at >= end) {
+                    return Err(format!("Beat {} is not inside audio clip {}", beat_text(&at), self.audio_name(&loc)));
+                }
+                let name = self.audio_name(&loc);
+                let cut = span.source(&at);
+                // The halves meet where the audio is continuous, so neither fades there.
+                let mut right = self.node(&loc).clone();
+                self.set_leaf(&loc, "source_end_seconds", Value::Float(cut));
+                self.set_leaf(&loc, "fade_out_ms", Value::Float(0.0));
+                let fields = right.map_mut().expect("an audio clip is an object");
+                fields.insert("at".into(), Node::Leaf(beat_value(&at)));
+                fields.insert("source_start_seconds".into(), Node::Leaf(Value::Float(cut)));
+                fields.insert("fade_in_ms".into(), Node::Leaf(Value::Float(0.0)));
+                out.made.push(self.insert(&owner, "audio", Some(i + 1), right)?);
+                out.label = format!("Split audio clip {name} at beat {}", beat_text(&at));
+            }
+            AudioTrim { clip, start, end } => {
+                let (owner, i) = self.member(clip, "audio", "an audio clip")?;
+                let loc = [owner, vec![Step::Key("audio".into()), Step::Index(i)]].concat();
+                let span = self.span(&loc)?;
+                let name = self.audio_name(&loc);
+                if start.is_none() && end.is_none() {
+                    return Err("Trim needs a start or an end".into());
+                }
+                let mut from = span.start;
+                if let Some(start) = start {
+                    let at = beat_at(start)?;
+                    from = span.source(&at);
+                    if from < 0.0 || span.end.is_some_and(|end| from >= end) {
+                        return Err(format!("Audio clip {name} has no audio at beat {}", beat_text(&at)));
+                    }
+                    self.set_leaf(&loc, "at", beat_value(&at));
+                    self.set_leaf(&loc, "source_start_seconds", Value::Float(from));
+                }
+                if let Some(end) = end {
+                    let to = span.source(&beat_at(end)?);
+                    if to <= from {
+                        return Err(format!("Audio clip {name} would end before it starts"));
+                    }
+                    self.set_leaf(&loc, "source_end_seconds", Value::Float(to));
+                }
+                out.label = format!("Trim audio clip {name}");
+            }
+            AudioCrossfade { clip, ms, in_ms, lead_ms } => {
+                let (owner, i) = self.member(clip, "audio", "an audio clip")?;
+                let loc = [owner.clone(), vec![Step::Key("audio".into()), Step::Index(i)]].concat();
+                let at = self.span(&loc)?.at;
+                // The clip before it: the latest that starts earlier on the track.
+                let mut before: Option<(usize, BigRational)> = None;
+                for j in 0..self.list(&owner, "audio")?.len() {
+                    let other = self.span(&[owner.clone(), vec![Step::Key("audio".into()), Step::Index(j)]].concat())?;
+                    if other.at < at && before.as_ref().is_none_or(|(_, b)| other.at > *b) {
+                        before = Some((j, other.at));
+                    }
+                }
+                let Some((j, _)) = before else {
+                    return Err(format!("No audio clip comes before {} on its track", self.audio_name(&loc)));
+                };
+                let leaving = [owner, vec![Step::Key("audio".into()), Step::Index(j)]].concat();
+                self.crossfade(&leaving, &loc, *ms, *in_ms, *lead_ms);
+                out.label = format!("Crossfade audio clips at beat {}", beat_text(&at));
+            }
+            AudioCut { track, from, to, ms, in_ms, lead_ms } => {
+                let owner = self.track(track)?;
+                let (from, to) = (beat_at(from)?, beat_at(to)?);
+                if from >= to || from < BigRational::from_integer(0.into()) {
+                    return Err("A cut runs from a beat to a later one".into());
+                }
+                let gap = &to - &from;
+                let tempo = self.tempo();
+                let old = std::mem::take(self.list(&owner, "audio")?);
+                let mut kept: Vec<Item> = Vec::new();
+                for item in old {
+                    let span = Span::of(&item.node, tempo)?;
+                    let end = span.end_beat();
+                    if end.as_ref().is_some_and(|end| *end <= from) {
+                        // Before the cut.
+                        kept.push(item);
+                    } else if span.at >= to {
+                        // After it: earlier by its length.
+                        let mut item = item;
+                        set(&mut item.node, "at", beat_value(&(&span.at - &gap)));
+                        kept.push(item);
+                    } else {
+                        // Across it: what it plays before the cut stays, and
+                        // what it plays after starts where the cut began.
+                        let mut handle = Some(item.handle);
+                        if span.at < from {
+                            let mut left = item.node.clone();
+                            set(&mut left, "source_end_seconds", Value::Float(span.source(&from)));
+                            kept.push(Item { handle: handle.take().expect("unused"), node: left });
+                        }
+                        if end.is_none_or(|end| end > to) {
+                            let mut right = item.node;
+                            set(&mut right, "at", beat_value(&from));
+                            set(&mut right, "source_start_seconds", Value::Float(span.source(&to)));
+                            let handle = handle.take().unwrap_or_else(|| {
+                                let h = self.fresh();
+                                out.made.push(h);
+                                h
+                            });
+                            kept.push(Item { handle, node: right });
+                        }
+                    }
+                }
+                // The join: the clip that now ends where the cut began, and the
+                // one that now starts there.
+                let near = |end: &BigRational| num_traits::ToPrimitive::to_f64(&(end - &from)).is_some_and(|d| d.abs() < 1e-6);
+                let spans: Vec<Span> = kept.iter().map(|item| Span::of(&item.node, tempo)).collect::<Result<_>>()?;
+                let leaving = spans.iter().position(|s| s.at < from && s.end_beat().is_some_and(|end| near(&end)));
+                let entering = spans.iter().position(|s| s.at == from);
+                *self.list(&owner, "audio")? = kept;
+                if let (Some(a), Some(b)) = (leaving, entering) {
+                    let at = |i: usize| [owner.clone(), vec![Step::Key("audio".into()), Step::Index(i)]].concat();
+                    self.crossfade(&at(a), &at(b), *ms, *in_ms, *lead_ms);
+                }
+                out.label = format!(
+                    "Cut beats {} to {} from {} and close the gap",
+                    beat_text(&from),
+                    beat_text(&to),
+                    self.name(&owner)
+                );
             }
             PatternAdd { pattern, fields } => {
                 let patterns = self.root.get_mut("patterns").and_then(Node::map_mut).expect("patterns");
@@ -1177,6 +1419,36 @@ impl<'a> Edit<'a> {
     }
 
     /// A clip described by its pattern and track, for labels.
+    fn tempo(&self) -> f64 {
+        number(self.root.get("session").and_then(|s| s.get("tempo"))).unwrap_or(144.0)
+    }
+
+    /// Where the audio clip at `loc` is on the timeline and in its file.
+    fn span(&self, loc: &[Step]) -> Result<Span> {
+        Span::of(self.node(loc), self.tempo())
+    }
+
+    fn audio_name(&self, loc: &[Step]) -> String {
+        let n = self.node(loc);
+        format!(
+            "{} at {}",
+            n.field("sample").unwrap_or("?"),
+            n.get("at").map_or_else(|| "?".into(), |a| short(&node_json(a)))
+        )
+    }
+
+    /// The fades of a join: the entering clip starts `lead_ms` before its beat
+    /// and fades in within that lead, and the leaving one fades out over `ms`
+    /// from where the entering one starts.
+    fn crossfade(&mut self, leaving: &[Step], entering: &[Step], ms: Option<f64>, in_ms: Option<f64>, lead_ms: Option<f64>) {
+        let lead = lead_ms.unwrap_or(5.0);
+        let out = ms.unwrap_or(12.0);
+        let into = in_ms.unwrap_or_else(|| (lead - 1.0).max(0.0).min(out));
+        self.set_leaf(entering, "lead_ms", Value::Float(lead));
+        self.set_leaf(leaving, "fade_out_ms", Value::Float(out));
+        self.set_leaf(entering, "fade_in_ms", Value::Float(into));
+    }
+
     fn clip_name(&self, loc: &[Step]) -> String {
         let n = self.node(loc);
         format!(

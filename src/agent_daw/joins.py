@@ -27,10 +27,10 @@ LEVEL_DB = 3.0
 def find(project, root: Path):
     """The joins of a song: pairs of regions, the one leaving and the one entering.
 
-    Two hits in a row on a track make a join when they play the same file from
-    different pads, each for a beat or more, and the second starts as the first
-    ends, within their fades. A drum hit after another is not one, nor is a loop
-    played again.
+    Two regions in a row on a track make a join when they are different parts of
+    the same file (two audio clips, or two pads), each a beat or more, and the
+    second starts as the first ends, within their fades. A drum hit after another
+    is not one, nor is a loop played again.
     """
     beat = 60 / project["session"]["tempo"]
     joins = []
@@ -39,7 +39,7 @@ def find(project, root: Path):
             overlap = a.end - b.start
             if (
                 a.sample == b.sample
-                and a.pad != b.pad
+                and a.part != b.part
                 and min(a.length, b.length) >= beat
                 and -0.05 <= overlap <= max(a.release, b.attack) + 0.05
             ):
@@ -196,7 +196,7 @@ def check(source, limit=None, seconds=4.0, excerpts=True):
             "join": number,
             "track": a.track,
             "sample": a.sample,
-            "pads": [a.pad, b.pad],
+            "parts": [a.part, b.part],
             "at_seconds": round(b.start, 6),
             "at_beats": round(b.start / beat, 4),
             "source_seconds": {
@@ -266,7 +266,7 @@ def check(source, limit=None, seconds=4.0, excerpts=True):
         "joins": report,
         "flagged": [entry["join"] for entry in report if entry["flags"]],
         "methods": {
-            "join": "two hits in a row on a track that play the same sample from different pads, each a beat or more, the second starting as the first ends",
+            "join": "two audio clips in a row on a track, or two hits of different pads, that play the same sample, each a beat or more, the second starting as the first ends",
             "grid": "the sample's saved beat map placed through each region; interval_error_ms is the time between the last beat before the join and the first after it, against whole session beats",
             "measured": f"the sharpest rise within 40 ms of up to {BEATS} beats either side, on the track's stem; the median distance from session beats, after less before",
             "step": "the sample-to-sample change of the stem where the entering part starts and where the leaving part stops, against the largest within 3 ms either side; the edge that stands out more is given",
