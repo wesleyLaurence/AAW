@@ -14,32 +14,27 @@ kept.
 
 ## Next
 
-1. **New, Untitled and Save As.** Launch on an Untitled project, File › New, Save
-   As… that moves the project, the Save / Delete / Cancel prompt, the project
-   index and `daw projects`, `daw` commands that take a project's folder, and
-   "project" in the app's text.
-   [features/new-and-untitled-projects.md](features/new-and-untitled-projects.md)
-2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-3. **Audio clips in the app.** Draw a track's audio clips with their waveform,
+2. **Audio clips in the app.** Draw a track's audio clips with their waveform,
    drag their edges and fades, and show the beat map on the waveform. Draw a
    shaped automation segment as the curve it plays. Today the app plays audio clips
    without drawing them, and draws a shaped segment as a straight line.
-4. **The `.aaw` file type and the project ID.** The project file under the app's
+3. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-5. **The workspace and the two levels.** The workspace folder with its managed
+4. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-6. **The agent panel.** A conversation in the window, per project, over the
+5. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-7. **Other Macs.** The rest of the Python ported or carried in the bundle,
+6. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-8. **Sign-in buttons and other agents,** as the companies' terms allow.
+7. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -60,7 +55,17 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
-  (with item 7).
+  (with item 6).
+- **Save As… in the app:** the panel on an Untitled project and on one that has
+  a name, a name that is taken, and work carried on in the copy. Scripted input
+  cannot answer a panel; `daw move` and `daw copy` were run in its place.
+- **Closing an Untitled project that holds something:** the question, and each
+  of Save…, Delete and Cancel, at a window's close and at Quit with several open.
+- **Open Recent** after a project's folder was moved in the Finder with the app
+  closed, after one was put in the Trash, and with an Untitled project a crash
+  left.
+- **Opening a project while its copy is open,** so that its path answers for it
+  again.
 
 ## Later
 
@@ -147,6 +152,12 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### The app
 
+- A song that grows when a clip is placed past its end. A blank project is 32
+  bars, and a clip cannot be dragged further.
+- Save As… over a folder that is already there, after asking.
+- The Python commands (`check`, `timeline`, `export`, `samples import`)
+  following a project that was saved under another name, as the Rust ones do.
+- A project made with `daw init` in the app's index.
 - A track's color saved in the song.
 - A pad's own settings (level, tuning, held or not) in the device panel.
 - A loop from the browser fitted to the song's tempo when it is added.

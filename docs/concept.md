@@ -113,6 +113,7 @@ the app quits.
 | When | What happens |
 |---|---|
 | Save As… on an Untitled project | Asks for a name and a place, moves the folder there and sets the song's title. The undo history, the open conversation and anything playing carry on |
+| Save As… on a project that has a name | Makes a copy under the new name and carries on in it. The original stays as it was |
 | Closing an Untitled project nobody changed | It is deleted without a question |
 | Closing an Untitled project with changes | Save…, Delete or Cancel |
 | The app quit or crashed with an Untitled project open | The project is still in the app's data folder and is offered again |

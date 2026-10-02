@@ -43,6 +43,16 @@ With no app or `daw host` running for a project, `daw` applies a command to the
 file itself and exits, under the project's `.daw.lock`. A running host registers
 its project and socket under `~/Library/Application Support/AAW/hosts`.
 
+A project is a folder with `song.yaml`, its samples and its renders, and a
+command takes the folder or the file. The app opens on an Untitled project, a
+folder in its data folder (`~/Library/Application Support/AAW`, or
+`AAW_DATA_DIR`). Save As… is a command to the host, which moves an Untitled
+project's folder or copies a named one's, carries on there with its history and
+what is playing, and keeps answering at the path it had. The app keeps an index
+of the projects it knows, `projects.json` in the data folder, which Open Recent
+shows and `daw projects --all` reads. See
+[new-and-untitled-projects.md](features/new-and-untitled-projects.md).
+
 The first build was in Python and rendered offline only. The Rust rebuild ported
 the model, the sampler, the effects and automation against that engine as the
 reference and then retired it; the document format, the fingerprints and the
@@ -61,6 +71,7 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   for WAV/stem export.
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
+  It also makes a blank project and moves or copies a project's folder.
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see

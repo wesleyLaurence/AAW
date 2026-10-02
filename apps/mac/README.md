@@ -1,15 +1,17 @@
 # Mac app
 
 The native macOS app of [docs/archive/Rust-Swift-Update.md](../../docs/archive/Rust-Swift-Update.md),
-through its last milestone, M9: it opens a song, shows its arrangement with what
+through its last milestone, M9, and what was built since: it opens on a blank
+project or on one it is given, shows its arrangement with what
 each clip plays as a waveform, plays it with its effects and automation, shows
 each change as it lands, whoever makes it, and lets the person edit the mixer,
 the clips, the tracks and returns, each row's effects and its automation lanes,
 and each pattern's steps and events. A browser finds samples in the library's
-index and adds them to the song as pads and tracks. The bundle holds `daw` and
+index and adds them to the song as pads and tracks. Save As… gives a project a
+name and a place. The bundle holds `daw` and
 the libraries it needs, and a menu item puts `daw` on the PATH.
 
-The app holds no model logic. Opening a song makes the app its session host
+The app holds no model logic. Opening a project makes the app its session host
 ([engine/README.md](../../engine/README.md)): the Rust core runs inside the app,
 and `daw` commands from a terminal reach that same host, so the person and the
 agent share one song, one transport and one undo history. An edit in the window
@@ -23,7 +25,8 @@ targets macOS 14.
 
 ```sh
 ./build.sh                          # build/AAW.app
-open -a build/AAW.app path/to/song.yaml
+open -a build/AAW.app               # a new Untitled project
+open -a build/AAW.app path/to/project   # its folder, or the song.yaml in it
 ./build.sh test                     # the Swift tests
 ./build.sh dist                     # build/AAW-0.1.0.zip, to share
 ```
@@ -119,6 +122,24 @@ before sharing a build:
   engine uses are not gathered, among them Signalsmith Stretch (MIT), which
   the engine links for time stretching. The `rubberband` program a song can
   name instead is not in the bundle.
+
+## Projects
+
+A project is a folder with `song.yaml` in it.
+[docs/features/new-and-untitled-projects.md](../../docs/features/new-and-untitled-projects.md)
+describes all of this; in short:
+
+| | |
+|---|---|
+| Launch | Opens a blank project called Untitled, 120 BPM and 32 bars, kept in `Untitled/` of the app's data folder until it has a name. There is no welcome window, and closing the last window quits |
+| File › New (⌘N) | Another Untitled project, in a window of its own |
+| File › Open… (⌘O), Open Recent | A project's folder or its `song.yaml`. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there |
+| File › Save As… (⇧⌘S) | Asks for a name and a place. An Untitled project moves there. A project that has a name is copied, and the window carries on in the copy. Undo, the selection and what is playing carry on, and `daw` commands sent to the old path still land in the window |
+| Closing an Untitled project | One that holds nothing is deleted. One that holds something asks: Save…, Delete or Cancel. Quitting asks about each in turn |
+
+The data folder is `~/Library/Application Support/AAW`, or what `AAW_DATA_DIR`
+names. `daw projects` lists the projects open in the app, with the window in
+front first.
 
 ## The window
 
@@ -221,7 +242,7 @@ When a change lands, rows and clips ease to their new places and values. What a
 change by the agent or an edit of the file touched lights up in that origin's
 color for a moment. A clip also lights up when its pattern changed. A
 `song.yaml` edited outside the app that does not load is reported in a banner
-and the last valid song stays open. `daw close SONG` closes the window.
+and the last valid song stays open. `daw close PROJECT` closes the window.
 
 ## Checking the app without the screen
 
@@ -230,9 +251,15 @@ events a person's click or key press makes, and can write a picture of the
 window and quit. Points are in the window's content, from its top left.
 
 ```sh
-build/AAW.app/Contents/MacOS/AAW song.yaml --size 1280x560 \
+AAW_DATA_DIR=/tmp/aaw-data build/AAW.app/Contents/MacOS/AAW song.yaml --size 1280x560 \
     --click 800,250 --key space --snapshot /tmp/window.png --after 1.5
 ```
+
+Set `AAW_DATA_DIR` to a scratch folder for such a run. The app keeps its index
+of projects there, and with no project on the command line it makes its
+Untitled project there, so neither touches the person's own. A run that takes a
+picture or measures asks nothing when it quits: an Untitled project that holds
+something is left in that folder.
 
 `--measure JSON [--frames N]` in place of the picture, or before it, scrolls and
 zooms the arrangement through the song for N frames (240 unless given) and
@@ -262,7 +289,9 @@ further right.
 A menu, such as Add Effect, a choice in a device or + Lane, waits for a person
 and cannot be scripted, and neither can a drag from the samples or the Finder;
 use a `daw` command, or the + by a sample, for what it would do. Install
-Command Line Tool asks in an alert, which also waits for a person.
+Command Line Tool asks in an alert, which also waits for a person, and so do
+Save As… and the question about an Untitled project: `daw move` and `daw copy`
+do what Save As… does.
 
 ## Layout
 
@@ -281,7 +310,8 @@ Command Line Tool asks in an alert, which also waits for a person.
 | `Sources/AAWApp/BrowserView.swift` | The samples: searches of the library's index, and the list |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
-| `Sources/AAWApp/App.swift` | The app delegate, menus, windows and the command line |
+| `Sources/AAWApp/Projects.swift` | The index of the projects the app knows, and what closing a project does, tested in `Tests` |
+| `Sources/AAWApp/App.swift` | The app delegate, menus, windows, launch, Save As…, closing and the command line |
 | `Sources/AAW` | The executable's entry point |
 
 ## Limits
@@ -311,4 +341,6 @@ Command Line Tool asks in an alert, which also waits for a person.
 - An effect's ID is set with `daw set`; the panel shows it.
 - An effect added, removed, bypassed or moved while the song plays is heard
   after a 10 ms dip, and so is a change to a field that reshapes a device.
+- Save As… does not replace a folder that is already there, and a new
+  project's browser is empty unless `AAW_LIBRARY` names an index.
 - The app has no icon, and the Python tools are not in its bundle.

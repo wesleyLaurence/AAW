@@ -13,8 +13,13 @@ effects, UI or broad infrastructure beyond the item being worked on. See [Docs](
   (`agent_daw.aaw_py`) and drives both. Python reads songs only through that model.
 - The Mac app in `apps/mac/` builds with `./build.sh`; run `./build.sh test` after Swift changes
   and see its README for checking the window with `--snapshot` and timing its drawing with
-  `--measure`. Its bundle holds a copy of `daw`, which the app's menu can link onto the PATH;
+  `--measure`. Run it with `AAW_DATA_DIR` set to a scratch folder: with no project it makes
+  an Untitled one there, and it keeps its index of projects there, not in the person's. Its bundle holds a copy of `daw`, which the app's menu can link onto the PATH;
   in this checkout keep to `uv run daw`, which runs the engine as last built.
+- A command's PROJECT is a project's folder or the `song.yaml` in it. `daw projects` lists
+  the projects open in the app, the window in front first. A project the person saved under
+  another name still answers at its old path, and the reply's `project` and a `notice` on
+  stderr say where it is now: use that path from then on.
 - Edit a song with commands (`set`, `clip move`, `effect add`, `undo`; see engine/README.md).
   While a session host runs for the song (it is open in the Mac app, or `daw host` or
   `daw play` is running; `daw status` shows `"host": true`), prefer them to `apply`: the

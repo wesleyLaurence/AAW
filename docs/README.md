@@ -35,13 +35,13 @@ Built:
 | [join checks](features/join-checks.md) | `daw joins`: each join of an edited song, and the file's length |
 | [export](features/export.md) | `daw export`: a named WAV, AAC or MP3 file from a render |
 | [skills](features/skills.md) | Where a personal skill and its sounds live, and the tracked `song-edit` skill |
+| [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
 
 Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [new and untitled projects](features/new-and-untitled-projects.md) | 1 |
-| [the agent panel](features/agent-panel.md) | 6 |
+| [the agent panel](features/agent-panel.md) | 5 |
 
 ## Archive
 
