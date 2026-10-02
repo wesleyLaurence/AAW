@@ -16,6 +16,8 @@ struct Launch {
         case click(CGPoint, shift: Bool = false, count: Int = 1)
         case drag(CGPoint, CGPoint)
         case key(Key)
+        /// An audio file let go at a point, as a drag from the Finder ends.
+        case drop(URL, CGPoint)
         /// Time for something else to happen, such as an agent's command.
         case wait(Double)
     }
@@ -95,6 +97,13 @@ struct Launch {
             case "--drag":
                 let n = numbers()
                 if n.count == 4 { actions.append(.drag(CGPoint(x: n[0], y: n[1]), CGPoint(x: n[2], y: n[3]))) }
+            case "--drop":
+                // FILE,X,Y: the file's path may have commas of its own.
+                let parts = (rest.popFirst() ?? "").split(separator: ",", omittingEmptySubsequences: false)
+                if parts.count >= 3, let x = Double(parts[parts.count - 2]), let y = Double(parts[parts.count - 1]) {
+                    let path = parts.dropLast(2).joined(separator: ",")
+                    actions.append(.drop(URL(fileURLWithPath: path), CGPoint(x: x, y: y)))
+                }
             case "--key":
                 if let key = rest.popFirst().flatMap(Key.init) { actions.append(.key(key)) }
             case "--type":
@@ -405,6 +414,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // A key with Command is a menu's, as it is when a person presses it.
             if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
             NSApp.sendEvent(event)
+        case .drop(let file, let p):
+            // No drag can be made up, so the file is handed to where a drag
+            // that ended at the point would have left it.
+            func arrangement(in view: NSView) -> ArrangementView? {
+                (view as? ArrangementView) ?? view.subviews.lazy.compactMap(arrangement).first
+            }
+            if let view = arrangement(in: content) {
+                view.drop(file: file, at: view.convert(CGPoint(x: p.x, y: content.bounds.height - p.y), from: nil))
+            }
         case .wait:
             break
         }
@@ -504,6 +522,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Copy", #selector(NSText.copy(_:)), "c"),
             item("Paste", #selector(NSText.paste(_:)), "v"),
             item("Duplicate", #selector(SongWindowController.duplicateSelection(_:)), "d"),
+            item("Split", #selector(SongWindowController.splitSelection(_:)), "e"),
             item("Delete", #selector(SongWindowController.deleteSelection(_:)), "\u{8}", []),
             .separator(),
             item("Select All", #selector(NSResponder.selectAll(_:)), "a"),
@@ -723,6 +742,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func undoEdit(_ sender: Any?) { model.undo() }
     @objc func redoEdit(_ sender: Any?) { model.redo() }
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
+    @objc func splitSelection(_ sender: Any?) { model.splitSelection() }
     /// Delete, for what has the keys: in the pattern editor the selected
     /// event and nothing else, so that it never takes the clip being edited.
     @objc func deleteSelection(_ sender: Any?) {
@@ -758,7 +778,10 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             return !typing
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
         case #selector(toggleDevices(_:)): item.state = model.showsDetail && model.detail == .devices ? .on : .off
-        case #selector(togglePattern(_:)): item.state = model.showsDetail && model.detail == .pattern ? .on : .off
+        case #selector(togglePattern(_:)):
+            // The clip last selected: a pattern, or an audio clip.
+            item.title = model.audioContext == nil ? "Pattern" : "Audio Clip"
+            item.state = model.showsDetail && model.detail == .pattern ? .on : .off
         case #selector(toggleBrowser(_:)): item.state = model.showsBrowser ? .on : .off
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
         case #selector(togglePlay(_:)): return !typing
@@ -769,6 +792,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.title = Self.title("Redo", model.redoStep)
             return model.redoStep != nil && !typing
         case #selector(duplicateSelection(_:)): return !model.selectedClips.isEmpty && !typing
+        case #selector(splitSelection(_:)): return model.canSplit && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
         case #selector(addTrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing

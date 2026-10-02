@@ -53,7 +53,7 @@ project's folder or the song file in it. It implements:
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
 | `daw samples ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, perception, `inspect` with measured root notes and warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
-| `daw audio add\|cut\|split\|trim\|crossfade` | Audio clips on a track: parts of a sample file placed on beats, a range removed with the gap closed, and the fades of a join |
+| `daw audio add\|move\|cut\|split\|trim\|crossfade` | Audio clips on a track: parts of a sample file placed on beats and moved to another beat or track, a range removed with the gap closed, and the fades of a join |
 | `daw model PATH...` | Canonical YAML and fingerprints, or validation errors |
 | `daw schedule PROJECT` | Every hit's start frame, track, pad and release frame |
 | `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read |
@@ -105,6 +105,8 @@ stream is cut into blocks, and processing never allocates.
   coarser stretches four times as long each, for a display to draw at any
   zoom. A track's program carries an identity of what its voices are made
   from, so peaks are worked out again only for the tracks an edit changed.
+  `file_peaks` gives the same of a sample file as it is, read in blocks so
+  that a whole song is never held, for an audio clip to draw.
 
 ## Session host
 
@@ -194,6 +196,15 @@ pattern's steps and events, names the tracks, clips, returns and sections a
 change touched, and turns the person's edits into commands (`edits.rs`),
 working out exact beats from the song for a clip moved by so many beats or
 copied after itself, and for an event moved by steps of its pattern's grid.
+A track's audio clips are in the arrangement beside its pattern clips, each to
+where it leaves and with how long it sounds after that, and so are the files
+they play (`files.rs`): each file's length, and the beats of the map `daw
+samples beats` left beside it, when that map is of the sample the song lists.
+The person's edits of an audio clip keep its sound ending where it is drawn: an
+end is trimmed to the fade out's length before the beat, and a longer fade out
+starts earlier. An edit that would end an audio clip past the song's end by
+more than the end fade lengthens the song to the end of that bar, in the same
+step; `daw` commands leave the length to whoever sends them.
 What a device panel shows of an effect type comes from `aaw_model::describe`.
 Such a host is reached through its socket like any other, and compiles each
 revision as it lands so that play starts at once.
@@ -202,7 +213,10 @@ Waveforms follow each compile (`waveform.rs`): a thread of its own works out
 the peaks of the tracks whose identity it has not seen, a few at a time, and
 tells the app which audio each track has at the revision and the peaks it has
 not been sent. Only the latest revision is worked on, and peaks are kept for a
-while, so undo and redo find theirs.
+while, so undo and redo find theirs. An audio clip draws its file, not its
+track: each file's peaks are read once, in blocks, and sent by the file's
+identity, and a track of audio clips alone has no peaks of its own to work
+out.
 
 A project as the app needs it is in `projects.rs`: a new Untitled project in
 the app's data folder (`AAW_DATA_DIR`, or `~/Library/Application Support/AAW`),

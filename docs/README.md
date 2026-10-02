@@ -30,6 +30,7 @@ Built:
 | [sample analysis](features/sample-analysis.md) | `daw samples analyze`, measured search filters, root-note warnings |
 | [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
+| [audio clips in the app](features/audio-clips-in-app.md) | A file dropped on the timeline, a clip moved, trimmed, faded and split there, the song growing to hold it, and the beat map on its waveform |
 | [time stretch](features/time-stretch.md) | A pad or audio clip that follows the tempo at its own pitch |
 | [timeline](features/timeline.md) | `daw timeline`: beats and seconds, end alignment, fitting the length |
 | [join checks](features/join-checks.md) | `daw joins`: each join of an edited song, and the file's length |
@@ -41,7 +42,7 @@ Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [the agent panel](features/agent-panel.md) | 5 |
+| [the agent panel](features/agent-panel.md) | 4 |
 
 ## Archive
 

@@ -210,6 +210,9 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(timed.snapshot?.lastPathComponent, "window.png")
         XCTAssertEqual(timed.size, CGSize(width: 1200, height: 700))
         XCTAssertEqual(Launch(arguments: ["--measure", "/tmp/times.json"]).frames, 240)
+        // A file let go at a point; its path may have commas.
+        let dropped = Launch(arguments: ["--drop", "/music/One, Two.wav,400,120", "--drop", "nowhere.wav"])
+        XCTAssertEqual(dropped.actions, [.drop(URL(fileURLWithPath: "/music/One, Two.wav"), CGPoint(x: 400, y: 120))])
     }
 
     func testDrawTimesAreSummedUp() {

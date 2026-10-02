@@ -4,8 +4,9 @@
 
 mod common;
 
-use aaw_engine::peaks::{peaks, BASE, COARSEST, STEP};
+use aaw_engine::peaks::{file_peaks, peaks, BASE, COARSEST, STEP};
 use aaw_engine::program::{compile_cached, Cache, Voice};
+use aaw_engine::sndfile;
 use common::{song, write_song};
 
 /// The voices summed frame by frame, each from its own position.
@@ -75,6 +76,41 @@ fn peaks_are_cut_at_the_session_end_and_clip_at_full_scale() {
     let clipped = peaks(&loud, program.total);
     assert!(clipped.levels[0].data.iter().any(|x| *x == 127) && clipped.levels[0].data.iter().any(|x| *x == -127));
     assert_eq!(peaks(&[], 1000).levels[0].data, vec![0i8; 2 * 16]);
+}
+
+#[test]
+fn a_files_peaks_are_of_the_file_as_it_is() {
+    let dir = tempfile::tempdir().unwrap();
+    // Longer than a block and not a whole number of buckets, with the right
+    // side quieter and the loudest sample outside full scale.
+    let frames: Vec<[f32; 2]> = (0..10_000)
+        .map(|i| {
+            let x = if i == 9_990 { 1.5 } else { ((i as f64) / 37.0).sin() * (i as f64 / 10_000.0) };
+            [x as f32, (x * 0.25) as f32]
+        })
+        .collect();
+    common::write_sample(dir.path(), "song.wav", frames.clone(), 44100);
+    let path = dir.path().join("song.wav");
+    assert_eq!(sndfile::info(&path).unwrap(), sndfile::Info { frames: 10_000, channels: 2, rate: 44100 });
+    let (made, rate) = file_peaks(&path).unwrap();
+    assert_eq!((made.frames, rate), (10_000, 44100));
+    let finest = &made.levels[0];
+    assert_eq!((finest.frames_per_bucket, finest.buckets()), (BASE, 10_000usize.div_ceil(BASE)));
+    for (bucket, part) in frames.chunks(BASE).enumerate() {
+        let all = || part.iter().flat_map(|f| [f64::from(f[0]), f64::from(f[1])]);
+        let (lo, hi) = (all().fold(f64::INFINITY, f64::min), all().fold(f64::NEG_INFINITY, f64::max));
+        let (shown_lo, shown_hi) = (finest.data[2 * bucket] as f64 / 127.0, finest.data[2 * bucket + 1] as f64 / 127.0);
+        assert!(shown_lo <= lo.max(-1.0) + 1e-12 && shown_lo > lo.max(-1.0) - 1.0 / 127.0 - 1e-12, "bucket {bucket}");
+        assert!(shown_hi >= hi.min(1.0) - 1e-12 && shown_hi < hi.min(1.0) + 1.0 / 127.0 + 1e-12, "bucket {bucket}");
+    }
+    assert_eq!(finest.data[2 * (9_990 / BASE) + 1], 127, "louder than full scale is drawn as full scale");
+    assert!(file_peaks(&dir.path().join("missing.wav")).is_err());
+    // A long file has coarser levels, as a track has.
+    let long: Vec<[f32; 2]> = (0..BASE * COARSEST * 5).map(|i| [((i % 200) as f32 / 200.0) - 0.5; 2]).collect();
+    common::write_sample(dir.path(), "long.wav", long, 48000);
+    let (long, _) = file_peaks(&dir.path().join("long.wav")).unwrap();
+    assert!(long.levels.len() > 1 && long.levels.last().unwrap().buckets() <= COARSEST);
+    assert_eq!(long.levels[1].frames_per_bucket, BASE * STEP);
 }
 
 #[test]

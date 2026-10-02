@@ -14,29 +14,23 @@ kept.
 
 ## Next
 
-1. **Audio clips in the app.** Draw a track's audio clips with their waveform,
-   drag their edges and fades, and show the beat map on the waveform. An audio
-   file dropped on a track's lane lands as an audio clip at that beat, not as a
-   pad, and a clip is dragged to move it. Draw a shaped automation segment as the
-   curve it plays. Today the app plays audio clips without drawing them, and
-   draws a shaped segment as a straight line.
-2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-3. **The `.aaw` file type and the project ID.** The project file under the app's
+2. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-4. **The workspace and the two levels.** The workspace folder with its managed
+3. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-5. **The agent panel.** A conversation in the window, per project, over the
+4. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-6. **Other Macs.** The rest of the Python ported or carried in the bundle,
+5. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-7. **Sign-in buttons and other agents,** as the companies' terms allow.
+6. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -46,10 +40,18 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - **How the app sounds.** Nobody listened during the scripted runs of the rebuild:
   the glide of a level or knob, the 10 ms dip when an effect is added or removed
   while playing, tails ringing through an edit, a locate and a stop.
-- **Dragging a sample** from the browser onto the arrangement, and a drop where
-  there is no track. Scripted input cannot start a drag. A WAV dropped on a
-  track was tried on 2026-10-02 and became a pad, as built; the person expected
-  an audio clip, which is item 1 of Next.
+- **Dragging a sample** from the browser, or a file from the Finder, onto the
+  timeline and onto a header: the outline while it is dragged, the audio clip or
+  the pad it makes, and a drop where there is no track. Scripted input cannot
+  start a drag; `--drop` handed a WAV and an `.m4a` to where a drag would have
+  left them, and both became clips.
+- **Audio clips by hand and by ear:** moving one, trimming each edge, both fade
+  handles, a split and what follows it deleted, on a song of a few minutes.
+  Whether the edges and the handles are easy to take hold of, how a faded and a
+  trimmed end sound, and how long a trim of a long file takes.
+- **The beat map on a clip,** on a real song measured with `daw samples beats`:
+  whether the ticks sit on the hits, and how they read in a song at another
+  tempo.
 - **Install Command Line Tool:** its alerts and the request for an administrator's
   password.
 - **A stretched render, by ear.** The default stretcher was chosen on licensing,
@@ -59,7 +61,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
-  (with item 6).
+  (with item 5).
 - **Save As… in the app:** the panel on an Untitled project and on one that has
   a name, a name that is taken, and work carried on in the copy. Scripted input
   cannot answer a panel; `daw move` and `daw copy` were run in its place.
@@ -121,6 +123,9 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   reverse or repeat; perhaps one list for pattern clips and audio clips.
 - A join check that places a pad transposed by an event at its transposed length.
 - A long song streamed from disk; a decoded song is held whole in memory.
+- A trimmed audio clip prepared from audio already at the song's rate. A trim
+  of a long file at another rate converts the part again, about half a second
+  for two minutes.
 - An event's offset in milliseconds, either side of its beat. A push or a drag
   is written in beats today, so it changes with the tempo, and a hit cannot sit
   ahead of its pattern's first beat.
@@ -161,8 +166,19 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### The app
 
-- A song that grows when a clip is placed past its end. A blank project is 32
-  bars, and a clip cannot be dragged further.
+- A song that grows when a pattern clip is placed past its end, as it does for
+  an audio clip. A blank project is 32 bars, and a pattern clip cannot be
+  dragged further.
+- Audio clips: a crossfade made by dragging one clip over another, where today
+  both play; an edge that snaps to the beats of the file's beat map; a clip's
+  lead shown and dragged; several clips trimmed at once.
+- A beat map measured from the app when a song is dropped. It is drawn when
+  `daw samples beats` has left one.
+- A larger picture of a clip's file in the detail panel, with the part the clip
+  plays marked.
+- An automation segment's shape set by dragging it. The app draws the curve and
+  `daw` sets it.
+- The window following the song's end when the song grows.
 - Save As… over a folder that is already there, after asking.
 - The Python commands (`check`, `timeline`, `export`, `samples import`)
   following a project that was saved under another name, as the Rust ones do.

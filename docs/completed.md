@@ -7,9 +7,10 @@ backlog.
 
 | Date | What | PR | Tried by a person |
 |---|---|---|---|
+| 2026-10-02 | Audio clips in the app: a file dropped on the timeline is a clip, drawn with its file's waveform, moved, trimmed, faded and split there; the song grows to hold it; the beat map on the waveform; a clip's panel; `daw audio move`; a shaped automation segment drawn as its curve ([audio clips in the app](features/audio-clips-in-app.md), D59) | #35 | Scripted runs only, on generated audio: a WAV and an `.m4a` handed to the timeline of a blank project, a trim, a fade, a move past the song's end, a split, the beat ticks and a shaped lane, each seen in a picture. Nothing dragged from the Finder, and nothing heard |
 | 2026-10-02 | The app opens on an Untitled project; File › New and Save As…; the question on closing; the project index, `daw projects`, `daw move`, `daw copy` and a folder as PROJECT ([new and untitled projects](features/new-and-untitled-projects.md), D58) | #33 | Scripted runs only: launch on Untitled, ⌘N, a move and a copy from a terminal with the app open, a project left after quitting. Not the Save As… panel, the question on closing or Open Recent |
-| 2026-10-01 | A shape on an automation point that bends its segment ([automation](features/automation.md), D55) | #31 | Not heard. The app draws the segment straight |
-| 2026-10-01 | Audio clips: parts of a song on a track, and `daw audio add`, `cut`, `split`, `trim`, `crossfade` ([audio clips](features/audio-clips.md), D54) | #30 | Not heard. The app plays them and does not draw them |
+| 2026-10-01 | A shape on an automation point that bends its segment ([automation](features/automation.md), D55) | #31 | Not heard. The app drew the segment straight until #35 |
+| 2026-10-01 | Audio clips: parts of a song on a track, and `daw audio add`, `cut`, `split`, `trim`, `crossfade` ([audio clips](features/audio-clips.md), D54) | #30 | Not heard. The app played them and did not draw them until #35 |
 | 2026-10-01 | A pad or audio clip stretched in time at its own pitch ([time stretch](features/time-stretch.md), D53) | #29 | Not heard |
 | 2026-10-01 | `daw timeline`: beats and seconds, a sound placed to end on a beat, fitting the length ([timeline](features/timeline.md)) | #28 | Generated songs only |
 | 2026-10-01 | The `song-edit` skill, the `daw describe` topics for edits, and a place for personal skills ([skills](features/skills.md), D52) | #27 | Run once by hand on a generated song |

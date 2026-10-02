@@ -2,15 +2,17 @@
 //! change touched. Positions are beats as floats, for display only; the song's
 //! exact values stay in the host.
 
+use crate::files::{FileView, Files};
 use aaw_host::session::Doc;
 use aaw_host::tree::{Item, Node};
 use aaw_model::describe::{self, Initial, Kind};
 use aaw_model::rules::{midi, target, Domain, Owner, TargetKind};
 use aaw_model::value::{py_eq, Value};
-use aaw_model::{step_cells, Curve, Effect, Lane, Project};
+use aaw_model::{step_cells, AudioClip, Curve, Effect, Lane, Project};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet};
+use std::path::Path;
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Arrangement {
@@ -25,6 +27,8 @@ pub struct Arrangement {
     pub master: MasterView,
     pub sections: Vec<SectionView>,
     pub patterns: Vec<PatternView>,
+    /// The files the tracks' audio clips play.
+    pub files: Vec<FileView>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -103,6 +107,9 @@ pub struct PointView {
     pub value: f64,
     /// Whether the value holds until the next point instead of moving to it.
     pub hold: bool,
+    /// How the segment to the next point bends, from -1 to 1: above zero it
+    /// starts slowly, below zero it finishes slowly, and zero is straight.
+    pub shape: f64,
 }
 
 /// An automation lane.
@@ -203,6 +210,7 @@ pub struct TrackView {
     pub lane_targets: Vec<LaneTarget>,
     pub pads: Vec<PadView>,
     pub clips: Vec<ClipView>,
+    pub audio: Vec<AudioClipView>,
 }
 
 /// A send from a track to a return.
@@ -223,6 +231,41 @@ pub struct ClipView {
     /// The length of one repeat.
     pub pattern_beats: f64,
     pub repeats: u32,
+}
+
+/// An audio clip: part of a sample file on a track's timeline.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct AudioClipView {
+    pub key: u64,
+    /// How commands address the clip, such as `@12`.
+    pub reference: String,
+    pub sample: String,
+    /// The beat its start plays on.
+    pub at: f64,
+    /// How long it plays before it leaves, in beats: to its end, or to its
+    /// file's.
+    pub length_beats: f64,
+    /// How long it sounds after that while it fades out, in beats: its fade
+    /// out, as far as its file goes. A clip is drawn to where its sound ends.
+    pub tail_beats: f64,
+    /// The seconds of its file it plays from and to; the end is the file's
+    /// when the clip has none of its own.
+    pub source_start_seconds: f64,
+    pub source_end_seconds: f64,
+    /// Seconds of its file that go by in a beat of the song.
+    pub seconds_per_beat: f64,
+    pub gain_db: f64,
+    pub fade_in_ms: f64,
+    pub fade_out_ms: f64,
+    /// `equal_power` or `linear`.
+    pub fade_curve: String,
+    /// The file's tempo, when the clip follows the song's.
+    pub source_bpm: Option<f64>,
+    /// `repitch` or `preserve_pitch`.
+    pub stretch: String,
+    /// The identity of its file among the arrangement's `files`, or 0 when
+    /// the file cannot be read.
+    pub file: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -466,6 +509,7 @@ fn lanes(owner: Owner, lanes: &[Lane], handles: &[Item]) -> Vec<LaneView> {
                         at: p.at_exact().to_f64().unwrap_or(0.0),
                         value: p.value,
                         hold: p.curve == Curve::Hold,
+                        shape: p.shape,
                     })
                     .collect(),
             })
@@ -609,12 +653,41 @@ fn patterns(p: &Project, tree: &Node) -> Vec<PatternView> {
         .collect()
 }
 
-/// The arrangement of a revision.
-pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
+/// Seconds of an audio clip's file that go by in a beat of the song. A clip
+/// with a tempo of its own follows the song's, so a beat of the song is a beat
+/// of its file.
+pub fn seconds_per_beat(clip: &AudioClip, tempo: f64) -> f64 {
+    60.0 / clip.source_bpm.unwrap_or(tempo)
+}
+
+/// How long an audio clip sounds after it leaves, in beats: its fade out, as
+/// far as its file goes. `file` is the file's length in seconds, when known.
+pub fn tail_beats(clip: &AudioClip, tempo: f64, file: Option<f64>) -> f64 {
+    let fade = clip.fade_out_ms / 1000.0 * tempo / 60.0;
+    match (clip.source_end_seconds, file) {
+        (Some(end), Some(file)) => fade.min(((file - end) / seconds_per_beat(clip, tempo)).max(0.0)),
+        (Some(_), None) => fade,
+        // It plays to its file's end, and fades over the last of it.
+        (None, _) => 0.0,
+    }
+}
+
+/// The arrangement of a revision of the song in `directory`.
+pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) -> Arrangement {
     let p = &doc.project;
     let tree = doc.tree();
     let float = |x: num_rational::BigRational| x.to_f64().unwrap_or(0.0);
     let track_items = items(&tree, "tracks");
+    // Each file once, however many clips play it.
+    let mut used: Vec<FileView> = Vec::new();
+    let mut file = |sample: &str| -> Option<(u64, f64)> {
+        let view = files.of(directory, p.samples.get(sample)?)?;
+        let found = (view.identity, view.seconds);
+        if used.iter().all(|f| f.identity != view.identity) {
+            used.push(view);
+        }
+        Some(found)
+    };
     let tracks = p
         .tracks
         .iter()
@@ -622,6 +695,7 @@ pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
         .map(|(i, t)| {
             let node = track_items.get(i).map(|item| &item.node);
             let clip_items = node.map(|n| items(n, "clips")).unwrap_or(&[]);
+            let audio_items = node.map(|n| items(n, "audio")).unwrap_or(&[]);
             let sends: Vec<String> = t.sends.iter().map(|s| s.to.clone()).collect();
             let (effects, lanes, lane_targets) = channel(Owner::Track(t), node, &keys(p, Some(&t.id)), &sends);
             TrackView {
@@ -666,6 +740,36 @@ pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
                             at: float(c.at_exact()),
                             pattern_beats: p.patterns.get(&c.pattern).map_or(0.0, |x| float(x.length_exact())),
                             repeats: c.repeats.max(0) as u32,
+                        }
+                    })
+                    .collect(),
+                audio: t
+                    .audio
+                    .iter()
+                    .enumerate()
+                    .map(|(j, c)| {
+                        let key = handle(audio_items, j);
+                        let per_beat = seconds_per_beat(c, p.session.tempo);
+                        let (identity, seconds) = file(&c.sample).unwrap_or((0, 0.0));
+                        // A file that cannot be read has no length to end on.
+                        let end = c.source_end_seconds.map_or(seconds, |end| if identity == 0 { end } else { end.min(seconds) });
+                        AudioClipView {
+                            key,
+                            reference: aaw_host::tree::handle_text(key),
+                            sample: c.sample.clone(),
+                            at: float(c.at_exact()),
+                            length_beats: ((end - c.source_start_seconds) / per_beat).max(0.0),
+                            tail_beats: tail_beats(c, p.session.tempo, (identity != 0).then_some(seconds)),
+                            source_start_seconds: c.source_start_seconds,
+                            source_end_seconds: end,
+                            seconds_per_beat: per_beat,
+                            gain_db: c.gain_db,
+                            fade_in_ms: c.fade_in_ms,
+                            fade_out_ms: c.fade_out_ms,
+                            fade_curve: c.fade_curve.as_str().to_string(),
+                            source_bpm: c.source_bpm,
+                            stretch: c.stretch.as_str().to_string(),
+                            file: identity,
                         }
                     })
                     .collect(),
@@ -724,6 +828,7 @@ pub fn arrangement(doc: &Doc, revision: u64) -> Arrangement {
         },
         sections,
         patterns: patterns(p, &tree),
+        files: used,
     }
 }
 
@@ -769,11 +874,12 @@ fn list_delta(part: Part, old: &[Item], new: &[Item], changed: impl Fn(&Item, &I
     }
 }
 
-/// Every clip by handle, with the handle of its track.
+/// Every clip by handle, pattern clips and audio clips alike, with the handle
+/// of its track.
 fn clips(tree: &Node) -> Vec<(u64, &Item)> {
     items(tree, "tracks")
         .iter()
-        .flat_map(|t| items(&t.node, "clips").iter().map(move |c| (t.handle, c)))
+        .flat_map(|t| items(&t.node, "clips").iter().chain(items(&t.node, "audio")).map(move |c| (t.handle, c)))
         .collect()
 }
 
@@ -801,7 +907,10 @@ pub fn touched(old: &Doc, new: &Doc) -> Vec<Touch> {
         Part::Track,
         items(&a, "tracks"),
         items(&b, "tracks"),
-        |o, n| !same(Some(&without(&o.node, "clips")), Some(&without(&n.node, "clips"))),
+        |o, n| {
+            let rest = |node: &Node| without(&without(node, "clips"), "audio");
+            !same(Some(&rest(&o.node)), Some(&rest(&n.node)))
+        },
         &mut out,
     );
 

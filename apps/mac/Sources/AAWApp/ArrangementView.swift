@@ -1,4 +1,5 @@
 import AAWCore
+import AVFoundation
 import AppKit
 import SwiftUI
 
@@ -99,14 +100,38 @@ private struct ClipVisual {
     /// at when the waveform was made. It moves with the clip, and is replaced
     /// when the host has worked out what the clip plays where it is now.
     var wave: (peaks: Waveform, at: Double)?
+    /// An audio clip as it is shown: the host's, or the person's while they
+    /// drag a fade. It draws its file, and `pattern` is its sample's name.
+    var audio: AudioClipView?
+    /// The beat an audio clip's file starts on, which its waveform is drawn
+    /// from: it moves with the clip and stays while an edge is trimmed.
+    var anchor = Animated(0)
 }
 
-/// Where a dragged sample would land.
+/// A clip under the pointer.
+private enum ClipHit {
+    case pattern(ClipView)
+    case audio(AudioClipView)
+
+    var key: UInt64 {
+        switch self {
+        case .pattern(let clip): clip.key
+        case .audio(let clip): clip.key
+        }
+    }
+}
+
+/// Where a dragged sample would land: in the headers as a pad, and on the
+/// timeline as an audio clip at a beat.
 private enum DropTarget: Equatable {
     /// As a pad of this track.
-    case track(UInt64)
-    /// As a new track after the others.
+    case pad(UInt64)
+    /// As a pad of a new track after the others.
     case newTrack
+    /// As an audio clip of this track.
+    case clip(track: UInt64, at: Double)
+    /// As an audio clip of a new track after the others.
+    case newClip(at: Double)
 }
 
 /// How long the arrangement took to draw each frame of a run of scrolling and
@@ -174,6 +199,28 @@ private struct ClipDrag {
     var collapse: UInt64?
 }
 
+/// An edge of an audio clip being dragged.
+private struct TrimDrag {
+    var clip: AudioClipView
+    var layout: AudioClipLayout
+    /// The start is dragged, or else the end.
+    var start: Bool
+    /// The beat the edge is at.
+    var beat: Double
+    var moved = false
+}
+
+/// A fade's handle being dragged.
+private struct FadeDrag {
+    var clip: AudioClipView
+    var layout: AudioClipLayout
+    /// The fade in is dragged, or else the fade out.
+    var fadeIn: Bool
+    /// The fade's length in beats.
+    var beats: Double
+    var moved = false
+}
+
 private struct ReorderDrag {
     var row: RowID
     var startY: CGFloat
@@ -201,6 +248,8 @@ private enum Drag {
     case slider(SliderDrag)
     case clips(ClipDrag)
     case resize(clip: ClipView, repeats: Int)
+    case trim(TrimDrag)
+    case fade(FadeDrag)
     case reorder(ReorderDrag)
     case point(PointDrag)
 }
@@ -250,6 +299,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
     private var dropTarget: DropTarget?
+    /// The file being dragged over the view and its length in seconds, read
+    /// once for the outline of the clip it would make.
+    private var dropFile: (path: String, seconds: Double?)?
+    /// The audio clip under the pointer, which shows its fades' handles.
+    private var hoverClip: UInt64?
     private var measuring: Measuring?
 
     init(model: SongModel) {
@@ -299,7 +353,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         for area in trackingAreas { removeTrackingArea(area) }
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                       owner: self))
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -324,6 +379,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         switch drag {
         case .clips(let d) where d.moved: Set(d.origin.keys)
         case .resize(let clip, _): [clip.key]
+        case .trim(let d): [d.clip.key]
+        case .fade(let d): [d.clip.key]
         default: []
         }
     }
@@ -437,6 +494,31 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     )
                 }
             }
+            for clip in track.audio {
+                liveClips.insert(clip.key)
+                let shape = audioLayout(clip, in: a)
+                if var v = clips[clip.key], !v.removing {
+                    v.pattern = clip.sample
+                    v.color = color
+                    v.muted = track.mute
+                    if !dragged.contains(clip.key) {
+                        v.audio = clip
+                        v.at.move(to: shape.start, at: now, over: time)
+                        v.length.move(to: shape.length, at: now, over: time)
+                        v.anchor.move(to: shape.fileStart, at: now, over: time)
+                        v.y.move(to: y, at: now, over: time)
+                    }
+                    clips[clip.key] = v
+                } else {
+                    var alpha = Animated(animated ? 0 : 1)
+                    alpha.move(to: 1, at: now, over: time)
+                    clips[clip.key] = ClipVisual(
+                        pattern: clip.sample, repeats: 1, color: color, muted: track.mute,
+                        at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), alpha: alpha,
+                        audio: clip, anchor: Animated(shape.fileStart)
+                    )
+                }
+            }
             y += height
         }
         y += TimelineLayout.busGap
@@ -510,7 +592,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         held.removeAll()
         heldPoints.removeAll()
         switch drag {
-        case .slider, .point: drag = nil
+        case .slider, .point, .trim, .fade: drag = nil
         default: break
         }
         show(model.arrangement, animated: true)
@@ -561,7 +643,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now)
                     || $0.sends.values.contains { $0.isRunning(at: now) }
             }
-            || clips.values.contains { $0.at.isRunning(at: now) || $0.length.isRunning(at: now) || $0.y.isRunning(at: now) || $0.alpha.isRunning(at: now) }
+            || clips.values.contains {
+                $0.at.isRunning(at: now) || $0.length.isRunning(at: now) || $0.y.isRunning(at: now) || $0.alpha.isRunning(at: now)
+                    || $0.anchor.isRunning(at: now)
+            }
         if busy { needsDisplay = true }
 
         let playhead = model.playhead()
@@ -740,6 +825,22 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                height: TimelineLayout.trackHeight - 5)
     }
 
+    /// The height of a clip's title strip.
+    private static let titleHeight: CGFloat = 14
+
+    /// What a clip shows under its title: its waveform.
+    private func body(of rect: CGRect) -> CGRect {
+        CGRect(x: rect.minX, y: rect.minY + Self.titleHeight + 1, width: rect.width, height: rect.height - Self.titleHeight - 2)
+    }
+
+    /// An audio clip as it is drawn and dragged, in the arrangement shown or
+    /// in a newer one.
+    private func audioLayout(_ clip: AudioClipView, in a: Arrangement? = nil) -> AudioClipLayout {
+        let a = a ?? model.arrangement
+        let seconds = clip.file == 0 ? nil : a.files.first { $0.identity == clip.file }?.seconds
+        return AudioClipLayout(clip, tempo: a.tempo, seconds: seconds)
+    }
+
     /// Where a clip is in the order clips are drawn in: selected clips over
     /// the others, as a dragged clip should be, and newer clips over older.
     private func drawOrder(_ key: UInt64) -> (Int, UInt64) {
@@ -747,16 +848,28 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// The clip at a point: the one drawn on top, where clips overlap.
-    private func clip(at p: CGPoint) -> (clip: ClipView, rect: CGRect)? {
-        var hit: (clip: ClipView, rect: CGRect)?
+    private func clip(at p: CGPoint) -> (hit: ClipHit, rect: CGRect)? {
+        var found: (hit: ClipHit, rect: CGRect)?
+        func take(_ hit: ClipHit, _ rect: CGRect) {
+            guard rect.contains(p), found.map({ drawOrder($0.hit.key) < drawOrder(hit.key) }) ?? true else { return }
+            found = (hit, rect)
+        }
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
-            for clip in track.clips where hit.map({ drawOrder($0.clip.key) < drawOrder(clip.key) }) ?? true {
-                let rect = clipRect(at: clip.at, length: clip.patternBeats * Double(clip.repeats), top: frame.top)
-                if rect.contains(p) { hit = (clip, rect) }
+            for clip in track.clips {
+                take(.pattern(clip), clipRect(at: clip.at, length: clip.patternBeats * Double(clip.repeats), top: frame.top))
+            }
+            for clip in track.audio {
+                let shape = audioLayout(clip)
+                take(.audio(clip), clipRect(at: shape.start, length: shape.length, top: frame.top))
             }
         }
-        return hit
+        return found
+    }
+
+    /// What of an audio clip a point is on: an edge, a fade's handle or the clip.
+    private func part(of clip: AudioClipView, at p: CGPoint, in rect: CGRect) -> AudioClipLayout.Part {
+        audioLayout(clip).part(at: p, in: body(of: rect))
     }
 
     /// Whether a point is on the end of a clip, where a drag changes its repeats.
@@ -786,7 +899,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         } else if p.y >= TimelineLayout.rulerHeight, let hit = lane(at: p) {
             laneDown(hit.lane, rect: hit.rect, at: p, event)
         } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
-            clipDown(hit.clip, rect: hit.rect, at: p, event)
+            clipDown(hit.hit, rect: hit.rect, at: p, event)
         } else {
             let free = event.modifierFlags.contains(.option)
             if event.clickCount == 2, let track = track(atLane: p) {
@@ -943,39 +1056,73 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
     }
 
-    private func clipDown(_ clip: ClipView, rect: CGRect, at p: CGPoint, _ event: NSEvent) {
+    /// How far right an audio clip can be dragged: the song grows with it.
+    private static let farBeats = 100_000.0
+
+    private func clipDown(_ hit: ClipHit, rect: CGRect, at p: CGPoint, _ event: NSEvent) {
+        let key = hit.key
+        // An edge or a fade's handle is of one clip, which it selects alone.
+        var grabbed = AudioClipLayout.Part.body
+        var resize = false
+        switch hit {
+        case .pattern: resize = onResizeEdge(p, of: rect)
+        case .audio(let clip): grabbed = part(of: clip, at: p, in: rect)
+        }
         var selection = model.selectedClips
         var collapse: UInt64?
         if event.modifierFlags.contains(.shift) {
             // Shift adds a clip to the selection, or takes it out.
-            if selection.remove(clip.key) == nil { selection.insert(clip.key) }
-            guard selection.contains(clip.key) else {
+            if selection.remove(key) == nil { selection.insert(key) }
+            guard selection.contains(key) else {
                 model.select(clips: selection)
                 return
             }
-        } else if !selection.contains(clip.key) || onResizeEdge(p, of: rect) {
-            selection = [clip.key]
+        } else if !selection.contains(key) || resize || grabbed != .body {
+            selection = [key]
         } else if selection.count > 1 {
-            collapse = clip.key
+            collapse = key
         }
-        // The detail panel shows the pattern of the clip that was clicked.
-        model.select(clips: selection, focus: clip.key)
-        if selection.count == 1, onResizeEdge(p, of: rect) {
-            drag = .resize(clip: clip, repeats: Int(clip.repeats))
-            return
+        // The detail panel shows the clip that was clicked.
+        model.select(clips: selection, focus: key)
+        if selection.count == 1 {
+            switch hit {
+            case .pattern(let clip) where resize:
+                drag = .resize(clip: clip, repeats: Int(clip.repeats))
+                return
+            case .audio(let clip) where grabbed != .body:
+                let shape = audioLayout(clip)
+                switch grabbed {
+                case .start: drag = .trim(TrimDrag(clip: clip, layout: shape, start: true, beat: shape.start))
+                case .end: drag = .trim(TrimDrag(clip: clip, layout: shape, start: false, beat: shape.end))
+                case .fadeIn: drag = .fade(FadeDrag(clip: clip, layout: shape, fadeIn: true, beats: shape.fadeIn))
+                case .fadeOut: drag = .fade(FadeDrag(clip: clip, layout: shape, fadeIn: false, beats: shape.fadeOut))
+                case .body: break
+                }
+                return
+            default: break
+            }
         }
-        let placed = model.placedClips().filter { selection.contains($0.clip.key) }
-        let starts = placed.map(\.clip.at)
-        let ends = placed.map { $0.clip.at + $0.clip.patternBeats * Double($0.clip.repeats) }
+        let placed = model.placedClips().filter { selection.contains($0.key) }
         let tracks = placed.map(\.track)
-        guard let first = starts.min(), let last = ends.max(), let top = tracks.min(), let bottom = tracks.max() else { return }
+        guard let first = placed.map(\.at).min(), let top = tracks.min(), let bottom = tracks.max() else { return }
+        // Pattern clips stay inside the song; an audio clip takes the song's end with it.
+        let room = placed.filter { $0.audio == nil }.map { layout.lengthBeats - $0.end }.min() ?? Self.farBeats
         drag = .clips(ClipDrag(
             start: p,
-            origin: Dictionary(uniqueKeysWithValues: placed.map { ($0.clip.key, ($0.clip.at, $0.track)) }),
-            range: min(0, -first)...max(0, layout.lengthBeats - last),
+            origin: Dictionary(uniqueKeysWithValues: placed.map { ($0.key, ($0.at, $0.track)) }),
+            range: min(0, -first)...max(0, room),
             rowRange: -top...max(0, model.arrangement.tracks.count - 1 - bottom),
             collapse: collapse
         ))
+    }
+
+    /// The beat a pointer at `x` means for an edge or a dropped clip: on the
+    /// grid unless `free`, and not before the song. It may be past the song's
+    /// end, which an audio clip takes with it.
+    private func snappedBeat(atX x: CGFloat, free: Bool) -> Double {
+        let raw = layout.beat(atX: x)
+        let grid = layout.grid
+        return max(0, free ? (raw * 1000).rounded() / 1000 : (raw / grid).rounded() * grid)
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -1011,7 +1158,35 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     clips[key]?.y = Animated(row.y.to)
                 }
             }
+            for key in d.origin.keys {
+                // An audio clip's audio moves with it.
+                if let audio = clips[key]?.audio { clips[key]?.anchor = Animated(audioLayout(audio).fileStart + d.by) }
+            }
             drag = .clips(d)
+        case .trim(var d):
+            let wanted = snappedBeat(atX: p.x, free: event.modifierFlags.contains(.option))
+            let beat = d.start ? d.layout.start(draggedTo: wanted) : d.layout.end(draggedTo: wanted)
+            if beat != d.beat {
+                d.beat = beat
+                d.moved = true
+                // The audio stays where it is; the clip shows more or less of it.
+                let (from, to) = d.start ? (beat, d.layout.end) : (d.layout.start, beat)
+                clips[d.clip.key]?.at = Animated(from)
+                clips[d.clip.key]?.length = Animated(to - from)
+            }
+            drag = .trim(d)
+        case .fade(var d):
+            let beat = layout.beat(atX: p.x)
+            let tempo = model.arrangement.tempo
+            let longest = AudioClipLayout.beats(ms: 10_000, tempo: tempo)
+            let beats = min(d.fadeIn ? d.layout.fadeIn(draggedTo: beat) : d.layout.fadeOut(draggedTo: beat), longest)
+            if beats != d.beats {
+                d.beats = beats
+                d.moved = true
+                let ms = (AudioClipLayout.ms(beats: beats, tempo: tempo) * 10).rounded() / 10
+                if d.fadeIn { clips[d.clip.key]?.audio?.fadeInMs = ms } else { clips[d.clip.key]?.audio?.fadeOutMs = ms }
+            }
+            drag = .fade(d)
         case .resize(let clip, let repeats):
             let wanted = layout.repeats(atX: p.x, clipAt: clip.at, patternBeats: clip.patternBeats)
             if wanted != repeats {
@@ -1067,6 +1242,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         case .resize(let clip, let repeats):
             if repeats != Int(clip.repeats) { model.edit(.clipRepeats(clip: clip.key, repeats: UInt32(repeats))) }
+        case .trim(let d):
+            // Sent when the drag ends, as a move is: each trim has the engine
+            // prepare another part of the file.
+            if d.moved { model.edit(.audioTrim(clip: d.clip.key, start: d.start ? d.beat : nil, end: d.start ? nil : d.beat)) }
+        case .fade(let d):
+            if d.moved {
+                let ms = (AudioClipLayout.ms(beats: d.beats, tempo: model.arrangement.tempo) * 10).rounded() / 10
+                model.edit(.audioFade(clip: d.clip.key, fadeInMs: d.fadeIn ? ms : nil, fadeOutMs: d.fadeIn ? nil : ms))
+            }
         case .point(let d):
             model.endDrag()
             // The point stays as dragged until the host's song has it.
@@ -1087,16 +1271,34 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     override func mouseMoved(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         var resize = false
-        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
-            resize = onResizeEdge(p, of: hit.rect)
+        var hover: UInt64?
+        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight, lane(at: p) == nil, let hit = clip(at: p) {
+            switch hit.hit {
+            case .pattern: resize = onResizeEdge(p, of: hit.rect)
+            case .audio(let clip):
+                hover = clip.key
+                resize = part(of: clip, at: p, in: hit.rect) != .body
+            }
         }
         (resize ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
+        // An audio clip under the pointer shows its fades' handles.
+        if hover != hoverClip {
+            hoverClip = hover
+            needsDisplay = true
+        }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if hoverClip != nil {
+            hoverClip = nil
+            needsDisplay = true
+        }
     }
 
     /// Drops a drag that has sent nothing yet. True if there was one.
     private func cancelDrag() -> Bool {
         switch drag {
-        case .clips, .resize, .reorder, .loop:
+        case .clips, .resize, .trim, .fade, .reorder, .loop:
             drag = nil
             show(model.arrangement, animated: true)
             return true
@@ -1113,25 +1315,61 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// The sample a drag carries: one from the browser, or an audio file from
-    /// anywhere else.
-    private func sample(of drag: NSDraggingInfo) -> (path: String, name: String, note: String?)? {
+    /// anywhere else, with its length when that is known.
+    private func sample(of drag: NSDraggingInfo) -> (path: String, name: String, note: String?, seconds: Double?)? {
         if drag.draggingSource != nil, let sample = model.browser.dragged {
-            return (sample.path, Browser.padName(of: sample), sample.rootNote)
+            return (sample.path, Browser.padName(of: sample), sample.rootNote, sample.seconds > 0 ? sample.seconds : nil)
         }
         let urls = drag.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
         guard let url = urls?.first, Browser.extensions.contains(url.pathExtension.lowercased()) else { return nil }
-        return (url.path, url.deletingPathExtension().lastPathComponent, nil)
+        // The file's header is read once for a drag, not at every move of it.
+        if dropFile?.path != url.path {
+            let file = try? AVAudioFile(forReading: url)
+            let rate = file?.fileFormat.sampleRate ?? 0
+            dropFile = (url.path, rate > 0 ? file.map { Double($0.length) / rate } : nil)
+        }
+        return (url.path, url.deletingPathExtension().lastPathComponent, nil, dropFile?.seconds)
     }
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
         draggingUpdated(sender)
     }
 
+    /// Where a sample at a point would land: in the headers as a pad, and
+    /// on the timeline as an audio clip at the grid line nearest the point,
+    /// or with `free` off the grid.
+    private func landing(at p: CGPoint, free: Bool) -> DropTarget {
+        var track: UInt64?
+        if p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id { track = key }
+        if p.x < TimelineLayout.headerWidth {
+            // In the headers it is a sound for patterns to play.
+            return track.map { .pad($0) } ?? .newTrack
+        }
+        let beat = snappedBeat(atX: p.x, free: free)
+        return track.map { .clip(track: $0, at: beat) } ?? .newClip(at: beat)
+    }
+
+    private func land(path: String, name: String, note: String?, on target: DropTarget) {
+        switch target {
+        case .pad(let track): model.addSample(path: path, name: name, note: note, to: track)
+        case .newTrack: model.addSample(path: path, name: name, note: note, to: nil)
+        case .clip(let track, let at): model.addClip(path: path, name: name, note: note, to: track, at: at)
+        case .newClip(let at): model.addClip(path: path, name: name, note: note, to: nil, at: at)
+        }
+    }
+
+    /// Lands an audio file at a point of the view, as a drag from the Finder
+    /// that ends there does. False for a file that is no audio file.
+    @discardableResult
+    func drop(file url: URL, at p: CGPoint) -> Bool {
+        guard Browser.extensions.contains(url.pathExtension.lowercased()) else { return false }
+        land(path: url.path, name: url.deletingPathExtension().lastPathComponent, note: nil, on: landing(at: p, free: false))
+        return true
+    }
+
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
         guard sample(of: sender) != nil else { return [] }
-        let p = convert(sender.draggingLocation, from: nil)
-        var target = DropTarget.newTrack
-        if p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id { target = .track(key) }
+        let target = landing(at: convert(sender.draggingLocation, from: nil), free: NSEvent.modifierFlags.contains(.option))
         if target != dropTarget {
             dropTarget = target
             needsDisplay = true
@@ -1141,19 +1379,19 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
         dropTarget = nil
+        dropFile = nil
         needsDisplay = true
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         defer {
             dropTarget = nil
+            dropFile = nil
             model.browser.dragged = nil
             needsDisplay = true
         }
         guard let sample = sample(of: sender), let target = dropTarget else { return false }
-        var track: UInt64?
-        if case .track(let key) = target { track = key }
-        model.addSample(path: sample.path, name: sample.name, note: sample.note, to: track)
+        land(path: sample.path, name: sample.name, note: sample.note, on: target)
         return true
     }
 
@@ -1191,19 +1429,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// Moves the selected clips by a grid step or to the next track, if they
-    /// stay in the song.
+    /// stay in the song. An audio clip may pass the song's end, which grows.
     private func nudge(by: Double, rows: Int) {
-        let placed = model.placedClips().filter { model.selectedClips.contains($0.clip.key) }
-        let starts = placed.map(\.clip.at)
-        let ends = placed.map { $0.clip.at + $0.clip.patternBeats * Double($0.clip.repeats) }
+        let placed = model.placedClips().filter { model.selectedClips.contains($0.key) }
         let tracks = placed.map(\.track)
-        guard let first = starts.min(), let last = ends.max(), let top = tracks.min(), let bottom = tracks.max() else { return }
+        guard let first = placed.map(\.at).min(), let top = tracks.min(), let bottom = tracks.max() else { return }
+        let last = placed.filter { $0.audio == nil }.map(\.end).max() ?? 0
         guard first + by >= 0, last + by <= layout.lengthBeats,
               top + rows >= 0, bottom + rows < model.arrangement.tracks.count else {
             NSSound.beep()
             return
         }
-        model.edit(.clipsMove(clips: placed.map(\.clip.key).sorted(), by: by, rows: Int32(rows)))
+        model.edit(.clipsMove(clips: placed.map(\.key).sorted(), by: by, rows: Int32(rows)))
     }
 
     // MARK: Names
@@ -1341,17 +1578,22 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         fill(CGRect(x: header - 1, y: 0, width: 1, height: bounds.height), Theme.separator)
         fill(CGRect(x: 0, y: ruler - 1, width: bounds.width, height: 1), Theme.separator)
 
-        // Where a dragged sample would land: on a track as a pad, or under
-        // the tracks as a new one.
+        // Where a dragged sample would land: in a track's header as a pad,
+        // on its lane as an audio clip, or under the tracks on a new track.
+        let under = max(ruler, layout.y(tracksHeight))
         switch dropTarget {
-        case .track(let key):
+        case .pad(let key):
             if let frame = frame(of: .track(key)) {
                 let top = max(frame.top, ruler)
-                fill(CGRect(x: 0, y: top, width: bounds.width, height: frame.top + frame.height - 1 - top), Theme.insertion.withAlphaComponent(0.2))
+                fill(CGRect(x: 0, y: top, width: header - 1, height: frame.top + frame.height - 1 - top), Theme.insertion.withAlphaComponent(0.3))
             }
         case .newTrack:
-            let y = max(ruler, layout.y(tracksHeight))
-            fill(CGRect(x: 0, y: y - 1.5, width: bounds.width, height: 2), Theme.insertion)
+            fill(CGRect(x: 0, y: under - 1.5, width: header - 1, height: 2), Theme.insertion)
+        case .clip(let key, let at):
+            if let frame = frame(of: .track(key)) { drawDropped(at: at, top: frame.top) }
+        case .newClip(let at):
+            fill(CGRect(x: 0, y: under - 1.5, width: bounds.width, height: 2), Theme.insertion)
+            drawDropped(at: at, top: under)
         case nil: break
         }
 
@@ -1362,6 +1604,28 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 fill(CGRect(x: 0, y: y - 1.5, width: bounds.width, height: 2), Theme.insertion)
             }
         }
+    }
+
+    /// The outline of the clip a dragged file would make: from its beat for
+    /// its length, or for a bar when its length is not known.
+    private func drawDropped(at beat: Double, top: CGFloat) {
+        let beats = dropLength ?? layout.beatsPerBar
+        let rect = clipRect(at: beat, length: beats, top: top)
+        clipped(to: CGRect(x: TimelineLayout.headerWidth, y: TimelineLayout.rulerHeight,
+                           width: bounds.width - TimelineLayout.headerWidth, height: bounds.height - TimelineLayout.rulerHeight)) {
+            let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
+            Theme.insertion.withAlphaComponent(0.25).setFill()
+            shape.fill()
+            Theme.insertion.setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+        }
+    }
+
+    /// The beats the dragged file would cover, at its own tempo.
+    private var dropLength: Double? {
+        let seconds = model.browser.dragged.map(\.seconds) ?? dropFile?.seconds
+        return seconds.flatMap { $0 > 0 ? $0 * model.arrangement.tempo / 60 : nil }
     }
 
     private func drawLanes(_ order: [(key: RowID, value: RowVisual)], at now: CFTimeInterval) {
@@ -1434,7 +1698,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         shape.fill()
         clipped(to: rect) {
             // A title strip in the track's color over a dimmer body.
-            let title = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: 14)
+            let title = CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: Self.titleHeight)
             NSGraphicsContext.saveGraphicsState()
             shape.addClip()
             fill(title, color.withAlphaComponent(alpha))
@@ -1447,8 +1711,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
             }
             NSGraphicsContext.restoreGraphicsState()
-            drawWaveform(of: clip, in: CGRect(x: rect.minX, y: title.maxY + 1, width: rect.width, height: rect.height - title.height - 2),
-                         alpha: alpha)
+            if let audio = clip.audio {
+                drawAudio(audio, of: clip, in: body(of: rect), alpha: alpha, handles: selected || hoverClip == key, at: now)
+            } else {
+                drawWaveform(of: clip, in: body(of: rect), alpha: alpha)
+            }
             // The name is cut where the clip ends: a clip too narrow for a
             // few letters has none.
             if rect.width >= 16 {
@@ -1470,6 +1737,107 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 3, yRadius: 3)
             outline.lineWidth = 2
             outline.stroke()
+        }
+    }
+
+    /// What an audio clip shows under its title: its file's waveform at the
+    /// clip's level, the beats of the file's beat map, and its fades, with
+    /// their handles when the clip is selected or under the pointer.
+    private func drawAudio(_ audio: AudioClipView, of clip: ClipVisual, in body: CGRect, alpha: CGFloat, handles: Bool,
+                           at now: CFTimeInterval) {
+        guard body.height >= 8, let context = NSGraphicsContext.current?.cgContext else { return }
+        let start = clip.at.value(at: now)
+        let length = clip.length.value(at: now)
+        let anchor = clip.anchor.value(at: now)
+        let visible = CGRect(x: TimelineLayout.headerWidth, y: body.minY, width: bounds.width - TimelineLayout.headerWidth, height: body.height)
+        let perBeat = audio.secondsPerBeat
+
+        // The file from where the clip starts in it, at the clip's level.
+        if let wave = model.fileWaveform(audio.file), perBeat > 0 {
+            let framesPerBeat = perBeat * wave.framesPerSecond
+            let columns = wave.columns(
+                in: body, clippedTo: visible, fromFrame: (start - anchor) * framesPerBeat,
+                framesPerPoint: framesPerBeat / Double(layout.pixelsPerBeat), step: 1 / (window?.backingScaleFactor ?? 2),
+                gain: pow(10, audio.gainDb / 20)
+            )
+            context.setFillColor(Theme.waveform.withAlphaComponent(0.78 * alpha).cgColor)
+            context.fill(columns)
+        } else {
+            fill(CGRect(x: body.minX, y: body.midY.rounded(), width: body.width, height: 1), Theme.waveform.withAlphaComponent(0.3 * alpha))
+        }
+
+        // The file's beats, where its beat map has them: a tick at the foot of
+        // the waveform, taller on a downbeat, once they are a few points apart.
+        if let file = model.file(audio.file), file.beats.count > 1, perBeat > 0 {
+            let seconds = { (x: CGFloat) in (self.layout.beat(atX: x) - anchor) * perBeat }
+            let (from, to) = (seconds(max(body.minX, visible.minX)), seconds(min(body.maxX, visible.maxX)))
+            let apart = CGFloat((file.beats[1].seconds - file.beats[0].seconds) / perBeat) * layout.pixelsPerBeat
+            let every = apart >= 5
+            if every || apart * 4 >= 5 {
+                var ticks: [CGRect] = []
+                var bars: [CGRect] = []
+                // The first beat in view, by halving.
+                var (low, high) = (0, file.beats.count)
+                while low < high {
+                    let mid = (low + high) / 2
+                    if file.beats[mid].seconds < from { low = mid + 1 } else { high = mid }
+                }
+                for beat in file.beats[low...] {
+                    guard beat.seconds <= to else { break }
+                    let x = layout.x(anchor + beat.seconds / perBeat).rounded()
+                    if beat.downbeat {
+                        bars.append(CGRect(x: x, y: body.maxY - 9, width: 1, height: 9))
+                    } else if every {
+                        ticks.append(CGRect(x: x, y: body.maxY - 4, width: 1, height: 4))
+                    }
+                }
+                context.setFillColor(Theme.gray(1, 0.45 * alpha).cgColor)
+                context.fill(ticks)
+                context.setFillColor(Theme.gray(1, 0.85 * alpha).cgColor)
+                context.fill(bars)
+            }
+        }
+
+        // The fades: what each takes away is shaded, under the curve it plays.
+        let tempo = model.arrangement.tempo
+        let shape = AudioClipLayout(
+            start: start, end: start + length, fileStart: anchor, fileEnd: nil,
+            fadeIn: min(AudioClipLayout.beats(ms: audio.fadeInMs, tempo: tempo), length),
+            fadeOut: min(AudioClipLayout.beats(ms: audio.fadeOutMs, tempo: tempo), length)
+        )
+        let marks = shape.handles(in: body)
+        let linear = audio.fadeCurve == "linear"
+        for (edge, mark) in [(body.minX, marks.fadeIn.x), (body.maxX, marks.fadeOut.x)] where abs(mark - edge) >= 1.5 {
+            // From silence at the clip's edge to full at the handle.
+            let steps = max(2, min(48, Int(abs(mark - edge) / 3)))
+            let points = (0...steps).map { i -> CGPoint in
+                let t = Double(i) / Double(steps)
+                return CGPoint(x: edge + (mark - edge) * CGFloat(t), y: body.maxY - body.height * CGFloat(AudioClipLayout.level(t, linear: linear)))
+            }
+            let taken = NSBezierPath()
+            taken.move(to: CGPoint(x: edge, y: body.minY))
+            for point in points { taken.line(to: point) }
+            taken.close()
+            Theme.gray(0, 0.4 * alpha).setFill()
+            taken.fill()
+            let curve = NSBezierPath()
+            curve.move(to: points[0])
+            for point in points.dropFirst() { curve.line(to: point) }
+            curve.lineWidth = 1
+            Theme.gray(1, 0.75 * alpha).setStroke()
+            curve.stroke()
+        }
+        guard handles, body.width >= 16 else { return }
+        let side = AudioClipLayout.handle
+        for mark in [marks.fadeIn.x, marks.fadeOut.x] {
+            // Kept inside the clip, where a fade of nothing would put it half out.
+            let x = min(max(mark - side / 2, body.minX + 1), body.maxX - side - 1)
+            let box = NSBezierPath(rect: CGRect(x: x, y: body.minY + 1, width: side, height: side))
+            Theme.gray(0.95, alpha).setFill()
+            box.fill()
+            Theme.gray(0.1, alpha).setStroke()
+            box.lineWidth = 1
+            box.stroke()
         }
     }
 
@@ -1499,9 +1867,25 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let line = NSBezierPath()
             line.move(to: CGPoint(x: min(rect.minX, first.at.x), y: first.at.y))
             line.line(to: first.at)
+            let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
             for (a, b) in zip(placed, placed.dropFirst()) {
-                // A point that holds keeps its value until the next.
-                if a.point.hold { line.line(to: CGPoint(x: b.at.x, y: a.at.y)) }
+                if a.point.hold {
+                    // A point that holds keeps its value until the next.
+                    line.line(to: CGPoint(x: b.at.x, y: a.at.y))
+                } else if a.point.shape != 0, b.at.x - a.at.x >= 2 {
+                    // A shaped segment is the curve it plays: bent in the
+                    // parameter's own domain, as the engine bends it.
+                    let from = heldPoints[a.point.key]?.value ?? a.point.value
+                    let to = heldPoints[b.point.key]?.value ?? b.point.value
+                    let ratio = lane.log && from > 0 && to > 0
+                    let steps = max(8, min(64, Int((b.at.x - a.at.x) / 3)))
+                    for i in 1..<steps {
+                        let t = Double(i) / Double(steps)
+                        let along = shapedProgress(t, shape: a.point.shape)
+                        let value = ratio ? from * pow(to / from, along) : from + (to - from) * along
+                        line.line(to: CGPoint(x: a.at.x + (b.at.x - a.at.x) * CGFloat(t), y: scale.y(value, in: rect)))
+                    }
+                }
                 line.line(to: b.at)
             }
             line.line(to: CGPoint(x: max(rect.maxX, last.at.x), y: last.at.y))

@@ -318,6 +318,15 @@ enum AudioCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
+    /// Move a clip to another beat and/or track; its audio moves with it.
+    Move {
+        project: Song,
+        clip: String,
+        #[arg(long)]
+        track: Option<String>,
+        #[arg(long)]
+        at: Option<String>,
+    },
     /// Make two clips of one at a beat inside it.
     Split {
         project: Song,
@@ -1060,6 +1069,14 @@ fn run(cli: &Cli) -> Result<Json> {
                 all.extend(fields(f)?);
                 edit(project, C::AudioAdd { track: track.clone(), fields: all })
             }
+            AudioCmd::Move { project, clip, track, at } => edit(
+                project,
+                C::AudioMove {
+                    clip: clip.clone(),
+                    track: track.clone(),
+                    at: at.as_deref().map(parse_value),
+                },
+            ),
             AudioCmd::Split { project, clip, at } => edit(
                 project,
                 C::AudioSplit {

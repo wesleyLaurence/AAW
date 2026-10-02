@@ -121,6 +121,16 @@ pub enum Command {
         #[serde(flatten)]
         fields: Fields,
     },
+    /// Moves a clip to another beat, another track or both. Its audio moves
+    /// with it, and it keeps its handle.
+    #[serde(rename = "audio.move")]
+    AudioMove {
+        clip: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<Json>,
+    },
     /// Makes two clips of one at a beat inside it; they play as the one did.
     #[serde(rename = "audio.split")]
     AudioSplit { clip: String, at: Json },
@@ -1040,6 +1050,28 @@ impl<'a> Edit<'a> {
                 let sample = fields.get("sample").and_then(Json::as_str).unwrap_or("?");
                 out.label = format!("Add audio clip of {sample} to {}", self.name(&loc));
             }
+            AudioMove { clip, track, at } => {
+                let (owner, i) = self.member(clip, "audio", "an audio clip")?;
+                let mut loc = [owner.clone(), vec![Step::Key("audio".into()), Step::Index(i)]].concat();
+                if track.is_none() && at.is_none() {
+                    return Err("Move needs a beat or a track".into());
+                }
+                if let Some(at) = at {
+                    self.set_leaf(&loc, "at", beat_value(&beat_at(at)?));
+                }
+                if let Some(t) = track {
+                    let dest = self.track(t)?;
+                    if dest != owner {
+                        let item = self.take(&owner, "audio", i)?;
+                        let list = self.list(&dest, "audio")?;
+                        list.push(item);
+                        loc = [dest, vec![Step::Key("audio".into()), Step::Index(list.len() - 1)]].concat();
+                    }
+                }
+                let sample = self.node(&loc).field("sample").unwrap_or("?").to_string();
+                let beat = beat_text(&self.span(&loc)?.at);
+                out.label = format!("Move audio clip {sample} to beat {beat} on {}", self.name(&loc[..2]));
+            }
             AudioSplit { clip, at } => {
                 let (owner, i) = self.member(clip, "audio", "an audio clip")?;
                 let loc = [owner.clone(), vec![Step::Key("audio".into()), Step::Index(i)]].concat();
@@ -1073,9 +1105,11 @@ impl<'a> Edit<'a> {
                 if let Some(start) = start {
                     let at = beat_at(start)?;
                     from = span.source(&at);
-                    if from < 0.0 || span.end.is_some_and(|end| from >= end) {
+                    // A beat worked out from the file's start may fall a hair before it.
+                    if from < -1e-6 || span.end.is_some_and(|end| from >= end) {
                         return Err(format!("Audio clip {name} has no audio at beat {}", beat_text(&at)));
                     }
+                    from = from.max(0.0);
                     self.set_leaf(&loc, "at", beat_value(&at));
                     self.set_leaf(&loc, "source_start_seconds", Value::Float(from));
                 }
