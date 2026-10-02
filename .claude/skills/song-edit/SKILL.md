@@ -43,10 +43,9 @@ middle of a phrase, say which beat you chose and why, and offer the other.
    nearest downbeat, preferring one that starts a phrase. Check that every part
    kept and every part removed is a whole number of bars. Tell the person the cuts,
    as times in the song and as bar numbers, before building.
-4. **Build the edit.** One track, one pad for each kept part, placed end to end
-   on session beats, with the fades `daw describe edit` gives. While the song is
-   open in the app or a host is running, edit with commands so the person sees
-   each change; otherwise one labelled `daw apply`.
+4. **Build the edit.** One track with the song on it as one audio clip, from the
+   first beat to keep to the last (`daw audio add`). Then take out each part to
+   remove with `daw audio cut`, which closes the gap and crossfades the join.
 5. **Add the other sounds.** Import each by path, on its own track. A sound that
    leads into a beat starts its own length before that beat; `daw timeline` gives
    the beat. Then fit the session's length to the sound with `daw timeline --fit`.
@@ -57,7 +56,7 @@ middle of a phrase, say which beat you chose and why, and offer the other.
    slips, beats removed that are not whole bars, a first beat inside a fade, a
    step at a splice. If the file is too long, first look for another whole phrase
    that could come out, and ask. Otherwise raise the tempo just enough, with the
-   parts set to keep their pitch; say how many percent, and above about 8 ask
+   clips set to keep their pitch; say how many percent, and above about 8 ask
    first.
 8. **Export.** `daw export` to the project's `exports/` folder, under the name
    and in the format the person asked for.

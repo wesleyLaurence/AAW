@@ -158,11 +158,13 @@ fn warnings(data: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     let p = project(data)?;
     let mut out = Vec::new();
     for t in &p.tracks {
-        for (name, pad) in &t.pads {
-            if pad.stretch != aaw_model::Stretch::PreservePitch {
+        let pads = t.pads.iter().map(|(name, pad)| (name.clone(), pad.stretch, pad.source_bpm));
+        let clips = t.audio.iter().enumerate().map(|(i, clip)| (format!("audio.{i}"), clip.stretch, clip.source_bpm));
+        for (name, stretch, source_bpm) in pads.chain(clips) {
+            if stretch != aaw_model::Stretch::PreservePitch {
                 continue;
             }
-            match pad.source_bpm {
+            match source_bpm {
                 None => out.push(format!(
                     "{}.{name}: stretch is preserve_pitch but source_bpm is not set, so nothing is stretched",
                     t.id

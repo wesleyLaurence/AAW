@@ -227,6 +227,8 @@ enum Top {
     #[command(subcommand)]
     Clip(ClipCmd),
     #[command(subcommand)]
+    Audio(AudioCmd),
+    #[command(subcommand)]
     Pattern(PatternCmd),
     #[command(subcommand)]
     Pad(PadCmd),
@@ -270,6 +272,66 @@ enum ReturnCmd {
     /// Rename a return, its sends and their lanes.
     Rename { project: PathBuf, id: String, to: String },
     Move { project: PathBuf, id: String, index: usize },
+}
+
+/// Audio clips: parts of a sample file on a track, addressed by reference: @N
+/// while a host runs, else tracks.T.audio.I.
+#[derive(Subcommand)]
+enum AudioCmd {
+    /// Add an audio clip: --at, --source-start-seconds, --source-end-seconds,
+    /// --lead-ms, --fade-in-ms, --fade-out-ms, --source-bpm and --stretch are optional.
+    Add {
+        project: PathBuf,
+        track: String,
+        sample: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Make two clips of one at a beat inside it.
+    Split {
+        project: PathBuf,
+        clip: String,
+        #[arg(long)]
+        at: String,
+    },
+    /// Move a clip's start or end to a beat; its audio stays where it is.
+    Trim {
+        project: PathBuf,
+        clip: String,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        end: Option<String>,
+    },
+    /// Crossfade a clip with the one before it on its track.
+    Crossfade {
+        project: PathBuf,
+        clip: String,
+        /// The fade out of the clip before, 12 ms unless given.
+        #[arg(long)]
+        ms: Option<f64>,
+        /// The fade in of this clip, a millisecond under the lead unless given.
+        #[arg(long)]
+        in_ms: Option<f64>,
+        /// How long before the beat this clip starts, 5 ms unless given.
+        #[arg(long)]
+        lead_ms: Option<f64>,
+    },
+    /// Remove a range of beats from a track's audio clips and close the gap.
+    Cut {
+        project: PathBuf,
+        track: String,
+        #[arg(long)]
+        from: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        ms: Option<f64>,
+        #[arg(long)]
+        in_ms: Option<f64>,
+        #[arg(long)]
+        lead_ms: Option<f64>,
+    },
 }
 
 /// Clips, addressed by reference: @N while a host runs, else tracks.T.clips.I.
@@ -859,6 +921,49 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Audio(a) => match a {
+            AudioCmd::Add { project, track, sample, f } => {
+                let mut all = Fields::new();
+                all.insert("sample".into(), json!(sample));
+                all.extend(fields(f)?);
+                edit(project, C::AudioAdd { track: track.clone(), fields: all })
+            }
+            AudioCmd::Split { project, clip, at } => edit(
+                project,
+                C::AudioSplit {
+                    clip: clip.clone(),
+                    at: parse_value(at),
+                },
+            ),
+            AudioCmd::Trim { project, clip, start, end } => edit(
+                project,
+                C::AudioTrim {
+                    clip: clip.clone(),
+                    start: start.as_deref().map(parse_value),
+                    end: end.as_deref().map(parse_value),
+                },
+            ),
+            AudioCmd::Crossfade { project, clip, ms, in_ms, lead_ms } => edit(
+                project,
+                C::AudioCrossfade {
+                    clip: clip.clone(),
+                    ms: *ms,
+                    in_ms: *in_ms,
+                    lead_ms: *lead_ms,
+                },
+            ),
+            AudioCmd::Cut { project, track, from, to, ms, in_ms, lead_ms } => edit(
+                project,
+                C::AudioCut {
+                    track: track.clone(),
+                    from: parse_value(from),
+                    to: parse_value(to),
+                    ms: *ms,
+                    in_ms: *in_ms,
+                    lead_ms: *lead_ms,
+                },
+            ),
+        },
         Top::Clip(c) => match c {
             ClipCmd::Add { project, track, pattern, f } => {
                 let mut all = Fields::new();
@@ -1114,6 +1219,7 @@ fn name(top: &Top) -> String {
         Top::Track(_) => group("track", ""),
         Top::Return(_) => group("return", ""),
         Top::Clip(_) => group("clip", ""),
+        Top::Audio(_) => group("audio", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),

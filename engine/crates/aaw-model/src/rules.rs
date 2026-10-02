@@ -443,6 +443,16 @@ pub fn references(p: &Project) -> Result<(), String> {
                 return Err(format!("{}: unknown sample {}", t.id, pad.sample));
             }
         }
+        for clip in &t.audio {
+            if !p.samples.contains_key(&clip.sample) {
+                return Err(format!("{}: unknown sample {}", t.id, clip.sample));
+            }
+            // Its sound may run past the session's end, as a tail does; its
+            // start may not.
+            if clip.at_exact() >= length {
+                return Err(format!("{}: audio clip starts past the session", t.id));
+            }
+        }
         for clip in &t.clips {
             let Some(pattern) = p.patterns.get(&clip.pattern) else {
                 return Err(format!("{}: unknown pattern {}", t.id, clip.pattern));

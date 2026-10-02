@@ -19,6 +19,7 @@ tracks:
   - id: t
     pads: {a: {sample: s}}
     clips: [{pattern: p}]
+    audio: [{sample: s}]
     effects:
       - {type: filter, mode: lowpass, cutoff_hz: 1000}
       - {type: eq, bands: [{shape: bell, freq_hz: 1000, gain_db: 0}]}

@@ -610,6 +610,26 @@ impl Session {
                         })
                     })
                     .collect();
+                let audio: Vec<Json> = t
+                    .audio
+                    .iter()
+                    .enumerate()
+                    .map(|(ci, c)| {
+                        let loc = [
+                            tree::Step::Key("tracks".into()),
+                            tree::Step::Index(ti),
+                            tree::Step::Key("audio".into()),
+                            tree::Step::Index(ci),
+                        ];
+                        json!({
+                            "ref": self.reference(&root, &loc),
+                            "sample": c.sample,
+                            "at": crate::command::node_json(&Node::Leaf(c.at.to_value())),
+                            "source_start_seconds": c.source_start_seconds,
+                            "source_end_seconds": c.source_end_seconds,
+                        })
+                    })
+                    .collect();
                 json!({
                     "id": t.id,
                     "events": triggers.iter().filter(|x| x.track_id == t.id).count(),
@@ -621,6 +641,7 @@ impl Session {
                     "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                     "automation": params(&t.automation),
                     "clips": clips,
+                    "audio": audio,
                 })
             })
             .collect();

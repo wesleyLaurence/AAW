@@ -14,6 +14,9 @@ tracks:
     part: {sample: song, source_bpm: 120, stretch: preserve_pitch}
 ```
 
+An audio clip has the same two fields, `source_bpm` and `stretch`, and they mean
+the same there ([audio-clips.md](audio-clips.md)).
+
 - `pad.source_bpm` is the tempo of the pad's sample. A pad that has it follows
   `session.tempo`: it plays `tempo / source_bpm` times as fast.
 - `pad.stretch` says how. `repitch`, the default and what the sampler always did,

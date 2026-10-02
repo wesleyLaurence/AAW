@@ -95,7 +95,8 @@ An import refuses a file the engine cannot play (unreadable, empty, or more than
 two channels), and `daw check` warns of a sample like that in a song.
 
 Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
-`effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
+`audio` (audio clips: parts of a sample file on the timeline; see
+[audio-clips.md](audio-clips.md)), `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
 one per return.
 
 Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute`,

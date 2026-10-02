@@ -84,6 +84,16 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
                         {"ref": f"tracks.{t['id']}.clips.{n}", "pattern": c["pattern"], "at": c["at"], "repeats": c["repeats"]}
                         for n, c in enumerate(t["clips"])
                     ],
+                    "audio": [
+                        {
+                            "ref": f"tracks.{t['id']}.audio.{n}",
+                            "sample": c["sample"],
+                            "at": c["at"],
+                            "source_start_seconds": c["source_start_seconds"],
+                            "source_end_seconds": c["source_end_seconds"],
+                        }
+                        for n, c in enumerate(t["audio"])
+                    ],
                 }
                 for t in song["tracks"]
             ],
