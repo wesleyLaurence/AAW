@@ -289,6 +289,15 @@ public struct ValueScale: Equatable {
         value(at: Double((rect.maxY - Self.inset - y) / (rect.height - 2 * Self.inset)))
     }
 
+    /// A number as it is written: without a fraction where it has none, and
+    /// else to three places at the most.
+    public static func plain(_ value: Double) -> String {
+        if value == value.rounded() { return String(Int(value)) }
+        var text = String(format: "%.3f", value)
+        while text.hasSuffix("0") { text.removeLast() }
+        return text
+    }
+
     /// A value with its unit, as a control shows it. A level that can be
     /// negative shows its sign.
     public static func text(_ value: Double, unit: String, signed: Bool = true) -> String {

@@ -69,21 +69,54 @@ final class WaveformTests: XCTestCase {
         var store = WaveformStore()
         let peaks = { (id: UInt64) in TrackPeaks(identity: id, framesPerBeat: 100, frames: 160, levels: []) }
         XCTAssertNil(store.waveform(of: 1, at: 0))
-        store.apply(Waveforms(revision: 0, tracks: [TrackWave(track: 1, identity: 10), TrackWave(track: 2, identity: 20)], peaks: [peaks(10)]))
+        store.apply(Waveforms(revision: 0, tracks: [TrackWave(track: 1, identity: 10), TrackWave(track: 2, identity: 20)], peaks: [peaks(10)], files: [], filePeaks: []))
         XCTAssertEqual(store.waveform(of: 1, at: 0)?.identity, 10)
         XCTAssertNil(store.waveform(of: 2, at: 0), "still being worked out")
         XCTAssertFalse(store.complete)
-        store.apply(Waveforms(revision: 0, tracks: [TrackWave(track: 1, identity: 10), TrackWave(track: 2, identity: 20)], peaks: [peaks(20)]))
+        store.apply(Waveforms(revision: 0, tracks: [TrackWave(track: 1, identity: 10), TrackWave(track: 2, identity: 20)], peaks: [peaks(20)], files: [], filePeaks: []))
         XCTAssertTrue(store.complete)
         XCTAssertEqual(store.waveform(of: 2, at: 0)?.identity, 20)
         // The song has moved on: what is here is of an older revision.
         XCTAssertNil(store.waveform(of: 1, at: 1))
         // A revision that changes one track's audio keeps the other's peaks and drops the old ones.
-        store.apply(Waveforms(revision: 1, tracks: [TrackWave(track: 1, identity: 10), TrackWave(track: 2, identity: 21)], peaks: []))
+        store.apply(Waveforms(revision: 1, tracks: [TrackWave(track: 1, identity: 10), TrackWave(track: 2, identity: 21)], peaks: [],
+                              files: [], filePeaks: []))
         XCTAssertEqual(store.waveform(of: 1, at: 1)?.identity, 10)
         XCTAssertNil(store.waveform(of: 2, at: 1))
         XCTAssertEqual(store.peaks.keys.sorted(), [10])
         XCTAssertNil(store.waveform(of: 3, at: 1), "no such track")
+    }
+
+    func testTheStoreKeepsAFilesPeaksWhileAClipPlaysIt() {
+        var store = WaveformStore()
+        let file = FilePeaks(identity: 5, framesPerSecond: 48000, frames: 96000, levels: [])
+        store.apply(Waveforms(revision: 3, tracks: [], peaks: [], files: [5, 6], filePeaks: [file]))
+        XCTAssertEqual(store.file(5)?.framesPerSecond, 48000)
+        XCTAssertNil(store.file(6), "still being read")
+        XCTAssertTrue(store.complete, "tracks are what a revision waits for")
+        // A file's peaks hold for any revision: they are of the file, not of the song.
+        store.apply(Waveforms(revision: 4, tracks: [], peaks: [], files: [5], filePeaks: []))
+        XCTAssertEqual(store.file(5)?.identity, 5)
+        // When no clip plays it any more they go; the host sends them again.
+        store.apply(Waveforms(revision: 5, tracks: [], peaks: [], files: [], filePeaks: []))
+        XCTAssertNil(store.file(5))
+    }
+
+    func testAnAudioClipDrawsItsFileFromWhereItStartsAtItsLevel() {
+        // A file of 100 frames a second, drawn at 2 frames a point from its frame 20.
+        let w = Waveform(identity: 7, framesPerSecond: 100, levels: waveform().levels)
+        let rect = CGRect(x: 100, y: 10, width: 50, height: 40)
+        let plain = w.columns(in: rect, clippedTo: rect, fromFrame: 20, framesPerPoint: 2, step: 5)
+        XCTAssertEqual(plain, waveform().columns(in: rect, clippedTo: rect, fromBeat: 0.2, pixelsPerBeat: 50, step: 5),
+                       "as a track's from that beat")
+        // Twice the level is twice the height, about the middle.
+        let loud = w.columns(in: rect, clippedTo: rect, fromFrame: 20, framesPerPoint: 2, step: 5, gain: 2)
+        XCTAssertEqual(loud[2].height, 2 * plain[2].height, accuracy: 1e-9)
+        XCTAssertEqual(loud[2].minY, 30 - 32.0 / 127 * 20, accuracy: 1e-9)
+        // Louder than full scale is drawn as full scale, inside the clip.
+        let clipped = w.columns(in: rect, clippedTo: rect, fromFrame: 20, framesPerPoint: 2, step: 5, gain: 100)
+        XCTAssertEqual(clipped[2], CGRect(x: 110, y: 10, width: 5, height: 40))
+        XCTAssertTrue(w.columns(in: rect, clippedTo: rect, fromFrame: 0, framesPerPoint: 0, step: 5).isEmpty)
     }
 
     func testTheBrowserNamesAPadAfterItsSample() {

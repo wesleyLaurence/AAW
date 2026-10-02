@@ -26,6 +26,7 @@ fn every_command_round_trips_as_json() {
         json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": "1/3"}),
         json!({"op": "clip.move", "clip": "@4", "at": 8}),
         json!({"op": "audio.add", "track": "drums", "sample": "tone", "at": 4, "source_start_seconds": 0.1}),
+        json!({"op": "audio.move", "clip": "@9", "track": "bass", "at": "13/3"}),
         json!({"op": "audio.split", "clip": "@9", "at": "13/3"}),
         json!({"op": "audio.trim", "clip": "tracks.drums.audio.0", "end": 6}),
         json!({"op": "audio.crossfade", "clip": "@9", "ms": 20.0, "lead_ms": 4.0}),
@@ -215,6 +216,33 @@ fn audio_clips_split_and_trim_where_their_audio_is() {
     edit(&mut s, json!({"op": "set", "path": "tracks.song.audio.1.at", "value": "25/3"})).unwrap();
     edit(&mut s, json!({"op": "remove", "path": clip})).unwrap();
     assert_eq!(get(&s, "tracks.song.audio").as_array().unwrap().len(), 1);
+    assert_eq!(get(&s, "tracks.song.audio.0.at"), json!("25/3"));
+}
+
+#[test]
+fn an_audio_clip_moves_to_a_beat_and_a_track_with_its_handle() {
+    let (_d, mut s) = open(true);
+    let clip = with_song(&mut s);
+    // In time, the audio goes with it: the same part of the file on another beat.
+    let r = edit(&mut s, json!({"op": "audio.move", "clip": clip, "at": "25/3"})).unwrap();
+    assert_eq!(r["label"], json!("Move audio clip song to beat \"25/3\" on song"));
+    assert_eq!(get(&s, "tracks.song.audio.0"), json!({"sample": "song", "at": "25/3", "source_start_seconds": 1.0}));
+    // To another track, last among its clips, and to a beat at once.
+    let r = edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "drums", "at": 2})).unwrap();
+    assert_eq!(r["label"], json!("Move audio clip song to beat 2 on drums"));
+    assert_eq!(get(&s, "tracks.song.audio"), json!([]));
+    assert_eq!(get(&s, "tracks.drums.audio"), json!([{"sample": "song", "at": 2, "source_start_seconds": 1.0}]));
+    assert_eq!(refs(&s, "tracks.drums.audio"), vec![clip.clone()]);
+    // Its own track is no move, and neither is nothing.
+    edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "drums"})).unwrap();
+    assert_eq!(get(&s, "tracks.drums.audio").as_array().unwrap().len(), 1);
+    assert_eq!(edit(&mut s, json!({"op": "audio.move", "clip": clip})).unwrap_err(), "Move needs a beat or a track");
+    assert!(edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "nobody"})).is_err());
+    assert!(edit(&mut s, json!({"op": "audio.move", "clip": "tracks.drums.clips.0", "at": 2})).is_err());
+    let late = edit(&mut s, json!({"op": "audio.move", "clip": clip, "at": 400})).unwrap_err();
+    assert!(late.contains("audio clip starts past the session"), "{late}");
+    // One undo puts it back on its track.
+    s.undo(Origin::User, false).unwrap();
     assert_eq!(get(&s, "tracks.song.audio.0.at"), json!("25/3"));
 }
 

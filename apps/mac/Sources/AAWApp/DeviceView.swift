@@ -3,9 +3,9 @@ import AppKit
 import SwiftUI
 
 /// The detail panel, under the arrangement: the devices of the row last
-/// selected, or the pattern of the clip last selected. A row's header shows
-/// the first and a clip the second, and the two marks at the top left change
-/// between them.
+/// selected, or the clip last selected, which is a pattern clip's pattern or
+/// an audio clip's settings. A row's header shows the first and a clip the
+/// second, and the two marks at the top left change between them.
 struct DetailView: View {
     let model: SongModel
 
@@ -16,7 +16,7 @@ struct DetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 2) {
                     tab("Devices", .devices)
-                    tab("Pattern", .pattern)
+                    tab(model.audioContext == nil ? "Pattern" : "Audio Clip", .pattern)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10)
@@ -29,10 +29,12 @@ struct DetailView: View {
                         hint("Select a track, a return or the master to see its effects.")
                     }
                 case .pattern:
-                    if let context = model.patternContext {
+                    if let context = model.audioContext {
+                        AudioClipHeader(model: model, context: context)
+                    } else if let context = model.patternContext {
                         PatternHeader(model: model, context: context)
                     } else {
-                        hint("Select a clip to edit its pattern. Double-click an empty part of a track to add a clip.")
+                        hint("Select a clip to edit it. Double-click an empty part of a track to add a pattern, or drop an audio file on it.")
                     }
                 }
                 Spacer(minLength: 0)
@@ -43,7 +45,9 @@ struct DetailView: View {
             case .devices:
                 if let chain = model.deviceChain { DeviceView(model: model, chain: chain) }
             case .pattern:
-                if let context = model.patternContext {
+                if let context = model.audioContext {
+                    AudioClipInfo(context: context, tempo: model.arrangement.tempo)
+                } else if let context = model.patternContext {
                     PatternPane(model: model, context: context, color: model.color(of: context.track.key),
                                 playing: model.transport.playing, selected: model.selectedEvent)
                 }
@@ -77,6 +81,144 @@ struct DetailView: View {
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
             .padding(.top, 8)
+    }
+}
+
+/// An audio clip's settings: its level, its fades and their curve, and the
+/// tempo it follows the song's from, with how it is stretched. Each is an edit
+/// to the host, as an agent's `daw set` is.
+private struct AudioClipHeader: View {
+    let model: SongModel
+    let context: AudioContext
+
+    private var clip: AudioClipView { context.clip }
+
+    private func row<Content: View>(_ label: String, @ViewBuilder _ content: () -> Content) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 50, alignment: .leading)
+            content()
+        }
+        .frame(height: 19)
+    }
+
+    private func set(_ field: String, _ value: FieldValue) {
+        model.edit(.audioSet(clip: clip.key, field: field, value: value))
+    }
+
+    /// A number as it is typed: without a fraction where it has none.
+    private func text(_ value: Double) -> String {
+        value == value.rounded() ? String(Int(value)) : String(value)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(clip.sample).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text("Audio clip on \(context.track.id)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            row("Gain") {
+                KnobBar(model: model, spec: BarSpec(value: clip.gainDb, min: -36, max: 24, unit: "dB", initial: 0, live: false)) { [key = clip.key] value in
+                    .audioSet(clip: key, field: "gain_db", value: .number(value: (value * 10).rounded() / 10))
+                }
+            }
+            row("Fade in") {
+                TypedValue(text: text(clip.fadeInMs), unit: "ms") { typed in
+                    if let ms = Double(typed) { model.edit(.audioFade(clip: clip.key, fadeInMs: ms, fadeOutMs: nil)) }
+                } done: {
+                    model.onFocus?()
+                }
+            }
+            row("Fade out") {
+                TypedValue(text: text(clip.fadeOutMs), unit: "ms") { typed in
+                    if let ms = Double(typed) { model.edit(.audioFade(clip: clip.key, fadeInMs: nil, fadeOutMs: ms)) }
+                } done: {
+                    model.onFocus?()
+                }
+            }
+            row("Curve") {
+                Picker("", selection: Binding(get: { clip.fadeCurve }, set: { set("fade_curve", .text(value: $0)) })) {
+                    Text("Equal power").tag("equal_power")
+                    Text("Linear").tag("linear")
+                }
+                .labelsHidden()
+                .controlSize(.mini)
+                .help("Equal power keeps the level across two different sounds; linear across the same one")
+            }
+            row("Tempo") {
+                // Empty, the clip plays at its file's own tempo; with one, it follows the song's.
+                TypedValue(text: clip.sourceBpm.map(text) ?? "", unit: "BPM", clears: true) { typed in
+                    if typed.isEmpty {
+                        set("source_bpm", .absent)
+                    } else if let bpm = Double(typed) {
+                        set("source_bpm", .number(value: bpm))
+                    }
+                } done: {
+                    model.onFocus?()
+                }
+                .help("The file's tempo. With one, the clip follows the song's tempo; empty, it plays as it is")
+            }
+            row("Stretch") {
+                Picker("", selection: Binding(get: { clip.stretch }, set: { set("stretch", .text(value: $0)) })) {
+                    Text("Repitch").tag("repitch")
+                    Text("Keep pitch").tag("preserve_pitch")
+                }
+                .labelsHidden()
+                .controlSize(.mini)
+                .disabled(clip.sourceBpm == nil)
+                .help("How the clip follows the song's tempo: faster and higher, or at its own pitch")
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+}
+
+/// What an audio clip plays, in words: the part of its file, and the file's
+/// beat map when it has one.
+private struct AudioClipInfo: View {
+    let context: AudioContext
+    let tempo: Double
+
+    /// Seconds as minutes and seconds to a hundredth, as `daw` takes them.
+    static func time(_ seconds: Double) -> String {
+        let s = max(0, seconds)
+        return String(format: "%d:%05.2f", Int(s / 60), s.truncatingRemainder(dividingBy: 60))
+    }
+
+    private var lines: [String] {
+        let clip = context.clip
+        var lines = ["Plays \(Self.time(clip.sourceStartSeconds)) to \(Self.time(clip.sourceEndSeconds)) of its file, from beat \(ValueScale.plain(clip.at))."]
+        guard let file = context.file else {
+            return lines + ["Its file cannot be read."]
+        }
+        lines.append("The file is \(Self.time(file.seconds)) long.")
+        if let bpm = file.bpm {
+            lines.append("Its beat map has \(file.beats.count) beats at \(String(format: "%.2f", bpm)) BPM; the ticks under the waveform are its beats.")
+            if clip.sourceBpm == nil, abs(bpm - tempo) > 0.005 {
+                lines.append("The song is at \(ValueScale.plain(tempo)) BPM, so the file's beats leave the grid. Set the song's tempo to the file's, or give the clip its tempo to follow the song's.")
+            }
+        } else {
+            lines.append("It has no beat map: `daw samples beats` measures one, and its beats then show under the waveform.")
+        }
+        return lines
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            ForEach(lines, id: \.self) { line in
+                Text(line).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Text("Drag the clip to move it, an edge to trim it and a corner's handle to fade it. ⌘E splits it at the start position.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 2)
+        }
+        .frame(maxWidth: 460, alignment: .leading)
+        .padding(12)
     }
 }
 

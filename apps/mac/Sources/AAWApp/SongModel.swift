@@ -30,9 +30,29 @@ struct DeviceChain {
     static let kinds = ["filter", "eq", "compressor", "limiter", "delay", "reverb"]
 }
 
-/// What the detail panel shows: a row's devices, or a clip's pattern.
+/// What the detail panel shows: a row's devices, or the clip last selected,
+/// which is a pattern clip's pattern or an audio clip's settings.
 enum Detail {
     case devices, pattern
+}
+
+/// A clip on the timeline, a pattern clip or an audio clip, with the place of
+/// its track among the tracks and the beats it covers. An audio clip's end is
+/// where its sound ends.
+struct PlacedClip {
+    var track: Int
+    var key: UInt64
+    var at: Double
+    var end: Double
+    var clip: ClipView?
+    var audio: AudioClipView?
+}
+
+/// The audio clip the detail panel shows, with its track and its file.
+struct AudioContext: Equatable {
+    var clip: AudioClipView
+    var track: TrackView
+    var file: FileView?
 }
 
 /// The pattern the detail panel edits: a clip's, with the track whose pads it
@@ -247,6 +267,16 @@ public final class SongModel {
         waveforms.waveform(of: track, at: arrangement.revision)
     }
 
+    /// The waveform of a file an audio clip plays, once the host has sent it.
+    func fileWaveform(_ identity: UInt64) -> Waveform? {
+        waveforms.file(identity)
+    }
+
+    /// A file an audio clip plays: its length and its beat map.
+    func file(_ identity: UInt64) -> FileView? {
+        identity == 0 ? nil : arrangement.files.first { $0.identity == identity }
+    }
+
     /// A track's color: the next of the palette for each track first seen.
     /// The song format has no color.
     func color(of track: UInt64) -> NSColor {
@@ -345,20 +375,28 @@ public final class SongModel {
 
     // MARK: Selection
 
-    /// Each clip with the place of its track among the tracks.
-    func placedClips() -> [(track: Int, clip: ClipView)] {
-        arrangement.tracks.enumerated().flatMap { index, track in track.clips.map { (index, $0) } }
+    /// Each clip, pattern clips and audio clips alike, with the place of its
+    /// track among the tracks.
+    func placedClips() -> [PlacedClip] {
+        arrangement.tracks.enumerated().flatMap { index, track in
+            track.clips.map {
+                PlacedClip(track: index, key: $0.key, at: $0.at, end: $0.at + $0.patternBeats * Double($0.repeats), clip: $0)
+            } + track.audio.map {
+                PlacedClip(track: index, key: $0.key, at: $0.at, end: $0.at + $0.lengthBeats + $0.tailBeats, audio: $0)
+            }
+        }
     }
 
     /// The beats the selected clips cover together.
     var selectedSpan: (start: Double, end: Double)? {
-        let clips = placedClips().map(\.clip).filter { selectedClips.contains($0.key) }
+        let clips = placedClips().filter { selectedClips.contains($0.key) }
         guard let start = clips.map(\.at).min() else { return nil }
-        return (start, clips.map { $0.at + $0.patternBeats * Double($0.repeats) }.max() ?? start)
+        return (start, clips.map(\.end).max() ?? start)
     }
 
-    /// Selects clips. The detail panel shows the pattern of `focus`, the clip
-    /// that was clicked, or of the one clip selected.
+    /// Selects clips. The detail panel shows `focus`, the clip that was
+    /// clicked, or the one clip selected: a pattern clip's pattern, or an
+    /// audio clip's settings.
     func select(clips: Set<UInt64>, focus: UInt64? = nil) {
         setSelection(clips: clips, row: nil)
         if let clip = focus ?? (clips.count == 1 ? clips.first : nil), clips.contains(clip) {
@@ -388,6 +426,17 @@ public final class SongModel {
             if let clip = track.clips.first(where: { $0.key == key }),
                let pattern = arrangement.patterns.first(where: { $0.name == clip.pattern }) {
                 return PatternContext(clip: clip, track: track, pattern: pattern)
+            }
+        }
+        return nil
+    }
+
+    /// The audio clip the detail panel shows, with its track and its file.
+    var audioContext: AudioContext? {
+        guard let key = patternClip else { return nil }
+        for track in arrangement.tracks {
+            if let clip = track.audio.first(where: { $0.key == key }) {
+                return AudioContext(clip: clip, track: track, file: file(clip.file))
             }
         }
         return nil
@@ -454,7 +503,7 @@ public final class SongModel {
     }
 
     public func selectAllClips() {
-        select(clips: Set(placedClips().map(\.clip.key)))
+        select(clips: Set(placedClips().map(\.key)))
     }
 
     private func setSelection(clips: Set<UInt64>, row: RowID?) {
@@ -467,7 +516,7 @@ public final class SongModel {
         if let row {
             deviceRow = row
             detail = .devices
-        } else if let track = placedClips().first(where: { clips.contains($0.clip.key) })?.track {
+        } else if let track = placedClips().first(where: { clips.contains($0.key) })?.track {
             deviceRow = .track(arrangement.tracks[track].key)
         }
         onSelection?()
@@ -488,7 +537,7 @@ public final class SongModel {
 
     /// Forgets selected objects that a change removed.
     private func dropMissingSelection() {
-        let clips = selectedClips.intersection(placedClips().map(\.clip.key))
+        let clips = selectedClips.intersection(placedClips().map(\.key))
         var row = selectedRow
         switch row {
         case .track(let key): if !arrangement.tracks.contains(where: { $0.key == key }) { row = nil }
@@ -512,7 +561,7 @@ public final class SongModel {
         case .master, nil: break
         }
         if deviceRow == nil { deviceRow = arrangement.tracks.first.map { .track($0.key) } }
-        if patternClip != nil, patternContext == nil { patternClip = nil }
+        if patternClip != nil, patternContext == nil, audioContext == nil { patternClip = nil }
         if selectedEvent != nil, selectedEventView == nil { selectedEvent = nil }
     }
 
@@ -539,6 +588,34 @@ public final class SongModel {
         guard !selectedClips.isEmpty else { return }
         edit(.clipsDuplicate(clips: selectedClips.sorted())) { [weak self] made in
             self?.select(clips: Set(made))
+        }
+    }
+
+    /// The audio clips a split is of: the selected ones, or with a track
+    /// selected and no clip, that track's.
+    private var splitTargets: [AudioClipView] {
+        if !selectedClips.isEmpty {
+            return arrangement.tracks.flatMap(\.audio).filter { selectedClips.contains($0.key) }
+        }
+        if case .track(let key) = selectedRow {
+            return arrangement.tracks.first { $0.key == key }?.audio ?? []
+        }
+        return []
+    }
+
+    /// Whether the start position is inside an audio clip a split is of.
+    public var canSplit: Bool {
+        let cue = transport.cue
+        return splitTargets.contains { $0.at < cue && cue < $0.at + $0.lengthBeats }
+    }
+
+    /// Splits those audio clips at the start position, and selects the later
+    /// halves, so that Delete takes what follows the split.
+    public func splitSelection() {
+        let clips = splitTargets.map(\.key).sorted()
+        guard !clips.isEmpty else { return }
+        edit(.audioSplit(clips: clips, at: transport.cue)) { [weak self] made in
+            if let focus = made.first { self?.select(clips: Set(made), focus: focus) }
         }
     }
 
@@ -576,20 +653,41 @@ public final class SongModel {
     /// first; the original stays as it is. `name` is what the pad and a new
     /// track are named after, and `note` the sample's pitch, if it has one.
     func addSample(path: String, name: String, note: String?, to track: UInt64?) {
-        let (song, index) = (url.path, UInt32(arrangement.tracks.count))
+        let index = UInt32(arrangement.tracks.count)
+        copy(path, note: note) { model, asset in
+            model.edit(.sampleAdd(asset: asset, name: name, track: track, index: index)) { [weak model] made in
+                // The row's pads show in the detail panel.
+                if let key = track ?? made.first { model?.select(row: .track(key)) }
+            }
+        }
+    }
+
+    /// Adds a sample file to the song as an audio clip at a beat: on `track`,
+    /// or with no track on a new one after the others, named after `name`.
+    /// The file is copied into the project first, and the song grows to hold
+    /// a clip that ends past its end.
+    func addClip(path: String, name: String, note: String?, to track: UInt64?, at beat: Double) {
+        let index = UInt32(arrangement.tracks.count)
+        copy(path, note: note) { model, asset in
+            model.edit(.sampleClip(asset: asset, name: name, track: track, index: index, at: beat)) { [weak model] made in
+                // The clip is the last of what the edit made, after a new track.
+                if let clip = made.last { model?.select(clips: [clip], focus: clip) }
+            }
+        }
+    }
+
+    /// Copies a sample file into the project, off the main thread, and hands
+    /// the copy on; the original stays as it is.
+    private func copy(_ path: String, note: String?, then: @escaping @MainActor (SongModel, Asset) -> Void) {
+        let song = url.path
         imports.async { [weak self] in
             let copied = Result { try libraryImport(song: song, source: path, rootNote: note) }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     switch copied {
-                    case .failure(let error):
-                        self.refuse(Self.reason(error))
-                    case .success(let asset):
-                        self.edit(.sampleAdd(asset: asset, name: name, track: track, index: index)) { [weak self] made in
-                            // The row's pads show in the detail panel.
-                            if let key = track ?? made.first { self?.select(row: .track(key)) }
-                        }
+                    case .failure(let error): self.refuse(Self.reason(error))
+                    case .success(let asset): then(self, asset)
                     }
                 }
             }

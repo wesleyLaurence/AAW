@@ -72,6 +72,55 @@ pub fn read(path: &Path) -> Result<Audio, String> {
     })
 }
 
+/// What a file's header says of it, without its audio.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Info {
+    pub frames: usize,
+    pub channels: usize,
+    pub rate: u32,
+}
+
+impl Info {
+    pub fn seconds(&self) -> f64 {
+        self.frames as f64 / f64::from(self.rate.max(1))
+    }
+}
+
+/// A file's length, channels and rate, from its header.
+pub fn info(path: &Path) -> Result<Info, String> {
+    blocks(path, 0, |_, _| {})
+}
+
+/// Reads a file in blocks of `frames` interleaved frames, the last one
+/// shorter, handing each to `each` with the file's channels, so that a long
+/// file is never held whole. No frames reads the header alone.
+pub fn blocks(path: &Path, frames: usize, mut each: impl FnMut(&[f64], usize)) -> Result<Info, String> {
+    let c = c_path(path)?;
+    let mut info = SfInfo::default();
+    // SAFETY: valid C string and SF_INFO pointer; the handle is closed below.
+    let file = unsafe { sf_open(c.as_ptr(), SFM_READ, &mut info) };
+    if file.is_null() {
+        return Err(format!("{}: {}", path.display(), last_error(std::ptr::null_mut())));
+    }
+    let channels = info.channels.max(0) as usize;
+    let mut block = vec![0.0; frames * channels];
+    while !block.is_empty() {
+        // SAFETY: the buffer holds `frames` frames of `channels` doubles.
+        let read = unsafe { sf_readf_double(file, block.as_mut_ptr(), frames as i64) }.max(0) as usize;
+        if read == 0 {
+            break;
+        }
+        each(&block[..read * channels], channels);
+    }
+    // SAFETY: file is an open handle.
+    unsafe { sf_close(file) };
+    Ok(Info {
+        frames: info.frames.max(0) as usize,
+        channels,
+        rate: info.samplerate.max(0) as u32,
+    })
+}
+
 /// The linked libsndfile, e.g. `libsndfile-1.2.2`.
 pub fn version() -> String {
     // SAFETY: returns a static C string.

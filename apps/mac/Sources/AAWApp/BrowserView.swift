@@ -236,8 +236,8 @@ struct BrowserView: View {
                 }
             }
             Divider()
-            Text(target.map { "+ adds a pad to \($0.id). Drag onto a track for a pad, or under the tracks for a new track." }
-                ?? "+ adds a new track. Drag onto a track for a pad, or under the tracks for a new track.")
+            Text(target.map { "+ adds a pad to \($0.id). Drag onto the timeline for an audio clip, or onto a track's name for a pad." }
+                ?? "+ adds a new track with a pad. Drag onto the timeline for an audio clip, or onto a track's name for a pad.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)

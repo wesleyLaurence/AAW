@@ -8,6 +8,8 @@
 
 use crate::program::Voice;
 use crate::render::{Frame, Voices};
+use crate::sndfile;
+use std::path::Path;
 
 /// Frames in a bucket of the finest level.
 pub const BASE: usize = 64;
@@ -65,6 +67,51 @@ fn coarser(level: &Level) -> Level {
     }
 }
 
+/// A level with the coarser ones after it.
+fn levels(finest: Level) -> Vec<Level> {
+    let mut levels = vec![finest];
+    while levels.last().is_some_and(|l| l.buckets() > COARSEST) {
+        levels.push(coarser(levels.last().expect("a level")));
+    }
+    levels
+}
+
+/// The peaks of a sample file as it is, over all its channels, with the rate
+/// its frames are at: what an audio clip of the file draws. The file is read
+/// in blocks, so a whole song is never held.
+pub fn file_peaks(path: &Path) -> Result<(Peaks, u32), String> {
+    let mut data: Vec<i8> = Vec::new();
+    // The bucket being filled, across blocks: its least, its greatest and its frames.
+    let (mut lo, mut hi, mut held) = (f64::INFINITY, f64::NEG_INFINITY, 0);
+    let info = sndfile::blocks(path, BLOCK, |block, channels| {
+        for frame in block.chunks(channels) {
+            for x in frame {
+                lo = lo.min(*x);
+                hi = hi.max(*x);
+            }
+            held += 1;
+            if held == BASE {
+                data.extend_from_slice(&quantize(lo, hi));
+                (lo, hi, held) = (f64::INFINITY, f64::NEG_INFINITY, 0);
+            }
+        }
+    })?;
+    if held > 0 {
+        data.extend_from_slice(&quantize(lo, hi));
+    }
+    let finest = Level {
+        frames_per_bucket: BASE,
+        data,
+    };
+    Ok((
+        Peaks {
+            frames: info.frames,
+            levels: levels(finest),
+        },
+        info.rate,
+    ))
+}
+
 /// The peaks of a track's voices over a session of `total` frames. Nothing
 /// sounds past the session end, as in a render.
 pub fn peaks(voices: &[Voice], total: usize) -> Peaks {
@@ -90,12 +137,12 @@ pub fn peaks(voices: &[Voice], total: usize) -> Peaks {
         }
         start += n;
     }
-    let mut levels = vec![Level {
+    let finest = Level {
         frames_per_bucket: BASE,
         data,
-    }];
-    while levels.last().is_some_and(|l| l.buckets() > COARSEST) {
-        levels.push(coarser(levels.last().expect("a level")));
+    };
+    Peaks {
+        frames: total,
+        levels: levels(finest),
     }
-    Peaks { frames: total, levels }
 }

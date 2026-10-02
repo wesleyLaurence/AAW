@@ -5,6 +5,7 @@
 //! and its edits become the host's commands here.
 
 pub mod edits;
+pub mod files;
 pub mod library;
 pub mod projects;
 pub mod view;
@@ -179,6 +180,13 @@ pub struct Song {
     doc: Arc<Mutex<Option<Doc>>>,
     /// The song file, which changes when the project is saved under a name.
     path: Arc<Mutex<PathBuf>>,
+    /// The files the song's audio clips play.
+    files: Arc<files::Files>,
+}
+
+/// The folder a song file is in, which its samples' paths are relative to.
+fn folder(file: &Path) -> PathBuf {
+    file.parent().unwrap_or(Path::new("")).to_path_buf()
 }
 
 fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -200,6 +208,8 @@ impl Song {
         let doc = Arc::new(Mutex::new(None::<Doc>));
         let current = doc.clone();
         let waveforms = waveform::Worker::new(observer.clone());
+        let files = Arc::new(files::Files::default());
+        let known = files.clone();
         let options = Options {
             buffer: BUFFER,
             play: None,
@@ -210,11 +220,11 @@ impl Song {
         };
         let running = host::spawn(&file, options, move |event| match event {
             Event::Opened(doc) => {
-                *locked(&shown) = Some(view::arrangement(&doc, 0));
+                *locked(&shown) = Some(view::arrangement(&doc, 0, &known, &folder(&locked(&now))));
                 *locked(&current) = Some(doc);
             }
             Event::Changed { change, doc, history } => {
-                let arrangement = view::arrangement(&doc, change.revision);
+                let arrangement = view::arrangement(&doc, change.revision, &known, &folder(&locked(&now)));
                 let previous = locked(&current).replace(doc.clone());
                 let touched = previous.map(|p| view::touched(&p, &doc)).unwrap_or_default();
                 *locked(&shown) = Some(arrangement.clone());
@@ -228,7 +238,7 @@ impl Song {
             }
             Event::Compiled { revision, program } => {
                 if let Some(doc) = locked(&current).as_ref() {
-                    waveforms.compiled(revision, &program, doc);
+                    waveforms.compiled(revision, &program, doc, &known, &folder(&locked(&now)));
                 }
             }
             Event::Transport(t) => observer.transport(TransportView {
@@ -250,6 +260,7 @@ impl Song {
             latest,
             doc,
             path: at,
+            files,
         }))
     }
 
@@ -319,8 +330,9 @@ impl Song {
     /// undo step, and the song is saved when they pause.
     pub fn edit(&self, edit: Edit, gesture: Option<String>) -> Result<Vec<u64>, SongError> {
         let mut commands = {
+            let directory = folder(&locked(&self.path));
             let doc = locked(&self.doc);
-            edits::commands(doc.as_ref().ok_or_else(closed)?, &edit)?
+            edits::commands(doc.as_ref().ok_or_else(closed)?, &edit, &self.files, &directory)?
         };
         let command = match (commands.len(), edits::label(&edit, commands.len())) {
             (0, _) => return Ok(Vec::new()),

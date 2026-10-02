@@ -657,6 +657,11 @@ fn lanes_and_points_are_edited_by_key() {
     let u = update(&seen);
     assert_eq!(points(&lane(&u, 1, 0)), [(0.0, -3.0, false), (16.0, -12.0, false), (20.0, -9.0, false)]);
     assert_eq!(lane(&u, 1, 0).points[2].key, mid);
+    // The bend an agent gives a segment comes with its point.
+    agent(&path, json!({"op": "set", "path": format!("@{late}.shape"), "value": -0.5}));
+    assert_eq!(lane(&update(&seen), 1, 0).points.iter().map(|p| p.shape).collect::<Vec<_>>(), [0.0, -0.5, 0.0]);
+    song.undo().unwrap();
+    update(&seen);
     song.edit(Edit::PointSet { point: late, at: None, value: None, hold: Some(true) }, None).unwrap();
     assert_eq!(points(&lane(&update(&seen), 1, 0))[1], (16.0, -12.0, true));
     song.undo().unwrap();
@@ -809,6 +814,382 @@ fn waveforms_follow_the_audio_of_each_track() {
     let grown = waveforms(&waves, 4, &mut have);
     assert_eq!(grown.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, perc, added]);
     assert!(have[&identity(&grown, added)].levels[0].data.iter().all(|x| *x == 0));
+    song.close();
+}
+
+/// Ten seconds of audio at 48 kHz beside the song, listed as the sample
+/// `song`: at 120 BPM a beat of the session is half a second of it.
+fn with_song_file(dir: &Path, path: &Path, seen: &Receiver<Seen>) {
+    let frames: Vec<[f32; 2]> = (0..480_000).map(|i| [((i % 4800) as f32 / 4800.0 - 0.5) * (i as f32 / 480_000.0); 2]).collect();
+    std::fs::write(dir.join("song.wav"), float_wav_bytes(&frames, 48000)).unwrap();
+    agent(path, json!({"op": "set", "path": "samples.song", "value": {"path": "song.wav"}}));
+    update(seen);
+}
+
+fn audio_add(path: &Path, seen: &Receiver<Seen>, fields: Json) -> Update {
+    let mut command = json!({"op": "audio.add", "sample": "song"});
+    command.as_object_mut().unwrap().extend(fields.as_object().unwrap().clone());
+    agent(path, command);
+    update(seen)
+}
+
+#[test]
+fn audio_clips_are_what_the_app_draws() {
+    let (dir, path, song, seen, waves) = open_with_waveforms();
+    transport(&seen);
+    with_song_file(dir.path(), &path, &seen);
+    let drums = song.arrangement().tracks[0].key;
+    assert!(song.arrangement().files.is_empty(), "no clip plays a file yet");
+
+    // A clip of seconds 1 to 3 on beat 4: four beats of the session.
+    let u = audio_add(&path, &seen, json!({"track": "drums", "at": 4, "source_start_seconds": 1, "source_end_seconds": 3, "gain_db": -3, "fade_out_ms": 20}));
+    let clip = u.arrangement.tracks[0].audio[0].clone();
+    assert_eq!(u.touched, [touch(Part::Clip, clip.key, Delta::Added)]);
+    assert_eq!((clip.reference.as_str(), clip.sample.as_str()), (format!("@{}", clip.key).as_str(), "song"));
+    assert_eq!((clip.at, clip.length_beats, clip.seconds_per_beat), (4.0, 4.0, 0.5));
+    // Its fade out comes after it leaves: 20 ms more, which is drawn with it.
+    assert!((clip.tail_beats - 0.04).abs() < 1e-12);
+    assert_eq!((clip.source_start_seconds, clip.source_end_seconds), (1.0, 3.0));
+    assert_eq!((clip.gain_db, clip.fade_in_ms, clip.fade_out_ms), (-3.0, 0.3, 20.0));
+    assert_eq!((clip.fade_curve.as_str(), clip.source_bpm, clip.stretch.as_str()), ("equal_power", None, "repitch"));
+    // The file it plays is listed once, with its length.
+    let file = u.arrangement.files[0].clone();
+    assert_eq!((u.arrangement.files.len(), file.identity, file.seconds, file.bpm, file.beats.len()), (1, clip.file, 10.0, None, 0));
+    assert_ne!(file.identity, 0);
+    assert_eq!(u.arrangement.tracks[0].clips.len(), 2, "pattern clips are a list of their own");
+
+    // A clip without an end plays to its file's; one with a tempo of its own
+    // counts its file in its own beats.
+    let u = audio_add(&path, &seen, json!({"track": "perc", "at": 8}));
+    let whole = u.arrangement.tracks[1].audio[0].clone();
+    assert_eq!((whole.length_beats, whole.tail_beats, whole.source_end_seconds, whole.file), (20.0, 0.0, 10.0, file.identity));
+    assert_eq!(u.arrangement.files.len(), 1);
+    agent(&path, json!({"op": "set", "path": format!("@{}.source_bpm", whole.key), "value": 60}));
+    let u = update(&seen);
+    let slow = &u.arrangement.tracks[1].audio[0];
+    assert_eq!((slow.seconds_per_beat, slow.length_beats, slow.source_bpm), (1.0, 10.0, Some(60.0)));
+    assert_eq!(u.touched, [touch(Part::Clip, whole.key, Delta::Changed)]);
+
+    // An agent's move to another track keeps the clip's key, and touches the
+    // clip and neither track.
+    agent(&path, json!({"op": "audio.move", "clip": clip.reference, "track": "perc", "at": 20}));
+    let u = update(&seen);
+    assert_eq!(u.touched, [touch(Part::Clip, clip.key, Delta::Changed)]);
+    assert_eq!(u.arrangement.tracks[1].audio.iter().map(|c| (c.key, c.at)).collect::<Vec<_>>(), [(whole.key, 8.0), (clip.key, 20.0)]);
+    assert!(u.arrangement.tracks[0].audio.is_empty());
+
+    // The file's peaks come once, by its identity, at the file's own rate.
+    let revision = u.change.revision;
+    let mut peaks = Vec::new();
+    let w = loop {
+        let mut w = waves.recv_timeout(Duration::from_secs(10)).expect("waveforms");
+        peaks.append(&mut w.file_peaks);
+        if w.revision == revision {
+            break w;
+        }
+    };
+    assert_eq!(w.files, [file.identity]);
+    assert_eq!(peaks.len(), 1, "sent once, however many revisions play the file");
+    assert_eq!((peaks[0].identity, peaks[0].frames_per_second, peaks[0].frames), (file.identity, 48000.0, 480_000));
+    assert_eq!((peaks[0].levels[0].frames_per_bucket, peaks[0].levels[0].data.len()), (64, 2 * 7500));
+    // The file gets louder: its end peaks higher than its start.
+    let finest = &peaks[0].levels[0].data;
+    assert!((finest[2 * 7400 + 1] as i8) > (finest[2 * 100 + 1] as i8));
+    // Both tracks have pattern clips, so both still have peaks of their own.
+    assert_eq!(w.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, u.arrangement.tracks[1].key]);
+
+    // A track of audio clips alone has none: its clips draw the file.
+    agent(&path, json!({"op": "track.add", "id": "edit"}));
+    update(&seen);
+    let u = audio_add(&path, &seen, json!({"track": "edit", "at": 0, "source_end_seconds": 2}));
+    let edit = u.arrangement.tracks[2].key;
+    let w = loop {
+        let w = waves.recv_timeout(Duration::from_secs(10)).expect("waveforms");
+        assert!(w.file_peaks.is_empty());
+        if w.revision == u.change.revision {
+            break w;
+        }
+    };
+    assert!(!w.tracks.iter().any(|t| t.track == edit));
+
+    // A beat map beside the file marks its beats, from the next change on.
+    let map = |sha: &str| {
+        json!({
+            "sha256": sha, "tempo": {"bpm": 120.0},
+            "beats": [
+                {"seconds": 0.25, "bar": 0, "beat": 4}, {"seconds": 0.75, "bar": 1, "beat": 1},
+                {"seconds": 1.25, "bar": 1, "beat": 2}, {"seconds": 2.75, "bar": 2, "beat": 1},
+            ],
+        })
+        .to_string()
+    };
+    std::fs::write(dir.path().join("song.beats.json"), map("anything")).unwrap();
+    agent(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -1}));
+    let u = update(&seen);
+    let mapped = &u.arrangement.files[0];
+    assert_eq!((mapped.identity, mapped.bpm), (file.identity, Some(120.0)));
+    assert_eq!(mapped.beats.iter().map(|b| (b.seconds, b.downbeat)).collect::<Vec<_>>(), [(0.25, false), (0.75, true), (1.25, false), (2.75, true)]);
+    // A map of other audio than the song lists says nothing of this file.
+    let sha = aaw_model::digest(&dir.path().join("song.wav")).unwrap();
+    agent(&path, json!({"op": "set", "path": "samples.song.sha256", "value": sha}));
+    let u = update(&seen);
+    assert_eq!((u.arrangement.files[0].bpm, u.arrangement.files[0].beats.len()), (None, 0));
+    std::fs::write(dir.path().join("song.beats.json"), map(&sha)).unwrap();
+    agent(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -2}));
+    assert_eq!(update(&seen).arrangement.files[0].beats.len(), 4);
+
+    // A clip whose file is gone still has a place, and no file.
+    std::fs::remove_file(dir.path().join("song.wav")).unwrap();
+    agent(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -3}));
+    let u = update(&seen);
+    assert!(u.arrangement.files.is_empty());
+    let lost = &u.arrangement.tracks[2].audio[0];
+    assert_eq!((lost.file, lost.length_beats), (0, 4.0));
+    song.close();
+}
+
+#[test]
+fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    with_song_file(dir.path(), &path, &seen);
+    let start = song.arrangement();
+    let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
+    let u = audio_add(&path, &seen, json!({"track": "drums", "at": 4, "source_start_seconds": 1, "source_end_seconds": 3}));
+    let clip = u.arrangement.tracks[0].audio[0].key;
+    let audio = |u: &Update, track: usize| u.arrangement.tracks[track].audio.clone();
+    let get = |what: &str| agent(&path, json!({"op": "get", "path": what}));
+
+    // A drag moves it in time and to another track, with its key: one step.
+    assert!(song.edit(Edit::ClipsMove { clips: vec![clip], by: 2.5, rows: 1 }, None).unwrap().is_empty());
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("audio.move", "Move audio clip song to beat 6.5 on perc"));
+    assert_eq!(audio(&u, 1).iter().map(|c| (c.key, c.at, c.source_start_seconds)).collect::<Vec<_>>(), [(clip, 6.5, 1.0)]);
+    assert!(song.edit(Edit::ClipsMove { clips: vec![clip], by: 0.0, rows: 0 }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::ClipsMove { clips: vec![clip], by: 0.0, rows: 1 }, None).is_err(), "no track below");
+    // With a pattern clip, each moves as its kind does.
+    let fill = start.tracks[0].clips[1].key;
+    song.edit(Edit::ClipsMove { clips: vec![fill, clip], by: -2.0, rows: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move 2 clips"));
+    assert_eq!((u.arrangement.tracks[0].clips[1].at, audio(&u, 1)[0].at), (14.0, 4.5));
+
+    // A clip that would end past the song's end lengthens the song to the end
+    // of that bar, in the same step.
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: 25.0, rows: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move audio clip song"));
+    assert_eq!((audio(&u, 1)[0].at, u.arrangement.length_beats), (29.5, 36.0));
+    assert!(u.touched.contains(&touch(Part::Session, 0, Delta::Changed)));
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!((audio(&u, 1)[0].at, u.arrangement.length_beats), (4.5, 32.0));
+    // Ending on the song's end is not past it.
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: 23.5, rows: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), audio(&u, 1)[0].at, u.arrangement.length_beats), ("audio.move", 28.0, 32.0));
+    song.undo().unwrap();
+    update(&seen);
+
+    // An edge moves to a beat and the audio stays where it is: the file's
+    // second 1 is on beat 4.5, so beat 3.5 is half a second earlier in it.
+    song.edit(Edit::AudioTrim { clip, start: Some(3.5), end: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Trim audio clip song at 4.5");
+    let c = &audio(&u, 1)[0];
+    assert_eq!((c.at, c.source_start_seconds, c.source_end_seconds, c.length_beats), (3.5, 0.5, 3.0, 5.0));
+    // No further than the file goes: it starts on beat 2.5 and ends on 22.5.
+    song.edit(Edit::AudioTrim { clip, start: Some(0.0), end: Some(40.0) }, None).unwrap();
+    let c = audio(&update(&seen), 1)[0].clone();
+    assert_eq!((c.at, c.source_start_seconds, c.source_end_seconds, c.length_beats), (2.5, 0.0, 10.0, 20.0));
+    assert!(song.edit(Edit::AudioTrim { clip, start: None, end: None }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::AudioTrim { clip, start: Some(30.0), end: None }, None).is_err(), "it would end before it starts");
+    assert!(song.edit(Edit::AudioTrim { clip: fill, start: Some(3.0), end: None }, None).is_err(), "a pattern clip has no audio to trim");
+    // An end dragged past the song's end takes the song with it.
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: 13.5, rows: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((audio(&u, 1)[0].at, u.arrangement.length_beats), (16.0, 36.0));
+    // An end is where the sound ends: the clip leaves its 8 ms fade out
+    // before the beat, so the fade is over on it.
+    song.edit(Edit::AudioTrim { clip, start: None, end: Some(24.0) }, None).unwrap();
+    let u = update(&seen);
+    let c = &audio(&u, 1)[0];
+    assert_eq!(u.change.op, "audio.trim");
+    assert!((c.length_beats - 7.984).abs() < 1e-9 && (c.tail_beats - 0.016).abs() < 1e-9 && (c.source_end_seconds - 3.992).abs() < 1e-9);
+    song.edit(Edit::AudioTrim { clip, start: None, end: Some(36.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((audio(&u, 1)[0].length_beats, u.arrangement.length_beats), (20.0, 36.0));
+    song.edit(Edit::AudioTrim { clip, start: Some(26.0), end: None }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: 9.0, rows: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((audio(&u, 1)[0].at, audio(&u, 1)[0].length_beats, u.arrangement.length_beats), (35.0, 10.0, 48.0));
+
+    // Fades, to a tenth of a millisecond; both at once are one step.
+    song.edit(Edit::AudioFade { clip, fade_in_ms: Some(250.04), fade_out_ms: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.label.as_str(), audio(&u, 1)[0].fade_in_ms, audio(&u, 1)[0].fade_out_ms), ("Set the fade in of audio clip song", 250.0, 8.0));
+    song.edit(Edit::AudioFade { clip, fade_in_ms: Some(-4.0), fade_out_ms: Some(1500.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the fades of audio clip song");
+    assert_eq!((audio(&u, 1)[0].fade_in_ms, audio(&u, 1)[0].fade_out_ms), (0.0, 1500.0));
+
+    assert!((0..2).all(|_| song.undo().is_ok() && update(&seen).change.op == "undo"));
+    // A fade out is drawn inside the clip: the sound still ends where it did,
+    // and the clip leaves the fade's length before that. Here the file goes
+    // on past the clip, so the end moves a beat earlier for 500 ms of fade.
+    song.edit(Edit::AudioTrim { clip, start: None, end: Some(40.0) }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::AudioFade { clip, fade_in_ms: None, fade_out_ms: Some(500.0) }, None).unwrap();
+    let u = update(&seen);
+    let c = &audio(&u, 1)[0];
+    assert_eq!(u.change.label, "Set the fade out of audio clip song");
+    assert!((c.length_beats - 4.0).abs() < 1e-9 && (c.tail_beats - 1.0).abs() < 1e-9 && c.fade_out_ms == 500.0, "{c:?}");
+    // A shorter fade gives the beats back, and one longer than the clip is refused.
+    song.edit(Edit::AudioFade { clip, fade_in_ms: None, fade_out_ms: Some(0.0) }, None).unwrap();
+    let c = audio(&update(&seen), 1)[0].clone();
+    assert!((c.length_beats - 5.0).abs() < 1e-9 && c.tail_beats == 0.0);
+    song.edit(Edit::AudioFade { clip, fade_in_ms: None, fade_out_ms: Some(500.0) }, None).unwrap();
+    update(&seen);
+    let long = song.edit(Edit::AudioFade { clip, fade_in_ms: None, fade_out_ms: Some(4000.0) }, None).unwrap_err();
+    assert_eq!(long.to_string(), "A fade out of 4000 ms is longer than audio clip song");
+    // An end dragged in until the fade no longer fits shortens the fade to
+    // half of what is left: a beat of clip, 250 ms of it fade.
+    song.edit(Edit::AudioTrim { clip, start: None, end: Some(36.0) }, None).unwrap();
+    let u = update(&seen);
+    let c = &audio(&u, 1)[0];
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str(), c.fade_out_ms), ("batch", "Trim audio clip song", 250.0));
+    assert!((c.length_beats - 0.5).abs() < 1e-9 && (c.tail_beats - 0.5).abs() < 1e-9);
+    assert!((0..5).all(|_| song.undo().is_ok() && update(&seen).change.op == "undo"));
+    let c = song.arrangement().tracks[1].audio[0].clone();
+    assert_eq!((c.at, c.length_beats, c.fade_out_ms), (35.0, 10.0, 8.0));
+
+    // The clip panel's fields.
+    let set = |field: &str, value: FieldValue| song.edit(Edit::AudioSet { clip, field: field.into(), value }, None);
+    set("gain_db", number(-6.5)).unwrap();
+    assert_eq!(audio(&update(&seen), 1)[0].gain_db, -6.5);
+    set("fade_curve", text("linear")).unwrap();
+    assert_eq!(audio(&update(&seen), 1)[0].fade_curve, "linear");
+    set("stretch", text("preserve_pitch")).unwrap();
+    assert_eq!(audio(&update(&seen), 1)[0].stretch, "preserve_pitch");
+    // At half the song's tempo of its own, its five seconds are five beats.
+    set("source_bpm", number(60.0)).unwrap();
+    let u = update(&seen);
+    assert_eq!((audio(&u, 1)[0].source_bpm, audio(&u, 1)[0].length_beats, u.arrangement.length_beats), (Some(60.0), 5.0, 48.0));
+    // At four times it they are forty, and the song grows to hold them.
+    set("source_bpm", number(240.0)).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the tempo of audio clip song");
+    assert_eq!((audio(&u, 1)[0].length_beats, u.arrangement.length_beats), (20.0, 56.0));
+    set("source_bpm", FieldValue::Absent).unwrap();
+    let u = update(&seen);
+    assert_eq!((audio(&u, 1)[0].source_bpm, audio(&u, 1)[0].length_beats), (None, 10.0));
+    assert_eq!(get(&format!("@{clip}")).get("source_bpm"), None);
+    assert!(set("gain_db", number(99.0)).is_err());
+    assert_eq!(set("sample", text("hit")).unwrap_err().to_string(), "An audio clip's sample is not set here");
+    assert!(set("fade_out_ms", number(4.0)).is_err(), "fades are set where the clip's end is kept");
+
+    // A split makes two that play as the one did; the later half is new.
+    let made = song.edit(Edit::AudioSplit { clips: vec![clip, fill], at: 39.0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.op, "audio.split");
+    let halves = audio(&u, 1);
+    assert_eq!(halves.iter().map(|c| (c.key, c.at, c.length_beats)).collect::<Vec<_>>(), [(clip, 35.0, 4.0), (made[0], 39.0, 6.0)]);
+    assert_eq!((halves[0].source_end_seconds, halves[1].source_start_seconds), (halves[1].source_start_seconds, 7.0));
+    let outside = song.edit(Edit::AudioSplit { clips: vec![clip, made[0]], at: 39.0 }, None).unwrap_err();
+    assert_eq!(outside.to_string(), "No audio clip to split plays at the start position");
+
+    // A copy goes right after what was copied, and can lengthen the song;
+    // removing a clip says what it was.
+    let copies = song.edit(Edit::ClipsDuplicate { clips: vec![clip, made[0]] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.label.as_str(), u.arrangement.length_beats), ("Duplicate 2 clips", 56.0));
+    let all = audio(&u, 1);
+    assert_eq!(all.iter().map(|c| (c.key, c.at, c.length_beats)).collect::<Vec<_>>()[2..], [(copies[0], 45.0, 4.0), (copies[1], 49.0, 6.0)]);
+    assert_eq!((all[3].gain_db, all[3].fade_curve.as_str(), all[3].stretch.as_str()), (-6.5, "linear", "preserve_pitch"));
+    song.edit(Edit::ClipsDuplicate { clips: vec![copies[1]] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.label.as_str(), u.arrangement.length_beats), ("Duplicate audio clip song", 64.0));
+    song.edit(Edit::ClipsRemove { clips: vec![copies[1]] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.label.as_str(), u.touched.as_slice()), ("Remove audio clip song", &[touch(Part::Clip, copies[1], Delta::Removed)][..]));
+    song.edit(Edit::ClipsRemove { clips: vec![clip, fill] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.label.as_str(), audio(&u, 1).len(), u.arrangement.tracks[0].clips.len()), ("Remove 2 clips", 3, 1));
+
+    // A clip's length comes from seconds of its file, and a copy still lands
+    // on a beat a person would write: this one sounds for 7.984 beats and
+    // 0.016 of fade, and its copy starts on beat 8.
+    let u = audio_add(&path, &seen, json!({"track": "drums", "at": 0, "source_end_seconds": 3.992}));
+    let short = u.arrangement.tracks[0].audio[0].key;
+    let copy = song.edit(Edit::ClipsDuplicate { clips: vec![short] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Duplicate audio clip song"));
+    assert_eq!(get(&format!("@{}.at", copy[0])), json!(8));
+    song.edit(Edit::ClipsMove { clips: vec![copy[0]], by: 4.0, rows: 0 }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Move audio clip song to beat 12 on drums");
+    let _ = (drums, perc);
+    song.close();
+}
+
+#[test]
+fn a_dropped_file_becomes_an_audio_clip_and_the_song_grows_to_hold_it() {
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let drums = start.tracks[0].key;
+    // A file as the library's import leaves it: copied into the project. Ten
+    // seconds, which is twenty beats at the song's 120 BPM.
+    std::fs::create_dir(dir.path().join("samples")).unwrap();
+    let frames: Vec<[f32; 2]> = (0..441_000).map(|i| [((i % 441) as f32 / 441.0 - 0.5) * 0.4; 2]).collect();
+    std::fs::write(dir.path().join("samples/ab12_song.wav"), float_wav_bytes(&frames, 44100)).unwrap();
+    let asset = aaw_ffi::library::Asset {
+        sha256: aaw_model::digest(&dir.path().join("samples/ab12_song.wav")).unwrap(),
+        path: "samples/ab12_song.wav".into(),
+        source: "/music/My Song.wav".into(),
+        source_sha256: None,
+        root_note: None,
+    };
+    let drop = |track: Option<u64>, at: f64| Edit::SampleClip { asset: asset.clone(), name: "My Song".into(), track, index: 2, at };
+
+    // On a track's lane: a clip of the whole file at that beat, in one step
+    // with the sample it plays.
+    let made = song.edit(drop(Some(drums), 8.0), None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.op.as_str(), u.change.label.as_str()), (Who::User, "batch", "Add audio clip of my-song to drums"));
+    let clip = u.arrangement.tracks[0].audio[0].clone();
+    assert_eq!(made, [clip.key]);
+    assert_eq!((clip.sample.as_str(), clip.at, clip.length_beats, clip.source_start_seconds, clip.source_end_seconds), ("my-song", 8.0, 20.0, 0.0, 10.0));
+    assert_eq!(u.arrangement.length_beats, 32.0, "it fits");
+    assert_eq!(u.arrangement.tracks[0].pads.len(), 1, "no pad is made");
+    assert_eq!(
+        agent(&path, json!({"op": "get", "path": "samples.my-song"})),
+        json!({"path": "samples/ab12_song.wav", "sha256": asset.sha256, "source": "/music/My Song.wav"})
+    );
+
+    // Past where it fits, the song grows to the end of the bar it ends in:
+    // from beat 14.5 its twenty beats end at 34.5. The file is the same sample.
+    song.edit(drop(Some(drums), 14.5), None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.length_beats, u.arrangement.tracks[0].audio[1].at), (36.0, 14.5));
+    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(2));
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.length_beats, u.arrangement.tracks[0].audio.len()), (32.0, 1));
+
+    // Where there is no track: a new one named after the file, with the clip,
+    // even at a beat past the song's end.
+    let made = song.edit(drop(None, 40.0), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add track my-song with audio clip my-song");
+    let track = &u.arrangement.tracks[2];
+    assert_eq!((track.id.as_str(), track.pads.len(), track.clips.len()), ("my-song", 0, 0));
+    assert_eq!(made, [track.key, track.audio[0].key]);
+    assert_eq!((track.audio[0].at, u.arrangement.length_beats), (40.0, 60.0));
+    // One undo takes back the track, the clip and the length.
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.tracks.len(), u.arrangement.length_beats), (2, 32.0));
     song.close();
 }
 
