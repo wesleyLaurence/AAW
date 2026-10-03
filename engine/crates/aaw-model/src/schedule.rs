@@ -19,18 +19,15 @@ pub struct NoteOn {
 }
 
 /// A MIDI track's notes in the order they start. A note plays from its start
-/// to its end or its clip's, whichever is first; one that starts at or after
-/// its clip's end does not play.
+/// to its end or its clip's, whichever is first; one that starts before its
+/// clip or at or after its end does not play.
 pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
     let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
     let mut notes = Vec::new();
     for clip in &midi.clips {
         let (base, length) = (clip.at_exact(), clip.length_exact());
-        for n in &clip.notes {
+        for n in clip.notes.iter().filter(|n| clip.plays(n)) {
             let at = n.at_exact();
-            if at >= length {
-                continue;
-            }
             let until = (&at + n.duration_exact()).min(length.clone());
             let beats = &until - &at;
             notes.push(NoteOn {

@@ -1,9 +1,11 @@
 # MIDI tracks and note clips — proposed October 3, 2026
 
-Status: item 1 built October 3, 2026 (#39); items 2 and 3 proposed. They were
-backlog items 1, 2 and 3, one branch and pull request each, in that order.
-Product requirements are in [concept.md](../concept.md#sound); decisions D60,
-D61, D62 and D63 record the reasons. The schema and commands of item 1 are as
+Status: item 1 built October 3, 2026 (#39), item 2 the same day; item 3
+proposed. They were backlog items 1, 2 and 3, one branch and pull request
+each, in that order. Product requirements are in
+[concept.md](../concept.md#sound); decisions D60, D61, D62, D63 and D64 record
+the reasons. What item 2 built in the app is in
+[apps/mac/README.md](../../apps/mac/README.md). The schema and commands of item 1 are as
 `daw describe midi` and [engine/README.md](../../engine/README.md) give them;
 this file becomes their reference once item 3 is built.
 
@@ -310,10 +312,9 @@ rewrite this file as the built reference.
 These are implementation choices to settle at the start of the item they
 belong to, without reopening the requirements above. Item 1's two, the clip's
 edges and whether a note clip repeats, are settled in D63: a note sounds until
-its clip's end, one that starts past it is kept and silent, a note cannot
-start before its clip, and note clips do not repeat.
-
-- Item 2: how a clip shortened from its left edge treats its notes, which are
-  placed from its start.
+its clip's end, one that starts past it is kept and silent, and note clips do
+not repeat. Item 2's, a clip shortened from its left edge, is settled in D64:
+its notes stay where they are in the song, and those it passes are kept before
+the clip, at a negative `at`, and do not play.
 - Item 3: MIDI channel/track mapping and the exact unsupported-message policy,
   including ambiguous overlapping note-on/off pairs for the same pitch/channel.

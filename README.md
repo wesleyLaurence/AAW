@@ -94,7 +94,7 @@ MIDI tracks hold note clips that own their notes, with numeric pitches placed
 on and off the grid, and a sampler that maps notes to pads plays them; the
 instrument can be attached, swapped or removed without touching the notes, and
 a copied clip changes independently. The agent writes them with `daw note` and
-`daw instrument`; the app draws them and does not yet edit them. See
+`daw instrument`; the person draws and edits them in the app's piano roll. See
 `daw describe midi` and [docs/features/midi-clips.md](docs/features/midi-clips.md).
 
 The broader workspace described above is the vision. Saturation, groups, synths,

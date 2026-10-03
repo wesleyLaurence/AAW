@@ -417,6 +417,16 @@ enum ClipCmd {
     Remove { project: Song, clip: String },
     /// Set a note clip's length; its notes stay where they are.
     Resize { project: Song, clip: String, length: String },
+    /// Move a note clip's start or end to a song beat. Its notes stay where
+    /// they are in the song; those the start passes are kept and do not play.
+    Trim {
+        project: Song,
+        clip: String,
+        #[arg(long)]
+        start: Option<String>,
+        #[arg(long)]
+        end: Option<String>,
+    },
 }
 
 /// Notes of note clips, addressed as CLIP.notes.ID, e.g.
@@ -1239,6 +1249,14 @@ fn run(cli: &Cli) -> Result<Json> {
                 C::ClipResize {
                     clip: clip.clone(),
                     length_beats: parse_value(length),
+                },
+            ),
+            ClipCmd::Trim { project, clip, start, end } => edit(
+                project,
+                C::ClipTrim {
+                    clip: clip.clone(),
+                    start: start.as_deref().map(parse_value),
+                    end: end.as_deref().map(parse_value),
                 },
             ),
         },

@@ -42,8 +42,8 @@ Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [MIDI tracks and note clips](features/midi-clips.md) | 1 and 2; the song model and commands are built |
-| [the agent panel](features/agent-panel.md) | 6 |
+| [MIDI tracks and note clips](features/midi-clips.md) | 1; the song model, the commands and the app's piano roll are built |
+| [the agent panel](features/agent-panel.md) | 5 |
 | [generated audio](features/generated-audio.md) | Later, under Sound |
 
 ## Archive

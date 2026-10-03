@@ -14,31 +14,26 @@ kept.
 
 ## Next
 
-1. **Note clips in the app.** A piano roll for a MIDI track's clips, notes
-   drawn and edited on and off the grid, a clip moved, resized and copied as an
-   independent copy, and the instrument attached and swapped. The app draws a
-   note clip's notes today and does not edit them.
-   [features/midi-clips.md](features/midi-clips.md)
-2. **Standard MIDI files.** Notes-only import and export in the CLI and the
+1. **Standard MIDI files.** Notes-only import and export in the CLI and the
    app, with what cannot be kept reported, and a `.mid` dropped on the
    timeline. [features/midi-clips.md](features/midi-clips.md)
-3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-4. **The `.aaw` file type and the project ID.** The project file under the app's
+3. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-5. **The workspace and the two levels.** The workspace folder with its managed
+4. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-6. **The agent panel.** A conversation in the window, per project, over the
+5. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-7. **Other Macs.** The rest of the Python ported or carried in the bundle,
+6. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-8. **Sign-in buttons and other agents,** as the companies' terms allow.
+7. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -86,6 +81,15 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   while the song plays, and the new MIDI track and its notes in the window. The
   engine's tests hold a note clip to the same hits written as a pattern, and
   the window was seen in a picture; nobody listened or looked by hand.
+- **The piano roll by hand and ear:** a MIDI track and a clip made, a chord
+  and a melody drawn and moved on and off the grid, ends dragged, several notes
+  selected with Shift and a drag, velocity, a clip copied and its copy changed,
+  a left edge dragged past notes and back, Copy and Paste of clips and notes,
+  and a sample dropped on the track's header, swapped and removed while the
+  song plays. Scripted clicks and keys did each of these but the drag of a
+  sample, which `--drop` stood in for, and the results were read from the song;
+  nobody held the mouse or listened. Whether a note is easy to take hold of at
+  10 points a row, and whether its end is.
 
 ## Later
 
@@ -214,8 +218,18 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - A pad's own settings (level, tuning, held or not) in the device panel.
 - A sample added as a pad shows where it went. Nothing on the timeline changes,
   and the person looked for the file on the track.
-- The pattern's step menu in note values: 1/16 and 1/8T, as other DAWs write
-  them. It lists beats, so its 1/4 is a sixteenth note.
+- The pattern's step menu and the piano roll's grid in note values: 1/16 and
+  1/8T, as other DAWs write them. They list beats, so their 1/4 is a sixteenth
+  note.
+- In the piano roll: a note heard as it is drawn, moved or clicked; a velocity
+  lane under the notes; zoom up and down as well as across; the left end of a
+  note dragged; a note dragged with Option copied, as in Ableton.
+- A drum kit made in the app: a sample dropped on a key of the piano roll as a
+  pad that the note plays. A sample on a MIDI track's header replaces the
+  instrument with one pad on every note, and `daw instrument map` makes kits.
+- A sample dropped from the Finder on a MIDI track played at its pitch. A file
+  has no root note until it is measured, so it plays as it is on every note;
+  one from the browser brings its measured pitch.
 - A loop from the browser fitted to the song's tempo when it is added.
 - Several events selected, copied and pasted; several clips selected by dragging
   over them; several automation points selected.

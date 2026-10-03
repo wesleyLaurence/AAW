@@ -3,8 +3,8 @@ import AppKit
 import SwiftUI
 
 /// The detail panel, under the arrangement: the devices of the row last
-/// selected, or the clip last selected, which is a pattern clip's pattern or
-/// an audio clip's settings. A row's header shows the first and a clip the
+/// selected, or the clip last selected, which is a pattern clip's pattern, an
+/// audio clip's settings or a note clip's piano roll. A row's header shows the first and a clip the
 /// second, and the two marks at the top left change between them.
 struct DetailView: View {
     let model: SongModel
@@ -16,7 +16,7 @@ struct DetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 2) {
                     tab("Devices", .devices)
-                    tab(model.audioContext == nil ? "Pattern" : "Audio Clip", .pattern)
+                    tab(Self.clipTitle(model), .pattern)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10)
@@ -31,10 +31,12 @@ struct DetailView: View {
                 case .pattern:
                     if let context = model.audioContext {
                         AudioClipHeader(model: model, context: context)
+                    } else if let context = model.noteContext {
+                        NoteClipHeader(model: model, context: context)
                     } else if let context = model.patternContext {
                         PatternHeader(model: model, context: context)
                     } else {
-                        hint("Select a clip to edit it. Double-click an empty part of a track to add a pattern, or drop an audio file on it.")
+                        hint("Select a clip to edit it. Double-click an empty part of a track to add a clip, or drop an audio file on it.")
                     }
                 }
                 Spacer(minLength: 0)
@@ -47,6 +49,9 @@ struct DetailView: View {
             case .pattern:
                 if let context = model.audioContext {
                     AudioClipInfo(context: context, tempo: model.arrangement.tempo)
+                } else if let context = model.noteContext {
+                    NotePane(model: model, context: context, color: model.color(of: context.track.key),
+                             playing: model.transport.playing, selected: model.selectedNotes, grid: model.noteGrid)
                 } else if let context = model.patternContext {
                     PatternPane(model: model, context: context, color: model.color(of: context.track.key),
                                 playing: model.transport.playing, selected: model.selectedEvent)
@@ -56,6 +61,13 @@ struct DetailView: View {
         }
         .frame(height: Self.height, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.13)))
+    }
+
+    /// What the clip's tab is called: after the kind of clip last selected.
+    static func clipTitle(_ model: SongModel) -> String {
+        if model.audioContext != nil { return "Audio Clip" }
+        if model.noteContext != nil { return "Notes" }
+        return "Pattern"
     }
 
     private func tab(_ title: String, _ detail: Detail) -> some View {
@@ -232,6 +244,9 @@ struct DeviceView: View {
     var body: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 8) {
+                if let track = chain.track, track.midi {
+                    InstrumentPanel(model: model, track: track)
+                }
                 ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
                     DevicePanel(model: model, chain: chain, effect: effect, index: index)
                 }
@@ -261,7 +276,7 @@ private struct ChainHeader: View {
 
     private var kind: String {
         switch chain.row {
-        case .track: "Track"
+        case .track: chain.track?.midi == true ? "MIDI track" : "Track"
         case .bus: "Return"
         case .master: "Master"
         }
@@ -285,7 +300,7 @@ private struct ChainHeader: View {
             .menuStyle(.borderlessButton)
             .controlSize(.small)
             .fixedSize()
-            if !chain.pads.isEmpty {
+            if !chain.pads.isEmpty, chain.track?.midi != true {
                 Divider()
                 Text("Pads").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
                 ScrollView {
@@ -307,6 +322,73 @@ private struct ChainHeader: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+    }
+}
+
+/// A MIDI track's instrument, first in its chain: the sampler's pads and the
+/// notes that play each, and the mark that takes it off. The notes are kept
+/// whatever is done here. A sample dropped on the track's header becomes the
+/// instrument, in place of the one it had.
+private struct InstrumentPanel: View {
+    let model: SongModel
+    let track: TrackView
+
+    /// Notes as a range of names: `C-1–G9`, or one note, `C2`.
+    private func notes(_ m: NoteMapView) -> String {
+        m.low == m.high ? noteName(midi: m.low) : "\(noteName(midi: m.low))–\(noteName(midi: m.high))"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                Image(systemName: "pianokeys").foregroundStyle(.secondary)
+                Text(track.instrument.map(readable) ?? "No instrument").font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 2)
+                if track.instrument != nil {
+                    Button {
+                        model.edit(.instrumentRemove(track: track.key))
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .help("Take the instrument off; the notes are kept")
+                }
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+            .background(Color(nsColor: Theme.gray(0.24)))
+            ScrollView {
+                VStack(alignment: .leading, spacing: 3) {
+                    if track.instrument == nil {
+                        Text("The notes play nothing. Drop a sample on \(track.id)'s header, or add one with + in the samples, and a sampler plays it on every note. Ask the agent for a drum kit.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    ForEach(Array(track.map.enumerated()), id: \.offset) { _, m in
+                        HStack(spacing: 4) {
+                            Text(notes(m)).font(.system(size: 10).monospacedDigit()).frame(width: 64, alignment: .leading)
+                            Text(m.pad).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                            Spacer(minLength: 0)
+                            Text(m.pitched ? "pitched" : "as it is").font(.system(size: 9)).foregroundStyle(.tertiary)
+                        }
+                        .help(track.pads.first { $0.name == m.pad }.map { "Pad \(m.pad) plays sample \($0.sample)" } ?? m.pad)
+                    }
+                    if track.instrument != nil, track.map.isEmpty {
+                        Text("No note plays a pad yet: `daw instrument map` gives the pads notes.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(6)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(width: 216, height: DetailView.height - 16, alignment: .top)
+        .background(Color(nsColor: Theme.gray(0.19)))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 

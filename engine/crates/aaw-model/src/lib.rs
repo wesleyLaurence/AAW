@@ -19,7 +19,7 @@ pub mod value;
 pub mod yaml_emit;
 pub mod yaml_load;
 
-pub use beat::{beat, frame, Beat};
+pub use beat::{beat, frame, signed_beat, Beat};
 pub use hash::{fingerprints, hash_matches, project_hash};
 pub use schema::*;
 pub use validate::ValidationError;

@@ -5,7 +5,7 @@ use crate::beat::{float_fraction, parse_fraction};
 use crate::pyfmt::{float_repr, format_g};
 use crate::schema::{Effect, Lane, PadMode, Project, Return, Track};
 use num_rational::BigRational;
-use num_traits::ToPrimitive;
+use num_traits::{Signed, ToPrimitive};
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -522,8 +522,8 @@ fn sampler_references(p: &Project, track: &str, sampler: &crate::schema::Sampler
     Ok(())
 }
 
-/// What `daw check` says of a song's notes: those that start at or after
-/// their clip's end, which are kept and do not play, and those the track's
+/// What `daw check` says of a song's notes: those that start before their
+/// clip or at or after its end, which are kept and do not play, and those the track's
 /// sampler maps to no pad, which are silent.
 pub fn note_warnings(p: &Project) -> Vec<String> {
     let mut out = Vec::new();
@@ -532,20 +532,22 @@ pub fn note_warnings(p: &Project) -> Vec<String> {
         let sampler = midi.sampler();
         for clip in &midi.clips {
             let length = clip.length_exact();
-            let outside: Vec<&str> = clip.notes.iter().filter(|n| n.at_exact() >= length).map(|n| n.id.as_str()).collect();
-            if !outside.is_empty() {
-                out.push(format!(
-                    "{}.{}: notes {} start at or after the clip's end and do not play",
-                    t.id,
-                    clip.id,
-                    outside.join(", ")
-                ));
+            let ids = |keep: &dyn Fn(&BigRational) -> bool| -> Vec<&str> {
+                clip.notes.iter().filter(|n| keep(&n.at_exact())).map(|n| n.id.as_str()).collect()
+            };
+            for (outside, place) in [
+                (ids(&|at| at.is_negative()), "before the clip's start"),
+                (ids(&|at| *at >= length), "at or after the clip's end"),
+            ] {
+                if !outside.is_empty() {
+                    out.push(format!("{}.{}: notes {} start {place} and do not play", t.id, clip.id, outside.join(", ")));
+                }
             }
             let Some(sampler) = sampler else { continue };
             let mut unmapped: Vec<i64> = clip
                 .notes
                 .iter()
-                .filter(|n| n.at_exact() < length && sampler.entry(n.pitch).is_none())
+                .filter(|n| clip.plays(n) && sampler.entry(n.pitch).is_none())
                 .map(|n| n.pitch)
                 .collect();
             unmapped.sort_unstable();

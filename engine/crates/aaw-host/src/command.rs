@@ -119,6 +119,17 @@ pub enum Command {
     /// Sets a note clip's length; its notes stay where they are.
     #[serde(rename = "clip.resize")]
     ClipResize { clip: String, length_beats: Json },
+    /// Moves a note clip's start, its end or both to a song beat. Its notes
+    /// stay where they are in the song: those the start passes are kept,
+    /// before the clip, and do not play.
+    #[serde(rename = "clip.trim")]
+    ClipTrim {
+        clip: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        start: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        end: Option<Json>,
+    },
 
     // Notes of note clips
     /// Adds notes to a note clip: `notes`, a list of notes, or one note from
@@ -532,10 +543,10 @@ fn beat_of(v: &Value) -> Option<Beat> {
     }
 }
 
-/// The exact beat a leaf holds, if it holds one.
+/// The exact beat a leaf holds, if it holds one: a note's may be negative.
 fn exact(n: Option<&Node>) -> Option<BigRational> {
     match n {
-        Some(Node::Leaf(v)) => beat_of(v).and_then(|b| aaw_model::beat(&b).ok()),
+        Some(Node::Leaf(v)) => beat_of(v).and_then(|b| aaw_model::signed_beat(&b).ok()),
         _ => None,
     }
 }
@@ -546,7 +557,7 @@ pub fn beat_value(x: &BigRational) -> Value {
         return Value::Int(x.to_integer());
     }
     let f = num_traits::ToPrimitive::to_f64(x).unwrap_or(f64::NAN);
-    if aaw_model::beat(&Beat::Float(f)).ok().as_ref() == Some(x) {
+    if aaw_model::signed_beat(&Beat::Float(f)).ok().as_ref() == Some(x) {
         Value::Float(f)
     } else {
         Value::Str(aaw_model::fraction_str(x))
@@ -1164,6 +1175,32 @@ impl<'a> Edit<'a> {
                 self.set_leaf(&loc, "length_beats", beat_value(&beat_at(length_beats)?));
                 out.label = format!("Resize clip {} to {} beats", self.clip_name(&loc), short(length_beats));
             }
+            ClipTrim { clip, start, end } => {
+                let loc = self.note_clip(clip)?;
+                if start.is_none() && end.is_none() {
+                    return Err("Trim needs a start or an end".into());
+                }
+                let at = exact(self.node(&loc).get("at")).unwrap_or_default();
+                let length = exact(self.node(&loc).get("length_beats")).unwrap_or_default();
+                let from = start.as_ref().map(beat_at).transpose()?.unwrap_or_else(|| at.clone());
+                let to = end.as_ref().map(beat_at).transpose()?.unwrap_or_else(|| &at + &length);
+                if to <= from {
+                    return Err(format!("Clip {} would end before it starts", self.clip_name(&loc)));
+                }
+                if from != at {
+                    // The notes stay where they are in the song.
+                    let by = &from - &at;
+                    let count = self.node(&loc).get("notes").map_or(0, |n| n.items().len());
+                    for i in 0..count {
+                        let note = [loc.clone(), vec![Step::Key("notes".into()), Step::Index(i)]].concat();
+                        let moved = exact(self.node(&note).get("at")).unwrap_or_default() - &by;
+                        self.set_leaf(&note, "at", beat_value(&moved));
+                    }
+                    self.set_leaf(&loc, "at", beat_value(&from));
+                }
+                self.set_leaf(&loc, "length_beats", beat_value(&(&to - &from)));
+                out.label = format!("Trim clip {} to beats {} to {}", self.clip_name(&loc), beat_text(&from), beat_text(&to));
+            }
             NoteAdd { clip, notes, fields } => {
                 let loc = self.note_clip(clip)?;
                 let mut all: Vec<Fields> = notes.clone();
@@ -1196,11 +1233,8 @@ impl<'a> Edit<'a> {
                 let found = self.notes_of(notes)?;
                 for (clip, i) in &found {
                     let loc = [clip.clone(), vec![Step::Key("notes".into()), Step::Index(*i)]].concat();
+                    // A note moved before its clip is kept and does not play.
                     let at = exact(self.node(&loc).get("at")).unwrap_or_default() + &by;
-                    if at < BigRational::from_integer(0.into()) {
-                        let id = self.node(&loc).field("id").unwrap_or("?").to_string();
-                        return Err(format!("Note {id} of clip {} would start before its clip", self.clip_name(clip)));
-                    }
                     self.set_leaf(&loc, "at", beat_value(&at));
                 }
                 out.label = format!("Move {} by {} beats", count(found.len(), "note"), signed(&aaw_model::fraction_str(&by)));

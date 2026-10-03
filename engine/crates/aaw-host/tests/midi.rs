@@ -69,14 +69,16 @@ fn each_field_of_a_note_is_edited_on_its_own_and_nothing_snaps() {
     edit(&mut s, json!({"op": "note.set", "note": n, "velocity": 30})).unwrap();
     assert_eq!(get(&s, n), json!({"id": "n2", "pitch": 68, "duration": "2/3", "velocity": 30}));
     // A move by a hair is kept exactly, and moving back restores the place.
-    edit(&mut s, json!({"op": "note.move", "notes": [n], "by": "-1/480"})).unwrap_err();
     edit(&mut s, json!({"op": "note.move", "notes": ["tracks.keys.clips.clip1.notes.n4"], "by": "-1/48"})).unwrap();
     assert_eq!(get(&s, "tracks.keys.clips.clip1.notes.n4.at"), json!("469/240"));
     edit(&mut s, json!({"op": "note.move", "notes": ["tracks.keys.clips.clip1.notes.n4"], "by": "1/48"})).unwrap();
     assert_eq!(get(&s, "tracks.keys.clips.clip1.notes.n4.at"), json!(1.975));
-    // What would leave the clip or the pitch range is refused, not clamped.
-    let e = edit(&mut s, json!({"op": "note.move", "notes": [n], "by": -1})).unwrap_err();
-    assert_eq!(e, "Note n2 of clip clip1 at 4 would start before its clip");
+    // A note moved before its clip is kept there and does not play; one
+    // that would leave the pitch range is refused, not clamped.
+    edit(&mut s, json!({"op": "note.move", "notes": [n], "by": "-1/480"})).unwrap();
+    assert_eq!(get(&s, &format!("{n}.at")), json!("-1/480"));
+    edit(&mut s, json!({"op": "note.move", "notes": [n], "by": "1/480"})).unwrap();
+    assert_eq!(get(&s, &format!("{n}.at")), json!(0));
     let e = edit(&mut s, json!({"op": "note.transpose", "notes": ["tracks.keys.clips.clip1"], "by": 60})).unwrap_err();
     assert!(e.contains("would be pitch 128, outside 0 to 127"), "{e}");
     let e = edit(&mut s, json!({"op": "note.set", "note": n, "id": "n9"})).unwrap_err();

@@ -94,7 +94,8 @@ fn what_a_note_or_a_midi_track_cannot_be() {
         (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 128, duration: 1}"), "less than or equal to 127"),
         (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: H2, duration: 1}"), "Invalid note 'H2'"),
         (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, duration: 0}"), "duration must be positive"),
-        (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, at: -1/4, duration: 1}"), "Beat values must be nonnegative"),
+        (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, duration: -1/4}"), "Beat values must be nonnegative"),
+        (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, at: x, duration: 1}"), "Invalid beat value 'x'"),
         (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, duration: 1, velocity: 0}"), "greater than or equal to 1"),
         (keys("length_beats: 4", "length_beats: 0"), "length must be positive"),
         (keys("at: 16", "at: 30"), "keys: clip clip1 exceeds session"),
@@ -135,6 +136,7 @@ tracks:
           - {pitch: 90, at: 2, duration: 1}
           - {pitch: 67, at: 3, duration: 4}
           - {pitch: 69, at: 4, duration: 1}
+          - {pitch: 71, at: -1/2, duration: 2}
 "#;
 
 #[test]
@@ -154,14 +156,16 @@ fn the_sampler_plays_mapped_notes_and_releases_gated_pads_at_the_note_off() {
             // An unpitched pad plays as it is, and a one-shot is not released.
             (5 * beat, "kick".into(), None, None, 100),
             // Note 90 is mapped to nothing; the note past the clip's end is cut
-            // at it, and the one that starts at the end does not play.
+            // at it, and the one that starts at the end does not play, nor
+            // the one before the clip's start that lasts into it.
             (7 * beat, "piano".into(), Some("G4".into()), Some(8 * beat), 100),
         ]
     );
     let midi = p.tracks[0].midi.as_ref().unwrap();
     let notes = track_notes(&p, midi);
-    assert_eq!(notes.len(), 5, "the note at the clip's end is left out");
+    assert_eq!(notes.len(), 5, "the notes outside the clip are left out");
     assert_eq!(aaw_model::rules::note_warnings(&p), [
+        "keys.phrase: notes n7 start before the clip's start and do not play",
         "keys.phrase: notes n6 start at or after the clip's end and do not play",
         "keys.phrase: the sampler maps no pad to notes 90 (F#6), which are silent",
     ]);
@@ -177,6 +181,12 @@ fn notes_play_at_exact_positions_off_the_grid() {
     assert!(starts.contains(&(beat2 - 600)) && starts.contains(&(beat2 + 600)), "{starts:?}");
     // A triplet's start is its exact fraction, rounded once.
     assert!(starts.contains(&(16 * 24000 + 56000)), "{starts:?}");
+    // A note before its clip is kept, written as it was.
+    let before = song(&keys("{pitch: 65, at: 7/3, duration: 1/3}", "{pitch: 65, at: -7/3, duration: 1/3}"));
+    let yaml = to_yaml(&before);
+    assert!(yaml.contains("at: -7/3"), "{yaml}");
+    assert_eq!(to_yaml(&song(&yaml)), yaml);
+    assert_eq!(track_notes(&before, before.tracks[0].midi.as_ref().unwrap()).len(), 5);
     // Without an instrument nothing plays, and the notes are all there.
     assert!(schedule(&p).is_empty());
     assert_eq!(track_notes(&p, midi).len(), 6);

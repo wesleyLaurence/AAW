@@ -177,7 +177,8 @@ duration, velocity}` with `pitch` a MIDI number (a name such as `C4` is taken
 and stored as 60) and `at` from the clip's start. A clip's ID is unique in the
 song and a note's in its clip; one that arrives without an ID is given the
 next `clipN` or `nN`. A note sounds until its end or its clip's, and one that
-starts at or after its clip's end is kept and does not play. `instrument` is
+starts before its clip, at a negative `at`, or at or after its end is kept and
+does not play: a clip trimmed from either edge keeps the notes it passes. `instrument` is
 null, which plays nothing, or `{sampler: {pads, map}}`: pads as below, and map
 entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
 not overlap; a pitched entry repitches its pad from its sample's root note to

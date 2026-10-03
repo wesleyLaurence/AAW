@@ -211,23 +211,40 @@ pub struct TrackView {
     pub pads: Vec<PadView>,
     pub clips: Vec<ClipView>,
     pub audio: Vec<AudioClipView>,
-    /// Whether it is a MIDI track, whose clips are `note_clips`.
+    /// Whether it is a MIDI track, whose clips are `note_clips` and whose
+    /// `pads` are its sampler's.
     pub midi: bool,
     /// The kind of a MIDI track's instrument, such as `sampler`; None
     /// without one.
     pub instrument: Option<String>,
+    /// Which notes play which of a MIDI track's sampler's pads.
+    pub map: Vec<NoteMapView>,
     pub note_clips: Vec<NoteClipView>,
+}
+
+/// Notes a sampler's pad plays: from `low` to `high`, inclusive, at their
+/// pitches when `pitched`.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct NoteMapView {
+    pub low: i32,
+    pub high: i32,
+    pub pad: String,
+    pub pitched: bool,
 }
 
 /// A note of a note clip.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct NoteView {
+    pub key: u64,
     pub id: String,
     pub pitch: i32,
-    /// Beats from the clip's start.
+    /// Beats from the clip's start; negative before it.
     pub at: f64,
     pub duration: f64,
     pub velocity: u32,
+    /// The place and length as the song writes them, such as `1/3`.
+    pub at_text: String,
+    pub duration_text: String,
 }
 
 /// A clip of a MIDI track, with the notes it owns.
@@ -746,7 +763,10 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 lanes,
                 lane_targets,
                 pads: t
-                    .pads
+                    .midi
+                    .as_ref()
+                    .and_then(|m| m.sampler())
+                    .map_or(&t.pads, |s| &s.pads)
                     .iter()
                     .map(|(name, pad)| PadView {
                         name: name.clone(),
@@ -758,6 +778,20 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     .collect(),
                 midi: t.midi.is_some(),
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
+                map: t
+                    .midi
+                    .as_ref()
+                    .and_then(|m| m.sampler())
+                    .map(|s| &s.map[..])
+                    .unwrap_or(&[])
+                    .iter()
+                    .map(|m| NoteMapView {
+                        low: m.low as i32,
+                        high: m.high as i32,
+                        pad: m.pad.clone(),
+                        pitched: m.pitched,
+                    })
+                    .collect(),
                 note_clips: t
                     .midi
                     .iter()
@@ -765,6 +799,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     .enumerate()
                     .map(|(j, c)| {
                         let key = handle(clip_items, j);
+                        let note_items = clip_items.get(j).map(|item| items(&item.node, "notes")).unwrap_or(&[]);
                         NoteClipView {
                             key,
                             reference: aaw_host::tree::handle_text(key),
@@ -774,12 +809,16 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             notes: c
                                 .notes
                                 .iter()
-                                .map(|n| NoteView {
+                                .enumerate()
+                                .map(|(k, n)| NoteView {
+                                    key: handle(note_items, k),
                                     id: n.id.clone(),
                                     pitch: n.pitch as i32,
                                     at: float(n.at_exact()),
                                     duration: float(n.duration_exact()),
                                     velocity: n.velocity.clamp(0, 127) as u32,
+                                    at_text: n.at.text(),
+                                    duration_text: n.duration.text(),
                                 })
                                 .collect(),
                         }

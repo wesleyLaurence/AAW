@@ -16,7 +16,7 @@ use aaw_host::command::{Command, Origin};
 use aaw_host::host::{self, Clock, Event, Options, Running};
 use aaw_host::project;
 use aaw_host::session::{Change, Doc};
-pub use edits::{Edit, Row};
+pub use edits::{Edit, NoteCopy, Row};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -340,6 +340,13 @@ impl Song {
             (_, label) => json!({"op": "batch", "commands": commands, "label": label}),
         };
         Ok(edits::made(&self.request(command, gesture)?))
+    }
+
+    /// What Copy takes of clips, for `Edit::ClipsPaste`.
+    pub fn copy_clips(&self, clips: Vec<u64>) -> Result<String, SongError> {
+        let directory = folder(&locked(&self.path));
+        let doc = locked(&self.doc);
+        Ok(edits::copied(doc.as_ref().ok_or_else(closed)?, &clips, &self.files, &directory)?)
     }
 
     /// Undoes the last change, whoever made it.
