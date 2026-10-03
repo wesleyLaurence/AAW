@@ -349,6 +349,13 @@ impl Song {
         Ok(edits::copied(doc.as_ref().ok_or_else(closed)?, &clips, &self.files, &directory)?)
     }
 
+    /// Writes the notes of a note clip that play as a MIDI file at `path`,
+    /// and returns how many it wrote.
+    pub fn export_midi_clip(&self, clip: u64, path: String) -> Result<u32, SongError> {
+        let reply = self.request(json!({"op": "midi.export", "clip": aaw_host::tree::handle_text(clip), "file": path}), None)?;
+        Ok(reply["notes"].as_u64().unwrap_or(0) as u32)
+    }
+
     /// Undoes the last change, whoever made it.
     pub fn undo(&self) -> Result<(), SongError> {
         self.request(json!({"op": "undo"}), None).map(|_| ())
@@ -409,6 +416,14 @@ fn closed() -> String {
 #[uniffi::export]
 pub fn note_name(midi: i32) -> String {
     aaw_model::rules::note_name(midi.into()).unwrap_or_default()
+}
+
+/// The beats a note clip made of the MIDI file at `path` would last, for
+/// the outline of a drop; None when the file is not one that is read.
+#[uniffi::export]
+pub fn midi_file_beats(path: String) -> Option<f64> {
+    let part = aaw_host::midi_file::read(&std::fs::read(path).ok()?).ok()?;
+    num_traits::ToPrimitive::to_f64(&part.length())
 }
 
 /// The host's reason for refusing a command, as a person reads it: the

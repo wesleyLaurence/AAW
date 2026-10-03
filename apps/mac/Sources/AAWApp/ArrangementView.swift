@@ -126,16 +126,17 @@ private enum ClipHit {
     }
 }
 
-/// Where a dragged sample would land: in the headers as a pad, and on the
-/// timeline as an audio clip at a beat.
+/// Where a dragged file would land: a sample in the headers as a pad, and
+/// on the timeline as an audio clip at a beat; a MIDI file on the timeline
+/// as a note clip.
 private enum DropTarget: Equatable {
     /// As a pad of this track.
     case pad(UInt64)
     /// As a pad of a new track after the others.
     case newTrack
-    /// As an audio clip of this track.
+    /// As a clip of this track.
     case clip(track: UInt64, at: Double)
-    /// As an audio clip of a new track after the others.
+    /// As a clip of a new track after the others.
     case newClip(at: Double)
 }
 
@@ -315,9 +316,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
     private var dropTarget: DropTarget?
-    /// The file being dragged over the view and its length in seconds, read
-    /// once for the outline of the clip it would make.
-    private var dropFile: (path: String, seconds: Double?)?
+    /// The file being dragged over the view and its length, in seconds for an
+    /// audio file and in beats for a MIDI file, read once for the outline of
+    /// the clip it would make.
+    private var dropFile: (path: String, seconds: Double?, beats: Double?)?
     /// The audio clip under the pointer, which shows its fades' handles.
     private var hoverClip: UInt64?
     private var measuring: Measuring?
@@ -1398,19 +1400,23 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.arrangement.tracks.last.flatMap { rows[.track($0.key)] }.map { CGFloat($0.y.to + $0.height.to) } ?? 0
     }
 
-    /// The sample a drag carries: one from the browser, or an audio file from
-    /// anywhere else, with its length when that is known.
+    /// The file a drag carries: a sample from the browser, or an audio or
+    /// MIDI file from anywhere else, with its length when that is known.
     private func sample(of drag: NSDraggingInfo) -> (path: String, name: String, note: String?, seconds: Double?)? {
         if drag.draggingSource != nil, let sample = model.browser.dragged {
             return (sample.path, Browser.padName(of: sample), sample.rootNote, sample.seconds > 0 ? sample.seconds : nil)
         }
         let urls = drag.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]
-        guard let url = urls?.first, Browser.extensions.contains(url.pathExtension.lowercased()) else { return nil }
-        // The file's header is read once for a drag, not at every move of it.
+        guard let url = urls?.first, Browser.extensions.contains(url.pathExtension.lowercased()) || Self.isMIDI(url.path) else { return nil }
+        // The file is read once for a drag, not at every move of it.
         if dropFile?.path != url.path {
-            let file = try? AVAudioFile(forReading: url)
-            let rate = file?.fileFormat.sampleRate ?? 0
-            dropFile = (url.path, rate > 0 ? file.map { Double($0.length) / rate } : nil)
+            if Self.isMIDI(url.path) {
+                dropFile = (url.path, nil, midiFileBeats(path: url.path))
+            } else {
+                let file = try? AVAudioFile(forReading: url)
+                let rate = file?.fileFormat.sampleRate ?? 0
+                dropFile = (url.path, rate > 0 ? file.map { Double($0.length) / rate } : nil, nil)
+            }
         }
         return (url.path, url.deletingPathExtension().lastPathComponent, nil, dropFile?.seconds)
     }
@@ -1436,7 +1442,31 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return track.map { .clip(track: $0, at: beat) } ?? .newClip(at: beat)
     }
 
+    /// Where a MIDI file at a point would land: on a MIDI track's lane as a
+    /// note clip there, elsewhere on the timeline on a new MIDI track, and in
+    /// the headers or the ruler nowhere.
+    private func midiLanding(at p: CGPoint, free: Bool) -> DropTarget? {
+        guard p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight else { return nil }
+        let beat = snappedBeat(atX: p.x, free: free)
+        if let (id, _) = row(atY: p.y), case .track(let key) = id, model.arrangement.tracks.first(where: { $0.key == key })?.midi == true {
+            return .clip(track: key, at: beat)
+        }
+        return .newClip(at: beat)
+    }
+
+    static func isMIDI(_ path: String) -> Bool {
+        ["mid", "midi"].contains(URL(fileURLWithPath: path).pathExtension.lowercased())
+    }
+
     private func land(path: String, name: String, note: String?, on target: DropTarget) {
+        if Self.isMIDI(path) {
+            switch target {
+            case .clip(let track, let at): model.importMIDI(path: path, to: track, at: at)
+            case .newClip(let at): model.importMIDI(path: path, to: nil, at: at)
+            case .pad, .newTrack: break
+            }
+            return
+        }
         switch target {
         case .pad(let track): model.addSample(path: path, name: name, note: note, to: track)
         case .newTrack: model.addSample(path: path, name: name, note: note, to: nil)
@@ -1445,23 +1475,32 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// Lands an audio file at a point of the view, as a drag from the Finder
-    /// that ends there does. False for a file that is no audio file.
+    /// Lands an audio or MIDI file at a point of the view, as a drag from
+    /// the Finder that ends there does. False for another kind of file, or a
+    /// MIDI file where it cannot land.
     @discardableResult
     func drop(file url: URL, at p: CGPoint) -> Bool {
+        let name = url.deletingPathExtension().lastPathComponent
+        if Self.isMIDI(url.path) {
+            guard let target = midiLanding(at: p, free: false) else { return false }
+            land(path: url.path, name: name, note: nil, on: target)
+            return true
+        }
         guard Browser.extensions.contains(url.pathExtension.lowercased()) else { return false }
-        land(path: url.path, name: url.deletingPathExtension().lastPathComponent, note: nil, on: landing(at: p, free: false))
+        land(path: url.path, name: name, note: nil, on: landing(at: p, free: false))
         return true
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        guard sample(of: sender) != nil else { return [] }
-        let target = landing(at: convert(sender.draggingLocation, from: nil), free: NSEvent.modifierFlags.contains(.option))
+        guard let file = sample(of: sender) else { return [] }
+        let p = convert(sender.draggingLocation, from: nil)
+        let free = NSEvent.modifierFlags.contains(.option)
+        let target = Self.isMIDI(file.path) ? midiLanding(at: p, free: free) : landing(at: p, free: free)
         if target != dropTarget {
             dropTarget = target
             needsDisplay = true
         }
-        return .copy
+        return target == nil ? [] : .copy
     }
 
     override func draggingExited(_ sender: NSDraggingInfo?) {
@@ -1665,8 +1704,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         fill(CGRect(x: header - 1, y: 0, width: 1, height: bounds.height), Theme.separator)
         fill(CGRect(x: 0, y: ruler - 1, width: bounds.width, height: 1), Theme.separator)
 
-        // Where a dragged sample would land: in a track's header as a pad,
-        // on its lane as an audio clip, or under the tracks on a new track.
+        // Where a dragged file would land: in a track's header as a pad, on
+        // its lane as a clip, or under the tracks on a new track.
         let under = max(ruler, layout.y(tracksHeight))
         switch dropTarget {
         case .pad(let key):
@@ -1709,8 +1748,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
     }
 
-    /// The beats the dragged file would cover, at its own tempo.
+    /// The beats the dragged file would cover: a MIDI file's clip, or an
+    /// audio file at its own tempo.
     private var dropLength: Double? {
+        if model.browser.dragged == nil, let beats = dropFile?.beats { return beats }
         let seconds = model.browser.dragged.map(\.seconds) ?? dropFile?.seconds
         return seconds.flatMap { $0 > 0 ? $0 * model.arrangement.tempo / 60 : nil }
     }

@@ -9,7 +9,8 @@ the clips, the tracks and returns, each row's effects and its automation lanes,
 and each pattern's steps and events. An audio file dropped on the timeline is an
 audio clip, which is moved, trimmed, faded and split there. A MIDI track's note
 clips are made, moved, trimmed and copied, and their notes drawn and edited in a
-piano roll. A browser finds
+piano roll; a MIDI file dropped on the timeline is a note clip, and a note clip
+is exported as one. A browser finds
 samples in the library's index and adds them to the song as pads, tracks and
 audio clips. Save As… gives a project a
 name and a place. The bundle holds `daw` and
@@ -138,6 +139,7 @@ describes all of this; in short:
 | Launch | Opens a blank project called Untitled, 120 BPM and 32 bars, kept in `Untitled/` of the app's data folder until it has a name. There is no welcome window, and closing the last window quits |
 | File › New (⌘N) | Another Untitled project, in a window of its own |
 | File › Open… (⌘O), Open Recent | A project's folder or its `song.yaml`. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there |
+| File › Export MIDI Clip… (⇧⌘E) | With one note clip selected, asks for a name and a place and writes the notes that play as a MIDI file, as `daw midi export` does |
 | File › Save As… (⇧⌘S) | Asks for a name and a place. An Untitled project moves there. A project that has a name is copied, and the window carries on in the copy. Undo, the selection and what is playing carry on, and `daw` commands sent to the old path still land in the window |
 | Closing an Untitled project | One that holds nothing is deleted. One that holds something asks: Save…, Delete or Cancel. Quitting asks about each in turn |
 
@@ -216,6 +218,7 @@ front first.
 | Click a sample | Plays it, as its file is; the speaker mark turns that off |
 | Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
 | Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with Option, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
+| Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with Option, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |
 | Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a sampler that plays the sample on every note, from its root note when it has one, in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
 | Drag a bar or type a value in the Audio Clip panel | Sets the clip's gain, fades, fade curve, tempo or stretch |
 
@@ -302,7 +305,7 @@ between the last of them and the picture:
 | `--drag X1,Y1,X2,Y2` | Presses, moves in two steps and lets go |
 | `--key KEY` | Presses `space`, `return`, `delete`, `escape`, `left`, `right`, `up`, `down` or a letter, after any of `cmd+`, `shift+` and `opt+`: `--key shift+cmd+z` |
 | `--type TEXT` | Types, as into a name |
-| `--drop FILE,X,Y` | Lets an audio file go at a point, as a drag from the Finder that ends there |
+| `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there |
 | `--wait SECONDS` | Leaves time, such as for a `daw` command from a terminal |
 
 Run `daw` commands against the song meanwhile to see them land in the picture.

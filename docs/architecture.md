@@ -71,7 +71,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   for WAV/stem export.
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
-  It also makes a blank project and moves or copies a project's folder.
+  It also makes a blank project and moves or copies a project's folder, and
+  reads and writes Standard MIDI files of one part (`midi_file`).
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see
@@ -184,7 +185,9 @@ entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
 not overlap; a pitched entry repitches its pad from its sample's root note to
 the note. The schedule gives a MIDI track's notes to its instrument as pitch,
 velocity, start and note-off, and the sampler makes of them the hits a pattern
-event would make. See [midi-clips.md](features/midi-clips.md) and `daw describe midi`.
+event would make. A Standard MIDI file of one part is imported as a note clip
+and a note clip exported as one; the file is not kept or linked, and its tempo
+is not taken. See [midi-clips.md](features/midi-clips.md) and `daw describe midi`.
 
 Pad: `sample`, `mode` (`one_shot` or `gate`), `gain_db`, `pan`, `transpose` in
 semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional

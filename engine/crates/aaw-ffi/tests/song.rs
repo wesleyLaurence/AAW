@@ -1548,8 +1548,9 @@ fn a_sample_becomes_a_pad_or_a_track() {
     // A file that is not in the project is refused, and nothing changes.
     let missing = aaw_ffi::library::Asset { path: "samples/none.wav".into(), sha256: kick.sha256.clone(), source: String::new(), source_sha256: None, root_note: None };
     assert_eq!(song.edit(add(&missing, "none", Some(drums)), None).unwrap_err().to_string(), "Missing asset none");
-    assert_eq!(aaw_ffi::edits::ident("  Hi-Hat #3 (Open)  "), "hi-hat-3-open");
-    assert_eq!((aaw_ffi::edits::ident("808"), aaw_ffi::edits::ident("!!!"), aaw_ffi::edits::ident("Ünïcode")), ("s-808".into(), "sample".into(), "n-code".into()));
+    let ident = |name: &str| aaw_host::command::ident(name, "sample");
+    assert_eq!(ident("  Hi-Hat #3 (Open)  "), "hi-hat-3-open");
+    assert_eq!((ident("808"), ident("!!!"), ident("Ünïcode")), ("s-808".into(), "sample".into(), "n-code".into()));
     song.close();
 }
 
@@ -2024,5 +2025,48 @@ fn a_sample_on_a_midi_track_becomes_its_instrument_and_the_notes_stay() {
     assert_eq!(notes_of(&u.arrangement.tracks[2], 0), before);
     song.undo().unwrap();
     assert_eq!(update(&seen).arrangement.tracks[2].pads[0].name, "organ");
+    song.close();
+}
+
+#[test]
+fn a_midi_file_dropped_becomes_a_note_clip_and_a_clip_is_exported() {
+    let (dir, _path, song, seen) = open();
+    transport(&seen);
+    let track = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    update(&seen);
+    let clip = song.edit(Edit::ClipNew { track, at: 0.0 }, None).unwrap()[0];
+    update(&seen);
+    for (at, pitch) in [(0.0, 60), (0.0, 64), (1.0, 67)] {
+        song.edit(Edit::NoteAdd { clip, at, free: false, grid: "1/4".into(), pitch }, None).unwrap();
+        update(&seen);
+    }
+    // File › Export MIDI Clip… writes the clip's notes where the panel says.
+    let file = dir.path().join("Chords Saved.mid");
+    assert_eq!(song.export_midi_clip(clip, file.to_string_lossy().into_owned()).unwrap(), 3);
+
+    // Dropped on the MIDI track's lane, the clip lands there at the drop.
+    let drop = |track: Option<u64>, at: f64| Edit::MidiClip { path: file.to_string_lossy().into_owned(), track, index: 3, at };
+    let made = song.edit(drop(Some(track), 8.0), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Import Chords Saved.mid to midi-1");
+    let midi = &u.arrangement.tracks[2];
+    assert_eq!(made, [midi.note_clips[1].key]);
+    assert_eq!((midi.note_clips[1].at, midi.note_clips[1].length_beats), (8.0, 4.0));
+    assert_eq!(notes_of(midi, 1), notes_of(midi, 0));
+
+    // Anywhere else, on a new MIDI track named after the file, with no
+    // instrument; the song grows to hold it.
+    let made = song.edit(drop(None, 30.0), None).unwrap();
+    let u = update(&seen);
+    let new = &u.arrangement.tracks[3];
+    assert_eq!((new.id.as_str(), new.midi, new.instrument.is_none()), ("chords-saved", true, true));
+    assert_eq!(made, [new.key, new.note_clips[0].key]);
+    assert_eq!(u.arrangement.length_beats, 36.0);
+    assert_eq!(notes_of(new, 0), notes_of(&u.arrangement.tracks[2], 0));
+
+    // A file that is not one part is refused, and nothing changes.
+    std::fs::write(dir.path().join("hit.mid"), b"not midi").unwrap();
+    let refused = Edit::MidiClip { path: dir.path().join("hit.mid").to_string_lossy().into_owned(), track: None, index: 0, at: 0.0 };
+    assert_eq!(song.edit(refused, None).unwrap_err().to_string(), "hit.mid: This is not a MIDI file");
     song.close();
 }

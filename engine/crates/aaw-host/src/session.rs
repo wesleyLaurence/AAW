@@ -378,6 +378,7 @@ impl Session {
         let before = outcome.before.clone();
         let label = outcome.label.clone();
         let also = outcome.also.clone();
+        let report = outcome.report.clone();
         let change = self.commit(project, tree::handles(&node), outcome, origin, cmd.json(), gesture);
         let mut reply = self.stamp_reply(change.is_some());
         // A gesture's edits share a label, which names the whole drag.
@@ -401,6 +402,7 @@ impl Session {
         if !also.is_empty() {
             reply.insert("also".into(), json!(also));
         }
+        reply.extend(report);
         Ok((Json::Object(reply), change))
     }
 
@@ -809,6 +811,68 @@ impl Session {
     /// track, each with its name and the song beat it starts on. `from` and
     /// `to` keep the notes that start from one song beat until another, and
     /// the clips that have such notes.
+    /// Writes the notes of a note clip that play as a MIDI file at `file`:
+    /// a note outside the clip is left out, and one that lasts past its end
+    /// is shortened to it.
+    pub fn export_midi(&self, clip: &str, file: &str) -> Result<Json> {
+        let p = &self.doc.project;
+        let root = self.doc.tree();
+        let loc = tree::resolve(&root, clip, self.hosted)?;
+        let (t, c) = match loc.as_slice() {
+            [tree::Step::Key(k), tree::Step::Index(t), tree::Step::Key(c), tree::Step::Index(i)] if k == "tracks" && c == "clips" => (*t, *i),
+            _ => return Err(format!("{clip} is not a note clip")),
+        };
+        let track = &p.tracks[t];
+        let c = track.midi.as_ref().and_then(|m| m.clips.get(c)).ok_or_else(|| format!("{clip} is not a note clip"))?;
+        let length = c.length_exact();
+        let (mut outside, mut shortened) = (0, 0);
+        let mut notes: Vec<(&str, crate::midi_file::FileNote)> = Vec::new();
+        for n in &c.notes {
+            if !c.plays(n) {
+                outside += 1;
+                continue;
+            }
+            let at = n.at_exact();
+            let mut duration = n.duration_exact();
+            if &at + &duration > length {
+                duration = &length - &at;
+                shortened += 1;
+            }
+            let note = crate::midi_file::FileNote { pitch: n.pitch as u8, at, duration, velocity: n.velocity as u8 };
+            notes.push((n.id.as_str(), note));
+        }
+        if notes.is_empty() {
+            return Err(format!("Clip {} has no notes that play, so there is nothing to write", c.id));
+        }
+        notes.sort_by(|(_, a), (_, b)| a.at.cmp(&b.at).then(a.pitch.cmp(&b.pitch)));
+        let file_notes: Vec<_> = notes.iter().map(|(_, n)| n.clone()).collect();
+        let written = crate::midi_file::write(&file_notes, &track.id, p.session.tempo);
+        std::fs::write(file, &written.bytes).map_err(|e| format!("{file}: {e}"))?;
+        let mut left_out = Map::new();
+        if outside > 0 {
+            left_out.insert("notes outside the clip".into(), json!(outside));
+        }
+        let mut adjusted = Map::new();
+        if shortened > 0 {
+            adjusted.insert("notes shortened to the clip's end".into(), json!(shortened));
+        }
+        if !written.rounded.is_empty() {
+            adjusted.insert("notes rounded to the nearest tick".into(), json!(written.rounded.len()));
+        }
+        if written.nested > 0 {
+            adjusted.insert("notes inside a longer one of their pitch, read back with its length".into(), json!(written.nested));
+        }
+        Ok(json!({
+            "file": file,
+            "clip": tree::path_text(&root, &loc),
+            "notes": written.notes,
+            "ticks_per_beat": crate::midi_file::TICKS_PER_BEAT,
+            "left_out": left_out,
+            "adjusted": adjusted,
+            "rounded": written.rounded.iter().map(|i| notes[*i].0).collect::<Vec<_>>(),
+        }))
+    }
+
     pub fn notes(&self, path: &str, from: Option<&Json>, to: Option<&Json>) -> Result<Json> {
         let p = &self.doc.project;
         let root = self.doc.tree();

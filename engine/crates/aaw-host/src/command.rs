@@ -158,6 +158,23 @@ pub enum Command {
     #[serde(rename = "note.remove")]
     NoteRemove { notes: Vec<String> },
 
+    // MIDI files
+    /// Reads a MIDI file of one part into a note clip at `at`, 0 unless
+    /// given: on `track`, a MIDI track, or else on a new MIDI track named
+    /// after the file, at `index` among the tracks or last. The song grows
+    /// to hold the clip. The reply counts what the file has that the song
+    /// does not hold.
+    #[serde(rename = "midi.import")]
+    MidiImport {
+        file: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
+
     // Instruments of MIDI tracks
     /// Attaches or replaces a MIDI track's instrument; null removes it. The
     /// notes are not touched.
@@ -401,6 +418,9 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<Json>,
     },
+    /// Writes the notes of a note clip that play as a MIDI file at `file`.
+    #[serde(rename = "midi.export")]
+    MidiExport { clip: String, file: String },
     /// What the person has selected in the app, as references; `status` reports
     /// it. It is host state like the loop: not saved, and not a change.
     #[serde(rename = "select")]
@@ -449,7 +469,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } => Kind::Transport,
-            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } => Kind::Read,
+            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }
@@ -478,6 +498,9 @@ pub struct Outcome {
     pub before: Option<Json>,
     /// Changes the command made to keep references valid.
     pub also: Vec<String>,
+    /// What the reply says besides, such as what a MIDI file had that the
+    /// song does not hold.
+    pub report: Map<String, Json>,
 }
 
 /// Applies edits to a tree. Created objects get handles at once.
@@ -1201,6 +1224,71 @@ impl<'a> Edit<'a> {
                 self.set_leaf(&loc, "length_beats", beat_value(&(&to - &from)));
                 out.label = format!("Trim clip {} to beats {} to {}", self.clip_name(&loc), beat_text(&from), beat_text(&to));
             }
+            MidiImport { file, track, at, index } => {
+                let path = std::path::Path::new(file);
+                let shown = path.file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned());
+                let bytes = std::fs::read(path).map_err(|e| format!("{shown}: {e}"))?;
+                let part = crate::midi_file::read(&bytes).map_err(|e| format!("{shown}: {e}"))?;
+                let start = at.as_ref().map(beat_at).transpose()?.unwrap_or_default();
+                let length = part.length();
+                let bar = BigRational::from_integer(4.into());
+                let end = &start + &length;
+                let song = exact(self.root.get("session").and_then(|s| s.get("length_beats")))
+                    .unwrap_or_else(|| BigRational::from_integer(16.into()));
+                if end > song {
+                    // To the end of the bar the clip ends in, as for an audio clip.
+                    let grown = (&end / &bar).ceil() * &bar;
+                    self.run(&Set { path: "session.length_beats".into(), value: to_json(&beat_value(&grown)) })?;
+                }
+                let target = match track {
+                    Some(t) => {
+                        let loc = self.track(t)?;
+                        if !self.is_midi(&loc) {
+                            return Err(format!("A MIDI file's notes go on a MIDI track, and {} is not one", self.name(&loc)));
+                        }
+                        out.label = format!("Import {shown} to {}", self.name(&loc));
+                        t.clone()
+                    }
+                    None => {
+                        let stem = path.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                        let taken: Vec<String> = ["tracks", "returns"]
+                            .iter()
+                            .flat_map(|k| self.root.get(k).map(Node::items).unwrap_or(&[]))
+                            .filter_map(|i| i.node.field("id").map(str::to_string))
+                            .collect();
+                        let id = unique(&ident(&stem, "midi"), |n| taken.iter().any(|t| t == n));
+                        let mut fields = Fields::new();
+                        fields.insert("type".into(), Json::String("midi".into()));
+                        let o = self.run(&TrackAdd { id: id.clone(), index: *index, fields })?;
+                        out.made.extend(o.made);
+                        out.label = format!("Import {shown} to new track {id}");
+                        id
+                    }
+                };
+                let notes: Vec<Json> = part
+                    .notes
+                    .iter()
+                    .map(|n| {
+                        serde_json::json!({
+                            "pitch": n.pitch,
+                            "at": to_json(&beat_value(&n.at)),
+                            "duration": to_json(&beat_value(&n.duration)),
+                            "velocity": n.velocity,
+                        })
+                    })
+                    .collect();
+                let mut fields = Fields::new();
+                fields.insert("at".into(), to_json(&beat_value(&start)));
+                fields.insert("length_beats".into(), to_json(&beat_value(&length)));
+                fields.insert("notes".into(), Json::Array(notes));
+                let o = self.run(&ClipAdd { track: target, fields })?;
+                out.made.extend(o.made);
+                let report = &mut out.report;
+                report.insert("notes".into(), Json::from(part.notes.len()));
+                report.insert("file_tempo".into(), part.tempo.map_or(Json::Null, |t| serde_json::json!((t * 1000.0).round() / 1000.0)));
+                report.insert("left_out".into(), part.left_out_json());
+                report.insert("adjusted".into(), part.adjusted_json());
+            }
             NoteAdd { clip, notes, fields } => {
                 let loc = self.note_clip(clip)?;
                 let mut all: Vec<Fields> = notes.clone();
@@ -1677,6 +1765,7 @@ impl<'a> Edit<'a> {
                     labels.push(o.label);
                     also.extend(o.also);
                     out.made.extend(o.made);
+                    out.report.extend(o.report);
                 }
                 self.also = also;
                 out.label = match (label, labels.len()) {
@@ -1873,6 +1962,35 @@ fn next_id(ids: &[&str], prefix: &str) -> String {
         .max()
         .unwrap_or(0);
     format!("{prefix}{}", n + 1)
+}
+
+/// `stem` if it is free, else the first free of `stem-2`, `stem-3`, ….
+pub fn unique(stem: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(stem) {
+        return stem.to_string();
+    }
+    (2..).map(|n| format!("{stem}-{n}")).find(|name| !taken(name)).expect("a free name")
+}
+
+/// A name as an ID allows it: lower-case letters, digits, `-` and `_`,
+/// starting with a letter, and not too long to read in a header. A name
+/// with nothing of that is `fallback`.
+pub fn ident(name: &str, fallback: &str) -> String {
+    let mut out = String::new();
+    for c in name.chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches('-');
+    let out = if out.starts_with(|c: char| c.is_ascii_lowercase()) { out.to_string() } else { format!("s-{out}") };
+    let out: String = out.chars().take(24).collect();
+    match out.trim_matches('-') {
+        "s" | "" => fallback.to_string(),
+        name => name.to_string(),
+    }
 }
 
 /// "1 note", "3 notes".

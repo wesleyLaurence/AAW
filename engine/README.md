@@ -65,6 +65,7 @@ project's folder or the song file in it. It implements:
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
+| `daw midi import PROJECT FILE [--track T] [--at BEAT]`, `daw midi export PROJECT CLIP FILE` | A Standard MIDI file of one part made into a note clip, on a MIDI track or a new one, with what the song cannot hold counted in the reply; a note clip's notes that play written as a type 0 file at 960 ticks a beat. The file's tempo is not taken. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,

@@ -827,6 +827,33 @@ public final class SongModel {
         }
     }
 
+    /// Makes a note clip of a MIDI file's notes at a beat: on the MIDI track
+    /// `track`, or with no track on a new MIDI track after the others, named
+    /// after the file. The file is read where it is, and the song grows to
+    /// hold the clip.
+    func importMIDI(path: String, to track: UInt64?, at beat: Double) {
+        let index = UInt32(arrangement.tracks.count)
+        edit(.midiClip(path: path, track: track, index: index, at: beat)) { [weak self] made in
+            // The clip is the last of what the edit made, after a new track.
+            if let clip = made.last { self?.select(clips: [clip], focus: clip) }
+        }
+    }
+
+    /// The note clip File › Export MIDI Clip… writes, and its track: the
+    /// clip selected, when it is the only one.
+    public var exportableClip: (track: TrackView, clip: NoteClipView)? {
+        guard selectedClips.count == 1, let key = selectedClips.first else { return nil }
+        for track in arrangement.tracks {
+            if let clip = track.noteClips.first(where: { $0.key == key }) { return (track, clip) }
+        }
+        return nil
+    }
+
+    /// Writes the notes of a note clip that play as a MIDI file.
+    public func exportMIDI(clip: UInt64, to url: URL) throws {
+        _ = try song.exportMidiClip(clip: clip, path: url.path)
+    }
+
     /// Copies a sample file into the project, off the main thread, and hands
     /// the copy on; the original stays as it is.
     private func copy(_ path: String, note: String?, then: @escaping @MainActor (SongModel, Asset) -> Void) {

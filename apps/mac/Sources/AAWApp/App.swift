@@ -512,6 +512,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator(),
             item("Save As…", #selector(SongWindowController.saveDocumentAs(_:)), "S"),
             .separator(),
+            item("Export MIDI Clip…", #selector(SongWindowController.exportMIDIClip(_:)), "E"),
+            .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
         ])
         add("Edit", [
@@ -681,6 +683,28 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         onClose?(self, finish())
     }
 
+    /// File › Export MIDI Clip…: writes the selected note clip's notes as a
+    /// MIDI file where the person says.
+    @objc func exportMIDIClip(_ sender: Any?) {
+        guard let (track, clip) = model.exportableClip else { return }
+        let panel = NSSavePanel()
+        panel.title = "Export MIDI Clip"
+        panel.prompt = "Export"
+        panel.nameFieldLabel = "Name:"
+        panel.allowedContentTypes = [.midi]
+        panel.canCreateDirectories = true
+        panel.nameFieldStringValue = "\(track.id) \(clip.id).mid"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try model.exportMIDI(clip: clip.key, to: url)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "The clip could not be exported as “\(url.lastPathComponent)”"
+            alert.informativeText = SongModel.reason(error)
+            alert.runModal()
+        }
+    }
+
     @objc func saveDocumentAs(_ sender: Any?) {
         saveAs()
     }
@@ -808,6 +832,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
         case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
+        case #selector(exportMIDIClip(_:)): return model.exportableClip != nil && !typing
         default: break
         }
         return true
