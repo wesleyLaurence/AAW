@@ -44,6 +44,8 @@ kept.
 
 ## Verify
 
+- **Manual BPM by hand and ear:** type a tempo while playing, undo it, and hear the new tempo. Scripted input and engine tests cover validation and undo.
+
 Merged, and never heard or tried by a person. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
@@ -278,4 +280,4 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 One line each, newest first.
 
-No pending ideas.
+- **A metronome toggle in the transport bar** that clicks at the session BPM during playback.
