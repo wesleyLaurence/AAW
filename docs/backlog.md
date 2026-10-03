@@ -14,23 +14,31 @@ kept.
 
 ## Next
 
-1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **A browser of samples, instruments and effects.** The Samples panel on the
+   left becomes a browser that opens and closes, with categories as in
+   Ableton: Samples, Instruments, Audio Effects. An instrument or effect is
+   dragged from it onto a track, or onto the device panel.
+2. **The Sampler device.** Sampler in the browser's Instruments, dropped on a MIDI
+   track as an empty sampler in the device panel, and a sample dragged onto that
+   device to play it on the keys. Its panel shows the sample's waveform and sets
+   the root note, start and end, one-shot or held, attack and release.
+3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-2. **The `.aaw` file type and the project ID.** The project file under the app's
+4. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-3. **The workspace and the two levels.** The workspace folder with its managed
+5. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-4. **The agent panel.** A conversation in the window, per project, over the
+6. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-5. **Other Macs.** The rest of the Python ported or carried in the bundle,
+7. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-6. **Sign-in buttons and other agents,** as the companies' terms allow.
+8. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -61,7 +69,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
-  (with item 5).
+  (with item 7).
 - **Save As… in the app:** the panel on an Untitled project and on one that has
   a name, a name that is taken, and work carried on in the copy. Scripted input
   cannot answer a panel; `daw move` and `daw copy` were run in its place.
@@ -78,6 +86,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   while the song plays, and the new MIDI track and its notes in the window. The
   engine's tests hold a note clip to the same hits written as a pattern, and
   the window was seen in a picture; nobody listened or looked by hand.
+- **A sample dropped on a MIDI track's header in the rebuilt app,** played on
+  notes above and below middle C, from the browser and from the Finder.
 - **MIDI files by hand:** a `.mid` saved from a synth or another DAW dragged
   from the Finder onto a MIDI track's lane and onto the timeline, its outline
   on the way, and the chords heard through a sampler; File › Export MIDI
@@ -235,9 +245,6 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - A drum kit made in the app: a sample dropped on a key of the piano roll as a
   pad that the note plays. A sample on a MIDI track's header replaces the
   instrument with one pad on every note, and `daw instrument map` makes kits.
-- A sample dropped from the Finder on a MIDI track played at its pitch. A file
-  has no root note until it is measured, so it plays as it is on every note;
-  one from the browser brings its measured pitch.
 - A loop from the browser fitted to the song's tempo when it is added.
 - Several events selected, copied and pasted; several clips selected by dragging
   over them; several automation points selected.

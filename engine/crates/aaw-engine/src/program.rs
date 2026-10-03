@@ -15,7 +15,7 @@ use crate::stretch::{self, MARGIN_SECONDS};
 use aaw_dsp::device::{Kernels, Plan};
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
-use aaw_model::rules::{midi, target, Owner, TargetKind};
+use aaw_model::rules::{midi, target, Owner, TargetKind, MIDDLE_C};
 use aaw_model::schedule::{track_triggers, Trigger};
 use aaw_model::{frame, AudioClip, Effect, Event, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
 use std::collections::{BTreeMap, HashMap};
@@ -476,8 +476,12 @@ impl<'a> Sampler<'a> {
         let asset = &self.project.samples[&pad.sample];
         let mut semitones = pad.transpose + event.transpose;
         if let Some(note) = &event.note {
-            let root = asset.root_note.as_deref().expect("validated root note");
-            semitones += (midi(note)? - midi(root)?) as f64;
+            // Only a pitched map entry plays a sample with no root note.
+            let root = match asset.root_note.as_deref().filter(|r| !r.is_empty()) {
+                Some(root) => midi(root)?,
+                None => MIDDLE_C,
+            };
+            semitones += (midi(note)? - root) as f64;
         }
         let follow = (pad.source_bpm, pad.stretch);
         self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow)

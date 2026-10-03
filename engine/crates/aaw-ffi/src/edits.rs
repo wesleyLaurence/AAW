@@ -1500,21 +1500,19 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         Edit::SampleAdd { asset, name, track, index } => {
             let tree = doc.tree();
             let stem = ident(name, "sample");
-            let (sample, mut commands) = listed(project, asset, &stem);
+            let midi = track.is_some_and(|key| is_midi(project, &tree, key));
+            // On a MIDI track a new sample plays as it is at middle C, as in
+            // Ableton, whatever pitch it measures at; one the song has keeps
+            // the root note the song gives it.
+            let unrooted = crate::library::Asset { root_note: None, ..asset.clone() };
+            let (sample, mut commands) = listed(project, if midi { &unrooted } else { asset }, &stem);
             let label = match track {
-                Some(key) if is_midi(project, &tree, *key) => {
+                Some(key) if midi => {
                     let place = items(&tree, "tracks").iter().position(|i| i.handle == *key);
                     let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
-                    // Pitched from its root note when it has one: the song's,
-                    // for a sample it has already.
-                    let root = project.samples.get(&sample).and_then(|s| s.root_note.clone()).or_else(|| asset.root_note.clone());
-                    let mut pad = json!({"sample": sample});
-                    if root.is_some() {
-                        pad["mode"] = json!("gate");
-                    }
                     let instrument = json!({"sampler": {
-                        "pads": {stem.clone(): pad},
-                        "map": [{"notes": [0, 127], "pad": stem, "pitched": root.is_some()}],
+                        "pads": {stem.clone(): {"sample": sample}},
+                        "map": [{"notes": [0, 127], "pad": stem, "pitched": true}],
                     }});
                     commands.push(json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument}));
                     match t.midi.as_ref().and_then(|m| m.instrument.as_ref()) {
