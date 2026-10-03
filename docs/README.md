@@ -1,10 +1,13 @@
 # AAW docs
 
-Start with the [project introduction](../README.md). Every kind of statement has
-one home here, and [AGENTS.md](../AGENTS.md) says how the files are kept.
+For a task, start with [AGENTS.md](../AGENTS.md): it routes music work and
+development separately. The [project introduction](../README.md) covers setup.
+[development.md](development.md) says how these files are kept.
 
 | File | Holds | Tense |
 |---|---|---|
+| [music.md](music.md) | How to operate AAW; references loaded only for the current musical task | Do |
+| [development.md](development.md) | How to change, test and document the software | Do |
 | [concept.md](concept.md) | What AAW should be: the mission, the principles, everything the app does | Should |
 | [backlog.md](backlog.md) | What is not built yet, in order, with an inbox for ideas | Next |
 | [features/](features/) | One file per feature: its design before it is built, its reference after | Will, then is |

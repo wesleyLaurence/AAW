@@ -23,6 +23,8 @@ projects/*/renders/
 # So do personal skills. The generic ones the repository ships are named here.
 /.claude/skills/*
 !/.claude/skills/song-edit/
+/.agents/skills/*
+!/.agents/skills/song-edit
 
 # Mac app build output and generated bindings
 apps/mac/.build/

@@ -3,7 +3,23 @@
 A skill is a plain-English file that tells an agent how a kind of job is done. The
 repository gives the agent the capabilities and says how each works
 (`daw describe`); a skill says what to do with them, in whose words and to whose
-taste. That part is personal and stays out of Git, like the songs.
+taste. Personal preferences stay out of Git, like the songs; generic workflows
+can be tracked.
+
+## Task routing and discovery — implemented October 3, 2026
+
+[AGENTS.md](../../AGENTS.md) routes a request to [music](../music.md) or
+[development](../development.md). These guides are ordinary files read for the
+applicable task; the root instructions do not import both. Command syntax and
+semantics stay in CLI help and `daw describe`; skills hold repeatable workflows,
+such as the sequence of decisions and checks for a finished-song edit.
+
+The tracked `song-edit` source stays in `.claude/skills/song-edit/`.
+`.agents/skills/song-edit` is a relative symlink to that directory for Codex
+skill discovery, so both agents read the same instructions. Each skill's short
+name and description support discovery; its body and references are read when
+needed. The music guide also links directly to the skill for agents without
+automatic discovery. No new workflow skills are added by this instruction split.
 
 ## Where a skill lives
 
@@ -16,7 +32,10 @@ taste. That part is personal and stays out of Git, like the songs.
   up. In this checkout keep to `uv run daw`.
 - **A generic skill** is tracked: `.claude/skills/song-edit/` is the first. To add
   another, add its folder to `.gitignore` as that one is, and keep it free of
-  names, private sounds and local paths.
+  names, private sounds and local paths. For Codex, add a matching relative
+  symlink under `.agents/skills/` and explicitly allow it in `.gitignore`.
+- **Personal Codex skills** may live under `.agents/skills/NAME/` (ignored), or
+  `~/.agents/skills/NAME/`. Personal links to `.claude/skills/` are ignored too.
 
 ## What goes in a personal skill
 

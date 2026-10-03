@@ -4,6 +4,9 @@ An AI-native digital audio workstation. A next-generation DAW.
 
 Open this with Codex or Claude and start creating music.
 
+For agent tasks, [AGENTS.md](AGENTS.md) routes to [making music](docs/music.md)
+or [developing AAW](docs/development.md); read the guide for the current task.
+
 AAW is an open-source workspace where humans and agents collaboratively build
 music at the track, object, and project level. Here are notes on what the project
 is and why it is being created.
@@ -98,7 +101,8 @@ a copied clip changes independently. The agent writes them with `daw note` and
 `daw describe midi` and [docs/features/midi-clips.md](docs/features/midi-clips.md).
 
 The broader workspace described above is the vision. Saturation, groups, synths,
-plugin hosting, MIDI import/export and recording are not implemented.
+plugin hosting and recording are not implemented. Standard MIDI import/export
+for one part is supported; see `daw describe midi`.
 [docs/architecture.md](docs/architecture.md) describes the implemented behavior.
 
 ## Repository scope
