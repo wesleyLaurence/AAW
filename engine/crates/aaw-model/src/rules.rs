@@ -507,9 +507,9 @@ fn sampler_references(p: &Project, track: &str, sampler: &crate::schema::Sampler
         }
     }
     for (i, m) in sampler.map.iter().enumerate() {
-        let Some(pad) = sampler.pads.get(&m.pad) else {
+        if !sampler.pads.contains_key(&m.pad) {
             return Err(format!("{track}: the map names unknown pad {}", m.pad));
-        };
+        }
         if let Some(other) = sampler.map[..i].iter().find(|o| o.low <= m.high && m.low <= o.high) {
             let note = m.low.max(other.low);
             return Err(format!(
