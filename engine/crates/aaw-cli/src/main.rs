@@ -265,6 +265,8 @@ enum Top {
     #[command(subcommand)]
     Instrument(InstrumentCmd),
     #[command(subcommand)]
+    Midi(MidiCmd),
+    #[command(subcommand)]
     Pattern(PatternCmd),
     #[command(subcommand)]
     Pad(PadCmd),
@@ -499,6 +501,25 @@ enum InstrumentCmd {
         #[arg(long)]
         pitched: bool,
     },
+}
+
+/// Standard MIDI files of one part: its notes and velocities, as a note clip.
+#[derive(Subcommand)]
+enum MidiCmd {
+    /// Make a note clip of a MIDI file's notes at --at, 0 unless given: on
+    /// --track, a MIDI track, or on a new MIDI track named after the file.
+    /// The file's tempo is not taken. What else the file has is left out and
+    /// counted in the reply.
+    Import {
+        project: Song,
+        file: PathBuf,
+        #[arg(long)]
+        track: Option<String>,
+        #[arg(long)]
+        at: Option<String>,
+    },
+    /// Write the notes of a note clip that play as a type 0 MIDI file.
+    Export { project: Song, clip: String, file: PathBuf },
 }
 
 /// Patterns and their events.
@@ -768,6 +789,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
                 Command::Inspect => Ok(s.inspect()),
                 Command::Get { path } => s.get(&path),
                 Command::Notes { path, from, to } => s.notes(&path, from.as_ref(), to.as_ref()),
+                Command::MidiExport { clip, file } => s.export_midi(&clip, &file),
                 Command::Status => {
                     let mut m = s.status();
                     m.insert("playing".into(), json!(false));
@@ -1260,6 +1282,24 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Midi(m) => match m {
+            MidiCmd::Import { project, file, track, at } => edit(
+                project,
+                C::MidiImport {
+                    file: absolute(file)?,
+                    track: track.clone(),
+                    at: at.as_deref().map(parse_value),
+                    index: None,
+                },
+            ),
+            MidiCmd::Export { project, clip, file } => edit(
+                project,
+                C::MidiExport {
+                    clip: clip.clone(),
+                    file: absolute(file)?,
+                },
+            ),
+        },
         Top::Note(n) => match n {
             NoteCmd::Add { project, clip, f } => {
                 let mut fields = fields(f)?;
@@ -1552,6 +1592,7 @@ fn name(top: &Top) -> String {
         Top::Clip(_) => group("clip", ""),
         Top::Audio(_) => group("audio", ""),
         Top::Note(_) => group("note", ""),
+        Top::Midi(_) => group("midi", ""),
         Top::Instrument(_) => group("instrument", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),

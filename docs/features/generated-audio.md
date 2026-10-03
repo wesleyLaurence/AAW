@@ -71,7 +71,7 @@ It makes the request, saves what comes back, imports it and replies with the
 sample's ID, path and length. It places nothing: an audio clip, a pad or a
 slice is made with the commands that exist. It is written in Rust, in `daw`,
 so the app's panel needs no Python, and it hands the file to `samples import`
-until that is in Rust too (backlog item 3).
+until that is in Rust too (backlog item 1).
 
 **The file is in the project.** The bytes that came back are kept under
 `generated/` in the project and imported from there as a file is today: a WAV
@@ -123,14 +123,14 @@ at a stand-in on this machine that returns generated audio.
 
 ## Depends on
 
-- Signing with a Developer ID (backlog item 7). The Keychain's access list is
+- Signing with a Developer ID (backlog item 5). The Keychain's access list is
   tied to the code signature, so on a build signed ad hoc it is expected to ask
   again after each rebuild.
 - The concept. It allows a generative model "as an instrument for texture,
   never as the product". A whole song to sample is wider than texture, so
   picking this up changes that sentence and the list of inputs, with an entry
   in [decisions.md](../decisions.md) that revises D11.
-- Sample import in Rust (backlog item 3), for the app's panel on a Mac without
+- Sample import in Rust (backlog item 1), for the app's panel on a Mac without
   Python.
 
 ## Done when

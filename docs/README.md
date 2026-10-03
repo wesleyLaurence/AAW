@@ -37,13 +37,13 @@ Built:
 | [export](features/export.md) | `daw export`: a named WAV, AAC or MP3 file from a render |
 | [skills](features/skills.md) | Where a personal skill and its sounds live, and the tracked `song-edit` skill |
 | [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
+| [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
 
 Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [MIDI tracks and note clips](features/midi-clips.md) | 1; the song model, the commands and the app's piano roll are built |
-| [the agent panel](features/agent-panel.md) | 5 |
+| [the agent panel](features/agent-panel.md) | 4 |
 | [generated audio](features/generated-audio.md) | Later, under Sound |
 
 ## Archive

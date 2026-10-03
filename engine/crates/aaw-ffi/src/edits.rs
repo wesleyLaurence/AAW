@@ -5,7 +5,7 @@
 
 use crate::files::Files;
 use crate::view::{seconds_per_beat, tail_beats, FieldValue};
-use aaw_host::command::{beat_value, node_json};
+use aaw_host::command::{beat_value, ident, node_json, unique};
 use aaw_host::session::{value_json, Doc};
 use aaw_host::tree::{self, handle_text, Item, Node, Step};
 use aaw_model::describe::{self, Initial};
@@ -253,6 +253,11 @@ pub enum Edit {
         index: u32,
         at: f64,
     },
+    /// Makes a note clip of a MIDI file's notes at a beat: on a MIDI track
+    /// or, without one, on a new MIDI track at `index` named after the
+    /// file. The file is read where it is; its tempo is not taken. The clip
+    /// is the last of what the edit makes, after a new track.
+    MidiClip { path: String, track: Option<u64>, index: u32, at: f64 },
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -574,34 +579,6 @@ fn static_value(project: &Project, owner: Owner, param: &str) -> Result<f64> {
 fn free_name(project: &Project, stem: &str) -> String {
     let taken = |name: &str| project.tracks.iter().any(|t| t.id == name) || project.returns.iter().any(|r| r.id == name);
     (1..).map(|n| format!("{stem}-{n}")).find(|name| !taken(name)).expect("a free name")
-}
-
-/// `stem` if it is free, else the first free of `stem-2`, `stem-3`, ….
-fn unique(stem: &str, taken: impl Fn(&str) -> bool) -> String {
-    if !taken(stem) {
-        return stem.to_string();
-    }
-    (2..).map(|n| format!("{stem}-{n}")).find(|name| !taken(name)).expect("a free name")
-}
-
-/// A name as an ID allows it: lower-case letters, digits, `-` and `_`,
-/// starting with a letter, and not too long to read in a header.
-pub fn ident(name: &str) -> String {
-    let mut out = String::new();
-    for c in name.chars().flat_map(char::to_lowercase) {
-        if c.is_ascii_alphanumeric() || c == '_' {
-            out.push(c);
-        } else if !out.ends_with('-') {
-            out.push('-');
-        }
-    }
-    let out = out.trim_matches('-');
-    let out = if out.starts_with(|c: char| c.is_ascii_lowercase()) { out.to_string() } else { format!("s-{out}") };
-    let out: String = out.chars().take(24).collect();
-    match out.trim_matches('-') {
-        "s" | "" => "sample".to_string(),
-        name => name.to_string(),
-    }
 }
 
 fn pattern<'a>(project: &'a Project, name: &str) -> Result<&'a aaw_model::Pattern> {
@@ -1522,7 +1499,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         }
         Edit::SampleAdd { asset, name, track, index } => {
             let tree = doc.tree();
-            let stem = ident(name);
+            let stem = ident(name, "sample");
             let (sample, mut commands) = listed(project, asset, &stem);
             let label = match track {
                 Some(key) if is_midi(project, &tree, *key) => {
@@ -1562,9 +1539,16 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             };
             Ok(batch(commands, label))
         }
+        Edit::MidiClip { path, track, index, at } => {
+            let mut import = json!({"op": "midi.import", "file": path, "at": beat_at(*at)?, "index": index});
+            if let Some(key) = track {
+                import["track"] = json!(handle_text(*key));
+            }
+            Ok(vec![import])
+        }
         Edit::SampleClip { asset, name, track, index, at } => {
             let tree = doc.tree();
-            let stem = ident(name);
+            let stem = ident(name, "sample");
             let (sample, mut commands) = listed(project, asset, &stem);
             let start = aaw_model::beat(&Beat::Float(at.max(0.0)))?;
             let add = |track: Json| json!({"op": "audio.add", "track": track, "sample": sample, "at": beat(&start)});

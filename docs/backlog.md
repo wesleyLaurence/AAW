@@ -14,26 +14,23 @@ kept.
 
 ## Next
 
-1. **Standard MIDI files.** Notes-only import and export in the CLI and the
-   app, with what cannot be kept reported, and a `.mid` dropped on the
-   timeline. [features/midi-clips.md](features/midi-clips.md)
-2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-3. **The `.aaw` file type and the project ID.** The project file under the app's
+2. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-4. **The workspace and the two levels.** The workspace folder with its managed
+3. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-5. **The agent panel.** A conversation in the window, per project, over the
+4. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-6. **Other Macs.** The rest of the Python ported or carried in the bundle,
+5. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-7. **Sign-in buttons and other agents,** as the companies' terms allow.
+6. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -64,7 +61,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
-  (with item 7).
+  (with item 5).
 - **Save As… in the app:** the panel on an Untitled project and on one that has
   a name, a name that is taken, and work carried on in the copy. Scripted input
   cannot answer a panel; `daw move` and `daw copy` were run in its place.
@@ -81,6 +78,13 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   while the song plays, and the new MIDI track and its notes in the window. The
   engine's tests hold a note clip to the same hits written as a pattern, and
   the window was seen in a picture; nobody listened or looked by hand.
+- **MIDI files by hand:** a `.mid` saved from a synth or another DAW dragged
+  from the Finder onto a MIDI track's lane and onto the timeline, its outline
+  on the way, and the chords heard through a sampler; File › Export MIDI
+  Clip… and its panel, and the file opened in Ableton or Logic. Scripted
+  `--drop` handed a file written by mido to a header, a MIDI lane and the
+  timeline past the song's end, and mido read an exported file; nobody
+  dragged a file, used the panel or listened.
 - **The piano roll by hand and ear:** a MIDI track and a clip made, a chord
   and a melody drawn and moved on and off the grid, ends dragged, several notes
   selected with Shift and a drag, velocity, a clip copied and its copy changed,
@@ -143,6 +147,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   library.
 - MIDI keyboard input and recording into note clips.
 - MIDI controller and expression editing, including pedal, pitch bend and MPE.
+- MIDI files beyond one part (D65): a file of several tracks or channels made
+  into several tracks, the file's tempo taken when asked, the pedal, pitch
+  bend and controllers kept once the song holds them, and a whole song
+  exported as a type 1 file.
 - Explicit enharmonic spelling, only if numeric-pitch agent workflows show a
   need; first-round MIDI notes store numbers alone (D61).
 - A legacy track converted into a MIDI track when asked: its pads the sampler's,
