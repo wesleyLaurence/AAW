@@ -341,6 +341,16 @@ address that stays valid as other edits land, and every error says how to fix it
 
 ## Sound
 
+- **MIDI tracks and clips:** a MIDI track can hold editable note clips with no
+  instrument attached. A sampler, synthesizer or another software instrument
+  can be attached or replaced without rewriting the notes. A person can draw
+  melodies, chords and rhythms, edit each note's pitch, start, duration and
+  velocity, and move notes ahead of or behind the beat without quantizing them.
+  Copying and pasting a clip makes an independently editable copy. The agent
+  reads and edits the same notes through the shared command interface (D60).
+  The first version stores numeric MIDI pitches alone; note names in the piano
+  roll are derived, and explicit enharmonic spelling waits for evidence that
+  it is needed (D61).
 - **Sampler tracks and audio clips:** pads that play, hold and repitch samples,
   and parts of a file placed on beats with fades.
 - **Instruments:** a subtractive synth with text patches and modulation (LFOs,

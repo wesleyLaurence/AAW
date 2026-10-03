@@ -14,23 +14,26 @@ kept.
 
 ## Next
 
-1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **MIDI tracks and note clips.** Optional sampler, numeric MIDI pitches,
+   precise note editing by people and agents, independent clip copies, and
+   basic MIDI file import/export. [features/midi-clips.md](features/midi-clips.md)
+2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-2. **The `.aaw` file type and the project ID.** The project file under the app's
+3. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-3. **The workspace and the two levels.** The workspace folder with its managed
+4. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-4. **The agent panel.** A conversation in the window, per project, over the
+5. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-5. **Other Macs.** The rest of the Python ported or carried in the bundle,
+6. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-6. **Sign-in buttons and other agents,** as the companies' terms allow.
+7. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -61,7 +64,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
-  (with item 5).
+  (with item 6).
 - **Save As… in the app:** the panel on an Untitled project and on one that has
   a name, a name that is taken, and work carried on in the copy. Scripted input
   cannot answer a panel; `daw move` and `daw copy` were run in its place.
@@ -86,7 +89,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Listening markers dropped at the playhead during playback.
 - How much the agent may do: Ask, Edit, Propose, Background.
 - The undo history kept across closing a project.
-- IDs on clips in the schema, so a handle survives between sessions.
+- Persistent IDs on legacy pattern clips and audio clips; new MIDI clips and
+  notes get them in Next 1.
 
 ### What the agent reads and writes
 
@@ -122,7 +126,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Stem separation of a song.
 - Note transformations (quantize, humanize, arpeggiate, vary) and a theory
   library.
-- MIDI file import and export, and a MIDI keyboard the person plays a riff on.
+- MIDI keyboard input and recording into note clips.
+- MIDI controller and expression editing, including pedal, pitch bend and MPE.
+- Explicit enharmonic spelling, only if numeric-pitch agent workflows show a
+  need; first-round MIDI notes store numbers alone (D61).
 - Audio clips: a cut that moves the other tracks with it; clips that loop,
   reverse or repeat; perhaps one list for pattern clips and audio clips.
 - A join check that places a pad transposed by an event at its transposed length.
@@ -224,6 +231,4 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 One line each, newest first.
 
-- A `.mid` file dropped on a track lands as pattern clips: its notes as events
-  of a pitched pad, or of the track's pads by drum note. Wants the MIDI import
-  under Sound, and says what plays a file dropped where there is no pad.
+No pending ideas.
