@@ -43,7 +43,9 @@ Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [the agent panel](features/agent-panel.md) | 4 |
+| [the browser](features/browser.md) | 1 |
+| [the Sampler device](features/sampler-device.md) | 2 |
+| [the agent panel](features/agent-panel.md) | 6 |
 | [generated audio](features/generated-audio.md) | Later, under Sound |
 
 ## Archive
