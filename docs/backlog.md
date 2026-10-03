@@ -14,9 +14,10 @@ kept.
 
 ## Next
 
-1. **Standard MIDI files.** Notes-only import and export in the CLI and the
-   app, with what cannot be kept reported, and a `.mid` dropped on the
-   timeline. [features/midi-clips.md](features/midi-clips.md)
+1. **Standard MIDI files.** One part's notes and velocities imported as a
+   note clip, and a note clip exported, in the CLI and the app, with what
+   cannot be kept counted, and a `.mid` dropped on the timeline (D65).
+   [features/midi-clips.md](features/midi-clips.md)
 2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
@@ -143,6 +144,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   library.
 - MIDI keyboard input and recording into note clips.
 - MIDI controller and expression editing, including pedal, pitch bend and MPE.
+- MIDI files beyond one part (D65): a file of several tracks or channels made
+  into several tracks, the file's tempo taken when asked, the pedal, pitch
+  bend and controllers kept once the song holds them, and a whole song
+  exported as a type 1 file.
 - Explicit enharmonic spelling, only if numeric-pitch agent workflows show a
   need; first-round MIDI notes store numbers alone (D61).
 - A legacy track converted into a MIDI track when asked: its pads the sampler's,

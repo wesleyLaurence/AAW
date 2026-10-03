@@ -1,9 +1,9 @@
 # MIDI tracks and note clips — proposed October 3, 2026
 
-Status: item 1 built October 3, 2026 (#39), item 2 the same day; item 3
-proposed. They were backlog items 1, 2 and 3, one branch and pull request
+Status: item 1 built October 3, 2026 (#39), item 2 the same day (#40);
+item 3 being built. They were backlog items 1, 2 and 3, one branch and pull request
 each, in that order. Product requirements are in
-[concept.md](../concept.md#sound); decisions D60, D61, D62, D63 and D64 record
+[concept.md](../concept.md#sound); decisions D60 to D65 record
 the reasons. What item 2 built in the app is in
 [apps/mac/README.md](../../apps/mac/README.md). The schema and commands of item 1 are as
 `daw describe midi` and [engine/README.md](../../engine/README.md) give them;
@@ -26,8 +26,9 @@ The work is three items, each useful on its own:
    and their clips but does not edit them.
 2. **Note clips in the app.** The piano roll, clip placement, copy and paste,
    and attaching and swapping the instrument.
-3. **Standard MIDI files.** Notes-only import and export in the CLI and the
-   app, and a `.mid` dropped on the timeline.
+3. **Standard MIDI files.** One part's notes imported as a note clip and a
+   note clip exported, in the CLI and the app, and a `.mid` dropped on the
+   timeline (D65).
 
 None of them builds a synthesizer, plugin hosting, MIDI keyboard recording,
 MIDI effects, controller/expression editing, MPE, a chord language or a theory
@@ -217,30 +218,60 @@ bypasses the host.
 
 ### Standard MIDI files
 
-Item 3 provides a documented notes-only subset of Standard MIDI File
-import/export in the CLI and app, including an instrumentless import and export
-of a selected clip. Type 0 and type 1 note sequences are the initial target.
-Parse delta ticks to absolute musical positions, pair note-on/off events
-(including note-on with zero velocity), and export ordered messages from the
-editable notes.
+Item 3 reads and writes one part (D65): the notes of one note clip, with
+their pitches, starts, durations and velocities. It is what saving a chord
+progression played on a synth and bringing it into a new song needs.
 
-A `.mid` dropped on the timeline creates MIDI note clips, including on a new
-instrumentless track when necessary. It does not require assigning a sample
-first. Preserve drum note numbers; the sampler's map gives them sounds.
+**Import.** `daw midi import SONG FILE [--track TRACK] [--at BEAT]` reads a
+type 0 or type 1 file whose notes are all in one file track and on one
+channel. A type 1 file's tempo track, which has no notes, does not count as a
+part. The notes become one note clip at `--at`, 0 unless given: on `--track`,
+which must be a MIDI track, or else on a new MIDI track with no instrument,
+named after the file. The clip starts at the file's beat 0, so a part that
+begins after a rest keeps the rest, and it lasts to the end of its last note,
+rounded up to a bar. The song grows to hold it, as it does for an audio
+clip. It is one command, `midi.import`, and one undo step.
 
-Preserve supported pitches, starts, durations and velocities. Select sufficient
-tick resolution and report timing rounding when exact export is impossible.
-Import into an existing project keeps its tempo and reports relevant source
-tempo information; it must not silently retime the whole project. Document
-channel/track grouping, drum-channel treatment and clip-length handling.
+A position in the file is its tick over the file's ticks per beat, an exact
+fraction, so nothing is rounded on the way in. A note-on with velocity 0 is
+a note-off. A note-off ends the earliest note of its pitch still sounding,
+so overlapping notes of one pitch stay as overlapping notes. A note with no
+note-off ends at the end of its file track, and one of no length lasts one
+tick; the reply counts both. A file timed in SMPTE frames rather than ticks
+per beat is refused, as is a file with notes in more than one file track or
+on more than one channel, with a message naming each part by its track,
+channel and name.
 
-Do not silently discard performance data that the first model cannot represent:
-pedal/controllers, pitch bend, expression, tempo maps and other unsupported
-cases must produce a specific report or refusal before committing an import.
-An explicit notes-only conversion may be offered, with the losses reported.
-Standard MIDI does not preserve AAW note IDs, instrument settings or copy
-relationships; project save/reopen does. The implementation must state its
-supported subset rather than claim general lossless MIDI round trips.
+The file's tempo is not taken. Its positions are in beats, so the part lands
+on the same bars at the song's tempo; the reply gives the file's first tempo
+for information. Drum notes keep their numbers, and the sampler's map gives
+them sounds.
+
+The song holds notes and nothing else of a MIDI file. What else the file
+has is left out and counted in the reply, by kind: the sustain pedal, pitch
+bend, other controllers, program changes, aftertouch, system exclusive
+messages, and tempo or time signature changes after the start. Nothing asks
+first. A person who played with the pedal down gets the notes as long as
+their fingers held them, which the count of pedal messages explains. Names,
+text and other meta events are not counted.
+
+**Export.** `daw midi export SONG CLIP FILE` writes one note clip as a type 0
+file of one track: the notes that play, at 960 ticks a beat, with the song's
+tempo and time signature and the track's name. A note outside its clip does
+not play and is left out, and one that lasts past the clip's end is
+shortened to it; the reply counts both. 960 holds triplets and positions
+such as 2.025 exactly. A position that is not a whole number of ticks is
+rounded to the nearest, and the reply names those notes. Every note is on
+channel 1.
+
+**The app.** A `.mid` file dropped on a MIDI track's lane makes its clip
+there, at the grid line nearest the drop; dropped anywhere else on the
+timeline, on a new MIDI track. A file refused shows its reason, as a
+refused edit does. File › Export MIDI Clip… writes the selected note clip
+where the save panel says.
+
+Standard MIDI does not keep AAW note IDs, instruments or the song's tempo
+on import; saving the project does. An import gives the notes new IDs.
 
 ### Existing projects and code
 
@@ -294,14 +325,17 @@ and the engine/app READMEs are updated with each item.
 
 ### Item 3: Standard MIDI files
 
-1. Export and reimport a generated notes-only clip; pitches, velocities,
-   starts and durations match within the declared tick precision. Simultaneous
-   notes, triplets, microtiming, both note-off encodings and type 0 and type 1
-   files are tested.
-2. Unsupported performance data is reported explicitly before anything is
-   committed, and a notes-only conversion reports what it dropped.
-3. A `.mid` dropped on the timeline in the app makes note clips, on a new
-   instrumentless track where there is none. Drum note numbers are kept.
+1. Export and reimport a generated note clip; pitches, velocities, starts
+   and durations match exactly where they fall on a tick. Chords, triplets,
+   notes just ahead of and behind a beat, overlapping notes of one pitch,
+   both note-off encodings, and type 0 and type 1 files are tested.
+2. A file with a pedal, pitch bend and controllers imports its notes, and the
+   reply counts what was left out by kind. A file of two parts is refused
+   with a message that names them.
+3. A `.mid` dropped on the timeline in the app makes a note clip, on a new
+   track with no instrument where it was not dropped on a MIDI track, and
+   File › Export MIDI Clip… writes the selected clip. Drum note numbers are
+   kept.
 
 On completing each item, move its backlog line to completed with the
 date/PR/verification and renumber Next, following AGENTS.md. After item 3,
@@ -315,6 +349,7 @@ edges and whether a note clip repeats, are settled in D63: a note sounds until
 its clip's end, one that starts past it is kept and silent, and note clips do
 not repeat. Item 2's, a clip shortened from its left edge, is settled in D64:
 its notes stay where they are in the song, and those it passes are kept before
-the clip, at a negative `at`, and do not play.
-- Item 3: MIDI channel/track mapping and the exact unsupported-message policy,
-  including ambiguous overlapping note-on/off pairs for the same pitch/channel.
+the clip, at a negative `at`, and do not play. Item 3's, how a file's
+tracks and channels become clips and what happens to data the song cannot
+hold, is settled in D65: a file is one part and makes one clip, and what is
+left out is counted in the reply.
