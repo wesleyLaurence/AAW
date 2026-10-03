@@ -95,7 +95,7 @@ public final class SongModel {
     /// which `daw` commands still reach it.
     private(set) var formerURLs: [URL] = []
     public private(set) var arrangement: Arrangement
-    public private(set) var transport = TransportView(playing: false, cue: 0, loopRegion: nil)
+    public private(set) var transport = TransportView(metronome: false, playing: false, cue: 0, loopRegion: nil)
     /// Recent changes, newest first.
     public private(set) var activity: [ChangeInfo] = []
     /// Why song.yaml does not load after an edit outside the host.
@@ -894,6 +894,11 @@ public final class SongModel {
     /// Where the song is playing, read from the audio thread.
     func playhead() -> Playhead? {
         song.playhead()
+    }
+
+    public func toggleMetronome() {
+        let enabled = !transport.metronome
+        send { try $0.setMetronome(enabled: enabled) }
     }
 
     public func togglePlay() {

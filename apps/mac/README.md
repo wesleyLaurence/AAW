@@ -151,7 +151,7 @@ front first.
 
 | Part | Shows |
 |---|---|
-| Transport bar | Play or stop, loop, the position as bar.beat.sixteenth, tempo, length, and "Agent editing" while an agent's changes land |
+| Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth, tempo, length, and "Agent editing" while an agent's changes land |
 | Ruler | The loop brace, section markers and bar numbers, with the start position as an orange marker |
 | Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; then the returns and the master. The A mark is orange when the row has automation |
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest. Clips of a muted track are gray, and selected clips are outlined |
@@ -167,6 +167,7 @@ front first.
 | Input | Does |
 |---|---|
 | Click in the ruler or an empty lane | Sets the start position, on the grid; with Option, off it. While playing, playback jumps there |
+| Click the metronome icon | Turns the beat click on or off. Yellow means on. It sounds during playback, including an empty project, follows BPM and loops, and accents each 4/4 downbeat. It starts off when a project opens and is excluded from renders and stems |
 | Type in BPM | Sets the session tempo (20–400, decimals accepted). Return or leaving the field applies; Escape cancels. The edit saves and can be undone |
 | Space | Plays from the start position, or stops |
 | Return | Jumps back to the start position while playing |

@@ -112,6 +112,17 @@ struct TransportBar: View {
             }
             .help("Loop (L). Drag in the top strip of the ruler to set the loop.")
 
+            Button {
+                model.toggleMetronome()
+            } label: {
+                Image(systemName: model.transport.metronome ? "metronome.fill" : "metronome")
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(model.transport.metronome ? Color.yellow : Color.secondary)
+            }
+            .accessibilityLabel("Metronome")
+            .accessibilityValue(model.transport.metronome ? "On" : "Off")
+            .help("Metronome: \(model.transport.metronome ? "on" : "off"). Clicks at the session BPM during playback.")
+
             Text(TimelineLayout.position(model.position, beatsPerBar: Double(a.beatsPerBar)))
                 .font(.system(size: 15, weight: .medium).monospacedDigit())
                 .frame(minWidth: 74, alignment: .leading)

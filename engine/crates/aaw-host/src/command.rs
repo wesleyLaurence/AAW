@@ -381,6 +381,9 @@ pub enum Command {
     },
     #[serde(rename = "stop")]
     Stop,
+    /// Monitoring only; never an edit of the song.
+    #[serde(rename = "metronome")]
+    Metronome { enabled: bool },
     #[serde(rename = "locate")]
     Locate { at: Json },
     /// Without `start` and `length`, turns the loop off.
@@ -468,7 +471,7 @@ impl Command {
         use Command::*;
         match self {
             Undo | Redo => Kind::History,
-            Play { .. } | Stop | Locate { .. } | Loop { .. } => Kind::Transport,
+            Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,

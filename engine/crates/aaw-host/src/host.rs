@@ -90,6 +90,7 @@ pub enum Event {
 /// The transport as a display needs it, in beats.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransportState {
+    pub metronome: bool,
     pub playing: bool,
     /// Where play starts.
     pub cue: f64,
@@ -153,6 +154,7 @@ struct Host {
     /// The compiled song and the SHA it was compiled from.
     program: Option<(String, Arc<Program>)>,
     transport: Option<Transport>,
+    metronome: bool,
     /// Where play starts, in beats.
     cue: BigRational,
     /// Loop start and length, in beats.
@@ -237,6 +239,7 @@ impl Host {
     fn open_transport(&mut self, program: Arc<Program>) -> Result<()> {
         let mut t = Transport::open(program, self.opts.buffer)?;
         t.control.set_loop(self.loop_frames())?;
+        t.control.set_metronome(self.metronome)?;
         self.transport = Some(t);
         self.publish_clock();
         Ok(())
@@ -323,6 +326,7 @@ impl Host {
     fn transport_state(&self) -> TransportState {
         let beats = |x: &BigRational| x.to_f64().unwrap_or(0.0);
         TransportState {
+            metronome: self.metronome,
             playing: self.transport.as_ref().is_some_and(|t| t.control.playing()),
             cue: beats(&self.cue),
             region: self.region.as_ref().map(|(start, length)| (beats(start), beats(length))),
@@ -361,6 +365,13 @@ impl Host {
     fn transport(&mut self, cmd: &Command) -> Result<Json> {
         match cmd {
             Command::Play { from } => self.play(from.as_ref()),
+            Command::Metronome { enabled } => {
+                if let Some(t) = &mut self.transport {
+                    t.control.set_metronome(*enabled)?;
+                }
+                self.metronome = *enabled;
+                Ok(self.status())
+            }
             Command::Stop => {
                 if let Some(t) = &mut self.transport {
                     t.control.stop()?;
@@ -414,6 +425,7 @@ impl Host {
             None => (false, self.frame(&self.cue), s.tempo, s.sample_rate as f64),
         };
         m.insert("playing".into(), json!(playing));
+        m.insert("metronome".into(), json!(self.metronome));
         m.insert(
             "position".into(),
             json!({"frame": frame, "beat": round3(frame as f64 * tempo / 60.0 / rate), "seconds": round3(frame as f64 / rate)}),
@@ -725,6 +737,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         cache: Cache::default(),
         program: None,
         transport: None,
+        metronome: false,
         cue: BigRational::zero(),
         region: None,
         playback_error: None,

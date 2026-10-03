@@ -254,6 +254,13 @@ so playback from the start and a render are the same audio. With no host, the sa
 commands edit the file. [../engine/README.md](../engine/README.md) lists the commands
 and describes the host; decisions D36 to D38, D41 and D44 record the choices.
 
+The metronome is host transport state, initially off, outside the song and its
+undo history. The player mixes its synthesized click after song processing,
+at the renderer's audible timeline and current BPM, including on an empty song.
+It follows playback, locate and loops, accents the 4/4 downbeat, and fades its
+monitoring level over 5 ms when switched. The offline renderer never receives
+it, so exports and stems contain only the song. See [metronome](features/metronome.md).
+
 ## Verification
 
 `uv run pytest -q` drives the built `daw` and the Python tools; `cargo test` in
