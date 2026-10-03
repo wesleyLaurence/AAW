@@ -195,6 +195,13 @@ pub fn beat(value: &Beat) -> Result<BigRational, String> {
     }
 }
 
+/// The exact value of a written beat that may be negative, as a note's place
+/// in its clip is.
+pub fn signed_beat(value: &Beat) -> Result<BigRational, String> {
+    parse_fraction(&value.text())
+        .map_err(|_| format!("Invalid beat value {}; use a number or fraction like '1/3'", value.repr()))
+}
+
 /// `Fraction(str(x))` for a float: exact in its shortest decimal form.
 pub fn float_fraction(x: f64) -> BigRational {
     match parse_fraction(&float_repr(x)) {

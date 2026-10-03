@@ -849,7 +849,7 @@
             }
           ],
           "default": 0,
-          "description": "Beats from the clip's start.",
+          "description": "Beats from the clip's start. A note before it, at a negative at, or at or after its end is kept and does not play.",
           "title": "At"
         },
         "duration": {

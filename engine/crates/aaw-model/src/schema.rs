@@ -132,6 +132,18 @@ fn beat_field(ctx: &mut Ctx, x: &Value) -> Option<Beat> {
     }
 }
 
+/// A beat field that may be negative.
+fn signed_beat_field(ctx: &mut Ctx, x: &Value) -> Option<Beat> {
+    let b = v::beat(ctx, x)?;
+    match crate::beat::signed_beat(&b) {
+        Ok(_) => Some(b),
+        Err(msg) => {
+            ctx.value_error(msg);
+            None
+        }
+    }
+}
+
 fn note_field(ctx: &mut Ctx, x: &Value) -> Option<String> {
     let s = v::string(ctx, x)?;
     match rules::midi(&s) {
@@ -775,7 +787,8 @@ pub struct Note {
     /// `nN` when the song is validated.
     pub id: String,
     pub pitch: i64,
-    /// Beats from its clip's start.
+    /// Beats from its clip's start. A note before the start, which a clip
+    /// shortened from its left edge leaves, is negative.
     pub at: Beat,
     pub duration: Beat,
     pub velocity: i64,
@@ -789,7 +802,7 @@ impl Note {
         let before = ctx.count();
         let id = f.opt(ctx, "id", String::new(), id_field);
         let pitch = f.req(ctx, "pitch", pitch_field);
-        let at = f.opt(ctx, "at", Beat::int(0), beat_field);
+        let at = f.opt(ctx, "at", Beat::int(0), signed_beat_field);
         let duration = f.req(ctx, "duration", beat_field);
         let velocity = f.opt(ctx, "velocity", 100, |c, x| v::int(c, x, Bounds::ge_le("1", "127")));
         f.finish(ctx);
@@ -811,7 +824,7 @@ impl Note {
     }
 
     pub fn at_exact(&self) -> BigRational {
-        exact(&self.at)
+        crate::beat::signed_beat(&self.at).expect("validated beat")
     }
 
     pub fn duration_exact(&self) -> BigRational {
@@ -837,8 +850,8 @@ pub struct NoteClip {
     pub id: String,
     pub at: Beat,
     pub length_beats: Beat,
-    /// In the order they were written. A note that starts at or after the
-    /// clip's end is kept and does not play.
+    /// In the order they were written. A note that starts before the clip or
+    /// at or after its end is kept and does not play.
     pub notes: Vec<Note>,
 }
 
@@ -881,6 +894,12 @@ impl NoteClip {
 
     pub fn length_exact(&self) -> BigRational {
         exact(&self.length_beats)
+    }
+
+    /// Whether a note of the clip plays: it starts inside the clip.
+    pub fn plays(&self, note: &Note) -> bool {
+        let at = note.at_exact();
+        !at.is_negative() && at < self.length_exact()
     }
 
     pub fn dump(&self, saved: bool) -> Value {

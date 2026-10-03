@@ -12,7 +12,7 @@ use aaw_model::describe::{self, Initial};
 use aaw_model::rules::{midi, note_name, target, Owner, TargetKind};
 use aaw_model::{AudioClip, Beat, Effect, Project, Sample};
 use num_rational::BigRational;
-use num_traits::{ToPrimitive, Zero};
+use num_traits::{Signed, ToPrimitive, Zero};
 use serde_json::{json, Value as Json};
 use std::path::Path;
 
@@ -22,6 +22,15 @@ pub enum Row {
     Track { key: u64 },
     Return { key: u64 },
     Master,
+}
+
+/// A note as Copy took it: its place and length as the song wrote them.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct NoteCopy {
+    pub pitch: i32,
+    pub at: String,
+    pub duration: String,
+    pub velocity: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
@@ -43,6 +52,67 @@ pub enum Edit {
     /// group repeats as a group. The copies are what the edit makes.
     ClipsDuplicate { clips: Vec<u64> },
     ClipsRemove { clips: Vec<u64> },
+    /// Adds the clips `copied` took, so that the earliest starts at `at`, on
+    /// `track` or else on the track it was copied from, and the others as far
+    /// after it and below it as they were. The copies are what the edit makes.
+    ClipsPaste { copied: String, at: f64, track: Option<u64> },
+    /// Moves a note clip's start, its end or both to a beat. Its notes stay
+    /// where they are in the song: those the start passes are kept, before
+    /// the clip, and do not play.
+    ClipTrim {
+        clip: u64,
+        start: Option<f64>,
+        end: Option<f64>,
+    },
+    /// Sets a note clip's length, as typed; its notes stay where they are.
+    ClipLength { clip: u64, beats: String },
+    /// Adds a note to a note clip at a beat of the clip, one step of `grid`
+    /// long: on the step under the beat, exactly, unless `free`. The note is
+    /// what the edit makes.
+    NoteAdd {
+        clip: u64,
+        at: f64,
+        free: bool,
+        grid: String,
+        pitch: i32,
+    },
+    /// Moves notes later by `steps` steps of `grid` and `by` beats, and up by
+    /// `semitones`.
+    NotesMove {
+        notes: Vec<u64>,
+        steps: i32,
+        grid: String,
+        by: f64,
+        semitones: i32,
+    },
+    /// Ends `grabbed` at a beat of its clip, on the nearest line of `grid`
+    /// unless `free`, and the other notes as much later or earlier.
+    NotesEnd {
+        notes: Vec<u64>,
+        grabbed: u64,
+        end: f64,
+        free: bool,
+        grid: String,
+    },
+    /// Sets fields of notes, as typed: a pitch as a number or a name such as
+    /// `C4`, beats such as `1/3` or `1.975`.
+    NotesSet {
+        notes: Vec<u64>,
+        pitch: Option<String>,
+        at: Option<String>,
+        duration: Option<String>,
+        velocity: Option<u32>,
+    },
+    NotesRemove { notes: Vec<u64> },
+    /// Copies notes to right after the span they cover together, in their
+    /// clip. The copies are what the edit makes.
+    NotesDuplicate { notes: Vec<u64> },
+    /// Adds copied notes to a note clip, the earliest at `at`, a beat of that
+    /// clip, and the others as far after it as they were; without `at`, right
+    /// after the span they covered. The copies are what the edit makes.
+    NotesPaste { notes: Vec<NoteCopy>, clip: u64, at: Option<f64> },
+    /// Takes a MIDI track's instrument off; its notes are kept.
+    InstrumentRemove { track: u64 },
     /// Moves an audio clip's start, its end or both to a beat. Its audio
     /// stays where it is on the timeline, and an edge goes no further than
     /// the file does. The end is where its sound ends: the clip leaves its
@@ -66,8 +136,9 @@ pub enum Edit {
     /// or `stretch`. An absent `source_bpm` has the clip play at its file's
     /// own tempo.
     AudioSet { clip: u64, field: String, value: FieldValue },
-    /// Adds an empty track at `index` among the tracks, under a free name.
-    TrackAdd { index: u32 },
+    /// Adds an empty track at `index` among the tracks, under a free name: a
+    /// MIDI track of note clips with no instrument when `midi`.
+    TrackAdd { index: u32, midi: bool },
     ReturnAdd { index: u32 },
     Rename { row: Row, to: String },
     Remove { row: Row },
@@ -152,8 +223,9 @@ pub enum Edit {
     /// Changes the length of a pattern's steps, as typed, such as `1/8`. Step
     /// rows are written on the new grid when their hits fall on it.
     PatternGrid { pattern: String, grid: String },
-    /// Adds a clip of a new, empty pattern one bar long to a track. The clip
-    /// is what the edit makes.
+    /// Adds a clip of a new, empty pattern one bar long to a track, or to a
+    /// MIDI track an empty note clip one bar long. The clip is what the edit
+    /// makes.
     ClipNew { track: u64, at: f64 },
     /// Gives a clip a copy of its pattern, so that editing it leaves the
     /// other clips that play the pattern as they are.
@@ -161,7 +233,9 @@ pub enum Edit {
     /// Adds a sample that `library::import` copied into the project, as a
     /// pad of a track or, without one, of a new track at `index`. Pad and
     /// track are named after `name` as far as IDs allow. A new track is what
-    /// the edit makes.
+    /// the edit makes. On a MIDI track the sample becomes the instrument, in
+    /// place of the one it had: a sampler that plays it on every note, from
+    /// its root note when it has one, else as it is.
     SampleAdd {
         asset: crate::library::Asset,
         name: String,
@@ -218,6 +292,8 @@ struct Placed<'a> {
     end: BigRational,
     /// The clip, when it is an audio clip.
     audio: Option<&'a AudioClip>,
+    /// Whether it is a note clip.
+    notes: bool,
 }
 
 /// A length in beats that was worked out from seconds of a file, exactly: to a
@@ -266,14 +342,17 @@ impl<'a> Song<'a> {
         let project = self.project;
         for (i, track) in items(tree, "tracks").iter().enumerate() {
             if let Some(j) = items(&track.node, "clips").iter().position(|c| c.handle == key) {
-                // A note clip is shown and is not yet edited from the app.
-                let Some(clip) = project.tracks[i].clips.get(j) else {
-                    return Err("A note clip is edited with daw commands for now".into());
-                };
+                if let Some(midi) = &project.tracks[i].midi {
+                    let clip = midi.clips.get(j).ok_or("The clip is no longer in the song")?;
+                    let start = clip.at_exact();
+                    let end = &start + clip.length_exact();
+                    return Ok(Placed { track: i, start, end, audio: None, notes: true });
+                }
+                let clip = &project.tracks[i].clips[j];
                 let length = project.patterns.get(&clip.pattern).map(|p| p.length_exact()).unwrap_or_else(BigRational::zero);
                 let start = clip.at_exact();
                 let end = &start + length * BigRational::from_integer(clip.repeats.into());
-                return Ok(Placed { track: i, start, end, audio: None });
+                return Ok(Placed { track: i, start, end, audio: None, notes: false });
             }
             if let Some(j) = items(&track.node, "audio").iter().position(|c| c.handle == key) {
                 let clip = &project.tracks[i].audio[j];
@@ -282,7 +361,7 @@ impl<'a> Song<'a> {
                 let beats = (self.source_end(clip)? - clip.source_start_seconds) / seconds_per_beat(clip, tempo)
                     + tail_beats(clip, tempo, self.seconds(&clip.sample));
                 let end = &start + span(beats);
-                return Ok(Placed { track: i, start, end, audio: Some(clip) });
+                return Ok(Placed { track: i, start, end, audio: Some(clip), notes: false });
             }
         }
         Err("The clip is no longer in the song".into())
@@ -315,6 +394,54 @@ impl<'a> Song<'a> {
             }
             None => commands,
         }
+    }
+}
+
+impl Song<'_> {
+    /// The commands that copy clips `by` beats later and `rows` tracks down:
+    /// a pattern or note clip as the host duplicates it, an audio clip as the
+    /// clip again on another beat. The song grows to hold an audio clip's.
+    fn copies(&self, tree: &Node, clips: &[u64], spans: &[Placed], by: &BigRational, rows: i64, verb: &str) -> Result<Vec<Json>> {
+        let tracks = items(tree, "tracks");
+        let mut furthest = None;
+        let mut sample = "";
+        let commands = clips
+            .iter()
+            .zip(spans)
+            .map(|(key, s)| {
+                let at = beat(&(&s.start + by));
+                let to = usize::try_from(s.track as i64 + rows).ok().and_then(|i| tracks.get(i));
+                let to = to.ok_or("There is no track to copy the clip to")?;
+                let Some(audio) = s.audio else {
+                    let mut command = json!({"op": "clip.duplicate", "clip": handle_text(*key), "at": at});
+                    if rows != 0 {
+                        command["track"] = json!(handle_text(to.handle));
+                    }
+                    return Ok(command);
+                };
+                // A copy of an audio clip is the clip again on another beat.
+                let loc = tree::find(tree, *key).ok_or("The clip is no longer in the song")?;
+                let mut copy = node_json(tree::get(tree, &loc));
+                let fields = copy.as_object_mut().ok_or("An audio clip is an object")?;
+                fields.retain(|_, value| !value.is_null());
+                fields.insert("op".into(), json!("audio.add"));
+                fields.insert("track".into(), json!(handle_text(to.handle)));
+                fields.insert("at".into(), at);
+                sample = &audio.sample;
+                furthest = later(furthest.take(), &s.end + by);
+                Ok(copy)
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let label = || match clips.len() {
+            1 => format!("{verb} audio clip {sample}"),
+            n => format!("{verb} {n} clips"),
+        };
+        let commands = self.grown(commands, furthest.as_ref(), label);
+        // One audio clip's copy is an `audio.add` to the host, which this names.
+        Ok(match commands.as_slice() {
+            [only] if only["op"] == "audio.add" => batch(commands, label()),
+            _ => commands,
+        })
     }
 }
 
@@ -555,6 +682,59 @@ fn pad_root(project: &Project, pattern: &str, pad: &str) -> Option<i64> {
     project.tracks.iter().filter(plays).find_map(root).or_else(|| project.tracks.iter().find_map(root)).map(i64::from)
 }
 
+/// Whether a track is a MIDI track.
+fn is_midi(project: &Project, tree: &Node, key: u64) -> bool {
+    let place = items(tree, "tracks").iter().position(|i| i.handle == key);
+    place.and_then(|i| project.tracks.get(i)).is_some_and(|t| t.midi.is_some())
+}
+
+/// A note clip in the song, with its key.
+fn note_clip<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(u64, &'a aaw_model::NoteClip)> {
+    let gone = || "The clip is no longer in the song".to_string();
+    match tree::find(tree, key).ok_or_else(gone)?.as_slice() {
+        [Step::Key(k), Step::Index(t), Step::Key(l), Step::Index(c)] if k == "tracks" && l == "clips" => {
+            let midi = project.tracks.get(*t).and_then(|t| t.midi.as_ref()).ok_or("That is not a note clip")?;
+            Ok((key, midi.clips.get(*c).ok_or_else(gone)?))
+        }
+        _ => Err("That is not a note clip".into()),
+    }
+}
+
+/// A note in the song, with its clip's key.
+fn note<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(u64, &'a aaw_model::Note)> {
+    let gone = || "The note is no longer in the song".to_string();
+    let loc = tree::find(tree, key).ok_or_else(gone)?;
+    match loc.as_slice() {
+        [Step::Key(k), Step::Index(t), Step::Key(l), Step::Index(c), Step::Key(m), Step::Index(n)]
+            if k == "tracks" && l == "clips" && m == "notes" =>
+        {
+            let clip = project.tracks.get(*t).and_then(|t| t.midi.as_ref()).and_then(|m| m.clips.get(*c)).ok_or_else(gone)?;
+            let clip_key = tree::handle_at(tree, &loc[..4]);
+            Ok((clip_key, clip.notes.get(*n).ok_or_else(gone)?))
+        }
+        _ => Err("That is not a note".into()),
+    }
+}
+
+/// The exact length of a grid's step, as typed: `1/4`, `1/3`.
+fn grid_exact(grid: &str) -> Result<BigRational> {
+    let grid = typed_exact(grid)?;
+    if grid <= BigRational::zero() {
+        return Err("A step has a length".into());
+    }
+    Ok(grid)
+}
+
+/// A beat that may be negative, as a command writes a distance.
+fn signed_beat(x: &BigRational) -> Json {
+    value_json(&beat_value(x))
+}
+
+/// "1 note", "3 notes".
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
 fn batch(commands: Vec<Json>, label: String) -> Vec<Json> {
     vec![json!({"op": "batch", "commands": commands, "label": label})]
 }
@@ -622,41 +802,229 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 return Ok(Vec::new());
             };
             let span = end - start;
-            let tracks = items(&tree, "tracks");
-            let mut furthest = None;
-            let mut sample = "";
-            let commands = clips
-                .iter()
-                .zip(&spans)
-                .map(|(key, s)| {
-                    let at = beat(&(&s.start + &span));
-                    let Some(audio) = s.audio else {
-                        return Ok(json!({"op": "clip.duplicate", "clip": clip(key), "at": at}));
-                    };
-                    // A copy of an audio clip is the clip again on another beat.
-                    let loc = tree::find(&tree, *key).ok_or("The clip is no longer in the song")?;
-                    let mut copy = node_json(tree::get(&tree, &loc));
-                    let fields = copy.as_object_mut().ok_or("An audio clip is an object")?;
-                    fields.retain(|_, value| !value.is_null());
-                    fields.insert("op".into(), json!("audio.add"));
-                    fields.insert("track".into(), json!(handle_text(tracks[s.track].handle)));
-                    fields.insert("at".into(), at);
-                    sample = &audio.sample;
-                    furthest = later(furthest.take(), &s.end + &span);
-                    Ok(copy)
-                })
-                .collect::<Result<Vec<_>>>()?;
-            let label = || match clips.len() {
-                1 => format!("Duplicate audio clip {sample}"),
-                n => format!("Duplicate {n} clips"),
+            song.copies(&tree, clips, &spans, &span, 0, "Duplicate")
+        }
+        Edit::ClipsPaste { copied, at, track } => {
+            let tree = doc.tree();
+            let copied: Json = serde_json::from_str(copied).map_err(|e| e.to_string())?;
+            let clips = copied.as_array().ok_or("Nothing was copied")?;
+            let start_of = |c: &Json| typed_exact(c["start"].as_str().unwrap_or_default());
+            let starts = clips.iter().map(start_of).collect::<Result<Vec<_>>>()?;
+            let (Some(first), Some(top)) = (starts.iter().min(), clips.iter().filter_map(|c| c["track"].as_i64()).min()) else {
+                return Ok(Vec::new());
             };
-            let commands = song.grown(commands, furthest.as_ref(), label);
-            // One audio clip's copy is an `audio.add` to the host, which this names.
-            Ok(match commands.as_slice() {
-                [only] if only["op"] == "audio.add" => batch(commands, label()),
+            let shift = aaw_model::beat(&Beat::Float(at.max(0.0)))? - first;
+            let tracks = items(&tree, "tracks");
+            let rows = match track {
+                Some(key) => tracks.iter().position(|i| i.handle == *key).ok_or("The track is no longer in the song")? as i64 - top,
+                None => 0,
+            };
+            let mut furthest = None;
+            let mut commands = Vec::new();
+            for (c, start) in clips.iter().zip(&starts) {
+                let to = usize::try_from(c["track"].as_i64().unwrap_or(0) + rows).ok().and_then(|i| tracks.get(i));
+                let to = to.ok_or("There is no track to paste the clip on")?;
+                let mut command = c["fields"].clone();
+                let fields = command.as_object_mut().ok_or("A copied clip is an object")?;
+                let kind = c["kind"].as_str().unwrap_or_default();
+                fields.insert("op".into(), json!(if kind == "audio" { "audio.add" } else { "clip.add" }));
+                fields.insert("track".into(), json!(handle_text(to.handle)));
+                fields.insert("at".into(), beat(&(start + &shift)));
+                if kind == "audio" {
+                    furthest = later(furthest.take(), start + &shift + typed_exact(c["length"].as_str().unwrap_or("0"))?);
+                }
+                commands.push(command);
+            }
+            let label = match commands.len() {
+                1 => "Paste a clip".to_string(),
+                n => format!("Paste {n} clips"),
+            };
+            if let Some(longer) = furthest.as_ref().and_then(|end| song.lengthen(end)) {
+                commands.insert(0, longer);
+            }
+            Ok(batch(commands, label))
+        }
+        Edit::ClipTrim { clip: key, start, end } => {
+            if start.is_none() && end.is_none() {
+                return Ok(Vec::new());
+            }
+            let tree = doc.tree();
+            if !placed(&tree, *key)?.notes {
+                return Err("That is not a note clip".into());
+            }
+            let mut command = json!({"op": "clip.trim", "clip": clip(key)});
+            if let Some(start) = start {
+                command["start"] = beat_at(*start)?;
+            }
+            if let Some(end) = end {
+                command["end"] = beat_at(*end)?;
+            }
+            Ok(vec![command])
+        }
+        Edit::ClipLength { clip: key, beats } => {
+            let tree = doc.tree();
+            let (_, c) = note_clip(project, &tree, *key)?;
+            if typed_exact(beats)? == c.length_exact() {
+                return Ok(Vec::new());
+            }
+            Ok(vec![json!({"op": "clip.resize", "clip": clip(key), "length_beats": typed_beat(beats)})])
+        }
+        Edit::NoteAdd { clip: key, at, free, grid, pitch } => {
+            let tree = doc.tree();
+            let (_, c) = note_clip(project, &tree, *key)?;
+            let grid = grid_exact(grid)?;
+            let at = if *free {
+                aaw_model::signed_beat(&Beat::Float(*at))?
+            } else {
+                let step = (at / grid.to_f64().unwrap_or(1.0) + 1e-9).floor();
+                BigRational::from_float(step).unwrap_or_default() * &grid
+            };
+            if at.is_negative() || at >= c.length_exact() {
+                return Err("A note is added inside its clip".into());
+            }
+            Ok(vec![json!({
+                "op": "note.add", "clip": clip(key), "pitch": pitch, "at": beat(&at), "duration": beat(&grid),
+            })])
+        }
+        Edit::NotesMove { notes, steps, grid, by, semitones } => {
+            if notes.is_empty() || (*steps == 0 && *by == 0.0 && *semitones == 0) {
+                return Ok(Vec::new());
+            }
+            let paths: Vec<String> = notes.iter().map(|k| handle_text(*k)).collect();
+            let mut commands = Vec::new();
+            if *steps != 0 || *by != 0.0 {
+                let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
+                let by = if *by < 0.0 { -distance } else { distance };
+                let shift = grid_exact(grid)? * BigRational::from_integer((*steps).into()) + by;
+                if !shift.is_zero() {
+                    commands.push(json!({"op": "note.move", "notes": paths, "by": signed_beat(&shift)}));
+                }
+            }
+            if *semitones != 0 {
+                commands.push(json!({"op": "note.transpose", "notes": paths, "by": semitones}));
+            }
+            Ok(match commands.len() {
+                2 => batch(commands, format!("Move {}", count(notes.len(), "note"))),
                 _ => commands,
             })
         }
+        Edit::NotesEnd { notes, grabbed, end, free, grid } => {
+            let tree = doc.tree();
+            let (_, n) = note(project, &tree, *grabbed)?;
+            let grid = grid_exact(grid)?;
+            let end = if *free {
+                aaw_model::signed_beat(&Beat::Float((end * 1000.0).round() / 1000.0))?
+            } else {
+                let line = (end / grid.to_f64().unwrap_or(1.0)).round();
+                BigRational::from_float(line).unwrap_or_default() * &grid
+            };
+            let by = end - (n.at_exact() + n.duration_exact());
+            if by.is_zero() {
+                return Ok(Vec::new());
+            }
+            let mut commands = Vec::new();
+            for key in notes.iter().chain(std::iter::once(grabbed)).fold(Vec::new(), |mut seen, k| {
+                if !seen.contains(k) {
+                    seen.push(*k);
+                }
+                seen
+            }) {
+                let (_, n) = note(project, &tree, key)?;
+                let duration = n.duration_exact() + &by;
+                if !duration.is_positive() {
+                    return Err(format!("Note {} would end before it starts", n.id));
+                }
+                commands.push(json!({"op": "note.set", "note": handle_text(key), "duration": beat(&duration)}));
+            }
+            Ok(match commands.len() {
+                1 => commands,
+                n => batch(commands, format!("Lengthen {n} notes")),
+            })
+        }
+        Edit::NotesSet { notes, pitch, at, duration, velocity } => {
+            let mut fields = serde_json::Map::new();
+            if let Some(pitch) = pitch {
+                let pitch = pitch.trim();
+                fields.insert("pitch".into(), pitch.parse::<i64>().map_or_else(|_| json!(pitch), |n| json!(n)));
+            }
+            if let Some(at) = at {
+                fields.insert("at".into(), typed_beat(at));
+            }
+            if let Some(duration) = duration {
+                fields.insert("duration".into(), typed_beat(duration));
+            }
+            if let Some(velocity) = velocity {
+                fields.insert("velocity".into(), json!(velocity));
+            }
+            if fields.is_empty() {
+                return Ok(Vec::new());
+            }
+            let commands: Vec<Json> = notes
+                .iter()
+                .map(|key| {
+                    let mut command = json!({"op": "note.set", "note": handle_text(*key)});
+                    command.as_object_mut().expect("an object").extend(fields.clone());
+                    command
+                })
+                .collect();
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Change {n} notes")),
+            })
+        }
+        Edit::NotesRemove { notes } => match notes.is_empty() {
+            true => Ok(Vec::new()),
+            false => Ok(vec![json!({"op": "note.remove", "notes": notes.iter().map(|k| handle_text(*k)).collect::<Vec<_>>()})]),
+        },
+        Edit::NotesDuplicate { notes } => {
+            let tree = doc.tree();
+            let found = notes.iter().map(|key| note(project, &tree, *key)).collect::<Result<Vec<_>>>()?;
+            let Some((clip_key, _)) = found.first() else { return Ok(Vec::new()) };
+            if found.iter().any(|(c, _)| c != clip_key) {
+                return Err("Notes are copied within one clip".into());
+            }
+            let (Some(start), Some(end)) = (
+                found.iter().map(|(_, n)| n.at_exact()).min(),
+                found.iter().map(|(_, n)| n.at_exact() + n.duration_exact()).max(),
+            ) else {
+                return Ok(Vec::new());
+            };
+            let span = end - start;
+            let copies: Vec<Json> = found
+                .iter()
+                .map(|(_, n)| {
+                    json!({
+                        "pitch": n.pitch, "at": signed_beat(&(n.at_exact() + &span)),
+                        "duration": beat(&n.duration_exact()), "velocity": n.velocity,
+                    })
+                })
+                .collect();
+            Ok(vec![json!({"op": "note.add", "clip": handle_text(*clip_key), "notes": copies})])
+        }
+        Edit::NotesPaste { notes, clip: key, at } => {
+            let tree = doc.tree();
+            note_clip(project, &tree, *key)?;
+            let places = notes
+                .iter()
+                .map(|n| Ok((aaw_model::signed_beat(&Beat::Str(n.at.clone()))?, typed_exact(&n.duration)?)))
+                .collect::<Result<Vec<_>>>()?;
+            let (Some(start), Some(end)) = (places.iter().map(|p| &p.0).min(), places.iter().map(|p| &p.0 + &p.1).max()) else {
+                return Ok(Vec::new());
+            };
+            let shift = match at {
+                Some(at) => aaw_model::signed_beat(&Beat::Float((at * 1000.0).round() / 1000.0))? - start,
+                None => end - start,
+            };
+            let copies: Vec<Json> = notes
+                .iter()
+                .zip(&places)
+                .map(|(n, (at, duration))| {
+                    json!({"pitch": n.pitch, "at": signed_beat(&(at + &shift)), "duration": beat(duration), "velocity": n.velocity})
+                })
+                .collect();
+            Ok(vec![json!({"op": "note.add", "clip": clip(key), "notes": copies})])
+        }
+        Edit::InstrumentRemove { track } => Ok(vec![json!({"op": "instrument.set", "track": handle_text(*track), "instrument": null})]),
         Edit::ClipsRemove { clips } => {
             let tree = doc.tree();
             let commands: Vec<Json> = clips
@@ -805,9 +1173,16 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             Ok(song.grown(vec![command], end.as_ref(), || format!("Set the tempo of audio clip {}", audio.sample)))
         }
-        Edit::TrackAdd { index } => Ok(vec![json!({
-            "op": "track.add", "id": free_name(project, "track"), "index": (*index as usize).min(project.tracks.len()),
-        })]),
+        Edit::TrackAdd { index, midi } => {
+            let mut command = json!({
+                "op": "track.add", "id": free_name(project, if *midi { "midi" } else { "track" }),
+                "index": (*index as usize).min(project.tracks.len()),
+            });
+            if *midi {
+                command["type"] = json!("midi");
+            }
+            Ok(vec![command])
+        }
         Edit::ReturnAdd { index } => Ok(vec![json!({
             "op": "return.add", "id": free_name(project, "return"), "index": (*index as usize).min(project.returns.len()),
         })]),
@@ -1111,6 +1486,9 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 return Err("A clip starts inside the song".into());
             }
             let length = left.min(BigRational::from_integer(4.into()));
+            if t.midi.is_some() {
+                return Ok(vec![json!({"op": "clip.add", "track": handle_text(*track), "at": beat(&at), "length_beats": beat(&length)})]);
+            }
             let name = (1..).map(|n| format!("{}-{n}", t.id)).find(|n| !project.patterns.contains_key(n)).expect("a free name");
             Ok(batch(
                 vec![
@@ -1147,6 +1525,26 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             let stem = ident(name);
             let (sample, mut commands) = listed(project, asset, &stem);
             let label = match track {
+                Some(key) if is_midi(project, &tree, *key) => {
+                    let place = items(&tree, "tracks").iter().position(|i| i.handle == *key);
+                    let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
+                    // Pitched from its root note when it has one: the song's,
+                    // for a sample it has already.
+                    let root = project.samples.get(&sample).and_then(|s| s.root_note.clone()).or_else(|| asset.root_note.clone());
+                    let mut pad = json!({"sample": sample});
+                    if root.is_some() {
+                        pad["mode"] = json!("gate");
+                    }
+                    let instrument = json!({"sampler": {
+                        "pads": {stem.clone(): pad},
+                        "map": [{"notes": [0, 127], "pad": stem, "pitched": root.is_some()}],
+                    }});
+                    commands.push(json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument}));
+                    match t.midi.as_ref().and_then(|m| m.instrument.as_ref()) {
+                        Some(_) => format!("Replace the instrument of {} with a sampler of {sample}", t.id),
+                        None => format!("Attach a sampler of {sample} to {}", t.id),
+                    }
+                }
                 Some(key) => {
                     let place = items(&tree, "tracks").iter().position(|i| i.handle == *key);
                     let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
@@ -1203,6 +1601,31 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Ok(batch(commands, label))
         }
     }
+}
+
+/// What Copy takes of clips, for `Edit::ClipsPaste`: each clip's track,
+/// where it starts, its kind and its fields, as JSON. A paste adds clips with
+/// these fields, so it works after the clips are changed or gone.
+pub fn copied(doc: &Doc, clips: &[u64], files: &Files, directory: &Path) -> Result<String> {
+    let song = Song { project: &doc.project, files, directory };
+    let tree = doc.tree();
+    let mut out = Vec::new();
+    for key in clips {
+        let at = song.placed(&tree, *key)?;
+        let loc = tree::find(&tree, *key).ok_or("The clip is no longer in the song")?;
+        let mut fields = node_json(tree::get(&tree, &loc));
+        let map = fields.as_object_mut().ok_or("A clip is an object")?;
+        map.retain(|_, value| !value.is_null());
+        // A pasted note clip is given an ID of its own; its notes keep theirs.
+        map.remove("id");
+        map.remove("at");
+        let kind = if at.audio.is_some() { "audio" } else if at.notes { "notes" } else { "pattern" };
+        out.push(json!({
+            "track": at.track, "kind": kind, "fields": fields,
+            "start": aaw_model::fraction_str(&at.start), "length": aaw_model::fraction_str(&(&at.end - &at.start)),
+        }));
+    }
+    Ok(Json::Array(out).to_string())
 }
 
 /// What an edit is called in the change log and for undo, where the commands

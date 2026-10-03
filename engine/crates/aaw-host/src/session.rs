@@ -868,7 +868,7 @@ impl Session {
                     "velocity": n.velocity,
                     "song_at": beat_json(&song_at),
                 });
-                if n.at_exact() >= length {
+                if !c.plays(n) {
                     row["outside"] = json!(true);
                 }
                 if let Some(s) = sampler {

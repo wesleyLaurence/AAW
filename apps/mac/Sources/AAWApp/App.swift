@@ -529,6 +529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ])
         add("Track", [
             item("Add Track", #selector(SongWindowController.addTrack(_:)), "t"),
+            item("Add MIDI Track", #selector(SongWindowController.addMIDITrack(_:)), "T"),
             item("Add Return", #selector(SongWindowController.addReturn(_:)), "t", [.command, .option]),
             .separator(),
             item("Rename", #selector(SongWindowController.renameSelection(_:)), "r"),
@@ -748,11 +749,19 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func deleteSelection(_ sender: Any?) {
         if window?.firstResponder is PatternEditor, model.selectedEvent == nil {
             NSSound.beep()
+        } else if window?.firstResponder is NoteEditor, model.selectedNotes.isEmpty {
+            NSSound.beep()
         } else {
             model.deleteSelection()
         }
     }
+    /// Copy and Paste: in the piano roll, notes, pasted where the clip was
+    /// last clicked; elsewhere, clips, pasted at the start position.
+    @objc func copy(_ sender: Any?) { model.copySelection(notes: window?.firstResponder is NoteEditor) }
+    @objc func cut(_ sender: Any?) { model.cutSelection(notes: window?.firstResponder is NoteEditor) }
+    @objc func paste(_ sender: Any?) { model.paste(intoNotes: window?.firstResponder is NoteEditor) }
     @objc func addTrack(_ sender: Any?) { model.addTrack() }
+    @objc func addMIDITrack(_ sender: Any?) { model.addTrack(midi: true) }
     @objc func addReturn(_ sender: Any?) { model.addReturn() }
     @objc func renameSelection(_ sender: Any?) { model.renameSelection() }
 
@@ -780,7 +789,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(toggleDevices(_:)): item.state = model.showsDetail && model.detail == .devices ? .on : .off
         case #selector(togglePattern(_:)):
             // The clip last selected: a pattern, or an audio clip.
-            item.title = model.audioContext == nil ? "Pattern" : "Audio Clip"
+            item.title = DetailView.clipTitle(model)
             item.state = model.showsDetail && model.detail == .pattern ? .on : .off
         case #selector(toggleBrowser(_:)): item.state = model.showsBrowser ? .on : .off
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
@@ -791,11 +800,14 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(redoEdit(_:)):
             item.title = Self.title("Redo", model.redoStep)
             return model.redoStep != nil && !typing
-        case #selector(duplicateSelection(_:)): return !model.selectedClips.isEmpty && !typing
+        case #selector(duplicateSelection(_:)): return model.canDuplicate && !typing
+        case #selector(copy(_:)), #selector(cut(_:)):
+            return !typing && (window?.firstResponder is NoteEditor ? !model.selectedNotes.isEmpty : !model.selectedClips.isEmpty)
+        case #selector(paste(_:)): return !typing && model.canPaste(intoNotes: window?.firstResponder is NoteEditor)
         case #selector(splitSelection(_:)): return model.canSplit && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
-        case #selector(addTrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
+        case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
         default: break
         }
         return true

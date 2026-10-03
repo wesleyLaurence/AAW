@@ -439,12 +439,12 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     };
 
     // A new track gets a free name, which the person then changes.
-    let made = song.edit(Edit::TrackAdd { index: 1 }, None).unwrap();
+    let made = song.edit(Edit::TrackAdd { index: 1, midi: false }, None).unwrap();
     let u = update(&seen);
     assert_eq!(ids(&u.arrangement).0, ["drums", "track-1", "perc"]);
     assert_eq!(made, [u.arrangement.tracks[1].key]);
     let track = Row::Track { key: made[0] };
-    assert_eq!(song.edit(Edit::TrackAdd { index: 99 }, None).unwrap().len(), 1);
+    assert_eq!(song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap().len(), 1);
     assert_eq!(ids(&update(&seen).arrangement).0, ["drums", "track-1", "perc", "track-2"]);
     song.edit(Edit::Rename { row: track.clone(), to: "keys".into() }, None).unwrap();
     assert_eq!(update(&seen).change.label, "Rename track track-1 to keys");
@@ -488,7 +488,7 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     song.select(Vec::new()).unwrap();
     assert_eq!(agent(&path, json!({"op": "status"}))["selection"], json!([]));
     song.close();
-    assert!(song.edit(Edit::TrackAdd { index: 0 }, None).is_err());
+    assert!(song.edit(Edit::TrackAdd { index: 0, midi: false }, None).is_err());
 }
 
 #[test]
@@ -810,7 +810,7 @@ fn waveforms_follow_the_audio_of_each_track() {
     assert!(undone.peaks[0].levels[0].data[..bucket(8.0)].iter().all(|x| *x == 0));
 
     // A new track has peaks of its own: silence, until it plays something.
-    let added = song.edit(Edit::TrackAdd { index: 2 }, None).unwrap()[0];
+    let added = song.edit(Edit::TrackAdd { index: 2, midi: false }, None).unwrap()[0];
     let grown = waveforms(&waves, 4, &mut have);
     assert_eq!(grown.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, perc, added]);
     assert!(have[&identity(&grown, added)].levels[0].data.iter().all(|x| *x == 0));
@@ -1656,7 +1656,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
 
     // A track by hand and one from a terminal are in one history, and make
     // the project one that holds something.
-    song.edit(Edit::TrackAdd { index: 0 }, None).unwrap();
+    song.edit(Edit::TrackAdd { index: 0, midi: false }, None).unwrap();
     update(&seen);
     agent(Path::new(&first), json!({"op": "track.add", "id": "bass"}));
     assert_eq!(update(&seen).change.origin, Who::Agent);
@@ -1710,7 +1710,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     let kept = project_new_untitled().unwrap();
     let (song, seen) = open_at(&kept);
     transport(&seen);
-    song.edit(Edit::TrackAdd { index: 0 }, None).unwrap();
+    song.edit(Edit::TrackAdd { index: 0, midi: false }, None).unwrap();
     update(&seen);
     song.close();
     let blank = project_new_untitled().unwrap();
@@ -1745,9 +1745,284 @@ fn a_midi_track_shows_its_note_clips_as_the_agent_makes_them() {
     let u = update(&seen);
     assert_eq!(u.touched, [touch(Part::Clip, clip.key, Delta::Changed)]);
     assert_eq!(u.arrangement.tracks[2].note_clips[0].notes[0].pitch, 72);
-    // A sampler attached is named; an app edit of a note clip is refused, not a crash.
+    // A sampler attached is named, with its pads and which notes play them.
     agent(&path, json!({"op": "instrument.set", "track": "keys", "instrument": {"sampler": {"pads": {"h": {"sample": "hit"}}, "map": [{"notes": 60, "pad": "h"}]}}}));
-    assert_eq!(update(&seen).arrangement.tracks[2].instrument.as_deref(), Some("sampler"));
-    assert!(song.edit(Edit::ClipsMove { clips: vec![clip.key], by: 1.0, rows: 0 }, None).is_err());
+    let keys = update(&seen).arrangement.tracks[2].clone();
+    assert_eq!(keys.instrument.as_deref(), Some("sampler"));
+    assert_eq!(keys.pads.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["h"]);
+    assert_eq!(keys.map, [aaw_ffi::view::NoteMapView { low: 60, high: 60, pad: "h".into(), pitched: false }]);
+    song.close();
+}
+
+/// The notes of the first note clip of a track, as (id, pitch, at, duration, velocity).
+fn notes_of(track: &aaw_ffi::view::TrackView, clip: usize) -> Vec<(String, i32, String, String, u32)> {
+    track.note_clips[clip].notes.iter().map(|n| (n.id.clone(), n.pitch, n.at_text.clone(), n.duration_text.clone(), n.velocity)).collect()
+}
+
+fn note(id: &str, pitch: i32, at: &str, duration: &str, velocity: u32) -> (String, i32, String, String, u32) {
+    (id.into(), pitch, at.into(), duration.into(), velocity)
+}
+
+#[test]
+fn the_app_makes_a_midi_track_and_draws_and_edits_its_notes() {
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    // A MIDI track with no instrument, and a clip of a bar on it.
+    let track = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    let u = update(&seen);
+    let keys = &u.arrangement.tracks[2];
+    assert!(keys.midi && keys.instrument.is_none() && keys.id == "midi-1");
+    let clip = song.edit(Edit::ClipNew { track, at: 8.0 }, None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add note clip to midi-1 at 8");
+    let c = &u.arrangement.tracks[2].note_clips[0];
+    assert_eq!((c.key, c.at, c.length_beats), (clip, 8.0, 4.0));
+
+    // A chord on the step under the pointer, and a melody note off the grid
+    // and on a triplet grid; each is one step of its grid long.
+    let add = |at: f64, free: bool, grid: &str, pitch: i32| Edit::NoteAdd { clip, at, free, grid: grid.into(), pitch };
+    for pitch in [60, 64, 67] {
+        song.edit(add(0.1, false, "1/4", pitch), None).unwrap();
+        update(&seen);
+    }
+    let late = song.edit(add(2.025, true, "1/4", 72), None).unwrap()[0];
+    update(&seen);
+    song.edit(add(1.4, false, "1/3", 71), None).unwrap();
+    let u = update(&seen);
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 0), [
+        note("n1", 60, "0", "0.25", 100), note("n2", 64, "0", "0.25", 100), note("n3", 67, "0", "0.25", 100),
+        note("n4", 72, "2.025", "0.25", 100), note("n5", 71, "4/3", "1/3", 100),
+    ]);
+    assert!(song.edit(add(4.0, false, "1/4", 60), None).is_err(), "a note is added inside its clip");
+    let keys = |t: &aaw_ffi::view::TrackView| t.note_clips[0].notes.iter().map(|n| n.key).collect::<Vec<_>>();
+    let chord = keys(&u.arrangement.tracks[2])[..3].to_vec();
+    assert_eq!(keys(&u.arrangement.tracks[2])[3], late);
+
+    // The chord moved a step later and up an octave, as one step: by whole
+    // steps, so the note off the grid moved by one stays as far off it.
+    song.edit(Edit::NotesMove { notes: chord.clone(), steps: 1, grid: "1/4".into(), by: 0.0, semitones: 12 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move 3 notes");
+    song.edit(Edit::NotesMove { notes: vec![late], steps: -1, grid: "1/4".into(), by: -0.05, semitones: 0 }, None).unwrap();
+    let u = update(&seen);
+    let ns = notes_of(&u.arrangement.tracks[2], 0);
+    assert_eq!(ns[0], note("n1", 72, "0.25", "0.25", 100));
+    assert_eq!(ns[3], note("n4", 72, "1.725", "0.25", 100));
+
+    // Its end on a line of the grid, the chord's other notes as much longer;
+    // off the grid with Option.
+    song.edit(Edit::NotesEnd { notes: chord.clone(), grabbed: chord[0], end: 1.1, free: false, grid: "1/4".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Lengthen 3 notes");
+    assert!(notes_of(&u.arrangement.tracks[2], 0)[..3].iter().all(|n| n.3 == "0.75"));
+    song.edit(Edit::NotesEnd { notes: vec![late], grabbed: late, end: 2.3333, free: true, grid: "1/4".into() }, None).unwrap();
+    assert_eq!(notes_of(&update(&seen).arrangement.tracks[2], 0)[3].3, "0.608");
+    assert!(song.edit(Edit::NotesEnd { notes: vec![late], grabbed: late, end: 1.5, free: false, grid: "1/4".into() }, None).is_err());
+
+    // Typed fields: a pitch by name is stored as its number, beats as typed.
+    song.edit(Edit::NotesSet { notes: vec![late], pitch: Some("D5".into()), at: Some("1.975".into()), duration: Some("1/6".into()), velocity: Some(64) }, None).unwrap();
+    assert_eq!(notes_of(&update(&seen).arrangement.tracks[2], 0)[3], note("n4", 74, "1.975", "1/6", 64));
+    song.edit(Edit::NotesSet { notes: chord.clone(), pitch: None, at: None, duration: None, velocity: Some(90) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Change 3 notes");
+    assert!(notes_of(&u.arrangement.tracks[2], 0)[..3].iter().all(|n| n.4 == 90));
+    assert!(song.edit(Edit::NotesSet { notes: vec![late], pitch: Some("200".into()), at: None, duration: None, velocity: None }, None).is_err());
+
+    // The chord copied after itself, in its clip; the copies are made.
+    let copies = song.edit(Edit::NotesDuplicate { notes: chord.clone() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(copies.len(), 3);
+    let ns = notes_of(&u.arrangement.tracks[2], 0);
+    assert_eq!(ns[5..], [note("n6", 72, "1", "0.75", 90), note("n7", 76, "1", "0.75", 90), note("n8", 79, "1", "0.75", 90)]);
+    song.edit(Edit::NotesRemove { notes: copies }, None).unwrap();
+    assert_eq!(notes_of(&update(&seen).arrangement.tracks[2], 0).len(), 5);
+    // Pasted at a beat of the clip, the earliest there and the rest after it.
+    let copied: Vec<aaw_ffi::NoteCopy> = u.arrangement.tracks[2].note_clips[0].notes.iter()
+        .filter(|n| n.key == late || n.key == chord[0])
+        .map(|n| aaw_ffi::NoteCopy { pitch: n.pitch, at: n.at_text.clone(), duration: n.duration_text.clone(), velocity: n.velocity })
+        .collect();
+    let pasted = song.edit(Edit::NotesPaste { notes: copied.clone(), clip, at: Some(3.0) }, None).unwrap();
+    let ns = notes_of(&update(&seen).arrangement.tracks[2], 0);
+    assert_eq!(pasted.len(), 2);
+    assert_eq!(ns[5..], [note("n6", 72, "3", "0.75", 90), note("n7", 74, "4.725", "1/6", 64)]);
+    song.edit(Edit::NotesRemove { notes: pasted }, None).unwrap();
+    update(&seen);
+    // Without a place, right after what was copied, exactly: the span is 227/120.
+    song.edit(Edit::NotesPaste { notes: copied, clip, at: None }, None).unwrap();
+    let ns = notes_of(&update(&seen).arrangement.tracks[2], 0);
+    assert_eq!((ns[5].2.as_str(), ns[6].2.as_str()), ("257/120", "58/15"));
+
+    // The whole clip saved and read again: the same notes, IDs and places.
+    let before = notes_of(&song.arrangement().tracks[2], 0);
+    song.close();
+    let (tx, rx) = channel();
+    let (waves_tx, _waves) = channel();
+    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(Watcher(Mutex::new(tx), Mutex::new(waves_tx)))).unwrap();
+    assert_eq!(notes_of(&song.arrangement().tracks[2], 0), before);
+    drop(rx);
+    song.close();
+    drop(dir);
+}
+
+#[test]
+fn a_note_clip_copied_in_the_app_is_its_own() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "batch", "label": "A phrase", "commands": [
+        {"op": "track.add", "id": "keys", "type": "midi"},
+        {"op": "track.add", "id": "bass", "type": "midi"},
+        {"op": "clip.add", "track": "keys", "at": 4, "length_beats": 4, "notes": [
+            {"pitch": 60, "duration": 1}, {"pitch": 64, "at": 1, "duration": 1}, {"pitch": 67, "at": "1/3", "duration": "1/3"},
+        ]},
+    ]}));
+    let u = update(&seen);
+    let original = u.arrangement.tracks[2].note_clips[0].clone();
+    let before = notes_of(&u.arrangement.tracks[2], 0);
+
+    // Duplicated right after it: a clip with a new ID, owning copies.
+    let copy = song.edit(Edit::ClipsDuplicate { clips: vec![original.key] }, None).unwrap()[0];
+    let u = update(&seen);
+    let keys = &u.arrangement.tracks[2];
+    assert_eq!((keys.note_clips[1].key, keys.note_clips[1].id.as_str(), keys.note_clips[1].at), (copy, "clip2", 8.0));
+    let copied: Vec<u64> = keys.note_clips[1].notes.iter().map(|n| n.key).collect();
+    song.edit(Edit::NotesMove { notes: copied.clone(), steps: 0, grid: "1/4".into(), by: 0.025, semitones: -12 }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::NotesSet { notes: copied[..1].to_vec(), pitch: None, at: None, duration: None, velocity: Some(40) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 0), before, "the original is as it was");
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 1)[0], note("n1", 48, "0.025", "1", 40));
+    song.undo().unwrap();
+    update(&seen);
+    song.undo().unwrap();
+    update(&seen);
+    song.redo().unwrap();
+    let u = update(&seen);
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 0), before);
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 1)[0].2, "0.025");
+
+    // Notes pasted into another clip, at a place in it.
+    let first = &original.notes[0];
+    let one = aaw_ffi::NoteCopy { pitch: first.pitch, at: first.at_text.clone(), duration: first.duration_text.clone(), velocity: first.velocity };
+    song.edit(Edit::NotesPaste { notes: vec![one], clip: copy, at: Some(2.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 1).last().unwrap(), &note("n4", 60, "2", "1", 100));
+    song.undo().unwrap();
+    let u = update(&seen);
+
+    // Pasted at a beat on another MIDI track; a pattern track will not take it.
+    let bass = u.arrangement.tracks[3].key;
+    let taken = song.copy_clips(vec![original.key]).unwrap();
+    let pasted = song.edit(Edit::ClipsPaste { copied: taken.clone(), at: 16.0, track: Some(bass) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Paste a clip");
+    let b = &u.arrangement.tracks[3].note_clips[0];
+    assert_eq!((b.key, b.at, b.id.as_str()), (pasted[0], 16.0, "clip3"));
+    assert_eq!(notes_of(&u.arrangement.tracks[3], 0), before);
+    let drums = u.arrangement.tracks[0].key;
+    assert!(song.edit(Edit::ClipsPaste { copied: taken.clone(), at: 16.0, track: Some(drums) }, None).is_err());
+
+    // Its length as typed: a triplet's is kept exactly.
+    song.edit(Edit::ClipLength { clip: pasted[0], beats: "11/3".into() }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[3].note_clips[0].length_beats, 11.0 / 3.0);
+    assert!(song.edit(Edit::ClipLength { clip: pasted[0], beats: "0".into() }, None).is_err());
+
+    // Moved and removed as any clip.
+    song.edit(Edit::ClipsMove { clips: vec![pasted[0]], by: -4.0, rows: -1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[2].note_clips.iter().map(|c| c.at).collect::<Vec<_>>(), [4.0, 8.0, 12.0]);
+    song.edit(Edit::ClipsRemove { clips: vec![pasted[0]] }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].note_clips.len(), 2);
+
+    // What was copied is pasted after the clip it came from is gone, as Cut
+    // and Paste do.
+    song.edit(Edit::ClipsRemove { clips: vec![original.key] }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::ClipsPaste { copied: taken, at: 0.0, track: None }, None).unwrap();
+    let u = update(&seen);
+    let back = u.arrangement.tracks[2].note_clips.iter().position(|c| c.at == 0.0).unwrap();
+    assert_eq!(notes_of(&u.arrangement.tracks[2], back), before);
+    song.close();
+}
+
+#[test]
+fn a_note_clip_trimmed_from_its_start_keeps_the_notes_it_passes() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "batch", "label": "A phrase", "commands": [
+        {"op": "track.add", "id": "keys", "type": "midi"},
+        {"op": "clip.add", "track": "keys", "at": 4, "length_beats": 4, "notes": [
+            {"pitch": 60, "duration": 2}, {"pitch": 64, "at": 1, "duration": 1}, {"pitch": 67, "at": "7/3", "duration": "1/3"},
+        ]},
+    ]}));
+    let clip = update(&seen).arrangement.tracks[2].note_clips[0].key;
+    // The start a beat and a half later: the notes stay where they are in the
+    // song, the two it passed before the clip, where they do not play.
+    song.edit(Edit::ClipTrim { clip, start: Some(5.5), end: None }, None).unwrap();
+    let u = update(&seen);
+    let c = &u.arrangement.tracks[2].note_clips[0];
+    assert_eq!((c.at, c.length_beats), (5.5, 2.5));
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 0), [
+        note("n1", 60, "-1.5", "2", 100), note("n2", 64, "-0.5", "1", 100), note("n3", 67, "5/6", "1/3", 100),
+    ]);
+    let listed = agent(&path, json!({"op": "notes", "path": "keys"}));
+    let flags: Vec<bool> = listed["clips"][0]["notes"].as_array().unwrap().iter().map(|n| n["outside"] == json!(true)).collect();
+    assert_eq!(flags, [true, true, false]);
+    // Back again: they are as they were.
+    song.edit(Edit::ClipTrim { clip, start: Some(4.0), end: Some(9.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.tracks[2].note_clips[0].at, u.arrangement.tracks[2].note_clips[0].length_beats), (4.0, 5.0));
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 0), [
+        note("n1", 60, "0", "2", 100), note("n2", 64, "1", "1", 100), note("n3", 67, "7/3", "1/3", 100),
+    ]);
+    assert!(song.edit(Edit::ClipTrim { clip, start: Some(9.0), end: None }, None).is_err());
+    song.close();
+}
+
+#[test]
+fn a_sample_on_a_midi_track_becomes_its_instrument_and_the_notes_stay() {
+    let (dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "batch", "label": "A phrase", "commands": [
+        {"op": "track.add", "id": "keys", "type": "midi"},
+        {"op": "clip.add", "track": "keys", "length_beats": 4, "notes": [{"pitch": 60, "duration": 1}, {"pitch": 67, "at": 1, "duration": 1}]},
+    ]}));
+    let u = update(&seen);
+    let track = u.arrangement.tracks[2].key;
+    let before = notes_of(&u.arrangement.tracks[2], 0);
+    std::fs::create_dir(dir.path().join("samples")).unwrap();
+    let tone: Vec<[f32; 2]> = (0..24_000).map(|i| [(i as f32 * 0.0575).sin() * 0.3; 2]).collect();
+    for name in ["piano", "organ"] {
+        std::fs::write(dir.path().join(format!("samples/{name}.wav")), float_wav_bytes(&tone, 48000)).unwrap();
+    }
+    let asset = |name: &str, root: Option<&str>| aaw_ffi::library::Asset {
+        sha256: aaw_model::digest(&dir.path().join(format!("samples/{name}.wav"))).unwrap(),
+        path: format!("samples/{name}.wav"),
+        source: format!("/library/{name}.wav"),
+        source_sha256: None,
+        root_note: root.map(String::from),
+    };
+    // A pitched sample attached: a sampler that plays it on every note.
+    song.edit(Edit::SampleAdd { asset: asset("piano", Some("C4")), name: "Piano".into(), track: Some(track), index: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Attach a sampler of piano to keys");
+    let keys = &u.arrangement.tracks[2];
+    assert_eq!((keys.instrument.as_deref(), keys.pads[0].name.as_str(), keys.pads[0].gate), (Some("sampler"), "piano", true));
+    assert_eq!(keys.map, [aaw_ffi::view::NoteMapView { low: 0, high: 127, pad: "piano".into(), pitched: true }]);
+    assert_eq!(notes_of(keys, 0), before);
+    // Another swaps it; one without a root note plays as it is on every note.
+    song.edit(Edit::SampleAdd { asset: asset("organ", None), name: "Organ".into(), track: Some(track), index: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Replace the instrument of keys with a sampler of organ");
+    let keys = &u.arrangement.tracks[2];
+    assert_eq!((keys.pads.len(), keys.pads[0].name.as_str()), (1, "organ"));
+    assert!(!keys.map[0].pitched);
+    assert_eq!(notes_of(keys, 0), before);
+    // And taken off: the notes are kept.
+    song.edit(Edit::InstrumentRemove { track }, None).unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.tracks[2].instrument.is_none() && u.arrangement.tracks[2].pads.is_empty());
+    assert_eq!(notes_of(&u.arrangement.tracks[2], 0), before);
+    song.undo().unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].pads[0].name, "organ");
     song.close();
 }

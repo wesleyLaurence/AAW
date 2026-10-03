@@ -64,7 +64,7 @@ project's folder or the song file in it. It implements:
 | `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
-| `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
+| `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
@@ -200,8 +200,12 @@ pattern's steps and events, names the tracks, clips, returns and sections a
 change touched, and turns the person's edits into commands (`edits.rs`),
 working out exact beats from the song for a clip moved by so many beats or
 copied after itself, and for an event moved by steps of its pattern's grid.
-A MIDI track is in the arrangement with its instrument's kind and its note
-clips, each with its notes. A track's audio clips are in the arrangement beside its pattern clips, each to
+A MIDI track is in the arrangement with its instrument's kind, its sampler's
+pads and map, and its note clips, each with its notes and their handles. The
+person's note edits work out exact beats from the piano roll's grid as typed,
+so a note added or moved on a grid of thirds is on its third; Copy takes clips
+or notes as they are, so that Paste works after the originals are gone. A
+sample added to a MIDI track becomes its instrument. A track's audio clips are in the arrangement beside its pattern clips, each to
 where it leaves and with how long it sounds after that, and so are the files
 they play (`files.rs`): each file's length, and the beats of the map `daw
 samples beats` left beside it, when that map is of the sample the song lists.
