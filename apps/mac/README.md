@@ -219,7 +219,7 @@ front first.
 | Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
 | Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with Option, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
 | Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with Option, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |
-| Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a sampler that plays the sample on every note, from its root note when it has one, in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
+| Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a sampler that plays the sample at every note's pitch, as it is at middle C (C4), in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
 | Drag a bar or type a value in the Audio Clip panel | Sets the clip's gain, fades, fade curve, tempo or stretch |
 
 The grid is the finest of bars, beats, eighths and sixteenths that the zoom has
@@ -379,9 +379,9 @@ do what Save As… does.
 - A note is not heard as it is drawn or clicked, and velocity is set in the
   fields beside the piano roll, not in a lane under it. The piano roll zooms
   across and not up and down.
-- A sample on a MIDI track's header makes a sampler of one pad on every note;
-  a kit of pads on notes is made with `daw instrument map`. A file dropped from
-  the Finder has no root note, so it plays as it is on every note.
+- A sample on a MIDI track's header makes a sampler of one pad on every note,
+  played as it is at middle C whatever its pitch; its root note is set with
+  `daw set`, and a kit of pads on notes is made with `daw instrument map`.
 - What Copy took is kept in the window, not on the system's clipboard, and is
   pasted into the same song.
 - A row of notes shows the notes its events play with two more either side; a

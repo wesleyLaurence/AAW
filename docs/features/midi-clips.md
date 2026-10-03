@@ -70,8 +70,8 @@ without one is saved as version 1, byte for byte as before.
 
 **The instrument** is null, which plays nothing, or a sampler of pads and a map
 from notes to pads. A map entry is a note or an inclusive range and a pad,
-pitched or not: a pitched entry repitches the pad from its sample's root note
-to the note, and one that is not plays the pad as it is, as a drum rack does.
+pitched or not: a pitched entry repitches the pad from its sample's root note,
+or from middle C when the sample has none (D66), to the note, and one that is not plays the pad as it is, as a drum rack does.
 Entries may not overlap, and a note no entry maps is silent. A pad is any
 pad's fields, so modes, envelopes, choke groups and stretching are the ones
 patterns use. The engine gives an instrument notes alone, a pitch, velocity,
@@ -101,7 +101,8 @@ The piano roll shows all 128 notes whatever the instrument, and adds, selects,
 moves, stretches, types and removes notes on its grid or, with Option, off it.
 Note clips are moved, trimmed at either edge and duplicated, and Copy, Cut and
 Paste take clips or notes as they are. A sample dropped on a MIDI track's header
-becomes its instrument, a sampler that plays it on every note. A MIDI file
+becomes its instrument, a sampler that plays it at every note's pitch, as it
+is at middle C (D66). A MIDI file
 dropped on the timeline is a note clip, and File › Export MIDI Clip… writes one.
 
 ## Standard MIDI files

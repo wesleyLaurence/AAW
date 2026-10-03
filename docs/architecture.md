@@ -182,8 +182,8 @@ starts before its clip, at a negative `at`, or at or after its end is kept and
 does not play: a clip trimmed from either edge keeps the notes it passes. `instrument` is
 null, which plays nothing, or `{sampler: {pads, map}}`: pads as below, and map
 entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
-not overlap; a pitched entry repitches its pad from its sample's root note to
-the note. The schedule gives a MIDI track's notes to its instrument as pitch,
+not overlap; a pitched entry repitches its pad from its sample's root note, or
+from middle C (C4, 60) when the sample has none, to the note. The schedule gives a MIDI track's notes to its instrument as pitch,
 velocity, start and note-off, and the sampler makes of them the hits a pattern
 event would make. A Standard MIDI file of one part is imported as a note clip
 and a note clip exported as one; the file is not kept or linked, and its tempo

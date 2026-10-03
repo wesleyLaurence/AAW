@@ -2002,21 +2002,23 @@ fn a_sample_on_a_midi_track_becomes_its_instrument_and_the_notes_stay() {
         source_sha256: None,
         root_note: root.map(String::from),
     };
-    // A pitched sample attached: a sampler that plays it on every note.
-    song.edit(Edit::SampleAdd { asset: asset("piano", Some("C4")), name: "Piano".into(), track: Some(track), index: 0 }, None).unwrap();
+    // A sample attached: a sampler that plays it at every note's pitch, as it
+    // is at middle C, whatever pitch it was measured at.
+    song.edit(Edit::SampleAdd { asset: asset("piano", Some("A3")), name: "Piano".into(), track: Some(track), index: 0 }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Attach a sampler of piano to keys");
     let keys = &u.arrangement.tracks[2];
-    assert_eq!((keys.instrument.as_deref(), keys.pads[0].name.as_str(), keys.pads[0].gate), (Some("sampler"), "piano", true));
+    assert_eq!((keys.instrument.as_deref(), keys.pads[0].name.as_str(), keys.pads[0].gate), (Some("sampler"), "piano", false));
+    assert_eq!(keys.pads[0].root, None);
     assert_eq!(keys.map, [aaw_ffi::view::NoteMapView { low: 0, high: 127, pad: "piano".into(), pitched: true }]);
     assert_eq!(notes_of(keys, 0), before);
-    // Another swaps it; one without a root note plays as it is on every note.
+    // Another swaps it, and is pitched too.
     song.edit(Edit::SampleAdd { asset: asset("organ", None), name: "Organ".into(), track: Some(track), index: 0 }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Replace the instrument of keys with a sampler of organ");
     let keys = &u.arrangement.tracks[2];
     assert_eq!((keys.pads.len(), keys.pads[0].name.as_str()), (1, "organ"));
-    assert!(!keys.map[0].pitched);
+    assert!(keys.map[0].pitched);
     assert_eq!(notes_of(keys, 0), before);
     // And taken off: the notes are kept.
     song.edit(Edit::InstrumentRemove { track }, None).unwrap();

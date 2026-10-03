@@ -114,6 +114,17 @@ fn a_gated_note_releases_at_its_note_off_or_its_clips_end_at_its_velocity() {
 }
 
 #[test]
+fn a_sample_with_no_root_note_plays_as_it_is_at_middle_c() {
+    let dir = tempfile::tempdir().unwrap();
+    write_audio(dir.path());
+    let song = midi_song("");
+    let unrooted = render(&compiled(dir.path(), &song.replace("tone: {path: tone.wav, root_note: A3}", "tone: {path: tone.wav}")));
+    let middle_c = render(&compiled(dir.path(), &song.replace("root_note: A3", "root_note: C4")));
+    assert!(unrooted.iter().any(|f| f[0].abs() > 0.1), "the phrase is silent");
+    assert_eq!(unrooted, middle_c);
+}
+
+#[test]
 fn without_an_instrument_the_track_is_silent_and_swapping_one_is_heard() {
     let dir = tempfile::tempdir().unwrap();
     write_audio(dir.path());

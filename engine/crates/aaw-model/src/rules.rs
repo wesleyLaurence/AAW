@@ -14,6 +14,10 @@ use std::sync::LazyLock;
 static NOTE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\A([A-Ga-g])([#b]?)(-?[0-9]+)\z").expect("note pattern"));
 
+/// Middle C, C4: the note a pitched map entry plays a sample as it is on when
+/// the sample has no root note.
+pub const MIDDLE_C: i64 = 60;
+
 /// A note name with octave, such as C2 or F#1, as a MIDI number.
 pub fn midi(note: &str) -> Result<i64, String> {
     let caps = NOTE
@@ -494,8 +498,8 @@ pub fn references(p: &Project) -> Result<(), String> {
     Ok(())
 }
 
-/// A sampler's pads name samples, its map names its pads, a note plays one
-/// pad at most, and a pad played at the notes' pitches has a root note.
+/// A sampler's pads name samples, its map names its pads, and a note plays one
+/// pad at most.
 fn sampler_references(p: &Project, track: &str, sampler: &crate::schema::Sampler) -> Result<(), String> {
     for pad in sampler.pads.values() {
         if !p.samples.contains_key(&pad.sample) {
@@ -514,9 +518,6 @@ fn sampler_references(p: &Project, track: &str, sampler: &crate::schema::Sampler
                 other.pad,
                 m.pad
             ));
-        }
-        if m.pitched && p.samples[&pad.sample].root_note.as_deref().is_none_or(str::is_empty) {
-            return Err(format!("{} needs root_note for a pitched map entry", pad.sample));
         }
     }
     Ok(())

@@ -197,7 +197,6 @@ fn what_a_sampler_cannot_map() {
     let cases = [
         (SAMPLED.replace("{notes: C2, pad: kick}", "{notes: 60, pad: kick}"), "note 60 (C4) is mapped to both piano and kick"),
         (SAMPLED.replace("{notes: C2, pad: kick}", "{notes: C2, pad: snare}"), "the map names unknown pad snare"),
-        (SAMPLED.replace("{notes: C2, pad: kick}", "{notes: C2, pad: kick, pitched: true}"), "kick needs root_note for a pitched map entry"),
         (SAMPLED.replace("[48, 72]", "[72, 48]"), "from the lower to the higher"),
         (SAMPLED.replace("{sample: kick}", "{sample: snare}"), "keys: unknown sample snare"),
     ];

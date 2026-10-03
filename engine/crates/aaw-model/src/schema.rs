@@ -922,7 +922,7 @@ pub struct NoteMap {
     pub range: bool,
     pub pad: String,
     /// Whether the pad plays at the note's pitch, repitched from its sample's
-    /// root note, rather than as it is.
+    /// root note, or from middle C when it has none, rather than as it is.
     pub pitched: bool,
 }
 
