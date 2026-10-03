@@ -181,7 +181,7 @@ fn the_arrangement_is_what_the_app_draws() {
 #[test]
 fn each_change_names_what_it_touched() {
     let (_dir, path, song, seen) = open();
-    assert_eq!(transport(&seen), TransportView { playing: false, cue: 0.0, loop_region: None });
+    assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 0.0, loop_region: None });
     let start = song.arrangement();
     let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
     let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
@@ -267,7 +267,7 @@ fn the_app_and_the_agent_share_the_transport() {
     let (_dir, path, song, seen) = open();
     assert_eq!(transport(&seen).cue, 0.0);
     song.locate(12.0).unwrap();
-    assert_eq!(transport(&seen), TransportView { playing: false, cue: 12.0, loop_region: None });
+    assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 12.0, loop_region: None });
     song.set_loop(8.0, 8.0).unwrap();
     assert_eq!(transport(&seen).loop_region.map(|l| (l.start, l.length)), Some((8.0, 8.0)));
     // The agent's transport commands show in the app.
@@ -2087,5 +2087,25 @@ fn tempo_edits_are_saved_validated_and_undoable() {
     assert_eq!(song.arrangement().tempo, 120.0);
     song.redo().unwrap();
     assert_eq!(song.arrangement().tempo, 137.5);
+    song.close();
+}
+
+#[test]
+fn metronome_is_shared_transport_state_without_a_song_edit() {
+    let (_dir, path, song, seen) = open();
+    assert!(!transport(&seen).metronome);
+    let original = std::fs::read(&path).unwrap();
+    let revision = song.arrangement().revision;
+    song.set_metronome(true).unwrap();
+    let state = transport(&seen);
+    assert!(state.metronome);
+    assert!(!state.playing);
+    assert_eq!(agent(&path, json!({"op": "status"}))["metronome"], true);
+    song.locate(4.0).unwrap();
+    assert!(transport(&seen).metronome);
+    agent(&path, json!({"op": "metronome", "enabled": false}));
+    assert!(!transport(&seen).metronome);
+    assert_eq!(song.arrangement().revision, revision);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
     song.close();
 }

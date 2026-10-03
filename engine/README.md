@@ -190,6 +190,15 @@ log, handles and the transport need a host.
   been silent for a second. The audio thread never allocates, locks or blocks;
   replaced programs return to the host to be freed.
 
+The host also accepts `{"op":"metronome","enabled":true}` (or false), sent by
+`Song.set_metronome` from the app. `daw status` and transport observer updates
+report `metronome`. This is per-open-project monitoring state, initially off:
+it changes neither revision nor undo history. The real-time player synthesizes
+the click from absolute quarter-note positions at the program's current BPM,
+aligned with its output latency, after the song's master processing. The click
+works with an empty song, follows stop, locate and loop, and is never rendered
+into the mix or stems. There is no separate CLI metronome subcommand.
+
 A process can embed a host instead of running `daw host`: `host::spawn` runs one
 on its own thread and calls an observer with the opened song, each change with
 the song after it, each revision's program once it is compiled, transport

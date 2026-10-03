@@ -44,6 +44,7 @@ kept.
 
 ## Verify
 
+- **Metronome by hand and ear:** toggle it on an empty song, change BPM while playing, loop, and listen for alignment and a comfortable click level. Engine timing tests and scripted UI input do not replace listening.
 - **Manual BPM by hand and ear:** type a tempo while playing, undo it, and hear the new tempo. Scripted input and engine tests cover validation and undo.
 
 Merged, and never heard or tried by a person. Each wants a short session at the
@@ -280,4 +281,4 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 One line each, newest first.
 
-- **A metronome toggle in the transport bar** that clicks at the session BPM during playback.
+No pending ideas.

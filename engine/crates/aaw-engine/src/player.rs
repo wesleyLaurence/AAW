@@ -47,6 +47,7 @@ pub enum Message {
     Program(Box<Deck>),
     Play(usize),
     Stop,
+    Metronome(bool),
     Locate(usize),
     /// Start and end frames; playback reaching the end jumps to the start.
     Loop(Option<(usize, usize)>),
@@ -83,6 +84,9 @@ pub struct Shared {
 pub struct Player {
     deck: Box<Deck>,
     playing: bool,
+    metronome: bool,
+    click_gain: f64,
+    click_position: i64,
     fade: Fade,
     pending: Option<Box<Deck>>,
     region: Option<(usize, usize)>,
@@ -113,6 +117,9 @@ pub fn channel(program: Arc<Program>) -> (Control, Player) {
         fade_len: deck.renderer.fade(),
         deck,
         playing: false,
+        metronome: false,
+        click_gain: 0.0,
+        click_position: 0,
         fade: Fade::None,
         pending: None,
         region: None,
@@ -156,6 +163,11 @@ impl Control {
 
     pub fn locate(&mut self, to: usize) -> Result<(), String> {
         self.send(Message::Locate(to))
+    }
+
+    /// A monitoring click, mixed only by the real-time player.
+    pub fn set_metronome(&mut self, enabled: bool) -> Result<(), String> {
+        self.send(Message::Metronome(enabled))
     }
 
     pub fn set_loop(&mut self, region: Option<(usize, usize)>) -> Result<(), String> {
@@ -277,6 +289,7 @@ impl Player {
                 }
             }
             Message::Loop(region) => self.region = region,
+            Message::Metronome(enabled) => self.metronome = enabled,
         }
     }
 
@@ -351,6 +364,7 @@ impl Player {
             out.fill([0.0; 2]);
             return;
         }
+        let heard = self.deck.renderer.heard();
         let old = match &mut self.fade {
             Fade::Cross { old, .. } => Some(&mut old.renderer),
             _ => None,
@@ -378,9 +392,27 @@ impl Player {
                 *left = left.saturating_sub(n);
             }
         }
-        if self.playing {
-            return;
+        // Monitor after all song processing, at the timeline heard from the
+        // renderer (including its latency). No click reaches offline exports.
+        if self.playing || self.click_gain > 0.0 {
+            let p = self.deck.renderer.program();
+            let target = if self.metronome && self.playing { 1.0 } else { 0.0 };
+            let click_start = if self.playing { heard } else { self.click_position };
+            let step = 1.0 / self.fade_len.max(1) as f64;
+            if target > 0.0 || self.click_gain > 0.0 {
+                for (k, frame) in out.iter_mut().enumerate() {
+                    self.click_gain += (target - self.click_gain).clamp(-step, step);
+                    let at = click_start + k as i64;
+                    if at >= 0 && at < p.total as i64 {
+                        let click = metronome_sample(at as usize, p.rate, p.tempo) * self.click_gain;
+                        frame[0] += click;
+                        frame[1] += click;
+                    }
+                }
+            }
+            self.click_position = click_start + n as i64;
         }
+        if self.playing { return; }
         // Stopped: once the tails have died away, the stream rests.
         if out.iter().all(|f| f[0].abs() < QUIET && f[1].abs() < QUIET) {
             self.quiet += n;
@@ -392,4 +424,17 @@ impl Player {
             self.quiet = 0;
         }
     }
+}
+
+/// Derive each onset from its absolute beat, so rounded periods never drift.
+/// A short attack and decay soften the monitoring click; the higher tone marks each 4/4 downbeat.
+fn metronome_sample(frame: usize, rate: u32, tempo: f64) -> f64 {
+    let period = rate as f64 * 60.0 / tempo;
+    let beat = ((frame as f64 + 0.5) / period).floor();
+    let onset = (beat * period).round() as usize;
+    let t = frame.saturating_sub(onset) as f64 / rate as f64;
+    if t >= 0.025 { return 0.0; }
+    let hz = if beat as u64 % 4 == 0 { 1760.0 } else { 1320.0 };
+    let envelope = (t / 0.001).min(1.0) * (1.0 - t / 0.025).powi(3);
+    0.16 * envelope * (std::f64::consts::TAU * hz * t).sin()
 }

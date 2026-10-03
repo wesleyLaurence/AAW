@@ -255,6 +255,7 @@ fn an_embedded_host_reports_what_changes() {
     assert_eq!(doc.project.tracks.len(), 2);
     let stopped = |cue: f64, region| {
         Event::Transport(TransportState {
+            metronome: false,
             playing: false,
             cue,
             region,

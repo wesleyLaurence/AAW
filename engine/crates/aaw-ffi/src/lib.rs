@@ -128,6 +128,7 @@ pub struct Update {
 /// The transport, in beats.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct TransportView {
+    pub metronome: bool,
     pub playing: bool,
     /// Where play starts.
     pub cue: f64,
@@ -242,6 +243,7 @@ impl Song {
                 }
             }
             Event::Transport(t) => observer.transport(TransportView {
+                metronome: t.metronome,
                 playing: t.playing,
                 cue: t.cue,
                 loop_region: t.region.map(|(start, length)| LoopRegion { start, length }),
@@ -379,6 +381,11 @@ impl Song {
     /// Plays from a beat, or from the start position.
     pub fn play(&self, from: Option<f64>) -> Result<(), SongError> {
         self.transport(json!({"op": "play", "from": from}))
+    }
+
+    /// Toggles the playback monitor click without editing the song.
+    pub fn set_metronome(&self, enabled: bool) -> Result<(), SongError> {
+        self.transport(json!({"op": "metronome", "enabled": enabled}))
     }
 
     pub fn stop(&self) -> Result<(), SongError> {

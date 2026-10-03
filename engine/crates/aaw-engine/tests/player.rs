@@ -465,3 +465,79 @@ fn a_stopped_stream_rests_once_it_is_silent() {
     control.play(0).unwrap();
     assert!(peak(&pull(&mut player, 24000)) > 0.05);
 }
+
+fn empty_metronome_song(dir: &Path, tempo: f64, rate: u32, limiter: bool) -> Arc<Program> {
+    let path = dir.join("click.yaml");
+    let effect = if limiter { "master: {effects: [{type: limiter, lookahead_ms: 5}]}" } else { "" };
+    std::fs::write(&path, format!(
+        "session: {{tempo: {tempo}, sample_rate: {rate}, length_beats: 32}}\n{effect}\n"
+    )).unwrap();
+    program(&path, |_| {})
+}
+
+#[test]
+fn metronome_has_exact_beats_and_never_changes_offline_audio() {
+    for rate in [44100, 48000] {
+        let dir = tempfile::tempdir().unwrap();
+        let p = empty_metronome_song(dir.path(), 137.5, rate, true);
+        let period = rate as f64 * 60.0 / 137.5;
+        let n = (period * 8.0).round() as usize + p.latency;
+        let (mut control, mut player) = started(&p, 0);
+        assert_eq!(peak(&plain(&p, 0, n)), 0.0);
+        assert_eq!(peak(&pull(&mut player, 1000)), 0.0, "off by default");
+        control.locate(0).unwrap();
+        control.set_metronome(true).unwrap();
+        let out = pull(&mut player, n);
+        assert_eq!(peak(&out[..p.latency]), 0.0, "click follows output latency");
+        for beat in 0..8 {
+            let onset = (period * beat as f64).round() as usize + p.latency;
+            assert_eq!(out[onset], [0.0; 2]);
+            assert!(peak(&out[onset + 1..onset + 800]) > 0.02);
+            let silent = onset + (rate as f64 * 0.025).ceil() as usize;
+            let next = (period * (beat + 1) as f64).round() as usize + p.latency;
+            assert_eq!(peak(&out[silent..next]), 0.0, "silence between beats");
+        }
+        let (mut other, mut partitioned) = started(&p, 0);
+        other.set_metronome(true).unwrap();
+        let mut blocks = vec![[0.0; 2]; n];
+        assert_no_alloc::assert_no_alloc(|| {
+            for chunk in blocks.chunks_mut(997) { partitioned.render(chunk); }
+        });
+        assert_eq!(out, blocks, "callback sizes cannot change the click");
+        assert_eq!(peak(&plain(&p, 0, n)), 0.0, "monitoring does not enter render or stems");
+        control.set_metronome(false).unwrap();
+        pull(&mut player, 1000);
+        assert_eq!(peak(&pull(&mut player, rate as usize)), 0.0);
+    }
+}
+
+#[test]
+fn metronome_follows_loops_locate_stop_and_tempo_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = empty_metronome_song(dir.path(), 120.0, 48000, false);
+    let (mut control, mut player) = started(&p, 0);
+    control.set_metronome(true).unwrap();
+    control.set_loop(Some((24000, 72000))).unwrap();
+    let out = pull(&mut player, 72000 + 2 * 48000);
+    assert_eq!(&out[24000..72000], &out[72000..120000]);
+    assert_eq!(&out[72000..120000], &out[120000..168000]);
+    control.set_loop(None).unwrap();
+    control.locate(12000).unwrap();
+    assert_eq!(peak(&pull(&mut player, 12000)), 0.0, "off-beat locate waits for next beat");
+    assert!(peak(&pull(&mut player, 1000)) > 0.02);
+    control.stop().unwrap();
+    pull(&mut player, 1000);
+    assert_eq!(peak(&pull(&mut player, 24000)), 0.0);
+    control.play(24000).unwrap();
+    assert!(peak(&pull(&mut player, 24000)) > 0.02);
+    let slower = empty_metronome_song(dir.path(), 96.0, 48000, false);
+    control.load(slower).unwrap();
+    let changed = pull(&mut player, 60000);
+    assert!(peak(&changed[..1000]) > 0.02, "the same beat after a tempo edit");
+    assert_eq!(peak(&changed[1200..30000]), 0.0);
+    assert!(peak(&changed[30000..31000]) > 0.02, "96 BPM is 30000 frames a beat");
+    control.locate(p.total - 100).unwrap();
+    pull(&mut player, 300000);
+    assert!(!player.playing());
+    assert_eq!(peak(&pull(&mut player, 1000)), 0.0, "silent after song end");
+}

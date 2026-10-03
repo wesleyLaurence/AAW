@@ -295,3 +295,12 @@ The feature file asked for performance data to be reported or refused before an 
 
 **D66. A sample dropped on a MIDI track plays at every note's pitch, as it is at middle C.**
 Chosen by the person on October 3, 2026, after dropping a metal percussion hit on a MIDI track and hearing it the same on every note. D64 made the sampler pitched only when the sample had a root note, and the browser leaves out the measured pitch of a drum, an effect or a loop, while a file from the Finder is never measured, so most hits played as they are. The person's expectation is Ableton's Simpler: whatever the sample is, a single note or not, it plays as it is at middle C and higher or lower on the keys around it. So a sample dropped on a MIDI track's header, or added to one with +, becomes a sampler with one pitched entry for every note, and a sample new to the song comes in with no root note, its measured pitch not taken. A pitched map entry whose sample has no root note repitches from middle C, C4 or MIDI 60, in place of being refused, so nothing has to write a root note the audio disagrees with and `daw check` stays quiet; a sample the song already gives a root note keeps it. The pad plays to the end of its sample, as the hit the person approved did, rather than stopping at the note-off. A pattern's pitched event still needs a root note. Setting the root note and the mode in a sampler's panel belongs to the Sampler device on the backlog.
+
+**D67. The metronome is a playback monitor, outside the song and its effects.**
+Implemented October 3, 2026, for the requested transport-bar toggle. The host
+owns the enabled state for each open project, initially off, and the audio
+player adds the click at the audible beat after the song's processing. This
+keeps it in time without a UI timer, lets an empty project click, and prevents
+master effects, faders, renders or stems from changing or capturing the timing
+reference. The setting survives live song edits and transport commands but
+is not saved or added to undo. See [metronome](features/metronome.md).
