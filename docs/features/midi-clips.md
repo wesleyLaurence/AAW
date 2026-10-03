@@ -1,9 +1,10 @@
 # MIDI tracks and note clips — proposed October 3, 2026
 
-Status: proposed, not built. Backlog item 1. Product requirements are in
-[concept.md](../concept.md#sound); decisions D60 and D61 record the reasons.
-This is the handoff for the next build session. Field names below illustrate
-the intended model; they are not accepted by the current schema.
+Status: proposed, not built. Backlog items 1, 2 and 3, one branch and pull
+request each, in that order. Product requirements are in
+[concept.md](../concept.md#sound); decisions D60, D61 and D62 record the
+reasons. Field and command names below illustrate the intended model; they are
+not accepted by the current schema.
 
 ## What
 
@@ -14,11 +15,22 @@ agent reads and edits those same objects. Attaching, removing or replacing a
 sampler changes the sound without changing the notes. The instrument boundary
 also accommodates software instruments built later.
 
-The first build includes the Rust model, host commands, playback through the
-existing sampler, the Mac editor, and basic standard MIDI file import/export.
-It does not build a synthesizer, plugin hosting, MIDI keyboard recording, MIDI
-effects, controller/expression editing, MPE, a chord language or a theory engine.
-Those are separate backlog items. Explicit enharmonic spelling is deferred.
+The work is three items, each useful on its own:
+
+1. **Note clips in the song and the commands.** The Rust model, the schema,
+   the sampler as a note instrument, host commands, inspection, playback and
+   render. The agent can program parts from here; the app shows MIDI tracks
+   and their clips but does not edit them.
+2. **Note clips in the app.** The piano roll, clip placement, copy and paste,
+   and attaching and swapping the instrument.
+3. **Standard MIDI files.** Notes-only import and export in the CLI and the
+   app, and a `.mid` dropped on the timeline.
+
+None of them builds a synthesizer, plugin hosting, MIDI keyboard recording,
+MIDI effects, controller/expression editing, MPE, a chord language or a theory
+engine. Those are separate backlog items. Explicit enharmonic spelling is
+deferred (D61). Converting existing pattern clips into note clips is a Later
+item (D62).
 
 ## Why
 
@@ -27,10 +39,11 @@ from the instrument, freely timed and independently editable after a copy.
 The agent needs exactly that freedom, with readable data and precise commands.
 
 Today an event requires a pad on the receiving track; a pitched event requires
-that pad's sample to have a root note. Duplicating a clip keeps its pattern
-reference, and Own Copy is a separate action. Notes therefore cannot be
-programmed on an instrumentless track as required, and ordinary duplication
-does not have the required independence. MIDI file interchange is not built.
+that pad's sample to have a root note. Patterns live in the project and a clip
+refers to one by name, so duplicating a clip shares its pattern until Own Copy
+is pressed. Notes therefore cannot be programmed on an instrumentless track as
+required, and ordinary duplication does not have the required independence.
+MIDI file interchange is not built.
 
 This comes before packaging and the agent panel because it establishes the
 musical objects those clients and future instruments will use. It can be built
@@ -46,11 +59,18 @@ Velocity is 1–127, duration is positive, and positions and durations use the
 existing exact quarter-note beat representation. Preserve fractions and
 off-grid decimals. The grid is an editing aid, not a storage constraint.
 
-Each MIDI clip and note has a persistent ID. IDs survive saving, reopening,
-moving and editing; independent copies receive new clip and note IDs. Display
-names, if present, are separate from identity. The first-round agent view uses
-numeric pitches. The piano roll may derive note labels using a documented
-octave convention; there is no stored spelling, key or scale requirement.
+**A clip owns its notes.** Notes are written inside the clip, not in a
+project-level list the clip refers to as patterns are. Copying a clip copies
+its notes, so a copy is independent with no further step, and nothing about
+sharing can leak into it. Linked copies and a clip defined by its relation to
+another stay in Later.
+
+Each MIDI clip and note has a persistent ID that the host assigns. A clip's ID
+is unique in the project and a note's is unique in its clip; the agent and the
+app never have to make one up, and a command that creates a clip or notes
+replies with their IDs. IDs survive saving, reopening, moving and editing;
+copies receive new clip and note IDs. Display names, if present, are separate
+from identity.
 
 An illustrative document fragment:
 
@@ -77,6 +97,17 @@ its relative note positions alone. A single-note octave shift adds 12 to pitch;
 an edit outside the supported pitch range is refused rather than silently
 clamped. Off-grid timing changes are equally explicit.
 
+**A MIDI track holds note clips and nothing else of a clip's kind.** It has an
+instrument, note clips, effects, sends and automation; it has no track-level
+pads, pattern clips or audio clips. A legacy track is unchanged. Keeping the
+two apart means neither the schema nor the app has to say what a pattern clip
+on a MIDI track would play.
+
+**Schema version 2** adds MIDI tracks. A song with no MIDI track still saves as
+version 1, byte for byte as today, so no existing project is rewritten by
+opening it. A song with one saves as version 2, which an older `daw` refuses
+with a clear error rather than misreading.
+
 The Rust model owns the data, the host owns the open revision, and the project
 document saves it, currently in `song.yaml`. JSON inspection is a view of that
 same state. A `.mid` file is an import/export artifact, not a second live source
@@ -88,33 +119,90 @@ An absent instrument is a valid state: notes can be created, saved, copied,
 inspected and exported, and playback produces no instrument audio on that track.
 The editor must show the full usable pitch range without a sample or root note.
 
-Adapt the existing sampler behind a note-capable instrument boundary. The
-instrument owns sample selection, root pitch, envelopes and velocity response;
-the notes own musical pitch, timing and dynamics. Attaching, removing or
-switching a sampler configuration preserves the notes exactly. Use two sampler
-configurations to demonstrate replacement without building a synth in this item.
+The instrument is one value on the track, and replacing it is one edit. The
+first kind is a sampler that maps notes to pads:
+
+```yaml
+  - id: keys
+    type: midi
+    instrument:
+      sampler:
+        pads:
+          piano: {sample: piano_c4, mode: gate, release_ms: 300}
+        map:
+          - {notes: [0, 127], pad: piano, pitched: true}
+    clips: [...]
+  - id: drums
+    type: midi
+    instrument:
+      sampler:
+        pads:
+          kick: {sample: kick_01}
+          snare: {sample: snare_03, choke_group: snare}
+        map:
+          - {notes: 36, pad: kick}
+          - {notes: 38, pad: snare}
+    clips: [...]
+```
+
+A pad keeps today's fields, so modes, envelopes, gain, pan, choke groups and
+stretching are reused rather than redesigned. A map entry names a note or an
+inclusive range of notes and the pad it plays. A pitched entry plays its pad
+repitched by the note's distance from the sample's `root_note`, which must be
+known; an unpitched entry plays the pad as it is, whatever the note. Entries
+may not overlap. A note no entry maps is silent, and `daw check` says which
+notes in which clips fell outside the map. This is a drum rack and a
+multisample in one shape, and it is what gives a drum note number a sound.
+
+The instrument owns sample selection, root pitch, envelopes and velocity
+response; the notes own musical pitch, timing and dynamics. Attaching, removing
+or switching a sampler configuration preserves the notes exactly. Use two
+sampler configurations to demonstrate replacement without building a synth.
+
+In the engine, an instrument receives notes and nothing about pads: a note's
+pitch, velocity, start frame and end frame, each with a voice handle. The
+sampler turns that into the voices it plays today. A future synth is another
+value under `instrument` (`synth: {...}`) that receives the same notes and
+adopts no sample-pad fields. Device state stays out of the song's note objects.
 
 Keep existing sampler limits explicit: note-off starts release, and a sample
 without a sustain loop can end before the requested note duration. Velocity
-controls the instrument's response and is not a per-note dB value. Future synths
-must be able to accept the same note data without adopting sample-pad fields.
-Reuse the playback/render engine and keep device state out of the song's note
-objects.
+controls the instrument's response and is not a per-note dB value.
+
+### Relation to patterns
+
+Note clips are where pitched and rhythmic material is headed; pattern clips
+and step rows are the format of songs made before them (D62). Items 1–3 leave
+pattern clips, their events, step rows and Own Copy working and sounding as
+they do, on legacy tracks, and add nothing to them. A later item converts a
+legacy track into a MIDI track: its pads become the sampler's pads, a pitched
+pad gets a pitched range, an unpitched pad gets a note of its own, and each
+pattern clip becomes a note clip that owns a copy of its pattern's events. It
+must preserve the sound exactly, against generated fixtures, and is only run
+when asked.
 
 ### Editing and the agent
 
-The app provides track/clip creation, a piano roll, note creation and deletion,
-pitch/start/duration/velocity edits, off-grid movement, clip placement and
-copy/paste or duplication with independent content. Ordinary MIDI clip copies
-must not require an Own Copy step. Internal sharing must not change that
-behavior. Linked copies and relational variations are not required here.
+Item 1 gives the CLI reads and edits over the existing host, beside today's
+`clip` and `pattern event` groups: MIDI track creation, instrument attach,
+replace and remove, clip create, move, resize, duplicate and remove, and note
+add (in bulk), edit, move, transpose and remove. Inspection returns numeric
+note fields and stable IDs, scoped to a clip or beat range; the agent must not
+need to read the whole project for one note edit. A duplicate returns the new
+clip's ID and its notes' IDs. A named batch can duplicate and vary a phrase as
+one undo step.
 
-The CLI exposes corresponding reads and edits over the existing host, including
-instrument attachment/removal, bulk note creation and transposition. Inspection
-returns numeric note fields and stable IDs, scoped to a clip or beat range;
-the agent must not need to read the whole project for one note edit. A duplicate
-command returns the new clip identity and enough information to address its
-notes. A named batch can duplicate and vary a phrase as one undo step.
+Commands also accept a note name for a pitch, as events do today (`C4` is 60,
+the convention `rules::midi` already uses), and store the number. Inspection
+gives each note's derived name beside its number. Nothing stores the name; it
+is there because an agent writing `pitch: 48` for middle C is an easy mistake
+and `C3` beside it makes the mistake visible.
+
+Item 2 gives the app track and clip creation, a piano roll, note creation and
+deletion, pitch/start/duration/velocity edits, off-grid movement, clip
+placement and copy/paste or duplication with independent content. The piano
+roll reuses `PatternEditor` and `PatternLayout` where they fit; it shows the
+full pitch range whatever the instrument, and labels rows with derived names.
 
 Edits from both clients use the existing validation, revision/precondition,
 origin, change-log and undo mechanisms. A stale edit fails rather than changing
@@ -124,15 +212,16 @@ bypasses the host.
 
 ### Standard MIDI files
 
-Provide a documented notes-only subset of Standard MIDI File import/export in
-the CLI and app, including an instrumentless import and export of a selected
-clip. Type 0 and type 1 note sequences are the initial target. Parse delta ticks
-to absolute musical positions, pair note-on/off events (including note-on with
-zero velocity), and export ordered messages from the editable notes.
+Item 3 provides a documented notes-only subset of Standard MIDI File
+import/export in the CLI and app, including an instrumentless import and export
+of a selected clip. Type 0 and type 1 note sequences are the initial target.
+Parse delta ticks to absolute musical positions, pair note-on/off events
+(including note-on with zero velocity), and export ordered messages from the
+editable notes.
 
 A `.mid` dropped on the timeline creates MIDI note clips, including on a new
 instrumentless track when necessary. It does not require assigning a sample
-first. Preserve drum note numbers; sound assignment is the instrument's job.
+first. Preserve drum note numbers; the sampler's map gives them sounds.
 
 Preserve supported pitches, starts, durations and velocities. Select sufficient
 tick resolution and report timing rounding when exact export is impossible.
@@ -144,68 +233,84 @@ Do not silently discard performance data that the first model cannot represent:
 pedal/controllers, pitch bend, expression, tempo maps and other unsupported
 cases must produce a specific report or refusal before committing an import.
 An explicit notes-only conversion may be offered, with the losses reported.
-Standard MIDI does not preserve AAW note IDs, instrument patches or independent
-copy relationships; project save/reopen does. The implementation must state its
+Standard MIDI does not preserve AAW note IDs, instrument settings or copy
+relationships; project save/reopen does. The implementation must state its
 supported subset rather than claim general lossless MIDI round trips.
 
-### Existing projects and build scope
+### Existing projects and code
 
-Keep existing sample-pad patterns, audio clips and their sound working. Choose
-and document schema versioning and compatibility before editing the model;
-do not silently reinterpret old shared patterns as independent ones or rewrite
-personal projects to test the migration. Any conversion must preserve their
-musical behavior and have generated fixtures. Existing render reports and
-legacy fingerprints must remain verifiable under the established contract.
+Existing render reports and legacy fingerprints must remain verifiable under
+the established contract; a version 1 song's fingerprint does not change.
 
 The relevant code is `aaw-model/src/schema.rs`, `rules.rs` and `schedule.rs`;
 `aaw-host/src/command.rs`, `session.rs` and `tree.rs`;
 `aaw-engine/src/program.rs`; `aaw-ffi/src/view.rs` and `edits.rs`; and the Mac
 `SongModel`, `PatternEditor` and `PatternLayout`. Reuse these layers rather than
 creating a parallel sequencer. Published schema, `daw describe`, architecture
-and the engine/app READMEs must be updated with implementation.
+and the engine/app READMEs are updated with each item.
 
 ## Done when
 
-1. In a scratch app project, create an instrumentless MIDI track and a clip,
-   draw a chord and melody, save and reopen, and recover the same notes and IDs.
-2. Edit pitch, duration and velocity individually. At 120 BPM, place notes at
-   1.975 and 2.025 beats to demonstrate positions 12.5 ms ahead of and behind beat
-   2. Triplets retain exact fractional positions. No operation silently snaps.
-3. Copy/paste or duplicate the clip elsewhere, change the copy's timing, pitch
-   and velocity, and verify the original's content remains identical. Verify
-   independent copies and their IDs again after reopening and undo/redo.
-4. Attach a sampler, hear the phrase, switch to another sampler configuration,
-   and remove the instrument. Its notes remain identical throughout. Test chords
-   and overlapping notes, duration/release and velocity response with generated
-   audio. Compare playback and render through the existing engine checks.
-5. The agent performs the same actions through commands, reads a single clip's
-   numeric notes, and duplicates/transposes/varies it in a labeled batch. The
-   app updates, undo restores it, and a stale expected revision is refused.
-6. Export and reimport a generated notes-only MIDI clip; compare pitches,
-   velocities, starts and durations within the declared tick precision. Test
-   simultaneous notes, triplets, microtiming, both note-off encodings and the
-   supported file types. Unsupported performance data is reported explicitly.
-7. Existing generated legacy songs still load and render correctly. Test schema
-   compatibility, identity, command operations and timing meaningfully. Run
-   `cargo test` in `engine/`, then `uv run pytest -q`, and `./build.sh test` in
-   `apps/mac/` after Swift changes. Use `AAW_DATA_DIR` for app verification.
-8. A person tries the creation, note edits, independent copy and instrument
-   replacement workflow by hand and ear. Record what was tried; anything not
-   tried belongs under Verify rather than being claimed as heard.
+### Item 1: note clips in the song and the commands
 
-Build this item on one branch and PR. On completion, rewrite this file as the
-built reference, move the backlog item to completed with the date/PR/verification,
-and renumber Next, following AGENTS.md.
+1. With commands alone, create an instrumentless MIDI track and a clip, add a
+   chord and a melody, save and reopen, and recover the same notes and IDs.
+   The app shows the track and its clips.
+2. Edit pitch, duration and velocity individually. At 120 BPM, place notes at
+   1.975 and 2.025 beats to demonstrate positions 12.5 ms ahead of and behind
+   beat 2. Triplets retain exact fractional positions. No operation silently
+   snaps. A pitch given as a name is stored as its number.
+3. Duplicate the clip, change the copy's timing, pitch and velocity, and verify
+   the original's content remains identical, again after reopening and after
+   undo/redo.
+4. Attach a pitched sampler, render the phrase, replace it with a second
+   sampler configuration, then remove the instrument; the notes remain
+   identical throughout. A drum sampler plays mapped notes and `daw check`
+   names unmapped ones. Chords, overlapping and repeated notes, duration and
+   release, and velocity response are tested with generated audio, and
+   playback and render agree through the existing engine checks.
+5. The agent reads a single clip's numeric notes, and duplicates, transposes
+   and varies it in a labeled batch while the app is open. The app updates,
+   undo restores it, and a stale expected revision is refused.
+6. Generated version 1 songs load, render and fingerprint as before and save
+   unchanged. `cargo test` in `engine/`, then `uv run pytest -q`, and
+   `./build.sh test` in `apps/mac/` pass.
+
+### Item 2: note clips in the app
+
+1. In a scratch app project (`AAW_DATA_DIR` set), create an instrumentless MIDI
+   track and a clip, draw a chord and melody, and edit pitch, start, duration
+   and velocity of single notes, on and off the grid.
+2. Copy/paste or duplicate the clip, change the copy, and the original is
+   unchanged, after reopening and undo/redo too.
+3. Attach, swap and remove a sampler from the app; the notes do not change.
+4. A person tries creation, note edits, an independent copy and instrument
+   replacement by hand and ear. Anything not tried goes under Verify.
+
+### Item 3: Standard MIDI files
+
+1. Export and reimport a generated notes-only clip; pitches, velocities,
+   starts and durations match within the declared tick precision. Simultaneous
+   notes, triplets, microtiming, both note-off encodings and type 0 and type 1
+   files are tested.
+2. Unsupported performance data is reported explicitly before anything is
+   committed, and a notes-only conversion reports what it dropped.
+3. A `.mid` dropped on the timeline in the app makes note clips, on a new
+   instrumentless track where there is none. Drum note numbers are kept.
+
+On completing each item, move its backlog line to completed with the
+date/PR/verification and renumber Next, following AGENTS.md. After item 3,
+rewrite this file as the built reference.
 
 ## Open questions
 
-These are implementation choices to settle at the start of the build, without
-reopening the requirements above:
+These are implementation choices to settle at the start of the item they
+belong to, without reopening the requirements above:
 
-- The exact versioned schema: inline owned notes versus referenced content with
-  independent-copy semantics; coexistence with legacy mixed tracks and patterns.
-- Clip-edge behavior: note tails beyond a clip, a note dragged before its first
-  beat, loop boundaries and clip resizing. Document and test the chosen behavior;
-  no silent quantization or loss of a moved note.
-- MIDI channel/track mapping and the exact unsupported-message policy, including
-  ambiguous overlapping note-on/off pairs for the same pitch/channel.
+- Item 1: clip-edge behavior — note tails beyond a clip, a note moved before
+  its clip's start, and resizing a clip over its notes. Document and test the
+  chosen behavior; no silent quantization or loss of a moved note.
+- Item 1: whether a note clip repeats (the `repeats` of a pattern clip) or that
+  waits for clips that loop, which is in Later for audio clips too.
+- Item 3: MIDI channel/track mapping and the exact unsupported-message policy,
+  including ambiguous overlapping note-on/off pairs for the same pitch/channel.

@@ -350,7 +350,9 @@ address that stays valid as other edits land, and every error says how to fix it
   reads and edits the same notes through the shared command interface (D60).
   The first version stores numeric MIDI pitches alone; note names in the piano
   roll are derived, and explicit enharmonic spelling waits for evidence that
-  it is needed (D61).
+  it is needed (D61). A clip owns its notes; the sampler maps notes to pads,
+  which is what plays a drum part; and the pattern clips of songs made before
+  note clips become note clips when the person asks (D62).
 - **Sampler tracks and audio clips:** pads that play, hold and repitch samples,
   and parts of a file placed on beats with fades.
 - **Instruments:** a subtractive synth with text patches and modulation (LFOs,

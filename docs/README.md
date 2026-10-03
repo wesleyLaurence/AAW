@@ -42,8 +42,8 @@ Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [MIDI tracks and note clips](features/midi-clips.md) | 1 |
-| [the agent panel](features/agent-panel.md) | 5 |
+| [MIDI tracks and note clips](features/midi-clips.md) | 1, 2 and 3 |
+| [the agent panel](features/agent-panel.md) | 7 |
 | [generated audio](features/generated-audio.md) | Later, under Sound |
 
 ## Archive
