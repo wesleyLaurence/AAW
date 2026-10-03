@@ -733,6 +733,325 @@ impl AudioClip {
     }
 }
 
+/// A MIDI pitch, 0 to 127, given as a number or as a note name such as C4
+/// (60), which is stored as its number.
+fn pitch_field(ctx: &mut Ctx, x: &Value) -> Option<i64> {
+    if let Value::Str(s) = x {
+        if s.trim().starts_with(|c: char| c.is_ascii_alphabetic()) {
+            return match rules::midi(s.trim()) {
+                Ok(n) => Some(n),
+                Err(msg) => {
+                    ctx.value_error(msg);
+                    None
+                }
+            };
+        }
+    }
+    v::int(ctx, x, Bounds::ge_le("0", "127"))
+}
+
+/// The number in an ID such as `n12` or `clip3` that starts with `prefix`.
+fn id_number(id: &str, prefix: &str) -> Option<u64> {
+    id.strip_prefix(prefix)
+        .filter(|n| !n.is_empty() && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit()))
+        .and_then(|n| n.parse().ok())
+}
+
+/// Fills in the IDs left empty with `prefix` and the next number after the
+/// highest such ID there is.
+fn assign_ids<'a>(ids: impl Iterator<Item = &'a mut String>, prefix: &str) {
+    let mut ids: Vec<&mut String> = ids.collect();
+    let mut next = ids.iter().filter_map(|id| id_number(id, prefix)).max().unwrap_or(0);
+    for id in ids.iter_mut().filter(|id| id.is_empty()) {
+        next += 1;
+        **id = format!("{prefix}{next}");
+    }
+}
+
+/// A note of a note clip.
+#[derive(Clone, Debug)]
+pub struct Note {
+    /// Unique in its clip. A note written without one is given the next free
+    /// `nN` when the song is validated.
+    pub id: String,
+    pub pitch: i64,
+    /// Beats from its clip's start.
+    pub at: Beat,
+    pub duration: Beat,
+    pub velocity: i64,
+}
+
+impl Note {
+    const FIELDS: &'static [&'static str] = &["id", "pitch", "at", "duration", "velocity"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Note> {
+        let f = Fields::of(ctx, x, "Note", Self::FIELDS)?;
+        let before = ctx.count();
+        let id = f.opt(ctx, "id", String::new(), id_field);
+        let pitch = f.req(ctx, "pitch", pitch_field);
+        let at = f.opt(ctx, "at", Beat::int(0), beat_field);
+        let duration = f.req(ctx, "duration", beat_field);
+        let velocity = f.opt(ctx, "velocity", 100, |c, x| v::int(c, x, Bounds::ge_le("1", "127")));
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let note = Note {
+            id: id?,
+            pitch: pitch?,
+            at: at?,
+            duration: duration?,
+            velocity: velocity?,
+        };
+        if !note.duration_exact().is_positive() {
+            ctx.value_error("A note's duration must be positive");
+            return None;
+        }
+        Some(note)
+    }
+
+    pub fn at_exact(&self) -> BigRational {
+        exact(&self.at)
+    }
+
+    pub fn duration_exact(&self) -> BigRational {
+        exact(&self.duration)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("id", Value::str(&self.id));
+        o.req("pitch", Value::int(self.pitch));
+        o.beat("at", &self.at, &Beat::int(0));
+        o.req("duration", self.duration.to_value());
+        o.int("velocity", self.velocity, 100);
+        o.done()
+    }
+}
+
+/// A clip of a MIDI track: notes it owns, placed on the song's timeline.
+#[derive(Clone, Debug)]
+pub struct NoteClip {
+    /// Unique among the song's note clips. A clip written without one is
+    /// given the next free `clipN` when the song is validated.
+    pub id: String,
+    pub at: Beat,
+    pub length_beats: Beat,
+    /// In the order they were written. A note that starts at or after the
+    /// clip's end is kept and does not play.
+    pub notes: Vec<Note>,
+}
+
+impl NoteClip {
+    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "notes"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<NoteClip> {
+        let f = Fields::of(ctx, x, "NoteClip", Self::FIELDS)?;
+        let before = ctx.count();
+        let id = f.opt(ctx, "id", String::new(), id_field);
+        let at = f.opt(ctx, "at", Beat::int(0), beat_field);
+        let length_beats = f.req(ctx, "length_beats", beat_field);
+        let notes = f.opt(ctx, "notes", Vec::new(), |c, x| v::list(c, x, 0, None, Note::validate));
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let mut clip = NoteClip {
+            id: id?,
+            at: at?,
+            length_beats: length_beats?,
+            notes: notes?,
+        };
+        if !clip.length_exact().is_positive() {
+            ctx.value_error("A clip's length must be positive");
+            return None;
+        }
+        let mut seen = std::collections::HashSet::new();
+        if let Some(n) = clip.notes.iter().find(|n| !n.id.is_empty() && !seen.insert(n.id.as_str())) {
+            ctx.value_error(format!("Two notes of a clip have the ID {}", n.id));
+            return None;
+        }
+        assign_ids(clip.notes.iter_mut().map(|n| &mut n.id), "n");
+        Some(clip)
+    }
+
+    pub fn at_exact(&self) -> BigRational {
+        exact(&self.at)
+    }
+
+    pub fn length_exact(&self) -> BigRational {
+        exact(&self.length_beats)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("id", Value::str(&self.id));
+        o.beat("at", &self.at, &Beat::int(0));
+        o.req("length_beats", self.length_beats.to_value());
+        o.coll("notes", list(&self.notes, saved, Note::dump));
+        o.done()
+    }
+}
+
+/// Which notes play a pad of a sampler.
+#[derive(Clone, Debug)]
+pub struct NoteMap {
+    /// The lowest and highest note, inclusive.
+    pub low: i64,
+    pub high: i64,
+    /// Whether it was written as a range rather than one note.
+    pub range: bool,
+    pub pad: String,
+    /// Whether the pad plays at the note's pitch, repitched from its sample's
+    /// root note, rather than as it is.
+    pub pitched: bool,
+}
+
+impl NoteMap {
+    const FIELDS: &'static [&'static str] = &["notes", "pad", "pitched"];
+
+    fn notes(ctx: &mut Ctx, x: &Value) -> Option<(i64, i64, bool)> {
+        match x {
+            Value::List(_) => {
+                let both = v::list(ctx, x, 2, Some(2), pitch_field)?;
+                if both[0] > both[1] {
+                    ctx.value_error("A range of notes runs from the lower to the higher");
+                    return None;
+                }
+                Some((both[0], both[1], true))
+            }
+            other => pitch_field(ctx, other).map(|n| (n, n, false)),
+        }
+    }
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<NoteMap> {
+        let f = Fields::of(ctx, x, "NoteMap", Self::FIELDS)?;
+        let before = ctx.count();
+        let notes = f.req(ctx, "notes", Self::notes);
+        let pad = f.req(ctx, "pad", v::string);
+        let pitched = f.opt(ctx, "pitched", false, v::boolean);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let (low, high, range) = notes?;
+        Some(NoteMap {
+            low,
+            high,
+            range,
+            pad: pad?,
+            pitched: pitched?,
+        })
+    }
+
+    pub fn contains(&self, pitch: i64) -> bool {
+        (self.low..=self.high).contains(&pitch)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        let notes = if self.range {
+            Value::List(vec![Value::int(self.low), Value::int(self.high)])
+        } else {
+            Value::int(self.low)
+        };
+        o.req("notes", notes);
+        o.req("pad", Value::str(&self.pad));
+        o.bool("pitched", self.pitched, false);
+        o.done()
+    }
+}
+
+/// A sampler that plays notes: its pads, and which notes play each.
+#[derive(Clone, Debug, Default)]
+pub struct Sampler {
+    pub pads: IndexMap<String, Pad>,
+    pub map: Vec<NoteMap>,
+}
+
+impl Sampler {
+    const FIELDS: &'static [&'static str] = &["pads", "map"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Sampler> {
+        let f = Fields::of(ctx, x, "Sampler", Self::FIELDS)?;
+        let before = ctx.count();
+        let pads = f.opt(ctx, "pads", IndexMap::new(), |c, x| v::str_dict(c, x, Pad::validate));
+        let map = f.opt(ctx, "map", Vec::new(), |c, x| v::list(c, x, 0, Some(128), NoteMap::validate));
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(Sampler { pads: pads?, map: map? })
+    }
+
+    /// The map entry a note plays, if any.
+    pub fn entry(&self, pitch: i64) -> Option<&NoteMap> {
+        self.map.iter().find(|m| m.contains(pitch))
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.coll("pads", str_map(&self.pads, saved, Pad::dump));
+        o.coll("map", list(&self.map, saved, NoteMap::dump));
+        o.done()
+    }
+}
+
+/// What a MIDI track's notes play. One kind so far.
+#[derive(Clone, Debug)]
+pub enum Instrument {
+    Sampler(Sampler),
+}
+
+impl Instrument {
+    const FIELDS: &'static [&'static str] = &["sampler"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Instrument> {
+        let f = Fields::of(ctx, x, "Instrument", Self::FIELDS)?;
+        let before = ctx.count();
+        let sampler = f.req(ctx, "sampler", Sampler::validate);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(Instrument::Sampler(sampler?))
+    }
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Instrument::Sampler(_) => "sampler",
+        }
+    }
+
+    pub fn sampler(&self) -> Option<&Sampler> {
+        match self {
+            Instrument::Sampler(s) => Some(s),
+        }
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        match self {
+            Instrument::Sampler(s) => o.req("sampler", s.dump(saved)),
+        }
+        o.done()
+    }
+}
+
+/// What a MIDI track has in place of pads, pattern clips and audio clips.
+#[derive(Clone, Debug, Default)]
+pub struct Midi {
+    /// None plays nothing; the notes are kept.
+    pub instrument: Option<Instrument>,
+    pub clips: Vec<NoteClip>,
+}
+
+impl Midi {
+    pub fn sampler(&self) -> Option<&Sampler> {
+        self.instrument.as_ref().and_then(Instrument::sampler)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterMode {
     Highpass,
@@ -1351,24 +1670,55 @@ pub struct Track {
     pub effects: Vec<Effect>,
     pub sends: Vec<Send>,
     pub automation: Vec<Lane>,
+    /// A MIDI track's instrument and note clips. Such a track has no pads,
+    /// pattern clips or audio clips of its own; it is written with
+    /// `type: midi` and its note clips under `clips`.
+    pub midi: Option<Midi>,
 }
+
+static NO_PADS: LazyLock<IndexMap<String, Pad>> = LazyLock::new(IndexMap::new);
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
         "id", "gain_db", "pan", "mute", "solo", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
+    const MIDI_FIELDS: &'static [&'static str] = &[
+        "id", "type", "gain_db", "pan", "mute", "solo", "instrument", "clips", "effects", "sends", "automation",
+    ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
-        let f = Fields::of(ctx, x, "Track", Self::FIELDS)?;
+        let midi = match x {
+            Value::Dict(d) => match d.get(&Key::str("type")) {
+                Some(tag) => {
+                    ctx.key("type", |c| v::literal_str(c, tag, &["midi"]))?;
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        };
+        let known = if midi { Self::MIDI_FIELDS } else { Self::FIELDS };
+        let f = Fields::of(ctx, x, "Track", known)?;
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
         let solo = f.opt(ctx, "solo", false, v::boolean);
-        let pads = f.req(ctx, "pads", |c, x| v::str_dict(c, x, Pad::validate));
-        let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, Clip::validate));
-        let audio = f.opt(ctx, "audio", Vec::new(), |c, x| v::list(c, x, 0, None, AudioClip::validate));
+        let (pads, clips, audio, notes) = if midi {
+            let instrument = f.opt(ctx, "instrument", None, |c, x| v::optional(c, x, Instrument::validate));
+            let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, NoteClip::validate));
+            let notes = match (instrument, clips) {
+                (Some(instrument), Some(clips)) => Some(Some(Midi { instrument, clips })),
+                _ => None,
+            };
+            (Some(IndexMap::new()), Some(Vec::new()), Some(Vec::new()), notes)
+        } else {
+            let pads = f.req(ctx, "pads", |c, x| v::str_dict(c, x, Pad::validate));
+            let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, Clip::validate));
+            let audio = f.opt(ctx, "audio", Vec::new(), |c, x| v::list(c, x, 0, None, AudioClip::validate));
+            (pads, clips, audio, Some(None))
+        };
         let effects = effects_field(ctx, &f);
         let sends = f.opt(ctx, "sends", Vec::new(), |c, x| v::list(c, x, 0, Some(16), Send::validate));
         let automation = automation_field(ctx, &f);
@@ -1388,6 +1738,7 @@ impl Track {
             effects: effects?,
             sends: sends?,
             automation: automation?,
+            midi: notes?,
         })
     }
 
@@ -1395,16 +1746,35 @@ impl Track {
         self.effects.iter().filter_map(Effect::sidechain).collect()
     }
 
+    /// The pads its sounds come from: a MIDI track's sampler's, or its own.
+    pub fn sound_pads(&self) -> &IndexMap<String, Pad> {
+        match &self.midi {
+            Some(m) => m.sampler().map_or(&NO_PADS, |s| &s.pads),
+            None => &self.pads,
+        }
+    }
+
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
+        if self.midi.is_some() {
+            o.req("type", Value::str("midi"));
+        }
         o.float("gain_db", self.gain_db, 0.0);
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
         o.bool("solo", self.solo, false);
-        o.req("pads", str_map(&self.pads, saved, Pad::dump));
-        o.coll("clips", list(&self.clips, saved, Clip::dump));
-        o.coll("audio", list(&self.audio, saved, AudioClip::dump));
+        match &self.midi {
+            Some(m) => {
+                o.opt("instrument", m.instrument.as_ref().map(|i| i.dump(saved)));
+                o.coll("clips", list(&m.clips, saved, NoteClip::dump));
+            }
+            None => {
+                o.req("pads", str_map(&self.pads, saved, Pad::dump));
+                o.coll("clips", list(&self.clips, saved, Clip::dump));
+                o.coll("audio", list(&self.audio, saved, AudioClip::dump));
+            }
+        }
         o.coll("effects", list(&self.effects, saved, Effect::dump));
         o.coll("sends", list(&self.sends, saved, Send::dump));
         o.coll("automation", list(&self.automation, saved, Lane::dump));
@@ -1673,7 +2043,8 @@ impl Project {
     fn fields(ctx: &mut Ctx, x: &Value) -> Option<Project> {
         let f = Fields::of(ctx, x, "Project", Self::FIELDS)?;
         let before = ctx.count();
-        let schema = f.opt(ctx, "schema_version", 1, |c, x| v::literal_int(c, x, &[1]));
+        // The version a song is written with follows from what it holds.
+        let schema = f.opt(ctx, "schema_version", 1, |c, x| v::literal_int(c, x, &[1, 2]));
         let session = f.req(ctx, "session", Session::validate);
         let samples = f.opt(ctx, "samples", IndexMap::new(), |c, x| v::str_dict(c, x, Sample::validate));
         let patterns = f.opt(ctx, "patterns", IndexMap::new(), |c, x| v::str_dict(c, x, Pattern::validate));
@@ -1686,22 +2057,40 @@ impl Project {
             return None;
         }
         schema?;
+        let mut tracks = tracks?;
+        let clips = || tracks.iter().filter_map(|t| t.midi.as_ref()).flat_map(|m| &m.clips);
+        let mut seen = std::collections::HashSet::new();
+        if let Some(c) = clips().find(|c| !c.id.is_empty() && !seen.insert(c.id.as_str())) {
+            ctx.value_error(format!("Two note clips have the ID {}", c.id));
+            return None;
+        }
+        assign_ids(tracks.iter_mut().filter_map(|t| t.midi.as_mut()).flat_map(|m| &mut m.clips).map(|c| &mut c.id), "clip");
         Some(Project {
             session: session?,
             samples: samples?,
             patterns: patterns?,
-            tracks: tracks?,
+            tracks,
             returns: returns?,
             sections: sections?,
             master: master?,
         })
     }
 
+    /// 2 for a song with a MIDI track, which an engine that knows only
+    /// version 1 refuses; otherwise 1, so that such a song saves as it did.
+    pub fn schema_version(&self) -> i64 {
+        if self.tracks.iter().any(|t| t.midi.is_some()) {
+            2
+        } else {
+            1
+        }
+    }
+
     /// `model_dump(mode="json")`, or with `saved` the form `save` writes, minus
-    /// the leading `schema_version`.
+    /// the leading `schema_version` of a version 1 song.
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
-        o.int("schema_version", 1, 1);
+        o.int("schema_version", self.schema_version(), 1);
         o.req("session", self.session.dump(saved));
         o.coll("samples", str_map(&self.samples, saved, Sample::dump));
         o.coll("patterns", str_map(&self.patterns, saved, Pattern::dump));

@@ -1,8 +1,79 @@
 //! Event scheduling: every hit's start frame, from exact beats.
 
-use crate::{frame, Event, PadMode, Project};
+use crate::{frame, Beat, Event, Midi, PadMode, Project, Sampler};
 use num_rational::BigRational;
 use std::collections::HashMap;
+
+/// A note as an instrument receives it: nothing about pads, only its pitch,
+/// velocity, and the frames it starts and stops on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NoteOn {
+    pub pitch: i64,
+    pub velocity: i64,
+    pub start: i64,
+    /// The note-off: the note's end, or its clip's when that comes first.
+    pub end: i64,
+    /// Its start and length in beats, exactly.
+    pub at: BigRational,
+    pub beats: BigRational,
+}
+
+/// A MIDI track's notes in the order they start. A note plays from its start
+/// to its end or its clip's, whichever is first; one that starts at or after
+/// its clip's end does not play.
+pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
+    let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
+    let mut notes = Vec::new();
+    for clip in &midi.clips {
+        let (base, length) = (clip.at_exact(), clip.length_exact());
+        for n in &clip.notes {
+            let at = n.at_exact();
+            if at >= length {
+                continue;
+            }
+            let until = (&at + n.duration_exact()).min(length.clone());
+            let beats = &until - &at;
+            notes.push(NoteOn {
+                pitch: n.pitch,
+                velocity: n.velocity,
+                start: frame(&(&base + &at), tempo, rate),
+                end: frame(&(&base + &until), tempo, rate),
+                at: &base + at,
+                beats,
+            });
+        }
+    }
+    notes.sort_by_key(|n| (n.start, n.pitch));
+    notes
+}
+
+/// What a sampler plays for notes: the pad each note's map entry names, at the
+/// note's pitch when the entry is pitched, released at the note-off when the
+/// pad is gated. A note no entry maps plays nothing.
+fn sampler_hits(sampler: &Sampler, notes: &[NoteOn], track: usize, track_id: &str) -> Vec<Trigger> {
+    let mut triggers = Vec::new();
+    for n in notes {
+        let Some(entry) = sampler.entry(n.pitch) else { continue };
+        let pad = &sampler.pads[&entry.pad];
+        triggers.push(Trigger {
+            start: n.start,
+            track,
+            track_id: track_id.to_string(),
+            pad: entry.pad.clone(),
+            event: Event {
+                at: Beat::Str(crate::fraction_str(&n.at)),
+                pad: entry.pad.clone(),
+                velocity: n.velocity,
+                note: entry.pitched.then(|| crate::rules::note_name(n.pitch).expect("a pitch is 0 to 127")),
+                duration: Some(Beat::Str(crate::fraction_str(&n.beats))),
+                transpose: 0.0,
+            },
+            velocity_scale: 1.0,
+            cutoff: (pad.mode == PadMode::Gate).then_some(n.end),
+        });
+    }
+    triggers
+}
 
 #[derive(Clone, Debug)]
 pub struct Trigger {
@@ -24,6 +95,11 @@ pub fn track_triggers(p: &Project, ti: usize) -> Vec<Trigger> {
     let tempo = p.session.tempo;
     let t = &p.tracks[ti];
     let mut triggers = Vec::new();
+    if let Some(midi) = &t.midi {
+        if let Some(sampler) = midi.sampler() {
+            triggers = sampler_hits(sampler, &track_notes(p, midi), ti, &t.id);
+        }
+    }
     for c in &t.clips {
         let pattern = &p.patterns[&c.pattern];
         let events = pattern.expanded();
@@ -53,7 +129,7 @@ pub fn track_triggers(p: &Project, ti: usize) -> Vec<Trigger> {
     // The incoming hit releases the preceding voice of its group.
     let mut last: HashMap<String, usize> = HashMap::new();
     for i in 0..triggers.len() {
-        let pad = &t.pads[&triggers[i].pad];
+        let pad = &t.sound_pads()[&triggers[i].pad];
         let Some(group) = pad.choke_group.as_deref().filter(|g| !g.is_empty()) else {
             continue;
         };

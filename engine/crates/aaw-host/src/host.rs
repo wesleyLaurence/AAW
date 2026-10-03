@@ -513,6 +513,7 @@ impl Host {
                     Command::Status => Ok(self.status()),
                     Command::Changes { since } => Ok(self.session.changes(since)),
                     Command::Get { path } => self.session.get(&path),
+                    Command::Notes { path, from, to } => self.session.notes(&path, from.as_ref(), to.as_ref()),
                     _ => unreachable!("not a read"),
                 }
             }

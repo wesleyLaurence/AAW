@@ -1720,3 +1720,34 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     project_delete_untitled(kept.clone()).unwrap();
     assert!(!Path::new(&kept).parent().unwrap().exists());
 }
+
+#[test]
+fn a_midi_track_shows_its_note_clips_as_the_agent_makes_them() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "batch", "label": "A phrase", "commands": [
+        {"op": "track.add", "id": "keys", "type": "midi"},
+        {"op": "clip.add", "track": "keys", "at": 4, "length_beats": 4, "notes": [
+            {"pitch": "C4", "duration": 1, "velocity": 96}, {"pitch": 64, "at": 1.975, "duration": "1/3"},
+        ]},
+    ]}));
+    let u = update(&seen);
+    let keys = &u.arrangement.tracks[2];
+    assert!(keys.midi && keys.instrument.is_none() && keys.clips.is_empty() && keys.pads.is_empty());
+    let clip = &keys.note_clips[0];
+    assert_eq!((clip.id.as_str(), clip.at, clip.length_beats), ("clip1", 4.0, 4.0));
+    assert_eq!(clip.reference, format!("@{}", clip.key));
+    let notes: Vec<_> = clip.notes.iter().map(|n| (n.id.as_str(), n.pitch, n.at, n.velocity)).collect();
+    assert_eq!(notes, [("n1", 60, 0.0, 96), ("n2", 64, 1.975, 100)]);
+    assert!(!u.arrangement.tracks[0].midi);
+    // A change to its notes touches the clip, which keeps its key.
+    agent(&path, json!({"op": "note.transpose", "notes": [clip.reference.clone()], "by": 12}));
+    let u = update(&seen);
+    assert_eq!(u.touched, [touch(Part::Clip, clip.key, Delta::Changed)]);
+    assert_eq!(u.arrangement.tracks[2].note_clips[0].notes[0].pitch, 72);
+    // A sampler attached is named; an app edit of a note clip is refused, not a crash.
+    agent(&path, json!({"op": "instrument.set", "track": "keys", "instrument": {"sampler": {"pads": {"h": {"sample": "hit"}}, "map": [{"notes": 60, "pad": "h"}]}}}));
+    assert_eq!(update(&seen).arrangement.tracks[2].instrument.as_deref(), Some("sampler"));
+    assert!(song.edit(Edit::ClipsMove { clips: vec![clip.key], by: 1.0, rows: 0 }, None).is_err());
+    song.close();
+}

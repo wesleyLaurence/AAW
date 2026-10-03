@@ -266,7 +266,10 @@ impl<'a> Song<'a> {
         let project = self.project;
         for (i, track) in items(tree, "tracks").iter().enumerate() {
             if let Some(j) = items(&track.node, "clips").iter().position(|c| c.handle == key) {
-                let clip = &project.tracks[i].clips[j];
+                // A note clip is shown and is not yet edited from the app.
+                let Some(clip) = project.tracks[i].clips.get(j) else {
+                    return Err("A note clip is edited with daw commands for now".into());
+                };
                 let length = project.patterns.get(&clip.pattern).map(|p| p.length_exact()).unwrap_or_else(BigRational::zero);
                 let start = clip.at_exact();
                 let end = &start + length * BigRational::from_integer(clip.repeats.into());

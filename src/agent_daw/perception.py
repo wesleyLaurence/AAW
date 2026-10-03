@@ -242,6 +242,8 @@ def musical_context(project, manifest, offset, count, sections):
             ]
             placements = []
             for clip in track["clips"]:
+                if "pattern" not in clip:
+                    continue
                 length = beat(project["patterns"][clip["pattern"]]["length_beats"])
                 for repeat in range(clip["repeats"]):
                     at = beat(clip["at"]) + repeat * length

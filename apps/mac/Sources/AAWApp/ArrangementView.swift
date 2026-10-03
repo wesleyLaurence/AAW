@@ -103,6 +103,8 @@ private struct ClipVisual {
     /// An audio clip as it is shown: the host's, or the person's while they
     /// drag a fade. It draws its file, and `pattern` is its sample's name.
     var audio: AudioClipView?
+    /// A note clip as it is shown, drawing its notes; `pattern` is its ID.
+    var notes: NoteClipView?
     /// The beat an audio clip's file starts on, which its waveform is drawn
     /// from: it moves with the clip and stays while an edge is trimmed.
     var anchor = Animated(0)
@@ -491,6 +493,27 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     clips[clip.key] = ClipVisual(
                         pattern: clip.pattern, repeats: Int(clip.repeats), color: color, muted: track.mute,
                         at: Animated(clip.at), length: Animated(length), y: Animated(y), alpha: alpha
+                    )
+                }
+            }
+            for clip in track.noteClips {
+                liveClips.insert(clip.key)
+                if var v = clips[clip.key], !v.removing {
+                    v.pattern = clip.id
+                    v.color = color
+                    v.muted = track.mute
+                    v.notes = clip
+                    v.at.move(to: clip.at, at: now, over: time)
+                    v.length.move(to: clip.lengthBeats, at: now, over: time)
+                    v.y.move(to: y, at: now, over: time)
+                    clips[clip.key] = v
+                } else {
+                    var alpha = Animated(animated ? 0 : 1)
+                    alpha.move(to: 1, at: now, over: time)
+                    clips[clip.key] = ClipVisual(
+                        pattern: clip.id, repeats: 1, color: color, muted: track.mute,
+                        at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), alpha: alpha,
+                        notes: clip
                     )
                 }
             }
@@ -1713,6 +1736,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             NSGraphicsContext.restoreGraphicsState()
             if let audio = clip.audio {
                 drawAudio(audio, of: clip, in: body(of: rect), alpha: alpha, handles: selected || hoverClip == key, at: now)
+            } else if let notes = clip.notes {
+                drawNotes(notes, of: clip, in: body(of: rect), alpha: alpha, at: now)
             } else {
                 drawWaveform(of: clip, in: body(of: rect), alpha: alpha)
             }
@@ -1737,6 +1762,27 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let outline = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 3, yRadius: 3)
             outline.lineWidth = 2
             outline.stroke()
+        }
+    }
+
+    /// What a note clip shows under its title: its notes, each a bar from its
+    /// start to its end or the clip's, from the lowest pitch at the bottom to
+    /// the highest at the top, an octave at least. Notes past the clip's end
+    /// do not play and are not drawn.
+    private func drawNotes(_ clip: NoteClipView, of visual: ClipVisual, in body: CGRect, alpha: CGFloat,
+                           at now: CFTimeInterval) {
+        let playing = clip.notes.filter { $0.at < clip.lengthBeats }
+        guard body.height >= 6, let low = playing.map(\.pitch).min(), let high = playing.map(\.pitch).max() else { return }
+        let span = max(high - low + 1, 12)
+        let bottom = Int32(Double(low + high) / 2 - Double(span) / 2 + 0.5)
+        let row = (body.height - 4) / CGFloat(span)
+        let start = visual.at.value(at: now)
+        let ink = Theme.gray(0.08, 0.8 * alpha)
+        for note in playing {
+            let from = layout.x(start + note.at)
+            let to = layout.x(start + min(note.at + note.duration, clip.lengthBeats))
+            let y = body.maxY - 2 - CGFloat(note.pitch - bottom + 1) * row
+            fill(CGRect(x: from, y: y, width: max(to - from - 1, 1), height: max(row - 1, 1)), ink)
         }
     }
 

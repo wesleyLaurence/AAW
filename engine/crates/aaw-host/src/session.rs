@@ -383,8 +383,8 @@ impl Session {
         // A gesture's edits share a label, which names the whole drag.
         let label = change.as_ref().map_or(label, |c| c.label.clone());
         reply.insert("label".into(), json!(label));
-        if batch {
-            // What a batch made, in the order its commands made it.
+        if batch || made.len() > 1 {
+            // What a batch or a command made, in the order it was made.
             if self.hosted {
                 reply.insert("handles".into(), json!(made.iter().map(|(h, _)| tree::handle_text(*h)).collect::<Vec<_>>()));
             }
@@ -699,6 +699,42 @@ impl Session {
                         })
                     })
                     .collect();
+                if let Some(midi) = &t.midi {
+                    let clips: Vec<Json> = midi
+                        .clips
+                        .iter()
+                        .enumerate()
+                        .map(|(ci, c)| {
+                            let loc = [
+                                tree::Step::Key("tracks".into()),
+                                tree::Step::Index(ti),
+                                tree::Step::Key("clips".into()),
+                                tree::Step::Index(ci),
+                            ];
+                            json!({
+                                "ref": self.reference(&root, &loc),
+                                "id": c.id,
+                                "at": beat_json(&c.at_exact()),
+                                "length_beats": beat_json(&c.length_exact()),
+                                "notes": c.notes.len(),
+                            })
+                        })
+                        .collect();
+                    return json!({
+                        "id": t.id,
+                        "type": "midi",
+                        "instrument": midi.instrument.as_ref().map(|i| i.kind()),
+                        "events": triggers.iter().filter(|x| x.track_id == t.id).count(),
+                        "gain_db": t.gain_db,
+                        "mute": t.mute,
+                        "solo": t.solo,
+                        "effects": types(&t.effects),
+                        "sidechain": t.sidechains(),
+                        "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
+                        "automation": params(&t.automation),
+                        "clips": clips,
+                    });
+                }
                 json!({
                     "id": t.id,
                     "events": triggers.iter().filter(|x| x.track_id == t.id).count(),
@@ -769,6 +805,96 @@ impl Session {
         Ok(self.view(node, &full, &loc))
     }
 
+    /// `daw note list`: the notes of a note clip, or of each clip of a MIDI
+    /// track, each with its name and the song beat it starts on. `from` and
+    /// `to` keep the notes that start from one song beat until another, and
+    /// the clips that have such notes.
+    pub fn notes(&self, path: &str, from: Option<&Json>, to: Option<&Json>) -> Result<Json> {
+        let p = &self.doc.project;
+        let root = self.doc.tree();
+        // A track may be named by its ID alone.
+        let loc = match tree::resolve(&root, path, self.hosted) {
+            Err(e) if !path.contains('.') && !path.starts_with('@') => tree::resolve(&root, &format!("tracks.{path}"), false).map_err(|_| e)?,
+            other => other?,
+        };
+        let (ti, only) = match loc.as_slice() {
+            [tree::Step::Key(k), tree::Step::Index(t)] if k == "tracks" => (*t, None),
+            [tree::Step::Key(k), tree::Step::Index(t), tree::Step::Key(c), tree::Step::Index(i)] if k == "tracks" && c == "clips" => (*t, Some(*i)),
+            _ => return Err(format!("{path} is not a MIDI track or a note clip")),
+        };
+        let t = &p.tracks[ti];
+        let midi = t.midi.as_ref().ok_or_else(|| format!("{} is not a MIDI track", t.id))?;
+        let beat = |j: Option<&Json>| -> Result<Option<num_rational::BigRational>> {
+            j.map(|j| {
+                let v = json_value(j)?;
+                let b = match v {
+                    aaw_model::value::Value::Int(n) => aaw_model::Beat::Int(n),
+                    aaw_model::value::Value::Float(f) => aaw_model::Beat::Float(f),
+                    aaw_model::value::Value::Str(s) => aaw_model::Beat::Str(s),
+                    _ => return Err(format!("{j} is not a beat")),
+                };
+                aaw_model::beat(&b)
+            })
+            .transpose()
+        };
+        let (from, to) = (beat(from)?, beat(to)?);
+        let sampler = midi.sampler();
+        let mut clips = Vec::new();
+        for (ci, c) in midi.clips.iter().enumerate() {
+            if only.is_some_and(|i| i != ci) {
+                continue;
+            }
+            let clip_loc = [
+                tree::Step::Key("tracks".into()),
+                tree::Step::Index(ti),
+                tree::Step::Key("clips".into()),
+                tree::Step::Index(ci),
+            ];
+            let (at, length) = (c.at_exact(), c.length_exact());
+            let mut notes = Vec::new();
+            for (ni, n) in c.notes.iter().enumerate() {
+                let song_at = &at + n.at_exact();
+                if from.as_ref().is_some_and(|f| &song_at < f) || to.as_ref().is_some_and(|t| &song_at >= t) {
+                    continue;
+                }
+                let note_loc = [clip_loc.to_vec(), vec![tree::Step::Key("notes".into()), tree::Step::Index(ni)]].concat();
+                let mut row = json!({
+                    "ref": self.reference(&root, &note_loc),
+                    "id": n.id,
+                    "pitch": n.pitch,
+                    "name": aaw_model::rules::note_name(n.pitch).unwrap_or_default(),
+                    "at": beat_json(&n.at_exact()),
+                    "duration": beat_json(&n.duration_exact()),
+                    "velocity": n.velocity,
+                    "song_at": beat_json(&song_at),
+                });
+                if n.at_exact() >= length {
+                    row["outside"] = json!(true);
+                }
+                if let Some(s) = sampler {
+                    row["pad"] = json!(s.entry(n.pitch).map(|m| m.pad.as_str()));
+                }
+                notes.push(row);
+            }
+            if only.is_none() && notes.is_empty() && (from.is_some() || to.is_some()) {
+                continue;
+            }
+            clips.push(json!({
+                "ref": self.reference(&root, &clip_loc),
+                "path": tree::path_text(&root, &clip_loc),
+                "id": c.id,
+                "at": beat_json(&at),
+                "length_beats": beat_json(&length),
+                "notes": notes,
+            }));
+        }
+        Ok(json!({
+            "track": t.id,
+            "instrument": midi.instrument.as_ref().map(|i| i.kind()),
+            "clips": clips,
+        }))
+    }
+
     fn view(&self, node: &Node, full: &Node, loc: &[tree::Step]) -> Json {
         match node {
             Node::Leaf(_) => node_json(node),
@@ -800,6 +926,11 @@ impl Session {
             ),
         }
     }
+}
+
+/// An exact beat as JSON: an integer, an exact decimal or a fraction.
+fn beat_json(x: &num_rational::BigRational) -> Json {
+    node_json(&Node::Leaf(crate::command::beat_value(x)))
 }
 
 /// A model value as JSON.

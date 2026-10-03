@@ -480,8 +480,91 @@ pub fn references(p: &Project) -> Result<(), String> {
                 }
             }
         }
+        if let Some(midi) = &t.midi {
+            if let Some(sampler) = midi.sampler() {
+                sampler_references(p, &t.id, sampler)?;
+            }
+            for clip in &midi.clips {
+                if clip.at_exact() + clip.length_exact() > length {
+                    return Err(format!("{}: clip {} exceeds session", t.id, clip.id));
+                }
+            }
+        }
     }
     Ok(())
+}
+
+/// A sampler's pads name samples, its map names its pads, a note plays one
+/// pad at most, and a pad played at the notes' pitches has a root note.
+fn sampler_references(p: &Project, track: &str, sampler: &crate::schema::Sampler) -> Result<(), String> {
+    for pad in sampler.pads.values() {
+        if !p.samples.contains_key(&pad.sample) {
+            return Err(format!("{track}: unknown sample {}", pad.sample));
+        }
+    }
+    for (i, m) in sampler.map.iter().enumerate() {
+        let Some(pad) = sampler.pads.get(&m.pad) else {
+            return Err(format!("{track}: the map names unknown pad {}", m.pad));
+        };
+        if let Some(other) = sampler.map[..i].iter().find(|o| o.low <= m.high && m.low <= o.high) {
+            let note = m.low.max(other.low);
+            return Err(format!(
+                "{track}: note {note} ({}) is mapped to both {} and {}",
+                note_name(note).unwrap_or_default(),
+                other.pad,
+                m.pad
+            ));
+        }
+        if m.pitched && p.samples[&pad.sample].root_note.as_deref().is_none_or(str::is_empty) {
+            return Err(format!("{} needs root_note for a pitched map entry", pad.sample));
+        }
+    }
+    Ok(())
+}
+
+/// What `daw check` says of a song's notes: those that start at or after
+/// their clip's end, which are kept and do not play, and those the track's
+/// sampler maps to no pad, which are silent.
+pub fn note_warnings(p: &Project) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in &p.tracks {
+        let Some(midi) = &t.midi else { continue };
+        let sampler = midi.sampler();
+        for clip in &midi.clips {
+            let length = clip.length_exact();
+            let outside: Vec<&str> = clip.notes.iter().filter(|n| n.at_exact() >= length).map(|n| n.id.as_str()).collect();
+            if !outside.is_empty() {
+                out.push(format!(
+                    "{}.{}: notes {} start at or after the clip's end and do not play",
+                    t.id,
+                    clip.id,
+                    outside.join(", ")
+                ));
+            }
+            let Some(sampler) = sampler else { continue };
+            let mut unmapped: Vec<i64> = clip
+                .notes
+                .iter()
+                .filter(|n| n.at_exact() < length && sampler.entry(n.pitch).is_none())
+                .map(|n| n.pitch)
+                .collect();
+            unmapped.sort_unstable();
+            unmapped.dedup();
+            if !unmapped.is_empty() {
+                let names: Vec<String> = unmapped
+                    .iter()
+                    .map(|n| format!("{n} ({})", note_name(*n).unwrap_or_default()))
+                    .collect();
+                out.push(format!(
+                    "{}.{}: the sampler maps no pad to notes {}, which are silent",
+                    t.id,
+                    clip.id,
+                    names.join(", ")
+                ));
+            }
+        }
+    }
+    out
 }
 
 #[cfg(test)]

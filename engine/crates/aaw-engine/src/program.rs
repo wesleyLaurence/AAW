@@ -381,7 +381,7 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
     'tracks: for &ti in tracks {
         let t = &p.tracks[ti];
         for tr in track_triggers(p, ti) {
-            let Ok(job) = sampler.job(&t.pads[&tr.pad], &tr.event) else { break 'tracks };
+            let Ok(job) = sampler.job(&t.sound_pads()[&tr.pad], &tr.event) else { break 'tracks };
             if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
                 jobs.push(job);
             }
@@ -656,17 +656,18 @@ impl<'a> Sampler<'a> {
 }
 
 /// Everything a track's voices are made from, as text: its pads, clips and
-/// audio clips, the patterns it plays, its samples and their files, the tempo,
-/// the rate and the stretcher.
+/// audio clips or its instrument and note clips, the patterns it plays, its
+/// samples and their files, the tempo, the rate and the stretcher.
 fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
     use std::fmt::Write;
     let t = &p.tracks[ti];
     let session = &p.session;
     let mut key = format!(
-        "{:?}|{:?}|{:?}|{}|{}|{:?}",
+        "{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}",
         t.pads,
         t.clips,
         t.audio,
+        t.midi,
         session.tempo.to_bits(),
         session.sample_rate,
         session.stretcher
@@ -679,7 +680,7 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
         }
     }
     seen.clear();
-    for sample in t.pads.values().map(|pad| &pad.sample).chain(t.audio.iter().map(|clip| &clip.sample)) {
+    for sample in t.sound_pads().values().map(|pad| &pad.sample).chain(t.audio.iter().map(|clip| &clip.sample)) {
         if !seen.contains(&sample.as_str()) {
             seen.push(sample);
             let asset = p.samples.get(sample);
@@ -715,7 +716,7 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
     let mut sampler = Sampler::new(p, directory, cache);
     let mut voices = Vec::new();
     for tr in track_triggers(p, ti) {
-        voices.push(sampler.voice(&t.pads[&tr.pad], &tr)?);
+        voices.push(sampler.voice(&t.sound_pads()[&tr.pad], &tr)?);
     }
     if !t.audio.is_empty() {
         for clip in &t.audio {

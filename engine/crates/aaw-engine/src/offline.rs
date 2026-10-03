@@ -219,7 +219,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     ];
     // A song that stretches names what stretched it; one that does not keeps
     // the identity it had.
-    let stretches = p.tracks.iter().flat_map(|t| t.pads.values()).any(|pad| {
+    let stretches = p.tracks.iter().flat_map(|t| t.sound_pads().values()).any(|pad| {
         pad.stretch == Stretch::PreservePitch && pad.source_bpm.is_some_and(|bpm| bpm != p.session.tempo)
     });
     if stretches {

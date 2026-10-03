@@ -79,7 +79,7 @@ pub fn to_yaml(project: &Project) -> String {
         unreachable!("a project dumps to a mapping")
     };
     let mut doc = Dict::new();
-    doc.insert(Key::str("schema_version"), Value::int(1));
+    doc.insert(Key::str("schema_version"), Value::int(project.schema_version()));
     doc.extend(saved);
     yaml_emit::dump(&Value::Dict(doc))
 }

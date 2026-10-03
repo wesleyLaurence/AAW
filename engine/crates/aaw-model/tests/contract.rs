@@ -4,6 +4,7 @@
 //! beside the schema: every model has exactly the schema's fields, a field left
 //! out takes the schema's default, a required field is missed when removed, and
 //! a number or choice is accepted up to the schema's limits and refused past them.
+//! A track is one of two models, and which is told by its `type`.
 
 use aaw_model::contract;
 use aaw_model::value::{Key, Value};
@@ -27,6 +28,13 @@ tracks:
       - {type: limiter}
       - {type: delay, time_beats: 1}
       - {type: reverb}
+    sends: [{to: r}]
+    automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
+  - id: m
+    type: midi
+    instrument: {sampler: {pads: {a: {sample: s}}, map: [{notes: 60, pad: a}]}}
+    clips: [{length_beats: 4, notes: [{pitch: 60, duration: 1}]}]
+    effects: [{type: limiter}]
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
 returns: [{id: r}]
@@ -192,21 +200,30 @@ impl Walk {
             if required.contains(&name.as_str()) && tag != Some(name.as_str()) {
                 assert!(self.refused(&path, &loc, None), "{} is required", loc.join("."));
             }
-            // SONG gives only required fields and collections, which have no
-            // default in the schema, so every default here was filled in.
+            // SONG gives only required fields, collections and models that
+            // may be null, so every other default here was filled in.
             if let Some(default) = prop.get("default") {
-                assert!(same(at(&self.song, &path), default), "{} defaults to {default}", loc.join("."));
-                self.defaults += 1;
+                let given = optional_model(prop).is_some() && !at(&self.song, &path).is_none();
+                if !given {
+                    assert!(same(at(&self.song, &path), default), "{} defaults to {default}", loc.join("."));
+                    self.defaults += 1;
+                }
             }
             self.field(prop, &path, &loc);
             self.inside(prop, &path, &loc);
         }
     }
 
-    /// The models inside a field: one, a list of them or a map of them.
+    /// The models inside a field: one, one or null, a list of them or a map of them.
     fn inside(&mut self, prop: &'static Json, path: &[Step], loc: &[String]) {
         if prop.get("$ref").is_some() {
             return self.model(prop, path, loc, None);
+        }
+        if let Some(branch) = optional_model(prop) {
+            if !at(&self.song, path).is_none() {
+                self.model(branch, path, loc, None);
+            }
+            return;
         }
         if let Some(items) = prop.get("items") {
             let Value::List(list) = at(&self.song, path) else { panic!() };
@@ -225,6 +242,20 @@ impl Walk {
                         self.model(branch.expect("a branch for each tag"), &path, &loc, Some(field));
                     }
                     None if items.get("$ref").is_some() => self.model(items, &path, &loc, None),
+                    // Models told apart by a `type` one has and the other has not.
+                    None if items.get("anyOf").is_some() => {
+                        let tag = at(&self.song, &path).get("type").cloned();
+                        let wanted = |b: &&'static Json| {
+                            let model = &self.schema["$defs"][b["$ref"].as_str().unwrap().trim_start_matches("#/$defs/")];
+                            match (&tag, model["properties"].get("type")) {
+                                (Some(Value::Str(t)), Some(declared)) => declared["const"] == Json::String(t.clone()),
+                                (None, None) => true,
+                                _ => false,
+                            }
+                        };
+                        let branch = items["anyOf"].as_array().unwrap().iter().find(wanted).expect("a model for each kind");
+                        self.model(branch, &path, &loc, tag.is_some().then_some("type"));
+                    }
                     None => {}
                 }
             }
@@ -237,6 +268,13 @@ impl Walk {
             }
         }
     }
+}
+
+/// The model a field holds when it holds a model or null.
+fn optional_model(prop: &'static Json) -> Option<&'static Json> {
+    let options = prop.get("anyOf")?.as_array()?;
+    let model = options.iter().find(|o| o.get("$ref").is_some())?;
+    options.iter().any(|o| o["type"] == "null").then_some(model)
 }
 
 #[test]
