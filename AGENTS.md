@@ -1,99 +1,38 @@
-# Agent DAW development and composition
+# Working in AAW
 
-Read README.md and docs/architecture.md for what is built. docs/concept.md is the
-end state and docs/backlog.md the work toward it; neither is a requirement to add
-effects, UI or broad infrastructure beyond the item being worked on. See [Docs](#docs).
+AAW is a local music workspace: a person and an agent edit the same song through
+`daw` and the Mac app. This repository also contains the software that builds it.
 
-- Use `uv run daw ...`; all commands emit JSON. `daw` is the Rust binary, which `uv run daw`
-  runs from `engine/target/release/daw`; `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and `export` run in
-  Python, and either entry point passes the other its commands.
-- The engine, the song model and the session host are Rust, in `engine/`
-  (docs/architecture.md). After Rust changes run `cargo test` there, then
-  `uv run pytest -q`, which rebuilds the release `daw` and the package's song model
-  (`agent_daw.aaw_py`) and drives both. Python reads songs only through that model.
-- The Mac app in `apps/mac/` builds with `./build.sh`; run `./build.sh test` after Swift changes
-  and see its README for checking the window with `--snapshot` and timing its drawing with
-  `--measure`. Run it with `AAW_DATA_DIR` set to a scratch folder: with no project it makes
-  an Untitled one there, and it keeps its index of projects there, not in the person's. Its bundle holds a copy of `daw`, which the app's menu can link onto the PATH;
-  in this checkout keep to `uv run daw`, which runs the engine as last built.
-- A command's PROJECT is a project's folder or the `song.yaml` in it. `daw projects` lists
-  the projects open in the app, the window in front first. A project the person saved under
-  another name still answers at its old path, and the reply's `project` and a `notice` on
-  stderr say where it is now: use that path from then on.
-- Edit a song with commands (`set`, `clip move`, `effect add`, `undo`; see engine/README.md).
-  While a session host runs for the song (it is open in the Mac app, or `daw host` or
-  `daw play` is running; `daw status` shows `"host": true`), prefer them to `apply`: the
-  person sees and hears each edit, and it lands in one undo history with your origin. Read
-  `daw changes --since REV` for what the person changed, and `daw status` for what they have
-  selected in the app. Give a `daw batch` a `--label` that says what it does; the person
-  sees it in the activity panel and the Undo menu. `apply` and raw file edits still work;
-  a host loads a file changed from outside as an external edit.
-- Index samples with `daw samples scan`; filename metadata is a hint, never guaranteed.
-- Import selected samples into the project. Never modify the original Splice library.
-- Read `daw inspect` before editing; use its SHA with `daw apply --expect` for revisions.
-- Musical positions are zero-based quarter-note beats. Use fractions for triplets.
-- Read `daw describe sampler` before assigning pitched/gated samples. Confirm root octave
-  with `daw samples analyze` or `--root-note auto`; resolve `daw check` root warnings.
-- Read `daw describe effects` before adding effects or returns. Stems exclude master
-  effects; track stems are dry and each return has its own stem.
-- Read `daw describe automation` before writing automation lanes. Give automated
-  effects an `id`; ramp levels over a few milliseconds rather than jumping them.
-- Render a short section or isolated track to investigate an edit. Full mix pointer is
-  `renders/latest.json`; previews use `renders/latest-preview.json`.
-- To edit a finished song from timecodes, follow the `song-edit` skill and read
-  `daw describe edit`, `beats`, `joins` and `export`. Import an `.m4a` or `.mp3`
-  before measuring it; cut on the downbeats `daw samples beats --near` gives; run
-  `daw joins` on the render before `daw export`.
-- Keep demo composition separate from reusable engine code. Do not hardcode creative
-  patterns, sample names or a user's absolute library path in the core package.
-- Preserve editable project, selected source hashes, stems and render report with demos.
-- Do not claim a render was listened to when only numerical analysis was performed.
-- Audio files, sample database and environment stay out of Git; no uploads are required.
-- Before continuing an existing song, read its local `HANDOFF.md` if present.
+## Choose instructions for the task
 
-## Docs
+- **Make or edit music, find sounds, render or export:** read
+  [docs/music.md](docs/music.md). Start from the intended project's state.
+- **Change software, tests, builds, or repository documentation:** read
+  [docs/development.md](docs/development.md). It routes to the relevant code,
+  build checks and documentation rules.
+- **Both:** read both guides when each part becomes relevant. Infer the route
+  from the request; no mode-selection question is needed. A musical request
+  does not authorize developing a missing feature: explain the limitation and
+  use available tools, or ask when a software change is needed.
 
-Each kind of statement has one home in `docs/`; `docs/README.md` is the index.
+Read only the applicable guide and references needed for the current operation.
+The README is an introduction and setup guide, not required reading every session.
+Architecture, backlog and feature designs are development references, not music
+prerequisites. When the person proposes future work, record a line under Ideas
+in `docs/backlog.md`; do not create a separate notes or plan file.
 
-- `concept.md` is the end state: what the app should be and why. It never says what
-  is built. Change it when the direction changes, and record the reason in
-  `decisions.md`.
-- `backlog.md` is everything not built, one line an item: Next in the order to
-  build, Verify, Later and Ideas. When the person thinks out loud, put the idea
-  under Ideas in a line. Do not start a new notes or plan file.
-- `features/NAME.md` is one feature. Write it when a backlog item is picked up and
-  needs a design: status proposed, then What, Why, Design, Done when and Open
-  questions. When the feature is built, rewrite the file in the present tense as
-  its reference, with the date it was implemented in the title.
-- `architecture.md`, `engine/README.md`, `apps/mac/README.md` and `daw describe` say
-  what exists. Change them in the pull request that changes the code.
-- `decisions.md` is append-only. A choice gets a new numbered entry, and the entry
-  it replaces gets "Revised by Dn".
-- `completed.md` is what was built, newest first.
-- `archive/` holds superseded documents. Do not update them or build from them.
-- Before building, read the backlog item and its feature file. One item to a
-  branch and a pull request.
-- The pull request that finishes an item also moves its line from `backlog.md` to
-  `completed.md` with the date, the pull request and what a person tried; adds a
-  line under Verify for anything nobody heard or tried by hand; and renumbers Next.
-- A limit that should be lifted gets a backlog line. A limit that is simply true
-  stays in the feature's file.
+## Tools and shared boundaries
 
-## Git scope
-
-- Commit reusable tooling, tests, documentation, and generic instructional examples.
-- Keep personal music out of this repository: arrangements, samples, source manifests,
-  creative briefs, handoff notes, revisions, renders, exports, and song-specific scripts.
-- Store creative work under ignored `projects/` or `content/`, or outside the repository.
-- A personal skill is personal content like a song: who asks, which sounds, the
-  limits, the file names. Keep it in `.claude/skills/NAME/`, which Git ignores apart
-  from the generic skills `.gitignore` names, or in your own skills folder. A skill
-  names `daw` commands and paths under `projects/` or `content/`, never an absolute
-  library path. See docs/features/skills.md.
-- Put song-specific automation inside its ignored project directory. Never force-add
-  ignored content or embed personal compositions in tooling, tests, or documentation.
-- Generic examples and test fixtures must be independent of personal songs and private
-  libraries; prefer generated test audio.
-- Review staged changes before committing for creative content and local source paths.
-- Keep local project files intact when changing tracking. Song history, if wanted,
-  belongs in separate private versioning, not the tooling repository.
+- In this checkout use `uv run daw ...`. Discover verbs with `uv run daw --help`,
+  syntax with a command's `--help`, and semantics with `uv run daw describe TOPIC`.
+  Request the relevant topic; the default prints the full song schema.
+- Command results are JSON; runtime errors use stderr and a nonzero exit status.
+  Help and argument-parsing errors may be plain text.
+- Preserve personal work. Songs, samples, briefs, handoffs, renders, exports and
+  song-specific scripts belong under ignored `projects/` or `content/`, or outside
+  this repository. Import selected audio; never modify the source library.
+- Commit reusable code, tests, docs and generic examples only. Personal skills
+  stay ignored or in a personal skills folder; never force-add personal content.
+- Skills describe repeatable workflows. For a finished-song edit from timecodes,
+  follow [song-edit](.claude/skills/song-edit/SKILL.md); read it only for that task.
+  [Skill conventions](docs/features/skills.md) apply when adding or changing skills.

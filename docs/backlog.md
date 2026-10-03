@@ -3,7 +3,7 @@
 Everything between [concept.md](concept.md) and what exists, as one list. An item
 is a line: what it is, and a link to its file in [features/](features/) once it
 has a design. When an item is finished its line moves to
-[completed.md](completed.md). [AGENTS.md](../AGENTS.md) says how these files are
+[completed.md](completed.md). [development.md](development.md) says how these files are
 kept.
 
 - **Next** is in the order to build.
@@ -43,6 +43,8 @@ kept.
 8. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
+
+- **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads and song-edit is discoverable. Links, ignore rules and the shared skill path were checked locally; fresh sessions have not been tried.
 
 - **Metronome by hand and ear:** toggle it on an empty song, change BPM while playing, loop, and listen for alignment and a comfortable click level. Engine timing tests and scripted UI input do not replace listening.
 - **Manual BPM by hand and ear:** type a tempo while playing, undo it, and hear the new tempo. Scripted input and engine tests cover validation and undo.
@@ -281,4 +283,4 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 One line each, newest first.
 
-No pending ideas.
+- **CLI discovery and first-task recipes:** focused help with accepted fields, a concrete batch JSON example, concise describe output separate from full schemas, and complete first-task recipes. Task-based entry guides are in place; CLI help is unchanged.

@@ -7,6 +7,7 @@ backlog.
 
 | Date | What | PR | Tried by a person |
 |---|---|---|---|
+| 2026-10-03 | Task-based agent entry instructions, separate music and development guides, and one song-edit skill shared with Codex through a relative symlink ([skills](features/skills.md)) | #47 | Local link, ignore-rule and symlink checks; fresh Claude/Codex sessions not tried |
 | 2026-10-03 | A metronome icon in the transport bar, with a beat-aligned monitoring click during playback, including an empty song ([metronome](features/metronome.md), D67) | #46 | Automated audio timing and host tests, scripted UI input and screenshots; not heard or tried by hand |
 | 2026-10-03 | Editable BPM in the transport bar, saved through the host with validation and undo ([manual BPM](features/tempo-control.md)) | #45 | Automated host tests and scripted UI checks; not tried by hand or heard |
 | 2026-10-03 | A sample dropped on a MIDI track plays at every note's pitch, as it is at middle C, as in Ableton's Simpler; a pitched map entry whose sample has no root note repitches from middle C (D66) | #42 | The person heard a percussion hit on their song play at each note's pitch once its map entry was made pitched by command; the drop in the rebuilt app not tried by hand |
