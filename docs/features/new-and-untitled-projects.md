@@ -155,11 +155,11 @@ projects that no host has open, with `missing` and `opened`.
 - The Python commands (`check`, `timeline`, `export`, `samples import`) read the
   path they are given and do not follow a project that was saved elsewhere. The
   notice on any other command says where it is.
-- Until the sample index moves into the app's data folder (backlog item 1), an
+- Until the sample index moves into the app's data folder (backlog item 3), an
   Untitled project's browser is empty unless `AAW_LIBRARY` names an index,
   because the index is found by walking up from the project's folder.
 - A moved project is matched by its bookmark. Matching by an ID in the project
-  file comes with the `.aaw` file type (backlog item 2).
+  file comes with the `.aaw` file type (backlog item 4).
 - A project made with `daw init` and never opened in the app is not in the
   index.
 - A copy of a large project is made while the window waits. On one APFS volume

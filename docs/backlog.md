@@ -18,10 +18,12 @@ kept.
    left becomes a browser that opens and closes, with categories as in
    Ableton: Samples, Instruments, Audio Effects. An instrument or effect is
    dragged from it onto a track, or onto the device panel.
+   [features/browser.md](features/browser.md)
 2. **The Sampler device.** Sampler in the browser's Instruments, dropped on a MIDI
    track as an empty sampler in the device panel, and a sample dragged onto that
    device to play it on the keys. Its panel shows the sample's waveform and sets
    the root note, start and end, one-shot or held, attack and release.
+   [features/sampler-device.md](features/sampler-device.md)
 3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. The sample index in the app's data folder, found
    from any project. An app icon. An install step that puts the app in
