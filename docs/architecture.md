@@ -61,7 +61,7 @@ render artifacts did not change
 
 Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 
-- `aaw-model`: strict schema v1, exact musical time, stable YAML, validation,
+- `aaw-model`: the strict schema (version 1, and 2 with MIDI tracks), exact musical time, stable YAML, validation,
   hashes, the event schedule and the schema `daw describe` prints.
 - `aaw-dsp`: bandlimited repitch, lane envelopes, and the filter, EQ,
   compressor/sidechain, limiter, delay and reverb devices with explicit block
@@ -111,10 +111,12 @@ mixes, stems and previews: its output does not depend on how the stream is cut i
 blocks, so a song played from the start equals its offline render, and its
 processing never allocates, so it runs in the audio callback. No second engine exists.
 
-## Format v1
+## Format
 
 Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
-`returns`, `sections` and `master`; `schema_version` is 1. Unknown fields are rejected. Run `daw describe`
+`returns`, `sections` and `master`. `schema_version` is 2 in a song with a MIDI
+track and 1 in any other, which saves byte for byte as it did before MIDI
+tracks; either is read (D63). Unknown fields are rejected. Run `daw describe`
 for the exact generated JSON schema, bounds and defaults.
 
 Session: `title`, `tempo`, `time_signature` (4/4), `sample_rate` (44100 or 48000),
@@ -166,6 +168,22 @@ list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).
+
+MIDI track: `type: midi`, with `id`, `gain_db`, `pan`, `mute`, `solo`,
+`effects`, `sends` and `automation` as any track, an `instrument`, and note
+clips under `clips`; no pads, pattern clips or audio clips. A note clip is
+`{id, at, length_beats, notes}` and owns its notes, each `{id, pitch, at,
+duration, velocity}` with `pitch` a MIDI number (a name such as `C4` is taken
+and stored as 60) and `at` from the clip's start. A clip's ID is unique in the
+song and a note's in its clip; one that arrives without an ID is given the
+next `clipN` or `nN`. A note sounds until its end or its clip's, and one that
+starts at or after its clip's end is kept and does not play. `instrument` is
+null, which plays nothing, or `{sampler: {pads, map}}`: pads as below, and map
+entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
+not overlap; a pitched entry repitches its pad from its sample's root note to
+the note. The schedule gives a MIDI track's notes to its instrument as pitch,
+velocity, start and note-off, and the sampler makes of them the hits a pattern
+event would make. See [midi-clips.md](features/midi-clips.md) and `daw describe midi`.
 
 Pad: `sample`, `mode` (`one_shot` or `gate`), `gain_db`, `pan`, `transpose` in
 semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional

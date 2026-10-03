@@ -90,6 +90,13 @@ Automation lanes move track, return and master levels, pans, send levels and
 effect parameters over time, such as a filter sweep into a drop or a quieter
 second chorus. See [docs/features/automation.md](docs/features/automation.md).
 
+MIDI tracks hold note clips that own their notes, with numeric pitches placed
+on and off the grid, and a sampler that maps notes to pads plays them; the
+instrument can be attached, swapped or removed without touching the notes, and
+a copied clip changes independently. The agent writes them with `daw note` and
+`daw instrument`; the app draws them and does not yet edit them. See
+`daw describe midi` and [docs/features/midi-clips.md](docs/features/midi-clips.md).
+
 The broader workspace described above is the vision. Saturation, groups, synths,
 plugin hosting, MIDI import/export and recording are not implemented.
 [docs/architecture.md](docs/architecture.md) describes the implemented behavior.
@@ -182,7 +189,7 @@ uses the measured note, and `daw check` warns when a declared root disagrees wit
 the audio. See [docs/features/sample-analysis.md](docs/features/sample-analysis.md).
 `daw samples import` takes a file's path as well as an index ID. An `.m4a` or
 `.mp3` file is decoded once into the project as WAV, and a file the engine cannot
-play is refused; see "Format v1" in [docs/architecture.md](docs/architecture.md).
+play is refused; see "Format" in [docs/architecture.md](docs/architecture.md).
 `daw samples beats` maps a whole song: its tempo, every beat, the downbeats with
 their alternatives, where the arrangement changes, the beats near a timecode and a
 click audition to check the grid by ear. See [docs/features/beat-map.md](docs/features/beat-map.md).

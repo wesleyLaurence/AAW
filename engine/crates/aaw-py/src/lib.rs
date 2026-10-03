@@ -151,14 +151,16 @@ fn schedule(data: &Bound<'_, PyAny>) -> PyResult<Vec<(i64, String, String, Optio
     Ok(triggers.into_iter().map(|t| (t.start, t.track_id, t.pad, t.cutoff)).collect())
 }
 
-/// What `daw check` warns about in a valid song: lanes on bypassed effects, and
-/// pads stretched far enough to hear or with nothing to stretch to.
+/// What `daw check` warns about in a valid song: lanes on bypassed effects,
+/// pads stretched far enough to hear or with nothing to stretch to, and notes
+/// that do not play because they start past their clip's end or no pad is
+/// mapped to them.
 #[pyfunction]
 fn warnings(data: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
     let p = project(data)?;
     let mut out = Vec::new();
     for t in &p.tracks {
-        let pads = t.pads.iter().map(|(name, pad)| (name.clone(), pad.stretch, pad.source_bpm));
+        let pads = t.sound_pads().iter().map(|(name, pad)| (name.clone(), pad.stretch, pad.source_bpm));
         let clips = t.audio.iter().enumerate().map(|(i, clip)| (format!("audio.{i}"), clip.stretch, clip.source_bpm));
         for (name, stretch, source_bpm) in pads.chain(clips) {
             if stretch != aaw_model::Stretch::PreservePitch {
@@ -191,6 +193,7 @@ fn warnings(data: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
             }
         }
     }
+    out.extend(aaw_model::rules::note_warnings(&p));
     Ok(out)
 }
 

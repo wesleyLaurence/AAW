@@ -88,11 +88,28 @@ def clip_region(track, index, clips, project, root: Path):
     )
 
 
+def track_pads(track) -> dict:
+    """A track's pads: its own, or the sampler's of a MIDI track."""
+    if track.get("type") == "midi":
+        instrument = track["instrument"] or {}
+        return instrument.get("sampler", {}).get("pads", {})
+    return track["pads"]
+
+
+def clip_end(project, clip) -> Fraction:
+    """The beat a pattern clip's last repeat or a note clip ends on."""
+    if "pattern" in clip:
+        length = Fraction(str(project["patterns"][clip["pattern"]]["length_beats"])) * clip["repeats"]
+    else:
+        length = Fraction(str(clip["length_beats"]))
+    return Fraction(str(clip["at"])) + length
+
+
 def regions(project, root: Path):
     """Every forward hit and audio clip of the song as a region, by track, in
     time order."""
     rate = project["session"]["sample_rate"]
-    pads = {(t["id"], name): pad for t in project["tracks"] for name, pad in t["pads"].items()}
+    pads = {(t["id"], name): pad for t in project["tracks"] for name, pad in track_pads(t).items()}
     lengths, found = {}, {}
     for hit in schedule(project):
         pad = pads[(hit.track, hit.pad)]
@@ -117,7 +134,8 @@ def regions(project, root: Path):
             )
         )
     for track in project["tracks"]:
-        clips = [clip_region(track["id"], i, track["audio"], project, root) for i in range(len(track["audio"]))]
+        audio = track.get("audio", [])
+        clips = [clip_region(track["id"], i, audio, project, root) for i in range(len(audio))]
         if clips:
             found[track["id"]] = sorted(found.get(track["id"], []) + clips, key=lambda r: r.start)
     return found
@@ -157,13 +175,8 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
             raise ValueError("The song has no sound to fit its length to")
         # Whole beats, so the end is a place on the grid. A session holds its
         # clips whole, so it cannot end before the last of them does.
-        patterns = project["patterns"]
         clips = max(
-            (
-                Fraction(str(c["at"])) + Fraction(str(patterns[c["pattern"]]["length_beats"])) * c["repeats"]
-                for t in project["tracks"]
-                for c in t["clips"]
-            ),
+            (clip_end(project, c) for t in project["tracks"] for c in t["clips"]),
             default=Fraction(0),
         )
         wanted = math.ceil(round(sound_ends + tail, 6))
@@ -196,7 +209,7 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
         follows = [
             {"pad": f"{t['id']}.{name}", "stretch": pad_["stretch"], "source_bpm": pad_["source_bpm"]}
             for t in project["tracks"]
-            for name, pad_ in t["pads"].items()
+            for name, pad_ in track_pads(t).items()
             if pad_["source_bpm"]
         ]
         result["tempo_for"] = {
@@ -215,7 +228,7 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
         raise ValueError("--end-at and --pad go together")
     if pad is not None:
         track, _, name = pad.partition(".")
-        pads = {t["id"]: t["pads"] for t in project["tracks"]}
+        pads = {t["id"]: track_pads(t) for t in project["tracks"]}
         if name not in pads.get(track, {}):
             raise ValueError(f"Unknown pad: {pad}; name it as TRACK.PAD")
         long = played(pads[track][name], project, path.parent)[1] * tempo / 60

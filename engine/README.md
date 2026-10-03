@@ -9,7 +9,7 @@ reads songs through `aaw-py`.
 
 | Crate | Responsibility |
 |---|---|
-| `aaw-model` | Schema v1 types, validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
+| `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
 | `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes and the six effects |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
@@ -49,7 +49,7 @@ project's folder or the song file in it. It implements:
 | `daw init DIRECTORY [--tempo T] [--bars N]` | Creates `DIRECTORY/song.yaml`, an empty song |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
-| `daw describe [project\|sampler\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, and how to edit a finished song, map its beats, check its joins and export it |
+| `daw describe [project\|sampler\|midi\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, and how to edit a finished song, map its beats, check its joins and export it |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
 | `daw samples ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, perception, `inspect` with measured root notes and warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
@@ -64,6 +64,7 @@ project's folder or the song file in it. It implements:
 | `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
+| `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
@@ -137,7 +138,10 @@ log, handles and the transport need a host.
   item.
 - **A batch builds on itself.** A track, return or pattern a batch adds can be
   added to by its later commands: a pad and a clip on a new track, steps and
-  events in a new pattern.
+  events in a new pattern, notes in a new note clip. A note clip or a note is
+  given its ID when the command makes it (the next `clipN` in the song, the
+  next `nN` in its clip), so a later command can name it; a command that makes
+  several replies with each one's path.
 - **References stay valid.** Renaming a track renames the sidechains naming it;
   renaming or removing a return updates or removes its sends and their lanes;
   inserting, moving or removing an effect rewrites or removes the lanes that
@@ -196,7 +200,8 @@ pattern's steps and events, names the tracks, clips, returns and sections a
 change touched, and turns the person's edits into commands (`edits.rs`),
 working out exact beats from the song for a clip moved by so many beats or
 copied after itself, and for an event moved by steps of its pattern's grid.
-A track's audio clips are in the arrangement beside its pattern clips, each to
+A MIDI track is in the arrangement with its instrument's kind and its note
+clips, each with its notes. A track's audio clips are in the arrangement beside its pattern clips, each to
 where it leaves and with how long it sounds after that, and so are the files
 they play (`files.rs`): each file's length, and the beats of the map `daw
 samples beats` left beside it, when that map is of the sample the song lists.

@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["project", "sampler", "effects", "automation", "edit", "beats", "joins", "export"];
+pub const TOPICS: &[&str] = &["project", "sampler", "midi", "effects", "automation", "edit", "beats", "joins", "export"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -33,9 +33,25 @@ const PROJECT: &[(&str, &str)] = &[
     ("effects", "tracks[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects."),
     ("returns", "returns[] are reverb/delay buses fed by tracks[].sends; see daw describe effects."),
     ("automation", "tracks[].automation, returns[].automation and master.automation move gain, pan, send levels and effect parameters over time; see daw describe automation."),
+    ("midi", "A track with type: midi holds note clips and an instrument; see daw describe midi."),
     ("audio", "tracks[].audio lists audio clips: parts of a sample file placed on the track's timeline, for edits of finished songs; see daw describe edit."),
     ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. An audio clip has the same two fields. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
     ("limits", "No groups, synths or recording."),
+];
+
+const MIDI: &[(&str, &str)] = &[
+    ("tracks", "A track with type: midi has an instrument and note clips under clips, and no pads, pattern clips or audio clips. Its gain, pan, effects, sends and automation are any track's. daw track add SONG ID --type midi makes one with no instrument."),
+    ("clips", "A note clip {id, at, length_beats, notes} owns its notes: at is the song beat it starts on, and each note's at is beats from the clip's start. A copy (daw clip duplicate) owns copies of the notes, so changing one clip changes nothing in another. Clips do not repeat; duplicate one to play it again."),
+    ("notes", "A note is {id, pitch, at, duration, velocity}. pitch is a MIDI number, 0 to 127. A command or the document also takes a name, which is stored as its number: C4 is 60, middle C, so C3 is 48 and C2 36. velocity is 1 to 127, 100 unless given, and scales the level linearly. duration is more than 0. Chords are notes at the same at."),
+    ("timing", "Positions are exact and nothing is snapped to a grid: write 1/3, 2/3 for triplets, and a decimal such as 1.975 for a note a little ahead of beat 2 (12.5 ms at 120 BPM) or 2.025 behind it."),
+    ("ids", "A clip written without an id is given the next free clipN, unique in the song; a note, the next free nN, unique in its clip. IDs stay through edits, saving and reopening. A note is addressed as its clip's path with notes.ID, e.g. tracks.keys.clips.clip1.notes.n3, or by @N while a host runs. A command that makes clips or notes replies with their paths."),
+    ("edges", "A note sounds from its start to the end of its duration or of its clip, whichever is first. A note that starts at or after its clip's end is kept and does not play, and lengthening the clip brings it back; daw check names such notes. A note cannot start before its clip."),
+    ("instrument", "instrument is null, and the notes play nothing and are kept, or {sampler: {pads, map}}. pads are the pads of daw describe sampler, by name. map lists {notes, pad, pitched}: notes is one note or [LOW, HIGH], inclusive, and no note may be in two entries. A pitched entry plays its pad repitched from its sample's root_note to the note, so the sample needs a root_note; an entry that is not pitched plays its pad as it is, whatever the note, as a drum rack does. A note no entry maps is silent, and daw check names it. Replacing or removing the instrument leaves the notes as they are."),
+    ("drums", "General MIDI drum notes are the usual map: 36 (C2) kick, 38 (D2) snare, 42 (F#2) closed hat, 46 (A#2) open hat, 49 (C#3) crash."),
+    ("voices", "Each note plays its own voice, overlapping notes of the same pitch included. A gate pad releases at the note-off over its release_ms; a one_shot pad plays its sample through. A voice never outlasts its sample: there is no sustain loop. Choke groups work as on any track."),
+    ("commands", "daw clip add SONG TRACK --length-beats 4 [--at 16]; daw note add SONG CLIP --pitch C4 --duration 1 [--at 0 --velocity 96], or --notes '[{...}, ...]' for many; daw note set SONG NOTE --velocity 80; daw note move SONG NOTE... --by -1/48; daw note transpose SONG NOTE... --by 12; daw note remove SONG NOTE...; a clip given to move, transpose or remove stands for all its notes. daw clip duplicate, move, resize and remove place clips. daw note list SONG CLIP|TRACK [--from BEAT --to BEAT] reads notes with their names and song beats. daw instrument set SONG TRACK JSON attaches or replaces the instrument, daw instrument remove takes it off, daw instrument map SONG TRACK NOTES PAD [--pitched] adds a map entry, and daw pad add/set/remove edit the sampler's pads. A labeled daw batch makes a phrase and its variations one undo step."),
+    ("version", "A song with a MIDI track is saved with schema_version: 2, which an engine from before MIDI tracks refuses. A song without one is saved as version 1, as before."),
+    ("limits", "No synth, no MIDI files, no controllers, pitch bend or pedal, no recording, and clips do not loop."),
 ];
 
 const EFFECT: &[(&str, &str)] = &[
@@ -176,6 +192,10 @@ pub fn describe(topic: &str) -> Option<Json> {
         "sampler" => json!({
             "schema": {"pad": model("Pad"), "event": model("Event"), "sample": model("Sample")},
             "semantics": texts(PROJECT),
+        }),
+        "midi" => json!({
+            "schema": {"track": model("MidiTrack"), "clip": model("NoteClip"), "instrument": model("Instrument")},
+            "semantics": texts(MIDI),
         }),
         "effects" => json!({
             "schema": Json::Object(EFFECT_TYPES.iter().map(|k| (k.to_string(), model(&title(k)))).collect()),

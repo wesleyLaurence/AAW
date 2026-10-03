@@ -1,10 +1,11 @@
 # MIDI tracks and note clips — proposed October 3, 2026
 
-Status: proposed, not built. Backlog items 1, 2 and 3, one branch and pull
-request each, in that order. Product requirements are in
-[concept.md](../concept.md#sound); decisions D60, D61 and D62 record the
-reasons. Field and command names below illustrate the intended model; they are
-not accepted by the current schema.
+Status: item 1 built October 3, 2026 (#39); items 2 and 3 proposed. They were
+backlog items 1, 2 and 3, one branch and pull request each, in that order.
+Product requirements are in [concept.md](../concept.md#sound); decisions D60,
+D61, D62 and D63 record the reasons. The schema and commands of item 1 are as
+`daw describe midi` and [engine/README.md](../../engine/README.md) give them;
+this file becomes their reference once item 3 is built.
 
 ## What
 
@@ -184,9 +185,11 @@ when asked.
 ### Editing and the agent
 
 Item 1 gives the CLI reads and edits over the existing host, beside today's
-`clip` and `pattern event` groups: MIDI track creation, instrument attach,
-replace and remove, clip create, move, resize, duplicate and remove, and note
-add (in bulk), edit, move, transpose and remove. Inspection returns numeric
+`clip` and `pattern event` groups: MIDI track creation (`daw track add
+--type midi`), instrument attach, replace and remove (`daw instrument set`,
+`remove`, `map`, and `daw pad` on the sampler), clip create, move, resize,
+duplicate and remove (`daw clip`), and note add (in bulk), edit, move,
+transpose and remove (`daw note`), with `daw note list` to read them. Inspection returns numeric
 note fields and stable IDs, scoped to a clip or beat range; the agent must not
 need to read the whole project for one note edit. A duplicate returns the new
 clip's ID and its notes' IDs. A named batch can duplicate and vary a phrase as
@@ -305,12 +308,12 @@ rewrite this file as the built reference.
 ## Open questions
 
 These are implementation choices to settle at the start of the item they
-belong to, without reopening the requirements above:
+belong to, without reopening the requirements above. Item 1's two, the clip's
+edges and whether a note clip repeats, are settled in D63: a note sounds until
+its clip's end, one that starts past it is kept and silent, a note cannot
+start before its clip, and note clips do not repeat.
 
-- Item 1: clip-edge behavior — note tails beyond a clip, a note moved before
-  its clip's start, and resizing a clip over its notes. Document and test the
-  chosen behavior; no silent quantization or loss of a moved note.
-- Item 1: whether a note clip repeats (the `repeats` of a pattern clip) or that
-  waits for clips that loop, which is in Later for audio clips too.
+- Item 2: how a clip shortened from its left edge treats its notes, which are
+  placed from its start.
 - Item 3: MIDI channel/track mapping and the exact unsupported-message policy,
   including ambiguous overlapping note-on/off pairs for the same pitch/channel.

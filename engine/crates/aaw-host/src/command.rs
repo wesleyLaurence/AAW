@@ -110,9 +110,56 @@ pub enum Command {
         track: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<Json>,
+        /// A note clip copy's ID; without one it is given the next free one.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
     },
     #[serde(rename = "clip.remove")]
     ClipRemove { clip: String },
+    /// Sets a note clip's length; its notes stay where they are.
+    #[serde(rename = "clip.resize")]
+    ClipResize { clip: String, length_beats: Json },
+
+    // Notes of note clips
+    /// Adds notes to a note clip: `notes`, a list of notes, or one note from
+    /// the command's other keys.
+    #[serde(rename = "note.add")]
+    NoteAdd {
+        clip: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<Fields>,
+        #[serde(flatten)]
+        fields: Fields,
+    },
+    #[serde(rename = "note.set")]
+    NoteSet {
+        note: String,
+        #[serde(flatten)]
+        fields: Fields,
+    },
+    /// Moves notes later, or earlier for a negative `by`, by exact beats. A
+    /// clip in `notes` stands for all of its notes.
+    #[serde(rename = "note.move")]
+    NoteMove { notes: Vec<String>, by: Json },
+    /// Moves notes up, or down for a negative `by`, by semitones.
+    #[serde(rename = "note.transpose")]
+    NoteTranspose { notes: Vec<String>, by: i64 },
+    #[serde(rename = "note.remove")]
+    NoteRemove { notes: Vec<String> },
+
+    // Instruments of MIDI tracks
+    /// Attaches or replaces a MIDI track's instrument; null removes it. The
+    /// notes are not touched.
+    #[serde(rename = "instrument.set")]
+    InstrumentSet { track: String, instrument: Json },
+    /// Maps a note or a range of notes to a pad of a MIDI track's sampler:
+    /// `notes`, `pad` and `pitched`.
+    #[serde(rename = "instrument.map")]
+    InstrumentMap {
+        track: String,
+        #[serde(flatten)]
+        fields: Fields,
+    },
 
     // Audio clips
     #[serde(rename = "audio.add")]
@@ -332,6 +379,17 @@ pub enum Command {
         #[serde(default)]
         path: String,
     },
+    /// The notes of a note clip, or of a MIDI track's clips, with their names
+    /// and song beats; `from` and `to` keep those that start in a range of
+    /// song beats.
+    #[serde(rename = "notes")]
+    Notes {
+        path: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Json>,
+    },
     /// What the person has selected in the app, as references; `status` reports
     /// it. It is host state like the loop: not saved, and not a change.
     #[serde(rename = "select")]
@@ -380,7 +438,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } => Kind::Transport,
-            Inspect | Status | Changes { .. } | Get { .. } => Kind::Read,
+            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }
@@ -515,6 +573,21 @@ fn beat_at(j: &Json) -> Result<BigRational> {
     beat_of(&value)
         .and_then(|b| aaw_model::beat(&b).ok())
         .ok_or_else(|| format!("{} is not a beat", short(j)))
+}
+
+/// A number of beats to move by, exactly, which may be negative: `-1/48`.
+fn offset_at(j: &Json) -> Result<BigRational> {
+    let negated = match j {
+        Json::String(t) => t.trim().strip_prefix('-').map(|rest| Json::String(rest.to_string())),
+        Json::Number(n) if n.as_f64().is_some_and(|x| x < 0.0) => {
+            Some(serde_json::from_str(n.to_string().trim_start_matches('-')).map_err(|e| e.to_string())?)
+        }
+        _ => None,
+    };
+    match negated {
+        Some(rest) => Ok(-beat_at(&rest)?),
+        None => beat_at(j),
+    }
 }
 
 fn beat_text(x: &BigRational) -> String {
@@ -916,6 +989,9 @@ impl<'a> Edit<'a> {
                 f.insert("id".into(), Json::String(id.clone()));
                 f.extend(fields.clone());
                 let node = match key {
+                    "tracks" if f.get("type").and_then(Json::as_str) == Some("midi") => {
+                        with_empty(&f, &["clips", "effects", "sends", "automation"], &[])?
+                    }
                     "tracks" => with_empty(&f, &["clips", "audio", "effects", "sends", "automation"], &["pads"])?,
                     _ => with_empty(&f, &["effects", "automation"], &[])?,
                 };
@@ -977,9 +1053,23 @@ impl<'a> Edit<'a> {
             }
             ClipAdd { track, fields } => {
                 let loc = self.track(track)?;
-                out.made.push(self.insert(&loc, "clips", None, map_node(fields)?)?);
-                let pattern = fields.get("pattern").and_then(Json::as_str).unwrap_or("?");
-                out.label = format!("Add clip of {pattern} to {}", self.name(&loc));
+                if self.is_midi(&loc) {
+                    // Notes can be added to it by later commands of a batch,
+                    // by the ID it is given here.
+                    let mut f = fields.clone();
+                    if !f.contains_key("id") {
+                        f.insert("id".into(), Json::String(self.next_clip_id()));
+                    }
+                    let mut node = with_empty(&f, &["notes"], &[])?;
+                    self.name_notes(&mut node);
+                    out.made.push(self.insert(&loc, "clips", None, node)?);
+                    let at = fields.get("at").map_or_else(|| "0".to_string(), short);
+                    out.label = format!("Add note clip to {} at {at}", self.name(&loc));
+                } else {
+                    out.made.push(self.insert(&loc, "clips", None, map_node(fields)?)?);
+                    let pattern = fields.get("pattern").and_then(Json::as_str).unwrap_or("?");
+                    out.label = format!("Add clip of {pattern} to {}", self.name(&loc));
+                }
             }
             ClipMove { clip, track, at } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
@@ -989,6 +1079,13 @@ impl<'a> Edit<'a> {
                 }
                 if let Some(t) = track {
                     let dest = self.track(t)?;
+                    if self.is_midi(&dest) != self.is_midi(&owner) {
+                        return Err(if self.is_midi(&owner) {
+                            format!("A note clip moves only to a MIDI track, and {t} is not one")
+                        } else {
+                            format!("A pattern clip cannot move to MIDI track {t}")
+                        });
+                    }
                     if dest != owner {
                         let item = self.take(&owner, "clips", i)?;
                         let list = self.list(&dest, "clips")?;
@@ -1004,11 +1101,16 @@ impl<'a> Edit<'a> {
                 self.set_leaf(&loc, "repeats", json_value(repeats)?);
                 out.label = format!("Set repeats of clip {} to {}", self.clip_name(&loc), short(repeats));
             }
-            ClipDuplicate { clip, track, at } => {
+            ClipDuplicate { clip, track, at, id } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
                 let source = self.node(&owner).get("clips").expect("clips").items()[i].node.clone();
+                let midi = self.is_midi(&owner);
                 let at = match at {
                     Some(a) => json_value(a)?,
+                    None if midi => match (exact(source.get("at")), exact(source.get("length_beats"))) {
+                        (Some(s), Some(l)) => beat_value(&(s + l)),
+                        _ => return Err(format!("{clip}: cannot place the copy; pass at")),
+                    },
                     None => {
                         // Right after the original: its start plus its span.
                         let pattern = source.field("pattern").unwrap_or_default();
@@ -1028,9 +1130,22 @@ impl<'a> Edit<'a> {
                     Some(t) => self.track(t)?,
                     None => owner.clone(),
                 };
-                let mut copy = source;
+                if self.is_midi(&dest) != midi {
+                    return Err(format!("{clip} cannot be copied to {}, which holds the other kind of clip", self.name(&dest)));
+                }
+                // The copy owns its notes, as new objects. A note clip's copy
+                // has an ID of its own, and its notes keep theirs, which are
+                // their clip's.
+                let mut copy = Node::new(&source.value());
+                let id = match id {
+                    Some(id) => Some(id.clone()),
+                    None => midi.then(|| self.next_clip_id()),
+                };
                 if let Some(m) = copy.map_mut() {
                     m.insert("at".into(), Node::Leaf(at));
+                    if let Some(id) = id {
+                        m.insert("id".into(), Node::Leaf(Value::Str(id)));
+                    }
                 }
                 let index = (dest == owner).then_some(i + 1);
                 let name = self.clip_name(&[owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat());
@@ -1043,6 +1158,99 @@ impl<'a> Edit<'a> {
                 let name = self.clip_name(&loc);
                 self.remove_at(&loc)?;
                 out.label = format!("Remove clip {name}");
+            }
+            ClipResize { clip, length_beats } => {
+                let loc = self.note_clip(clip)?;
+                self.set_leaf(&loc, "length_beats", beat_value(&beat_at(length_beats)?));
+                out.label = format!("Resize clip {} to {} beats", self.clip_name(&loc), short(length_beats));
+            }
+            NoteAdd { clip, notes, fields } => {
+                let loc = self.note_clip(clip)?;
+                let mut all: Vec<Fields> = notes.clone();
+                if !fields.is_empty() {
+                    all.push(fields.clone());
+                }
+                if all.is_empty() {
+                    return Err("Give a note's fields, or notes".into());
+                }
+                for f in &all {
+                    out.made.push(self.insert(&loc, "notes", None, map_node(f)?)?);
+                }
+                let mut clip_node = self.node(&loc).clone();
+                self.name_notes(&mut clip_node);
+                *self.node_mut(&loc) = clip_node;
+                out.label = format!("Add {} to clip {}", count(all.len(), "note"), self.clip_name(&loc));
+            }
+            NoteSet { note, fields } => {
+                let (clip, i) = self.member(note, "notes", "a note")?;
+                let loc = [clip.clone(), vec![Step::Key("notes".into()), Step::Index(i)]].concat();
+                if fields.contains_key("id") {
+                    return Err("A note's ID cannot be changed".into());
+                }
+                self.merge(&loc, fields)?;
+                let id = self.node(&loc).field("id").unwrap_or("?").to_string();
+                out.label = format!("Change note {id} of clip {}", self.clip_name(&clip));
+            }
+            NoteMove { notes, by } => {
+                let by = offset_at(by)?;
+                let found = self.notes_of(notes)?;
+                for (clip, i) in &found {
+                    let loc = [clip.clone(), vec![Step::Key("notes".into()), Step::Index(*i)]].concat();
+                    let at = exact(self.node(&loc).get("at")).unwrap_or_default() + &by;
+                    if at < BigRational::from_integer(0.into()) {
+                        let id = self.node(&loc).field("id").unwrap_or("?").to_string();
+                        return Err(format!("Note {id} of clip {} would start before its clip", self.clip_name(clip)));
+                    }
+                    self.set_leaf(&loc, "at", beat_value(&at));
+                }
+                out.label = format!("Move {} by {} beats", count(found.len(), "note"), signed(&aaw_model::fraction_str(&by)));
+            }
+            NoteTranspose { notes, by } => {
+                let found = self.notes_of(notes)?;
+                for (clip, i) in &found {
+                    let loc = [clip.clone(), vec![Step::Key("notes".into()), Step::Index(*i)]].concat();
+                    let pitch = number(self.node(&loc).get("pitch")).unwrap_or(f64::NAN) as i64 + by;
+                    if !(0..=127).contains(&pitch) {
+                        let id = self.node(&loc).field("id").unwrap_or("?").to_string();
+                        return Err(format!("Note {id} of clip {} would be pitch {pitch}, outside 0 to 127", self.clip_name(clip)));
+                    }
+                    self.set_leaf(&loc, "pitch", Value::int(pitch));
+                }
+                out.label = format!("Transpose {} by {} semitones", count(found.len(), "note"), signed(&by.to_string()));
+            }
+            NoteRemove { notes } => {
+                let mut found = self.notes_of(notes)?;
+                // From the last, so each index still names its note.
+                found.sort_by(|a, b| b.1.cmp(&a.1));
+                for (clip, i) in &found {
+                    self.take(clip, "notes", *i)?;
+                }
+                out.label = format!("Remove {}", count(found.len(), "note"));
+            }
+            InstrumentSet { track, instrument } => {
+                let loc = self.midi_track(track)?;
+                let had = !matches!(self.node(&loc).get("instrument"), None | Some(Node::Leaf(Value::None)));
+                let value = json_value(instrument)?;
+                let kind = match &value {
+                    Value::Dict(d) => d.keys().next().and_then(|k| k.as_str()).unwrap_or("instrument").to_string(),
+                    _ => "instrument".to_string(),
+                };
+                let removing = value.is_none();
+                self.node_mut(&loc).map_mut().expect("a track").insert("instrument".into(), Node::new(&value));
+                let name = self.name(&loc);
+                out.label = match (had, removing) {
+                    (_, true) => format!("Remove the instrument of {name}"),
+                    (false, false) => format!("Attach a {kind} to {name}"),
+                    (true, false) => format!("Replace the instrument of {name} with a {kind}"),
+                };
+            }
+            InstrumentMap { track, fields } => {
+                let loc = self.midi_track(track)?;
+                let sampler = self.sampler(&loc)?;
+                out.made.push(self.insert(&sampler, "map", None, map_node(fields)?)?);
+                let notes = fields.get("notes").map_or_else(|| "?".to_string(), short);
+                let pad = fields.get("pad").and_then(Json::as_str).unwrap_or("?");
+                out.label = format!("Map notes {notes} to {pad} on {}", self.name(&loc));
             }
             AudioAdd { track, fields } => {
                 let loc = self.track(track)?;
@@ -1255,7 +1463,7 @@ impl<'a> Edit<'a> {
                 self.remove_at(&loc)?;
             }
             PadAdd { track, pad, fields } => {
-                let loc = [self.track(track)?, vec![Step::Key("pads".into())]].concat();
+                let loc = self.pads(track)?;
                 let node = map_node(fields)?;
                 let pads = self.node_mut(&loc).map_mut().expect("pads");
                 if pads.contains_key(pad) {
@@ -1265,12 +1473,12 @@ impl<'a> Edit<'a> {
                 out.label = format!("Add pad {pad} to {track}");
             }
             PadSet { track, pad, fields } => {
-                let loc = self.at(&format!("tracks.{track}.pads.{pad}"))?;
+                let loc = self.pad(track, pad)?;
                 self.merge(&loc, fields)?;
                 out.label = format!("Change pad {track}.{pad}");
             }
             PadRemove { track, pad } => {
-                let loc = self.at(&format!("tracks.{track}.pads.{pad}"))?;
+                let loc = self.pad(track, pad)?;
                 self.remove_at(&loc)?;
                 out.label = format!("Remove pad {track}.{pad}");
             }
@@ -1501,12 +1709,148 @@ impl<'a> Edit<'a> {
         self.set_leaf(entering, "fade_in_ms", Value::Float(into));
     }
 
+    /// A clip described by its pattern, or a note clip by its ID, and its
+    /// beat, for labels.
     fn clip_name(&self, loc: &[Step]) -> String {
         let n = self.node(loc);
         format!(
             "{} at {}",
-            n.field("pattern").unwrap_or("?"),
-            n.get("at").map_or_else(|| "?".into(), |a| short(&node_json(a)))
+            n.field("pattern").or_else(|| n.field("id")).unwrap_or("?"),
+            n.get("at").map_or_else(|| "0".into(), |a| short(&node_json(a)))
         )
+    }
+
+    /// The next `clipN` no note clip of the song has, as the model gives.
+    fn next_clip_id(&self) -> String {
+        let ids: Vec<&str> = self
+            .root
+            .get("tracks")
+            .map_or(&[][..], Node::items)
+            .iter()
+            .filter(|t| t.node.field("type") == Some("midi"))
+            .flat_map(|t| t.node.get("clips").map_or(&[][..], Node::items))
+            .filter_map(|c| c.node.field("id"))
+            .collect();
+        next_id(&ids, "clip")
+    }
+
+    /// Gives a note clip's notes that have no ID the next free `nN`, as the
+    /// model would, so that later commands of a batch can name them.
+    fn name_notes(&self, clip: &mut Node) {
+        let Some(notes) = clip.get_mut("notes").and_then(Node::items_mut) else { return };
+        for i in 0..notes.len() {
+            if notes[i].node.field("id").is_none() {
+                let ids: Vec<&str> = notes.iter().filter_map(|n| n.node.field("id")).collect();
+                let id = next_id(&ids, "n");
+                set(&mut notes[i].node, "id", Value::Str(id));
+            }
+        }
+    }
+
+    fn is_midi(&self, track: &[Step]) -> bool {
+        self.node(track).field("type") == Some("midi")
+    }
+
+    fn midi_track(&self, id: &str) -> Result<Loc> {
+        let loc = self.track(id)?;
+        if !self.is_midi(&loc) {
+            return Err(format!("{id} is not a MIDI track"));
+        }
+        Ok(loc)
+    }
+
+    /// The note clip a path names.
+    fn note_clip(&self, path: &str) -> Result<Loc> {
+        let (owner, i) = self.member(path, "clips", "a clip")?;
+        if !self.is_midi(&owner) {
+            return Err(format!("{path} is a pattern clip, not a note clip"));
+        }
+        Ok([owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat())
+    }
+
+    /// The notes paths name, each as its clip and its index there: a note, or
+    /// a note clip for all of its notes. Each note once.
+    fn notes_of(&self, paths: &[String]) -> Result<Vec<(Loc, usize)>> {
+        if paths.is_empty() {
+            return Err("Name a note or a note clip".into());
+        }
+        let mut out: Vec<(Loc, usize)> = Vec::new();
+        for path in paths {
+            let loc = self.at(path)?;
+            match loc.as_slice() {
+                [clip @ .., Step::Key(k), Step::Index(i)] if k == "notes" => out.push((clip.to_vec(), *i)),
+                [owner @ .., Step::Key(k), Step::Index(_)] if k == "clips" && self.is_midi(owner) => {
+                    let n = self.node(&loc).get("notes").map_or(0, |n| n.items().len());
+                    out.extend((0..n).map(|i| (loc.clone(), i)));
+                }
+                _ => return Err(format!("{path} is not a note or a note clip")),
+            }
+        }
+        let mut seen = Vec::new();
+        out.retain(|x| {
+            let new = !seen.contains(x);
+            seen.push(x.clone());
+            new
+        });
+        Ok(out)
+    }
+
+    /// A MIDI track's sampler, made empty where the track has no instrument.
+    fn sampler(&mut self, track: &[Step]) -> Result<Loc> {
+        let instrument = self.node(track).get("instrument");
+        if matches!(instrument, None | Some(Node::Leaf(Value::None))) {
+            let empty = aaw_model::json_value(r#"{"sampler": {"pads": {}, "map": []}}"#).map_err(|e| e.to_string())?;
+            self.node_mut(track).map_mut().expect("a track").insert("instrument".into(), Node::new(&empty));
+        }
+        let loc = [track.to_vec(), vec![Step::Key("instrument".into()), Step::Key("sampler".into())]].concat();
+        match tree::resolve(self.root, &self.text(&loc), false) {
+            Ok(_) => Ok(loc),
+            Err(_) => Err(format!("{} has an instrument that is not a sampler", self.name(track))),
+        }
+    }
+
+    /// Where a track's pads are: its own, or its sampler's on a MIDI track,
+    /// which is made if the track has no instrument.
+    fn pads(&mut self, track: &str) -> Result<Loc> {
+        let loc = self.track(track)?;
+        if self.is_midi(&loc) {
+            let sampler = self.sampler(&loc)?;
+            return Ok([sampler, vec![Step::Key("pads".into())]].concat());
+        }
+        Ok([loc, vec![Step::Key("pads".into())]].concat())
+    }
+
+    fn pad(&self, track: &str, pad: &str) -> Result<Loc> {
+        let loc = self.track(track)?;
+        if self.is_midi(&loc) {
+            return self.at(&format!("{}.instrument.sampler.pads.{pad}", self.text(&loc)));
+        }
+        self.at(&format!("tracks.{track}.pads.{pad}"))
+    }
+}
+
+/// `prefix` and one more than the highest number among IDs of that form.
+fn next_id(ids: &[&str], prefix: &str) -> String {
+    let n = ids
+        .iter()
+        .filter_map(|id| id.strip_prefix(prefix))
+        .filter(|n| !n.is_empty() && !n.starts_with('0') && n.bytes().all(|b| b.is_ascii_digit()))
+        .filter_map(|n| n.parse::<u64>().ok())
+        .max()
+        .unwrap_or(0);
+    format!("{prefix}{}", n + 1)
+}
+
+/// "1 note", "3 notes".
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+/// A number with its sign: +12, -1/3.
+fn signed(text: &str) -> String {
+    if text.starts_with('-') {
+        text.to_string()
+    } else {
+        format!("+{text}")
     }
 }

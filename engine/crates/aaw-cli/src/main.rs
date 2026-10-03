@@ -90,6 +90,7 @@ struct Forwarded {
 enum Topic {
     Project,
     Sampler,
+    Midi,
     Effects,
     Automation,
     Edit,
@@ -260,6 +261,10 @@ enum Top {
     #[command(subcommand)]
     Audio(AudioCmd),
     #[command(subcommand)]
+    Note(NoteCmd),
+    #[command(subcommand)]
+    Instrument(InstrumentCmd),
+    #[command(subcommand)]
     Pattern(PatternCmd),
     #[command(subcommand)]
     Pad(PadCmd),
@@ -276,7 +281,7 @@ enum Top {
 /// Tracks.
 #[derive(Subcommand)]
 enum TrackCmd {
-    /// Add a track; --index places it.
+    /// Add a track; --index places it, and --type midi makes a MIDI track.
     Add {
         project: Song,
         id: String,
@@ -374,14 +379,16 @@ enum AudioCmd {
     },
 }
 
-/// Clips, addressed by reference: @N while a host runs, else tracks.T.clips.I.
+/// Clips, addressed by reference: @N while a host runs, else tracks.T.clips.I,
+/// or a note clip's ID, tracks.T.clips.ID.
 #[derive(Subcommand)]
 enum ClipCmd {
-    /// Add a clip: --at, --repeats and --velocity-scale are optional.
+    /// Add a clip: `add SONG TRACK PATTERN`, then --at, --repeats and
+    /// --velocity-scale if wanted. On a MIDI track, a note clip, with no
+    /// pattern: --length-beats, and --at, --id and --notes if wanted.
     Add {
         project: Song,
         track: String,
-        pattern: String,
         #[command(flatten)]
         f: FieldArgs,
     },
@@ -395,7 +402,8 @@ enum ClipCmd {
         at: Option<String>,
     },
     Repeats { project: Song, clip: String, repeats: String },
-    /// Copy a clip, by default right after the original.
+    /// Copy a clip, by default right after the original. A note clip's copy
+    /// owns its notes; --id names it.
     Duplicate {
         project: Song,
         clip: String,
@@ -403,8 +411,84 @@ enum ClipCmd {
         track: Option<String>,
         #[arg(long)]
         at: Option<String>,
+        #[arg(long)]
+        id: Option<String>,
     },
     Remove { project: Song, clip: String },
+    /// Set a note clip's length; its notes stay where they are.
+    Resize { project: Song, clip: String, length: String },
+}
+
+/// Notes of note clips, addressed as CLIP.notes.ID, e.g.
+/// tracks.keys.clips.clip1.notes.n3, or by @N while a host runs.
+#[derive(Subcommand)]
+enum NoteCmd {
+    /// Add a note: --pitch (a number or a name such as C4), --duration,
+    /// optionally --at and --velocity; or --notes with a JSON list of them.
+    Add {
+        project: Song,
+        clip: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Change a note's --pitch, --at, --duration or --velocity.
+    Set {
+        project: Song,
+        note: String,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Move notes by exact beats; a clip stands for all of its notes.
+    Move {
+        project: Song,
+        #[arg(required = true)]
+        notes: Vec<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        by: String,
+    },
+    /// Move notes up or down by semitones; a clip stands for all of its notes.
+    Transpose {
+        project: Song,
+        #[arg(required = true)]
+        notes: Vec<String>,
+        #[arg(long, allow_hyphen_values = true)]
+        by: i64,
+    },
+    /// Remove notes; a clip stands for all of its notes.
+    Remove {
+        project: Song,
+        #[arg(required = true)]
+        notes: Vec<String>,
+    },
+    /// The notes of a note clip, or of a MIDI track's clips, with their names
+    /// and song beats; --from and --to keep those starting in a range of song beats.
+    List {
+        project: Song,
+        path: String,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
+}
+
+/// The instrument of a MIDI track. Replacing or removing it leaves the notes.
+#[derive(Subcommand)]
+enum InstrumentCmd {
+    /// Attach or replace the instrument, e.g. '{"sampler": {"pads": {...}, "map": [...]}}'.
+    Set { project: Song, track: String, instrument: String },
+    /// Remove the instrument; the notes are kept and play nothing.
+    Remove { project: Song, track: String },
+    /// Map NOTES (a note, a name, or [LOW, HIGH]) to a pad of the sampler;
+    /// --pitched plays the pad at the notes' pitches.
+    Map {
+        project: Song,
+        track: String,
+        notes: String,
+        pad: String,
+        #[arg(long)]
+        pitched: bool,
+    },
 }
 
 /// Patterns and their events.
@@ -673,6 +757,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
             match command {
                 Command::Inspect => Ok(s.inspect()),
                 Command::Get { path } => s.get(&path),
+                Command::Notes { path, from, to } => s.notes(&path, from.as_ref(), to.as_ref()),
                 Command::Status => {
                     let mut m = s.status();
                     m.insert("playing".into(), json!(false));
@@ -1114,10 +1199,14 @@ fn run(cli: &Cli) -> Result<Json> {
             ),
         },
         Top::Clip(c) => match c {
-            ClipCmd::Add { project, track, pattern, f } => {
+            ClipCmd::Add { project, track, f } => {
+                // A pattern, if one is given, comes before the fields.
                 let mut all = Fields::new();
-                all.insert("pattern".into(), json!(pattern));
-                all.extend(fields(f)?);
+                let mut rest = FieldArgs { fields: f.fields.clone() };
+                if rest.fields.first().is_some_and(|a| !a.starts_with("--")) {
+                    all.insert("pattern".into(), json!(rest.fields.remove(0)));
+                }
+                all.extend(fields(&rest)?);
                 edit(project, C::ClipAdd { track: track.clone(), fields: all })
             }
             ClipCmd::Move { project, clip, track, at } => edit(
@@ -1135,15 +1224,87 @@ fn run(cli: &Cli) -> Result<Json> {
                     repeats: parse_value(repeats),
                 },
             ),
-            ClipCmd::Duplicate { project, clip, track, at } => edit(
+            ClipCmd::Duplicate { project, clip, track, at, id } => edit(
                 project,
                 C::ClipDuplicate {
                     clip: clip.clone(),
                     track: track.clone(),
                     at: at.as_deref().map(parse_value),
+                    id: id.clone(),
                 },
             ),
             ClipCmd::Remove { project, clip } => edit(project, C::ClipRemove { clip: clip.clone() }),
+            ClipCmd::Resize { project, clip, length } => edit(
+                project,
+                C::ClipResize {
+                    clip: clip.clone(),
+                    length_beats: parse_value(length),
+                },
+            ),
+        },
+        Top::Note(n) => match n {
+            NoteCmd::Add { project, clip, f } => {
+                let mut fields = fields(f)?;
+                let notes = match fields.shift_remove("notes") {
+                    None => Vec::new(),
+                    Some(Json::Array(items)) => items
+                        .into_iter()
+                        .map(|n| match n {
+                            Json::Object(m) => Ok(m),
+                            other => Err(format!("--notes lists notes as objects, not {other}")),
+                        })
+                        .collect::<Result<_>>()?,
+                    Some(other) => return Err(format!("--notes must be a JSON list of notes, not {other}")),
+                };
+                edit(project, C::NoteAdd { clip: clip.clone(), notes, fields })
+            }
+            NoteCmd::Set { project, note, f } => edit(
+                project,
+                C::NoteSet {
+                    note: note.clone(),
+                    fields: fields(f)?,
+                },
+            ),
+            NoteCmd::Move { project, notes, by } => edit(
+                project,
+                C::NoteMove {
+                    notes: notes.clone(),
+                    by: parse_value(by),
+                },
+            ),
+            NoteCmd::Transpose { project, notes, by } => edit(project, C::NoteTranspose { notes: notes.clone(), by: *by }),
+            NoteCmd::Remove { project, notes } => edit(project, C::NoteRemove { notes: notes.clone() }),
+            NoteCmd::List { project, path, from, to } => edit(
+                project,
+                C::Notes {
+                    path: path.clone(),
+                    from: from.as_deref().map(parse_value),
+                    to: to.as_deref().map(parse_value),
+                },
+            ),
+        },
+        Top::Instrument(i) => match i {
+            InstrumentCmd::Set { project, track, instrument } => {
+                let instrument: Json =
+                    serde_json::from_str(instrument).map_err(|e| format!("The instrument must be JSON: {e}"))?;
+                edit(project, C::InstrumentSet { track: track.clone(), instrument })
+            }
+            InstrumentCmd::Remove { project, track } => edit(
+                project,
+                C::InstrumentSet {
+                    track: track.clone(),
+                    instrument: Json::Null,
+                },
+            ),
+            InstrumentCmd::Map { project, track, notes, pad, pitched } => {
+                let mut fields = Fields::new();
+                fields.insert("notes".into(), parse_value(notes));
+                fields.insert("pad".into(), json!(pad));
+                if *pitched {
+                    fields.insert("pitched".into(), json!(true));
+                }
+                edit(project, C::InstrumentMap { track: track.clone(), fields })
+            }
         },
         Top::Pattern(p) => match p {
             PatternCmd::Add { project, pattern, f } => edit(
@@ -1372,6 +1533,8 @@ fn name(top: &Top) -> String {
         Top::Return(_) => group("return", ""),
         Top::Clip(_) => group("clip", ""),
         Top::Audio(_) => group("audio", ""),
+        Top::Note(_) => group("note", ""),
+        Top::Instrument(_) => group("instrument", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),

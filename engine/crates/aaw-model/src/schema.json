@@ -549,6 +549,19 @@
       "title": "Filter",
       "type": "object"
     },
+    "Instrument": {
+      "additionalProperties": false,
+      "properties": {
+        "sampler": {
+          "$ref": "#/$defs/Sampler"
+        }
+      },
+      "required": [
+        "sampler"
+      ],
+      "title": "Instrument",
+      "type": "object"
+    },
     "Lane": {
       "additionalProperties": false,
       "description": "Automation for one parameter. It overrides the static value for the whole song.",
@@ -679,6 +692,300 @@
         }
       },
       "title": "Master",
+      "type": "object"
+    },
+    "MidiTrack": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "midi",
+          "title": "Type",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "mute": {
+          "default": false,
+          "title": "Mute",
+          "type": "boolean"
+        },
+        "solo": {
+          "default": false,
+          "title": "Solo",
+          "type": "boolean"
+        },
+        "instrument": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Instrument"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the notes play; null plays nothing and keeps the notes.",
+          "title": "Instrument"
+        },
+        "clips": {
+          "items": {
+            "$ref": "#/$defs/NoteClip"
+          },
+          "title": "Clips",
+          "type": "array"
+        },
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "reverb": "#/$defs/Reverb"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array"
+        },
+        "sends": {
+          "items": {
+            "$ref": "#/$defs/Send"
+          },
+          "maxItems": 16,
+          "title": "Sends",
+          "type": "array"
+        },
+        "automation": {
+          "items": {
+            "$ref": "#/$defs/Lane"
+          },
+          "maxItems": 64,
+          "title": "Automation",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "MidiTrack",
+      "type": "object"
+    },
+    "Note": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Unique in its clip. Left out, the next free nN is given when the song is validated.",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "pitch": {
+          "anyOf": [
+            {
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "A MIDI number, 0 to 127, or a note name such as C4, which is 60 and is stored as its number.",
+          "title": "Pitch"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 0,
+          "description": "Beats from the clip's start.",
+          "title": "At"
+        },
+        "duration": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "Beats, more than 0.",
+          "title": "Duration"
+        },
+        "velocity": {
+          "default": 100,
+          "maximum": 127,
+          "minimum": 1,
+          "title": "Velocity",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "pitch",
+        "duration"
+      ],
+      "title": "Note",
+      "type": "object"
+    },
+    "NoteClip": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "description": "Unique among the song's note clips. Left out, the next free clipN is given when the song is validated.",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "default": 0,
+          "description": "The song beat the clip starts on.",
+          "title": "At"
+        },
+        "length_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "More than 0. A note is cut off at the clip's end, and one that starts at or after it does not play.",
+          "title": "Length Beats"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/Note"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "length_beats"
+      ],
+      "title": "NoteClip",
+      "type": "object"
+    },
+    "NoteMap": {
+      "additionalProperties": false,
+      "properties": {
+        "notes": {
+          "anyOf": [
+            {
+              "maximum": 127,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "items": {
+                "anyOf": [
+                  {
+                    "maximum": 127,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ]
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          ],
+          "description": "A note, or [LOW, HIGH] for an inclusive range, as numbers or names. Entries may not overlap.",
+          "title": "Notes"
+        },
+        "pad": {
+          "title": "Pad",
+          "type": "string"
+        },
+        "pitched": {
+          "default": false,
+          "description": "Plays the pad at the note's pitch, repitched from its sample's root_note; otherwise the pad plays as it is.",
+          "title": "Pitched",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "notes",
+        "pad"
+      ],
+      "title": "NoteMap",
       "type": "object"
     },
     "Pad": {
@@ -1136,6 +1443,28 @@
       "title": "Sample",
       "type": "object"
     },
+    "Sampler": {
+      "additionalProperties": false,
+      "properties": {
+        "pads": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Pad"
+          },
+          "title": "Pads",
+          "type": "object"
+        },
+        "map": {
+          "items": {
+            "$ref": "#/$defs/NoteMap"
+          },
+          "maxItems": 128,
+          "title": "Map",
+          "type": "array"
+        }
+      },
+      "title": "Sampler",
+      "type": "object"
+    },
     "Section": {
       "additionalProperties": false,
       "properties": {
@@ -1397,8 +1726,11 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "const": 1,
-      "default": 1,
+      "description": "Written by the tool: 2 for a song with a MIDI track, which an engine that knows only 1 refuses, otherwise 1. Either is read.",
+      "enum": [
+        1,
+        2
+      ],
       "title": "Schema Version",
       "type": "integer"
     },
@@ -1421,7 +1753,14 @@
     },
     "tracks": {
       "items": {
-        "$ref": "#/$defs/Track"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Track"
+          },
+          {
+            "$ref": "#/$defs/MidiTrack"
+          }
+        ]
       },
       "title": "Tracks",
       "type": "array"

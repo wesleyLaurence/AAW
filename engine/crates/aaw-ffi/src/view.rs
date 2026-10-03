@@ -211,6 +211,35 @@ pub struct TrackView {
     pub pads: Vec<PadView>,
     pub clips: Vec<ClipView>,
     pub audio: Vec<AudioClipView>,
+    /// Whether it is a MIDI track, whose clips are `note_clips`.
+    pub midi: bool,
+    /// The kind of a MIDI track's instrument, such as `sampler`; None
+    /// without one.
+    pub instrument: Option<String>,
+    pub note_clips: Vec<NoteClipView>,
+}
+
+/// A note of a note clip.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct NoteView {
+    pub id: String,
+    pub pitch: i32,
+    /// Beats from the clip's start.
+    pub at: f64,
+    pub duration: f64,
+    pub velocity: u32,
+}
+
+/// A clip of a MIDI track, with the notes it owns.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct NoteClipView {
+    pub key: u64,
+    /// How commands address the clip, such as `@12`.
+    pub reference: String,
+    pub id: String,
+    pub at: f64,
+    pub length_beats: f64,
+    pub notes: Vec<NoteView>,
 }
 
 /// A send from a track to a return.
@@ -725,6 +754,35 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                         gain_db: pad.gain_db,
                         gate: pad.mode == aaw_model::PadMode::Gate,
                         root: root(p, &pad.sample),
+                    })
+                    .collect(),
+                midi: t.midi.is_some(),
+                instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
+                note_clips: t
+                    .midi
+                    .iter()
+                    .flat_map(|m| &m.clips)
+                    .enumerate()
+                    .map(|(j, c)| {
+                        let key = handle(clip_items, j);
+                        NoteClipView {
+                            key,
+                            reference: aaw_host::tree::handle_text(key),
+                            id: c.id.clone(),
+                            at: float(c.at_exact()),
+                            length_beats: float(c.length_exact()),
+                            notes: c
+                                .notes
+                                .iter()
+                                .map(|n| NoteView {
+                                    id: n.id.clone(),
+                                    pitch: n.pitch as i32,
+                                    at: float(n.at_exact()),
+                                    duration: float(n.duration_exact()),
+                                    velocity: n.velocity.clamp(0, 127) as u32,
+                                })
+                                .collect(),
+                        }
                     })
                     .collect(),
                 clips: t
