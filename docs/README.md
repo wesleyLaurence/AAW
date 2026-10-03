@@ -24,6 +24,7 @@ Built:
 
 | Feature | Covers |
 |---|---|
+| [manual BPM](features/tempo-control.md) | Editable session tempo in the transport bar |
 | [effects](features/effects.md) | Insert effects on tracks, returns and the master, sidechain compression, the limiter, delay, reverb, and sends to returns |
 | [automation](features/automation.md) | Lanes for levels, pans, sends and effect parameters |
 | [perception](features/perception.md) | `daw listen` and `daw compare` |

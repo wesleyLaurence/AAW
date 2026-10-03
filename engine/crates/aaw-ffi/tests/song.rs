@@ -2072,3 +2072,20 @@ fn a_midi_file_dropped_becomes_a_note_clip_and_a_clip_is_exported() {
     assert_eq!(song.edit(refused, None).unwrap_err().to_string(), "hit.mid: This is not a MIDI file");
     song.close();
 }
+
+#[test]
+fn tempo_edits_are_saved_validated_and_undoable() {
+    let (_dir, path, song, _seen) = open();
+    song.edit(Edit::Tempo { bpm: 137.5 }, None).unwrap();
+    assert_eq!(song.arrangement().tempo, 137.5);
+    assert!(std::fs::read_to_string(&path).unwrap().contains("137.5"));
+    for bpm in [19.9, 400.1, f64::NAN, f64::INFINITY] {
+        assert!(song.edit(Edit::Tempo { bpm }, None).is_err());
+        assert_eq!(song.arrangement().tempo, 137.5);
+    }
+    song.undo().unwrap();
+    assert_eq!(song.arrangement().tempo, 120.0);
+    song.redo().unwrap();
+    assert_eq!(song.arrangement().tempo, 137.5);
+    song.close();
+}

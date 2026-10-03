@@ -244,7 +244,8 @@ locate or a stop. `daw stop`, `locate` and `loop` move a running transport.
 
 While a session host runs for a song (the Mac app has it open, or `daw host` or
 `daw play` is running), every edit is a command to that host, from the agent or the
-person. The host validates it against the whole song, saves `song.yaml`, records it
+person. The transport bar’s editable BPM field sets `session.tempo` through this
+same command path, including save and undo. The host validates it against the whole song, saves `song.yaml`, records it
 in one undo history and change log with its origin, and plays it: levels, pans,
 sends and the knobs automation can move glide to their new values over 5 ms, and a
 change of structure, such as an added effect, fades through a 10 ms dip. Automation

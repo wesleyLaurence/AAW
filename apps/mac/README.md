@@ -167,6 +167,7 @@ front first.
 | Input | Does |
 |---|---|
 | Click in the ruler or an empty lane | Sets the start position, on the grid; with Option, off it. While playing, playback jumps there |
+| Type in BPM | Sets the session tempo (20–400, decimals accepted). Return or leaving the field applies; Escape cancels. The edit saves and can be undone |
 | Space | Plays from the start position, or stops |
 | Return | Jumps back to the start position while playing |
 | Drag in the ruler's top strip | Sets the loop |

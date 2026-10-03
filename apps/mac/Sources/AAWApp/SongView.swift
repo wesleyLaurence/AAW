@@ -120,7 +120,7 @@ struct TransportBar: View {
             Divider().frame(height: 18)
 
             HStack(spacing: 10) {
-                Text("\(a.tempo.formatted(.number.precision(.fractionLength(0...2)))) BPM")
+                TempoField(model: model)
                 Text("\(a.beatsPerBar)/4").foregroundStyle(.secondary)
                 Text("\(Int((a.lengthBeats / Double(a.beatsPerBar)).rounded(.up))) bars").foregroundStyle(.secondary)
             }
@@ -224,5 +224,42 @@ struct ActivityPanel: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Keeps an unfinished entry separate from updates arriving from the host.
+private struct TempoField: View {
+    let model: SongModel
+    @State private var typed = ""
+    @FocusState private var focused: Bool
+
+    private var current: String { String(model.arrangement.tempo) }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField("BPM", text: $typed)
+                .textFieldStyle(.plain)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 58)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 3)
+                .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 3))
+                .focused($focused)
+                .accessibilityLabel("Tempo in BPM")
+                .help("Tempo: 20–400 BPM. Return applies; Escape cancels.")
+                .onSubmit { focused = false; model.onFocus?() }
+                .onExitCommand { typed = current; focused = false; model.onFocus?() }
+            Text("BPM")
+        }
+        .onAppear { typed = current }
+        .onChange(of: model.arrangement.tempo) {
+            if !focused { typed = current }
+        }
+        .onChange(of: focused) {
+            if !focused {
+                model.setTempo(typed)
+                typed = current
+            }
+        }
     }
 }

@@ -321,6 +321,15 @@ public final class SongModel {
         }
     }
 
+    func setTempo(_ text: String) {
+        guard let bpm = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+              bpm.isFinite, (20...400).contains(bpm) else {
+            refuse("Enter a tempo from 20 to 400 BPM.")
+            return
+        }
+        if bpm != arrangement.tempo { edit(.tempo(bpm: bpm)) }
+    }
+
     // MARK: Editing
 
     /// Makes an edit. `then` is called with the keys of what the edit made,
