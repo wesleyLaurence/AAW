@@ -86,6 +86,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   while the song plays, and the new MIDI track and its notes in the window. The
   engine's tests hold a note clip to the same hits written as a pattern, and
   the window was seen in a picture; nobody listened or looked by hand.
+- **A sample dropped on a MIDI track's header in the rebuilt app,** played on
+  notes above and below middle C, from the browser and from the Finder.
 - **MIDI files by hand:** a `.mid` saved from a synth or another DAW dragged
   from the Finder onto a MIDI track's lane and onto the timeline, its outline
   on the way, and the chords heard through a sampler; File › Export MIDI
