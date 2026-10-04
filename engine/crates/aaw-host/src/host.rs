@@ -362,6 +362,58 @@ impl Host {
         Ok(self.status())
     }
 
+    /// `note.preview`: a note played now through a MIDI track's Synth and its
+    /// chain, from where the stream stands, outside the timeline and the
+    /// history. Opens the output if no play has yet.
+    fn preview(&mut self, track: &str, pitch: &Json, velocity: Option<i64>, length_beats: Option<&Json>) -> Result<Json> {
+        let pitch = match pitch {
+            Json::Number(n) => n.as_i64().ok_or_else(|| format!("pitch {n} is not a whole number"))?,
+            Json::String(s) => s.parse::<i64>().or_else(|_| aaw_model::rules::midi(s))?,
+            other => return Err(format!("pitch must be a MIDI number or a note name, not {other}")),
+        };
+        if !(0..=127).contains(&pitch) {
+            return Err(format!("pitch {pitch} is outside 0 to 127"));
+        }
+        let velocity = velocity.unwrap_or(100);
+        if !(1..=127).contains(&velocity) {
+            return Err("velocity is 1 to 127".into());
+        }
+        let length = match length_beats {
+            Some(l) => beat(l).map_err(|e| format!("length_beats: {e}"))?.to_f64().unwrap_or(0.0),
+            None => 1.0,
+        };
+        if !(length > 0.0 && length <= 64.0) {
+            return Err("length_beats is more than 0 and at most 64".into());
+        }
+        let session = &self.session.project().session;
+        let t = self.session.project().track(track).ok_or_else(|| format!("Unknown track: {track}"))?;
+        if t.midi.as_ref().and_then(|m| m.synth()).is_none() {
+            return Err(format!("{track} has no synth to play the note; daw synth add attaches one"));
+        }
+        let frames = (length * 60.0 / session.tempo * session.sample_rate as f64).round() as usize;
+        let program = self.program()?;
+        if self.transport.is_none() {
+            self.open_transport(program.clone())?;
+        }
+        let t = self.transport.as_mut().expect("transport");
+        // The track's place in the program the output plays.
+        let playing = t.control.program().clone();
+        let index = playing
+            .tracks
+            .iter()
+            .position(|p| p.id == track && p.synth.is_some())
+            .ok_or_else(|| format!("{track} is not yet playing its synth; playback keeps the previous version"))?;
+        t.control.preview(index, pitch as f64, velocity as f64 / 127.0, frames)?;
+        Ok(json!({
+            "track": track,
+            "pitch": pitch,
+            "note": aaw_model::rules::note_name(pitch).unwrap_or_default(),
+            "velocity": velocity,
+            "length_beats": length,
+            "frames": frames,
+        }))
+    }
+
     fn transport(&mut self, cmd: &Command) -> Result<Json> {
         match cmd {
             Command::Play { from } => self.play(from.as_ref()),
@@ -378,6 +430,7 @@ impl Host {
                 }
                 Ok(self.status())
             }
+            Command::NotePreview { track, pitch, velocity, length_beats } => self.preview(track, pitch, *velocity, length_beats.as_ref()),
             Command::Locate { at } => {
                 let at = beat(at)?;
                 self.check_in_song(&at, "locate")?;

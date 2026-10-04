@@ -1,14 +1,15 @@
-# The Synth — engine and commands implemented October 3, 2026; patches October 4, 2026
+# The Synth — engine and commands implemented October 3, 2026; patches and the panel October 4, 2026
 
-Status: two of four items are built. The engine, the patch in the song,
+Status: three of four items are built. The engine, the patch in the song,
 `daw synth` and `daw describe synth`, automation of the patch's fields,
-`daw check` warnings, a panel of plain fields in the app, patches as files
-with the factory patches, `daw patch` and the browser's Synth are built and
-described here in the present tense. The panel's drawings and unison,
-wavetables and the patch's effects are the two items that remain, described
-under [What remains](#what-remains). D69 records what the person settled on
-October 3, 2026, D71 what was decided in building the first item and D72
-what was decided in building patches.
+`daw check` warnings, patches as files with the factory patches, `daw patch`
+and the browser's Synth, and the panel with its drawings, its Save and Load,
+its keys and `note.preview` are built and described here in the present
+tense. Unison, wavetables and the patch's effects are the item that remains,
+described under [What remains](#what-remains). D69 records what the person
+settled on October 3, 2026, D71 what was decided in building the first item,
+D72 what was decided in building patches and D73 what was decided in
+building the panel.
 
 ## What
 
@@ -296,26 +297,67 @@ window comes back to the front, so a patch saved from the terminal appears.
 The Synth takes the instrument's place at the head of a MIDI track's chain, as
 the Sampler does, drawn from describe as an effect's panel is: a column for the
 Synth's own fields, one for each oscillator, the filter, each envelope, each
-LFO, the macros, and the matrix as rows of source, target and amount with ×
-to remove one. Each control is the one effects' panels have, with the lane
-mark that adds or removes a lane on the field; a wave or a mode is sent when
-chosen and a knob is heard as it is dragged. The agent adds parts and matrix
-entries with `daw synth set` and `daw synth mod`; the panel does not yet, and
-draws no wave, curve or envelope. That is the panel item.
+LFO, the macros, and the matrix. Each control is the one effects' panels have,
+with the lane mark that adds or removes a lane on the field; a wave or a mode
+is sent when chosen and a knob is heard as it is dragged.
+
+**The header** shows the patch's name, or Synth when the sound came from
+none, with ◂ ▸ through the patches the browser lists, Factory then Mine, and
+a menu: Save…, Save As…, and the patches to load. Save… writes over the patch
+the sound came from when that is one of the person's own, keeping its
+description and tags; otherwise, as Save As… does, it asks for a name, a
+description and tags in a sheet, and refuses a name of the person's already
+saved unless asked to write over it. Both send `patch.save`; loading sends
+`patch.load`, and × takes the Synth off.
+
+**The drawings**, at the head of each column: an oscillator's wave over one
+cycle, with its pulse width; the filter's response from 10 Hz to 20 kHz,
+-36 to +36 dB, with a corner at the cutoff that a drag moves across for the
+cutoff and up and down for the resonance, both in one undo step and heard as
+they move, a press elsewhere on the curve taking the cutoff alone; an
+envelope with a handle at the end of its attack, of its decay, which also
+sets the sustain, and of its release, each time taking up to a quarter of the
+width in equal ratios of (1 + ms); an LFO's shape over one cycle from its
+phase. Under a control a matrix entry moves, a line reaches from its value to
+where full modulation takes it, one line an entry. Each envelope's and LFO's
+title, each macro's name, and velocity, note and random in the Matrix column
+are tabs: dropped on a control, they add an entry from that source to the
+control's target, an oscillator's semitones standing for its pitch, with an
+amount enough to hear (an octave, a semitone, 6 dB, 25 points or half the
+pan). An entry's amount is a bar in the matrix, and × takes it out. + in the
+Synth column adds an oscillator (`a` to `d`, the plain saw), an envelope
+(`env2` on, a decay to nothing), an LFO (`lfo1` on) or a macro (`macro1` on,
+at 0), and × on a column or a macro takes it off; the last oscillator, `amp`
+and a part the matrix names are refused with the reason.
+
+**The keys.** The Synth column ends in an octave of keys, C3 to C4 until the
+octave is stepped, that play a note now through the track: a beat long,
+softly at the top of a key and hard at the bottom, and a drag onto the next
+key plays that one. They send `note.preview`:
+
+```
+{"op": "note.preview", "track": "lead", "pitch": "C4", "velocity": 100, "length_beats": 1}
+daw synth audition SONG lead --notes C2,G2 --play     # the same notes, through the running host
+```
+
+`note.preview` is a transport command, as `metronome` is: it plays a note of
+a pitch, velocity and length through a MIDI track's Synth and the track's
+chain, from where the stream stands, whether or not the song plays, outside
+the timeline and the undo history, and nothing of it is rendered. A note
+held while a knob is dragged carries on under the new patch, and through a
+change of wave. It needs a host, which opens the output if nothing has played
+yet; it refuses a track with no synth, and plays nothing through a Sampler.
+While the transport stands still the stream is no longer cut at the song's
+end: a tail or a previewed note is heard whole wherever the transport is.
+`--play` sends the audition's notes one after another and needs a running
+host; the file is written as well.
+
+**The detail panel's height** is dragged at its top edge, 214 points the
+least and kept between projects, so the Synth has room; at the least height
+the panel's columns scroll.
 
 ## What remains
 
-3. **The panel.** A header with the patch's name, ◂ ▸ through the patches of
-   the list it came from, a menu with Save…, Save As… and the patches, which
-   send `patch.save` and `patch.load`; the wave drawn one cycle; the filter's
-   response curve dragged by its corner; the ADSR drawn with its four
-   handles; the LFO's shape over one cycle; a ring on a control for the depth
-   of a matrix entry on it, and an envelope's or LFO's tab dragged onto a
-   control to add one; + and × for the parts; the detail panel's height
-   draggable, 214 points the least; `note.preview` in the host, a note of a
-   pitch, velocity and length played now through a track's instrument and
-   chain, outside the timeline and the undo history, and one octave of keys
-   in the panel that sends it. `daw synth audition --play` sends one too.
 4. **Unison, wavetables and the patch's effects.** `unison` (1 to 16 voices),
    `unison_detune_cents` and `unison_width_percent` on an oscillator, with
    `unison_detune_cents` a matrix target; `wave: wavetable` with built-in
@@ -325,8 +367,8 @@ draws no wave, curve or envelope. That is the panel item.
    before the track's inserts, automated as `instrument.effects.REF.FIELD`.
    The factory patches gain unison and effects where they want them.
 
-Each item's pull request moves its line and rewrites this file toward the
-present tense.
+Its pull request moves its line and rewrites this file toward the present
+tense.
 
 ## Done when
 
@@ -368,9 +410,27 @@ Of the patches item:
   in `crates/aaw-ffi/tests/song.rs` and the Mac tests, through the model,
   and the list was seen in a scripted picture; nothing was dragged by hand.
 
+Of the panel item:
+
+- A previewed note sounds while the transport stands, through the track's
+  chain, carries across a knob's take-over and a wave's swap, is heard past
+  the song's end, and is in no render. Done: `crates/aaw-dsp/src/synth.rs`
+  and `crates/aaw-engine/tests/synth.rs`; the host refuses a bad note before
+  the output opens, `crates/aaw-host/tests/host.rs`; `--play` without a host
+  says so, `tests/test_midi.py`.
+- The panel's edits reach the song as the commands do: several fields in one
+  step, parts added under the next free name and removed, entries added by
+  a drop and their amounts set, a patch saved and listed under Mine. Done:
+  `crates/aaw-ffi/tests/song.rs`.
+- The filter's corner, the envelope's handles, the keys and an entry's
+  reach are where they are drawn and read back what they were dragged to.
+  Done: `apps/mac/Tests/AAWAppTests/SynthLayoutTests.swift`.
+- The header, the drawings, the keys, the reach lines and the panel dragged
+  taller were seen in scripted pictures; nothing was dragged by hand, no key
+  was pressed and nothing was heard.
+
 Of the whole: the factory patches are heard and one of each kind sounds like
-its name; the panel's drawings, drops and tall panel are seen in pictures.
-Listening by hand is a line under Verify.
+its name. Listening by hand is a line under Verify.
 
 ## Settled
 
@@ -419,9 +479,27 @@ Decided in building patches, October 4, 2026 (D72):
 - **The factory patches are written for the Synth as it is:** four detuned
   saws stand in for unison, and no effects are in them, until item 4.
 
+Decided in building the panel, October 4, 2026 (D73):
+
+- **`note.preview` plays a Synth only,** from where the stream stands, and
+  a standing stream is cut by nothing: the end fade and the gate at the
+  song's end apply only while the transport rolls.
+- **A key's note is a beat long** and its velocity is how far down the key
+  it is pressed; there is no note-off.
+- **◂ ▸ step through the browser's list,** Factory then Mine, and Save…
+  writes over a patch of the person's own only.
+
 ## Limits
 
 - No unison, wavetables or effects inside the patch until item 4.
+- `note.preview` plays nothing through a Sampler: a Sampler's note needs
+  audio prepared for its pitch, which the compiled song has only for the
+  notes it plays. A Later line.
+- A key plays a note of one beat; it cannot be held or let go early, and
+  the panel's keys are the only keyboard.
+- A previewed note is kept across a knob's glide and a wave's swap, but
+  not across a change of the song's tempo or sample rate, which opens
+  another stream.
 - `patch` in the song is where the sound came from, set by `patch load`,
   `patch save` and `synth add --patch`; nothing reads it, and a changed
   sound keeps the name until it is saved under another.
@@ -439,6 +517,6 @@ Decided in building patches, October 4, 2026 (D72):
   not.
 - `synth show` leaves out fields at their defaults, as `daw get` does;
   `describe synth` lists the defaults.
-- The panel draws plain controls: no wave, curve, envelope or keys, no + for
-  a part or an entry, and no Save or Load of a patch, until item 3; the
-  browser loads one, and `daw patch save` saves one.
+- The panel does not rename a part or a macro, and a matrix entry's source
+  and target are set when it is made: `daw synth set` and `daw synth mod`
+  do the rest.

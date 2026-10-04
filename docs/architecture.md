@@ -264,6 +264,15 @@ so playback from the start and a render are the same audio. With no host, the sa
 commands edit the file. [../engine/README.md](../engine/README.md) lists the commands
 and describes the host; decisions D36 to D38, D41 and D44 record the choices.
 
+`note.preview` is a transport command too: a note of a pitch, velocity and
+length played now through a MIDI track's Synth and the track's chain, from
+where the stream stands, whether or not the song plays, outside the timeline
+and the undo history and in no render. The app's Synth panel sends it from
+its keys and `daw synth audition --play` from the terminal. While the
+transport stands still the stream is cut by nothing: the end fade and the
+gate at the song's end apply only while it rolls, so a tail or a previewed
+note is heard whole wherever the transport is.
+
 The metronome is host transport state, initially off, outside the song and its
 undo history. The player mixes its synthesized click after song processing,
 at the renderer's audible timeline and current BPM, including on an empty song.

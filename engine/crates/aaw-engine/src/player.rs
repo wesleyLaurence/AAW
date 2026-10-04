@@ -51,6 +51,15 @@ pub enum Message {
     Locate(usize),
     /// Start and end frames; playback reaching the end jumps to the start.
     Loop(Option<(usize, usize)>),
+    /// A note played now through a track's Synth, outside the timeline: the
+    /// track's place among the program's tracks, its pitch as a MIDI number,
+    /// its velocity 0 to 1 and how many frames it is held.
+    Preview {
+        track: usize,
+        pitch: f64,
+        velocity: f64,
+        frames: usize,
+    },
 }
 
 enum Fade {
@@ -174,6 +183,18 @@ impl Control {
         self.send(Message::Loop(region))
     }
 
+    /// Plays a note now through the Synth of the program's track at `track`,
+    /// whether or not the transport rolls: `note.preview`. The note is
+    /// heard through the track's chain and fader and is never recorded.
+    pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize) -> Result<(), String> {
+        self.send(Message::Preview {
+            track,
+            pitch,
+            velocity,
+            frames,
+        })
+    }
+
     /// The last program sent.
     pub fn program(&self) -> &Arc<Program> {
         &self.program
@@ -290,6 +311,12 @@ impl Player {
             }
             Message::Loop(region) => self.region = region,
             Message::Metronome(enabled) => self.metronome = enabled,
+            Message::Preview { track, pitch, velocity, frames } => {
+                // A resting stream wakes for the note.
+                self.resting = false;
+                self.quiet = 0;
+                self.deck.renderer.preview(track, pitch, velocity, frames);
+            }
         }
     }
 

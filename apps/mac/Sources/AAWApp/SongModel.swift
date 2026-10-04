@@ -142,6 +142,16 @@ public final class SongModel {
     public var showsActivity = true
     public var showsDetail = true
     public var showsBrowser = false
+    /// The detail panel's height, which the person drags at its top edge:
+    /// `leastDetailHeight` at the least, and kept between projects.
+    public var detailHeight: CGFloat = max(SongModel.leastDetailHeight, CGFloat(UserDefaults.standard.double(forKey: "detail.height"))) {
+        didSet {
+            if detailHeight != oldValue { UserDefaults.standard.set(Double(detailHeight), forKey: "detail.height") }
+        }
+    }
+
+    /// The detail panel's least height, and its height until it is dragged.
+    public static let leastDetailHeight: CGFloat = 214
     /// The sample library, for the browser.
     let browser: Browser
 
@@ -874,6 +884,23 @@ public final class SongModel {
               Browser.extensions.contains(url.pathExtension.lowercased()) else { return false }
         loadSampler(path: url.path, name: url.deletingPathExtension().lastPathComponent, into: track.key)
         return true
+    }
+
+    /// Saves the Synth on a MIDI track to the library as a patch, as `daw
+    /// patch save` does, and names the song's patch after it; over a patch
+    /// already saved under the name only with `replace`. The browser's list
+    /// and the panel's header then show it.
+    func savePatch(track: UInt64, name: String, description: String?, tags: [String], replace: Bool) {
+        edit(.patchSave(track: track, name: name, description: description, tags: tags, replace: replace)) { [weak self] _ in
+            self?.browser.refreshPatches()
+        }
+    }
+
+    /// Plays a note now through the Synth on a MIDI track and the track's
+    /// chain, as the panel's keys do: outside the timeline and the undo
+    /// history. `velocity` is 1 to 127.
+    func previewNote(track: UInt64, pitch: Int, velocity: Int, lengthBeats: Double) {
+        send { try $0.previewNote(track: track, pitch: Int32(pitch), velocity: UInt32(velocity), lengthBeats: lengthBeats) }
     }
 
     /// Sets the root note of the Sampler's sample to the pitch `daw samples

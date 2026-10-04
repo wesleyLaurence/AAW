@@ -388,3 +388,26 @@ mapping, defaults left out. `saved_by` is the command's origin, user or
 agent, and `saved_at` a UTC timestamp; a person's name is not kept. The
 factory patches are written for the Synth as item 1 built it: four detuned
 saws stand in for unison, and they carry no effects, until item 4 adds both.
+
+**D73. A previewed note plays a Synth only, a standing stream is cut by nothing, a key's note is a beat long, and the header steps through the browser's list.**
+
+Decided on October 4, 2026, in building the Synth's panel
+([features/synth.md](features/synth.md)). `note.preview` plays a note through
+a MIDI track's Synth and its chain and refuses a Sampler: a Sampler's note
+needs audio prepared for its pitch, which the compiled song holds only for
+the notes it plays, and preparing it on the way is work of its own, a Later
+line. Previewed notes are kept apart from the song's in the Synth, so a seek
+or a stop leaves them and a program swap carries them, and the one thing the
+engine changed for them is that the end fade and the gate at the song's end
+apply only while the transport rolls: a standing stream used to be forced to
+silence past the end, which would have cut a note previewed there, and
+nothing but silence was lost by letting tails ring as they do after any stop.
+A key plays a note of one beat, its velocity how far down the key it is
+pressed, since the host's command has a length and no note-off; holding and
+letting go is a Later line with the MIDI keyboard. ◂ ▸ in the header step
+through the patches as the browser lists them, Factory then Mine, and Save…
+writes over a patch only when the sound came from one of the person's own,
+asking for a name otherwise, so a factory patch is never overwritten by
+accident and nothing is written without a name the person gave. The detail
+panel's height is kept in the app's defaults, not in the song, as the window's
+size is.

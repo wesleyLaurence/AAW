@@ -49,6 +49,9 @@ enum Theme {
     static let automationLane = gray(0.125)
     /// The fill of a knob's bar in a device panel.
     static let knob = rgb(0x4d6f96)
+    /// The Synth's modulation: a source's tab, and how far an entry reaches
+    /// under a control.
+    static let modulation = rgb(0x4fc9b0)
     /// A clip's waveform, over the clip's color.
     static let waveform = gray(0.05)
 

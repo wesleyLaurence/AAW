@@ -121,6 +121,9 @@ def test_a_synth_plays_the_phrase_is_checked_and_auditioned(tmp_path):
     assert heard["peak_dbfs"] < 3 and heard["loudness_lufs"] < 0
     assert 20 < heard["spectral_centroid_hz"] < 5000
     assert sf.info(heard["path"]).frames == heard["frames"]
+    # --play sends the notes to the running host as note.preview; with none it says so.
+    with pytest.raises(Exception, match="No host is running"):
+        daw("synth", "audition", path, "keys", "--notes", "C2", "--play")
     # Lanes reach the synth, and the instrument comes off with them.
     daw("lane", "point", "add", path, "tracks.keys", "instrument.filter.cutoff_hz", "--at", 0, "--value", 300)
     assert load(path)["tracks"][0]["automation"][0]["param"] == "instrument.filter.cutoff_hz"

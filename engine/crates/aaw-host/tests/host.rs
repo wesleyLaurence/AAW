@@ -94,6 +94,29 @@ impl Drop for Running {
 }
 
 #[test]
+fn a_note_preview_is_refused_before_the_output_opens_and_is_no_edit() {
+    let h = Running::start();
+    h.send(json!({"op": "synth.add", "track": "lead"})).unwrap();
+    // The note is checked, and the track, before any audio device is touched.
+    let e = h.send(json!({"op": "note.preview", "track": "bass", "pitch": "C3"})).unwrap_err();
+    assert!(e.contains("has no synth"), "{e}");
+    let e = h.send(json!({"op": "note.preview", "track": "nobody", "pitch": 60})).unwrap_err();
+    assert!(e.contains("Unknown track"), "{e}");
+    let e = h.send(json!({"op": "note.preview", "track": "lead", "pitch": 200})).unwrap_err();
+    assert!(e.contains("outside 0 to 127"), "{e}");
+    let e = h.send(json!({"op": "note.preview", "track": "lead", "pitch": "H9"})).unwrap_err();
+    assert!(!e.is_empty());
+    let e = h.send(json!({"op": "note.preview", "track": "lead", "pitch": 60, "velocity": 0})).unwrap_err();
+    assert!(e.contains("velocity"), "{e}");
+    let e = h.send(json!({"op": "note.preview", "track": "lead", "pitch": 60, "length_beats": 0})).unwrap_err();
+    assert!(e.contains("length_beats"), "{e}");
+    // Nothing of it reached the song or the history.
+    let status = h.send(json!({"op": "status"})).unwrap();
+    assert_eq!(status["revision"], json!(1));
+    assert_eq!(status["undo"]["label"], json!("Add Synth track lead"));
+}
+
+#[test]
 fn the_host_applies_saves_undoes_and_logs() {
     let mut h = Running::start();
     let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -6})).unwrap();

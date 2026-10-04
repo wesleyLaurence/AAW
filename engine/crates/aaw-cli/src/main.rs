@@ -28,6 +28,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 // Debug builds abort when the audio callback allocates.
 #[cfg(debug_assertions)]
@@ -565,6 +566,10 @@ enum SynthCmd {
         /// Where to write the file, instead of under renders/auditions.
         #[arg(long)]
         output: Option<PathBuf>,
+        /// Also play the notes now through the running host, one after
+        /// another, as the panel's keys do (note.preview). Needs a host.
+        #[arg(long)]
+        play: bool,
     },
 }
 
@@ -1435,25 +1440,48 @@ fn run(cli: &Cli) -> Result<Json> {
                     },
                 )
             }
-            SynthCmd::Audition { project, track, notes, velocity, length_beats, track_chain, output } => {
+            SynthCmd::Audition { project, track, notes, velocity, length_beats, track_chain, output, play } => {
                 let notes: Vec<i64> = notes
                     .split(',')
                     .map(str::trim)
                     .filter(|n| !n.is_empty())
                     .map(|n| n.parse::<i64>().or_else(|_| aaw_model::rules::midi(n)))
                     .collect::<Result<_>>()?;
-                audition(
-                    &files(project),
+                let file = files(project);
+                let mut reply = audition(
+                    &file,
                     &AuditionOptions {
                         track: track.clone(),
-                        notes,
+                        notes: notes.clone(),
                         velocity: *velocity,
                         length_beats: *length_beats,
                         track_chain: *track_chain,
                         output: output.clone(),
                     },
                 )
-                .map(value)
+                .map(value)?;
+                if *play {
+                    // The same notes, heard now through the host, each held
+                    // for its length before the next starts.
+                    let tempo = aaw_model::load(&file, true).map_err(text)?.session.tempo;
+                    let played: Vec<i64> = if notes.is_empty() { vec![60] } else { notes };
+                    for (i, pitch) in played.iter().enumerate() {
+                        if i > 0 {
+                            std::thread::sleep(Duration::from_secs_f64(*length_beats * 60.0 / tempo));
+                        }
+                        edit(
+                            project,
+                            C::NotePreview {
+                                track: track.clone(),
+                                pitch: json!(pitch),
+                                velocity: Some(*velocity),
+                                length_beats: Some(json!(length_beats)),
+                            },
+                        )?;
+                    }
+                    reply["played"] = json!(true);
+                }
+                Ok(reply)
             }
         },
         Top::Patch(p) => match p {

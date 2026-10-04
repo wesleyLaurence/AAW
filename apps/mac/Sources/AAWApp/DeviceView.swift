@@ -10,7 +10,8 @@ import UniformTypeIdentifiers
 struct DetailView: View {
     let model: SongModel
 
-    static let height: CGFloat = 214
+    /// The panel's height until the person drags its top edge, and its least.
+    static let height: CGFloat = SongModel.leastDetailHeight
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
@@ -60,7 +61,7 @@ struct DetailView: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(height: Self.height, alignment: .top)
+        .frame(height: model.detailHeight, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.13)))
     }
 
@@ -293,7 +294,7 @@ private struct DeviceInsertion: View {
     var body: some View {
         RoundedRectangle(cornerRadius: 2)
             .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
-            .frame(width: 12, height: 160)
+            .frame(width: 12, height: model.detailHeight - 54)
             .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 }, isTargeted: $targeted) { providers in
                 guard let provider = providers.first,
                       let kind = DeviceChain.kinds.first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }) else { return false }
@@ -396,28 +397,32 @@ private struct InstrumentPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 5) {
-                Image(systemName: "pianokeys").foregroundStyle(.secondary)
-                Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
-                Spacer(minLength: 2)
-                if track.instrument != nil {
-                    Button {
-                        model.edit(.instrumentRemove(track: track.key))
-                    } label: {
-                        Image(systemName: "xmark")
+            if let synth = track.synth {
+                SynthHeader(model: model, track: track, synth: synth)
+            } else {
+                HStack(spacing: 5) {
+                    Image(systemName: "pianokeys").foregroundStyle(.secondary)
+                    Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                    Spacer(minLength: 2)
+                    if track.instrument != nil {
+                        Button {
+                            model.edit(.instrumentRemove(track: track.key))
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .help("Take the instrument off; the notes are kept")
                     }
-                    .help("Take the instrument off; the notes are kept")
                 }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10))
+                .padding(.horizontal, 7)
+                .frame(height: 24)
+                .background(Color(nsColor: Theme.gray(0.24)))
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 10))
-            .padding(.horizontal, 7)
-            .frame(height: 24)
-            .background(Color(nsColor: Theme.gray(0.24)))
             if let sampler = track.sampler {
                 SamplerPanel(model: model, track: track, sampler: sampler)
             } else if let synth = track.synth {
-                SynthPanel(model: model, track: track, synth: synth)
+                SynthPanel(model: model, track: track, synth: synth, height: model.detailHeight - 16 - 24)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
@@ -448,7 +453,7 @@ private struct InstrumentPanel: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(width: width, height: DetailView.height - 16, alignment: .top)
+        .frame(width: width, height: model.detailHeight - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))
         .clipShape(RoundedRectangle(cornerRadius: 4))
@@ -548,7 +553,7 @@ private struct DevicePanel: View {
             .opacity(effect.bypass ? 0.5 : 1)
             Spacer(minLength: 0)
         }
-        .frame(width: effect.kind == "eq" ? 376 : 216, height: DetailView.height - 16, alignment: .top)
+        .frame(width: effect.kind == "eq" ? 376 : 216, height: model.detailHeight - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
     }

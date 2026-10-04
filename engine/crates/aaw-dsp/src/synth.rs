@@ -581,13 +581,22 @@ impl Voice {
     /// times are taken for the whole note.
     fn start(patch: &Patch, notes: &[NoteOn], note: usize, base: &Values, lfo: &[f64; MAX_LFO], from: f64, fade: usize) -> Voice {
         let n = &notes[note];
+        Voice::begin(patch, note, n.pitch as f64, n.velocity as f64 / 127.0, n.start, (n.end - n.start).max(0) as f64, base, lfo, from, fade)
+    }
+
+    /// A voice for a pitch and a velocity (0 to 1) starting at timeline
+    /// frame `start` and let go `off` frames later. `note` is its place
+    /// among the track's notes, or a count for a previewed note, which the
+    /// random values come from.
+    #[allow(clippy::too_many_arguments)]
+    fn begin(patch: &Patch, note: usize, pitch: f64, velocity: f64, start: i64, off: f64, base: &Values, lfo: &[f64; MAX_LFO], from: f64, fade: usize) -> Voice {
         let seed = hash(&[patch.seed, note as u64]);
         let mut v = Voice::blank();
         v.note = note;
-        v.start = n.start;
-        v.pitch = n.pitch as f64;
-        v.velocity = (n.velocity as f64 / 127.0).clamp(0.0, 1.0);
-        v.off = (n.end - n.start).max(0) as f64;
+        v.start = start;
+        v.pitch = pitch;
+        v.velocity = velocity.clamp(0.0, 1.0);
+        v.off = off;
         // The first note of a song has nothing to glide from.
         v.from = if from.is_nan() { v.pitch } else { from };
         v.at_pitch = v.from;
@@ -821,6 +830,13 @@ pub struct Synth {
     next: usize,
     active: Vec<Voice>,
     ringing: Vec<Voice>,
+    /// Notes played now from outside the timeline, by `preview`: they sound
+    /// whether or not the transport rolls, and a seek or a stop leaves them.
+    preview: Vec<Voice>,
+    /// How many notes were previewed, which their random values come from.
+    previewed: u64,
+    /// The pitch of the last previewed note, which the next glides from.
+    preview_pitch: f64,
     last_pitch: f64,
     lfo_phase: [f64; MAX_LFO],
     lfo_cycle: [u64; MAX_LFO],
@@ -846,6 +862,9 @@ impl Synth {
             next: 0,
             active: Vec::with_capacity(MAX_VOICES),
             ringing: Vec::with_capacity(MAX_VOICES),
+            preview: Vec::with_capacity(MAX_VOICES),
+            previewed: 0,
+            preview_pitch: f64::NAN,
             last_pitch: f64::NAN,
             lfo_phase: [0.0; MAX_LFO],
             lfo_cycle: [0; MAX_LFO],
@@ -936,9 +955,48 @@ impl Synth {
         }
     }
 
+    /// Plays a note now, outside the timeline: `pitch` as a MIDI number,
+    /// `velocity` 0 to 1, let go after `frames` frames and ringing out
+    /// through the amp release. It sounds whether or not the transport
+    /// rolls, from where the stream is, and glides from the last previewed
+    /// note. Past `MAX_VOICES` previews the oldest fades out. Does not
+    /// allocate.
+    pub fn preview(&mut self, pitch: f64, velocity: f64, frames: usize) {
+        let patch = self.patch.clone();
+        let mut values = self.values;
+        patch.base(self.frame, &mut values);
+        let mut lfo = [0.0; MAX_LFO];
+        for (i, l) in patch.lfos.iter().enumerate() {
+            lfo[i] = lfo_sample(l.shape, self.lfo_phase[i], self.lfo_held[i]);
+        }
+        self.previewed += 1;
+        // Previews take their random values from a count of their own, past
+        // any place among the track's notes.
+        let note = (1u64 << 40).wrapping_add(self.previewed) as usize;
+        let v = Voice::begin(&patch, note, pitch, velocity, self.frame, frames as f64, &values, &lfo, self.preview_pitch, self.fade);
+        self.preview_pitch = pitch;
+        if self.preview.len() >= MAX_VOICES {
+            let mut oldest = self.preview.remove(0);
+            oldest.fade_left = self.fade;
+            if self.ringing.len() >= MAX_VOICES {
+                self.ringing.remove(0);
+            }
+            self.ringing.push(oldest);
+        }
+        self.preview.push(v);
+    }
+
+    /// Whether a previewed note is sounding.
+    pub fn previewing(&self) -> bool {
+        !self.preview.is_empty()
+    }
+
     /// Whether nothing sounds: no voice, and none starts before frame `end`.
     pub fn idle(&self, end: i64) -> bool {
-        self.active.is_empty() && self.ringing.is_empty() && self.notes.get(self.next).is_none_or(|n| n.start >= end)
+        self.active.is_empty()
+            && self.ringing.is_empty()
+            && self.preview.is_empty()
+            && self.notes.get(self.next).is_none_or(|n| n.start >= end)
     }
 
     /// Fills the free LFOs' values for `n` frames from `frame`, advancing
@@ -1042,6 +1100,15 @@ impl Synth {
             }
             k0 = k1;
         }
+        // Previewed notes sound through the whole block, rolling or not, and
+        // past the song's end.
+        if !self.preview.is_empty() {
+            let Synth { preview, lfo_buf, values, .. } = self;
+            for v in preview.iter_mut() {
+                v.run(&patch, out, 0, n, start, step, lfo_buf, &base, values);
+            }
+            self.preview.retain(|v| !v.done());
+        }
         self.glide_left = self.glide_left.saturating_sub(n);
         if self.glide_left == 0 {
             self.glide_from = None;
@@ -1058,12 +1125,13 @@ impl Synth {
     /// Continues from `old`, which plays the same notes: its voices carry
     /// on here, and this patch's values glide from the old patch's over the
     /// fade where they differ.
-    pub fn take_over(&mut self, old: &Synth) {
+    pub fn take_over(&mut self, old: &mut Synth) {
         self.next = old.next;
         self.active.clear();
         self.active.extend_from_slice(&old.active);
         self.ringing.clear();
         self.ringing.extend_from_slice(&old.ringing);
+        self.take_previews(old);
         self.last_pitch = old.last_pitch;
         self.lfo_phase = old.lfo_phase;
         self.lfo_cycle = old.lfo_cycle;
@@ -1074,6 +1142,16 @@ impl Synth {
             self.glide_from = Some(old.patch.clone());
             self.glide_left = self.fade;
         }
+    }
+
+    /// Takes the notes `old` is previewing, so that a note held while the
+    /// patch changes carries on under the new patch. Does not allocate.
+    pub fn take_previews(&mut self, old: &mut Synth) {
+        self.preview.clear();
+        self.preview.extend_from_slice(&old.preview);
+        old.preview.clear();
+        self.previewed = self.previewed.max(old.previewed);
+        self.preview_pitch = old.preview_pitch;
     }
 }
 
@@ -1210,7 +1288,7 @@ mod tests {
         let mut old = Synth::new(a, notes.clone(), 4096, 240);
         let _ = render(&mut old, 4096, 4096);
         let mut new = Synth::new(b, notes, 4096, 240);
-        new.take_over(&old);
+        new.take_over(&mut old);
         assert_eq!(new.active.len(), 1);
         assert_eq!(new.active[0].frames, 4096);
         let mut out = vec![[0.0; 2]; 4096];
@@ -1218,6 +1296,35 @@ mod tests {
         assert!(out.windows(2).all(|w| (w[0][0] - w[1][0]).abs() < 0.5), "no jump");
         let c = patch("{oscillators: {a: {wave: square, phase: 0}}, filter: {cutoff_hz: 4000}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}");
         assert_ne!(new.patch.signature, c.signature);
+    }
+
+    #[test]
+    fn a_previewed_note_sounds_while_stopped_and_carries_across_a_take_over() {
+        let p = patch("{oscillators: {a: {wave: sine, phase: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 100}}}");
+        let notes = Arc::new(vec![note(60, 100000, 148000)]);
+        let mut s = Synth::new(p, notes.clone(), 4096, 240);
+        // Nothing of the song sounds here, and the transport does not roll.
+        let mut quiet = vec![[0.0; 2]; 1000];
+        s.render(&mut quiet, 0, 1 << 30, false, 0);
+        assert!(quiet.iter().all(|f| *f == [0.0; 2]));
+        s.preview(69.0, 1.0, 24000);
+        assert!(s.previewing() && !s.idle(i64::MAX));
+        let mut out = vec![[0.0; 2]; 24000];
+        for chunk in out.chunks_mut(512) {
+            s.render(chunk, 0, 1 << 30, false, 0);
+        }
+        let crossings = out[2000..22000].windows(2).filter(|w| w[0][0] <= 0.0 && w[1][0] > 0.0).count();
+        assert!((crossings as f64 / (20000.0 / 48000.0) - 440.0).abs() < 3.0, "{crossings} crossings");
+        // It carries on under another patch, and ends after its release.
+        let b = patch("{oscillators: {a: {wave: sine, phase: 0}, b: {wave: saw, level_db: -12}}, filter: {cutoff_hz: 400}, envelopes: {amp: {attack_ms: 0, release_ms: 100}}}");
+        let mut new = Synth::new(b, notes, 4096, 240);
+        new.take_previews(&mut s);
+        assert!(new.previewing() && !s.previewing());
+        let mut tail = vec![[0.0; 2]; 8000];
+        new.render(&mut tail, 0, 1 << 30, false, 0);
+        assert!(tail[..1000].iter().any(|f| f[0].abs() > 0.05), "still sounding after the take-over");
+        assert!(tail[6000..].iter().all(|f| f[0] == 0.0), "silent 100 ms after the note was let go");
+        assert!(!new.previewing());
     }
 
     #[test]
@@ -1234,6 +1341,10 @@ mod tests {
             s.render(&mut out, 30000, 1 << 30, true, 240);
             s.release();
             s.render(&mut out, 30256, 1 << 30, false, 0);
+            for i in 0..20 {
+                s.preview(48.0 + i as f64, 0.8, 4000);
+            }
+            s.render(&mut out, 30512, 1 << 30, false, 0);
         });
     }
 }

@@ -2367,6 +2367,85 @@ fn the_synth_is_drawn_from_its_fields_and_turned_by_its_paths() {
 }
 
 #[test]
+fn the_panel_adds_parts_and_entries_sets_several_fields_saves_a_patch_and_previews_a_note() {
+    use aaw_ffi::SynthFieldValue;
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "synth.add", "track": "lead"}));
+    let u = update(&seen);
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    let track = lead.key;
+    // The filter's corner: cutoff and resonance in one step.
+    let fields = vec![
+        SynthFieldValue { field: "filter.cutoff_hz".into(), value: number(800.0) },
+        SynthFieldValue { field: "filter.resonance_percent".into(), value: number(30.0) },
+    ];
+    song.edit(Edit::SynthSetFields { track, fields }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the Synth's filter cutoff and filter resonance on lead");
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.lead.instrument.synth.filter"})), json!({"cutoff_hz": 800.0, "resonance_percent": 30.0}));
+    // + on each part: the next free name, with a place to start.
+    song.edit(Edit::SynthPartAdd { track, part: "oscillators".into() }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Add oscillator b to the Synth on lead");
+    song.edit(Edit::SynthPartAdd { track, part: "envelopes".into() }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Add envelope env2 to the Synth on lead");
+    song.edit(Edit::SynthPartAdd { track, part: "lfos".into() }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Add LFO lfo1 to the Synth on lead");
+    song.edit(Edit::SynthPartAdd { track, part: "macros".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add macro macro1 to the Synth on lead");
+    let s = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.clone().unwrap();
+    assert_eq!(s.oscillators.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(s.envelopes.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["amp", "env2"]);
+    assert_eq!(s.envelopes[1].fields.iter().find(|f| f.name == "envelopes.env2.sustain_percent").unwrap().value, number(0.0));
+    assert_eq!(s.lfos[0].name, "lfo1");
+    assert_eq!(s.macros[0].name, "macros.macro1");
+    assert!(song.edit(Edit::SynthPartAdd { track, part: "strings".into() }, None).is_err());
+    // A tab dropped on a control: an entry from the source to the field's target, then its amount set.
+    assert_eq!(aaw_ffi::view::synth_mod_target("oscillators.b.semitones".into()).as_deref(), Some("oscillators.b.pitch"));
+    assert_eq!(aaw_ffi::view::synth_mod_target("filter.cutoff_hz".into()).as_deref(), Some("filter.cutoff_hz"));
+    assert_eq!(aaw_ffi::view::synth_mod_target("filter.mode".into()), None);
+    assert_eq!(aaw_ffi::view::synth_mod_target("macros.macro1".into()), None);
+    song.edit(Edit::SynthModAdd { track, source: "env2".into(), target: "filter.cutoff_hz".into(), amount: 2.0 }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Modulate filter.cutoff_hz by env2 by 2 on lead");
+    song.edit(Edit::SynthModAdd { track, source: "lfo1".into(), target: "oscillators.b.pitch".into(), amount: 0.5 }, None).unwrap();
+    let u = update(&seen);
+    let s = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.clone().unwrap();
+    assert_eq!(s.modulation[0].field.as_deref(), Some("filter.cutoff_hz"));
+    assert_eq!(s.modulation[1].field.as_deref(), Some("oscillators.b.semitones"));
+    song.edit(Edit::SynthModSet { track, index: 0, amount: 3.5 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set modulation of filter.cutoff_hz by env2 to 3.5 on lead");
+    assert_eq!(u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.as_ref().unwrap().modulation[0].amount, 3.5);
+    song.edit(Edit::SynthModAdd { track, source: "env2".into(), target: "filter.cutoff_hz".into(), amount: 1.0 }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Set modulation of filter.cutoff_hz by env2 to 1 on lead");
+    // × on a part the matrix names is refused; on a free one it goes; amp never does.
+    assert!(song.edit(Edit::SynthPartRemove { track, part: "envelopes".into(), name: "env2".into() }, None).is_err());
+    assert!(song.edit(Edit::SynthPartRemove { track, part: "envelopes".into(), name: "amp".into() }, None).is_err());
+    song.edit(Edit::SynthPartRemove { track, part: "macros".into(), name: "macro1".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Remove macro macro1 from the Synth on lead");
+    assert!(u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.as_ref().unwrap().macros.is_empty());
+    // Save… writes the patch to the library and names the song's patch; the browser lists it under Mine.
+    song.edit(Edit::PatchSave { track, name: "Panel Lead".into(), description: Some("From the panel".into()), tags: vec!["lead".into()], replace: false }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Save patch Panel Lead from lead");
+    assert_eq!(u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.as_ref().unwrap().patch.as_deref(), Some("Panel Lead"));
+    let mine = aaw_ffi::library::library_patches("panel".into());
+    assert_eq!(mine.len(), 1);
+    assert!(!mine[0].factory && mine[0].tags == ["lead"] && mine[0].description == "From the panel");
+    assert!(song.edit(Edit::PatchSave { track, name: "Panel Lead".into(), description: None, tags: vec![], replace: false }, None).is_err());
+    song.edit(Edit::PatchSave { track, name: "Panel Lead".into(), description: None, tags: vec![], replace: true }, None).unwrap();
+    // Written over without a description, the file keeps the one it had; the
+    // song already named the patch, so nothing in it changed.
+    assert_eq!(aaw_ffi::library::library_patches("panel".into())[0].description, "From the panel");
+    // A note previewed on a track without a Synth is refused before anything opens.
+    let drums = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().key;
+    let e = song.preview_note(drums, 60, 100, 1.0).unwrap_err();
+    assert!(e.to_string().contains("no Synth"), "{e}");
+}
+
+#[test]
 fn the_browsers_synth_and_its_patches_are_dropped_on_tracks_and_under_them() {
     let (_dir, path, song, seen) = open();
     transport(&seen);

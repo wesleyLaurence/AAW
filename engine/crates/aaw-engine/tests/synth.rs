@@ -86,6 +86,66 @@ fn playback_equals_the_render_and_never_allocates() {
 }
 
 #[test]
+fn a_previewed_note_is_heard_while_stopped_through_the_chain_and_survives_a_patch_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("song.yaml");
+    // A sine on a track with a filter insert, and a return it does not reach.
+    let yaml = format!(
+        "{HEAD}tracks:\n- id: lead\n  type: midi\n  instrument:\n    synth: {{oscillators: {{a: {{wave: sine, phase: 0}}}}, envelopes: {{amp: {{attack_ms: 0, release_ms: 100}}}}}}\n  effects: [{{type: filter, mode: lowpass, cutoff_hz: 8000}}]\n  clips:\n  - at: 6\n    length_beats: 2\n    notes:\n    - {{pitch: 60, duration: 1}}\n"
+    );
+    std::fs::write(&path, &yaml).unwrap();
+    let mut cache = Cache::default();
+    let p = Arc::new(compile_cached(&aaw_model::load(&path, true).unwrap(), dir.path(), &mut cache).unwrap());
+    let (mut control, mut player) = channel(p.clone());
+    let pull = |player: &mut aaw_engine::player::Player, n: usize| {
+        let mut out = vec![[0.0; 2]; n];
+        for chunk in out.chunks_mut(128) {
+            player.render(chunk);
+        }
+        out
+    };
+    let peak = |x: &[Frame]| x.iter().fold(0.0f64, |m, f| m.max(f[0].abs()));
+    // Stopped, resting: nothing sounds until a note is previewed.
+    assert_eq!(peak(&pull(&mut player, 4800)), 0.0);
+    control.preview(0, 69.0, 1.0, 24000).unwrap();
+    let out = pull(&mut player, 24000);
+    assert!(peak(&out[1000..]) > 0.1, "the previewed note sounds while stopped");
+    let crossings = out[4000..20000].windows(2).filter(|w| w[0][0] <= 0.0 && w[1][0] > 0.0).count();
+    assert!((crossings as f64 / (16000.0 / 48000.0) - 440.0).abs() < 4.0, "{crossings} crossings of an A");
+    // A knob turned while the note sounds: the same structure takes over and the note carries on.
+    let mut project = aaw_model::load(&path, true).unwrap();
+    if let Some(aaw_model::Instrument::Synth(s)) = project.tracks[0].midi.as_mut().unwrap().instrument.as_mut() {
+        s.filter.cutoff_hz = 300.0;
+    }
+    let edited = Arc::new(compile_cached(&project, dir.path(), &mut cache).unwrap());
+    assert_eq!(edited.structure, p.structure);
+    control.load(edited).unwrap();
+    control.preview(0, 57.0, 0.8, 48000).unwrap();
+    let after = pull(&mut player, 2400);
+    assert!(peak(&after) > 0.05, "still sounding across the take-over");
+    // A wave changed: another structure, swapped through the dip, and the note is still there after it.
+    if let Some(aaw_model::Instrument::Synth(s)) = project.tracks[0].midi.as_mut().unwrap().instrument.as_mut() {
+        s.oscillators[0].wave = aaw_model::Wave::Triangle;
+    }
+    let reshaped = Arc::new(compile_cached(&project, dir.path(), &mut cache).unwrap());
+    assert_ne!(reshaped.structure, p.structure);
+    control.load(reshaped).unwrap();
+    let swapped = pull(&mut player, 4800);
+    assert!(peak(&swapped[2400..]) > 0.05, "the preview carries on under the new patch");
+    // A preview while playing past the end of the song is heard too: the end fade is the timeline's.
+    control.play(p.total - 10).unwrap();
+    let _ = pull(&mut player, p.total);
+    assert!(!player.playing());
+    pull(&mut player, 60000);
+    control.preview(0, 72.0, 1.0, 9600).unwrap();
+    let late = pull(&mut player, 4800);
+    assert!(peak(&late[500..]) > 0.05, "heard with the transport standing past the end");
+    // A render has none of it.
+    let whole = render(&p, 4096);
+    assert!(whole[..6 * 24000 - 10].iter().all(|f| *f == [0.0; 2]));
+}
+
+#[test]
 fn a_locate_chases_the_notes_sounding_there() {
     let dir = tempfile::tempdir().unwrap();
     let p = compiled(dir.path(), &song(PATCH, ""));

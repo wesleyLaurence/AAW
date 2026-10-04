@@ -378,14 +378,10 @@ pub fn carry(frame: usize, from: &Program, to: &Program) -> usize {
 }
 
 /// Silences the frames of a chain's output at or past the session end: the
-/// timeline is cut at the session length.
+/// timeline is cut at the session length. Only while the transport rolls;
+/// a standing stream carries tails and previewed notes whole.
 fn gate(x: &mut [Frame], first: i64, step: i64, total: i64) {
-    if step == 0 {
-        if first >= total {
-            x.fill(SILENCE);
-        }
-        return;
-    }
+    debug_assert_eq!(step, 1);
     let keep = (total - first).clamp(0, x.len() as i64) as usize;
     x[keep..].fill(SILENCE);
 }
@@ -516,6 +512,22 @@ impl Renderer {
         }
     }
 
+    /// Plays a note now through the Synth of the track at `track` among the
+    /// program's tracks, outside the timeline: `pitch` as a MIDI number,
+    /// `velocity` 0 to 1, let go after `frames` frames. It runs through the
+    /// track's chain and fader as its notes do, whether or not the transport
+    /// rolls. Nothing happens for a track without a Synth. Does not allocate.
+    pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize) {
+        if let Some(s) = self.tracks.get_mut(track).and_then(|t| t.synth.as_mut()) {
+            s.preview(pitch, velocity, frames);
+        }
+    }
+
+    /// Whether a previewed note is sounding on any track.
+    pub fn previewing(&self) -> bool {
+        self.tracks.iter().any(|t| t.synth.as_ref().is_some_and(|s| s.previewing()))
+    }
+
     /// Lets the sounding voices ring out over a fade, as on a stop.
     pub fn release(&mut self) {
         for state in &mut self.tracks {
@@ -621,7 +633,9 @@ impl Renderer {
             }
             if !state.chain.slots.is_empty() {
                 state.chain.process(out, clock(start), sources, &mut self.key);
-                gate(out, start - t.chain.latency as i64, step, total);
+                if rolling {
+                    gate(out, start - t.chain.latency as i64, step, total);
+                }
             }
             let x = &mut self.work[..n];
             x.copy_from_slice(out);
@@ -680,7 +694,9 @@ impl Renderer {
             let x = &mut state.bus[..n];
             if !state.chain.slots.is_empty() {
                 state.chain.process(x, clock(aligned), &self.tracks, &mut self.key);
-                gate(x, aligned - r.chain.latency as i64, step, total);
+                if rolling {
+                    gate(x, aligned - r.chain.latency as i64, step, total);
+                }
             }
             let at = aligned - r.chain.latency as i64;
             let [left, right, level, ..] = &mut self.values;
@@ -707,8 +723,11 @@ impl Renderer {
                 *l += o;
             }
         }
+        // The end fade is the timeline's. While the transport stands still,
+        // only tails and previewed notes sound, wherever it stands, so they
+        // are heard whole: a stopped stream is cut by nothing but silence.
         let fader = |f: i64| {
-            if f < 0 {
+            if !rolling || f < 0 {
                 1.0
             } else if f >= total {
                 0.0
@@ -772,7 +791,7 @@ impl Renderer {
             };
             if same_time && Arc::ptr_eq(&t.voices, &o.voices) && same_notes {
                 state.voices.copy(&was.voices);
-                if let (Some(s), Some(w)) = (&mut state.synth, &was.synth) {
+                if let (Some(s), Some(w)) = (&mut state.synth, &mut was.synth) {
                     s.take_over(w);
                 }
                 state.inherits = None;
@@ -784,6 +803,10 @@ impl Renderer {
                 was.voices.release(old.fade);
                 if let Some(w) = &mut was.synth {
                     w.release();
+                    // A note being previewed carries on under the new notes.
+                    if let Some(s) = &mut state.synth {
+                        s.take_previews(w);
+                    }
                 }
                 state.inherits = Some(i);
             }
@@ -832,6 +855,10 @@ impl Renderer {
         for (state, t) in self.tracks.iter_mut().zip(&program.tracks) {
             if let Some(i) = old.program.tracks.iter().position(|o| o.id == t.id) {
                 state.chain.take_over(&mut old.tracks[i].chain);
+                // A note being previewed carries on under the new patch.
+                if let (Some(s), Some(w)) = (&mut state.synth, &mut old.tracks[i].synth) {
+                    s.take_previews(w);
+                }
             }
         }
         for (state, r) in self.returns.iter_mut().zip(&program.returns) {
