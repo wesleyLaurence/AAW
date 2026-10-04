@@ -1,0 +1,16 @@
+name: Supersaw
+description: Four saws spread in detune and across the stereo field, for chords and big leads. Tone opens the filter.
+tags: [lead, chords, wide, bright]
+synth:
+  voices: 8
+  oscillators:
+    a: {wave: saw, level_db: -14, detune_cents: -18, pan: -0.7}
+    b: {wave: saw, level_db: -14, detune_cents: -6, pan: -0.25}
+    c: {wave: saw, level_db: -14, detune_cents: 6, pan: 0.25}
+    d: {wave: saw, level_db: -14, detune_cents: 18, pan: 0.7}
+  filter: {cutoff_hz: 2500, slope_db_per_octave: 12}
+  envelopes:
+    amp: {attack_ms: 20, decay_ms: 300, sustain_percent: 85, release_ms: 350}
+  macros: {tone: 70}
+  modulation:
+  - {source: macros.tone, target: filter.cutoff_hz, amount: 2}

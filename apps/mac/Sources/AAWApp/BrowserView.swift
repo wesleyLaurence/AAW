@@ -27,6 +27,25 @@ final class Browser {
     var folderError: String?
     @ObservationIgnored private var folderOperations = 0
     static let deviceType = "org.aaw.browser-device"
+    /// A Synth patch dragged out of the browser; the data is its name.
+    static let patchType = "org.aaw.browser-patch"
+    /// The instruments the browser offers, by kind.
+    static let instruments = ["sampler", "synth"]
+
+    /// The Synth's patches, factory and the person's, as `daw patch list`
+    /// lists them; read again when the browser is shown.
+    private(set) var patches: [PatchInfo] = []
+
+    func refreshPatches() {
+        patches = libraryPatches(query: "")
+    }
+
+    /// Whether every word of `query` is in the patch's name or a tag.
+    nonisolated static func matches(_ patch: PatchInfo, _ query: String) -> Bool {
+        query.split(separator: " ").allSatisfy { word in
+            patch.name.localizedCaseInsensitiveContains(word) || patch.tags.contains { $0.localizedCaseInsensitiveContains(word) }
+        }
+    }
 
     func refreshFolders(operation: String = "list", path: String? = nil) {
         guard let library else { return }
@@ -271,37 +290,124 @@ struct BrowserView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear { browser.refreshFolders() }
+        .onAppear { browser.refreshFolders(); browser.refreshPatches() }
         .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
+            // A patch saved from the terminal shows when the window comes back.
+            if browser.section == "Instruments" { browser.refreshPatches() }
+        }
+        .onChange(of: browser.section) { _, section in
+            if section == "Instruments" { browser.refreshPatches() }
+        }
     }
 
+    /// Instruments, or audio effects, each with + and dragged by its name;
+    /// under the Synth its patches, Factory and the person's own, searched
+    /// by name and tag along with the devices.
     private var devices: some View {
-        let kinds = browser.section == "Instruments" ? ["sampler"] : DeviceChain.kinds
+        let instruments = browser.section == "Instruments"
+        let kinds = (instruments ? Browser.instruments : DeviceChain.kinds)
+            .filter { browser.query.isEmpty || readable($0).localizedCaseInsensitiveContains(browser.query) }
+        let patches = instruments ? browser.patches.filter { Browser.matches($0, browser.query) } : []
+        let factory = patches.filter(\.factory)
+        let mine = patches.filter { !$0.factory }
         return ScrollView {
             VStack(spacing: 0) {
-                ForEach(kinds.filter { browser.query.isEmpty || readable($0).localizedCaseInsensitiveContains(browser.query) }, id: \.self) { kind in
-                    HStack {
-                        Text(readable(kind))
-                        Spacer()
-                        Button { model.addBrowserDevice(kind, to: model.selectedRow) } label: { Image(systemName: "plus") }
-                            .buttonStyle(.borderless)
-                            .disabled(!model.canAddBrowserDevice(kind, to: model.selectedRow))
+                ForEach(kinds, id: \.self) { kind in
+                    device(kind)
+                }
+                if instruments && !patches.isEmpty {
+                    if !factory.isEmpty {
+                        heading("Factory")
+                        ForEach(factory, id: \.slug) { patch in row(patch) }
                     }
-                    .font(.system(size: 12))
-                    .padding(10)
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { model.addBrowserDevice(kind, to: model.selectedRow) }
-                    .onDrag {
-                        browser.dragged = nil
-                        let provider = NSItemProvider()
-                        provider.registerDataRepresentation(forTypeIdentifier: Browser.deviceType + "." + kind, visibility: .all) { completion in
-                            completion(Data(kind.utf8), nil)
-                            return nil
-                        }
-                        return provider
+                    if !mine.isEmpty {
+                        heading("Mine")
+                        ForEach(mine, id: \.slug) { patch in row(patch) }
                     }
                 }
+                if instruments && browser.query.isEmpty && mine.isEmpty {
+                    Text("Your own patches, saved with daw patch save, are listed here under Mine.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                }
             }
+        }
+    }
+
+    private func heading(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+    }
+
+    private func device(_ kind: String) -> some View {
+        HStack {
+            Text(readable(kind))
+            Spacer()
+            Button { model.addBrowserDevice(kind, to: model.selectedRow) } label: { Image(systemName: "plus") }
+                .buttonStyle(.borderless)
+                .disabled(!model.canAddBrowserDevice(kind, to: model.selectedRow))
+        }
+        .font(.system(size: 12))
+        .padding(10)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) { model.addBrowserDevice(kind, to: model.selectedRow) }
+        .onDrag {
+            browser.dragged = nil
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(forTypeIdentifier: Browser.deviceType + "." + kind, visibility: .all) { completion in
+                completion(Data(kind.utf8), nil)
+                return nil
+            }
+            return provider
+        }
+    }
+
+    /// A patch: its name and tags, + to add a Synth with it to the selected
+    /// MIDI track or a new one, and dragged by its name.
+    private func row(_ patch: PatchInfo) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(patch.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(patch.tags.isEmpty ? patch.description : patch.tags.joined(separator: " · "))
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                model.addBrowserDevice("synth", to: model.selectedRow, patch: patch.name)
+            } label: {
+                Image(systemName: "plus").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .disabled(!model.canAddBrowserDevice("synth", to: model.selectedRow))
+            .help(target.map { "Load \(patch.name) into a Synth on \($0.id)" } ?? "Add a new track with a Synth playing \(patch.name)")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 6)
+        .frame(height: 34)
+        .contentShape(Rectangle())
+        .help(patch.description)
+        .onTapGesture(count: 2) { model.addBrowserDevice("synth", to: model.selectedRow, patch: patch.name) }
+        .onDrag {
+            browser.dragged = nil
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(forTypeIdentifier: Browser.patchType, visibility: .all) { completion in
+                completion(Data(patch.name.utf8), nil)
+                return nil
+            }
+            return provider
         }
     }
 

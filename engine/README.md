@@ -65,7 +65,8 @@ project's folder or the song file in it. It implements:
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
-| `daw synth add PROJECT TRACK`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE]` | The Synth on a MIDI track: the plain saw attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part; a matrix entry added, changed or removed; and notes rendered through the patch to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply. See `daw describe synth` |
+| `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part; a matrix entry added, changed or removed; and notes rendered through the patch to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply. See `daw describe synth` |
+| `daw patch list [WORDS]`, `daw patch show NAME`, `daw patch save PROJECT TRACK NAME [--description TEXT] [--tags a,b] [--replace]`, `daw patch load PROJECT TRACK NAME` | Patches: a Synth's sound as a YAML file, the twelve factory patches built into `daw` and the saved ones in the workspace library, `~/Music/AAW/library/patches/` or `library/patches/` under `AAW_WORKSPACE`, each named by the slug of its name; a track's synth saved there, over a saved name only with `--replace`, naming the song's patch after it; and a patch, by name or as a `.yaml` path, put in place of a MIDI track's whole synth in one undo step, the notes staying. See `daw describe synth` |
 | `daw midi import PROJECT FILE [--track T] [--at BEAT]`, `daw midi export PROJECT CLIP FILE` | A Standard MIDI file of one part made into a note clip, on a MIDI track or a new one, with what the song cannot hold counted in the reply; a note clip's notes that play written as a type 0 file at 960 ticks a beat. The file's tempo is not taken. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
@@ -115,6 +116,14 @@ stream is cut into blocks, and processing never allocates.
   swaps through the dip. A locate chases the notes sounding there with their
   envelopes and free LFOs where time would have brought them. A track with a
   synth has no sample voices and no peaks of its own.
+- **Patches** (`aaw-host/src/patches.rs`) are the synth mapping as a YAML
+  file with a name, description, tags, `saved_by` and `saved_at` around it,
+  validated as a song's synth is. The factory patches are `engine/patches/`,
+  built into the binary; saved ones are files in the workspace library,
+  named by the slug of the name, and one of a factory name shadows it.
+  `patch.load` and `synth.add` with a patch are `instrument.set` of the
+  mapping led by `patch: NAME`; `patch.save` writes the file and sets the
+  song's `patch`.
 - **Peaks** (`peaks.rs`) are what a track's voices sum to, before its inserts
   and fader, as the least and greatest sample of every 64 frames and of
   coarser stretches four times as long each, for a display to draw at any
@@ -284,6 +293,9 @@ with the pad, and the track if it is new, that plays it.
 every block size and to itself, hears a lane on its filter, chases a locate
 and plays under allocation checking; `crates/aaw-dsp/src/synth.rs` measures a
 sine's pitch and level, the envelope, a glide, stealing and a take-over.
+`crates/aaw-host/tests/patches.rs` renders every factory patch under full
+scale and holds a patch saved from one song and loaded into another to the
+same audition byte for byte.
 `crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
 the selection, external edits, concurrent clients, an embedded host, a project
 moved and copied under a running host with its old path still answering,

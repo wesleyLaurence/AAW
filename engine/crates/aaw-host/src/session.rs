@@ -361,7 +361,7 @@ impl Session {
             _ => {
                 let mut root = self.doc.tree();
                 let mut next = self.next;
-                let outcome = Edit::new(&mut root, self.hosted, &mut next).run(cmd)?;
+                let outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).run(cmd)?;
                 let project = Project::validate(&root.value()).map_err(|e| e.to_string())?;
                 let node = tree::carry(&project.dump(false), Some(&root), &mut next);
                 self.next = next;

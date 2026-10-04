@@ -226,6 +226,7 @@ front first.
 | Drag a marker on the Sampler's waveform; type Start or End | Moves where in the file the keys play from or to, no further than the file or the other marker, heard when the drag ends. An empty End plays to the file's end |
 | Type in Root; click Measure | Sets the note the sample is at, as C4 or 60, so the keys play it from there; empty plays it as it is at middle C. Measure sets it to the pitch `daw samples analyze` finds, and says so when the file has no one pitch |
 | Choose a mode; drag Transpose, Attack, Release, Level or Pan; tick Reverse | Sets the Sampler's pad, as `daw pad set` does; each is heard when the drag ends, after a 10 ms dip |
+| Drag Synth, or one of its patches, from the browser onto a MIDI track's header or its device panel, or under the tracks; + or a double-click on it | Attaches the plain saw in place of the track's instrument, or loads the patch into the track's Synth, or attaches a Synth with it; under the tracks, a new MIDI track, `synth-1` or named after the patch. The notes are kept. One undo step, as `daw synth add --patch` and `daw patch load` make |
 | Drag a knob, choose a wave or mode, type a number or tick a box in the Synth's panel; click a field's diamond; click × on a matrix entry | Sets that field of the patch, as `daw synth set` does: a knob is heard as it is dragged, and a wave, a filter mode or a routing when chosen, after a 10 ms dip; the diamond adds a lane on the field under the track, or removes it; × takes the entry out of the matrix. The agent attaches a Synth with `daw synth add` and adds its parts and entries |
 | Drag a bar or type a value in the Audio Clip panel | Sets the clip's gain, fades, fade curve, tempo or stretch |
 
@@ -280,11 +281,17 @@ and M4A are searchable. The agent's `daw samples folders` and repeatable
 `daw samples search --folder DIRECTORY` use the same sources.
 
 Drag an effect onto a track, return or master header to append it, or onto an
-insertion strip between device panels to place it there. Drag Sampler onto a MIDI
-header or instrument panel to attach an empty sampler, or below the rows to make
-a MIDI track. Double-click or + adds to the selected row. Invalid destinations
-refuse the drop. Each device addition is one undo step. See
-[browser](../../docs/features/browser.md).
+insertion strip between device panels to place it there. Instruments lists
+Sampler and Synth, and under Synth its patches, Factory and Mine, which the
+search field narrows by name and tag; Mine are the files `daw patch save`
+writes to `~/Music/AAW/library/patches/`, read again when the window comes to
+the front. Drag Sampler or Synth onto a MIDI header or instrument panel to
+attach an empty sampler or the plain saw, or below the rows to make a MIDI
+track; drag a patch onto a MIDI header or panel to load it into the track's
+Synth, or attach a Synth with it, or below the rows for a track named after
+it. Double-click or + adds to the selected row. Invalid destinations refuse
+the drop. Each device addition is one undo step. See
+[browser](../../docs/features/browser.md) and [the Synth](../../docs/features/synth.md).
 
 An edit shows at once and goes to the host, whose song the window then follows.
 A drag of a level is one undo step, however long, and the song is saved when it
@@ -379,7 +386,7 @@ is at the panel's right, about x = 640 in the first row.
 | `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/NoteEditor.swift` | The piano roll, an AppKit view, and the fields beside it |
 | `Sources/AAWApp/PianoRollLayout.swift` | Where a note clip's notes are in the piano roll, and how the grid and a drag move them, tested in `Tests` |
-| `Sources/AAWApp/BrowserView.swift` | The browser: shared folders, sample search and device lists |
+| `Sources/AAWApp/BrowserView.swift` | The browser: shared folders, sample search, the device lists and the Synth's patches |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
 | `Sources/AAWApp/Projects.swift` | The index of the projects the app knows, and what closing a project does, tested in `Tests` |
@@ -419,7 +426,10 @@ is at the panel's right, about x = 640 in the first row.
 - The Synth's panel is plain controls: no wave, filter curve, envelope or
   LFO drawn, no keys, and no way to add an oscillator, an envelope, an LFO, a
   macro or a matrix entry; `daw synth set` and `daw synth mod` add them. A
-  patch is not loaded or saved from the panel, and the browser has no Synth.
+  patch is loaded from the browser and not from the panel, and saved only
+  with `daw patch save`; the browser's list of patches is read when it is
+  shown and when the window comes to the front, not while a terminal saves
+  one in front of it.
 - What Copy took is kept in the window, not on the system's clipboard, and is
   pasted into the same song.
 - A row of notes shows the notes its events play with two more either side; a

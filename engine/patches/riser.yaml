@@ -1,0 +1,18 @@
+name: Riser
+description: Noise and a saw under a resonant filter that an envelope opens six octaves over two seconds while the saw climbs an octave, with a sixteenth-note wobble. Hold a note into the drop.
+tags: [fx, riser, noise, transition]
+synth:
+  voices: 2
+  oscillators:
+    a: {wave: noise, level_db: -9}
+    b: {wave: saw, level_db: -18, detune_cents: 15}
+  filter: {cutoff_hz: 150, slope_db_per_octave: 24, resonance_percent: 40}
+  envelopes:
+    amp: {attack_ms: 200, decay_ms: 0, sustain_percent: 100, release_ms: 300}
+    env2: {attack_ms: 2000, decay_ms: 0, sustain_percent: 100, release_ms: 300}
+  lfos:
+    lfo1: {shape: sine, rate_beats: 1/4, retrigger: true}
+  modulation:
+  - {source: env2, target: filter.cutoff_hz, amount: 6}
+  - {source: env2, target: oscillators.b.pitch, amount: 12}
+  - {source: lfo1, target: filter.cutoff_hz, amount: 0.3}

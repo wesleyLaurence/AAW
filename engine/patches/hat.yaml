@@ -1,0 +1,13 @@
+name: Hat
+description: Noise through a resonant highpass with a faint metallic square high up, over in seventy milliseconds; harder hits ring a little longer.
+tags: [drum, hat, percussion, short]
+synth:
+  voices: 2
+  oscillators:
+    a: {wave: noise, level_db: -6}
+    b: {wave: square, level_db: -30, octave: 3, semitones: 1}
+  filter: {mode: highpass, cutoff_hz: 6000, slope_db_per_octave: 24, resonance_percent: 20}
+  envelopes:
+    amp: {attack_ms: 0, decay_ms: 70, sustain_percent: 0, release_ms: 40}
+  modulation:
+  - {source: velocity, target: envelopes.amp.decay_ms, amount: 1}

@@ -1,0 +1,16 @@
+name: Bell
+description: A sine with a partial a twelfth up and a bright inharmonic one that fades first, struck and left to ring.
+tags: [bell, keys, mallet, long]
+synth:
+  voices: 8
+  oscillators:
+    a: {wave: sine, level_db: -9}
+    b: {wave: sine, level_db: -15, octave: 1, semitones: 7}
+    c: {wave: triangle, level_db: -40, octave: 2, semitones: 4, detune_cents: 30}
+  filter: {cutoff_hz: 12000}
+  envelopes:
+    amp: {attack_ms: 1, decay_ms: 1800, sustain_percent: 0, release_ms: 1500}
+    env2: {attack_ms: 0, decay_ms: 400, sustain_percent: 0, release_ms: 400}
+  modulation:
+  - {source: env2, target: oscillators.c.level_db, amount: 24}
+  - {source: velocity, target: oscillators.b.level_db, amount: 6}

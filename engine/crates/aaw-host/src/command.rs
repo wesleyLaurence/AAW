@@ -190,13 +190,35 @@ pub enum Command {
     },
 
     // The Synth
-    /// Attaches the plain saw to a MIDI track, or makes a new MIDI track
-    /// with it, at `index` among the tracks or last.
+    /// Attaches the plain saw, or the patch `patch` names, to a MIDI track,
+    /// or makes a new MIDI track with it, at `index` among the tracks or
+    /// last.
     #[serde(rename = "synth.add")]
     SynthAdd {
         track: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         index: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        patch: Option<String>,
+    },
+    /// Loads a patch into a MIDI track: the patch's `synth` mapping takes
+    /// the instrument's place whole, and the notes stay. `patch` is a
+    /// patch's name, a saved patch's or a factory one's, or a `.yaml` file.
+    #[serde(rename = "patch.load")]
+    PatchLoad { track: String, patch: String },
+    /// Saves a MIDI track's synth to the library as a patch named `name`,
+    /// with a description and tags, and names the song's patch after it.
+    /// Over a patch already saved under that name only with `replace`.
+    #[serde(rename = "patch.save")]
+    PatchSave {
+        track: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tags: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replace: bool,
     },
     /// Sets fields of a MIDI track's synth by their paths in the patch, as
     /// one step: `values` maps each path to its value, null removing an
@@ -539,6 +561,8 @@ pub struct Edit<'a> {
     /// Whether `@N` handles may be used in paths.
     pub handles: bool,
     pub next: &'a mut u64,
+    /// Who is editing, for what an edit writes outside the song.
+    pub origin: Origin,
     also: Vec<String>,
 }
 
@@ -730,8 +754,14 @@ impl<'a> Edit<'a> {
             root,
             handles,
             next,
+            origin: Origin::Agent,
             also: Vec::new(),
         }
+    }
+
+    pub fn by(mut self, origin: Origin) -> Self {
+        self.origin = origin;
+        self
     }
 
     fn fresh(&mut self) -> u64 {
@@ -1411,26 +1441,72 @@ impl<'a> Edit<'a> {
                 let pad = fields.get("pad").and_then(Json::as_str).unwrap_or("?");
                 out.label = format!("Map notes {notes} to {pad} on {}", self.name(&loc));
             }
-            SynthAdd { track, index } => {
-                let plain = json!({"synth": {"oscillators": {"a": {}}}});
+            SynthAdd { track, index, patch } => {
+                let found = patch.as_deref().map(crate::patches::find).transpose()?;
+                let instrument = match &found {
+                    Some(p) => json!({"synth": to_json(&crate::patches::loaded(p))}),
+                    None => json!({"synth": {"oscillators": {"a": {}}}}),
+                };
+                let with = found.as_ref().map_or(String::new(), |p| format!(" with {}", p.name));
                 match self.track(track) {
                     Ok(loc) => {
                         if !self.is_midi(&loc) {
                             return Err(format!("{track} is not a MIDI track; a synth goes on one, or on a new track"));
                         }
-                        let o = self.run(&InstrumentSet { track: track.clone(), instrument: plain })?;
+                        let o = self.run(&InstrumentSet { track: track.clone(), instrument })?;
                         out.also.extend(o.also);
-                        out.label = format!("Attach a Synth to {track}");
+                        out.label = format!("Attach a Synth{with} to {}", self.name(&loc));
                     }
                     Err(_) => {
                         let mut fields = Fields::new();
                         fields.insert("type".into(), Json::String("midi".into()));
-                        fields.insert("instrument".into(), plain);
+                        fields.insert("instrument".into(), instrument);
                         let o = self.run(&TrackAdd { id: track.clone(), index: *index, fields })?;
                         out.made.extend(o.made);
-                        out.label = format!("Add Synth track {track}");
+                        out.label = format!("Add Synth track {track}{with}");
                     }
                 }
+                if let Some(p) = &found {
+                    out.report.insert("patch".into(), json!(p.name));
+                    out.report.insert("factory".into(), json!(p.factory));
+                }
+            }
+            PatchLoad { track, patch } => {
+                let loc = self.midi_track(track)?;
+                let p = crate::patches::find(patch)?;
+                let instrument = json!({"synth": to_json(&crate::patches::loaded(&p))});
+                let o = self.run(&InstrumentSet { track: track.clone(), instrument })?;
+                out.also.extend(o.also);
+                out.label = format!("Load patch {} into {}", p.name, self.name(&loc));
+                out.report.insert("patch".into(), json!(p.name));
+                out.report.insert("factory".into(), json!(p.factory));
+            }
+            PatchSave { track, name, description, tags, replace } => {
+                let owner = self.midi_track(track)?;
+                let loc = self.synth(track)?;
+                let synth = crate::patches::validate(&self.node(&loc).value())?;
+                // Written over, a patch keeps its description and tags unless new ones are given.
+                let before = if *replace { crate::patches::find(name).ok().filter(|p| !p.factory) } else { None };
+                let description = match (description, &before) {
+                    (Some(d), _) => d.clone(),
+                    (None, Some(b)) => b.description.clone(),
+                    (None, None) => String::new(),
+                };
+                let tags = match (tags.is_empty(), &before) {
+                    (true, Some(b)) => b.tags.clone(),
+                    _ => tags.clone(),
+                };
+                let p = crate::patches::save(name, &description, &tags, &synth, self.origin.as_str(), *replace)?;
+                let file = p.file.clone().unwrap_or_default();
+                // The song says where the sound now comes from.
+                if self.node(&loc).field("patch") != Some(p.name.as_str()) {
+                    let o = self.run(&Set { path: format!("{}.patch", self.text(&loc)), value: json!(p.name) })?;
+                    out.also.extend(o.also);
+                }
+                out.label = format!("Save patch {} from {}", p.name, self.name(&owner));
+                out.report.insert("patch".into(), json!(p.name));
+                out.report.insert("file".into(), json!(file));
+                out.report.insert("shadows_factory".into(), json!(crate::patches::FACTORY.iter().any(|(s, _)| *s == p.slug)));
             }
             SynthSet { track, values } => {
                 let loc = self.synth(track)?;
@@ -1881,7 +1957,8 @@ impl<'a> Edit<'a> {
             Apply { .. } => return Err("apply replaces the whole song; the session applies it".into()),
             other => return Err(format!("{} is not an edit", other.op())),
         }
-        out.also = std::mem::take(&mut self.also);
+        // What this command noted itself, after what the commands it ran noted.
+        out.also.extend(std::mem::take(&mut self.also));
         Ok(out)
     }
 

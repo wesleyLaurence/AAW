@@ -1,13 +1,14 @@
-# The Synth — engine and commands implemented October 3, 2026
+# The Synth — engine and commands implemented October 3, 2026; patches October 4, 2026
 
-Status: the first of four items is built. The engine, the patch in the song,
+Status: two of four items are built. The engine, the patch in the song,
 `daw synth` and `daw describe synth`, automation of the patch's fields,
-`daw check` warnings and a panel of plain fields in the app are built and
-described here in the present tense. Patches as files, the panel's drawings
-and unison, wavetables and the patch's effects are the three items that
-remain, described under [What remains](#what-remains). D69 records what the
-person settled on October 3, 2026, and D71 what was decided in building the
-first item.
+`daw check` warnings, a panel of plain fields in the app, patches as files
+with the factory patches, `daw patch` and the browser's Synth are built and
+described here in the present tense. The panel's drawings and unison,
+wavetables and the patch's effects are the two items that remain, described
+under [What remains](#what-remains). D69 records what the person settled on
+October 3, 2026, D71 what was decided in building the first item and D72
+what was decided in building patches.
 
 ## What
 
@@ -214,6 +215,82 @@ hat and a riser, the way `describe edit` teaches an edit.
 synth has voices, and of a last note whose amp release ends past the song's
 end, which the end fade cuts.
 
+## Patches
+
+A patch is the `synth` mapping as a YAML file outside any song, so that a
+sound designed in one project is loaded into another and is the same sound at
+the same tempo, since nothing outside the mapping shapes it. Around the
+mapping are a name, a description, tags, who saved it and when:
+
+```yaml
+name: Round Sub
+description: A sine with a saw an octave up under a low filter.
+tags: [bass, sub]
+saved_by: agent
+saved_at: '2026-10-04T03:16:50Z'
+synth:
+  voices: 1
+  oscillators:
+    a: {wave: sine, level_db: -6, filter: false}
+    b: {level_db: -18, octave: 1}
+  filter: {cutoff_hz: 200, slope_db_per_octave: 24}
+```
+
+The mapping is written as the song saves it, fields at their defaults left
+out, and validated as the song validates a synth, so a file with a wrong wave
+or an entry naming a part the patch lacks is refused with the field named.
+
+**Where they live.** Saved patches are files in the workspace's library,
+`~/Music/AAW/library/patches/`, or `library/patches/` under `AAW_WORKSPACE`:
+the first folder of the workspace the concept names, made when the first
+patch is saved. A patch is named by its file: the file's stem is the slug of
+the name, `round-sub.yaml` for Round Sub, so a name may have spaces and
+capitals and the file has neither (D72). A `.yaml` file anywhere loads by its
+path too. Twelve factory patches are built into `daw` from
+`engine/patches/`: Init, Sub Bass, Reese, Supersaw, Pluck, Soft Pad, Bright
+Lead, Organ, Bell, Kick, Hat and Riser, generic sounds that start from the
+recipes `daw describe synth` teaches. A saved patch whose slug is a factory
+patch's shadows it.
+
+**Commands.**
+
+```
+daw patch list [WORDS]                                  # factory first, then mine by name
+daw patch show NAME                                     # the file: name, tags, who, when, synth
+daw patch save SONG lead "Round Sub" --description "…" --tags bass,sub [--replace]
+daw patch load SONG lead round-sub                      # by name, by slug, or a .yaml path
+daw synth add SONG lead --patch "Soft Pad"              # attach, or a new track with it
+```
+
+`patch list` lists every patch with its name, slug, description, tags,
+whether it is factory and its file; `WORDS` keep those with every word in the
+name or a tag. A file in the folder that is not a patch is named under
+`problems`, not fatal. `patch save` writes a track's synth under the name, as
+the file above, with `saved_by` the command's origin, user or agent; a name
+already saved is written over only with `--replace`, which keeps the file's
+description and tags unless new ones are given, and a factory name is
+shadowed without asking. It also sets the song's `patch` field to the name,
+so the song says where its sound came from; that is the one undo step it
+makes, and when the song already says so nothing changes. `patch load` puts
+the patch's mapping, led by `patch: NAME`, in place of the track's whole
+instrument, in one undo step named for the patch; the notes stay, and a lane
+on a field the new patch lacks goes, as it does when an instrument is
+replaced. A MIDI track with no instrument takes a patch too; a track of
+patterns is refused. `synth add --patch` attaches a patch instead of the
+plain saw, or makes a new MIDI track with it. The replies of `load` and
+`synth add` say `patch` and `factory`; `save` says the file.
+
+**The browser.** Instruments lists Sampler and Synth, and under Synth its
+patches, Factory and Mine, searched by name and tag with the field at the
+top. Dragging Synth onto a MIDI track's header or device panel attaches the
+plain saw in place of the instrument it had; dragging a patch loads it into
+the track's Synth, or attaches a Synth with it; a drop under the tracks makes
+a new MIDI track, `synth-1` for the plain saw and named after the patch
+otherwise, `soft-pad`, then `soft-pad-2`. Double-click and + do the same to
+the selected row. Each is one undo step, labeled as the commands label
+theirs. The list is read when the browser opens on Instruments and when the
+window comes back to the front, so a patch saved from the terminal appears.
+
 ## The panel
 
 The Synth takes the instrument's place at the head of a MIDI track's chain, as
@@ -228,35 +305,17 @@ draws no wave, curve or envelope. That is the panel item.
 
 ## What remains
 
-2. **Patches.** A patch as a YAML file, the `synth` mapping with a name,
-   description, tags, who saved it and when around it, in
-   `~/Music/AAW/library/patches/`, the first folder of the workspace, made when
-   the first is saved; `AAW_WORKSPACE` points elsewhere. A patch is named by
-   its file, `round-sub.yaml`; `patch save` over a name that exists asks, or
-   `--replace`. Factory patches in `daw` itself under `engine/patches/`, which
-   `patch list` shows with `factory: true` and a saved copy shadows: a dozen
-   generic sounds, Init, Sub Bass, Reese, Supersaw, Pluck, Soft Pad, Bright
-   Lead, Organ, Bell, Kick, Hat, Riser. `daw patch save|list|show|load` and
-   `daw synth add --patch`; `patch load` replaces the whole `synth` mapping,
-   the notes staying as they are, in one undo step named for the patch. The
-   browser's Instruments lists Synth beside Sampler, opening to its patches,
-   Factory and Mine, searched by name and tag; dragging Synth onto a MIDI track
-   attaches the plain saw, dragging a patch attaches a synth with it or loads
-   it into the synth the track has, and a drop under the tracks makes a new
-   MIDI track named after the patch. A patch saved from one song and loaded
-   into another is the same audio at the same tempo, since nothing outside the
-   mapping shapes it.
 3. **The panel.** A header with the patch's name, ◂ ▸ through the patches of
-   the list it came from, a menu with Save…, Save As… and the factory patches;
-   the wave drawn one cycle; the filter's response curve dragged by its corner;
-   the ADSR drawn with its four handles; the LFO's shape over one cycle; a ring
-   on a control for the depth of a matrix entry on it, and an envelope's or
-   LFO's tab dragged onto a control to add one; + and × for the parts; the
-   detail panel's height draggable, 214 points the least; `note.preview` in the
-   host, a note of a pitch, velocity and length played now through a track's
-   instrument and chain, outside the timeline and the undo history, and one
-   octave of keys in the panel that sends it. `daw synth audition --play`
-   sends one too.
+   the list it came from, a menu with Save…, Save As… and the patches, which
+   send `patch.save` and `patch.load`; the wave drawn one cycle; the filter's
+   response curve dragged by its corner; the ADSR drawn with its four
+   handles; the LFO's shape over one cycle; a ring on a control for the depth
+   of a matrix entry on it, and an envelope's or LFO's tab dragged onto a
+   control to add one; + and × for the parts; the detail panel's height
+   draggable, 214 points the least; `note.preview` in the host, a note of a
+   pitch, velocity and length played now through a track's instrument and
+   chain, outside the timeline and the undo history, and one octave of keys
+   in the panel that sends it. `daw synth audition --play` sends one too.
 4. **Unison, wavetables and the patch's effects.** `unison` (1 to 16 voices),
    `unison_detune_cents` and `unison_width_percent` on an oscillator, with
    `unison_detune_cents` a matrix target; `wave: wavetable` with built-in
@@ -264,9 +323,10 @@ draws no wave, curve or envelope. That is the panel item.
    `saturation` as effect kinds anywhere; and `effects` inside the patch, the
    song's effect kinds in a chain of their own run on the sum of the voices
    before the track's inserts, automated as `instrument.effects.REF.FIELD`.
+   The factory patches gain unison and effects where they want them.
 
-Items 2 and 3 can swap; 4 can follow either. Each item's pull request moves its
-line and rewrites this file toward the present tense.
+Each item's pull request moves its line and rewrites this file toward the
+present tense.
 
 ## Done when
 
@@ -295,10 +355,22 @@ Of the first item:
 - `architecture.md`, the engine and Mac READMEs, `concept.md`'s Sound section
   and `decisions.md` are updated, and this file is rewritten as the reference.
 
-Of the whole: a patch saved from one project loads into another and renders
-the same audio in both at the same tempo; the factory patches are heard and
-one of each kind sounds like its name; the panel's drawings, drops and tall
-panel are seen in pictures. Listening by hand is a line under Verify.
+Of the patches item:
+
+- A patch saved from one project loads into another and renders the same
+  audio in both at the same tempo. Done: `crates/aaw-host/tests/patches.rs`
+  holds the two auditions byte for byte, and `tests/test_midi.py` does the
+  same through `daw`.
+- Every factory patch reads, validates, renders on a few notes and sits
+  under full scale. Done in the same test; whether each sounds like its name
+  is not, and is a line under Verify.
+- The browser's Synth and its patches make tracks and load into them: done
+  in `crates/aaw-ffi/tests/song.rs` and the Mac tests, through the model,
+  and the list was seen in a scripted picture; nothing was dragged by hand.
+
+Of the whole: the factory patches are heard and one of each kind sounds like
+its name; the panel's drawings, drops and tall panel are seen in pictures.
+Listening by hand is a line under Verify.
 
 ## Settled
 
@@ -335,10 +407,28 @@ Decided in building the first item, October 3, 2026 (D71):
 - **The amp release reaches exactly nothing** at `release_ms`, 60 dB down and
   then zero, so a voice ends without a step and the song is quiet after it.
 
+Decided in building patches, October 4, 2026 (D72):
+
+- **A patch's file is the slug of its name,** so Soft Pad is `soft-pad.yaml`
+  and a name may have spaces; the name in the file is the patch's.
+- **`patch save` names the song's patch** after the patch it wrote, as one
+  undo step, so the song says where its sound came from and the panel's
+  header shows it; `patch load` sets it too. Nothing reads the field.
+- **A patch file is validated as the song validates a synth,** so one
+  refusal names a bad field whether it is in a song or a file.
+- **The factory patches are written for the Synth as it is:** four detuned
+  saws stand in for unison, and no effects are in them, until item 4.
+
 ## Limits
 
-- No unison, wavetables or effects inside the patch until item 4, and no
-  patches as files until item 2; `patch` in the song is a name nothing reads.
+- No unison, wavetables or effects inside the patch until item 4.
+- `patch` in the song is where the sound came from, set by `patch load`,
+  `patch save` and `synth add --patch`; nothing reads it, and a changed
+  sound keeps the name until it is saved under another.
+- The browser reads the patches when it opens on Instruments and when the
+  window comes to the front, not while a terminal saves one in front of it.
+- A patch names no tempo, so a synced LFO or a riser's envelope is in beats
+  or milliseconds as the patch wrote it, whatever the song's tempo.
 - The triangle is not bandlimited; it aliases a little at the top of the keys.
 - An LFO's fields are not matrix targets. A free LFO's phase at a locate is
   worked out from its static rate, so under a lane on its rate the phase after
@@ -349,5 +439,6 @@ Decided in building the first item, October 3, 2026 (D71):
   not.
 - `synth show` leaves out fields at their defaults, as `daw get` does;
   `describe synth` lists the defaults.
-- The panel draws plain controls: no wave, curve, envelope or keys, and no +
-  for a part or an entry, until item 3.
+- The panel draws plain controls: no wave, curve, envelope or keys, no + for
+  a part or an entry, and no Save or Load of a patch, until item 3; the
+  browser loads one, and `daw patch save` saves one.

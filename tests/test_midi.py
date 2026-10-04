@@ -128,6 +128,45 @@ def test_a_synth_plays_the_phrase_is_checked_and_auditioned(tmp_path):
     assert load(path)["tracks"][0]["automation"] == []
 
 
+def test_patches_are_listed_loaded_saved_and_heard_the_same_in_another_song(tmp_path, monkeypatch):
+    monkeypatch.setenv("AAW_WORKSPACE", str(tmp_path / "ws"))
+    listed = daw("patch", "list")
+    names = [p["name"] for p in listed["patches"]]
+    assert names[:3] == ["Init", "Sub Bass", "Reese"] and "Riser" in names
+    assert all(p["factory"] for p in listed["patches"])
+    assert listed["directory"] == str(tmp_path / "ws" / "library" / "patches")
+    assert [p["name"] for p in daw("patch", "list", "drum")["patches"]] == ["Kick", "Hat"]
+    shown = daw("patch", "show", "Soft Pad")
+    assert shown["synth"]["envelopes"]["amp"]["attack_ms"] == 400 and "pad" in shown["tags"]
+    # A factory patch on the phrase, then changed and saved as the person's own.
+    path = phrase(tmp_path)
+    added = daw("synth", "add", path, "keys", "--patch", "pluck")
+    assert added["label"] == "Attach a Synth with Pluck to keys" and added["factory"] is True
+    assert load(path)["tracks"][0]["instrument"]["synth"]["patch"] == "Pluck"
+    daw("synth", "set", path, "keys", "filter.cutoff_hz", 450)
+    saved = daw("patch", "save", path, "keys", "Dull Pluck", "--description", "The pluck, closed", "--tags", "pluck,dark")
+    assert saved["label"] == "Save patch Dull Pluck from keys"
+    file = tmp_path / "ws" / "library" / "patches" / "dull-pluck.yaml"
+    assert saved["file"] == str(file) and file.is_file()
+    assert load(path)["tracks"][0]["instrument"]["synth"]["patch"] == "Dull Pluck"
+    mine = [p for p in daw("patch", "list")["patches"] if not p["factory"]]
+    assert [(p["name"], p["tags"], p["saved_by"]) for p in mine] == [("Dull Pluck", ["pluck", "dark"], "agent")]
+    # Loaded into another song, it is the same sound.
+    other = phrase(tmp_path / "other")
+    loaded = daw("patch", "load", other, "keys", "Dull Pluck")
+    assert loaded["label"] == "Load patch Dull Pluck into keys" and loaded["factory"] is False
+    assert load(other)["tracks"][0]["instrument"]["synth"] == load(path)["tracks"][0]["instrument"]["synth"]
+    a = daw("synth", "audition", path, "keys", "--notes", "C3", "--output", tmp_path / "a.wav")
+    b = daw("synth", "audition", other, "keys", "--notes", "C3", "--output", tmp_path / "b.wav")
+    assert (tmp_path / "a.wav").read_bytes() == (tmp_path / "b.wav").read_bytes()
+    assert a["peak_dbfs"] < 0 and a["peak_dbfs"] == b["peak_dbfs"]
+    # The notes stayed.
+    assert load(other)["tracks"][0]["clips"] == load(path)["tracks"][0]["clips"]
+    # A second save of the name wants --replace.
+    code, err = cli("patch", "save", path, "keys", "Dull Pluck")
+    assert code != 0 and "--replace" in err["error"]
+
+
 def test_a_labeled_batch_through_a_host_is_one_undo_step(tmp_path, registry):
     path = phrase(tmp_path)
     host = subprocess.Popen([os.environ["AAW_DAW"], "host", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

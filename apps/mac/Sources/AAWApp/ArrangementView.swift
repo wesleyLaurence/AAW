@@ -345,7 +345,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         model.onWaveforms = { [weak self] in self?.takeWaveforms() }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
-        registerForDraggedTypes([.fileURL, .string] + (DeviceChain.kinds + ["sampler"]).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
+        registerForDraggedTypes(
+            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType)]
+                + (DeviceChain.kinds + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
     @available(*, unavailable)
@@ -1491,10 +1493,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return true
     }
 
-    private func deviceKind(_ sender: NSDraggingInfo) -> String? {
-        (DeviceChain.kinds + ["sampler"]).first {
-            sender.draggingPasteboard.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true
+    /// The device being dragged from the browser: its kind, and for a
+    /// Synth patch the patch's name.
+    private func device(of sender: NSDraggingInfo) -> (kind: String, patch: String?)? {
+        let board = sender.draggingPasteboard
+        if board.types?.contains(NSPasteboard.PasteboardType(Browser.patchType)) == true {
+            let name = board.data(forType: NSPasteboard.PasteboardType(Browser.patchType)).flatMap { String(data: $0, encoding: .utf8) }
+            return ("synth", name)
         }
+        return (DeviceChain.kinds + Browser.instruments).first {
+            board.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true
+        }.map { ($0, nil) }
     }
 
     private func deviceLanding(_ kind: String, at point: CGPoint) -> (valid: Bool, row: RowID?) {
@@ -1502,11 +1511,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if let (row, _) = row(atY: point.y) {
             return (point.x < TimelineLayout.headerWidth && model.canAddBrowserDevice(kind, to: row), row)
         }
-        return (kind == "sampler" && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
+        return (Browser.instruments.contains(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if let kind = deviceKind(sender) {
+        if let (kind, _) = device(of: sender) {
             return deviceLanding(kind, at: convert(sender.draggingLocation, from: nil)).valid ? .copy : []
         }
         guard let file = sample(of: sender) else { return [] }
@@ -1527,10 +1536,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        if let kind = deviceKind(sender) {
+        if let (kind, patch) = device(of: sender) {
             let landing = deviceLanding(kind, at: convert(sender.draggingLocation, from: nil))
             guard landing.valid else { return false }
-            model.addBrowserDevice(kind, to: landing.row)
+            model.addBrowserDevice(kind, to: landing.row, patch: patch)
             return true
         }
         defer {

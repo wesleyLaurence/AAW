@@ -123,6 +123,40 @@ pub fn browser_effects() -> Vec<String> {
     aaw_model::EFFECT_TYPES.iter().map(|kind| kind.to_string()).collect()
 }
 
+/// A Synth patch as the browser lists it: a factory patch built into the
+/// engine, or one saved in the workspace library.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PatchInfo {
+    pub name: String,
+    /// The file's stem, `soft-pad` for Soft Pad.
+    pub slug: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    pub factory: bool,
+    /// The file, for a saved patch.
+    pub file: Option<String>,
+}
+
+/// The patches, factory first and then the person's by name, that have
+/// every word of `query` in their name or a tag; all of them for an empty
+/// query. What `daw patch list` lists. Reads the library's folder.
+#[uniffi::export]
+pub fn library_patches(query: String) -> Vec<PatchInfo> {
+    aaw_host::patches::list()
+        .patches
+        .iter()
+        .filter(|p| aaw_host::patches::matches(p, &query))
+        .map(|p| PatchInfo {
+            name: p.name.clone(),
+            slug: p.slug.clone(),
+            description: p.description.clone(),
+            tags: p.tags.clone(),
+            factory: p.factory,
+            file: p.file.as_ref().map(|f| f.to_string_lossy().into_owned()),
+        })
+        .collect()
+}
+
 /// The categories the browser offers.
 #[uniffi::export]
 pub fn library_categories() -> Vec<String> {

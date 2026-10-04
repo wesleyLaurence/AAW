@@ -787,19 +787,25 @@ public final class SongModel {
         add(.trackAdd(index: UInt32(index), midi: midi)) { .track($0) }
     }
 
+    /// Whether a device from the browser can go on a row: an effect on any
+    /// row, an instrument on a MIDI track or, with no row, on a new track.
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
-        if kind != "sampler" { return DeviceChain.kinds.contains(kind) && row != nil }
+        if !Browser.instruments.contains(kind) { return DeviceChain.kinds.contains(kind) && row != nil }
         guard let row else { return true }
         guard case .track(let key) = row else { return false }
         return arrangement.tracks.first { $0.key == key }?.midi == true
     }
 
-    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil) {
+    /// Adds a device from the browser: an effect at `index` of the row's
+    /// chain or its end; an empty Sampler, or a Synth with the plain saw or
+    /// the patch named, as the MIDI track's instrument or on a new track.
+    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil, patch: String? = nil) {
         guard canAddBrowserDevice(kind, to: row) else { return }
-        if kind == "sampler" {
+        if Browser.instruments.contains(kind) {
             let track: UInt64?
             if case .track(let key) = row { track = key } else { track = nil }
-            edit(.instrumentAdd(track: track)) { [weak self] made in
+            let edit: Edit = kind == "sampler" ? .instrumentAdd(track: track) : .synthAdd(track: track, patch: patch)
+            self.edit(edit) { [weak self] made in
                 guard let self else { return }
                 if let key = track ?? made.first { self.select(row: .track(key)) }
                 self.detail = .devices

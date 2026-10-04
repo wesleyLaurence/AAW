@@ -42,6 +42,7 @@ Use `uv run daw COMMAND --help` for syntax. The commands below also use the
 | Use a sound | `daw samples import` copies it into the project; import compressed audio before measuring it |
 | Pitched or gated samples | `daw describe sampler`; confirm root octave with `samples analyze` or import `--root-note auto`; resolve `daw check` root warnings |
 | MIDI notes and instruments | `daw describe midi` |
+| A synthesized sound | `daw describe synth`; start from a factory patch with `daw synth add TRACK --patch NAME` (`daw patch list`), hear it with `daw synth audition`, keep it with `daw patch save` |
 | Effects or return buses | `daw describe effects`; track stems include inserts but exclude return contributions and master effects; returns have separate stems |
 | Automation | `daw describe automation`; give automated effects an `id` and ramp levels over a few milliseconds |
 | Finished-song edits from timecodes | Follow [song-edit](../.claude/skills/song-edit/SKILL.md); load its CLI topics before the relevant step |

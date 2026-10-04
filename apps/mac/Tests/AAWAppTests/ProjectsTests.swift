@@ -14,6 +14,7 @@ final class ProjectsTests: XCTestCase {
         let root = URL(fileURLWithPath: "/tmp/aaw-\(UUID().uuidString.prefix(8))")
         setenv("AAW_HOST_DIR", root.appendingPathComponent("hosts").path, 1)
         setenv("AAW_DATA_DIR", root.appendingPathComponent("data").path, 1)
+        setenv("AAW_WORKSPACE", root.appendingPathComponent("workspace").path, 1)
         return root
     }()
 
@@ -162,6 +163,37 @@ final class ProjectsTests: XCTestCase {
         let audio = try XCTUnwrap(model.arrangement.tracks.first { !$0.midi })
         XCTAssertFalse(model.canAddBrowserDevice("sampler", to: .track(audio.key)))
         XCTAssertEqual(model.browser.library, libraryPath(song: "/another/project/song.yaml"))
+    }
+
+    @MainActor
+    func testTheBrowsersSynthAndPatchesMakeTracksAndLoadIntoThem() throws {
+        let model = try SongModel(url: project("Patches"))
+        defer { model.close() }
+        // The factory patches are listed, and a search narrows them by name and tag.
+        model.browser.refreshPatches()
+        let patches = model.browser.patches
+        XCTAssertEqual(patches.prefix(3).map(\.name), ["Init", "Sub Bass", "Reese"])
+        XCTAssertTrue(patches.allSatisfy(\.factory))
+        let kick = try XCTUnwrap(patches.first { $0.name == "Kick" })
+        XCTAssertTrue(Browser.matches(kick, "") && Browser.matches(kick, "drum") && Browser.matches(kick, "KICK perc"))
+        XCTAssertFalse(Browser.matches(kick, "kick pad"))
+        XCTAssertFalse(model.canAddBrowserDevice("synth", to: .master))
+        // Synth under the tracks, then a patch on the track it made.
+        model.addBrowserDevice("synth", to: nil)
+        wait(for: "new synth track") { model.arrangement.tracks.count == 1 }
+        let track = model.arrangement.tracks[0]
+        XCTAssertEqual(track.id, "synth-1")
+        XCTAssertEqual(track.instrument, "synth")
+        XCTAssertNil(track.synth?.patch)
+        model.addBrowserDevice("synth", to: .track(track.key), patch: "Soft Pad")
+        wait(for: "the patch loaded") { model.arrangement.tracks[0].synth?.patch == "Soft Pad" }
+        XCTAssertEqual(model.arrangement.tracks[0].synth?.oscillators.map(\.name), ["a", "b", "sub"])
+        // A patch under the tracks makes a track named after it.
+        model.addBrowserDevice("synth", to: nil, patch: "Bright Lead")
+        wait(for: "a track named after the patch") { model.arrangement.tracks.count == 2 }
+        XCTAssertEqual(model.arrangement.tracks[1].id, "bright-lead")
+        XCTAssertEqual(model.arrangement.tracks[1].synth?.patch, "Bright Lead")
+        XCTAssertEqual(model.detail, .devices)
     }
 
     @MainActor

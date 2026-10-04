@@ -365,3 +365,26 @@ change of `voices` glides like a knob; a change of wave, filter mode, slope or
 routing, or of the parts a patch has, swaps through the dip, since it would
 jump the waveform. Patch names with spaces, the other open question, wait for
 patches as files.
+
+**D72. A patch's file is the slug of its name, saving names the song's patch, and a patch file is validated as a song's synth is.**
+
+Decided on October 4, 2026, in building the Synth's patches
+([features/synth.md](features/synth.md)). D71 left open how a patch with
+spaces in its name is named. A patch's name is free text, Soft Pad, written
+inside the file as `name`; its file is the slug of that name, `soft-pad.yaml`,
+lower-case letters, digits and hyphens, so the terminal, the browser and the
+Finder agree on one file for one name and `daw patch load` takes either.
+`patch save` writes the file and also sets the song's `patch` field to the
+name, as one undo step, because the song should say where its sound came from
+and the panel's header shows that name; `patch load` and `synth add --patch`
+set it too, and nothing reads it. A saved name is written over only with
+`--replace`, which keeps the file's description and tags unless new ones are
+given; a saved patch of a factory name shadows the factory one without
+asking, since the factory patch is still in the binary. The mapping in a file
+is validated by the same code that validates a synth in a song, wrapped as an
+instrument, so a wrong wave or a dangling matrix entry is refused with the
+field named either way, and the file is written as the song saves the
+mapping, defaults left out. `saved_by` is the command's origin, user or
+agent, and `saved_at` a UTC timestamp; a person's name is not kept. The
+factory patches are written for the Synth as item 1 built it: four detuned
+saws stand in for unison, and they carry no effects, until item 4 adds both.
