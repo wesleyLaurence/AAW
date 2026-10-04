@@ -200,6 +200,10 @@ def test_a_host_takes_commands_from_other_processes(rust_daw, tmp_path, registry
         # Handles address clips while the host runs.
         clip = daw(rust_daw, "inspect", path)["tracks"][0]["clips"][0]["ref"]
         assert clip.startswith("@")
+        # So does the map, with the clips under each letter.
+        mapped = daw(rust_daw, "map", path, "--track", track)
+        assert mapped["map"][0].startswith("bar ")
+        assert clip in mapped["clips"]["A"].split()
         moved = daw(rust_daw, "--origin", "user", "clip", "move", path, clip, "--at", "0")
         assert moved["revision"] in (2, 3)
 

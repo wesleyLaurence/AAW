@@ -483,3 +483,20 @@ the schema at the host, before pydantic's message, which stays as it is so the
 model's errors remain those of the Python model they were held to. The Python
 commands keep argparse's help until they move to Rust; only their closed pipe
 is handled now.
+
+**D77. The arrangement map prints its text as a list of lines beside each letter's clips, and a pattern clip's repeats share its letter.**
+
+Made while building [the arrangement map](features/arrangement-map.md) on
+October 4, 2026, settling the design's open questions without the person. The
+design had the map's text as one string beside structured rows of cells. A
+string printed as JSON is one line of `\n`s whose columns do not line up, and
+`jq` is not on every Mac, so `map` is a list of lines, which printed JSON keeps
+aligned; the rows' cells would repeat the grid, so they were left out. What the
+agent needs from the JSON to act is a clip's reference, so `clips` names each
+letter's clips, space separated in a line a letter rather than as objects, which
+on a 64-bar song would have been several times the map. A pattern clip's
+repeats are the same music again and share its letter, as copies of a phrase
+do. `#` marks clips that sound at once, not clips that only meet in a cell. The
+legend counts places past six, and the same music on two tracks has one letter
+so that a doubled part shows. Whether `inspect` lists clips in the order they
+play was settled by D76.

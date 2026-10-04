@@ -74,8 +74,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   for WAV/stem export.
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
-  It also makes a blank project and moves or copies a project's folder, and
-  reads and writes Standard MIDI files of one part (`midi_file`).
+  It also makes a blank project, moves or copies a project's folder,
+  reads and writes Standard MIDI files of one part (`midi_file`), and draws the
+  song as a grid of tracks by bars for `daw map` (`map`).
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see

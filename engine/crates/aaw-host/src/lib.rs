@@ -7,6 +7,7 @@
 pub mod client;
 pub mod command;
 pub mod host;
+pub mod map;
 pub mod midi_file;
 pub mod patches;
 pub mod project;

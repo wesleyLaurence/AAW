@@ -484,6 +484,23 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<Json>,
     },
+    /// The song as a grid of tracks by bars: where each plays, the same
+    /// music under the same letter, and clips that sound at once. `per` is
+    /// a number of bars a cell, `bar` or `beat`; `from` and `to` are beats;
+    /// `tracks` keeps those tracks; `lanes` adds a row a lane.
+    #[serde(rename = "map")]
+    Map {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        per: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        from: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Json>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        lanes: bool,
+    },
     /// Writes the notes of a note clip that play as a MIDI file at `file`.
     #[serde(rename = "midi.export")]
     MidiExport { clip: String, file: String },
@@ -535,7 +552,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } => Kind::Transport,
-            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | MidiExport { .. } => Kind::Read,
+            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }

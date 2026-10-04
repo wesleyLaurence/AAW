@@ -19,72 +19,68 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **The arrangement map.** Tracks by bars in a few hundred tokens, with the same
-   music under the same letter and stacked clips marked: the song as a whole,
-   for an agent that cannot see the window.
-   [features/arrangement-map.md](features/arrangement-map.md)
-2. **Musical checks.** `daw check` warning of stacked and overlapping clips, a
+1. **Musical checks.** `daw check` warning of stacked and overlapping clips, a
    note struck again while it sounds, a song that ends inside a part, two tracks
    in one low register; and `clip duplicate` laying repeated copies in a row.
    [features/musical-checks.md](features/musical-checks.md)
-3. **The piano roll for writing by hand.** A note heard as it is drawn, moved or
+2. **The piano roll for writing by hand.** A note heard as it is drawn, moved or
    clicked; a velocity lane under the notes; zoom up and down as well as across;
    the left end of a note dragged; a note dragged with Option copied, as in
    Ableton; the grid, and the pattern's step menu, in note values (1/16, 1/8T)
    rather than beats, whose 1/4 is a sixteenth note.
-4. **Selecting several things in the app.** Several clips selected by dragging
+3. **Selecting several things in the app.** Several clips selected by dragging
    over them and moved, copied or deleted together; several notes or events
    copied and pasted; several automation points selected.
-5. **Editing a range of bars.** A range copied, inserted, deleted or cleared
+4. **Editing a range of bars.** A range copied, inserted, deleted or cleared
    across every track, with its lanes and sections, and a section duplicated
    with what is under it; through `daw` first, then a time selection across the
    tracks in the app. [features/bar-ranges.md](features/bar-ranges.md)
-6. **Clips that loop.** Note clips and audio clips that repeat until they end,
+5. **Clips that loop.** Note clips and audio clips that repeat until they end,
    by one rule (D63), so a phrase is changed once.
    [features/looping-clips.md](features/looping-clips.md)
-7. **A MIDI keyboard.** Notes played through the selected track, held and let
+6. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-8. **Listening markers.** The person drops a marker at the playhead while the
+7. **Listening markers.** The person drops a marker at the playhead while the
    song plays, with a word if they want, and the agent reads them with `daw`:
    "this bar", without a timecode.
-9. **A project made with `daw init` in the app's index,** so a song the agent
+8. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-10. **Turns and A/B.** An agent request's commands grouped, named for the
-    request, kept or reverted as one, and the song restored to before any turn;
-    one key flips between before and after a turn while the loop plays.
-11. **A clipper and a utility.** Agents making loud mixes stopped at the
+9. **Turns and A/B.** An agent request's commands grouped, named for the
+   request, kept or reverted as one, and the song restored to before any turn;
+   one key flips between before and after a turn while the loop plays.
+10. **A clipper and a utility.** Agents making loud mixes stopped at the
     limiter; saturation is built, a clipper that holds a ceiling as a limiter
     does without its look-ahead is not. A utility for gain, width, mono below a
     frequency and phase.
-12. **Groups.** Tracks summed into a group with its own effects and level, a
+11. **Groups.** Tracks summed into a group with its own effects and level, a
     drum bus, as in any DAW.
-13. **Comparing with a reference.** A song the person names as a reference,
+12. **Comparing with a reference.** A song the person names as a reference,
     analyzed once and compared with a mix section by section, so the agent has
     targets for the low end, the brightness and the loudness of each section.
     [features/reference-comparison.md](features/reference-comparison.md)
-14. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+13. **Sound descriptors.** Each sample measured for brightness, attack, decay,
     low end and noise, with search sorted by them and samples like a chosen
     one, so the agent chooses sounds by more than their names.
     [features/sound-descriptors.md](features/sound-descriptors.md)
-15. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+14. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-16. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+15. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-17. **Key and chord detection,** and swing detection, of samples and songs: a
+16. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-18. **Presets.** Effect chains, pad setups and whole tracks saved as text and
+17. **Presets.** Effect chains, pad setups and whole tracks saved as text and
     loaded into any song.
-19. **The workspace and the two levels.** The workspace folder with its managed
+18. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-20. **The agent panel.** A conversation in the window, per project, over the
+19. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-21. **Stem separation** of a song.
-22. **Generated audio.** A sound, a loop or a whole song from a description, with
+20. **Stem separation** of a song.
+21. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -204,6 +200,12 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   left.
 - **Opening a project while its copy is open,** so that its path answers for it
   again.
+- **A fresh agent reading `daw map`:** an agent session asked to make a song
+  of several sections, then to change one, with `daw map` as its view; whether
+  it reads the marks without being told, catches stacked or misplaced clips
+  before rendering, and finds the clip to change from `clips`. Generated songs
+  and a song made by `clip duplicate` were mapped in tests; no agent session
+  has used it.
 - **A fresh agent learning `daw` from `daw describe start`:** a new Claude or
   Codex session asked for a short song, with nothing else read first; whether
   it starts from `describe` and `start`, how many errors it meets, and whether

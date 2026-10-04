@@ -12,6 +12,9 @@ For a new song, `uv run daw init projects/NAME` creates an empty project;
 and the quickest way to learn the verbs.
 Before continuing a song, read its local `HANDOFF.md` if present.
 
+Run `uv run daw map PROJECT` to see the arrangement bar by bar: where each
+track plays, the same music under the same letter, and `#` where two clips of a
+track sound at once. Run it again after laying out clips, before rendering.
 Run `uv run daw inspect PROJECT` before editing and `uv run daw status PROJECT`
 for transport, host state and the person's selection. Use `daw get PROJECT PATH`
 for just the objects needed. If a Rust command reports a new `project` path after
