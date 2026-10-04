@@ -234,6 +234,28 @@ enum Top {
     },
     /// Summary of the song, with a reference for each clip.
     Inspect { project: Song },
+    /// The song as a grid of tracks by bars: a letter where a clip plays, the
+    /// same letter for the same music, # where two clips of a track sound at
+    /// once, : where a clip holds and nothing starts, . for nothing; then what
+    /// each letter is and a line a track. `clips` names each letter's clips.
+    Map {
+        project: Song,
+        /// A cell: a number of bars, bar (the default) or beat.
+        #[arg(long)]
+        per: Option<String>,
+        /// The first beat shown.
+        #[arg(long)]
+        from: Option<String>,
+        /// The beat to stop at; the song's end, or its last clip's, unless given.
+        #[arg(long)]
+        to: Option<String>,
+        /// Keep only these tracks: --track drums --track bass, or drums,bass.
+        #[arg(long = "track", value_delimiter = ',')]
+        tracks: Vec<String>,
+        /// A row a lane of automation, ~ where its value moves.
+        #[arg(long)]
+        lanes: bool,
+    },
     /// Part of the song by path, e.g. tracks.drums.clips; list items start with
     /// the reference commands use for them.
     Get { project: Song, path: Option<String> },
@@ -1038,6 +1060,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
                 Command::Inspect => Ok(s.inspect()),
                 Command::Get { path } => s.get(&path),
                 Command::Notes { path, from, to } => s.notes(&path, from.as_ref(), to.as_ref()),
+                Command::Map { per, from, to, tracks, lanes } => s.map(per.as_ref(), from.as_ref(), to.as_ref(), &tracks, lanes),
                 Command::MidiExport { clip, file } => s.export_midi(&clip, &file),
                 Command::Status => {
                     let mut m = s.status();
@@ -1356,6 +1379,23 @@ fn run(cli: &Cli) -> Result<Json> {
         Top::Status { project } => edit(project, C::Status),
         Top::Changes { project, since } => edit(project, C::Changes { since: *since }),
         Top::Inspect { project } => edit(project, C::Inspect),
+        Top::Map {
+            project,
+            per,
+            from,
+            to,
+            tracks,
+            lanes,
+        } => edit(
+            project,
+            C::Map {
+                per: per.as_deref().map(parse_value),
+                from: from.as_deref().map(parse_value),
+                to: to.as_deref().map(parse_value),
+                tracks: tracks.clone(),
+                lanes: *lanes,
+            },
+        ),
         Top::Get { project, path } => edit(project, C::Get { path: path.clone().unwrap_or_default() }),
         Top::Undo { project } => edit(project, C::Undo),
         Top::Redo { project } => edit(project, C::Redo),
@@ -1957,6 +1997,7 @@ fn name(top: &Top) -> String {
         Top::Status { .. } => "status".into(),
         Top::Changes { .. } => "changes".into(),
         Top::Inspect { .. } => "inspect".into(),
+        Top::Map { .. } => "map".into(),
         Top::Get { .. } => "get".into(),
         Top::Undo { .. } => "undo".into(),
         Top::Redo { .. } => "redo".into(),

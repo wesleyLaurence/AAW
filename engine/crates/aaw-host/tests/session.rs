@@ -42,6 +42,8 @@ fn every_command_round_trips_as_json() {
         json!({"op": "instrument.set", "track": "keys", "instrument": null}),
         json!({"op": "instrument.map", "track": "keys", "notes": [36, 40], "pad": "k", "pitched": true}),
         json!({"op": "notes", "path": "keys", "from": 4, "to": "17/2"}),
+        json!({"op": "map", "per": "beat", "from": 4, "to": 32, "tracks": ["drums", "bass"], "lanes": true}),
+        json!({"op": "map"}),
         json!({"op": "effect.add", "owner": "master", "type": "limiter", "ceiling_db": -1}),
         json!({"op": "return.remove", "return": "plate"}),
         json!({"op": "loop", "start": 0, "length": 8}),

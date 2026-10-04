@@ -127,6 +127,28 @@ def test_inspect_lists_clips_in_the_order_they_play(tmp_path):
     assert [c["id"] for c in tracks[1]["clips"]] == ["first", "later"]
 
 
+def test_the_map_shows_copies_stacked_on_one_bar(tmp_path):
+    # The agent's song of October 4, 2026: a clip duplicated three times.
+    song = daw("init", tmp_path / "song", "--bars", 8)["project"]
+    sf.write(tmp_path / "song" / "kick.wav", np.zeros(SR // 10), SR)
+    daw("set", song, "samples.kick", '{"path": "kick.wav"}')
+    daw("track", "add", song, "drums")
+    daw("pad", "add", song, "drums", "k", "--sample", "kick")
+    daw("pattern", "add", song, "p", "--length-beats", 4)
+    daw("pattern", "steps", song, "p", "k", "x...x...x...x...")
+    daw("clip", "add", song, "drums", "p", "--repeats", 2)
+    for _ in range(3):
+        daw("clip", "duplicate", song, "tracks.drums.clips.0")
+    out = run("map", song).stdout
+    # Printed JSON keeps the grid's columns, a line of map each.
+    assert '    "drums  AA##....",' in out.splitlines()
+    mapped = json.loads(out)
+    assert mapped["map"][0] == "bar    1   5"
+    assert mapped["clips"]["A"].split() == [f"tracks.drums.clips.{i}" for i in range(4)]
+    assert "pattern p, 4 beats, 4 hits; drums bars 1 ×2, 3 ×2, 3 ×2, 3 ×2" in mapped["map"][3]
+    assert "daw map PROJECT" in daw("describe", "project")["semantics"]["map"]
+
+
 def test_the_first_song_recipe_runs_as_written(tmp_path, monkeypatch):
     library = tmp_path / "library"
     library.mkdir()

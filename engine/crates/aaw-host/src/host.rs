@@ -579,6 +579,9 @@ impl Host {
                     Command::Changes { since } => Ok(self.session.changes(since)),
                     Command::Get { path } => self.session.get(&path),
                     Command::Notes { path, from, to } => self.session.notes(&path, from.as_ref(), to.as_ref()),
+                    Command::Map { per, from, to, tracks, lanes } => {
+                        self.session.map(per.as_ref(), from.as_ref(), to.as_ref(), &tracks, lanes)
+                    }
                     Command::MidiExport { clip, file } => self.session.export_midi(&clip, &file),
                     _ => unreachable!("not a read"),
                 }

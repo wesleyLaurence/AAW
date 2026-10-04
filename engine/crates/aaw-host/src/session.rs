@@ -788,6 +788,33 @@ impl Session {
         out
     }
 
+    /// `daw map`: the song as a grid of tracks by cells of `per` (a number of
+    /// bars, `bar` or `beat`), from beat `from` until beat `to`, of the
+    /// tracks named, with a row a lane when `lanes`.
+    pub fn map(&self, per: Option<&Json>, from: Option<&Json>, to: Option<&Json>, tracks: &[String], lanes: bool) -> Result<Json> {
+        let per = match per {
+            None => 4.0,
+            Some(Json::String(s)) if s == "bar" => 4.0,
+            Some(Json::String(s)) if s == "beat" => 1.0,
+            Some(j) => {
+                let bars = beat_arg(j).map_err(|_| format!("--per takes a number of bars, bar or beat, not {j}"))?;
+                num_traits::ToPrimitive::to_f64(&bars).unwrap_or(f64::NAN) * 4.0
+            }
+        };
+        let beat = |j: Option<&Json>| -> Result<Option<f64>> {
+            j.map(|j| beat_arg(j).map(|b| num_traits::ToPrimitive::to_f64(&b).unwrap_or(f64::NAN))).transpose()
+        };
+        let options = crate::map::Options {
+            per,
+            from: beat(from)?.unwrap_or(0.0),
+            to: beat(to)?,
+            tracks: tracks.to_vec(),
+            lanes,
+        };
+        let root = self.doc.tree();
+        crate::map::map(&self.doc.project, &self.dir, &options, &|loc| self.reference(&root, loc))
+    }
+
     /// `daw get PATH`: part of the song in its saved form, each list item led by
     /// the reference commands use for it.
     pub fn get(&self, path: &str) -> Result<Json> {
@@ -890,19 +917,7 @@ impl Session {
         };
         let t = &p.tracks[ti];
         let midi = t.midi.as_ref().ok_or_else(|| format!("{} is not a MIDI track", t.id))?;
-        let beat = |j: Option<&Json>| -> Result<Option<num_rational::BigRational>> {
-            j.map(|j| {
-                let v = json_value(j)?;
-                let b = match v {
-                    aaw_model::value::Value::Int(n) => aaw_model::Beat::Int(n),
-                    aaw_model::value::Value::Float(f) => aaw_model::Beat::Float(f),
-                    aaw_model::value::Value::Str(s) => aaw_model::Beat::Str(s),
-                    _ => return Err(format!("{j} is not a beat")),
-                };
-                aaw_model::beat(&b)
-            })
-            .transpose()
-        };
+        let beat = |j: Option<&Json>| j.map(beat_arg).transpose();
         let (from, to) = (beat(from)?, beat(to)?);
         let sampler = midi.sampler();
         let mut clips = Vec::new();
@@ -995,6 +1010,17 @@ impl Session {
 }
 
 /// An exact beat as JSON: an integer, an exact decimal or a fraction.
+/// A beat a command was given: a number or a fraction such as `"1/3"`.
+fn beat_arg(j: &Json) -> Result<num_rational::BigRational> {
+    let b = match json_value(j)? {
+        aaw_model::value::Value::Int(n) => aaw_model::Beat::Int(n),
+        aaw_model::value::Value::Float(f) => aaw_model::Beat::Float(f),
+        aaw_model::value::Value::Str(s) => aaw_model::Beat::Str(s),
+        _ => return Err(format!("{j} is not a beat")),
+    };
+    aaw_model::beat(&b)
+}
+
 fn beat_json(x: &num_rational::BigRational) -> Json {
     node_json(&Node::Leaf(crate::command::beat_value(x)))
 }
