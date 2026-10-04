@@ -418,7 +418,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // No drag can be made up, so the file is handed to where a drag
             // that ended at the point would have left it: in the detail
             // panel, the Sampler it shows.
-            if p.y >= content.bounds.height - DetailView.height, let model = songs.first?.model, model.dropOnDevices(file: file) {
+            if let model = songs.first?.model, p.y >= content.bounds.height - model.detailHeight, model.dropOnDevices(file: file) {
                 return
             }
             func arrangement(in view: NSView) -> ArrangementView? {

@@ -33,6 +33,15 @@ pub struct NoteCopy {
     pub velocity: u32,
 }
 
+/// A field of the Synth with the value to set it to, by its path in the
+/// patch, for an edit that sets several at once, as a drag of the filter's
+/// corner sets the cutoff and the resonance.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SynthFieldValue {
+    pub field: String,
+    pub value: FieldValue,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum Edit {
     /// The session tempo in quarter notes per minute.
@@ -144,8 +153,43 @@ pub enum Edit {
     /// patch as its `FieldView` names it, such as `filter.cutoff_hz` or
     /// `oscillators.a.wave`. An absent `phase` is a random one.
     SynthSet { track: u64, field: String, value: FieldValue },
+    /// Sets several fields of a MIDI track's Synth as one step, as a drag of
+    /// a drawn curve does: the filter's cutoff and resonance together, or an
+    /// envelope's decay and sustain.
+    SynthSetFields { track: u64, fields: Vec<SynthFieldValue> },
+    /// Adds a part to a MIDI track's Synth under the next free name:
+    /// `oscillators` (`a` to `d`, the plain saw), `envelopes` (`env2` on, a
+    /// decay to nothing, for the matrix), `lfos` (`lfo1` on) or `macros`
+    /// (`macro1` on, at 0).
+    SynthPartAdd { track: u64, part: String },
+    /// Takes a part off a MIDI track's Synth: `part` as above and the
+    /// part's name. The host refuses the last oscillator, and a part the
+    /// matrix names.
+    SynthPartRemove { track: u64, part: String, name: String },
+    /// Adds an entry to the Synth's matrix, from a source to a target in the
+    /// target's unit, or sets the amount of the entry that is already there.
+    SynthModAdd {
+        track: u64,
+        source: String,
+        target: String,
+        amount: f64,
+    },
+    /// Sets the amount of an entry of the Synth's matrix, by its place in
+    /// the list.
+    SynthModSet { track: u64, index: u32, amount: f64 },
     /// Takes an entry out of the Synth's matrix, by its place in the list.
     SynthModRemove { track: u64, index: u32 },
+    /// Saves a MIDI track's Synth to the library as a patch named `name`,
+    /// as `daw patch save` does, and names the song's patch after it. Over
+    /// a patch already saved under that name only with `replace`, which
+    /// keeps the file's description and tags unless new ones are given.
+    PatchSave {
+        track: u64,
+        name: String,
+        description: Option<String>,
+        tags: Vec<String>,
+        replace: bool,
+    },
     /// Moves an audio clip's start, its end or both to a beat. Its audio
     /// stays where it is on the timeline, and an edge goes no further than
     /// the file does. The end is where its sound ends: the clip leaves its
@@ -712,6 +756,13 @@ fn sampler_device<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'
     Ok((t, loaded))
 }
 
+/// The ID of the MIDI track with a Synth at `key`, for a command that names
+/// tracks by ID, such as `note.preview`.
+pub fn synth_track_id(doc: &Doc, key: u64) -> Result<String> {
+    let tree = doc.tree();
+    synth_track(&doc.project, &tree, key).map(|(t, _)| t.id.clone())
+}
+
 /// The MIDI track a Synth is on, and its patch.
 fn synth_track<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'a aaw_model::Track, &'a aaw_model::Synth)> {
     let place = items(tree, "tracks").iter().position(|i| i.handle == key).ok_or("The track is no longer in the song")?;
@@ -1170,12 +1221,113 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             };
             Ok(batch(vec![command], format!("Set the Synth's {} on {}", label.to_lowercase(), t.id)))
         }
+        Edit::SynthSetFields { track: key, fields } => {
+            let tree = doc.tree();
+            let (t, _) = synth_track(project, &tree, *key)?;
+            if fields.is_empty() {
+                return Ok(Vec::new());
+            }
+            let mut values = serde_json::Map::new();
+            let mut labels = Vec::new();
+            for f in fields {
+                values.insert(f.field.clone(), field_json(&f.value));
+                labels.push(crate::view::synth_label(&f.field).0.to_lowercase());
+            }
+            let named = match labels.len() {
+                1 => labels[0].clone(),
+                2 => format!("{} and {}", labels[0], labels[1]),
+                n => format!("{} and {}", labels[..n - 1].join(", "), labels[n - 1]),
+            };
+            Ok(batch(
+                vec![json!({"op": "synth.set", "track": handle_text(*key), "values": values})],
+                format!("Set the Synth's {named} on {}", t.id),
+            ))
+        }
+        Edit::SynthPartAdd { track: key, part } => {
+            let tree = doc.tree();
+            let (t, synth) = synth_track(project, &tree, *key)?;
+            let (what, names, value): (&str, Vec<String>, Json) = match part.as_str() {
+                "oscillators" => ("oscillator", ["a", "b", "c", "d"].iter().map(|s| s.to_string()).collect(), json!({})),
+                "envelopes" => (
+                    "envelope",
+                    (2..=aaw_model::Synth::MAX_ENVELOPES).map(|n| format!("env{n}")).collect(),
+                    json!({"attack_ms": 0, "decay_ms": 300, "sustain_percent": 0, "release_ms": 300}),
+                ),
+                "lfos" => ("LFO", (1..=aaw_model::Synth::MAX_LFOS).map(|n| format!("lfo{n}")).collect(), json!({})),
+                "macros" => ("macro", (1..=aaw_model::Synth::MAX_MACROS).map(|n| format!("macro{n}")).collect(), json!(0)),
+                other => return Err(format!("A Synth has no part {other}; its parts are oscillators, envelopes, lfos and macros")),
+            };
+            let taken = |name: &str| match part.as_str() {
+                "oscillators" => synth.oscillators.contains_key(name),
+                "envelopes" => synth.envelopes.contains_key(name) || synth.lfos.contains_key(name),
+                "lfos" => synth.lfos.contains_key(name) || synth.envelopes.contains_key(name),
+                _ => synth.macros.contains_key(name),
+            };
+            let name = names
+                .iter()
+                .find(|n| !taken(n))
+                .ok_or_else(|| format!("The Synth on {} has as many {what}s as it can", t.id))?;
+            let mut values = serde_json::Map::new();
+            values.insert(format!("{part}.{name}"), value);
+            Ok(batch(
+                vec![json!({"op": "synth.set", "track": handle_text(*key), "values": values})],
+                format!("Add {what} {name} to the Synth on {}", t.id),
+            ))
+        }
+        Edit::SynthPartRemove { track: key, part, name } => {
+            let tree = doc.tree();
+            let (t, _) = synth_track(project, &tree, *key)?;
+            let what = match part.as_str() {
+                "oscillators" => "oscillator",
+                "envelopes" => "envelope",
+                "lfos" => "LFO",
+                "macros" => "macro",
+                other => return Err(format!("A Synth has no part {other}; its parts are oscillators, envelopes, lfos and macros")),
+            };
+            if part == "envelopes" && name == "amp" {
+                return Err("The amp envelope is always there: it shapes the level".into());
+            }
+            let mut values = serde_json::Map::new();
+            values.insert(format!("{part}.{name}"), Json::Null);
+            Ok(batch(
+                vec![json!({"op": "synth.set", "track": handle_text(*key), "values": values})],
+                format!("Remove {what} {name} from the Synth on {}", t.id),
+            ))
+        }
+        Edit::SynthModAdd { track: key, source, target, amount } => {
+            let tree = doc.tree();
+            let (t, synth) = synth_track(project, &tree, *key)?;
+            let had = synth.modulation.iter().any(|m| &m.source == source && &m.target == target);
+            let verb = if had { format!("Set modulation of {target} by {source} to {amount}") } else { format!("Modulate {target} by {source} by {amount}") };
+            Ok(batch(
+                vec![json!({"op": "synth.mod", "track": handle_text(*key), "source": source, "target": target, "amount": number(*amount)})],
+                format!("{verb} on {}", t.id),
+            ))
+        }
+        Edit::SynthModSet { track: key, index, amount } => {
+            let tree = doc.tree();
+            let (t, synth) = synth_track(project, &tree, *key)?;
+            let m = synth.modulation.get(*index as usize).ok_or("The matrix has no such entry")?;
+            Ok(batch(
+                vec![json!({"op": "synth.mod", "track": handle_text(*key), "source": m.source, "target": m.target, "amount": number(*amount)})],
+                format!("Set modulation of {} by {} to {amount} on {}", m.target, m.source, t.id),
+            ))
+        }
         Edit::SynthModRemove { track: key, index } => {
             let tree = doc.tree();
             let (t, synth) = synth_track(project, &tree, *key)?;
             let m = synth.modulation.get(*index as usize).ok_or("The matrix has no such entry")?;
             let path = format!("tracks.{}.instrument.synth.modulation.{index}", handle_text(*key));
             Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Remove modulation of {} by {} on {}", m.target, m.source, t.id)))
+        }
+        Edit::PatchSave { track: key, name, description, tags, replace } => {
+            let tree = doc.tree();
+            synth_track(project, &tree, *key)?;
+            let mut command = json!({"op": "patch.save", "track": handle_text(*key), "name": name, "tags": tags, "replace": replace});
+            if let Some(d) = description {
+                command["description"] = json!(d);
+            }
+            Ok(vec![command])
         }
         Edit::SamplerRoot { track: key, note } => {
             let tree = doc.tree();

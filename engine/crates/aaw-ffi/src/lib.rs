@@ -16,7 +16,7 @@ use aaw_host::command::{Command, Origin};
 use aaw_host::host::{self, Clock, Event, Options, Running};
 use aaw_host::project;
 use aaw_host::session::{Change, Doc};
-pub use edits::{Edit, NoteCopy, Row};
+pub use edits::{Edit, NoteCopy, Row, SynthFieldValue};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
@@ -381,6 +381,18 @@ impl Song {
     /// Plays from a beat, or from the start position.
     pub fn play(&self, from: Option<f64>) -> Result<(), SongError> {
         self.transport(json!({"op": "play", "from": from}))
+    }
+
+    /// Plays a note now through the Synth on the MIDI track at `track` and
+    /// the track's chain, outside the timeline and the undo history, as the
+    /// panel's keys do: `pitch` a MIDI number, `velocity` 1 to 127 and how
+    /// long it is held in beats. Opens the output if nothing has played yet.
+    pub fn preview_note(&self, track: u64, pitch: i32, velocity: u32, length_beats: f64) -> Result<(), SongError> {
+        let id = {
+            let doc = locked(&self.doc);
+            edits::synth_track_id(doc.as_ref().ok_or_else(closed)?, track)?
+        };
+        self.transport(json!({"op": "note.preview", "track": id, "pitch": pitch, "velocity": velocity, "length_beats": length_beats}))
     }
 
     /// Toggles the playback monitor click without editing the song.

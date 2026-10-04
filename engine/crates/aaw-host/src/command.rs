@@ -430,6 +430,20 @@ pub enum Command {
     },
     #[serde(rename = "stop")]
     Stop,
+    /// Plays a note now through a MIDI track's Synth and the track's chain,
+    /// outside the timeline and the undo history: `pitch` a MIDI number or
+    /// a name such as `C4`, `velocity` 1 to 127 (100 unless given) and
+    /// `length_beats` how long it is held (1 unless given). Monitoring, as
+    /// the metronome is: never an edit of the song.
+    #[serde(rename = "note.preview")]
+    NotePreview {
+        track: String,
+        pitch: Json,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        velocity: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length_beats: Option<Json>,
+    },
     /// Monitoring only; never an edit of the song.
     #[serde(rename = "metronome")]
     Metronome { enabled: bool },
@@ -520,7 +534,7 @@ impl Command {
         use Command::*;
         match self {
             Undo | Redo => Kind::History,
-            Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } => Kind::Transport,
+            Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,

@@ -14,12 +14,12 @@ kept.
 
 ## Next
 
-1. **The Synth's remaining items.** Its engine, `daw synth`, automation of the
-   patch, a panel of plain fields, patches as files with the factory patches,
-   `daw patch` and the browser's Synth are built. Left: the panel's drawings,
-   its Save and Load, `note.preview` and the keys, with the detail panel's
-   height draggable; then unison, wavetables and the patch's own effects. Two
-   pull requests, in that order. [features/synth.md](features/synth.md)
+1. **The Synth's last item.** Its engine, `daw synth`, automation of the
+   patch, patches as files with the factory patches, `daw patch`, the
+   browser's Synth and the panel with its drawings, Save and Load, keys and
+   `note.preview` are built. Left: unison, wavetables and the patch's own
+   effects, and the factory patches gaining them. One pull request.
+   [features/synth.md](features/synth.md)
 2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
@@ -39,6 +39,18 @@ kept.
 
 ## Verify
 
+- **The Synth's panel by hand and ear:** a patch loaded with ◂ ▸ and from
+  the menu while the song plays, Save… over one of Mine and Save As… with a
+  name that is taken; the filter's corner and an envelope's handles dragged
+  while a note sounds; an envelope's tab dropped on the cutoff and a macro's
+  on a level, and the reach lines read against the amounts; + for each part
+  and × on one the matrix names; a key pressed and dragged across the
+  octave, the octave stepped, and `daw synth audition --play` heard in the
+  app; the detail panel dragged taller and the columns scrolled at the least
+  height. The layout is tested, the edits ran through the model, and the
+  header, drawings, keys, reach lines and the taller panel were seen in
+  scripted pictures; nothing was dragged by hand, no key was pressed and
+  nothing was heard.
 - **The factory patches by ear, and the browser's Synth by hand:** each of
   the twelve factory patches on a MIDI track of its kind of part, a chord or
   a bass line, heard through `daw synth audition` and in the app, and whether
@@ -172,9 +184,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Saturation and a clipper. Agents making loud mixes stopped at the limiter.
 - Beyond the Synth (Next 1): multi-frame wavetables with a sweepable position
   and Serum's or other WAV tables read; a second filter with routing; a MIDI
-  keyboard played through `note.preview`; an LFO's rate and phase as matrix
-  targets; a bandlimited triangle; a locate that carries a chased voice's
-  oscillator phases and filter state as a render has them.
+  keyboard played through `note.preview`; a note held and let go rather than
+  a beat long, and `note.preview` through a Sampler, whose pitch needs audio
+  prepared on the way; an LFO's rate and phase as matrix targets; a
+  bandlimited triangle; a locate that carries a chased voice's oscillator
+  phases and filter state as a render has them.
 - Generated audio: a sound, a loop or a whole song from a description, with the
   person's own ElevenLabs key kept in the Keychain, saved in the project as a
   sample; a `daw generate` command for the agent and a panel in the app.

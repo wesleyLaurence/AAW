@@ -108,6 +108,14 @@ fn fields_are_set_by_their_paths_as_one_step_and_the_matrix_is_edited() {
 }
 
 #[test]
+fn a_note_preview_is_a_transport_command() {
+    use aaw_host::command::{Command, Kind};
+    let c: Command = serde_json::from_value(json!({"op": "note.preview", "track": "lead", "pitch": "C4"})).unwrap();
+    assert_eq!(c.kind(), Kind::Transport);
+    assert_eq!(c.op(), "note.preview");
+}
+
+#[test]
 fn lanes_reach_the_synths_fields_and_go_with_the_instrument() {
     let (_d, mut s) = open();
     edit(&mut s, json!({"op": "synth.add", "track": "lead"})).unwrap();

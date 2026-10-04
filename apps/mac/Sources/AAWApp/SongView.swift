@@ -26,7 +26,7 @@ struct SongView: View {
                 VStack(spacing: 0) {
                     ArrangementPane(model: model)
                     if model.showsDetail {
-                        Divider()
+                        DetailResizer(model: model)
                         DetailView(model: model)
                     }
                 }
@@ -49,6 +49,66 @@ struct SongView: View {
         }
         .background(Color(nsColor: Theme.background))
         .preferredColorScheme(.dark)
+    }
+}
+
+/// The line between the arrangement and the detail panel, which is dragged
+/// to make the panel taller or shorter.
+private struct DetailResizer: NSViewRepresentable {
+    let model: SongModel
+
+    func makeNSView(context: Context) -> DetailResizerView {
+        DetailResizerView(model: model)
+    }
+
+    func updateNSView(_ view: DetailResizerView, context: Context) {}
+}
+
+final class DetailResizerView: NSView {
+    private let model: SongModel
+    private var start: (y: CGFloat, height: CGFloat)?
+
+    /// How tall the strip is to take hold of.
+    static let thickness: CGFloat = 5
+    /// The least the arrangement keeps above the panel.
+    static let leastArrangement: CGFloat = 160
+
+    init(model: SongModel) {
+        self.model = model
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("not used")
+    }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: NSView.noIntrinsicMetric, height: Self.thickness) }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeUpDown)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        start = (event.locationInWindow.y, model.detailHeight)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start, let content = window?.contentView else { return }
+        // Up is a taller panel: window coordinates grow upward.
+        let height = start.height + (event.locationInWindow.y - start.y)
+        let most = content.bounds.height - Self.leastArrangement
+        model.detailHeight = min(max(height, SongModel.leastDetailHeight), max(most, SongModel.leastDetailHeight))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        start = nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.separator.setFill()
+        CGRect(x: bounds.minX, y: bounds.midY.rounded() - 0.5, width: bounds.width, height: 1).fill()
     }
 }
 

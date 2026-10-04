@@ -65,7 +65,7 @@ project's folder or the song file in it. It implements:
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
-| `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part; a matrix entry added, changed or removed; and notes rendered through the patch to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply. See `daw describe synth` |
+| `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE] [--play]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part; a matrix entry added, changed or removed; and notes rendered through the patch to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply, and with `--play` also played now, one after another, through the running host (`note.preview`). See `daw describe synth` |
 | `daw patch list [WORDS]`, `daw patch show NAME`, `daw patch save PROJECT TRACK NAME [--description TEXT] [--tags a,b] [--replace]`, `daw patch load PROJECT TRACK NAME` | Patches: a Synth's sound as a YAML file, the twelve factory patches built into `daw` and the saved ones in the workspace library, `~/Music/AAW/library/patches/` or `library/patches/` under `AAW_WORKSPACE`, each named by the slug of its name; a track's synth saved there, over a saved name only with `--replace`, naming the song's patch after it; and a patch, by name or as a `.yaml` path, put in place of a MIDI track's whole synth in one undo step, the notes staying. See `daw describe synth` |
 | `daw midi import PROJECT FILE [--track T] [--at BEAT]`, `daw midi export PROJECT CLIP FILE` | A Standard MIDI file of one part made into a note clip, on a MIDI track or a new one, with what the song cannot hold counted in the reply; a note clip's notes that play written as a type 0 file at 960 ticks a beat. The file's tempo is not taken. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
@@ -212,6 +212,18 @@ log, handles and the transport need a host.
   been silent for a second. The audio thread never allocates, locks or blocks;
   replaced programs return to the host to be freed.
 
+The host also accepts `{"op":"note.preview","track":"lead","pitch":"C4",
+"velocity":100,"length_beats":1}`: a note played now through a MIDI track's
+Synth and the track's chain, from where the stream stands, whether or not the
+song plays, outside the timeline and the undo history and in no render. The
+app's Synth panel sends it from its keys (`Song.preview_note`) and `daw synth
+audition --play` from the terminal. It opens the output if nothing has played
+yet, refuses a track with no synth and a note outside 0 to 127, and plays
+nothing through a Sampler. The player keeps previewed notes apart from the
+song's: they survive a program swap, and while the transport stands still the
+stream is cut by nothing, the end fade and the gate at the song's end applying
+only while it rolls.
+
 The host also accepts `{"op":"metronome","enabled":true}` (or false), sent by
 `Song.set_metronome` from the app. `daw status` and transport observer updates
 report `metronome`. This is per-open-project monitoring state, initially off:
@@ -290,8 +302,9 @@ to copy a chosen file into the project, which the song then takes as one edit
 with the pad, and the track if it is new, that plays it.
 
 `crates/aaw-engine/tests/synth.rs` holds a synth's render to playback, to
-every block size and to itself, hears a lane on its filter, chases a locate
-and plays under allocation checking; `crates/aaw-dsp/src/synth.rs` measures a
+every block size and to itself, hears a lane on its filter, chases a locate,
+hears a previewed note while stopped, across a take-over and past the song's
+end, and plays under allocation checking; `crates/aaw-dsp/src/synth.rs` measures a
 sine's pitch and level, the envelope, a glide, stealing and a take-over.
 `crates/aaw-host/tests/patches.rs` renders every factory patch under full
 scale and holds a patch saved from one song and loaded into another to the

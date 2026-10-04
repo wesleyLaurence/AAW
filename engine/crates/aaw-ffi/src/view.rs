@@ -259,6 +259,40 @@ pub struct ModulationView {
     pub target: String,
     pub amount: f64,
     pub unit: String,
+    /// The field of the panel the entry moves, by its path, for the mark on
+    /// its control: an oscillator's pitch is its `semitones`. None for
+    /// `pitch`, which moves every oscillator.
+    pub field: Option<String>,
+}
+
+/// The field of the panel a matrix target moves, by its path in the patch:
+/// `oscillators.a.pitch` moves `oscillators.a.semitones`, and every other
+/// target is a field of its own name. None for `pitch`, which is every
+/// oscillator's, and for a name that is no target.
+pub fn mod_field(target: &str) -> Option<String> {
+    let parts: Vec<&str> = target.split('.').collect();
+    match parts.as_slice() {
+        ["oscillators", id, "pitch"] => Some(format!("oscillators.{id}.semitones")),
+        ["oscillators", _, "level_db" | "pan" | "pulse_width"] => Some(target.to_string()),
+        ["filter", "cutoff_hz" | "resonance_percent" | "drive_db"] => Some(target.to_string()),
+        ["envelopes", _, "attack_ms" | "decay_ms" | "sustain_percent" | "release_ms"] => Some(target.to_string()),
+        _ => None,
+    }
+}
+
+/// The matrix target a field of the panel stands for, by the field's path,
+/// for a source dropped on its control: `oscillators.a.semitones` is the
+/// target `oscillators.a.pitch`. None for a field the matrix cannot move.
+#[uniffi::export]
+pub fn synth_mod_target(field: String) -> Option<String> {
+    let parts: Vec<&str> = field.split('.').collect();
+    match parts.as_slice() {
+        ["oscillators", id, "semitones"] => Some(format!("oscillators.{id}.pitch")),
+        ["oscillators", _, "level_db" | "pan" | "pulse_width"] => Some(field.clone()),
+        ["filter", "cutoff_hz" | "resonance_percent" | "drive_db"] => Some(field.clone()),
+        ["envelopes", _, "attack_ms" | "decay_ms" | "sustain_percent" | "release_ms"] => Some(field.clone()),
+        _ => None,
+    }
 }
 
 /// A MIDI track's Sampler device: a sampler that is empty, or one pad played
@@ -827,6 +861,7 @@ fn synth_view(synth: &aaw_model::Synth, driven: &Driven) -> SynthView {
                 target: m.target.clone(),
                 amount: m.amount,
                 unit: aaw_model::rules::mod_target(synth, &m.target).map_or(String::new(), |t| t.unit().to_string()),
+                field: mod_field(&m.target),
             })
             .collect(),
     }
