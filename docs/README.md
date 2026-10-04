@@ -53,6 +53,13 @@ Proposed:
 |---|---|
 | [the agent panel](features/agent-panel.md) | 5 |
 | [generated audio](features/generated-audio.md) | Later, under Sound |
+| [the arrangement map](features/arrangement-map.md) | Later, under What the agent reads and writes |
+| [musical checks](features/musical-checks.md) | Later, under What the agent reads and writes |
+| [editing a range of bars](features/bar-ranges.md) | Later, under What the agent reads and writes |
+| [learning the CLI quickly](features/cli-discovery.md) | Later, under What the agent reads and writes |
+| [clips that loop](features/looping-clips.md) | Later, under Sound |
+| [comparing with a reference](features/reference-comparison.md) | Later, under Library and perception |
+| [sound descriptors](features/sound-descriptors.md) | Later, under Library and perception |
 
 ## Archive
 
