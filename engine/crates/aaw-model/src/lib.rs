@@ -10,6 +10,7 @@ pub mod beat;
 pub mod contract;
 pub mod describe;
 pub mod hash;
+pub mod hint;
 pub mod pyfmt;
 pub mod rules;
 pub mod schedule;

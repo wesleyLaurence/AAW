@@ -442,7 +442,12 @@ def main():
     args = parser().parse_args(argv)
     try:
         result = execute(args)
-        print(json.dumps(result, indent=2, allow_nan=False))
+        print(json.dumps(result, indent=2, allow_nan=False), flush=True)
+    except BrokenPipeError:
+        # A reader that stopped, as `head` does: end quietly, with the status a
+        # shell gives a closed pipe, and nothing left to flush at exit.
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        return 141
     except (ValueError, OSError, RuntimeError, KeyError, TypeError) as exc:
         print(json.dumps({"error": str(exc), "command": args.command}), file=sys.stderr)
         return 1

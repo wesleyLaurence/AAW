@@ -467,3 +467,19 @@ detection, presets); then the workspace, the agent panel, stem separation and
 generated audio. Verify is ordered too, with the Synth, the piano roll and the
 Sampler first, since everything after them is built on how they sound.
 
+**D76. `daw describe` is short by default, its field lines are text inside the JSON, and the hint for an unknown field comes before the model's message.**
+
+Made while building [Learning the CLI quickly](features/cli-discovery.md) on
+October 4, 2026, settling the design's open questions without the person.
+A topic prints what its fields mean and a line for each field, its path, what
+it takes and its default, generated from the schema; `--schema` prints the JSON
+Schema as before, and `daw describe` without a topic lists the topics rather
+than printing the whole song's schema. The lines are strings in the JSON result
+rather than JSON objects of their own: an agent reads them as easily, and they
+are a third of the size. The Synth's fields are listed by their paths in the
+patch, which every Synth command takes, rather than from the top of the song.
+A key the song has no field for is answered with the nearest field, made from
+the schema at the host, before pydantic's message, which stays as it is so the
+model's errors remain those of the Python model they were held to. The Python
+commands keep argparse's help until they move to Rust; only their closed pipe
+is handled now.

@@ -389,7 +389,7 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
     }
     snare = inspected["tracks"][0]
     assert snare["sends"][0] == {"to": "plate", "gain_db": -6, "pre_fader": False}
-    code, described = cli("describe", "effects")
+    code, described = cli("describe", "effects", "--schema")
     assert {"delay", "reverb"} <= set(described["schema"])
     assert set(described["routing"]) == {"send", "return"}
     assert "returns" in described["semantics"]

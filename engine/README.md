@@ -49,7 +49,7 @@ project's folder or the song file in it. It implements:
 | `daw init DIRECTORY [--tempo T] [--bars N]` | Creates `DIRECTORY/song.yaml`, an empty song |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
-| `daw describe [project\|sampler\|synth\|midi\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, the Synth's fields, modulation and recipes, and how to edit a finished song, map its beats, check its joins and export it |
+| `daw describe [start\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|beats\|joins\|export] [--schema]` | The authoring contract: without a topic, the topics a line each; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file. `--schema` adds the topic's JSON Schema, and with no topic prints the whole song's |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
 | `daw samples ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, perception, `inspect` with measured root notes and warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
@@ -164,8 +164,18 @@ log, handles and the transport need a host.
 - **Paths** are dot-separated. A list item is an index, its `id` (a send: its
   `to`), or a handle: while a host runs, clips, effects, events and points have
   handles such as `@12` that keep naming the same object as other edits land.
-  `daw inspect` lists each clip's reference and `daw get` puts one on every list
-  item.
+  `daw inspect` lists each clip's reference, in the order the clips play, and
+  `daw get` puts one on every list item.
+- **Help and errors say what is accepted.** A command that takes `--FIELD VALUE`
+  pairs lists them in its `--help` with each one's range and default, from the
+  schema: `effect add --help` every effect type and its fields, `lane set
+  --help` what a lane can move, `set --help` the commonest paths. An edit that
+  names a field the song does not have is refused with the nearest one first,
+  `` `bpm` is not a field; did you mean `session.tempo`? ``, then the model's
+  message (`aaw_model::hint`). A word where a flag was wanted names the flag
+  (`--type limiter`), and a render that would clip names the loudest stems and
+  the paths to lower. Output to a pipe that closes, as `| head` does, ends with
+  status 141 and nothing on stderr.
 - **A batch builds on itself.** A track, return or pattern a batch adds can be
   added to by its later commands: a pad and a clip on a new track, steps and
   events in a new pattern, notes in a new note clip. A note clip or a note is

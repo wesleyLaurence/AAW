@@ -24,8 +24,9 @@ in `docs/backlog.md`; do not create a separate notes or plan file.
 ## Tools and shared boundaries
 
 - In this checkout use `uv run daw ...`. Discover verbs with `uv run daw --help`,
-  syntax with a command's `--help`, and semantics with `uv run daw describe TOPIC`.
-  Request the relevant topic; the default prints the full song schema.
+  syntax and accepted fields with a command's `--help`, and semantics with
+  `uv run daw describe TOPIC`; `daw describe` lists the topics, and
+  `daw describe start` makes a first song. `--schema` adds a topic's JSON Schema.
 - Command results are JSON; runtime errors use stderr and a nonzero exit status.
   Help and argument-parsing errors may be plain text.
 - Preserve personal work. Songs, samples, briefs, handoffs, renders, exports and

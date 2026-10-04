@@ -350,7 +350,7 @@ impl Session {
         let (project, node, outcome) = match cmd {
             Command::Apply { patch, label } => {
                 let merged = aaw_model::merge(&self.doc.project.dump(false), &json_value(patch)?);
-                let project = Project::validate(&merged).map_err(|e| e.to_string())?;
+                let project = Project::validate(&merged).map_err(|e| aaw_model::hint::explain(&merged, &e))?;
                 let node = tree::matched(&project.dump(false), Some(&self.doc.tree()), &mut self.next);
                 let outcome = Outcome {
                     label: label.clone().unwrap_or_else(|| "Apply a merge patch".into()),
@@ -362,7 +362,8 @@ impl Session {
                 let mut root = self.doc.tree();
                 let mut next = self.next;
                 let outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).run(cmd)?;
-                let project = Project::validate(&root.value()).map_err(|e| e.to_string())?;
+                let value = root.value();
+                let project = Project::validate(&value).map_err(|e| aaw_model::hint::explain(&value, &e))?;
                 let node = tree::carry(&project.dump(false), Some(&root), &mut next);
                 self.next = next;
                 (project, node, outcome)
@@ -657,15 +658,20 @@ impl Session {
         fn params(lanes: &[aaw_model::Lane]) -> Vec<&str> {
             lanes.iter().map(|l| l.param.as_str()).collect()
         }
+        // Clips are listed in the order they play; each keeps the reference
+        // of its place in the song, which is the order they were made.
+        fn in_order<T>(items: &[T], at: impl Fn(&T) -> num_rational::BigRational) -> Vec<(usize, &T)> {
+            let mut listed: Vec<(usize, &T)> = items.iter().enumerate().collect();
+            listed.sort_by_key(|(_, c)| at(c));
+            listed
+        }
         let tracks: Vec<Json> = p
             .tracks
             .iter()
             .enumerate()
             .map(|(ti, t)| {
-                let clips: Vec<Json> = t
-                    .clips
-                    .iter()
-                    .enumerate()
+                let clips: Vec<Json> = in_order(&t.clips, |c| c.at_exact())
+                    .into_iter()
                     .map(|(ci, c)| {
                         let loc = [
                             tree::Step::Key("tracks".into()),
@@ -681,10 +687,8 @@ impl Session {
                         })
                     })
                     .collect();
-                let audio: Vec<Json> = t
-                    .audio
-                    .iter()
-                    .enumerate()
+                let audio: Vec<Json> = in_order(&t.audio, |c| c.at_exact())
+                    .into_iter()
                     .map(|(ci, c)| {
                         let loc = [
                             tree::Step::Key("tracks".into()),
@@ -702,10 +706,8 @@ impl Session {
                     })
                     .collect();
                 if let Some(midi) = &t.midi {
-                    let clips: Vec<Json> = midi
-                        .clips
-                        .iter()
-                        .enumerate()
+                    let clips: Vec<Json> = in_order(&midi.clips, |c| c.at_exact())
+                        .into_iter()
                         .map(|(ci, c)| {
                             let loc = [
                                 tree::Step::Key("tracks".into()),

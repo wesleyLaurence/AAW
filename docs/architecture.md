@@ -120,8 +120,9 @@ processing never allocates, so it runs in the audio callback. No second engine e
 Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
 `returns`, `sections` and `master`. `schema_version` is 2 in a song with a MIDI
 track and 1 in any other, which saves byte for byte as it did before MIDI
-tracks; either is read (D63). Unknown fields are rejected. Run `daw describe`
-for the exact generated JSON schema, bounds and defaults.
+tracks; either is read (D63). Unknown fields are rejected, and an edit that
+names one is told the nearest field. Run `daw describe TOPIC` for each field's
+path, bounds and default, and `--schema` for the exact generated JSON schema.
 
 Session: `title`, `tempo`, `time_signature` (4/4), `sample_rate` (44100 or 48000),
 `length_beats`, `master_gain_db`, `end_fade_ms`, and `stretcher` (`signalsmith` or

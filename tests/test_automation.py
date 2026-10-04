@@ -505,7 +505,7 @@ def test_lane_limits_match_the_static_field(song):
     # are accepted or refused together.
     _, data = song
     code, described = cli("describe", "automation")
-    models = cli("describe", "project")[1]["schema"]["$defs"]
+    models = cli("describe", "project", "--schema")[1]["schema"]["$defs"]
     track = data["tracks"][0]
     del track["automation"]
     track["effects"] = [
@@ -621,7 +621,7 @@ def test_automation_round_trip_and_cli(song):
     assert checked["warnings"] == [
         "space: effects.echo.feedback_percent automates a bypassed effect"
     ]
-    described = ok("describe", "automation")
+    described = ok("describe", "automation", "--schema")
     assert described["automatable"]["effects"]["filter"] == {"cutoff_hz": "log"}
     assert "lane" in described["schema"]
     assert "curves" in described["semantics"]

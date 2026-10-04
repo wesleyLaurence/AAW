@@ -1,5 +1,6 @@
-//! The authoring contract `daw describe` prints: the JSON Schema of a song and
-//! what its fields mean.
+//! The authoring contract `daw describe` prints: what a song's fields mean,
+//! a line for each field generated from the JSON Schema, and with `--schema`
+//! the JSON Schema itself.
 //!
 //! `schema.json` is the schema of the whole document, in the form pydantic
 //! generated it from the Python model. A test holds it to what validation
@@ -12,7 +13,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["project", "sampler", "synth", "midi", "effects", "automation", "edit", "beats", "joins", "export"];
+pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "beats", "joins", "export"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -293,9 +294,362 @@ pub fn schema() -> &'static Json {
     &SCHEMA
 }
 
-/// What `daw describe TOPIC` prints, or None for an unknown topic.
-pub fn describe(topic: &str) -> Option<Json> {
+/// What each topic is about, as `daw describe` lists them.
+const ABOUT: &[(&str, &str)] = &[
+    ("start", "The commands that make a first song, from init to listen. Read this first."),
+    ("project", "The song: session, samples, patterns, tracks, returns, sections; editing, rendering and playback."),
+    ("sampler", "Pads, samples and pattern events: pitch, gate, choke, stretch, and the app's Sampler."),
+    ("synth", "The Synth: oscillators, filter, envelopes, LFOs, the modulation matrix, macros, patches and recipes."),
+    ("midi", "MIDI tracks: note clips, notes, instruments, drum maps and MIDI files."),
+    ("effects", "Insert effects and what each takes, sends and returns."),
+    ("automation", "Lanes and points: what a lane can move and how values move between points."),
+    ("edit", "Editing a finished song from audio clips: cuts, joins, crossfades, speed."),
+    ("beats", "daw samples beats: a song's tempo, beats, downbeats and phrases."),
+    ("joins", "daw joins: checking a render's joins and length."),
+    ("export", "daw export: a named WAV, AAC or MP3 file at a stated level."),
+];
+
+/// The topic that describes each model, for a field list that meets a
+/// model another topic lists.
+fn home(model: &str) -> &'static str {
+    match model {
+        "Pad" | "Sample" | "Event" => "sampler",
+        "AudioClip" => "edit",
+        "MidiTrack" | "NoteClip" | "Note" | "Instrument" | "Sampler" | "NoteMap" => "midi",
+        "Synth" | "Oscillator" | "SynthFilter" | "SynthEnvelope" | "Lfo" | "Modulation" => "synth",
+        "Lane" | "Point" => "automation",
+        "Send" | "Return" | "EqBand" => "effects",
+        m if EFFECT_TYPES.iter().any(|k| title(k) == m) => "effects",
+        _ => "project",
+    }
+}
+
+fn ref_name(node: &Json) -> Option<&str> {
+    node.get("$ref")?.as_str()?.strip_prefix("#/$defs/")
+}
+
+/// A number's range in a few characters: `-96..24`, `>0..2`, `>=1`.
+fn range(node: &Json) -> String {
+    let low = match (node.get("minimum"), node.get("exclusiveMinimum")) {
+        (Some(m), _) => Some(m.to_string()),
+        (None, Some(m)) => Some(format!(">{m}")),
+        _ => None,
+    };
+    let high = node.get("maximum").or_else(|| node.get("exclusiveMaximum")).map(Json::to_string);
+    match (low, high) {
+        (Some(l), Some(h)) => format!(" {l}..{h}"),
+        (Some(l), None) if l.starts_with('>') => format!(" {l}"),
+        (Some(l), None) => format!(" >={l}"),
+        (None, Some(h)) => format!(" <={h}"),
+        (None, None) => String::new(),
+    }
+}
+
+/// What a value of a field may be, in a few words.
+fn kind(node: &Json) -> String {
+    if let Some(model) = ref_name(node) {
+        return format!("{model} (daw describe {})", home(model));
+    }
+    if node.get("discriminator").is_some() {
+        return "effect (daw describe effects)".into();
+    }
+    if let Some(alternatives) = node.get("anyOf").and_then(Json::as_array) {
+        let null = alternatives.iter().any(|a| a["type"] == "null");
+        let rest: Vec<&Json> = alternatives.iter().filter(|a| a["type"] != "null").collect();
+        let types: Vec<&str> = rest.iter().filter_map(|a| a["type"].as_str()).collect();
+        let mut text = if types == ["integer", "number", "string"] && rest.len() == 3 {
+            // A position or length: a number, or a fraction such as "1/3".
+            "beats".to_string()
+        } else {
+            rest.iter().map(|a| kind(a)).collect::<Vec<_>>().join(" or ")
+        };
+        if null {
+            text.push_str(" or null");
+        }
+        return text;
+    }
+    if let Some(choices) = node.get("enum").and_then(Json::as_array) {
+        return choices.iter().map(plain).collect::<Vec<_>>().join("|");
+    }
+    if let Some(only) = node.get("const") {
+        return plain(only);
+    }
+    match node["type"].as_str() {
+        Some(t @ ("number" | "integer")) => format!("{t}{}", range(node)),
+        Some("boolean") => "true|false".into(),
+        Some("string") => match node["pattern"].as_str() {
+            Some(p) if p == crate::schema::ID => "id".into(),
+            Some(_) => "sha256".into(),
+            None => "text".into(),
+        },
+        Some("array") => {
+            let mut text = format!("list of {}", kind(&node["items"]));
+            if let Some(n) = node.get("maxItems") {
+                text.push_str(&format!(", at most {n}"));
+            }
+            text
+        }
+        Some("object") => format!("map of names to {}", kind(&node["additionalProperties"])),
+        _ => "any".into(),
+    }
+}
+
+/// A JSON value as text: a string without its quotes.
+fn plain(v: &Json) -> String {
+    v.as_str().map_or_else(|| v.to_string(), str::to_string)
+}
+
+/// One field on one line: what it may be, its default, and whether it is
+/// required. `null` defaults are said, since null usually means "off".
+pub fn field_line(node: &Json, required: bool) -> String {
+    let mut line = kind(node);
+    if let Some(d) = node.get("default") {
+        line.push_str(&format!(", default {}", plain(d)));
+    }
+    if required {
+        line.push_str(", required");
+    }
+    line
+}
+
+/// A model's own fields, each with its line, in the schema's order.
+pub fn model_fields(model: &str) -> Vec<(String, String)> {
+    let own = &SCHEMA["$defs"][model];
+    let required = |name: &str| own["required"].as_array().is_some_and(|r| r.iter().any(|x| x == name));
+    own["properties"]
+        .as_object()
+        .map(|props| props.iter().map(|(name, node)| (name.clone(), field_line(node, required(name)))).collect())
+        .unwrap_or_default()
+}
+
+/// The fields of a topic's models by their path in the song, each on one
+/// line. Models the topic describes are listed field by field; any other
+/// is named with the topic that describes it.
+struct Listing<'a> {
+    expand: &'a [&'a str],
+    lines: Map<String, Json>,
+    open: Vec<String>,
+}
+
+impl Listing<'_> {
+    fn model(&mut self, prefix: &str, model: &Json) {
+        let required = |name: &str| model["required"].as_array().is_some_and(|r| r.iter().any(|x| x == name));
+        for (name, node) in model["properties"].as_object().into_iter().flatten() {
+            let path = if prefix.is_empty() { name.clone() } else { format!("{prefix}.{name}") };
+            self.field(&path, node, required(name));
+        }
+    }
+
+    /// The models a node refers to, and whether it may be null.
+    fn refs(node: &Json) -> (Vec<&str>, bool) {
+        if let Some(model) = ref_name(node) {
+            return (vec![model], false);
+        }
+        let alternatives = node.get("anyOf").and_then(Json::as_array);
+        let refs: Vec<&str> = alternatives.into_iter().flatten().filter_map(ref_name).collect();
+        let null = alternatives.into_iter().flatten().any(|a| a["type"] == "null");
+        (refs, null)
+    }
+
+    fn listed(&self, model: &str) -> bool {
+        self.expand.contains(&model) && !self.open.iter().any(|m| m == model)
+    }
+
+    fn descend(&mut self, path: &str, model: &str) {
+        self.open.push(model.to_string());
+        self.model(path, &SCHEMA["$defs"][model]);
+        self.open.pop();
+    }
+
+    fn line(&mut self, path: &str, text: String) {
+        match self.lines.get_mut(path) {
+            Some(Json::String(have)) => {
+                have.push_str("; ");
+                have.push_str(&text);
+            }
+            _ => {
+                self.lines.insert(path.to_string(), json!(text));
+            }
+        }
+    }
+
+    fn field(&mut self, path: &str, node: &Json, required: bool) {
+        let (refs, null) = Self::refs(node);
+        if !refs.is_empty() {
+            for model in refs {
+                if self.listed(model) {
+                    if null {
+                        self.line(path, format!("null or the fields below, default {}", plain(&node["default"])));
+                    }
+                    self.descend(path, model);
+                } else {
+                    self.line(path, field_line(node, required));
+                }
+            }
+            return;
+        }
+        let items = &node["items"];
+        let (item_refs, _) = Self::refs(items);
+        if node["type"] == "array" && !item_refs.is_empty() {
+            let each = format!("{path}[]");
+            for model in item_refs {
+                if self.listed(model) {
+                    self.descend(&each, model);
+                } else {
+                    self.line(&each, kind(&json!({"$ref": format!("#/$defs/{model}")})));
+                }
+            }
+            return;
+        }
+        if let Some(model) = node.get("additionalProperties").and_then(ref_name) {
+            if self.listed(model) {
+                self.descend(&format!("{path}.ID"), model);
+                return;
+            }
+        }
+        self.line(path, field_line(node, required));
+    }
+}
+
+/// The field lines of a topic: each root model at its path in the song,
+/// listing the `expand` models field by field.
+fn listing(roots: &[(&str, &str)], expand: &[&str]) -> Json {
+    let mut listing = Listing {
+        expand,
+        lines: Map::new(),
+        open: Vec::new(),
+    };
+    for (path, model) in roots {
+        if *model == "Project" {
+            listing.model(path, &SCHEMA);
+        } else {
+            listing.descend(path, model);
+        }
+    }
+    Json::Object(listing.lines)
+}
+
+/// The fields of a topic, or None for a topic of commands alone.
+fn fields(topic: &str) -> Option<Json> {
     Some(match topic {
+        "project" => listing(
+            &[("", "Project")],
+            &["Session", "Sample", "Pattern", "Event", "Track", "Clip", "Section", "Master", "Return", "Send"],
+        ),
+        "sampler" => listing(
+            &[("samples.ID", "Sample"), ("tracks[].pads.ID", "Pad"), ("patterns.ID.events[]", "Event")],
+            &["Sample", "Pad", "Event"],
+        ),
+        // By their paths in the patch, as daw synth set, lanes and the matrix
+        // take them; the patch is tracks.T.instrument.synth.
+        "synth" => listing(
+            &[("", "Synth")],
+            &["Synth", "Oscillator", "SynthFilter", "SynthEnvelope", "Lfo", "Modulation"],
+        ),
+        "midi" => listing(&[("tracks[]", "MidiTrack")], &["MidiTrack", "NoteClip", "Note", "Instrument", "Sampler", "NoteMap"]),
+        "effects" => {
+            let roots: Vec<(&str, String)> = EFFECT_TYPES.iter().map(|k| (*k, title(k))).collect();
+            let mut roots: Vec<(&str, &str)> = roots.iter().map(|(k, m)| (*k, m.as_str())).collect();
+            roots.extend([("tracks[].sends[]", "Send"), ("returns[]", "Return")]);
+            let mut expand: Vec<String> = EFFECT_TYPES.iter().map(|k| title(k)).collect();
+            expand.extend(["EqBand".into(), "Send".into(), "Return".into()]);
+            listing(&roots, &expand.iter().map(String::as_str).collect::<Vec<_>>())
+        }
+        "automation" => listing(&[("tracks[].automation[]", "Lane")], &["Lane", "Point"]),
+        "edit" => listing(&[("tracks[].audio[]", "AudioClip")], &["AudioClip"]),
+        _ => return None,
+    })
+}
+
+/// `daw describe` with no topic: the topics, a line each.
+pub fn topics() -> Json {
+    json!({
+        "topics": texts(ABOUT),
+        "usage": "daw describe TOPIC prints what the topic's fields mean and, for each field, its path, what it takes and its default; --schema prints the JSON Schema as well. A command's --help lists the fields it takes.",
+    })
+}
+
+/// The first-song recipe: `daw describe start`.
+const START: &[(&str, &str)] = &[
+    ("daw init song --tempo 96 --bars 8", "Makes song/song.yaml: eight bars of 4/4 at 96 BPM. song is the PROJECT every other command takes."),
+    ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR."),
+    ("daw samples import KICK_PATH --project song --id kick", "Copies the file into the project and names it kick in the song. Import the snare and the hat the same way, as snare and hat."),
+    ("daw track add song drums", "A track of pads, played by patterns."),
+    ("daw pad add song drums kick --sample kick", "A pad plays a sample. Add the snare and hat pads the same way; daw describe sampler lists what a pad takes."),
+    ("daw pattern add song beat --length-beats 4", "A one-bar pattern. Its grid is 1/4 of a beat, so a row has sixteen steps of a sixteenth note."),
+    ("daw pattern steps song beat kick \"x... .... x.x. ....\"", "A pad's row: x hits, a dot rests. Then snare \".... x... .... x...\" and hat \"x.x. x.x. x.x. x.x.\"."),
+    ("daw clip add song drums beat --repeats 8", "Plays the pattern eight times in a row from beat 0."),
+    ("daw synth add song bass --patch \"Sub Bass\"", "A new MIDI track playing a factory patch; daw patch list names them all."),
+    ("daw clip add song bass --id bassline --length-beats 32", "A note clip of 32 beats at beat 0. Its notes are placed from its start."),
+    (
+        "daw note add song tracks.bass.clips.bassline --notes '[{\"pitch\": \"C2\", \"duration\": 3.5}, {\"pitch\": \"A#1\", \"at\": 8, \"duration\": 3.5}, {\"pitch\": \"C2\", \"at\": 16, \"duration\": 3.5}, {\"pitch\": \"A#1\", \"at\": 24, \"duration\": 3.5}]'",
+        "Notes by name or MIDI number, C4 being middle C; at and duration in beats.",
+    ),
+    ("daw batch song chords.json", "Runs the commands of the file below as one undo step: a pad track with chords."),
+    ("daw effect add song master --type limiter", "A limiter on the master holds the render under full scale."),
+    ("daw render song", "Renders the mix and each track's stem under song/renders. The reply has the mix's peak and loudness."),
+    ("daw listen song/renders/latest.json", "Measures the render: loudness, spectrum and pictures to look at. It measures; it does not hear for you."),
+];
+
+/// What `daw describe start` prints.
+fn start() -> Json {
+    let steps: Vec<Json> = START.iter().map(|(run, does)| json!({"run": run, "does": does})).collect();
+    let chord = |at: i64, names: [&str; 3]| -> Vec<Json> {
+        names.iter().map(|n| json!({"pitch": n, "at": at, "duration": 8})).collect()
+    };
+    let notes: Vec<Json> = [(0, ["C4", "D#4", "G4"]), (8, ["A#3", "D4", "F4"]), (16, ["G#3", "C4", "D#4"]), (24, ["A#3", "D4", "G4"])]
+        .into_iter()
+        .flat_map(|(at, names)| chord(at, names))
+        .collect();
+    json!({
+        "steps": steps,
+        "batch": {
+            "file": "chords.json",
+            "content": {
+                "label": "Add chords",
+                "commands": [
+                    {"op": "synth.add", "track": "keys", "patch": "Soft Pad"},
+                    {"op": "clip.add", "track": "keys", "id": "chords", "length_beats": 32},
+                    {"op": "note.add", "clip": "tracks.keys.clips.chords", "notes": notes},
+                    {"op": "set", "path": "tracks.keys.gain_db", "value": -6},
+                ],
+            },
+        },
+        "semantics": texts(&[
+            ("placeholders", "KICK_PATH and the other paths come from daw samples search. Everything else runs as written in an empty folder."),
+            ("batch", "A batch file lists commands as objects: op is the command (set, track.add, clip.add, note.add, synth.add, effect.add and the others), and its other keys are the command's arguments and the fields of what it adds. A label names the step in the change log and for undo."),
+            ("next", "daw play song plays it, or open the folder in the app. daw inspect song summarizes it, daw get song PATH reads any part, and daw set song PATH VALUE changes any field. daw --help lists the commands, a command's --help what it takes, and daw describe the topics."),
+        ]),
+    })
+}
+
+/// What `daw describe TOPIC` prints: what the topic's fields mean and a line
+/// for each field, or None for an unknown topic.
+pub fn describe(topic: &str) -> Option<Json> {
+    if topic == "start" {
+        return Some(start());
+    }
+    let mut full = describe_with_schema(topic)?;
+    let full = full.as_object_mut().expect("a topic is an object");
+    let mut out = Map::new();
+    out.insert("semantics".into(), full.remove("semantics").expect("a topic has semantics"));
+    if let Some(lines) = fields(topic) {
+        out.insert("fields".into(), lines);
+    }
+    // What the schema cannot say: the matrix and what lanes can move.
+    for key in ["modulation", "automatable"] {
+        if let Some(v) = full.remove(key) {
+            out.insert(key.into(), v);
+        }
+    }
+    Some(Json::Object(out))
+}
+
+/// What `daw describe TOPIC --schema` prints: the JSON Schema of the topic's
+/// models with what their fields mean, or None for an unknown topic.
+pub fn describe_with_schema(topic: &str) -> Option<Json> {
+    Some(match topic {
+        "start" => start(),
         "project" => json!({"schema": schema(), "semantics": texts(PROJECT)}),
         "sampler" => json!({
             "schema": {"pad": model("Pad"), "event": model("Event"), "sample": model("Sample")},

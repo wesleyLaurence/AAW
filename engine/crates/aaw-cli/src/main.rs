@@ -90,6 +90,7 @@ struct Forwarded {
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Topic {
+    Start,
     Project,
     Sampler,
     Synth,
@@ -125,10 +126,15 @@ enum Top {
     /// Copy the project's folder to NEW_FOLDER and name the copy after it. A
     /// running host carries on in the copy and leaves the original as it was.
     Copy { project: Song, new_folder: PathBuf },
-    /// The authoring contract: the song's schema and what its fields mean.
+    /// The authoring contract: what a topic's fields mean and what each takes.
+    /// Without a topic, the topics; `daw describe start` makes a first song.
     Describe {
-        #[arg(value_enum, default_value = "project")]
-        topic: Topic,
+        #[arg(value_enum)]
+        topic: Option<Topic>,
+        /// Print the JSON Schema of the topic's models as well; without a
+        /// topic, the schema of the whole song.
+        #[arg(long)]
+        schema: bool,
     },
     /// The sample library: scan, search, analyze, inspect, audition, import.
     #[command(disable_help_flag = true)]
@@ -237,6 +243,7 @@ enum Top {
     Redo { project: Song },
     /// Set any value by path, e.g. tracks.drums.gain_db -4.5. VALUE is JSON,
     /// or text when it does not parse as JSON.
+    #[command(after_help = set_help())]
     Set {
         project: Song,
         path: String,
@@ -291,6 +298,7 @@ enum Top {
 #[derive(Subcommand)]
 enum TrackCmd {
     /// Add a track; --index places it, and --type midi makes a MIDI track.
+    #[command(after_help = track_help())]
     Add {
         project: Song,
         id: String,
@@ -306,6 +314,7 @@ enum TrackCmd {
 /// Returns.
 #[derive(Subcommand)]
 enum ReturnCmd {
+    #[command(after_help = fields_help("Return", &["id"]))]
     Add {
         project: Song,
         id: String,
@@ -325,6 +334,7 @@ enum ReturnCmd {
 enum AudioCmd {
     /// Add an audio clip: --at, --source-start-seconds, --source-end-seconds,
     /// --lead-ms, --fade-in-ms, --fade-out-ms, --source-bpm and --stretch are optional.
+    #[command(after_help = fields_help("AudioClip", &["sample"]))]
     Add {
         project: Song,
         track: String,
@@ -395,6 +405,7 @@ enum ClipCmd {
     /// Add a clip: `add SONG TRACK PATTERN`, then --at, --repeats and
     /// --velocity-scale if wanted. On a MIDI track, a note clip, with no
     /// pattern: --length-beats, and --at, --id and --notes if wanted.
+    #[command(after_help = clip_help())]
     Add {
         project: Song,
         track: String,
@@ -444,6 +455,7 @@ enum ClipCmd {
 enum NoteCmd {
     /// Add a note: --pitch (a number or a name such as C4), --duration,
     /// optionally --at and --velocity; or --notes with a JSON list of them.
+    #[command(after_help = fields_help("Note", &[]))]
     Add {
         project: Song,
         clip: String,
@@ -451,6 +463,7 @@ enum NoteCmd {
         f: FieldArgs,
     },
     /// Change a note's --pitch, --at, --duration or --velocity.
+    #[command(after_help = fields_help("Note", &["id"]))]
     Set {
         project: Song,
         note: String,
@@ -627,6 +640,7 @@ enum MidiCmd {
 /// Patterns and their events.
 #[derive(Subcommand)]
 enum PatternCmd {
+    #[command(after_help = fields_help("Pattern", &[]))]
     Add {
         project: Song,
         pattern: String,
@@ -651,6 +665,7 @@ enum PatternCmd {
 #[derive(Subcommand)]
 enum EventCmd {
     /// Add an event: --at and --pad, optionally --note, --duration, --velocity, --transpose.
+    #[command(after_help = fields_help("Event", &[]))]
     Add {
         project: Song,
         pattern: String,
@@ -658,6 +673,7 @@ enum EventCmd {
         f: FieldArgs,
     },
     /// Change an event's fields; a null value resets one.
+    #[command(after_help = fields_help("Event", &[]))]
     Set {
         project: Song,
         event: String,
@@ -671,6 +687,7 @@ enum EventCmd {
 #[derive(Subcommand)]
 enum PadCmd {
     /// Add a pad: --sample, and any pad field.
+    #[command(after_help = fields_help("Pad", &[]))]
     Add {
         project: Song,
         track: String,
@@ -679,6 +696,7 @@ enum PadCmd {
         f: FieldArgs,
     },
     /// Change a pad's fields; a null value resets one.
+    #[command(after_help = fields_help("Pad", &[]))]
     Set {
         project: Song,
         track: String,
@@ -699,6 +717,7 @@ enum OnOff {
 #[derive(Subcommand)]
 enum EffectCmd {
     /// Add an effect: --type, optionally --id, --index and parameters.
+    #[command(after_help = effect_help())]
     Add {
         project: Song,
         owner: String,
@@ -721,6 +740,7 @@ enum EffectCmd {
 #[derive(Subcommand)]
 enum SendCmd {
     /// Add or change a send: --gain-db, --pre-fader.
+    #[command(after_help = fields_help("Send", &["to"]))]
     Set {
         project: Song,
         track: String,
@@ -736,6 +756,7 @@ enum SendCmd {
 #[derive(Subcommand)]
 enum LaneCmd {
     /// Replace or create a whole lane from a JSON list of points.
+    #[command(after_help = lane_help())]
     Set { project: Song, owner: String, param: String, points: String },
     Remove { project: Song, owner: String, param: String },
     #[command(subcommand)]
@@ -746,6 +767,7 @@ enum LaneCmd {
 #[derive(Subcommand)]
 enum PointCmd {
     /// Add a point in time order, creating the lane if needed: --at, --value, --curve, --shape.
+    #[command(after_help = lane_help())]
     Add {
         project: Song,
         owner: String,
@@ -754,6 +776,7 @@ enum PointCmd {
         f: FieldArgs,
     },
     /// Change a point's --at, --value, --curve or --shape.
+    #[command(after_help = fields_help("Point", &[]))]
     Move {
         project: Song,
         point: String,
@@ -774,6 +797,104 @@ enum SectionCmd {
 
 type Result<T> = std::result::Result<T, String>;
 
+/// A field as a flag with what it takes, for a command's --help.
+fn flag_line(name: &str, line: &str) -> String {
+    format!("  --{:<24} {line}\n", name.replace('_', "-"))
+}
+
+/// The fields a command takes, for its --help, from the schema: those of
+/// `model` that are values, leaving out `skip`, which the command takes
+/// another way.
+fn takes(model: &str, skip: &[&str]) -> String {
+    contract::model_fields(model)
+        .iter()
+        .filter(|(name, line)| !skip.contains(&name.as_str()) && !line.starts_with("list of") && !line.starts_with("map of"))
+        .map(|(name, line)| flag_line(name, line))
+        .collect()
+}
+
+fn fields_help(model: &str, skip: &[&str]) -> String {
+    format!("Fields:\n{}", takes(model, skip))
+}
+
+fn track_help() -> String {
+    format!(
+        "Fields:\n{}{}{}",
+        flag_line("type", "midi makes a MIDI track, which holds note clips and an instrument"),
+        flag_line("index", "where among the tracks, 0 first; last unless given"),
+        takes("Track", &["id"])
+    )
+}
+
+fn clip_help() -> String {
+    format!(
+        "Fields of a pattern clip:\n{}\nFields of a note clip, on a MIDI track:\n{}",
+        takes("Clip", &["pattern"]),
+        takes("NoteClip", &[])
+    )
+}
+
+fn effect_help() -> String {
+    let mut out = String::from("Each type, with the fields it takes; --type is required:\n");
+    for kind in aaw_model::EFFECT_TYPES {
+        let model = format!("{}{}", kind[..1].to_ascii_uppercase(), &kind[1..]);
+        out.push_str(&format!("{kind}\n{}", takes(&model, &["type"])));
+        if kind == "eq" {
+            out.push_str(&flag_line("bands", "a JSON list of bands, each:"));
+            for (name, line) in contract::model_fields("EqBand") {
+                out.push_str(&format!("      {name}: {line}\n"));
+            }
+        }
+    }
+    out.push_str("--index places it in the chain, 0 first; last unless given. daw describe effects says what each does.");
+    out
+}
+
+fn lane_help() -> String {
+    let automation = contract::describe("automation").expect("automation is a topic");
+    let mut out = String::from(
+        "PARAM on a track or return: gain_db, pan, sends.RETURN.gain_db (a track's), effects.REF.FIELD; \
+         on the master: gain_db, effects.REF.FIELD; on a MIDI track with a synth: instrument.FIELD \
+         (daw describe synth). REF is an effect's id or index in the chain.\nEffect fields a lane can move:\n",
+    );
+    for (kind, params) in automation["automatable"]["effects"].as_object().into_iter().flatten() {
+        let names: Vec<&String> = params.as_object().into_iter().flatten().map(|(f, _)| f).collect();
+        let names: Vec<String> = names.iter().map(|f| if kind == "eq" { format!("bands.N.{f}") } else { f.to_string() }).collect();
+        out.push_str(&format!("  {kind}: {}\n", names.join(", ")));
+    }
+    out.push_str("A point is {at, value, curve, shape}:\n");
+    for (name, line) in contract::model_fields("Point") {
+        out.push_str(&format!("  {name}: {line}\n"));
+    }
+    out
+}
+
+fn set_help() -> String {
+    let lookup = |model: &str, field: &str| {
+        contract::model_fields(model).into_iter().find(|(n, _)| n == field).map(|(_, l)| l).unwrap_or_default()
+    };
+    let paths = [
+        ("session.tempo", "Session", "tempo"),
+        ("session.length_beats", "Session", "length_beats"),
+        ("session.master_gain_db", "Session", "master_gain_db"),
+        ("session.title", "Session", "title"),
+        ("tracks.T.gain_db", "Track", "gain_db"),
+        ("tracks.T.pan", "Track", "pan"),
+        ("tracks.T.mute", "Track", "mute"),
+        ("tracks.T.pads.P.gain_db", "Pad", "gain_db"),
+        ("samples.S.root_note", "Sample", "root_note"),
+    ];
+    let mut out = String::from("Common paths:\n");
+    for (path, model, field) in paths {
+        out.push_str(&format!("  {path:<26} {}\n", lookup(model, field)));
+    }
+    out.push_str(
+        "T is a track's ID, P a pad's, S a sample's. Any field daw describe lists is set by its path, \
+         and an effect's as tracks.T.effects.REF.FIELD, REF its id or index.",
+    );
+    out
+}
+
 fn text(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -789,7 +910,7 @@ fn fields(f: &FieldArgs) -> Result<Fields> {
     let mut i = 0;
     while i < args.len() {
         let Some(flag) = args[i].strip_prefix("--") else {
-            return Err(format!("Expected --FIELD VALUE, got {}", args[i]));
+            return Err(positional(&args[i]));
         };
         let (name, value) = match flag.split_once('=') {
             Some((n, v)) => (n, v.to_string()),
@@ -803,6 +924,18 @@ fn fields(f: &FieldArgs) -> Result<Fields> {
         i += 1;
     }
     Ok(out)
+}
+
+/// The error for a word given where a `--FIELD VALUE` pair was wanted,
+/// naming the flag when the word is a value one takes.
+fn positional(word: &str) -> String {
+    if aaw_model::EFFECT_TYPES.contains(&word) {
+        return format!("`{word}` is an effect type; use --type {word}");
+    }
+    if word == "midi" {
+        return "Use --type midi for a MIDI track".into();
+    }
+    format!("Expected --FIELD VALUE, got `{word}`; fields are flags such as --gain-db -3, and the command's --help lists them")
 }
 
 fn take_index(fields: &mut Fields) -> Result<Option<usize>> {
@@ -1060,9 +1193,14 @@ fn run(cli: &Cli) -> Result<Json> {
         Top::Projects { all } => projects(*all),
         Top::Move { project, new_folder } => edit(project, C::Move { to: absolute(new_folder)? }),
         Top::Copy { project, new_folder } => edit(project, C::Copy { to: absolute(new_folder)? }),
-        Top::Describe { topic } => {
+        Top::Describe { topic, schema } => {
+            let Some(topic) = topic else {
+                return Ok(if *schema { contract::describe_with_schema("project") } else { Some(contract::topics()) }
+                    .expect("the song has a schema"));
+            };
             let name = topic.to_possible_value().expect("a topic has a name");
-            contract::describe(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
+            let described = if *schema { contract::describe_with_schema } else { contract::describe };
+            described(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
         }
         Top::Samples(_)
         | Top::Listen(_)
@@ -1883,8 +2021,18 @@ fn main() -> ExitCode {
     }
     match run(&cli) {
         Ok(result) => {
-            println!("{}", serde_json::to_string_pretty(&result).expect("json"));
-            ExitCode::SUCCESS
+            use std::io::Write;
+            let text = serde_json::to_string_pretty(&result).expect("json");
+            match writeln!(std::io::stdout().lock(), "{text}") {
+                Ok(()) => ExitCode::SUCCESS,
+                // A reader that has stopped, as `head` does, ends the command
+                // quietly with the status a shell gives a closed pipe.
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => ExitCode::from(141),
+                Err(e) => {
+                    eprintln!("{}", json!({"error": e.to_string(), "command": name(&cli.command)}));
+                    ExitCode::FAILURE
+                }
+            }
         }
         Err(error) => {
             eprintln!("{}", json!({"error": error, "command": name(&cli.command)}));
