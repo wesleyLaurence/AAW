@@ -14,12 +14,13 @@ kept.
 
 ## Next
 
-1. **The Synth.** A polyphonic synthesizer on a MIDI track with oscillators,
-   unison, a filter, envelopes, LFOs, a modulation matrix, macros and its own
-   effects; text patches saved to `~/Music/AAW/library/patches/` and loaded into
-   any song; `daw synth` and `daw patch` for the agent and a panel in the app.
-   Four pull requests: the engine and commands, patches, the panel, then unison,
-   wavetables and the patch's effects. [features/synth.md](features/synth.md)
+1. **The Synth's remaining items.** Its engine, `daw synth`, automation of the
+   patch and a panel of plain fields are built. Left: patches as text files in
+   `~/Music/AAW/library/patches/` with factory patches, `daw patch` and the
+   browser's Synth; the panel's drawings, `note.preview` and the keys, with the
+   detail panel's height draggable; then unison, wavetables and the patch's own
+   effects. Three pull requests, in that order or with the first two swapped.
+   [features/synth.md](features/synth.md)
 2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
@@ -39,6 +40,16 @@ kept.
 
 ## Verify
 
+- **The Synth by ear:** `daw synth add` on a MIDI track of a few chords and a
+  bass line, each factory-style recipe from `daw describe synth` built with
+  `daw synth set` and heard through `daw synth audition` and in the app: the
+  plain saw, a sub, a pluck with a filter envelope, a pad, a glide with one
+  voice, a kick from a pitch envelope; a knob dragged in the panel while the
+  song plays, a wave chosen, a lane on the cutoff, a locate into a held note
+  and a stop. Engine tests hold a render to playback, to every block size and
+  to itself, and measure a sine's pitch, an envelope, a sweep, a glide and
+  stealing; nobody listened, and the panel was built and tested but not seen
+  in a picture.
 - **The Sampler device by hand and ear:** drag Sampler from the browser onto a
   MIDI track, drop a sample on the device from the browser and from the
   Finder, draw a few notes and listen across the keys; drag the markers, type
@@ -150,9 +161,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 ### Sound
 
 - Saturation and a clipper. Agents making loud mixes stopped at the limiter.
-- Beyond the Synth (Next 2): multi-frame wavetables with a sweepable position
+- Beyond the Synth (Next 1): multi-frame wavetables with a sweepable position
   and Serum's or other WAV tables read; a second filter with routing; a MIDI
-  keyboard played through `note.preview`.
+  keyboard played through `note.preview`; an LFO's rate and phase as matrix
+  targets; a bandlimited triangle; a locate that carries a chased voice's
+  oscillator phases and filter state as a render has them.
 - Generated audio: a sound, a loop or a whole song from a description, with the
   person's own ElevenLabs key kept in the Keychain, saved in the project as a
   sample; a `daw generate` command for the agent and a panel in the app.

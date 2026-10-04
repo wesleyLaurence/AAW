@@ -63,9 +63,11 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 
 - `aaw-model`: the strict schema (version 1, and 2 with MIDI tracks), exact musical time, stable YAML, validation,
   hashes, the event schedule and the schema `daw describe` prints.
-- `aaw-dsp`: bandlimited repitch, lane envelopes, and the filter, EQ,
+- `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
   compressor/sidechain, limiter, delay and reverb devices with explicit block
-  state; see [effects.md](features/effects.md) and [automation.md](features/automation.md).
+  state, and the Synth, a polyphonic synthesizer played from a patch; see
+  [effects.md](features/effects.md), [automation.md](features/automation.md)
+  and [synth.md](features/synth.md).
 - `aaw-engine`: compiles a song into a program of voices, chains, routing and
   latency-aligning delays, and runs it as one stream for real-time playback and
   for WAV/stem export.
@@ -164,8 +166,8 @@ master effects follow `master_gain_db` and precede the end fade. See
 [effects.md](features/effects.md) for parameters and semantics.
 
 Automation: `tracks[].automation`, `returns[].automation` and `master.automation`
-list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` or
-`effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
+list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db`,
+`effects.REF.FIELD` or, on a MIDI track with a synth, `instrument.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).
@@ -180,12 +182,15 @@ song and a note's in its clip; one that arrives without an ID is given the
 next `clipN` or `nN`. A note sounds until its end or its clip's, and one that
 starts before its clip, at a negative `at`, or at or after its end is kept and
 does not play: a clip trimmed from either edge keeps the notes it passes. `instrument` is
-null, which plays nothing, or `{sampler: {pads, map}}`: pads as below, and map
+null, which plays nothing, `{sampler: {pads, map}}` or `{synth: {...}}`: pads as below, and map
 entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
 not overlap; a pitched entry repitches its pad from its sample's root note, or
 from middle C (C4, 60) when the sample has none, to the note. The schedule gives a MIDI track's notes to its instrument as pitch,
 velocity, start and note-off, and the sampler makes of them the hits a pattern
-event would make. A Standard MIDI file of one part is imported as a note clip
+event would make. The Synth plays them itself, every frame, from a patch of
+oscillators, a filter a voice, envelopes, LFOs, a modulation matrix and
+macros, whose fields a track's lanes reach as `instrument.FIELD`; see
+[synth.md](features/synth.md) and `daw describe synth`. A Standard MIDI file of one part is imported as a note clip
 and a note clip exported as one; the file is not kept or linked, and its tempo
 is not taken. See [midi-clips.md](features/midi-clips.md) and `daw describe midi`.
 

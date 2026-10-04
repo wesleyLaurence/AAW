@@ -12,7 +12,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["project", "sampler", "midi", "effects", "automation", "edit", "beats", "joins", "export"];
+pub const TOPICS: &[&str] = &["project", "sampler", "synth", "midi", "effects", "automation", "edit", "beats", "joins", "export"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -36,7 +36,23 @@ const PROJECT: &[(&str, &str)] = &[
     ("midi", "A track with type: midi holds note clips and an instrument; see daw describe midi."),
     ("audio", "tracks[].audio lists audio clips: parts of a sample file placed on the track's timeline, for edits of finished songs; see daw describe edit."),
     ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. An audio clip has the same two fields. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
-    ("limits", "No groups, synths or recording."),
+    ("synth", "A MIDI track's instrument may be the Synth, {synth: {...}}, a polyphonic synthesizer whose whole sound is that mapping; see daw describe synth."),
+    ("limits", "No groups or recording."),
+];
+
+const SYNTH: &[(&str, &str)] = &[
+    ("device", "The Synth is a MIDI track's instrument, {synth: {...}}: a polyphonic synthesizer whose whole sound is the mapping, so a project is self-contained. It plays the track's note clips as a sampler does. daw synth add SONG TRACK attaches the plain saw, {synth: {oscillators: {a: {}}}}, to a MIDI track, or makes a new MIDI track with it; daw instrument set SONG TRACK JSON attaches a whole patch. Every field has a label, unit, range and default, listed under fields, and the panel in the app draws the same fields."),
+    ("oscillators", "oscillators is a mapping of one to four, keyed by an ID the patch chooses (a, b, sub and noise are conventions), summed in the order written. wave is sine, triangle, saw, square, pulse (with pulse_width, the percent of the cycle that is high) or noise. level_db, pan, octave, semitones and detune_cents tune and place it. phase is the percent of its cycle a note starts at; left out, each note starts at a random place from seed, which thickens stacked notes. filter: false keeps it out of the filter, as a sub often is. Saw, square and pulse are bandlimited (PolyBLEP); the triangle is plain."),
+    ("filter", "One filter a voice, after the oscillators routed through it: mode lowpass, highpass, bandpass or notch, slope_db_per_octave 12 or 24, cutoff_hz, resonance_percent (0 is a Q of a half; 100 rings just short of self-oscillation), drive_db into a soft clip before the filter, and keytrack_percent, 100 moving the cutoff an octave an octave from middle C. enabled: false passes the oscillators through. The default is a lowpass open at 20 kHz, which changes nothing."),
+    ("envelopes", "envelopes is a mapping; amp is always there and shapes each voice's level, and others (env2, env3) do nothing until the matrix uses them. attack_ms rises linearly to full; decay_ms falls exponentially to sustain_percent, reaching it at decay_ms; release_ms falls exponentially to silence after the note-off, reaching it at release_ms. A voice ends when its amp release does."),
+    ("lfos", "lfos is a mapping of up to four, bipolar, -1 to 1. shape is sine, triangle, saw (falling), square or sample_hold (a new random value a cycle). rate_hz is cycles a second; rate_beats, when given, replaces it with one cycle in so many beats at the song's tempo, so 1/2 is an eighth note and 4 a bar. retrigger: true starts the cycle at each note from phase_percent; otherwise the LFO runs from the start of the song and every voice shares its phase, so a synced LFO lands on the bar."),
+    ("modulation", "modulation lists {source, target, amount}. source is an envelope or LFO by its ID, velocity, note, random or macros.NAME; target is listed under targets with the unit of amount, which is how far the target moves at full modulation: semitones for a pitch, octaves for cutoff_hz and envelope times (1 doubles, -1 halves), dB for a level, points for a percentage, and the pan's own units. Envelopes, velocity, random and macros are unipolar, 0 to 1; note and LFOs are bipolar. An entry on an envelope's field is taken when the note starts and holds for the note. Automation and the matrix add: a lane moves the field's value and the matrix moves it from there. An entry naming a source or target the patch lacks is refused."),
+    ("macros", "macros is a mapping of up to eight named knobs, 0 to 100, that do nothing but through the matrix: {source: macros.tone, target: filter.cutoff_hz, amount: 3} opens the filter three octaves as tone goes from 0 to 100. They are the knobs to automate (instrument.macros.tone) and to reach for first; daw check names a macro no entry uses."),
+    ("voices", "voices is 1 to 16; 1 is monophonic. Past it the oldest releasing voice is stolen, else the oldest sounding, over a 5 ms fade. glide_ms slides each new note's pitch from the pitch of the last note started: portamento with one voice. velocity_percent is how much velocity moves the level: 100 is linear, as a sampler's, 0 none. A voice is a function of the patch, the note and the frames since it started, with its random phases and random value from seed, the track and the note's place in the track, so a render is the same bytes twice and playback from the start equals it. Playback from a locate chases the notes sounding there: each starts with its envelopes and free LFOs where time would have brought them and its filter empty."),
+    ("automation", "Lanes on a MIDI track reach the synth as instrument.FIELD: instrument.filter.cutoff_hz, instrument.oscillators.a.level_db, instrument.macros.tone, instrument.envelopes.amp.release_ms, instrument.lfos.lfo1.rate_hz. automatable lists every field a lane can move; frequencies and LFO rates interpolate in the log domain. A field the panel or the agent sets glides over 5 ms while the song plays; a change of wave, filter mode, slope or routing swaps through a 10 ms dip."),
+    ("commands", "daw synth add SONG TRACK; daw synth show SONG TRACK prints the patch as the song holds it, fields at their defaults left out; daw synth set SONG TRACK PATH VALUE [PATH VALUE ...] sets fields by their path in the patch as one undo step, a value being a number, a word or a JSON object, so oscillators.sub '{\"wave\": \"sine\", \"octave\": -1, \"filter\": false}' adds an oscillator and a null removes one; daw synth mod SONG TRACK SOURCE TARGET AMOUNT adds an entry or changes its amount, and --remove takes it out; daw synth audition SONG TRACK [--notes C2,C3] [--velocity 100] [--length-beats 2] [--track-chain] renders the notes one after another through the patch, and with --track-chain the track's effects, to a WAV under renders/auditions and replies with its path, peak, loudness and spectral centroid, so there is something to hear and daw listen can measure it. daw set SONG tracks.T.instrument.synth.PATH VALUE reaches any field too, and a labeled daw batch makes a designed sound one step."),
+    ("recipes", "Sub bass: a sine, and a saw an octave up at -12 dB under a lowpass at 200 Hz; velocity to filter.cutoff_hz by 1. Pluck: a saw, amp attack 1 decay 300 sustain 0 release 200, env2 attack 0 decay 250 sustain 0 on filter.cutoff_hz by 4 over a cutoff of 300 Hz with resonance 20. Pad: two saws detuned ±8 cents, amp attack 400 release 900, cutoff 1200, lfo1 at 0.3 Hz on pitch by 0.08. Lead: a square and a saw a fifth up at -9 dB, glide_ms 60 with one voice, lfo1 sine 5 Hz retriggered on pitch by 0.3 for vibrato. Kick: a sine with env2 attack 0 decay 40 sustain 0 on pitch by -24 and the amp decay 300 sustain 0, plus a short noise burst at -20 dB with its own envelope. Hat: noise with a highpass at 6 kHz, amp decay 60 sustain 0. Riser: noise through a lowpass whose cutoff an envelope opens over 4 beats, with resonance 40. Every amount is in the target's unit; start from these and listen with daw synth audition."),
+    ("limits", "No unison, no wavetables and no effects inside the patch yet; LFO fields are not matrix targets; the triangle is not bandlimited. Patches as files, the browser's Synth and the panel's drawings come in the Synth's next items."),
 ];
 
 const SAMPLER_DEVICE: &[(&str, &str)] = &[
@@ -50,13 +66,13 @@ const MIDI: &[(&str, &str)] = &[
     ("timing", "Positions are exact and nothing is snapped to a grid: write 1/3, 2/3 for triplets, and a decimal such as 1.975 for a note a little ahead of beat 2 (12.5 ms at 120 BPM) or 2.025 behind it."),
     ("ids", "A clip written without an id is given the next free clipN, unique in the song; a note, the next free nN, unique in its clip. IDs stay through edits, saving and reopening. A note is addressed as its clip's path with notes.ID, e.g. tracks.keys.clips.clip1.notes.n3, or by @N while a host runs. A command that makes clips or notes replies with their paths."),
     ("edges", "A note sounds from its start to the end of its duration or of its clip, whichever is first. A note that starts at or after its clip's end is kept and does not play, and lengthening the clip brings it back. A note may start before its clip, at a negative at, as a clip shortened from its left edge (daw clip trim --start) leaves the notes it passed: it is kept and does not play, even where it would last into the clip, and moving the start back brings it back. daw check and daw note list name notes outside their clip."),
-    ("instrument", "instrument is null, and the notes play nothing and are kept, or {sampler: {pads, map}}. pads are the pads of daw describe sampler, by name. map lists {notes, pad, pitched}: notes is one note or [LOW, HIGH], inclusive, and no note may be in two entries. A pitched entry plays its pad repitched from its sample's root_note to the note, or from middle C (C4, 60) when the sample has none, as Ableton's Simpler does; an entry that is not pitched plays its pad as it is, whatever the note, as a drum rack does. A note no entry maps is silent, and daw check names it. Replacing or removing the instrument leaves the notes as they are."),
+    ("instrument", "instrument is null, and the notes play nothing and are kept, or {sampler: {pads, map}}, or {synth: {...}}, the Synth of daw describe synth. pads are the pads of daw describe sampler, by name. map lists {notes, pad, pitched}: notes is one note or [LOW, HIGH], inclusive, and no note may be in two entries. A pitched entry plays its pad repitched from its sample's root_note to the note, or from middle C (C4, 60) when the sample has none, as Ableton's Simpler does; an entry that is not pitched plays its pad as it is, whatever the note, as a drum rack does. A note no entry maps is silent, and daw check names it. Replacing or removing the instrument leaves the notes as they are."),
     ("drums", "General MIDI drum notes are the usual map: 36 (C2) kick, 38 (D2) snare, 42 (F#2) closed hat, 46 (A#2) open hat, 49 (C#3) crash."),
     ("voices", "Each note plays its own voice, overlapping notes of the same pitch included. A gate pad releases at the note-off over its release_ms; a one_shot pad plays its sample through. A voice never outlasts its sample: there is no sustain loop. Choke groups work as on any track."),
     ("commands", "daw clip add SONG TRACK --length-beats 4 [--at 16]; daw note add SONG CLIP --pitch C4 --duration 1 [--at 0 --velocity 96], or --notes '[{...}, ...]' for many; daw note set SONG NOTE --velocity 80; daw note move SONG NOTE... --by -1/48; daw note transpose SONG NOTE... --by 12; daw note remove SONG NOTE...; a clip given to move, transpose or remove stands for all its notes. daw clip duplicate, move, resize, trim and remove place clips; daw clip trim SONG CLIP --start BEAT --end BEAT moves either edge to a song beat and leaves the notes where they are in the song. daw note list SONG CLIP|TRACK [--from BEAT --to BEAT] reads notes with their names and song beats. daw instrument set SONG TRACK JSON attaches or replaces the instrument, daw instrument remove takes it off, daw instrument map SONG TRACK NOTES PAD [--pitched] adds a map entry, and daw pad add/set/remove edit the sampler's pads. A labeled daw batch makes a phrase and its variations one undo step."),
     ("version", "A song with a MIDI track is saved with schema_version: 2, which an engine from before MIDI tracks refuses. A song without one is saved as version 1, as before."),
     ("files", "daw midi import SONG FILE [--track TRACK] [--at BEAT] makes a note clip of a Standard MIDI file of one part, type 0 or 1, whose notes are in one file track and on one channel; a file of more parts is refused with them named. The clip goes on --track, a MIDI track, or else on a new MIDI track named after the file, at --at (0 unless given). It starts at the file's beat 0 and lasts to its last note's end in whole bars, and the song grows to hold it. Positions are exact. The file's tempo is not taken: the notes keep their beats, and the reply's file_tempo is for information. The reply's left_out counts what the song does not hold, by kind (sustain pedal, pitch bend, controllers, program changes, aftertouch and more), and adjusted counts notes with no note-off or no length. daw midi export SONG CLIP FILE writes the clip's notes that play as a type 0 file at 960 ticks a beat with the song's tempo, on channel 1; its reply counts notes outside the clip, notes shortened to its end, notes rounded to a tick, and a note inside a longer one of its pitch, whose lengths a MIDI file cannot keep apart."),
-    ("limits", "No synth, no controllers, pitch bend or pedal, no recording, and clips do not loop. A MIDI file is one part; a file of several parts and its tempo are not read."),
+    ("limits", "No controllers, pitch bend or pedal, no recording, and clips do not loop. A MIDI file is one part; a file of several parts and its tempo are not read."),
 ];
 
 const EFFECT: &[(&str, &str)] = &[
@@ -80,7 +96,7 @@ const EFFECT: &[(&str, &str)] = &[
 
 const AUTOMATION: &[(&str, &str)] = &[
     ("lanes", "tracks[].automation, returns[].automation and master.automation list lanes {param, points}. A lane overrides the static value for the whole song. One lane per parameter."),
-    ("params", "Tracks: gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD. Returns: gain_db, pan, effects.REF.FIELD. Master: gain_db (replaces session.master_gain_db) and effects.REF.FIELD. REF is an effect id or zero-based index; eq fields are effects.REF.bands.N.FIELD. Automatable effect fields are listed under automatable."),
+    ("params", "Tracks: gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD, and on a MIDI track with a synth instrument.FIELD, such as instrument.filter.cutoff_hz or instrument.macros.tone (daw describe synth). Returns: gain_db, pan, effects.REF.FIELD. Master: gain_db (replaces session.master_gain_db) and effects.REF.FIELD. REF is an effect id or zero-based index; eq fields are effects.REF.bands.N.FIELD. Automatable effect fields are listed under automatable."),
     ("points", "points are {at, value, curve, shape} in time order; at is in beats like any position and may equal the session length. Values use the parameter's own units and bounds."),
     ("curves", "curve shapes the segment after its point. linear (default) moves in the parameter's domain: dB, pan and percent linearly, frequencies and q in equal ratios per beat (log). hold keeps the value until the next point. shape bends a linear segment, from -1 to 1: above zero it starts slowly and finishes fast (at 0.5 progress goes as its square, at 1 as its fourth power), below zero it starts fast and finishes slowly, and 0 is straight. A sweep that should hold back and then open needs two points and a shape. Two points at the same at jump there; at most two may share a position."),
     ("outside", "Before the first point the lane holds the first value; after the last it holds the last value. A lane whose points all share one value renders exactly as that static value."),
@@ -180,6 +196,86 @@ fn title(kind: &str) -> String {
     name
 }
 
+/// Each part of the Synth's fields: label, unit, range, default, choices,
+/// and whether a lane can move the field or a change swaps through a dip.
+fn synth_fields() -> Json {
+    use crate::describe::{Initial, Kind, SYNTH_PARTS};
+    let initial = |i: Initial| match i {
+        Initial::Number(x) => json!(x),
+        Initial::Text(s) => json!(s),
+        Initial::Flag(b) => json!(b),
+        Initial::Required => json!("required"),
+        Initial::Absent => Json::Null,
+    };
+    Json::Object(
+        SYNTH_PARTS
+            .iter()
+            .map(|(part, fields)| {
+                let rows: Vec<Json> = fields
+                    .iter()
+                    .map(|f| {
+                        let mut row = Map::new();
+                        row.insert("name".into(), json!(f.name));
+                        row.insert("label".into(), json!(f.label));
+                        row.insert(
+                            "kind".into(),
+                            json!(match f.kind {
+                                Kind::Number => "number",
+                                Kind::Integer => "integer",
+                                Kind::Choice => "choice",
+                                Kind::Flag => "flag",
+                                Kind::Beats => "beats",
+                                Kind::Track => "track",
+                            }),
+                        );
+                        if !f.unit.is_empty() {
+                            row.insert("unit".into(), json!(f.unit));
+                        }
+                        if f.choices.is_empty() && matches!(f.kind, Kind::Number | Kind::Integer | Kind::Beats) {
+                            row.insert("min".into(), json!(f.min));
+                            row.insert("max".into(), json!(f.max));
+                        }
+                        if !f.choices.is_empty() {
+                            row.insert("choices".into(), json!(f.choices));
+                        }
+                        row.insert("default".into(), initial(f.default));
+                        if f.default == Initial::Absent {
+                            row.insert("absent".into(), json!(if f.name == "phase" { "random" } else { "off" }));
+                        }
+                        row.insert("automatable".into(), json!(f.kind == Kind::Number && !f.structural));
+                        row.insert("structural".into(), json!(f.structural));
+                        Json::Object(row)
+                    })
+                    .collect();
+                (part.to_string(), Json::Array(rows))
+            })
+            .chain(std::iter::once((
+                "macros".to_string(),
+                json!([{"name": "NAME", "label": "a macro", "kind": "number", "min": 0, "max": 100, "default": 0, "automatable": true, "structural": false}]),
+            )))
+            .collect(),
+    )
+}
+
+/// The Synth's automatable fields by part, with their interpolation domains.
+fn synth_automatable() -> Json {
+    use crate::describe::{Kind, SYNTH_PARTS};
+    Json::Object(
+        SYNTH_PARTS
+            .iter()
+            .map(|(part, fields)| {
+                let own: Vec<(&str, Domain)> = fields
+                    .iter()
+                    .filter(|f| f.kind == Kind::Number && !f.structural)
+                    .map(|f| (f.name, if f.log { Domain::Log } else { Domain::Linear }))
+                    .collect();
+                (part.to_string(), domains(&own))
+            })
+            .chain(std::iter::once(("macros".to_string(), json!({"NAME": "linear"}))))
+            .collect(),
+    )
+}
+
 fn domains(params: &[(&str, Domain)]) -> Json {
     let name = |d: &Domain| if *d == Domain::Log { "log" } else { "linear" };
     Json::Object(params.iter().map(|(field, d)| (field.to_string(), json!(name(d)))).collect())
@@ -197,6 +293,19 @@ pub fn describe(topic: &str) -> Option<Json> {
         "sampler" => json!({
             "schema": {"pad": model("Pad"), "event": model("Event"), "sample": model("Sample")},
             "semantics": texts(&[PROJECT, SAMPLER_DEVICE].concat()),
+        }),
+        "synth" => json!({
+            "schema": {"synth": model("Synth")},
+            "fields": synth_fields(),
+            "modulation": {
+                "sources": texts(crate::rules::MOD_SOURCES),
+                "targets": texts(crate::rules::MOD_TARGETS),
+            },
+            "automatable": {
+                "paths": "instrument.FIELD on the MIDI track, FIELD being a path in the patch: a field of the synth, oscillators.ID.FIELD, filter.FIELD, envelopes.ID.FIELD, lfos.ID.FIELD or macros.NAME",
+                "fields": synth_automatable(),
+            },
+            "semantics": texts(SYNTH),
         }),
         "midi" => json!({
             "schema": {"track": model("MidiTrack"), "clip": model("NoteClip"), "instrument": model("Instrument")},

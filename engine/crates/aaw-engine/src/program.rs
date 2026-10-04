@@ -15,8 +15,9 @@ use crate::stretch::{self, MARGIN_SECONDS};
 use aaw_dsp::device::{Kernels, Plan};
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
+use aaw_dsp::synth::{track_seed, Patch};
 use aaw_model::rules::{midi, target, Owner, TargetKind, MIDDLE_C};
-use aaw_model::schedule::{track_triggers, Trigger};
+use aaw_model::schedule::{track_notes, track_triggers, NoteOn, Trigger};
 use aaw_model::{frame, AudioClip, Effect, Event, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
@@ -142,12 +143,23 @@ pub struct SendProgram {
     pub level: Option<Param>,
 }
 
+/// A MIDI track's Synth: the notes it plays, shared with every program
+/// compiled while the track's clips stay as they are, and its patch as the
+/// synth plays it.
+#[derive(Debug)]
+pub struct SynthProgram {
+    pub notes: Arc<Vec<NoteOn>>,
+    pub patch: Arc<Patch>,
+}
+
 #[derive(Debug)]
 pub struct TrackProgram {
     pub id: String,
     /// Voices in trigger order, shared with every program compiled while the
-    /// track's clips, patterns and pads stay as they are.
+    /// track's clips, patterns and pads stay as they are. A track with a
+    /// Synth has none; its notes are the synth's.
     pub voices: Arc<Vec<Voice>>,
+    pub synth: Option<SynthProgram>,
     /// Equal for tracks whose voices are the same hits of the same audio
     /// within the same session length, so that what was worked out from
     /// them, such as waveform peaks, can be kept.
@@ -289,6 +301,9 @@ pub struct Cache {
     original: HashMap<PathBuf, (u64, Stamp, Arc<sndfile::Audio>)>,
     prepared: HashMap<PrepKey, (u64, Arc<Prepared>)>,
     tracks: HashMap<String, TrackEntry>,
+    /// Each Synth track's notes, with what they were made from, so that a
+    /// patch edit leaves them as they are and a playing synth carries on.
+    notes: HashMap<String, (u64, String, Arc<Vec<NoteOn>>)>,
     kernels: Kernels,
 }
 
@@ -303,7 +318,24 @@ impl Cache {
         self.original.retain(|_, e| e.0 == g);
         self.prepared.retain(|_, e| e.0 == g);
         self.tracks.retain(|_, e| e.generation == g);
+        self.notes.retain(|_, e| e.0 == g);
         self.kernels.finish();
+    }
+
+    /// A Synth track's notes, from the cache when its clips, the tempo and
+    /// the rate are as they were.
+    fn synth_notes(&mut self, p: &Project, t: &aaw_model::Track, midi: &aaw_model::Midi) -> Arc<Vec<NoteOn>> {
+        let key = format!("{:?}|{}|{}", midi.clips, p.session.tempo.to_bits(), p.session.sample_rate);
+        let g = self.generation;
+        if let Some(entry) = self.notes.get_mut(&t.id) {
+            if entry.1 == key {
+                entry.0 = g;
+                return entry.2.clone();
+            }
+        }
+        let notes = Arc::new(track_notes(p, midi));
+        self.notes.insert(t.id.clone(), (g, key, notes.clone()));
+        notes
     }
 }
 
@@ -661,11 +693,15 @@ impl<'a> Sampler<'a> {
 
 /// Everything a track's voices are made from, as text: its pads, clips and
 /// audio clips or its instrument and note clips, the patterns it plays, its
-/// samples and their files, the tempo, the rate and the stretcher.
+/// samples and their files, the tempo, the rate and the stretcher. A Synth
+/// track's voices are none, whatever its patch.
 fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
     use std::fmt::Write;
     let t = &p.tracks[ti];
     let session = &p.session;
+    if t.midi.as_ref().is_some_and(|m| m.synth().is_some()) {
+        return "synth".to_string();
+    }
     let mut key = format!(
         "{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}",
         t.pads,
@@ -751,6 +787,8 @@ struct Lanes {
     sends: HashMap<String, Arc<Envelope>>,
     /// By effect index, then parameter name.
     effects: HashMap<usize, BTreeMap<String, Arc<Envelope>>>,
+    /// A Synth's fields, by their path in the patch.
+    instrument: BTreeMap<String, Arc<Envelope>>,
     params: Vec<String>,
 }
 
@@ -770,6 +808,9 @@ impl Lanes {
                 }
                 TargetKind::Effect { index, .. } => {
                     out.effects.entry(*index).or_default().insert(t.name(), env);
+                }
+                TargetKind::Instrument => {
+                    out.instrument.insert(t.field.clone(), env);
                 }
             }
         }
@@ -891,6 +932,10 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         };
         let voices = voices(p, index[t.id.as_str()], key, directory, cache)?;
         let mut lanes = Lanes::new(Owner::Track(t), &t.automation, p);
+        let synth = t.midi.as_ref().and_then(|m| m.synth().map(|s| (m, s))).map(|(midi, spec)| SynthProgram {
+            notes: cache.synth_notes(p, t, midi),
+            patch: Arc::new(Patch::new(spec, &lanes.instrument, rate as f64, p.session.tempo, track_seed(&t.id))),
+        });
         let mut chain = chain(&t.effects, &mut lanes, p, &mut cache.kernels);
         // The track waits for the slowest of its keys.
         let delay = chain
@@ -918,6 +963,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         tracks.push(TrackProgram {
             id: t.id.clone(),
             voices,
+            synth,
             voices_id,
             chain,
             gain: lanes.channel("gain_db", t.gain_db),
@@ -973,7 +1019,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     };
     (rate, track_offset, return_latency, latency).hash(&mut h);
     for t in &tracks {
-        (&t.id, t.delay, t.align, t.in_mix).hash(&mut h);
+        (&t.id, t.delay, t.align, t.in_mix, t.synth.as_ref().map(|s| s.patch.signature)).hash(&mut h);
         devices(&t.chain, &mut h);
     }
     for r in &buses {

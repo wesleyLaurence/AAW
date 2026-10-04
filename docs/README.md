@@ -43,14 +43,15 @@ Built:
 | [skills](features/skills.md) | Where a personal skill and its sounds live, and the tracked `song-edit` skill |
 | [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
 | [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
+| [the browser](features/browser.md) | Samples, instruments, effects and shared folders at the window's left |
+| [the Sampler device](features/sampler-device.md) | A sample loaded onto an empty Sampler and shaped in its panel |
+| [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth` and a panel of fields are built; patches as files, the panel's drawings and unison are next |
 
 Proposed:
 
 | Feature | Backlog item |
 |---|---|
-| [the browser](features/browser.md) | 1 |
-| [the Sampler device](features/sampler-device.md) | 2 |
-| [the agent panel](features/agent-panel.md) | 6 |
+| [the agent panel](features/agent-panel.md) | 5 |
 | [generated audio](features/generated-audio.md) | Later, under Sound |
 
 ## Archive

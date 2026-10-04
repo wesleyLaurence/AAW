@@ -320,8 +320,9 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
             continue;
         };
         let track = &program.tracks[ti];
+        let events = track.synth.as_ref().map_or(track.voices.len(), |s| s.notes.len());
         let mut fields = vec![
-            ("events", Value::int(track.voices.len() as i64)),
+            ("events", Value::int(events as i64)),
             ("effects", effects(&track_effects[ti])),
         ];
         if !track.automation.is_empty() {

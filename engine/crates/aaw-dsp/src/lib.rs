@@ -10,6 +10,7 @@ pub mod envelope;
 pub mod resample;
 pub mod reverb;
 pub mod svf;
+pub mod synth;
 
 /// One stereo frame.
 pub type Frame = [f64; 2];

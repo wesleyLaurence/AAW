@@ -342,3 +342,26 @@ wavetables and the patch's effects.
 **D70. The Sampler's root note is the sample's, and its pad is named after the sample it plays.**
 
 Chosen on October 3, 2026, in building the [Sampler device](features/sampler-device.md), whose open question was whether the root note belongs to the sample, as the song keeps it, or to the pad, as Ableton keeps it per instrument. It stays on the sample: the song keeps one truth about a file, `daw check` compares that note with the pitch it measures from the file, and the browser's measured pitch and `import --root-note` write the same field, so Measure in the panel, the agent's `daw set samples.S.root_note` and `daw check` agree on one value. The cost is that two Samplers of one file cannot have different root notes; Transpose on the pad is per instrument and covers that. A `root_note` on the pad that overrides the sample's is a model change to make if a song shows the need. A sample loaded over the Sampler's renames the pad after the new sample, so that `daw pad set` names the pad for what it plays, and carries the panel's settings over, as Simpler keeps its settings when a sample is swapped; the start and the end go back to the whole file, since they were of the old file. Every field of the pad is sent when a drag ends, as a delay's time is, because any pad change gives the sampler new voices and a playing song fades through it.
+
+**D71. One filter a voice with a per-oscillator bypass, control values every 16 frames, and an envelope's modulation taken at the note's start.**
+
+Decided on October 3, 2026, in building the Synth's engine
+([features/synth.md](features/synth.md)), whose open question was a filter
+per oscillator route, two filters, or one. One filter a voice, with each
+oscillator either through it or not, is what the sounds in the recipes need (a
+sub under the filter, a saw through it) and keeps the panel to one filter
+column; a second filter with routing is a Later line. Oscillators and the
+filter run every frame, and every control value is worked out every 16 frames
+of the voice's own time, so a render is a function of the patch, the note and
+the frames since the note started, the same bytes twice and in any block size,
+at a cost a few voices leave unnoticed. An entry on an envelope's field is
+taken when the note starts and holds for the note, since an attack cannot
+change under way; an LFO's fields are not matrix targets, since a free LFO is
+shared by every voice and a per-voice amount would contradict that. The amp
+release reaches exactly nothing at `release_ms`, 60 dB down and then zero, so
+a voice ends without a step. Every voice's state is allocated when a renderer
+is built, 16 voices and 16 ringing out whatever the patch asks for, so a
+change of `voices` glides like a knob; a change of wave, filter mode, slope or
+routing, or of the parts a patch has, swaps through the dip, since it would
+jump the waveform. Patch names with spaces, the other open question, wait for
+patches as files.

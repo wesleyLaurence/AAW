@@ -1016,42 +1016,652 @@ impl Sampler {
     }
 }
 
-/// What a MIDI track's notes play. One kind so far.
-#[derive(Clone, Debug)]
-pub enum Instrument {
-    Sampler(Sampler),
+// ---------------------------------------------------------------------------
+// The Synth
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Wave {
+    Sine,
+    Triangle,
+    Saw,
+    Square,
+    Pulse,
+    Noise,
 }
 
-impl Instrument {
-    const FIELDS: &'static [&'static str] = &["sampler"];
+impl Wave {
+    pub const NAMES: [&'static str; 6] = ["sine", "triangle", "saw", "square", "pulse", "noise"];
 
-    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Instrument> {
-        let f = Fields::of(ctx, x, "Instrument", Self::FIELDS)?;
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Wave::Sine => "sine",
+            Wave::Triangle => "triangle",
+            Wave::Saw => "saw",
+            Wave::Square => "square",
+            Wave::Pulse => "pulse",
+            Wave::Noise => "noise",
+        }
+    }
+
+    fn from_str(s: &str) -> Wave {
+        match s {
+            "sine" => Wave::Sine,
+            "triangle" => Wave::Triangle,
+            "square" => Wave::Square,
+            "pulse" => Wave::Pulse,
+            "noise" => Wave::Noise,
+            _ => Wave::Saw,
+        }
+    }
+}
+
+/// An oscillator of the Synth: one of up to four, each with its own wave,
+/// level, pan and tuning.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Oscillator {
+    pub wave: Wave,
+    pub level_db: f64,
+    pub pan: f64,
+    pub octave: i64,
+    pub semitones: f64,
+    pub detune_cents: f64,
+    /// The high part of a pulse's cycle, in percent.
+    pub pulse_width: f64,
+    /// Where in its cycle the wave starts, in percent; None starts each note
+    /// at a random place, from the patch's seed.
+    pub phase: Option<f64>,
+    /// Whether it goes through the filter.
+    pub filter: bool,
+}
+
+impl Oscillator {
+    const FIELDS: &'static [&'static str] = &[
+        "wave", "level_db", "pan", "octave", "semitones", "detune_cents", "pulse_width", "phase", "filter",
+    ];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Oscillator> {
+        let f = Fields::of(ctx, x, "Oscillator", Self::FIELDS)?;
         let before = ctx.count();
-        let sampler = f.req(ctx, "sampler", Sampler::validate);
+        let wave = f.opt(ctx, "wave", Wave::Saw, |c, x| v::literal_str(c, x, &Wave::NAMES).map(Wave::from_str));
+        let level_db = f.opt(ctx, "level_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
+        let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
+        let octave = f.opt(ctx, "octave", 0, |c, x| v::int(c, x, Bounds::ge_le("-4", "4")));
+        let semitones = f.opt(ctx, "semitones", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-36", "36")));
+        let detune_cents = f.opt(ctx, "detune_cents", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-100", "100")));
+        let pulse_width = f.opt(ctx, "pulse_width", 50.0, |c, x| v::float(c, x, Bounds::ge_le("1", "99")));
+        let phase = f.opt(ctx, "phase", None, |c, x| v::optional(c, x, |c, x| v::float(c, x, Bounds::ge_le("0", "100"))));
+        let filter = f.opt(ctx, "filter", true, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
         }
-        Some(Instrument::Sampler(sampler?))
+        Some(Oscillator {
+            wave: wave?,
+            level_db: level_db?,
+            pan: pan?,
+            octave: octave?,
+            semitones: semitones?,
+            detune_cents: detune_cents?,
+            pulse_width: pulse_width?,
+            phase: phase?,
+            filter: filter?,
+        })
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.str("wave", self.wave.as_str(), "saw");
+        o.float("level_db", self.level_db, 0.0);
+        o.float("pan", self.pan, 0.0);
+        o.int("octave", self.octave, 0);
+        o.float("semitones", self.semitones, 0.0);
+        o.float("detune_cents", self.detune_cents, 0.0);
+        o.float("pulse_width", self.pulse_width, 50.0);
+        o.opt("phase", self.phase.map(Value::Float));
+        o.bool("filter", self.filter, true);
+        o.done()
+    }
+}
+
+impl Default for Oscillator {
+    /// A plain saw at full level, in tune, through the filter.
+    fn default() -> Self {
+        Oscillator {
+            wave: Wave::Saw,
+            level_db: 0.0,
+            pan: 0.0,
+            octave: 0,
+            semitones: 0.0,
+            detune_cents: 0.0,
+            pulse_width: 50.0,
+            phase: None,
+            filter: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SynthFilterMode {
+    Lowpass,
+    Highpass,
+    Bandpass,
+    Notch,
+}
+
+impl SynthFilterMode {
+    pub const NAMES: [&'static str; 4] = ["lowpass", "highpass", "bandpass", "notch"];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SynthFilterMode::Lowpass => "lowpass",
+            SynthFilterMode::Highpass => "highpass",
+            SynthFilterMode::Bandpass => "bandpass",
+            SynthFilterMode::Notch => "notch",
+        }
+    }
+}
+
+/// The Synth's filter: one for each voice, after the oscillators that go
+/// through it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SynthFilter {
+    pub enabled: bool,
+    pub mode: SynthFilterMode,
+    /// 12 or 24.
+    pub slope_db_per_octave: i64,
+    pub cutoff_hz: f64,
+    /// 0 is a Q of a half; 100 rings just short of self-oscillation.
+    pub resonance_percent: f64,
+    /// Gain into a soft clip before the filter.
+    pub drive_db: f64,
+    /// How far the cutoff follows the note: 100 moves it an octave an octave
+    /// from middle C.
+    pub keytrack_percent: f64,
+}
+
+impl SynthFilter {
+    const FIELDS: &'static [&'static str] = &[
+        "enabled", "mode", "slope_db_per_octave", "cutoff_hz", "resonance_percent", "drive_db", "keytrack_percent",
+    ];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<SynthFilter> {
+        let f = Fields::of(ctx, x, "SynthFilter", Self::FIELDS)?;
+        let before = ctx.count();
+        let enabled = f.opt(ctx, "enabled", true, v::boolean);
+        let mode = f.opt(ctx, "mode", SynthFilterMode::Lowpass, |c, x| {
+            v::literal_str(c, x, &SynthFilterMode::NAMES).map(|m| match m {
+                "highpass" => SynthFilterMode::Highpass,
+                "bandpass" => SynthFilterMode::Bandpass,
+                "notch" => SynthFilterMode::Notch,
+                _ => SynthFilterMode::Lowpass,
+            })
+        });
+        let slope = f.opt(ctx, "slope_db_per_octave", 12, |c, x| v::literal_int(c, x, &[12, 24]));
+        let cutoff_hz = f.opt(ctx, "cutoff_hz", 20000.0, |c, x| v::float(c, x, Bounds::ge_le("10", "20000")));
+        let resonance_percent = f.opt(ctx, "resonance_percent", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let drive_db = f.opt(ctx, "drive_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "24")));
+        let keytrack_percent = f.opt(ctx, "keytrack_percent", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(SynthFilter {
+            enabled: enabled?,
+            mode: mode?,
+            slope_db_per_octave: slope?,
+            cutoff_hz: cutoff_hz?,
+            resonance_percent: resonance_percent?,
+            drive_db: drive_db?,
+            keytrack_percent: keytrack_percent?,
+        })
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.bool("enabled", self.enabled, true);
+        o.str("mode", self.mode.as_str(), "lowpass");
+        o.int("slope_db_per_octave", self.slope_db_per_octave, 12);
+        o.float("cutoff_hz", self.cutoff_hz, 20000.0);
+        o.float("resonance_percent", self.resonance_percent, 0.0);
+        o.float("drive_db", self.drive_db, 0.0);
+        o.float("keytrack_percent", self.keytrack_percent, 0.0);
+        o.done()
+    }
+}
+
+impl Default for SynthFilter {
+    /// A lowpass open all the way, which passes the oscillators as they are.
+    fn default() -> Self {
+        SynthFilter {
+            enabled: true,
+            mode: SynthFilterMode::Lowpass,
+            slope_db_per_octave: 12,
+            cutoff_hz: 20000.0,
+            resonance_percent: 0.0,
+            drive_db: 0.0,
+            keytrack_percent: 0.0,
+        }
+    }
+}
+
+/// An envelope of the Synth: `amp` shapes each voice's level, and any other
+/// moves what the matrix wires it to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SynthEnvelope {
+    pub attack_ms: f64,
+    pub decay_ms: f64,
+    pub sustain_percent: f64,
+    pub release_ms: f64,
+}
+
+impl SynthEnvelope {
+    const FIELDS: &'static [&'static str] = &["attack_ms", "decay_ms", "sustain_percent", "release_ms"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<SynthEnvelope> {
+        let f = Fields::of(ctx, x, "SynthEnvelope", Self::FIELDS)?;
+        let before = ctx.count();
+        let ms = |ctx: &mut Ctx, name: &str, default: f64| f.opt(ctx, name, default, |c, x| v::float(c, x, Bounds::ge_le("0", "20000")));
+        let attack_ms = ms(ctx, "attack_ms", 1.0);
+        let decay_ms = ms(ctx, "decay_ms", 100.0);
+        let sustain_percent = f.opt(ctx, "sustain_percent", 100.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let release_ms = ms(ctx, "release_ms", 50.0);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(SynthEnvelope {
+            attack_ms: attack_ms?,
+            decay_ms: decay_ms?,
+            sustain_percent: sustain_percent?,
+            release_ms: release_ms?,
+        })
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.float("attack_ms", self.attack_ms, 1.0);
+        o.float("decay_ms", self.decay_ms, 100.0);
+        o.float("sustain_percent", self.sustain_percent, 100.0);
+        o.float("release_ms", self.release_ms, 50.0);
+        o.done()
+    }
+}
+
+impl Default for SynthEnvelope {
+    /// A plain envelope: at once, held, and a short release.
+    fn default() -> Self {
+        SynthEnvelope {
+            attack_ms: 1.0,
+            decay_ms: 100.0,
+            sustain_percent: 100.0,
+            release_ms: 50.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum LfoShape {
+    Sine,
+    Triangle,
+    Saw,
+    Square,
+    SampleHold,
+}
+
+impl LfoShape {
+    pub const NAMES: [&'static str; 5] = ["sine", "triangle", "saw", "square", "sample_hold"];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LfoShape::Sine => "sine",
+            LfoShape::Triangle => "triangle",
+            LfoShape::Saw => "saw",
+            LfoShape::Square => "square",
+            LfoShape::SampleHold => "sample_hold",
+        }
+    }
+}
+
+/// A low-frequency oscillator of the Synth, bipolar, which moves what the
+/// matrix wires it to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Lfo {
+    pub shape: LfoShape,
+    /// Cycles a second, unless `rate_beats` is given.
+    pub rate_hz: f64,
+    /// One cycle in so many beats at the song's tempo, in place of `rate_hz`.
+    pub rate_beats: Option<Beat>,
+    /// Where in its cycle it starts, in percent.
+    pub phase_percent: f64,
+    /// Whether each note starts the cycle over; otherwise the LFO runs from
+    /// the start of the song and every voice shares it.
+    pub retrigger: bool,
+}
+
+impl Lfo {
+    const FIELDS: &'static [&'static str] = &["shape", "rate_hz", "rate_beats", "phase_percent", "retrigger"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Lfo> {
+        let f = Fields::of(ctx, x, "Lfo", Self::FIELDS)?;
+        let before = ctx.count();
+        let shape = f.opt(ctx, "shape", LfoShape::Sine, |c, x| {
+            v::literal_str(c, x, &LfoShape::NAMES).map(|s| match s {
+                "triangle" => LfoShape::Triangle,
+                "saw" => LfoShape::Saw,
+                "square" => LfoShape::Square,
+                "sample_hold" => LfoShape::SampleHold,
+                _ => LfoShape::Sine,
+            })
+        });
+        let rate_hz = f.opt(ctx, "rate_hz", 1.0, |c, x| v::float(c, x, Bounds::ge_le("0.01", "100")));
+        let rate_beats = f.opt(ctx, "rate_beats", None, |c, x| v::optional(c, x, beat_field));
+        let phase_percent = f.opt(ctx, "phase_percent", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let retrigger = f.opt(ctx, "retrigger", false, v::boolean);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let lfo = Lfo {
+            shape: shape?,
+            rate_hz: rate_hz?,
+            rate_beats: rate_beats?,
+            phase_percent: phase_percent?,
+            retrigger: retrigger?,
+        };
+        if let Some(beats) = &lfo.rate_beats {
+            let b = exact_beat(beats).expect("validated beat");
+            if !b.is_positive() || b > BigRational::from_integer(64.into()) {
+                ctx.value_error("rate_beats must be more than 0 and at most 64");
+                return None;
+            }
+        }
+        Some(lfo)
+    }
+
+    /// Beats a cycle takes, when the rate is in beats.
+    pub fn beats_exact(&self) -> Option<BigRational> {
+        self.rate_beats.as_ref().map(exact)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.str("shape", self.shape.as_str(), "sine");
+        o.float("rate_hz", self.rate_hz, 1.0);
+        o.opt("rate_beats", self.rate_beats.as_ref().map(Beat::to_value));
+        o.float("phase_percent", self.phase_percent, 0.0);
+        o.bool("retrigger", self.retrigger, false);
+        o.done()
+    }
+}
+
+/// An entry of the Synth's modulation matrix: a source moving a target by
+/// `amount` at full modulation, in the target's unit.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Modulation {
+    pub source: String,
+    pub target: String,
+    pub amount: f64,
+}
+
+impl Modulation {
+    const FIELDS: &'static [&'static str] = &["source", "target", "amount"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Modulation> {
+        let f = Fields::of(ctx, x, "Modulation", Self::FIELDS)?;
+        let before = ctx.count();
+        let source = f.req(ctx, "source", v::string);
+        let target = f.req(ctx, "target", v::string);
+        let amount = f.req(ctx, "amount", |c, x| v::float(c, x, Bounds::ge_le("-100", "100")));
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(Modulation {
+            source: source?,
+            target: target?,
+            amount: amount?,
+        })
+    }
+
+    pub fn dump(&self, _saved: bool) -> Value {
+        let mut o = Out::new(false);
+        o.req("source", Value::str(&self.source));
+        o.req("target", Value::str(&self.target));
+        o.req("amount", Value::Float(self.amount));
+        o.done()
+    }
+}
+
+/// The Synth: a polyphonic synthesizer whose whole sound is this mapping.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Synth {
+    /// The name of the patch the sound came from; nothing reads it.
+    pub patch: Option<String>,
+    /// 1 to 16; 1 is monophonic.
+    pub voices: i64,
+    /// How long a new note slides from the last one's pitch.
+    pub glide_ms: f64,
+    /// How much a note's velocity moves its level: 100 is linear, 0 none.
+    pub velocity_percent: f64,
+    /// What random phases and the `random` source come from.
+    pub seed: i64,
+    /// One to four, by an ID the patch chooses, played in this order.
+    pub oscillators: IndexMap<String, Oscillator>,
+    pub filter: SynthFilter,
+    /// `amp` is always there and shapes the level; up to three more.
+    pub envelopes: IndexMap<String, SynthEnvelope>,
+    /// Up to four.
+    pub lfos: IndexMap<String, Lfo>,
+    pub modulation: Vec<Modulation>,
+    /// Up to eight knobs, 0 to 100, that do nothing but through the matrix.
+    pub macros: IndexMap<String, f64>,
+}
+
+impl Synth {
+    const FIELDS: &'static [&'static str] = &[
+        "patch", "voices", "glide_ms", "velocity_percent", "seed", "oscillators", "filter", "envelopes", "lfos",
+        "modulation", "macros",
+    ];
+    pub const MAX_OSCILLATORS: usize = 4;
+    pub const MAX_ENVELOPES: usize = 4;
+    pub const MAX_LFOS: usize = 4;
+    pub const MAX_MACROS: usize = 8;
+    pub const MAX_MODULATION: usize = 32;
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Synth> {
+        let f = Fields::of(ctx, x, "Synth", Self::FIELDS)?;
+        let before = ctx.count();
+        let patch = f.opt(ctx, "patch", None, opt_string);
+        let voices = f.opt(ctx, "voices", 8, |c, x| v::int(c, x, Bounds::ge_le("1", "16")));
+        let glide_ms = f.opt(ctx, "glide_ms", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "5000")));
+        let velocity_percent = f.opt(ctx, "velocity_percent", 100.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let seed = f.opt(ctx, "seed", 0, |c, x| v::int(c, x, Bounds::ge_le("0", "4294967295")));
+        let oscillators = f.req(ctx, "oscillators", |c, x| id_dict(c, x, Oscillator::validate));
+        let filter = f.opt(ctx, "filter", SynthFilter::default(), SynthFilter::validate);
+        let envelopes = f.opt(ctx, "envelopes", IndexMap::new(), |c, x| id_dict(c, x, SynthEnvelope::validate));
+        let lfos = f.opt(ctx, "lfos", IndexMap::new(), |c, x| id_dict(c, x, Lfo::validate));
+        let modulation = f.opt(ctx, "modulation", Vec::new(), |c, x| {
+            v::list(c, x, 0, Some(Self::MAX_MODULATION), Modulation::validate)
+        });
+        let macros = f.opt(ctx, "macros", IndexMap::new(), |c, x| {
+            id_dict(c, x, |c, x| v::float(c, x, Bounds::ge_le("0", "100")))
+        });
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let mut synth = Synth {
+            patch: patch?,
+            voices: voices?,
+            glide_ms: glide_ms?,
+            velocity_percent: velocity_percent?,
+            seed: seed?,
+            oscillators: oscillators?,
+            filter: filter?,
+            envelopes: envelopes?,
+            lfos: lfos?,
+            modulation: modulation?,
+            macros: macros?,
+        };
+        // The amp envelope is always there, first.
+        if !synth.envelopes.contains_key("amp") {
+            synth.envelopes.shift_insert(0, "amp".into(), SynthEnvelope::default());
+        }
+        let check = || -> Result<(), String> {
+            let count = |what: &str, n: usize, least: usize, most: usize| {
+                if n < least || n > most {
+                    return Err(format!("A synth has {least} to {most} {what}, not {n}"));
+                }
+                Ok(())
+            };
+            count("oscillators", synth.oscillators.len(), 1, Self::MAX_OSCILLATORS)?;
+            count("envelopes", synth.envelopes.len(), 1, Self::MAX_ENVELOPES)?;
+            count("LFOs", synth.lfos.len(), 0, Self::MAX_LFOS)?;
+            count("macros", synth.macros.len(), 0, Self::MAX_MACROS)?;
+            rules::synth_references(&synth)
+        };
+        if let Err(msg) = check() {
+            ctx.value_error(msg);
+            return None;
+        }
+        Some(synth)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.opt("patch", opt_str(&self.patch));
+        o.int("voices", self.voices, 8);
+        o.float("glide_ms", self.glide_ms, 0.0);
+        o.float("velocity_percent", self.velocity_percent, 100.0);
+        o.int("seed", self.seed, 0);
+        o.req("oscillators", str_map(&self.oscillators, saved, Oscillator::dump));
+        let filter = self.filter.dump(saved);
+        if !(saved && self.filter == SynthFilter::default()) {
+            o.req("filter", filter);
+        }
+        // The plain amp envelope alone is what a patch has when it says nothing.
+        let plain_amp = self.envelopes.len() == 1 && self.envelopes.get("amp") == Some(&SynthEnvelope::default());
+        if !(saved && plain_amp) {
+            o.coll("envelopes", str_map(&self.envelopes, saved, SynthEnvelope::dump));
+        }
+        o.coll("lfos", str_map(&self.lfos, saved, Lfo::dump));
+        o.coll("modulation", list(&self.modulation, saved, Modulation::dump));
+        o.coll(
+            "macros",
+            Value::Dict(self.macros.iter().map(|(k, x)| (Key::str(k), Value::Float(*x))).collect()),
+        );
+        o.done()
+    }
+}
+
+impl Default for Synth {
+    /// The plain saw: one oscillator, the filter open, the plain envelope.
+    fn default() -> Self {
+        let mut oscillators = IndexMap::new();
+        oscillators.insert("a".to_string(), Oscillator::default());
+        let mut envelopes = IndexMap::new();
+        envelopes.insert("amp".to_string(), SynthEnvelope::default());
+        Synth {
+            patch: None,
+            voices: 8,
+            glide_ms: 0.0,
+            velocity_percent: 100.0,
+            seed: 0,
+            oscillators,
+            filter: SynthFilter::default(),
+            envelopes,
+            lfos: IndexMap::new(),
+            modulation: Vec::new(),
+            macros: IndexMap::new(),
+        }
+    }
+}
+
+/// `dict[ID, T]`: a mapping whose keys are IDs, as a synth's parts are.
+fn id_dict<T>(ctx: &mut Ctx, x: &Value, item: impl FnMut(&mut Ctx, &Value) -> Option<T>) -> Option<IndexMap<String, T>> {
+    let out = v::str_dict(ctx, x, item)?;
+    if let Some(bad) = out.keys().find(|k| !ID_RE.is_match(k)) {
+        ctx.value_error(format!("{} is not an ID; use letters, digits, - and _, starting with a letter", crate::pyfmt::str_repr(bad)));
+        return None;
+    }
+    Some(out)
+}
+
+/// What a MIDI track's notes play: a sampler, or the Synth.
+#[derive(Clone, Debug)]
+pub enum Instrument {
+    Sampler(Sampler),
+    Synth(Synth),
+}
+
+impl Instrument {
+    const FIELDS: &'static [&'static str] = &["sampler", "synth"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Instrument> {
+        let f = Fields::of(ctx, x, "Instrument", Self::FIELDS)?;
+        let before = ctx.count();
+        let sampler = f.opt(ctx, "sampler", None, |c, x| v::optional(c, x, Sampler::validate));
+        let synth = f.opt(ctx, "synth", None, |c, x| v::optional(c, x, Synth::validate));
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        match (sampler?, synth?) {
+            (Some(s), None) => Some(Instrument::Sampler(s)),
+            (None, Some(s)) => Some(Instrument::Synth(s)),
+            (None, None) => {
+                ctx.value_error("An instrument is a sampler or a synth");
+                None
+            }
+            (Some(_), Some(_)) => {
+                ctx.value_error("An instrument is a sampler or a synth, not both");
+                None
+            }
+        }
+    }
+
+    /// An instrument from a value on its own, as validation reads it: for
+    /// what checks an instrument before the song around it is validated.
+    pub fn parse(x: &Value) -> Result<Instrument, crate::validate::ValidationError> {
+        let mut ctx = Ctx::default();
+        match Self::validate(&mut ctx, x) {
+            Some(i) if ctx.errors.is_empty() => Ok(i),
+            _ => Err(crate::validate::ValidationError { errors: ctx.errors }),
+        }
     }
 
     pub fn kind(&self) -> &'static str {
         match self {
             Instrument::Sampler(_) => "sampler",
+            Instrument::Synth(_) => "synth",
         }
     }
 
     pub fn sampler(&self) -> Option<&Sampler> {
         match self {
             Instrument::Sampler(s) => Some(s),
+            Instrument::Synth(_) => None,
+        }
+    }
+
+    pub fn synth(&self) -> Option<&Synth> {
+        match self {
+            Instrument::Synth(s) => Some(s),
+            Instrument::Sampler(_) => None,
         }
     }
 
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         match self {
-            Instrument::Sampler(s) => o.req("sampler", s.dump(saved)),
+            Instrument::Sampler(s) => {
+                o.req("sampler", s.dump(saved));
+                o.opt("synth", None);
+            }
+            Instrument::Synth(s) => {
+                o.opt("sampler", None);
+                o.req("synth", s.dump(saved));
+            }
         }
         o.done()
     }
@@ -1068,6 +1678,10 @@ pub struct Midi {
 impl Midi {
     pub fn sampler(&self) -> Option<&Sampler> {
         self.instrument.as_ref().and_then(Instrument::sampler)
+    }
+
+    pub fn synth(&self) -> Option<&Synth> {
+        self.instrument.as_ref().and_then(Instrument::synth)
     }
 }
 
