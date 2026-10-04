@@ -157,7 +157,7 @@ front first.
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest. Clips of a muted track are gray, and selected clips are outlined |
 | Automation | Under a row whose A mark is on: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
 | Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
-| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the sampler's pads and the notes that play each, or No instrument |
+| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
 | Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note. While the clip plays, a line shows where |
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play. Beside it the clip's ID, its length, the grid, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
@@ -221,7 +221,11 @@ front first.
 | Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
 | Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with Option, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
 | Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with Option, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |
-| Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a sampler that plays the sample at every note's pitch, as it is at middle C (C4), in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
+| Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a Sampler that plays the sample at every note's pitch, as it is at middle C (C4), in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
+| Drag one onto the Sampler in the device panel | Loads it: the keys play it at every note's pitch, as it is at middle C. Over a sample the Sampler has, it takes its place and keeps the pad's mode, level, pan, transpose, attack, release and reverse; the start and the end go back to the whole file. A MIDI track with no instrument gets a Sampler of it. One undo step |
+| Drag a marker on the Sampler's waveform; type Start or End | Moves where in the file the keys play from or to, no further than the file or the other marker, heard when the drag ends. An empty End plays to the file's end |
+| Type in Root; click Measure | Sets the note the sample is at, as C4 or 60, so the keys play it from there; empty plays it as it is at middle C. Measure sets it to the pitch `daw samples analyze` finds, and says so when the file has no one pitch |
+| Choose a mode; drag Transpose, Attack, Release, Level or Pan; tick Reverse | Sets the Sampler's pad, as `daw pad set` does; each is heard when the drag ends, after a 10 ms dip |
 | Drag a bar or type a value in the Audio Clip panel | Sets the clip's gain, fades, fade curve, tempo or stretch |
 
 The grid is the finest of bars, beats, eighths and sixteenths that the zoom has
@@ -323,7 +327,7 @@ between the last of them and the picture:
 | `--drag X1,Y1,X2,Y2` | Presses, moves in two steps and lets go |
 | `--key KEY` | Presses `space`, `return`, `delete`, `escape`, `left`, `right`, `up`, `down` or a letter, after any of `cmd+`, `shift+` and `opt+`: `--key shift+cmd+z` |
 | `--type TEXT` | Types, as into a name |
-| `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there |
+| `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there. In the detail panel, while it shows the devices of a MIDI track with a Sampler or no instrument, the file loads the Sampler |
 | `--wait SECONDS` | Leaves time, such as for a `daw` command from a terminal |
 
 Run `daw` commands against the song meanwhile to see them land in the picture.
@@ -348,7 +352,11 @@ audio clip's fade handles are in the top third of the waveform, at the corners
 until it has fades. Install
 Command Line Tool asks in an alert, which also waits for a person, and so do
 Save As… and the question about an Untitled project: `daw move` and `daw copy`
-do what Save As… does.
+do what Save As… does. A MIDI track's Sampler panel starts 8 points into the
+devices, at x = 220, with its title strip 24 points high; its waveform is
+204 by 92 points from 6 points inside the panel, so a marker at the file's
+start is at x = 226 and one at its end at x = 430, and Root's Measure button
+is at the panel's right, about x = 640 in the first row.
 
 ## Layout
 
@@ -362,7 +370,9 @@ do what Save As… does.
 | `Sources/AAWApp/TextLines.swift` | Lines of text laid out once and drawn many times |
 | `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid and what a click or drag means, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
-| `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, and the bar a number is dragged with |
+| `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, a MIDI track's instrument, and the bar a number is dragged with |
+| `Sources/AAWApp/SamplerPanel.swift` | The Sampler device: its waveform with the markers for the part the keys play, an AppKit view, the root note and Measure, the pad's fields, and what a drop on it loads |
+| `Sources/AAWApp/SamplerLayout.swift` | Where the Sampler's markers are on its waveform, which one a point takes hold of and how far a drag goes, tested in `Tests` |
 | `Sources/AAWApp/PatternEditor.swift` | The pattern editor, an AppKit view, and the fields beside it |
 | `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/NoteEditor.swift` | The piano roll, an AppKit view, and the fields beside it |
@@ -383,7 +393,9 @@ do what Save As… does.
 - A waveform shows a track's sampler before its effects, fader and sends, with
   full scale at the clip's height; louder is drawn as full scale.
 - A pad's own settings, such as its level, tuning and whether it is held, are
-  set with `daw pad set`; the device panel lists a track's pads.
+  set with `daw pad set` on a track of patterns and in a kit of several pads
+  on a MIDI track; the device panel lists those pads. The Sampler's one pad
+  is set in its panel.
 - A new track has no pads until a sample is added to it, and a sample added
   from the browser plays at its own tempo: a loop is fitted to the song with
   `daw pad set SONG TRACK PAD --source-bpm BPM`, and an audio clip with the
@@ -397,9 +409,11 @@ do what Save As… does.
 - A note is not heard as it is drawn or clicked, and velocity is set in the
   fields beside the piano roll, not in a lane under it. The piano roll zooms
   across and not up and down.
-- A sample on a MIDI track's header makes a sampler of one pad on every note,
-  played as it is at middle C whatever its pitch; its root note is set with
-  `daw set`, and a kit of pads on notes is made with `daw instrument map`.
+- A sample on a MIDI track's header or its Sampler makes a sampler of one pad
+  on every note, played as it is at middle C whatever its pitch until Root is
+  set; a kit of pads on notes is made with `daw instrument map`. The Sampler
+  has no note range, glide, sustain loop or filter, and is not played from a
+  keyboard. Its root note is the sample's, so every pad of that file follows.
 - What Copy took is kept in the window, not on the system's clipboard, and is
   pasted into the same song.
 - A row of notes shows the notes its events play with two more either side; a

@@ -39,6 +39,10 @@ const PROJECT: &[(&str, &str)] = &[
     ("limits", "No groups, synths or recording."),
 ];
 
+const SAMPLER_DEVICE: &[(&str, &str)] = &[
+    ("device", "The app's Sampler, dragged from the browser's Instruments onto a MIDI track, is the track's sampler instrument. Empty it is {sampler: {pads: {}, map: []}}, which plays nothing. A sample dropped on it loads one pad on every note at its pitch, as it is at middle C: {sampler: {pads: {NAME: {sample: S}}, map: [{notes: [0, 127], pad: NAME, pitched: true}]}}, the same as a sample dropped on the track's header makes. Its panel shows the file's waveform and sets the pad's mode, gain_db, pan, transpose, start_seconds, end_seconds, attack_ms, release_ms and reverse, which daw pad set SONG TRACK NAME sets too, and the sample's root_note, which daw set SONG samples.S.root_note NOTE sets; Measure in the panel sets it to the pitch daw samples analyze finds. A sampler of several pads, as daw instrument map makes, is listed in the panel and not drawn as the device."),
+];
+
 const MIDI: &[(&str, &str)] = &[
     ("tracks", "A track with type: midi has an instrument and note clips under clips, and no pads, pattern clips or audio clips. Its gain, pan, effects, sends and automation are any track's. daw track add SONG ID --type midi makes one with no instrument."),
     ("clips", "A note clip {id, at, length_beats, notes} owns its notes: at is the song beat it starts on, and each note's at is beats from the clip's start. A copy (daw clip duplicate) owns copies of the notes, so changing one clip changes nothing in another. Clips do not repeat; duplicate one to play it again."),
@@ -192,7 +196,7 @@ pub fn describe(topic: &str) -> Option<Json> {
         "project" => json!({"schema": schema(), "semantics": texts(PROJECT)}),
         "sampler" => json!({
             "schema": {"pad": model("Pad"), "event": model("Event"), "sample": model("Sample")},
-            "semantics": texts(PROJECT),
+            "semantics": texts(&[PROJECT, SAMPLER_DEVICE].concat()),
         }),
         "midi" => json!({
             "schema": {"track": model("MidiTrack"), "clip": model("NoteClip"), "instrument": model("Instrument")},

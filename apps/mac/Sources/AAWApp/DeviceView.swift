@@ -247,10 +247,6 @@ struct DeviceView: View {
             HStack(alignment: .top, spacing: 8) {
                 if let track = chain.track, track.midi {
                     InstrumentPanel(model: model, track: track)
-                        .onDrop(of: [Browser.deviceType + ".sampler"], isTargeted: nil) { _ in
-                            model.addBrowserDevice("sampler", to: chain.row)
-                            return true
-                        }
                 }
                 ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
                     DeviceInsertion(model: model, row: chain.row, index: UInt32(index))
@@ -359,24 +355,32 @@ private struct ChainHeader: View {
     }
 }
 
-/// A MIDI track's instrument, first in its chain: the sampler's pads and the
-/// notes that play each, and the mark that takes it off. The notes are kept
-/// whatever is done here. A sample dropped on the track's header becomes the
-/// instrument, in place of the one it had.
+/// A MIDI track's instrument, first in its chain, and the mark that takes it
+/// off. A sampler that is empty or one pad on every note is the Sampler
+/// device, drawn by `SamplerPanel`; a sampler of several pads lists them and
+/// the notes that play each. The notes are kept whatever is done here. A
+/// sample dropped here, or on the track's header, becomes the instrument's,
+/// in place of the one it had.
 private struct InstrumentPanel: View {
     let model: SongModel
     let track: TrackView
+    @State private var targeted = false
 
     /// Notes as a range of names: `C-1–G9`, or one note, `C2`.
     private func notes(_ m: NoteMapView) -> String {
         m.low == m.high ? noteName(midi: m.low) : "\(noteName(midi: m.low))–\(noteName(midi: m.high))"
     }
 
+    private var title: String {
+        if track.sampler != nil { return "Sampler" }
+        return track.instrument.map(readable) ?? "No instrument"
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 5) {
                 Image(systemName: "pianokeys").foregroundStyle(.secondary)
-                Text(track.instrument.map(readable) ?? "No instrument").font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 2)
                 if track.instrument != nil {
                     Button {
@@ -392,43 +396,45 @@ private struct InstrumentPanel: View {
             .padding(.horizontal, 7)
             .frame(height: 24)
             .background(Color(nsColor: Theme.gray(0.24)))
-            ScrollView {
-                VStack(alignment: .leading, spacing: 3) {
-                    if track.instrument != nil && track.pads.isEmpty {
-                        Text("Empty Sampler. Drop a sample on this track's header to play it across the keys.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    if track.instrument == nil {
-                        Text("The notes play nothing. Drop a sample on \(track.id)'s header, or add one with + in the samples, and a sampler plays it on every note. Ask the agent for a drum kit.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                    ForEach(Array(track.map.enumerated()), id: \.offset) { _, m in
-                        HStack(spacing: 4) {
-                            Text(notes(m)).font(.system(size: 10).monospacedDigit()).frame(width: 64, alignment: .leading)
-                            Text(m.pad).font(.system(size: 10, weight: .medium)).lineLimit(1)
-                            Spacer(minLength: 0)
-                            Text(m.pitched ? "pitched" : "as it is").font(.system(size: 9)).foregroundStyle(.tertiary)
+            if let sampler = track.sampler {
+                SamplerPanel(model: model, track: track, sampler: sampler)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 3) {
+                        if track.instrument == nil {
+                            Text("The notes play nothing. Drop a sample here or on \(track.id)'s header, or add one with + in the samples, and a Sampler plays it on every note. Ask the agent for a drum kit.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
-                        .help(track.pads.first { $0.name == m.pad }.map { "Pad \(m.pad) plays sample \($0.sample)" } ?? m.pad)
+                        ForEach(Array(track.map.enumerated()), id: \.offset) { _, m in
+                            HStack(spacing: 4) {
+                                Text(notes(m)).font(.system(size: 10).monospacedDigit()).frame(width: 64, alignment: .leading)
+                                Text(m.pad).font(.system(size: 10, weight: .medium)).lineLimit(1)
+                                Spacer(minLength: 0)
+                                Text(m.pitched ? "pitched" : "as it is").font(.system(size: 9)).foregroundStyle(.tertiary)
+                            }
+                            .help(track.pads.first { $0.name == m.pad }.map { "Pad \(m.pad) plays sample \($0.sample)" } ?? m.pad)
+                        }
+                        if track.instrument != nil, !track.pads.isEmpty, track.map.isEmpty {
+                            Text("No note plays a pad yet: `daw instrument map` gives the pads notes.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
-                    if track.instrument != nil, !track.pads.isEmpty, track.map.isEmpty {
-                        Text("No note plays a pad yet: `daw instrument map` gives the pads notes.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    .padding(6)
                 }
-                .padding(6)
             }
             Spacer(minLength: 0)
         }
-        .frame(width: 216, height: DetailView.height - 16, alignment: .top)
+        .frame(width: track.sampler == nil ? 216 : SamplerPanel.width, height: DetailView.height - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .onDrop(of: SamplerDrop.types, isTargeted: $targeted) { providers in
+            SamplerDrop.land(providers, model: model, track: track)
+        }
     }
 }
 
@@ -593,14 +599,26 @@ private struct LaneMark: View {
     }
 }
 
-/// The control a field's kind calls for.
-private struct FieldControl: View {
+/// The control a field's kind calls for. `edit` is the edit that sets the
+/// field to a value: an effect's, or a Sampler's pad's.
+struct FieldControl: View {
     let model: SongModel
-    let effect: UInt64
     let field: FieldView
+    let edit: (FieldValue) -> Edit
+
+    /// A control for a field of an effect.
+    init(model: SongModel, effect: UInt64, field: FieldView) {
+        self.init(model: model, field: field) { .effectSet(effect: effect, field: field.name, value: $0) }
+    }
+
+    init(model: SongModel, field: FieldView, edit: @escaping (FieldValue) -> Edit) {
+        self.model = model
+        self.field = field
+        self.edit = edit
+    }
 
     private func set(_ value: FieldValue) {
-        model.edit(.effectSet(effect: effect, field: field.name, value: value))
+        model.edit(edit(value))
     }
 
     private var text: String {
@@ -625,8 +643,8 @@ private struct FieldControl: View {
                     .labelsHidden()
                     .help(field.value == .absent ? "Off" : "On")
                 }
-                KnobBar(model: model, spec: BarSpec(field)) { [effect, name = field.name] value in
-                    .effectSet(effect: effect, field: name, value: .number(value: value))
+                KnobBar(model: model, spec: BarSpec(field)) { [edit] value in
+                    edit(.number(value: value))
                 }
             }
         case .integer where !field.choices.isEmpty, .choice:

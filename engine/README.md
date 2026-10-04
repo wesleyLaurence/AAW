@@ -215,7 +215,15 @@ pads and map, and its note clips, each with its notes and their handles. The
 person's note edits work out exact beats from the piano roll's grid as typed,
 so a note added or moved on a grid of thirds is on its third; Copy takes clips
 or notes as they are, so that Paste works after the originals are gone. A
-sample added to a MIDI track becomes its instrument. A track's audio clips are in the arrangement beside its pattern clips, each to
+sample added to a MIDI track becomes its instrument. A sampler that is empty
+or one pad on every note is also in the arrangement as the Sampler device
+(`SamplerView`): its pad's fields as controls need them, from
+`aaw_model::describe::PAD`, the sample's root note, and its file's identity,
+length and the seconds played; the file's peaks are sent as an audio clip's
+are. The edits load a sample into it as one batch, carrying the pad's
+settings over, set a field of its pad, and set or take off the sample's root
+note as typed, `C4` or `60`; `library_pitch` measures a file's pitch for it
+through `daw samples analyze`. A track's audio clips are in the arrangement beside its pattern clips, each to
 where it leaves and with how long it sounds after that, and so are the files
 they play (`files.rs`): each file's length, and the beats of the map `daw
 samples beats` left beside it, when that map is of the sample the song lists.
@@ -224,7 +232,8 @@ end is trimmed to the fade out's length before the beat, and a longer fade out
 starts earlier. An edit that would end an audio clip past the song's end by
 more than the end fade lengthens the song to the end of that bar, in the same
 step; `daw` commands leave the length to whoever sends them.
-What a device panel shows of an effect type comes from `aaw_model::describe`.
+What a device panel shows of an effect type, or of the Sampler's pad, comes
+from `aaw_model::describe`.
 Such a host is reached through its socket like any other, and compiles each
 revision as it lands so that play starts at once.
 

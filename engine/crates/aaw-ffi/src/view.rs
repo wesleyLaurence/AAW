@@ -219,7 +219,37 @@ pub struct TrackView {
     pub instrument: Option<String>,
     /// Which notes play which of a MIDI track's sampler's pads.
     pub map: Vec<NoteMapView>,
+    /// The instrument as the Sampler device, when it is one.
+    pub sampler: Option<SamplerView>,
     pub note_clips: Vec<NoteClipView>,
+}
+
+/// A MIDI track's Sampler device: a sampler that is empty, or one pad played
+/// on every note at its pitch, as the app's panel draws it. A sampler of
+/// several pads, such as a kit, is listed instead and has none of this.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SamplerView {
+    /// The pad and its sample, once a sample is loaded, and the sample's
+    /// file, relative to the song's folder, for measuring its pitch.
+    pub pad: Option<String>,
+    pub sample: Option<String>,
+    pub path: String,
+    /// The pad's fields as the panel's controls need them, from the model's
+    /// description of a pad; none while the Sampler is empty. The start and
+    /// the end go as far as the file does.
+    pub fields: Vec<FieldView>,
+    /// The sample's root note as a MIDI number and as the song writes it,
+    /// when it has one; without one the keys play it as it is at middle C.
+    pub root: Option<i32>,
+    pub root_text: String,
+    /// The identity of the sample's file among the arrangement's `files`,
+    /// or 0 when there is none or it cannot be read, and its length.
+    pub file: u64,
+    pub seconds: f64,
+    /// The seconds of the file the pad plays from and to; the end is the
+    /// file's when the pad has none of its own.
+    pub start_seconds: f64,
+    pub end_seconds: f64,
 }
 
 /// Notes a sampler's pad plays: from `low` to `high`, inclusive, at their
@@ -643,6 +673,111 @@ pub fn root(p: &Project, sample: &str) -> Option<i32> {
     midi(note).ok().map(|n| n as i32)
 }
 
+/// The pad a MIDI track's sampler plays as the Sampler device: Some(None)
+/// for an empty sampler, Some(the pad) for one pad on every note at its
+/// pitch, and None for a sampler of several pads or no sampler at all.
+pub fn device(track: &aaw_model::Track) -> Option<Option<(&str, &aaw_model::Pad)>> {
+    let s = track.midi.as_ref()?.sampler()?;
+    if s.pads.is_empty() && s.map.is_empty() {
+        return Some(None);
+    }
+    let (name, pad) = s.pads.iter().next().filter(|_| s.pads.len() == 1)?;
+    match &s.map[..] {
+        [m] if m.low == 0 && m.high == 127 && m.pitched && &m.pad == name => Some(Some((name, pad))),
+        _ => None,
+    }
+}
+
+/// The sample a track's Sampler device plays, when it has one.
+pub fn device_sample(track: &aaw_model::Track) -> Option<&str> {
+    device(track).flatten().map(|(_, pad)| pad.sample.as_str())
+}
+
+/// A pad's field as the song holds it.
+fn pad_value(pad: &aaw_model::Pad, name: &str) -> Option<Value> {
+    Some(match name {
+        "mode" => Value::str(pad.mode.as_str()),
+        "gain_db" => Value::Float(pad.gain_db),
+        "pan" => Value::Float(pad.pan),
+        "transpose" => Value::Float(pad.transpose),
+        "start_seconds" => Value::Float(pad.start_seconds),
+        "end_seconds" => Value::Float(pad.end_seconds?),
+        "attack_ms" => Value::Float(pad.attack_ms),
+        "release_ms" => Value::Float(pad.release_ms),
+        "reverse" => Value::Bool(pad.reverse),
+        _ => return None,
+    })
+}
+
+/// A track's Sampler device, with its file at `seconds` long and `file` its
+/// identity, when the file can be read.
+fn sampler(p: &Project, track: &aaw_model::Track, file: Option<(u64, f64)>) -> Option<SamplerView> {
+    let loaded = device(track)?;
+    let (identity, seconds) = file.unwrap_or((0, 0.0));
+    let Some((name, pad)) = loaded else {
+        return Some(SamplerView {
+            pad: None,
+            sample: None,
+            path: String::new(),
+            fields: Vec::new(),
+            root: None,
+            root_text: String::new(),
+            file: 0,
+            seconds: 0.0,
+            start_seconds: 0.0,
+            end_seconds: 0.0,
+        });
+    };
+    let fields = describe::PAD
+        .iter()
+        .map(|f| {
+            let value = pad_value(pad, f.name);
+            FieldView {
+                name: f.name.to_string(),
+                label: f.label.to_string(),
+                kind: match f.kind {
+                    Kind::Number => FieldKind::Number,
+                    Kind::Choice => FieldKind::Choice,
+                    Kind::Flag => FieldKind::Flag,
+                    Kind::Integer => FieldKind::Integer,
+                    Kind::Beats => FieldKind::Beats,
+                    Kind::Track => FieldKind::Track,
+                },
+                value: field_value(value.as_ref()),
+                min: f.min,
+                // The start and the end go as far as the file does.
+                max: if f.max > 0.0 { f.max } else { seconds },
+                unit: f.unit.to_string(),
+                log: f.log,
+                choices: f.choices.iter().map(|c| c.to_string()).collect(),
+                optional: f.default == Initial::Absent,
+                initial: initial(if f.default == Initial::Absent { Initial::Number(seconds) } else { f.default }),
+                live: !f.structural,
+                param: None,
+                lane: None,
+                band: None,
+            }
+        })
+        .collect();
+    let root_text = p.samples.get(&pad.sample).and_then(|s| s.root_note.clone()).unwrap_or_default();
+    Some(SamplerView {
+        pad: Some(name.to_string()),
+        sample: Some(pad.sample.clone()),
+        path: p.samples.get(&pad.sample).map(|s| s.path.clone()).unwrap_or_default(),
+        fields,
+        root: root(p, &pad.sample),
+        root_text,
+        file: identity,
+        seconds,
+        start_seconds: pad.start_seconds,
+        end_seconds: match pad.end_seconds {
+            Some(end) if identity == 0 => end,
+            Some(end) => end.min(seconds),
+            None => seconds,
+        },
+    })
+}
+
 /// A step's level as a row writes it: `.`, a digit or `x`.
 pub fn step_level(c: char) -> u8 {
     match c {
@@ -734,7 +869,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         }
         Some(found)
     };
-    let tracks = p
+    let tracks: Vec<TrackView> = p
         .tracks
         .iter()
         .enumerate()
@@ -778,6 +913,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     .collect(),
                 midi: t.midi.is_some(),
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
+                sampler: sampler(p, t, device_sample(t).and_then(&mut file)),
                 map: t
                     .midi
                     .as_ref()

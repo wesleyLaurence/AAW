@@ -416,7 +416,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             NSApp.sendEvent(event)
         case .drop(let file, let p):
             // No drag can be made up, so the file is handed to where a drag
-            // that ended at the point would have left it.
+            // that ended at the point would have left it: in the detail
+            // panel, the Sampler it shows.
+            if p.y >= content.bounds.height - DetailView.height, let model = songs.first?.model, model.dropOnDevices(file: file) {
+                return
+            }
             func arrangement(in view: NSView) -> ArrangementView? {
                 (view as? ArrangementView) ?? view.subviews.lazy.compactMap(arrangement).first
             }

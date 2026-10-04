@@ -846,6 +846,56 @@ public final class SongModel {
         }
     }
 
+    /// Loads a sample file into the Sampler on a MIDI track, or gives a
+    /// track with no instrument a Sampler of it: the keys then play it at
+    /// every note's pitch, as it is at middle C. The file is copied into the
+    /// project first, and the pad is named after `name`.
+    func loadSampler(path: String, name: String, into track: UInt64) {
+        copy(path, note: nil) { model, asset in
+            model.edit(.samplerLoad(track: track, asset: asset, name: name)) { [weak model] _ in
+                model?.select(row: .track(track))
+                model?.detail = .devices
+            }
+        }
+    }
+
+    /// Lands a file dropped on the detail panel: into the Sampler it shows,
+    /// or a MIDI track with no instrument. False when the panel shows no
+    /// such track, or the file is not audio.
+    @discardableResult
+    func dropOnDevices(file url: URL) -> Bool {
+        guard detail == .devices, let track = deviceChain?.track, track.midi, track.sampler != nil || track.instrument == nil,
+              Browser.extensions.contains(url.pathExtension.lowercased()) else { return false }
+        loadSampler(path: url.path, name: url.deletingPathExtension().lastPathComponent, into: track.key)
+        return true
+    }
+
+    /// Sets the root note of the Sampler's sample to the pitch `daw samples
+    /// analyze` measures from its file, off the main thread; a file with no
+    /// one pitch is refused with the reason. `done` is called either way.
+    func measureSamplerRoot(track: UInt64, done: @escaping @MainActor () -> Void) {
+        guard let sampler = arrangement.tracks.first(where: { $0.key == track })?.sampler, let sample = sampler.sample else { return done() }
+        guard let library = browser.library else {
+            refuse("The library index was not found, so the pitch cannot be measured")
+            return done()
+        }
+        let file = url.deletingLastPathComponent().appendingPathComponent(sampler.path).path
+        imports.async { [weak self] in
+            let measured = Result { try libraryPitch(db: library, path: file) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    defer { done() }
+                    guard let self else { return }
+                    switch measured {
+                    case .failure(let error): self.refuse(Self.reason(error))
+                    case .success(nil): self.refuse("No one pitch was measured in \(sample): it plays as it is at middle C")
+                    case .success(let note?): self.edit(.samplerRoot(track: track, note: note))
+                    }
+                }
+            }
+        }
+    }
+
     /// Adds a sample file to the song as an audio clip at a beat: on `track`,
     /// or with no track on a new one after the others, named after `name`.
     /// The file is copied into the project first, and the song grows to hold

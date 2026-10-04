@@ -131,9 +131,12 @@ impl Worker {
                 })
             })
             .collect();
+        // The files audio clips play, and the ones Sampler devices show.
         let mut played: Vec<(u64, PathBuf)> = Vec::new();
-        for clip in doc.project.tracks.iter().flat_map(|t| &t.audio) {
-            let Some(sample) = doc.project.samples.get(&clip.sample) else { continue };
+        let clips = doc.project.tracks.iter().flat_map(|t| &t.audio).map(|c| c.sample.as_str());
+        let samplers = doc.project.tracks.iter().filter_map(crate::view::device_sample);
+        for name in clips.chain(samplers) {
+            let Some(sample) = doc.project.samples.get(name) else { continue };
             let Some(file) = files.of(directory, sample) else { continue };
             if played.iter().all(|(identity, _)| *identity != file.identity) {
                 played.push((file.identity, directory.join(&sample.path)));
