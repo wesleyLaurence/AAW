@@ -546,7 +546,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Zoom Out", #selector(SongWindowController.zoomOut(_:)), "-"),
             item("Zoom to Fit", #selector(SongWindowController.zoomToFit(_:)), "0"),
             .separator(),
-            item("Samples", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
+            item("Browser", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
             item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
             item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]),

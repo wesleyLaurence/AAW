@@ -29,7 +29,7 @@ struct DeviceChain {
     /// The track, for a MIDI track's instrument.
     var track: TrackView? = nil
     /// The song's effect types, for adding one.
-    static let kinds = ["filter", "eq", "compressor", "limiter", "delay", "reverb"]
+    static let kinds = browserEffects()
 }
 
 /// What the detail panel shows: a row's devices, or the clip last selected,
@@ -785,6 +785,30 @@ public final class SongModel {
             index = at + 1
         }
         add(.trackAdd(index: UInt32(index), midi: midi)) { .track($0) }
+    }
+
+    func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
+        if kind != "sampler" { return DeviceChain.kinds.contains(kind) && row != nil }
+        guard let row else { return true }
+        guard case .track(let key) = row else { return false }
+        return arrangement.tracks.first { $0.key == key }?.midi == true
+    }
+
+    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil) {
+        guard canAddBrowserDevice(kind, to: row) else { return }
+        if kind == "sampler" {
+            let track: UInt64?
+            if case .track(let key) = row { track = key } else { track = nil }
+            edit(.instrumentAdd(track: track)) { [weak self] made in
+                guard let self else { return }
+                if let key = track ?? made.first { self.select(row: .track(key)) }
+                self.detail = .devices
+            }
+        } else if let row {
+            edit(.effectAdd(row: row.row, kind: kind, index: index))
+            select(row: row)
+            detail = .devices
+        }
     }
 
     public func addReturn() {

@@ -1579,8 +1579,14 @@ fn the_library_is_searched_and_a_sample_copied_in() {
     aaw_host::python::run("samples", &["--db", &db, "scan", &library.to_string_lossy()]).unwrap();
     aaw_host::python::run("samples", &["--db", &db, "analyze", "--all"]).unwrap();
     let song_path = path.to_string_lossy().into_owned();
-    assert_eq!(aaw_ffi::library::library_path(song_path.clone()), Some(db.clone()));
+    assert_eq!(aaw_ffi::library::library_path(song_path.clone()), Some(aaw_host::project::data_dir().join("library.sqlite").to_string_lossy().into_owned()));
     assert!(aaw_ffi::library::library_categories().contains(&"kick".to_string()));
+    let sources = aaw_ffi::library::library_folders(db.clone(), "list".into(), None).unwrap();
+    assert_eq!(sources.len(), 1);
+    assert!(sources[0].available);
+    let scoped = aaw_ffi::library::library_search_folders(db.clone(), String::new(), None, None, 50, vec![library.join("absent").to_string_lossy().into_owned()]).unwrap();
+    assert!(scoped.is_empty());
+
 
     let search = |query: &str, category: Option<&str>, kind: Option<&str>| {
         let found = aaw_ffi::library::library_search(db.clone(), query.into(), category.map(str::to_string), kind.map(str::to_string), 50).unwrap();
@@ -2107,5 +2113,76 @@ fn metronome_is_shared_transport_state_without_a_song_edit() {
     assert!(!transport(&seen).metronome);
     assert_eq!(song.arrangement().revision, revision);
     assert_eq!(std::fs::read(&path).unwrap(), original);
+    song.close();
+}
+
+#[test]
+fn browser_instruments_are_atomic_and_effects_insert_at_the_drop() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let drums = song.arrangement().tracks[0].key;
+    assert!(
+        song.edit(Edit::InstrumentAdd { track: Some(drums) }, None)
+            .is_err()
+    );
+    song.edit(Edit::InstrumentAdd { track: None }, None)
+        .unwrap();
+    let u = update(&seen);
+    let sampler = u.arrangement.tracks.last().unwrap();
+    let key = sampler.key;
+    assert!(sampler.midi);
+    assert_eq!(sampler.id, "sampler-1");
+    assert_eq!(
+        agent(
+            &path,
+            json!({"op": "get", "path": "tracks.sampler-1.instrument"})
+        ),
+        json!({"sampler": {}})
+    );
+    song.undo().unwrap();
+    assert_eq!(update(&seen).arrangement.tracks.len(), 2);
+    song.redo().unwrap();
+    update(&seen);
+    song.edit(Edit::InstrumentRemove { track: key }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::InstrumentAdd { track: Some(key) }, None).unwrap();
+    update(&seen);
+    for row in [
+        Row::Track { key: drums },
+        Row::Return {
+            key: song.arrangement().returns[0].key,
+        },
+        Row::Master,
+    ] {
+        song.edit(
+            Edit::EffectAdd {
+                row: row.clone(),
+                kind: "delay".into(),
+                index: Some(0),
+            },
+            None,
+        )
+        .unwrap();
+        update(&seen);
+        song.edit(
+            Edit::EffectAdd {
+                row: row.clone(),
+                kind: "filter".into(),
+                index: Some(0),
+            },
+            None,
+        )
+        .unwrap();
+        let u = update(&seen);
+        let effects = match row {
+            Row::Track { .. } => &u.arrangement.tracks[0].effects,
+            Row::Return { .. } => &u.arrangement.returns[0].effects,
+            Row::Master => &u.arrangement.master.effects,
+        };
+        assert_eq!(effects[0].kind, "filter");
+        assert_eq!(effects[1].kind, "delay");
+        song.undo().unwrap();
+        update(&seen);
+    }
     song.close();
 }

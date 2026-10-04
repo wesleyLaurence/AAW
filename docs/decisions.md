@@ -304,3 +304,15 @@ keeps it in time without a UI timer, lets an empty project click, and prevents
 master effects, faders, renders or stems from changing or capturing the timing
 reference. The setting survives live song edits and transport commands but
 is not saved or added to undo. See [metronome](features/metronome.md).
+
+
+**D68. The browser's Folders are shared sample sources across projects.**
+
+Chosen by the person on October 3, 2026. Add Folder registers local sample
+directories, including several locations, in the app's shared library. The
+browser's search bar and the agent search the same index, over all registered
+sources or a selected subset. This extends D57's app-owned sample index with
+explicit source registration; it is workspace configuration, outside a song and
+its undo history. Removing a source never deletes its files or project copies.
+The browser item includes this shared index and folder management; porting search
+and import from Python to Rust remains the standalone-app item.

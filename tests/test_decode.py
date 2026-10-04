@@ -166,3 +166,18 @@ def test_check_warns_of_a_sample_the_engine_cannot_read(tmp_path):
     assert code == 0, checked
     assert len(checked["warnings"]) == 1
     assert checked["warnings"][0].startswith("song: Cannot read song.m4a as audio")
+
+
+@pytest.mark.parametrize("kind", ["m4a", "mp3"])
+def test_compressed_files_are_searchable_without_changing_sources(tmp_path, kind):
+    from agent_daw.library import scan, search
+    source = compressed(tmp_path, kind)
+    before = digest(source)
+    db = tmp_path / "index.sqlite"
+    result = scan(tmp_path, db)
+    assert result["errors"] == []
+    matches = search(db, source.name)
+    assert len(matches) == 1
+    assert matches[0]["duration"] > 2
+    assert digest(source) == before
+    assert scan(tmp_path, db)["unchanged"] == 2

@@ -2,6 +2,7 @@ import AAWCore
 import AppKit
 import Observation
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The sample library as the browser shows it. The index is the one `daw
 /// samples scan` writes and `daw samples search` reads; a search here asks
@@ -17,6 +18,53 @@ final class Browser {
     /// The index, or nil when none was found for the song.
     let library: String?
     let categories: [String]
+    var section = UserDefaults.standard.string(forKey: "browser.section") ?? "Samples" {
+        didSet { UserDefaults.standard.set(section, forKey: "browser.section") }
+    }
+    var folders: [LibraryFolder] = []
+    var selectedFolders: Set<String> = [] { didSet { search() } }
+    var scanning = false
+    var folderError: String?
+    @ObservationIgnored private var folderOperations = 0
+    static let deviceType = "org.aaw.browser-device"
+
+    func refreshFolders(operation: String = "list", path: String? = nil) {
+        guard let library else { return }
+        folderOperations += 1
+        scanning = true
+        if operation != "list" { folderError = nil }
+        queue.async { [weak self] in
+            let result = Result { try libraryFolders(db: library, operation: operation, path: path) }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.folderOperations -= 1
+                self.scanning = self.folderOperations > 0
+                switch result {
+                case .success(let folders):
+                    self.folders = folders
+                    self.selectedFolders.formIntersection(Set(folders.map(\.path)))
+                    self.search()
+                case .failure(let error): self.folderError = SongModel.reason(error)
+                }
+                if operation != "list" {
+                    NotificationCenter.default.post(name: .init("AAWLibraryChanged"), object: nil)
+                }
+            }
+        }
+    }
+
+    func addFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add Folders"
+        panel.begin { [weak self] response in
+            guard response == .OK else { return }
+            for url in panel.urls { self?.refreshFolders(operation: "add", path: url.path) }
+        }
+    }
+
     var query = "" {
         didSet {
             if query != oldValue { search(after: 0.25) }
@@ -70,13 +118,13 @@ final class Browser {
         guard let library else { return }
         pending?.cancel()
         searches += 1
-        let (mine, query, category, kind) = (searches, query, category, kind)
+        let (mine, query, category, kind, folders) = (searches, query, category, kind, Array(selectedFolders))
         pending = Task { [weak self] in
             if delay > 0 { try? await Task.sleep(for: .seconds(delay)) }
             guard !Task.isCancelled, let self else { return }
             self.searching = true
             self.queue.async {
-                let found = Result { try librarySearch(db: library, query: query, category: category, kind: kind, limit: Self.limit) }
+                let found = Result { try librarySearchFolders(db: library, query: query, category: category, kind: kind, limit: Self.limit, folders: folders) }
                 DispatchQueue.main.async {
                     MainActor.assumeIsolated {
                         guard self.searches == mine else { return }
@@ -133,7 +181,7 @@ final class Browser {
 struct BrowserView: View {
     let model: SongModel
 
-    static let width: CGFloat = 250
+    static let width: CGFloat = 360
 
     private var browser: Browser { model.browser }
 
@@ -146,7 +194,7 @@ struct BrowserView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
-                Text("Samples")
+                Text("Browser")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
@@ -164,19 +212,96 @@ struct BrowserView: View {
             .padding(.horizontal, 12)
             .frame(height: TimelineLayout.rulerHeight - 1)
             Divider()
-            if browser.library == nil {
-                note("No sample library was found for this project. Index one with `daw samples scan DIRECTORY` from the folder that holds your projects, or set AAW_LIBRARY to an index.")
-            } else {
-                filters
+            TextField("Search \(browser.section)", text: Binding(get: { browser.query }, set: { browser.query = $0 }))
+                .textFieldStyle(.roundedBorder)
+                .padding(8)
+            if let error = browser.folderError { note(error) }
+            HStack(alignment: .top, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(["Samples", "Instruments", "Audio Effects", "Folders"], id: \.self) { section in
+                        Button(section) { browser.section = section }
+                            .buttonStyle(.plain)
+                            .font(.system(size: 11, weight: browser.section == section ? .bold : .regular))
+                            .foregroundStyle(browser.section == section ? Color.accentColor : .primary)
+                            .padding(.vertical, 4)
+                    }
+                    Divider()
+                    Button("Add Folder…") { browser.addFolders() }.disabled(browser.scanning)
+                    Button(browser.scanning ? "Scanning…" : "Refresh") { browser.refreshFolders(operation: "refresh") }
+                        .disabled(browser.scanning || browser.folders.isEmpty)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Button("All folders") { browser.selectedFolders = []; browser.section = "Folders" }
+                                .foregroundStyle(browser.selectedFolders.isEmpty ? Color.accentColor : .primary)
+                            ForEach(browser.folders, id: \.path) { folder in
+                                Toggle(isOn: Binding(get: { browser.selectedFolders.contains(folder.path) }, set: { selected in
+                                    if selected { browser.selectedFolders.insert(folder.path) }
+                                    else { browser.selectedFolders.remove(folder.path) }
+                                    browser.section = "Folders"
+                                })) {
+                                    Text(URL(fileURLWithPath: folder.path).lastPathComponent + (folder.available ? "" : " (offline)"))
+                                        .lineLimit(2)
+                                }
+                                .toggleStyle(.checkbox)
+                                .help(folder.path)
+                                .contextMenu {
+                                    Button("Remove Folder") { browser.refreshFolders(operation: "remove", path: folder.path) }
+                                }
+                            }
+                        }
+                    }
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10))
+                .padding(8)
+                .frame(width: 120, alignment: .leading)
                 Divider()
-                results
+                VStack(spacing: 0) {
+                    if browser.section == "Instruments" || browser.section == "Audio Effects" {
+                        devices
+                    } else {
+                        filters
+                        Divider()
+                        results
+                    }
+                }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
+
         }
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear {
-            if !browser.searched { browser.search() }
+        .onAppear { browser.refreshFolders() }
+        .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
+    }
+
+    private var devices: some View {
+        let kinds = browser.section == "Instruments" ? ["sampler"] : DeviceChain.kinds
+        return ScrollView {
+            VStack(spacing: 0) {
+                ForEach(kinds.filter { browser.query.isEmpty || readable($0).localizedCaseInsensitiveContains(browser.query) }, id: \.self) { kind in
+                    HStack {
+                        Text(readable(kind))
+                        Spacer()
+                        Button { model.addBrowserDevice(kind, to: model.selectedRow) } label: { Image(systemName: "plus") }
+                            .buttonStyle(.borderless)
+                            .disabled(!model.canAddBrowserDevice(kind, to: model.selectedRow))
+                    }
+                    .font(.system(size: 12))
+                    .padding(10)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { model.addBrowserDevice(kind, to: model.selectedRow) }
+                    .onDrag {
+                        browser.dragged = nil
+                        let provider = NSItemProvider()
+                        provider.registerDataRepresentation(forTypeIdentifier: Browser.deviceType + "." + kind, visibility: .all) { completion in
+                            completion(Data(kind.utf8), nil)
+                            return nil
+                        }
+                        return provider
+                    }
+                }
+            }
         }
     }
 
@@ -190,13 +315,6 @@ struct BrowserView: View {
 
     private var filters: some View {
         VStack(alignment: .leading, spacing: 6) {
-            TextField("Search", text: Binding(get: { browser.query }, set: { browser.query = $0 }))
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .padding(.horizontal, 7)
-                .frame(height: 22)
-                .background(RoundedRectangle(cornerRadius: 4).fill(Color(nsColor: Theme.control)))
-                .onSubmit { model.onFocus?() }
             HStack(spacing: 6) {
                 Picker("", selection: Binding(get: { browser.category ?? "" }, set: { browser.category = $0.isEmpty ? nil : $0 })) {
                     Text("Any category").tag("")
@@ -219,7 +337,7 @@ struct BrowserView: View {
         if let error = browser.error {
             note(error)
         } else if browser.results.isEmpty {
-            note(browser.searched ? "No samples match." : "Searching…")
+            note(browser.folders.isEmpty ? "Add a folder to find samples across your projects." : (browser.searched ? "No samples match." : "Searching…"))
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
@@ -273,6 +391,9 @@ struct BrowserView: View {
         .frame(height: 34)
         .background(Color.white.opacity(browser.selected == sample.id ? 0.09 : 0))
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote, to: target?.key)
+        }
         .onTapGesture { browser.audition(sample) }
         .onDrag {
             browser.dragged = sample

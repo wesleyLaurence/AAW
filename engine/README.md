@@ -243,6 +243,16 @@ the ones a crash left there, and whether one holds nothing and can be deleted
 unasked. `Song` saves its project under another name and reports the new path
 to its observer.
 
+The browser's shared index is `library.sqlite` in `AAW_DATA_DIR` (otherwise
+`~/Library/Application Support/AAW`), overridden by `AAW_LIBRARY` or an explicit
+`samples --db PATH`. `daw samples folders` lists registered directories;
+`folders add DIRECTORY` scans and registers one, `folders remove DIRECTORY`
+forgets it without touching source files, and `folders refresh` rescans.
+`samples scan DIRECTORY` also registers a source. `samples search QUERY
+--folder DIRECTORY` scopes results, with `--folder` repeatable. This replaces
+the project-relative default index; existing indexes remain usable with an
+explicit override.
+
 The app's sample browser asks Python (`library.rs`, `aaw_host::python`):
 `daw samples search` for what it lists, and `daw samples import --copy-only`
 to copy a chosen file into the project, which the song then takes as one edit

@@ -140,6 +140,31 @@ final class ProjectsTests: XCTestCase {
     }
 
     @MainActor
+    func testBrowserAddsDevicesAndRefusesIncompatibleRows() throws {
+        let model = try SongModel(url: project("Browser"))
+        defer { model.close() }
+        XCTAssertFalse(model.canAddBrowserDevice("reverb", to: nil))
+        XCTAssertFalse(model.canAddBrowserDevice("sampler", to: .master))
+        model.addBrowserDevice("sampler", to: nil)
+        wait(for: "new sampler track") { model.arrangement.tracks.count == 1 }
+        let track = model.arrangement.tracks[0]
+        XCTAssertTrue(track.midi)
+        XCTAssertEqual(track.instrument, "sampler")
+        model.addBrowserDevice("delay", to: .track(track.key))
+        wait(for: "delay") { model.arrangement.tracks[0].effects.count == 1 }
+        model.addBrowserDevice("filter", to: .track(track.key), index: 0)
+        wait(for: "inserted filter") { model.arrangement.tracks[0].effects.count == 2 }
+        XCTAssertEqual(model.arrangement.tracks[0].effects.map(\.kind), ["filter", "delay"])
+        model.addBrowserDevice("reverb", to: .master)
+        wait(for: "master reverb") { model.arrangement.master.effects.count == 1 }
+        model.addTrack()
+        wait(for: "audio track") { model.arrangement.tracks.count == 2 }
+        let audio = try XCTUnwrap(model.arrangement.tracks.first { !$0.midi })
+        XCTAssertFalse(model.canAddBrowserDevice("sampler", to: .track(audio.key)))
+        XCTAssertEqual(model.browser.library, libraryPath(song: "/another/project/song.yaml"))
+    }
+
+    @MainActor
     func testSaveAsMovesAnUntitledProjectAndCopiesANamedOne() throws {
         let made = SongModel.normal(URL(fileURLWithPath: try projectNewUntitled()))
         XCTAssertEqual(ProjectIndex.name(of: made), "Untitled")
