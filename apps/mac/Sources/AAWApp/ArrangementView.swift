@@ -345,7 +345,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         model.onWaveforms = { [weak self] in self?.takeWaveforms() }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
-        registerForDraggedTypes([.fileURL, .string])
+        registerForDraggedTypes([.fileURL, .string] + (DeviceChain.kinds + ["sampler"]).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
     @available(*, unavailable)
@@ -1491,7 +1491,24 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return true
     }
 
+    private func deviceKind(_ sender: NSDraggingInfo) -> String? {
+        (DeviceChain.kinds + ["sampler"]).first {
+            sender.draggingPasteboard.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true
+        }
+    }
+
+    private func deviceLanding(_ kind: String, at point: CGPoint) -> (valid: Bool, row: RowID?) {
+        guard point.y >= TimelineLayout.rulerHeight else { return (false, nil) }
+        if let (row, _) = row(atY: point.y) {
+            return (point.x < TimelineLayout.headerWidth && model.canAddBrowserDevice(kind, to: row), row)
+        }
+        return (kind == "sampler" && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
+    }
+
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if let kind = deviceKind(sender) {
+            return deviceLanding(kind, at: convert(sender.draggingLocation, from: nil)).valid ? .copy : []
+        }
         guard let file = sample(of: sender) else { return [] }
         let p = convert(sender.draggingLocation, from: nil)
         let free = NSEvent.modifierFlags.contains(.option)
@@ -1510,6 +1527,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if let kind = deviceKind(sender) {
+            let landing = deviceLanding(kind, at: convert(sender.draggingLocation, from: nil))
+            guard landing.valid else { return false }
+            model.addBrowserDevice(kind, to: landing.row)
+            return true
+        }
         defer {
             dropTarget = nil
             dropFile = nil

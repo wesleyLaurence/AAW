@@ -184,8 +184,14 @@ works wherever `projects/my-beat/song.yaml` does. `daw projects` lists the
 projects open in the Mac app, the window in front first, and `daw move` and
 `daw copy` save a project under another name; see
 [docs/features/new-and-untitled-projects.md](docs/features/new-and-untitled-projects.md).
-The index is
-`.daw/library.sqlite`; supply `daw samples --db /path/index.sqlite ...` to use another.
+The shared sample index is `library.sqlite` in the app data folder
+(`~/Library/Application Support/AAW`, or `AAW_DATA_DIR`). `AAW_LIBRARY` overrides
+it for both app and agent; `daw samples --db /path/index.sqlite ...` overrides
+one command. `daw samples folders add DIRECTORY` registers and scans a source;
+`folders list`, `folders refresh` and `folders remove DIRECTORY` manage those
+sources. Repeat `samples search --folder DIRECTORY` to search several sources.
+Existing `.daw/library.sqlite` indexes remain usable through an explicit override,
+or add their source folders to the shared library.
 Filename BPM/key/category are **hints**, not audio-derived facts. Names with C/F/etc.
 do not establish an octave. `daw samples analyze` measures pitch with octave and
 cents, onsets, loop tempo and one-shot/loop kind from the audio. `--root-note auto`

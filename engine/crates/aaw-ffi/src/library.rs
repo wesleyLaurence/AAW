@@ -6,7 +6,7 @@
 use crate::SongError;
 use aaw_host::python;
 use serde_json::Value as Json;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// A sample in the library's index. Category, kind, tempo and key are read
 /// from the file's name and are hints; the note is measured from its audio.
@@ -79,23 +79,48 @@ fn sample(j: &Json) -> SampleInfo {
     }
 }
 
-/// The library index a song's browser reads: AAW_LIBRARY, or
-/// `.daw/library.sqlite` in the song's folder or the nearest folder above it
-/// that has one, which is where `daw samples scan` writes it in a checkout.
+/// The workspace library shared by every project and the agent.
 #[uniffi::export]
-pub fn library_path(song: String) -> Option<String> {
-    if let Some(path) = std::env::var_os("AAW_LIBRARY") {
-        return Some(PathBuf::from(path).to_string_lossy().into_owned());
-    }
-    let mut dir = Path::new(&song).parent();
-    while let Some(d) = dir {
-        let db = d.join(".daw/library.sqlite");
-        if db.is_file() {
-            return Some(db.to_string_lossy().into_owned());
+pub fn library_path(_song: String) -> Option<String> {
+    Some(std::env::var_os("AAW_LIBRARY").map(PathBuf::from)
+        .unwrap_or_else(|| aaw_host::project::data_dir().join("library.sqlite"))
+        .to_string_lossy().into_owned())
+}
+
+#[derive(Clone, Debug, uniffi::Record)]
+pub struct LibraryFolder {
+    pub path: String,
+    pub available: bool,
+}
+
+/// Folder operations share the CLI's storage and never change the source audio.
+#[uniffi::export]
+pub fn library_folders(db: String, operation: String, path: Option<String>) -> Result<Vec<LibraryFolder>, SongError> {
+    let mut args = vec!["--db", db.as_str(), "folders", operation.as_str()];
+    if let Some(path) = &path { args.push(path); }
+    let result = python::run("samples", &args)?;
+    if matches!(operation.as_str(), "add" | "refresh") {
+        // Surface unreadable files and unavailable folders instead of reporting success.
+        let reports = if let Some(rows) = result.as_array() { rows.clone() } else { vec![result.clone()] };
+        for report in reports {
+            if let Some(error) = report.get("error").and_then(Json::as_str) {
+                return Err(SongError::from(format!("{}: {error}", text(&report, "root"))));
+            }
+            if let Some(errors) = report.get("errors").and_then(Json::as_array).filter(|e| !e.is_empty()) {
+                return Err(SongError::from(format!("Could not index {} audio files. {}: {}", errors.len(), text(&errors[0], "path"), text(&errors[0], "error"))));
+            }
         }
-        dir = d.parent();
     }
-    None
+    let result = if matches!(operation.as_str(), "list" | "remove") { result } else { python::run("samples", &["--db", &db, "folders", "list"])? };
+    Ok(result.as_array().into_iter().flatten().map(|row| LibraryFolder {
+        path: text(row, "path"), available: row["available"].as_bool().unwrap_or(false)
+    }).collect())
+}
+
+/// Device kinds supplied by the engine, used by the browser and Add Effect.
+#[uniffi::export]
+pub fn browser_effects() -> Vec<String> {
+    aaw_model::EFFECT_TYPES.iter().map(|kind| kind.to_string()).collect()
 }
 
 /// The categories the browser offers.
@@ -114,6 +139,14 @@ pub fn library_search(
     kind: Option<String>,
     limit: u32,
 ) -> Result<Vec<SampleInfo>, SongError> {
+    library_search_folders(db, query, category, kind, limit, vec![])
+}
+
+#[uniffi::export]
+pub fn library_search_folders(
+    db: String, query: String, category: Option<String>, kind: Option<String>,
+    limit: u32, folders: Vec<String>,
+) -> Result<Vec<SampleInfo>, SongError> {
     let limit = limit.clamp(1, 1000).to_string();
     let mut args = vec!["--db", db.as_str(), "search", query.as_str(), "--limit", limit.as_str()];
     if let Some(category) = &category {
@@ -122,6 +155,7 @@ pub fn library_search(
     if let Some(kind) = &kind {
         args.extend(["--type", kind.as_str()]);
     }
+    for folder in &folders { args.extend(["--folder", folder.as_str()]); }
     let found = python::run("samples", &args)?;
     Ok(found.as_array().map(|rows| rows.iter().map(sample).collect()).unwrap_or_default())
 }

@@ -1,6 +1,7 @@
 """Rebuildable SQLite sample index. Filename metadata is explicitly a hint."""
 
 from pathlib import Path
+from contextlib import closing
 import hashlib
 import os
 import re
@@ -32,10 +33,39 @@ DECODERS = {
 }
 
 
+def default_db() -> Path:
+    """One library for the app and CLI, independent of the open project."""
+    if override := os.environ.get("AAW_LIBRARY"):
+        return Path(override).expanduser()
+    data = Path(os.environ.get("AAW_DATA_DIR", str(Path.home() / "Library/Application Support/AAW")))
+    return data / "library.sqlite"
+
+
+def folders(db: Path):
+    with closing(connect(db)) as con, con:
+        return [{"path": row[0], "available": Path(row[0]).is_dir()}
+                for row in con.execute("SELECT path FROM folders ORDER BY path")]
+
+
+def remove_folder(db: Path, root: Path):
+    """Forget a source without touching any original or imported audio."""
+    root = str(root.expanduser().resolve())
+    with closing(connect(db)) as con, con:
+        con.execute("DELETE FROM folders WHERE path=?", (root,))
+        remaining = [Path(r[0]) for r in con.execute("SELECT path FROM folders")]
+        for row in con.execute("SELECT path FROM samples").fetchall():
+            path = Path(row[0])
+            if path.is_relative_to(root) and not any(path.is_relative_to(r) for r in remaining):
+                con.execute("DELETE FROM samples WHERE path=?", (str(path),))
+        con.execute("DELETE FROM analysis WHERE id NOT IN (SELECT id FROM samples)")
+    return folders(db)
+
+
 def connect(db: Path):
     db.parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(db)
     con.row_factory = sqlite3.Row
+    con.execute("CREATE TABLE IF NOT EXISTS folders (path TEXT PRIMARY KEY)")
     con.execute("""CREATE TABLE IF NOT EXISTS samples (
       id TEXT PRIMARY KEY, path TEXT UNIQUE, name TEXT, pack TEXT,
       duration REAL, sample_rate INTEGER, channels INTEGER, frames INTEGER,
@@ -93,9 +123,9 @@ def scan(root: Path, db: Path):
     count, skipped, errors, seen = 0, 0, [], set()
     try:
         for p in sorted(root.rglob("*")):
-            if p.suffix.lower() not in EXTENSIONS or not p.is_file():
+            if p.suffix.lower() not in EXTENSIONS | COMPRESSED or not p.is_file():
                 continue
-            p = p.resolve()
+            # Keep a file symlink under its registered source for scope/removal.
             path = str(p)
             seen.add(path)
             stat = p.stat()
@@ -110,7 +140,13 @@ def scan(root: Path, db: Path):
                 skipped += 1
                 continue
             try:
-                info = sf.info(p)
+                if p.suffix.lower() in COMPRESSED:
+                    with tempfile.TemporaryDirectory(prefix="aaw-index-") as temp:
+                        decoded = Path(temp) / "audio.wav"
+                        decode(p, decoded)
+                        info = sf.info(decoded)
+                else:
+                    info = sf.info(p)
                 cat, kind, bpm, key = hints(p)
                 pack = p.relative_to(root).parts[0]
                 sid = hashlib.sha256(path.encode()).hexdigest()[:16]
@@ -142,6 +178,7 @@ def scan(root: Path, db: Path):
             if p.is_relative_to(root) and row["path"] not in seen:
                 con.execute("DELETE FROM samples WHERE path=?", (row["path"],))
         con.execute("DELETE FROM analysis WHERE id NOT IN (SELECT id FROM samples)")
+        con.execute("INSERT OR IGNORE INTO folders VALUES (?)", (str(root),))
         con.commit()
         return {
             "root": str(root),
@@ -169,10 +206,19 @@ def search(
     note_range=None,
     measured_kind=None,
     measured_bpm=None,
+    roots=None,
 ):
     """Filename search. Measured filters match only samples with a current analysis."""
     con = connect(db)
     clauses, args = [], [analysis.ANALYZER]
+    if roots:
+        # Prefixes include a separator: /drums must never also match /drums-old.
+        scopes = []
+        for root in roots:
+            prefix = str(Path(root).expanduser().resolve()).rstrip(os.sep) + os.sep
+            scopes.append("substr(s.path, 1, ?) = ?")
+            args.extend([len(prefix), prefix])
+        clauses.append("(" + " OR ".join(scopes) + ")")
     for token in query.lower().split():
         clauses.append("s.search_text LIKE ? ESCAPE '\\'")
         args.append(

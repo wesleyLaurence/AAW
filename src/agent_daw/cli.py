@@ -13,7 +13,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-DEFAULT_DB = Path(".daw/library.sqlite")
 COMMANDS = ("samples", "listen", "compare", "check", "timeline", "joins", "export")
 
 
@@ -66,12 +65,16 @@ def parser():
     )
     sub = p.add_subparsers(dest="command", required=True)
     samples = sub.add_parser("samples")
-    samples.add_argument("--db", type=Path, default=DEFAULT_DB)
+    samples.add_argument("--db", type=Path, default=library.default_db())
     ss = samples.add_subparsers(dest="action", required=True)
     scan = ss.add_parser("scan")
     scan.add_argument("directory", type=Path)
+    folders = ss.add_parser("folders", help="List, add, refresh or remove shared sample folders")
+    folders.add_argument("operation", choices=["list", "add", "remove", "refresh"], nargs="?", default="list")
+    folders.add_argument("directory", type=Path, nargs="?")
     search = ss.add_parser("search")
     search.add_argument("query", nargs="?", default="")
+    search.add_argument("--folder", type=Path, action="append", help="Search within this folder; repeat for multiple sources")
     search.add_argument("--category")
     search.add_argument("--type", dest="kind", choices=["one-shot", "loop", "unknown"])
     search.add_argument("--key")
@@ -244,6 +247,17 @@ def execute(a):
     from . import library
     from .model import midi
 
+    if a.action == "folders":
+        if a.operation == "list":
+            return library.folders(a.db)
+        if a.operation == "refresh":
+            return [library.scan(Path(f["path"]), a.db) if f["available"] else
+                    {"root": f["path"], "error": "Folder unavailable"} for f in library.folders(a.db)]
+        if a.directory is None:
+            raise ValueError("folders add/remove requires a directory")
+        if a.operation == "add":
+            return library.scan(a.directory, a.db)
+        return library.remove_folder(a.db, a.directory)
     if a.action == "scan":
         return library.scan(a.directory, a.db)
     if a.action == "search":
@@ -269,6 +283,7 @@ def execute(a):
             note_range=note_range,
             measured_kind=a.measured_type,
             measured_bpm=a.measured_bpm,
+            roots=a.folder,
         )
     if a.action == "analyze" and a.all:
         return library.analyze_all(a.db, a.refresh)

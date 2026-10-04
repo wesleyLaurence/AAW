@@ -1,6 +1,7 @@
 import AAWCore
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The detail panel, under the arrangement: the devices of the row last
 /// selected, or the clip last selected, which is a pattern clip's pattern, an
@@ -246,12 +247,18 @@ struct DeviceView: View {
             HStack(alignment: .top, spacing: 8) {
                 if let track = chain.track, track.midi {
                     InstrumentPanel(model: model, track: track)
+                        .onDrop(of: [Browser.deviceType + ".sampler"], isTargeted: nil) { _ in
+                            model.addBrowserDevice("sampler", to: chain.row)
+                            return true
+                        }
                 }
                 ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
+                    DeviceInsertion(model: model, row: chain.row, index: UInt32(index))
                     DevicePanel(model: model, chain: chain, effect: effect, index: index)
                 }
+                DeviceInsertion(model: model, row: chain.row, index: UInt32(chain.effects.count))
                 if chain.effects.isEmpty {
-                    Text("No effects on \(chain.name). Add one at the left, or ask the agent: its `daw effect add` lands here.")
+                    Text("No effects on \(chain.name). Drag an effect here, or use Add Effect.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(width: 320, alignment: .leading)
@@ -260,6 +267,33 @@ struct DeviceView: View {
             }
             .padding(8)
         }
+        .onDrop(of: (DeviceChain.kinds + (chain.track?.midi == true ? ["sampler"] : [])).map { Browser.deviceType + "." + $0 }, isTargeted: nil) { providers in
+            guard let provider = providers.first,
+                  let kind = (DeviceChain.kinds + ["sampler"]).first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }),
+                  model.canAddBrowserDevice(kind, to: chain.row) else { return false }
+            model.addBrowserDevice(kind, to: chain.row)
+            return true
+        }
+    }
+}
+
+private struct DeviceInsertion: View {
+    let model: SongModel
+    let row: RowID
+    let index: UInt32
+    @State private var targeted = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
+            .frame(width: 12, height: 160)
+            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 }, isTargeted: $targeted) { providers in
+                guard let provider = providers.first,
+                      let kind = DeviceChain.kinds.first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }) else { return false }
+                model.addBrowserDevice(kind, to: row, index: index)
+                return true
+            }
+            .help("Drop an effect here")
     }
 }
 
@@ -360,6 +394,12 @@ private struct InstrumentPanel: View {
             .background(Color(nsColor: Theme.gray(0.24)))
             ScrollView {
                 VStack(alignment: .leading, spacing: 3) {
+                    if track.instrument != nil && track.pads.isEmpty {
+                        Text("Empty Sampler. Drop a sample on this track's header to play it across the keys.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if track.instrument == nil {
                         Text("The notes play nothing. Drop a sample on \(track.id)'s header, or add one with + in the samples, and a sampler plays it on every note. Ask the agent for a drum kit.")
                             .font(.system(size: 10))
@@ -375,7 +415,7 @@ private struct InstrumentPanel: View {
                         }
                         .help(track.pads.first { $0.name == m.pad }.map { "Pad \(m.pad) plays sample \($0.sample)" } ?? m.pad)
                     }
-                    if track.instrument != nil, track.map.isEmpty {
+                    if track.instrument != nil, !track.pads.isEmpty, track.map.isEmpty {
                         Text("No note plays a pad yet: `daw instrument map` gives the pads notes.")
                             .font(.system(size: 10))
                             .foregroundStyle(.secondary)

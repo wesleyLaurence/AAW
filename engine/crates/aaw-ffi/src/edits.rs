@@ -115,6 +115,8 @@ pub enum Edit {
     NotesPaste { notes: Vec<NoteCopy>, clip: u64, at: Option<f64> },
     /// Takes a MIDI track's instrument off; its notes are kept.
     InstrumentRemove { track: u64 },
+    /// Attach an empty sampler, or create a MIDI track with one.
+    InstrumentAdd { track: Option<u64> },
     /// Moves an audio clip's start, its end or both to a beat. Its audio
     /// stays where it is on the timeline, and an edge goes no further than
     /// the file does. The end is where its sound ends: the clip leaves its
@@ -1003,6 +1005,13 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 })
                 .collect();
             Ok(vec![json!({"op": "note.add", "clip": clip(key), "notes": copies})])
+        }
+        Edit::InstrumentAdd { track } => {
+            let instrument = json!({"sampler": {"pads": {}, "map": []}});
+            Ok(match track {
+                Some(key) => batch(vec![json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument})], "Attach Sampler".into()),
+                None => batch(vec![json!({"op": "track.add", "id": free_name(project, "sampler"), "type": "midi", "instrument": instrument})], "Add Sampler track".into()),
+            })
         }
         Edit::InstrumentRemove { track } => Ok(vec![json!({"op": "instrument.set", "track": handle_text(*track), "instrument": null})]),
         Edit::ClipsRemove { clips } => {

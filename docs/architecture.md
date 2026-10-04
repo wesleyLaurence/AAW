@@ -88,7 +88,7 @@ Python, in `src/agent_daw`:
 - `beats.py`: the beat and downbeat map of a whole song, its phrase changes and a
   click audition; see [beat-map.md](features/beat-map.md). Kept beside the audio by
   `library.py`.
-- `library.py`: incremental SQLite filename/folder search, metadata, basic signal
+- `library.py`: shared folder registration in the app data directory, incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
@@ -139,7 +139,7 @@ are the original's; `ffmpeg` keeps about 15 ms of padding after AAC. A decoded
 lossy file can peak a fraction of a decibel above full scale, which float keeps.
 Files bought from the iTunes Store are plain AAC and decode; files downloaded
 through an Apple Music subscription are copy-protected and cannot be read. The
-library index does not list compressed files, and `inspect`, `analyze` and
+library index includes compressed files using temporary decoding for metadata; `inspect`, `analyze` and
 `audition` read the decoded copy in the project.
 
 An import refuses a file the engine cannot play (unreadable, empty, or more than

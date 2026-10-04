@@ -16,7 +16,9 @@ kept.
 
 1. **A browser of samples, instruments and effects.** The Samples panel on the
    left becomes a browser that opens and closes, with categories as in
-   Ableton: Samples, Instruments, Audio Effects. An instrument or effect is
+   Ableton: Samples, Instruments, Audio Effects and shared Folders. Add Folder
+   registers sample sources across projects for the browser and agent, with search
+   across one or several folders. An instrument or effect is
    dragged from it onto a track, or onto the device panel.
    [features/browser.md](features/browser.md)
 2. **The Sampler device.** Sampler in the browser's Instruments, dropped on a MIDI
@@ -25,8 +27,7 @@ kept.
    the root note, start and end, one-shot or held, attack and release.
    [features/sampler-device.md](features/sampler-device.md)
 3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
-   the browser needs no Python. The sample index in the app's data folder, found
-   from any project. An app icon. An install step that puts the app in
+   the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
 4. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a

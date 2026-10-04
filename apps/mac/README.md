@@ -215,7 +215,7 @@ front first.
 | Arrow keys, in the piano roll | Move the selected notes a step earlier or later, or a note up or down; with Shift, an octave |
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
 | Choose a grid | The steps the piano roll adds and moves notes on: a beat to a sixteenth of one, triplets too |
-| ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the samples |
+| ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
 | Click a sample | Plays it, as its file is; the speaker mark turns that off |
 | Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
@@ -261,9 +261,25 @@ measured pitch brings it along as its root note, unless its name says it is a
 drum, an effect or a loop. The sample, the pad or the audio clip, a new track
 and a longer song are one undo step.
 
-The browser reads the index `daw samples scan` writes: `.daw/library.sqlite` in
-the song's folder or the nearest folder above it, or the file `AAW_LIBRARY`
-names. Searches run in Python, as `daw samples search` does.
+The browser has Samples, Instruments, Audio Effects and Folders, with search at
+its top. Add Folder… registers one or more directories for every project and the
+agent. Check folder names to search within one or several; All folders searches
+all sources. Refresh scans for changes, and a folder's context menu removes its
+registration without touching audio files. Offline folders remain listed.
+
+The shared index is `library.sqlite` in the app data folder (`AAW_DATA_DIR`, or
+`~/Library/Application Support/AAW`); `AAW_LIBRARY` overrides it. Existing local
+indexes can still be used through that override, or their folders added again.
+Search and indexing run through Python off the UI thread. WAV, AIFF, FLAC, MP3
+and M4A are searchable. The agent's `daw samples folders` and repeatable
+`daw samples search --folder DIRECTORY` use the same sources.
+
+Drag an effect onto a track, return or master header to append it, or onto an
+insertion strip between device panels to place it there. Drag Sampler onto a MIDI
+header or instrument panel to attach an empty sampler, or below the rows to make
+a MIDI track. Double-click or + adds to the selected row. Invalid destinations
+refuse the drop. Each device addition is one undo step. See
+[browser](../../docs/features/browser.md).
 
 An edit shows at once and goes to the host, whose song the window then follows.
 A drag of a level is one undo step, however long, and the song is saved when it
@@ -317,7 +333,7 @@ start 93 points down: 46 for each track, more while its sends or lanes show
 x = 212. The pattern editor's rows start 16 points down the panel and 96 points
 further right, at x = 308: a row of steps or hits is 24 points high, and rows
 of notes share the rest. A pattern of a few bars fills the panel's width, and
-a longer one scrolls. While the samples show, everything else is 251 points
+a longer one scrolls. While the samples show, everything else is 361 points
 further right.
 A menu, such as Add Effect, a choice in a device or + Lane, waits for a person
 and cannot be scripted, and neither can a drag from the samples or the Finder:
@@ -351,7 +367,7 @@ do what Save As… does.
 | `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/NoteEditor.swift` | The piano roll, an AppKit view, and the fields beside it |
 | `Sources/AAWApp/PianoRollLayout.swift` | Where a note clip's notes are in the piano roll, and how the grid and a drag move them, tested in `Tests` |
-| `Sources/AAWApp/BrowserView.swift` | The samples: searches of the library's index, and the list |
+| `Sources/AAWApp/BrowserView.swift` | The browser: shared folders, sample search and device lists |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
 | `Sources/AAWApp/Projects.swift` | The index of the projects the app knows, and what closing a project does, tested in `Tests` |
@@ -398,6 +414,5 @@ do what Save As… does.
 - An effect's ID is set with `daw set`; the panel shows it.
 - An effect added, removed, bypassed or moved while the song plays is heard
   after a 10 ms dip, and so is a change to a field that reshapes a device.
-- Save As… does not replace a folder that is already there, and a new
-  project's browser is empty unless `AAW_LIBRARY` names an index.
+- Save As… does not replace a folder that is already there.
 - The app has no icon, and the Python tools are not in its bundle.

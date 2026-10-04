@@ -194,7 +194,10 @@ My Beat/
 | A project folder, anywhere | One song and everything about it | The person's |
 
 The sample index belongs to the app, not to a folder above the project, so the
-sample browser works wherever a project is kept.
+sample browser works wherever a project is kept. Its Folders section registers
+one or several local sample directories through Add Folder. The person and agent
+search those same sources across projects, with all folders or a selected subset
+as the search scope.
 
 ## The project index
 
