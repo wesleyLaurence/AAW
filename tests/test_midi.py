@@ -91,6 +91,43 @@ def test_a_sampler_plays_the_notes_and_check_names_the_ones_it_cannot(tmp_path):
     assert load(path)["tracks"][0]["clips"] == before
 
 
+def test_a_synth_plays_the_phrase_is_checked_and_auditioned(tmp_path):
+    path = phrase(tmp_path)
+    assert daw("synth", "add", path, "keys")["label"] == "Attach a Synth to keys"
+    daw("synth", "set", path, "keys", "voices", 2, "filter.cutoff_hz", 600, "macros.tone", 30,
+        "oscillators.sub", json.dumps({"wave": "sine", "octave": -1, "filter": False}))
+    daw("synth", "mod", path, "keys", "velocity", "filter.cutoff_hz", 2)
+    shown = daw("synth", "show", path, "keys")
+    assert shown["oscillators"]["sub"]["wave"] == "sine" and shown["modulation"][0]["amount"] == 2
+    song = load(path)
+    assert song["tracks"][0]["instrument"]["synth"]["voices"] == 2
+    assert song["tracks"][0]["instrument"]["sampler"] is None
+    out = tmp_path / "render"
+    report = daw("render", path, "--output", out)
+    assert report["tracks"]["keys"]["events"] == 6
+    x = stem(out, "keys")
+    beat = SR // 2
+    assert np.abs(x[4 * beat : 5 * beat]).max() > 0.05
+    assert np.abs(x[: 4 * beat]).max() == 0
+    # A second render is the same bytes.
+    again = daw("render", path, "--output", tmp_path / "again")
+    assert again["audio_sha256"] == report["audio_sha256"]
+    code, checked = cli("check", path)
+    assert code == 0, checked
+    assert "keys: macro tone moves nothing; the matrix has no entry with source macros.tone" in checked["warnings"]
+    assert any(w.startswith("keys: 3 notes sound at once and the synth has 2 voices") for w in checked["warnings"])
+    heard = daw("synth", "audition", path, "keys", "--notes", "C2,G2", "--length-beats", 1)
+    assert heard["notes"] == ["C2", "G2"] and heard["seconds"] > 1.0
+    assert heard["peak_dbfs"] < 3 and heard["loudness_lufs"] < 0
+    assert 20 < heard["spectral_centroid_hz"] < 5000
+    assert sf.info(heard["path"]).frames == heard["frames"]
+    # Lanes reach the synth, and the instrument comes off with them.
+    daw("lane", "point", "add", path, "tracks.keys", "instrument.filter.cutoff_hz", "--at", 0, "--value", 300)
+    assert load(path)["tracks"][0]["automation"][0]["param"] == "instrument.filter.cutoff_hz"
+    daw("instrument", "remove", path, "keys")
+    assert load(path)["tracks"][0]["automation"] == []
+
+
 def test_a_labeled_batch_through_a_host_is_one_undo_step(tmp_path, registry):
     path = phrase(tmp_path)
     host = subprocess.Popen([os.environ["AAW_DAW"], "host", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

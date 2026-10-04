@@ -2298,3 +2298,68 @@ fn browser_instruments_are_atomic_and_effects_insert_at_the_drop() {
     }
     song.close();
 }
+
+#[test]
+fn the_synth_is_drawn_from_its_fields_and_turned_by_its_paths() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    // The agent attaches a synth on a new track; the panel draws every part.
+    agent(&path, json!({"op": "synth.add", "track": "lead"}));
+    agent(&path, json!({"op": "synth.set", "track": "lead", "values": {"oscillators.sub": {"wave": "sine", "octave": -1}, "lfos.lfo1": {"rate_hz": 3}, "macros.tone": 25}}));
+    agent(&path, json!({"op": "synth.mod", "track": "lead", "source": "macros.tone", "target": "filter.cutoff_hz", "amount": 3}));
+    let mut u = update(&seen);
+    while u.change.op != "synth.mod" {
+        u = update(&seen);
+    }
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    assert_eq!(lead.instrument.as_deref(), Some("synth"));
+    assert!(lead.sampler.is_none());
+    let s = lead.synth.clone().expect("the synth is the device");
+    assert_eq!(s.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["voices", "glide_ms", "velocity_percent", "seed"]);
+    assert_eq!(s.oscillators.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["a", "sub"]);
+    let sub = &s.oscillators[1];
+    assert_eq!(sub.fields[0].name, "oscillators.sub.wave");
+    assert_eq!(sub.fields[0].value, text("sine"));
+    assert_eq!(sub.fields[0].kind, FieldKind::Choice);
+    assert!(!sub.fields[0].live, "a wave swaps through a dip");
+    let level = sub.fields.iter().find(|f| f.name == "oscillators.sub.level_db").unwrap();
+    assert_eq!((level.param.as_deref(), level.live, level.lane), (Some("instrument.oscillators.sub.level_db"), true, None));
+    let cutoff = s.filter.iter().find(|f| f.name == "filter.cutoff_hz").unwrap();
+    assert_eq!((cutoff.value.clone(), cutoff.log, cutoff.param.as_deref()), (number(20000.0), true, Some("instrument.filter.cutoff_hz")));
+    assert_eq!(s.envelopes[0].name, "amp");
+    assert_eq!(s.lfos[0].fields.iter().find(|f| f.name == "lfos.lfo1.rate_hz").unwrap().value, number(3.0));
+    assert_eq!((s.macros[0].name.as_str(), s.macros[0].label.as_str(), s.macros[0].value.clone()), ("macros.tone", "tone", number(25.0)));
+    assert_eq!((s.modulation[0].source.as_str(), s.modulation[0].target.as_str(), s.modulation[0].amount, s.modulation[0].unit.as_str()), ("macros.tone", "filter.cutoff_hz", 3.0, "octaves"));
+    assert!(lead.lane_targets.iter().any(|t| t.param == "instrument.macros.tone" && t.label == "Synth macro tone"));
+
+    // The person turns a knob, picks a wave, adds a lane and removes an entry.
+    let track = lead.key;
+    song.edit(Edit::SynthSet { track, field: "filter.cutoff_hz".into(), value: number(900.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the Synth's filter cutoff on lead");
+    let s = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.clone().unwrap();
+    assert_eq!(s.filter.iter().find(|f| f.name == "filter.cutoff_hz").unwrap().value, number(900.0));
+    song.edit(Edit::SynthSet { track, field: "oscillators.a.wave".into(), value: text("square") }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Set the Synth's osc a wave on lead");
+    song.edit(Edit::SynthSet { track, field: "oscillators.a.phase".into(), value: number(25.0) }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::SynthSet { track, field: "oscillators.a.phase".into(), value: FieldValue::Absent }, None).unwrap();
+    update(&seen);
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.lead.instrument.synth.oscillators.a"})), json!({"wave": "square"}));
+    assert!(song.edit(Edit::SynthSet { track, field: "filter.cutoff_hz".into(), value: number(5.0) }, None).is_err());
+    assert!(song.edit(Edit::SynthSet { track, field: "filter.nothing".into(), value: number(5.0) }, None).is_err());
+    song.edit(Edit::LaneAdd { row: Row::Track { key: track }, param: "instrument.filter.cutoff_hz".into() }, None).unwrap();
+    let u = update(&seen);
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    assert_eq!((lead.lanes[0].param.as_str(), lead.lanes[0].label.as_str(), lead.lanes[0].unit.as_str(), lead.lanes[0].log), ("instrument.filter.cutoff_hz", "Synth filter cutoff", "Hz", true));
+    assert_eq!(lead.lanes[0].points[0].value, 900.0);
+    let cutoff = lead.synth.as_ref().unwrap().filter.iter().find(|f| f.name == "filter.cutoff_hz").unwrap();
+    assert_eq!(cutoff.lane, Some(lead.lanes[0].key));
+    song.edit(Edit::SynthModRemove { track, index: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Remove modulation of filter.cutoff_hz by macros.tone on lead");
+    assert!(u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.as_ref().unwrap().modulation.is_empty());
+    // A sampler track has no synth to set.
+    let bass = u.arrangement.tracks[1].key;
+    assert!(song.edit(Edit::SynthSet { track: bass, field: "filter.cutoff_hz".into(), value: number(900.0) }, None).is_err());
+}

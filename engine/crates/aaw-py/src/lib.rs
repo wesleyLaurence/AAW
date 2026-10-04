@@ -194,6 +194,7 @@ fn warnings(data: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
         }
     }
     out.extend(aaw_model::rules::note_warnings(&p));
+    out.extend(aaw_model::rules::synth_warnings(&p));
     Ok(out)
 }
 

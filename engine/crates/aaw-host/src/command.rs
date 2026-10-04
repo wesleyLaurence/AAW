@@ -12,7 +12,7 @@ use aaw_model::value::Value;
 use aaw_model::Beat;
 use num_rational::BigRational;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value as Json};
+use serde_json::{json, Map, Value as Json};
 
 pub type Fields = Map<String, Json>;
 
@@ -187,6 +187,33 @@ pub enum Command {
         track: String,
         #[serde(flatten)]
         fields: Fields,
+    },
+
+    // The Synth
+    /// Attaches the plain saw to a MIDI track, or makes a new MIDI track
+    /// with it, at `index` among the tracks or last.
+    #[serde(rename = "synth.add")]
+    SynthAdd {
+        track: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
+    /// Sets fields of a MIDI track's synth by their paths in the patch, as
+    /// one step: `values` maps each path to its value, null removing an
+    /// oscillator, an LFO or a macro.
+    #[serde(rename = "synth.set")]
+    SynthSet { track: String, values: Fields },
+    /// Adds an entry to the synth's matrix, or changes the amount of the
+    /// entry with that source and target; `remove` takes it out.
+    #[serde(rename = "synth.mod")]
+    SynthMod {
+        track: String,
+        source: String,
+        target: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        amount: Option<Json>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        remove: bool,
     },
 
     // Audio clips
@@ -1357,11 +1384,18 @@ impl<'a> Edit<'a> {
                 let had = !matches!(self.node(&loc).get("instrument"), None | Some(Node::Leaf(Value::None)));
                 let value = json_value(instrument)?;
                 let kind = match &value {
-                    Value::Dict(d) => d.keys().next().and_then(|k| k.as_str()).unwrap_or("instrument").to_string(),
+                    Value::Dict(d) => d
+                        .iter()
+                        .find(|(_, v)| !v.is_none())
+                        .and_then(|(k, _)| k.as_str())
+                        .unwrap_or("instrument")
+                        .to_string(),
                     _ => "instrument".to_string(),
                 };
                 let removing = value.is_none();
                 self.node_mut(&loc).map_mut().expect("a track").insert("instrument".into(), Node::new(&value));
+                // Lanes on the synth's fields that the new instrument lacks go.
+                self.drop_instrument_lanes(&loc)?;
                 let name = self.name(&loc);
                 out.label = match (had, removing) {
                     (_, true) => format!("Remove the instrument of {name}"),
@@ -1376,6 +1410,73 @@ impl<'a> Edit<'a> {
                 let notes = fields.get("notes").map_or_else(|| "?".to_string(), short);
                 let pad = fields.get("pad").and_then(Json::as_str).unwrap_or("?");
                 out.label = format!("Map notes {notes} to {pad} on {}", self.name(&loc));
+            }
+            SynthAdd { track, index } => {
+                let plain = json!({"synth": {"oscillators": {"a": {}}}});
+                match self.track(track) {
+                    Ok(loc) => {
+                        if !self.is_midi(&loc) {
+                            return Err(format!("{track} is not a MIDI track; a synth goes on one, or on a new track"));
+                        }
+                        let o = self.run(&InstrumentSet { track: track.clone(), instrument: plain })?;
+                        out.also.extend(o.also);
+                        out.label = format!("Attach a Synth to {track}");
+                    }
+                    Err(_) => {
+                        let mut fields = Fields::new();
+                        fields.insert("type".into(), Json::String("midi".into()));
+                        fields.insert("instrument".into(), plain);
+                        let o = self.run(&TrackAdd { id: track.clone(), index: *index, fields })?;
+                        out.made.extend(o.made);
+                        out.label = format!("Add Synth track {track}");
+                    }
+                }
+            }
+            SynthSet { track, values } => {
+                let loc = self.synth(track)?;
+                if values.is_empty() {
+                    return Err("Give a field's path and its value".into());
+                }
+                let base = self.text(&loc);
+                let mut parts = Vec::new();
+                for (field, value) in values {
+                    let path = format!("{base}.{field}");
+                    let o = if value.is_null() {
+                        self.run(&Remove { path })?
+                    } else {
+                        self.run(&Set { path, value: value.clone() })?
+                    };
+                    out.also.extend(o.also);
+                    parts.push(if value.is_null() { format!("{field} removed") } else { format!("{field} {}", short(value)) });
+                }
+                out.label = format!("Set synth of {track}: {}", parts.join(", "));
+            }
+            SynthMod { track, source, target, amount, remove } => {
+                let loc = self.synth(track)?;
+                let entries = self.list(&loc, "modulation")?;
+                let found = entries.iter().position(|e| e.node.field("source") == Some(source.as_str()) && e.node.field("target") == Some(target.as_str()));
+                if *remove {
+                    let i = found.ok_or_else(|| format!("The synth of {track} has no entry from {source} to {target}"))?;
+                    entries.remove(i);
+                    out.label = format!("Remove modulation of {target} by {source} on {track}");
+                } else {
+                    let amount = amount
+                        .as_ref()
+                        .ok_or("Give the amount, or --remove")?
+                        .as_f64()
+                        .ok_or_else(|| format!("The amount must be a number, not {}", amount.as_ref().map_or(String::new(), short)))?;
+                    match found {
+                        Some(i) => {
+                            set(&mut entries[i].node, "amount", Value::Float(amount));
+                            out.label = format!("Set modulation of {target} by {source} to {amount} on {track}");
+                        }
+                        None => {
+                            let entry = json_value(&json!({"source": source, "target": target, "amount": amount}))?;
+                            out.made.push(self.insert(&loc, "modulation", None, Node::new(&entry))?);
+                            out.label = format!("Modulate {target} by {source} by {amount} on {track}");
+                        }
+                    }
+                }
             }
             AudioAdd { track, fields } => {
                 let loc = self.track(track)?;
@@ -1929,10 +2030,45 @@ impl<'a> Edit<'a> {
             self.node_mut(track).map_mut().expect("a track").insert("instrument".into(), Node::new(&empty));
         }
         let loc = [track.to_vec(), vec![Step::Key("instrument".into()), Step::Key("sampler".into())]].concat();
-        match tree::resolve(self.root, &self.text(&loc), false) {
-            Ok(_) => Ok(loc),
-            Err(_) => Err(format!("{} has an instrument that is not a sampler", self.name(track))),
+        match self.node(track).get("instrument").and_then(|i| i.get("sampler")) {
+            Some(Node::Map(_)) => Ok(loc),
+            _ => Err(format!("{} has an instrument that is not a sampler", self.name(track))),
         }
+    }
+
+    /// A MIDI track's synth.
+    fn synth(&self, track: &str) -> Result<Loc> {
+        let loc = self.midi_track(track)?;
+        match self.node(&loc).get("instrument").and_then(|i| i.get("synth")) {
+            Some(Node::Map(_)) => Ok([loc, vec![Step::Key("instrument".into()), Step::Key("synth".into())]].concat()),
+            _ => Err(format!("{track} has no synth; daw synth add attaches one")),
+        }
+    }
+
+    /// Removes a track's lanes on `instrument.FIELD` whose field its
+    /// instrument no longer has, after the instrument is replaced.
+    fn drop_instrument_lanes(&mut self, track: &[Step]) -> Result<()> {
+        // The instrument as validation fills it in, so a lane on a field at
+        // its default stays.
+        let synth = self
+            .node(track)
+            .get("instrument")
+            .and_then(|i| aaw_model::Instrument::parse(&i.value()).ok())
+            .and_then(|i| i.synth().cloned());
+        let name = self.text(track);
+        let lanes = self.list(track, "automation")?;
+        let mut notes = Vec::new();
+        lanes.retain(|lane| {
+            let Some(param) = lane.node.field("param") else { return true };
+            let Some(field) = param.strip_prefix("instrument.") else { return true };
+            let kept = synth.as_ref().is_some_and(|s| aaw_model::rules::synth_param(s, field).is_ok());
+            if !kept {
+                notes.push(format!("{name}: removed lane {param}"));
+            }
+            kept
+        });
+        self.also.extend(notes);
+        Ok(())
     }
 
     /// Where a track's pads are: its own, or its sampler's on a MIDI track,

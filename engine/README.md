@@ -10,7 +10,7 @@ reads songs through `aaw-py`.
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes and the six effects |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the six effects and the Synth |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
@@ -49,7 +49,7 @@ project's folder or the song file in it. It implements:
 | `daw init DIRECTORY [--tempo T] [--bars N]` | Creates `DIRECTORY/song.yaml`, an empty song |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
-| `daw describe [project\|sampler\|midi\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, and how to edit a finished song, map its beats, check its joins and export it |
+| `daw describe [project\|sampler\|synth\|midi\|effects\|automation\|edit\|beats\|joins\|export]` | The authoring contract: the schema and what its fields mean, the Synth's fields, modulation and recipes, and how to edit a finished song, map its beats, check its joins and export it |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
 | `daw samples ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, perception, `inspect` with measured root notes and warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
@@ -65,11 +65,12 @@ project's folder or the song file in it. It implements:
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
+| `daw synth add PROJECT TRACK`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE]` | The Synth on a MIDI track: the plain saw attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part; a matrix entry added, changed or removed; and notes rendered through the patch to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply. See `daw describe synth` |
 | `daw midi import PROJECT FILE [--track T] [--at BEAT]`, `daw midi export PROJECT CLIP FILE` | A Standard MIDI file of one part made into a note clip, on a MIDI track or a new one, with what the song cannot hold counted in the reply; a note clip's notes that play written as a type 0 file at 960 ticks a beat. The file's tempo is not taken. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
-repitch, trim, reverse, downmix, pan laws), the six effects on tracks, returns
+repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the six effects on tracks, returns
 and the master, sidechains, pre- and post-fader sends, automation lanes, track
 gain, pan, mute and solo, master gain and the end fade. `render` writes the
 mix, a stem for each track and return, the snapshot and `report.json` with what
@@ -102,6 +103,18 @@ stream is cut into blocks, and processing never allocates.
   audio and reverb kernels are kept from the last compile, so after a level or
   knob edit it takes under a millisecond. Pad audio a first compile lacks is
   repitched on several threads.
+- **The Synth** (`aaw-dsp/src/synth.rs`) plays a MIDI track's notes from its
+  patch. A program holds the track's notes, shared across patch edits, and
+  the patch compiled with the lanes on its fields; the renderer holds the
+  synth's state, 16 voices and 16 ringing out, allocated when it is built.
+  Oscillators and the filter run every frame, and the envelopes, LFOs, matrix
+  and tuning every 16 frames of a voice's own time, so the output does not
+  depend on blocks and a render is the same bytes twice. A take-over carries
+  the voices and glides the patch's values from the old patch's over 5 ms; a
+  change of wave, filter mode or routing changes the program's structure and
+  swaps through the dip. A locate chases the notes sounding there with their
+  envelopes and free LFOs where time would have brought them. A track with a
+  synth has no sample voices and no peaks of its own.
 - **Peaks** (`peaks.rs`) are what a track's voices sum to, before its inserts
   and fader, as the least and greatest sample of every 64 frames and of
   coarser stretches four times as long each, for a display to draw at any
@@ -267,6 +280,10 @@ The app's sample browser asks Python (`library.rs`, `aaw_host::python`):
 to copy a chosen file into the project, which the song then takes as one edit
 with the pad, and the track if it is new, that plays it.
 
+`crates/aaw-engine/tests/synth.rs` holds a synth's render to playback, to
+every block size and to itself, hears a lane on its filter, chases a locate
+and plays under allocation checking; `crates/aaw-dsp/src/synth.rs` measures a
+sine's pitch and level, the envelope, a glide, stealing and a take-over.
 `crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
 the selection, external edits, concurrent clients, an embedded host, a project
 moved and copied under a running host with its old path still answering,

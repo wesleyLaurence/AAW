@@ -22,6 +22,7 @@ use crate::program::{amplitude, pan_gains, ChainProgram, Program, Voice};
 use aaw_dsp::device::Unit;
 use aaw_dsp::dynamics::Reduction;
 use aaw_dsp::envelope::{Glide, Param};
+use aaw_dsp::synth::Synth;
 use aaw_dsp::Clock;
 use std::sync::Arc;
 
@@ -312,6 +313,8 @@ impl Strip {
 
 struct TrackState {
     voices: Voices,
+    /// A MIDI track's Synth, with its voices.
+    synth: Option<Synth>,
     /// The track of the renderer being taken over from whose voices ring out
     /// here, when this track's voices differ from them.
     inherits: Option<usize>,
@@ -459,6 +462,7 @@ impl Renderer {
             .iter()
             .map(|t| TrackState {
                 voices: Voices::new(&t.voices, max_block),
+                synth: t.synth.as_ref().map(|s| Synth::new(s.patch.clone(), s.notes.clone(), max_block, fade)),
                 inherits: None,
                 chain: Chain::new(&t.chain, max_block, fade, &mut reverbs),
                 out: vec![SILENCE; max_block],
@@ -506,6 +510,9 @@ impl Renderer {
         self.ramp = if ramp { self.fade } else { 0 };
         for (t, state) in self.program.tracks.iter().zip(self.tracks.iter_mut()) {
             state.voices.seek(&t.voices, to as i64 - t.delay as i64, ramp);
+            if let Some(s) = &mut state.synth {
+                s.seek(to as i64 - t.delay as i64, ramp);
+            }
         }
     }
 
@@ -513,6 +520,9 @@ impl Renderer {
     pub fn release(&mut self) {
         for state in &mut self.tracks {
             state.voices.release(self.fade);
+            if let Some(s) = &mut state.synth {
+                s.release();
+            }
         }
     }
 
@@ -603,6 +613,9 @@ impl Renderer {
                 state.voices.render(&t.voices, out, start, total, self.ramp);
             }
             state.voices.ring(&t.voices, out, self.fade, self.ramp);
+            if let Some(s) = &mut state.synth {
+                s.render(out, start, total, rolling, self.ramp);
+            }
             if let (Some(track), Some(old)) = (state.inherits, old.as_deref_mut()) {
                 old.ring(track, out);
             }
@@ -730,6 +743,9 @@ impl Renderer {
     fn ring(&mut self, track: usize, out: &mut [Frame]) {
         let voices = &self.program.tracks[track].voices;
         self.tracks[track].voices.ring(voices, out, self.fade, self.ramp);
+        if let Some(s) = &mut self.tracks[track].synth {
+            s.ring(out);
+        }
     }
 
     /// Takes over from the renderer of a program with the same structure, at
@@ -749,12 +765,26 @@ impl Renderer {
         let program = self.program.clone();
         for (i, (state, was)) in self.tracks.iter_mut().zip(old.tracks.iter_mut()).enumerate() {
             let (t, o) = (&program.tracks[i], &old.program.tracks[i]);
-            if same_time && Arc::ptr_eq(&t.voices, &o.voices) {
+            let same_notes = match (&t.synth, &o.synth) {
+                (Some(a), Some(b)) => Arc::ptr_eq(&a.notes, &b.notes),
+                (None, None) => true,
+                _ => false,
+            };
+            if same_time && Arc::ptr_eq(&t.voices, &o.voices) && same_notes {
                 state.voices.copy(&was.voices);
+                if let (Some(s), Some(w)) = (&mut state.synth, &was.synth) {
+                    s.take_over(w);
+                }
                 state.inherits = None;
             } else {
                 state.voices.seek(&t.voices, cursor as i64 - t.delay as i64, true);
+                if let Some(s) = &mut state.synth {
+                    s.seek(cursor as i64 - t.delay as i64, true);
+                }
                 was.voices.release(old.fade);
+                if let Some(w) = &mut was.synth {
+                    w.release();
+                }
                 state.inherits = Some(i);
             }
             inherits |= state.inherits.is_some();

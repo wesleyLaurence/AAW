@@ -10,6 +10,7 @@
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
 //! with exit status 1.
 
+use aaw_engine::audition::{audition, AuditionOptions};
 use aaw_engine::offline::{render, RenderOptions};
 use aaw_engine::program::{compile_cached, Cache};
 use aaw_engine::realtime::{benchmark, PlayOptions};
@@ -90,6 +91,7 @@ struct Forwarded {
 enum Topic {
     Project,
     Sampler,
+    Synth,
     Midi,
     Effects,
     Automation,
@@ -264,6 +266,8 @@ enum Top {
     Note(NoteCmd),
     #[command(subcommand)]
     Instrument(InstrumentCmd),
+    #[command(subcommand)]
+    Synth(SynthCmd),
     #[command(subcommand)]
     Midi(MidiCmd),
     #[command(subcommand)]
@@ -500,6 +504,58 @@ enum InstrumentCmd {
         pad: String,
         #[arg(long)]
         pitched: bool,
+    },
+}
+
+/// The Synth on a MIDI track: a polyphonic synthesizer whose sound is a
+/// patch in the song. See `daw describe synth`.
+#[derive(Subcommand)]
+enum SynthCmd {
+    /// Attach the plain saw to a MIDI track, or make a new MIDI track with it.
+    Add { project: Song, track: String },
+    /// The patch as the song holds it, with its modulation listed; fields at
+    /// their defaults are left out, as `daw get` leaves them, and `daw
+    /// describe synth` lists the defaults.
+    Show { project: Song, track: String },
+    /// Set fields by their path in the patch, as one undo step: PATH VALUE
+    /// pairs, e.g. filter.cutoff_hz 900 envelopes.amp.release_ms 600. A
+    /// value is a number, a word, a JSON object, or null to remove a part.
+    Set {
+        project: Song,
+        track: String,
+        #[arg(required = true, num_args = 2.., allow_hyphen_values = true, value_name = "PATH VALUE")]
+        pairs: Vec<String>,
+    },
+    /// Add a matrix entry or change its amount: SOURCE TARGET AMOUNT, in the
+    /// target's unit; --remove takes the entry out.
+    Mod {
+        project: Song,
+        track: String,
+        source: String,
+        target: String,
+        #[arg(allow_hyphen_values = true)]
+        amount: Option<String>,
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Render notes through the patch to a WAV under renders/auditions and
+    /// measure it, so there is something to hear.
+    Audition {
+        project: Song,
+        track: String,
+        /// Notes to play one after another, as names or numbers: C2,G2,C3.
+        #[arg(long, default_value = "C4")]
+        notes: String,
+        #[arg(long, default_value_t = 100)]
+        velocity: i64,
+        #[arg(long, default_value_t = 2.0)]
+        length_beats: f64,
+        /// Through the track's effects as well.
+        #[arg(long)]
+        track_chain: bool,
+        /// Where to write the file, instead of under renders/auditions.
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -1282,6 +1338,62 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Synth(s) => match s {
+            SynthCmd::Add { project, track } => edit(project, C::SynthAdd { track: track.clone(), index: None }),
+            SynthCmd::Show { project, track } => {
+                let reply = edit(project, C::Get { path: format!("tracks.{track}.instrument.synth") })?;
+                if reply.is_null() {
+                    return Err(format!("{track} has no synth; daw synth add attaches one"));
+                }
+                Ok(reply)
+            }
+            SynthCmd::Set { project, track, pairs } => {
+                if pairs.len() % 2 != 0 {
+                    return Err("Give PATH VALUE pairs".into());
+                }
+                let mut values = Fields::new();
+                for pair in pairs.chunks(2) {
+                    values.insert(pair[0].clone(), parse_value(&pair[1]));
+                }
+                edit(project, C::SynthSet { track: track.clone(), values })
+            }
+            SynthCmd::Mod { project, track, source, target, amount, remove } => {
+                let amount = match amount {
+                    Some(a) => Some(json!(a.parse::<f64>().map_err(|_| format!("The amount must be a number, not {a}"))?)),
+                    None => None,
+                };
+                edit(
+                    project,
+                    C::SynthMod {
+                        track: track.clone(),
+                        source: source.clone(),
+                        target: target.clone(),
+                        amount,
+                        remove: *remove,
+                    },
+                )
+            }
+            SynthCmd::Audition { project, track, notes, velocity, length_beats, track_chain, output } => {
+                let notes: Vec<i64> = notes
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .map(|n| n.parse::<i64>().or_else(|_| aaw_model::rules::midi(n)))
+                    .collect::<Result<_>>()?;
+                audition(
+                    &files(project),
+                    &AuditionOptions {
+                        track: track.clone(),
+                        notes,
+                        velocity: *velocity,
+                        length_beats: *length_beats,
+                        track_chain: *track_chain,
+                        output: output.clone(),
+                    },
+                )
+                .map(value)
+            }
+        },
         Top::Midi(m) => match m {
             MidiCmd::Import { project, file, track, at } => edit(
                 project,
@@ -1594,6 +1706,7 @@ fn name(top: &Top) -> String {
         Top::Note(_) => group("note", ""),
         Top::Midi(_) => group("midi", ""),
         Top::Instrument(_) => group("instrument", ""),
+        Top::Synth(_) => group("synth", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),

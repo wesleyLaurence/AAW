@@ -6,7 +6,7 @@ use crate::files::{FileView, Files};
 use aaw_host::session::Doc;
 use aaw_host::tree::{Item, Node};
 use aaw_model::describe::{self, Initial, Kind};
-use aaw_model::rules::{midi, target, Domain, Owner, TargetKind};
+use aaw_model::rules::{midi, synth_param, synth_params, target, Domain, Owner, TargetKind};
 use aaw_model::value::{py_eq, Value};
 use aaw_model::{step_cells, AudioClip, Curve, Effect, Lane, Project};
 use num_rational::BigRational;
@@ -221,7 +221,44 @@ pub struct TrackView {
     pub map: Vec<NoteMapView>,
     /// The instrument as the Sampler device, when it is one.
     pub sampler: Option<SamplerView>,
+    /// The instrument as the Synth, when it is one.
+    pub synth: Option<SynthView>,
     pub note_clips: Vec<NoteClipView>,
+}
+
+/// A MIDI track's Synth as the panel draws it: every part's fields as
+/// controls need them, each field named by its path in the patch, so a
+/// control's edit is `SynthSet` of that path.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SynthView {
+    /// The patch's name, when the sound came from one.
+    pub patch: Option<String>,
+    /// The Synth's own fields: voices, glide, velocity and seed.
+    pub fields: Vec<FieldView>,
+    pub oscillators: Vec<SynthGroup>,
+    pub filter: Vec<FieldView>,
+    pub envelopes: Vec<SynthGroup>,
+    pub lfos: Vec<SynthGroup>,
+    /// A field for each macro, named `macros.NAME`.
+    pub macros: Vec<FieldView>,
+    pub modulation: Vec<ModulationView>,
+}
+
+/// A part of the Synth that there are several of, by its ID: an oscillator,
+/// an envelope or an LFO, with its fields.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SynthGroup {
+    pub name: String,
+    pub fields: Vec<FieldView>,
+}
+
+/// An entry of the Synth's matrix, with the unit of its amount.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct ModulationView {
+    pub source: String,
+    pub target: String,
+    pub amount: f64,
+    pub unit: String,
 }
 
 /// A MIDI track's Sampler device: a sampler that is empty, or one pad played
@@ -428,6 +465,8 @@ fn effect_ref(e: &Effect, index: usize) -> String {
 /// effect's and the lane's own parameter otherwise, with each lane's handle.
 struct Driven {
     effects: HashMap<(usize, String), u64>,
+    /// A synth's fields by their path in the patch.
+    instrument: HashMap<String, u64>,
     others: HashSet<String>,
 }
 
@@ -435,6 +474,7 @@ impl Driven {
     fn new(owner: Owner, lanes: &[Lane], handles: &[Item]) -> Driven {
         let mut out = Driven {
             effects: HashMap::new(),
+            instrument: HashMap::new(),
             others: HashSet::new(),
         };
         for (i, lane) in lanes.iter().enumerate() {
@@ -442,6 +482,9 @@ impl Driven {
                 Ok(t) => match &t.kind {
                     TargetKind::Effect { index, .. } => {
                         out.effects.insert((*index, t.name()), handle(handles, i));
+                    }
+                    TargetKind::Instrument => {
+                        out.instrument.insert(t.field.clone(), handle(handles, i));
                     }
                     _ => {
                         out.others.insert(t.key());
@@ -525,12 +568,36 @@ fn effect_name(e: &Effect) -> &str {
     e.id().filter(|id| !id.is_empty()).unwrap_or(e.kind())
 }
 
+/// A synth field's label and unit, by its path in the patch: `Filter
+/// cutoff`, `Osc a level`, `Macro tone`.
+pub fn synth_label(path: &str) -> (String, String) {
+    let parts: Vec<&str> = path.split('.').collect();
+    let spec = |table: &'static [describe::Field], name: &str| table.iter().find(|f| f.name == name).map(|f| (f.label, f.unit));
+    let (part, found) = match parts.as_slice() {
+        [name] => ("".to_string(), spec(describe::SYNTH, name)),
+        ["oscillators", id, name] => (format!("Osc {id} "), spec(describe::OSCILLATOR, name)),
+        ["filter", name] => ("Filter ".to_string(), spec(describe::SYNTH_FILTER, name)),
+        ["envelopes", id, name] => (format!("Env {id} "), spec(describe::ENVELOPE, name)),
+        ["lfos", id, name] => (format!("LFO {id} "), spec(describe::LFO, name)),
+        ["macros", name] => (format!("Macro {name}"), Some(("", ""))),
+        _ => (path.to_string(), Some(("", ""))),
+    };
+    match found {
+        Some((label, unit)) => (format!("{part}{}", if part.is_empty() { label.to_string() } else { label.to_lowercase() }).trim().to_string(), unit.to_string()),
+        None => (path.to_string(), String::new()),
+    }
+}
+
 /// A lane parameter as a person reads it, with its unit.
 fn lane_label(owner: Owner, kind: &TargetKind, field: &str) -> (String, String) {
     match kind {
         TargetKind::Channel if field == "pan" => ("Pan".into(), String::new()),
         TargetKind::Channel => ("Volume".into(), "dB".into()),
         TargetKind::Send(to) => (format!("Send {to}"), "dB".into()),
+        TargetKind::Instrument => {
+            let (label, unit) = synth_label(field);
+            (format!("Synth {}", label.to_lowercase()), unit)
+        }
         TargetKind::Effect { index, band } => {
             let e = &owner.effects()[*index];
             let spec = |fields: &'static [describe::Field]| fields.iter().find(|f| f.name == field);
@@ -610,6 +677,22 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
             })
         })
         .collect();
+    if let Owner::Track(t) = owner {
+        if let Some(synth) = t.midi.as_ref().and_then(|m| m.synth()) {
+            for path in synth_params(synth) {
+                if driven.instrument.contains_key(&path) {
+                    continue;
+                }
+                let param = format!("instrument.{path}");
+                if let Ok(t) = target(owner, &param) {
+                    out.push(LaneTarget {
+                        label: lane_label(owner, &t.kind, &t.field).0,
+                        param,
+                    });
+                }
+            }
+        }
+    }
     for (i, e) in owner.effects().iter().enumerate() {
         let reference = effect_ref(e, i);
         let names: Vec<String> = match e {
@@ -640,18 +723,113 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
     out
 }
 
-/// A channel's effects, lanes and what could still be automated.
-fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String]) -> (Vec<EffectView>, Vec<LaneView>, Vec<LaneTarget>) {
+/// A channel's effects, lanes and what could still be automated, and a
+/// MIDI track's Synth.
+fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String]) -> (Vec<EffectView>, Vec<LaneView>, Vec<LaneTarget>, Option<SynthView>) {
     let (effect_items, lane_items) = match node {
         Some(n) => (items(n, "effects"), items(n, "automation")),
         None => (&[][..], &[][..]),
     };
     let driven = Driven::new(owner, owner.automation(), lane_items);
+    let synth = match owner {
+        Owner::Track(t) => t.midi.as_ref().and_then(|m| m.synth()).map(|s| synth_view(s, &driven)),
+        _ => None,
+    };
     (
         effects(owner.effects(), effect_items, tracks, &driven),
         lanes(owner, owner.automation(), lane_items),
         lane_targets(owner, sends, &driven),
+        synth,
     )
+}
+
+/// A field of a synth as a control needs it. `path` is its path in the
+/// patch and `value` what the patch holds there.
+fn synth_field(synth: &aaw_model::Synth, f: &describe::Field, path: String, value: Option<&Value>, driven: &Driven) -> FieldView {
+    let automatable = synth_param(synth, &path).is_ok();
+    FieldView {
+        label: f.label.to_string(),
+        kind: match f.kind {
+            Kind::Number => FieldKind::Number,
+            Kind::Integer => FieldKind::Integer,
+            Kind::Choice => FieldKind::Choice,
+            Kind::Flag => FieldKind::Flag,
+            Kind::Beats => FieldKind::Beats,
+            Kind::Track => FieldKind::Track,
+        },
+        value: field_value(value),
+        min: f.min,
+        max: f.max,
+        unit: f.unit.to_string(),
+        log: f.log,
+        choices: f.choices.iter().map(|c| c.to_string()).collect(),
+        optional: f.default == Initial::Absent,
+        initial: initial(if f.default == Initial::Required || f.default == Initial::Absent { f.suggested } else { f.default }),
+        live: !f.structural,
+        param: automatable.then(|| format!("instrument.{path}")),
+        lane: driven.instrument.get(&path).copied(),
+        band: None,
+        name: path,
+    }
+}
+
+/// A track's Synth, every part's fields drawn from the model's description.
+fn synth_view(synth: &aaw_model::Synth, driven: &Driven) -> SynthView {
+    let dump = synth.dump(false);
+    let own = |table: &'static [describe::Field], prefix: &str, holder: Option<&Value>| -> Vec<FieldView> {
+        table
+            .iter()
+            .map(|f| {
+                let path = if prefix.is_empty() { f.name.to_string() } else { format!("{prefix}.{}", f.name) };
+                synth_field(synth, f, path, holder.and_then(|h| h.get(f.name)), driven)
+            })
+            .collect()
+    };
+    let groups = |table: &'static [describe::Field], part: &str| -> Vec<SynthGroup> {
+        match dump.get(part) {
+            Some(Value::Dict(d)) => d
+                .iter()
+                .filter_map(|(k, v)| k.as_str().map(|id| (id.to_string(), v)))
+                .map(|(id, v)| SynthGroup {
+                    fields: own(table, &format!("{part}.{id}"), Some(v)),
+                    name: id,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    SynthView {
+        patch: synth.patch.clone(),
+        fields: own(describe::SYNTH, "", Some(&dump)),
+        oscillators: groups(describe::OSCILLATOR, "oscillators"),
+        filter: own(describe::SYNTH_FILTER, "filter", dump.get("filter")),
+        envelopes: groups(describe::ENVELOPE, "envelopes"),
+        lfos: groups(describe::LFO, "lfos"),
+        macros: synth
+            .macros
+            .iter()
+            .map(|(name, value)| {
+                let f = describe::Field {
+                    name: "macro",
+                    label: "",
+                    ..describe::MACRO
+                };
+                let mut field = synth_field(synth, &f, format!("macros.{name}"), Some(&Value::Float(*value)), driven);
+                field.label = name.clone();
+                field
+            })
+            .collect(),
+        modulation: synth
+            .modulation
+            .iter()
+            .map(|m| ModulationView {
+                source: m.source.clone(),
+                target: m.target.clone(),
+                amount: m.amount,
+                unit: aaw_model::rules::mod_target(synth, &m.target).map_or(String::new(), |t| t.unit().to_string()),
+            })
+            .collect(),
+    }
 }
 
 /// The tracks that may key a compressor of `owner`: every other track.
@@ -878,7 +1056,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             let clip_items = node.map(|n| items(n, "clips")).unwrap_or(&[]);
             let audio_items = node.map(|n| items(n, "audio")).unwrap_or(&[]);
             let sends: Vec<String> = t.sends.iter().map(|s| s.to.clone()).collect();
-            let (effects, lanes, lane_targets) = channel(Owner::Track(t), node, &keys(p, Some(&t.id)), &sends);
+            let (effects, lanes, lane_targets, synth) = channel(Owner::Track(t), node, &keys(p, Some(&t.id)), &sends);
             TrackView {
                 key: handle(track_items, i),
                 id: t.id.clone(),
@@ -914,6 +1092,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 midi: t.midi.is_some(),
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
                 sampler: sampler(p, t, device_sample(t).and_then(&mut file)),
+                synth,
                 map: t
                     .midi
                     .as_ref()
@@ -1016,7 +1195,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         .enumerate()
         .map(|(i, r)| {
             let node = return_items.get(i).map(|item| &item.node);
-            let (effects, lanes, lane_targets) = channel(Owner::Return(r), node, &keys(p, None), &[]);
+            let (effects, lanes, lane_targets, _) = channel(Owner::Return(r), node, &keys(p, None), &[]);
             ReturnView {
                 key: handle(return_items, i),
                 id: r.id.clone(),
@@ -1042,7 +1221,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         })
         .collect();
     // A master compressor cannot be keyed.
-    let (master_effects, master_lanes, master_targets) = channel(Owner::Master(&p.master), tree.get("master"), &[], &[]);
+    let (master_effects, master_lanes, master_targets, _) = channel(Owner::Master(&p.master), tree.get("master"), &[], &[]);
     Arrangement {
         revision,
         project_sha256: doc.sha.clone(),

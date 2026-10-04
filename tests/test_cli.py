@@ -19,7 +19,7 @@ def test_init_and_describe_through_either_entry_point(tmp_path):
     assert daw("init", tmp_path / "other")["project"] == str((tmp_path / "other" / "song.yaml").resolve())
     assert load(tmp_path / "other" / "song.yaml")["session"]["length_beats"] == 64
 
-    for topic in ["project", "sampler", "effects", "automation", "edit", "beats", "joins", "export"]:
+    for topic in ["project", "sampler", "synth", "midi", "effects", "automation", "edit", "beats", "joins", "export"]:
         described = daw("describe", topic)
         assert cli("describe", topic) == (0, described)
         assert described["semantics"]
@@ -27,6 +27,12 @@ def test_init_and_describe_through_either_entry_point(tmp_path):
     assert schema == daw("describe", "project")["schema"]
     assert schema["$defs"]["Track"]["properties"]["gain_db"]["maximum"] == 24
     assert daw("describe", "sampler")["schema"]["pad"]["required"] == ["sample"]
+    synth = daw("describe", "synth")
+    assert synth["schema"]["synth"]["required"] == ["oscillators"]
+    assert [f["name"] for f in synth["fields"]["filter"]][:3] == ["enabled", "mode", "slope_db_per_octave"]
+    assert synth["modulation"]["targets"]["filter.cutoff_hz"] == "octaves"
+    assert synth["automatable"]["fields"]["filter"]["cutoff_hz"] == "log"
+    assert "recipes" in synth["semantics"]
 
 
 def test_python_commands_run_from_the_rust_binary(tmp_path):

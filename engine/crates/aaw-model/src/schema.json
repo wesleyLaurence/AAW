@@ -551,14 +551,33 @@
     },
     "Instrument": {
       "additionalProperties": false,
+      "description": "A sampler or the Synth: exactly one of the two.",
       "properties": {
         "sampler": {
-          "$ref": "#/$defs/Sampler"
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Sampler"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sampler"
+        },
+        "synth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Synth"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Synth"
         }
       },
-      "required": [
-        "sampler"
-      ],
       "title": "Instrument",
       "type": "object"
     },
@@ -585,6 +604,65 @@
         "points"
       ],
       "title": "Lane",
+      "type": "object"
+    },
+    "Lfo": {
+      "additionalProperties": false,
+      "description": "A low-frequency oscillator of the Synth, bipolar, which moves what the matrix wires it to.",
+      "properties": {
+        "shape": {
+          "default": "sine",
+          "enum": [
+            "sine",
+            "triangle",
+            "saw",
+            "square",
+            "sample_hold"
+          ],
+          "title": "Shape",
+          "type": "string"
+        },
+        "rate_hz": {
+          "default": 1,
+          "description": "Cycles a second, unless rate_beats is given.",
+          "maximum": 100,
+          "minimum": 0.01,
+          "title": "Rate Hz",
+          "type": "number"
+        },
+        "rate_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "One cycle in so many beats at the song's tempo, in place of rate_hz: more than 0 and at most 64.",
+          "title": "Rate Beats"
+        },
+        "phase_percent": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Phase Percent",
+          "type": "number"
+        },
+        "retrigger": {
+          "default": false,
+          "title": "Retrigger",
+          "type": "boolean"
+        }
+      },
+      "title": "Lfo",
       "type": "object"
     },
     "Limiter": {
@@ -813,6 +891,33 @@
       "title": "MidiTrack",
       "type": "object"
     },
+    "Modulation": {
+      "additionalProperties": false,
+      "description": "An entry of the Synth's modulation matrix: a source moving a target by amount at full modulation, in the target's unit.",
+      "properties": {
+        "source": {
+          "title": "Source",
+          "type": "string"
+        },
+        "target": {
+          "title": "Target",
+          "type": "string"
+        },
+        "amount": {
+          "maximum": 100,
+          "minimum": -100,
+          "title": "Amount",
+          "type": "number"
+        }
+      },
+      "required": [
+        "source",
+        "target",
+        "amount"
+      ],
+      "title": "Modulation",
+      "type": "object"
+    },
     "Note": {
       "additionalProperties": false,
       "properties": {
@@ -986,6 +1091,90 @@
         "pad"
       ],
       "title": "NoteMap",
+      "type": "object"
+    },
+    "Oscillator": {
+      "additionalProperties": false,
+      "description": "An oscillator of the Synth: one of up to four, each with its own wave, level, pan and tuning.",
+      "properties": {
+        "wave": {
+          "default": "saw",
+          "enum": [
+            "sine",
+            "triangle",
+            "saw",
+            "square",
+            "pulse",
+            "noise"
+          ],
+          "title": "Wave",
+          "type": "string"
+        },
+        "level_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Level Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "octave": {
+          "default": 0,
+          "maximum": 4,
+          "minimum": -4,
+          "title": "Octave",
+          "type": "integer"
+        },
+        "semitones": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "title": "Semitones",
+          "type": "number"
+        },
+        "detune_cents": {
+          "default": 0,
+          "maximum": 100,
+          "minimum": -100,
+          "title": "Detune Cents",
+          "type": "number"
+        },
+        "pulse_width": {
+          "default": 50,
+          "description": "The high part of a pulse's cycle, in percent.",
+          "maximum": 99,
+          "minimum": 1,
+          "title": "Pulse Width",
+          "type": "number"
+        },
+        "phase": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where in its cycle the wave starts, in percent; null starts each note at a random place from the seed.",
+          "title": "Phase"
+        },
+        "filter": {
+          "default": true,
+          "title": "Filter",
+          "type": "boolean"
+        }
+      },
+      "title": "Oscillator",
       "type": "object"
     },
     "Pad": {
@@ -1605,6 +1794,203 @@
         }
       },
       "title": "Session",
+      "type": "object"
+    },
+    "Synth": {
+      "additionalProperties": false,
+      "description": "The Synth: a polyphonic synthesizer whose whole sound is this mapping.",
+      "properties": {
+        "patch": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of the patch the sound came from; nothing reads it.",
+          "title": "Patch"
+        },
+        "voices": {
+          "default": 8,
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Voices",
+          "type": "integer"
+        },
+        "glide_ms": {
+          "default": 0,
+          "maximum": 5000,
+          "minimum": 0,
+          "title": "Glide Ms",
+          "type": "number"
+        },
+        "velocity_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Velocity Percent",
+          "type": "number"
+        },
+        "seed": {
+          "default": 0,
+          "maximum": 4294967295,
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        },
+        "oscillators": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Oscillator"
+          },
+          "description": "One to four, by an ID the patch chooses, played in this order.",
+          "title": "Oscillators",
+          "type": "object"
+        },
+        "filter": {
+          "$ref": "#/$defs/SynthFilter"
+        },
+        "envelopes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/SynthEnvelope"
+          },
+          "description": "amp is always there and shapes the level; up to three more.",
+          "title": "Envelopes",
+          "type": "object"
+        },
+        "lfos": {
+          "additionalProperties": {
+            "$ref": "#/$defs/Lfo"
+          },
+          "description": "Up to four.",
+          "title": "Lfos",
+          "type": "object"
+        },
+        "modulation": {
+          "items": {
+            "$ref": "#/$defs/Modulation"
+          },
+          "maxItems": 32,
+          "title": "Modulation",
+          "type": "array"
+        },
+        "macros": {
+          "additionalProperties": {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          "description": "Up to eight knobs, 0 to 100, that do nothing but through the matrix.",
+          "title": "Macros",
+          "type": "object"
+        }
+      },
+      "required": [
+        "oscillators"
+      ],
+      "title": "Synth",
+      "type": "object"
+    },
+    "SynthEnvelope": {
+      "additionalProperties": false,
+      "description": "An envelope of the Synth: amp shapes each voice's level, and any other moves what the matrix wires it to.",
+      "properties": {
+        "attack_ms": {
+          "default": 1,
+          "maximum": 20000,
+          "minimum": 0,
+          "title": "Attack Ms",
+          "type": "number"
+        },
+        "decay_ms": {
+          "default": 100,
+          "maximum": 20000,
+          "minimum": 0,
+          "title": "Decay Ms",
+          "type": "number"
+        },
+        "sustain_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Sustain Percent",
+          "type": "number"
+        },
+        "release_ms": {
+          "default": 50,
+          "maximum": 20000,
+          "minimum": 0,
+          "title": "Release Ms",
+          "type": "number"
+        }
+      },
+      "title": "SynthEnvelope",
+      "type": "object"
+    },
+    "SynthFilter": {
+      "additionalProperties": false,
+      "description": "The Synth's filter: one for each voice, after the oscillators that go through it.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "mode": {
+          "default": "lowpass",
+          "enum": [
+            "lowpass",
+            "highpass",
+            "bandpass",
+            "notch"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "slope_db_per_octave": {
+          "default": 12,
+          "enum": [
+            12,
+            24
+          ],
+          "title": "Slope Db Per Octave",
+          "type": "integer"
+        },
+        "cutoff_hz": {
+          "default": 20000,
+          "maximum": 20000,
+          "minimum": 10,
+          "title": "Cutoff Hz",
+          "type": "number"
+        },
+        "resonance_percent": {
+          "default": 0,
+          "description": "0 is a Q of a half; 100 rings just short of self-oscillation.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Resonance Percent",
+          "type": "number"
+        },
+        "drive_db": {
+          "default": 0,
+          "description": "Gain into a soft clip before the filter.",
+          "maximum": 24,
+          "minimum": 0,
+          "title": "Drive Db",
+          "type": "number"
+        },
+        "keytrack_percent": {
+          "default": 0,
+          "description": "How far the cutoff follows the note: 100 moves it an octave an octave from middle C.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Keytrack Percent",
+          "type": "number"
+        }
+      },
+      "title": "SynthFilter",
       "type": "object"
     },
     "Track": {

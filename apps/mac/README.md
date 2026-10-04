@@ -157,7 +157,7 @@ front first.
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest. Clips of a muted track are gray, and selected clips are outlined |
 | Automation | Under a row whose A mark is on: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
 | Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
-| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
+| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a column of plain controls for its own fields, each oscillator, the filter, each envelope, each LFO and the macros, and the matrix's entries; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
 | Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note. While the clip plays, a line shows where |
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play. Beside it the clip's ID, its length, the grid, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
@@ -226,6 +226,7 @@ front first.
 | Drag a marker on the Sampler's waveform; type Start or End | Moves where in the file the keys play from or to, no further than the file or the other marker, heard when the drag ends. An empty End plays to the file's end |
 | Type in Root; click Measure | Sets the note the sample is at, as C4 or 60, so the keys play it from there; empty plays it as it is at middle C. Measure sets it to the pitch `daw samples analyze` finds, and says so when the file has no one pitch |
 | Choose a mode; drag Transpose, Attack, Release, Level or Pan; tick Reverse | Sets the Sampler's pad, as `daw pad set` does; each is heard when the drag ends, after a 10 ms dip |
+| Drag a knob, choose a wave or mode, type a number or tick a box in the Synth's panel; click a field's diamond; click × on a matrix entry | Sets that field of the patch, as `daw synth set` does: a knob is heard as it is dragged, and a wave, a filter mode or a routing when chosen, after a 10 ms dip; the diamond adds a lane on the field under the track, or removes it; × takes the entry out of the matrix. The agent attaches a Synth with `daw synth add` and adds its parts and entries |
 | Drag a bar or type a value in the Audio Clip panel | Sets the clip's gain, fades, fade curve, tempo or stretch |
 
 The grid is the finest of bars, beats, eighths and sixteenths that the zoom has
@@ -373,6 +374,7 @@ is at the panel's right, about x = 640 in the first row.
 | `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, a MIDI track's instrument, and the bar a number is dragged with |
 | `Sources/AAWApp/SamplerPanel.swift` | The Sampler device: its waveform with the markers for the part the keys play, an AppKit view, the root note and Measure, the pad's fields, and what a drop on it loads |
 | `Sources/AAWApp/SamplerLayout.swift` | Where the Sampler's markers are on its waveform, which one a point takes hold of and how far a drag goes, tested in `Tests` |
+| `Sources/AAWApp/SynthPanel.swift` | The Synth: a column of controls for each part of the patch, drawn from its fields, the matrix's entries, and the lane mark beside a field |
 | `Sources/AAWApp/PatternEditor.swift` | The pattern editor, an AppKit view, and the fields beside it |
 | `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/NoteEditor.swift` | The piano roll, an AppKit view, and the fields beside it |
@@ -414,6 +416,10 @@ is at the panel's right, about x = 640 in the first row.
   set; a kit of pads on notes is made with `daw instrument map`. The Sampler
   has no note range, glide, sustain loop or filter, and is not played from a
   keyboard. Its root note is the sample's, so every pad of that file follows.
+- The Synth's panel is plain controls: no wave, filter curve, envelope or
+  LFO drawn, no keys, and no way to add an oscillator, an envelope, an LFO, a
+  macro or a matrix entry; `daw synth set` and `daw synth mod` add them. A
+  patch is not loaded or saved from the panel, and the browser has no Synth.
 - What Copy took is kept in the window, not on the system's clipboard, and is
   pasted into the same song.
 - A row of notes shows the notes its events play with two more either side; a

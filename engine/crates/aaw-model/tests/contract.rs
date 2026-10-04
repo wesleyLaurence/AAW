@@ -37,6 +37,15 @@ tracks:
     effects: [{type: limiter}]
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
+  - id: y
+    type: midi
+    instrument:
+      synth:
+        oscillators: {a: {}}
+        lfos: {lfo1: {}}
+        macros: {tone: 50}
+        modulation: [{source: macros.tone, target: filter.cutoff_hz, amount: 1}]
+    automation: [{param: instrument.filter.cutoff_hz, points: [{at: 0, value: 900}]}]
 returns: [{id: r}]
 sections: [{id: a, at: 0, length_beats: 4}]
 master: {}

@@ -110,6 +110,9 @@ pub enum TargetKind {
     Channel,
     Send(String),
     Effect { index: usize, band: Option<usize> },
+    /// A field of a MIDI track's synth, `field` being its path in the patch,
+    /// such as `filter.cutoff_hz` or `macros.tone`.
+    Instrument,
 }
 
 /// A resolved lane target. `key` is canonical: effects are addressed by index.
@@ -134,8 +137,263 @@ impl Target {
         match &self.kind {
             TargetKind::Send(to) => format!("sends.{to}.{}", self.field),
             TargetKind::Effect { index, .. } => format!("effects.{index}.{}", self.name()),
+            TargetKind::Instrument => format!("instrument.{}", self.field),
             TargetKind::Channel => self.field.clone(),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Synth's matrix and automatable fields
+
+/// What an entry of the Synth's matrix moves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ModTarget {
+    /// Every oscillator's pitch, in semitones.
+    Pitch,
+    /// One oscillator's pitch, level, pan or pulse width; the index is its
+    /// place among the oscillators.
+    OscPitch(usize),
+    OscLevel(usize),
+    OscPan(usize),
+    OscPulseWidth(usize),
+    /// The filter's cutoff in octaves, its resonance in points and its drive
+    /// in dB.
+    Cutoff,
+    Resonance,
+    Drive,
+    /// An envelope's times in octaves (doublings) and its sustain in points,
+    /// taken when the note starts.
+    EnvAttack(usize),
+    EnvDecay(usize),
+    EnvSustain(usize),
+    EnvRelease(usize),
+}
+
+impl ModTarget {
+    /// The unit of an entry's amount.
+    pub fn unit(self) -> &'static str {
+        match self {
+            ModTarget::Pitch | ModTarget::OscPitch(_) => "semitones",
+            ModTarget::OscLevel(_) | ModTarget::Drive => "dB",
+            ModTarget::OscPan(_) => "pan",
+            ModTarget::OscPulseWidth(_) | ModTarget::Resonance | ModTarget::EnvSustain(_) => "points",
+            ModTarget::Cutoff | ModTarget::EnvAttack(_) | ModTarget::EnvDecay(_) | ModTarget::EnvRelease(_) => "octaves",
+        }
+    }
+}
+
+/// Where an entry of the Synth's matrix takes its value from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ModSource {
+    /// An envelope, 0 to 1; the index is its place among the envelopes.
+    Envelope(usize),
+    /// An LFO, -1 to 1.
+    Lfo(usize),
+    /// The note's velocity, 0 to 1.
+    Velocity,
+    /// The note, 0 at middle C and 1 an octave up.
+    Note,
+    /// One value a note, 0 to 1, from the seed.
+    Random,
+    /// A macro, 0 to 1.
+    Macro(usize),
+}
+
+/// The matrix's targets with their units, as `describe synth` lists them:
+/// `ID` stands for an oscillator's or an envelope's ID.
+pub const MOD_TARGETS: &[(&str, &str)] = &[
+    ("pitch", "semitones"),
+    ("oscillators.ID.pitch", "semitones"),
+    ("oscillators.ID.level_db", "dB"),
+    ("oscillators.ID.pan", "pan"),
+    ("oscillators.ID.pulse_width", "points"),
+    ("filter.cutoff_hz", "octaves"),
+    ("filter.resonance_percent", "points"),
+    ("filter.drive_db", "dB"),
+    ("envelopes.ID.attack_ms", "octaves"),
+    ("envelopes.ID.decay_ms", "octaves"),
+    ("envelopes.ID.sustain_percent", "points"),
+    ("envelopes.ID.release_ms", "octaves"),
+];
+
+/// The matrix's sources, as `describe synth` lists them.
+pub const MOD_SOURCES: &[(&str, &str)] = &[
+    ("ENVELOPE", "an envelope by its ID, 0 to 1"),
+    ("LFO", "an LFO by its ID, -1 to 1"),
+    ("velocity", "the note's velocity, 0 to 1"),
+    ("note", "the note, 0 at middle C and 1 an octave up"),
+    ("random", "one value a note, 0 to 1, from seed"),
+    ("macros.NAME", "a macro, 0 to 1"),
+];
+
+/// The names the matrix keeps for itself, which no envelope or LFO may have.
+const RESERVED_SOURCES: [&str; 3] = ["velocity", "note", "random"];
+
+/// What a source names in a synth.
+pub fn mod_source(synth: &crate::schema::Synth, source: &str) -> Result<ModSource, String> {
+    if let Some(name) = source.strip_prefix("macros.") {
+        return synth
+            .macros
+            .get_index_of(name)
+            .map(ModSource::Macro)
+            .ok_or_else(|| format!("source {source}: no macro {name}"));
+    }
+    match source {
+        "velocity" => return Ok(ModSource::Velocity),
+        "note" => return Ok(ModSource::Note),
+        "random" => return Ok(ModSource::Random),
+        _ => {}
+    }
+    if let Some(i) = synth.envelopes.get_index_of(source) {
+        return Ok(ModSource::Envelope(i));
+    }
+    if let Some(i) = synth.lfos.get_index_of(source) {
+        return Ok(ModSource::Lfo(i));
+    }
+    Err(format!("source {source}: no envelope, LFO or macro of that name; sources are an envelope or LFO by ID, velocity, note, random or macros.NAME"))
+}
+
+/// What a target names in a synth.
+pub fn mod_target(synth: &crate::schema::Synth, target: &str) -> Result<ModTarget, String> {
+    let parts: Vec<&str> = target.split('.').collect();
+    let unknown = || {
+        let names: Vec<&str> = MOD_TARGETS.iter().map(|(n, _)| *n).collect();
+        format!("target {target}: not a target; targets are {}", names.join(", "))
+    };
+    match parts.as_slice() {
+        ["pitch"] => Ok(ModTarget::Pitch),
+        ["oscillators", id, field] => {
+            let i = synth.oscillators.get_index_of(*id).ok_or_else(|| format!("target {target}: no oscillator {id}"))?;
+            match *field {
+                "pitch" => Ok(ModTarget::OscPitch(i)),
+                "level_db" => Ok(ModTarget::OscLevel(i)),
+                "pan" => Ok(ModTarget::OscPan(i)),
+                "pulse_width" => Ok(ModTarget::OscPulseWidth(i)),
+                _ => Err(unknown()),
+            }
+        }
+        ["filter", field] => match *field {
+            "cutoff_hz" => Ok(ModTarget::Cutoff),
+            "resonance_percent" => Ok(ModTarget::Resonance),
+            "drive_db" => Ok(ModTarget::Drive),
+            _ => Err(unknown()),
+        },
+        ["envelopes", id, field] => {
+            let i = synth.envelopes.get_index_of(*id).ok_or_else(|| format!("target {target}: no envelope {id}"))?;
+            match *field {
+                "attack_ms" => Ok(ModTarget::EnvAttack(i)),
+                "decay_ms" => Ok(ModTarget::EnvDecay(i)),
+                "sustain_percent" => Ok(ModTarget::EnvSustain(i)),
+                "release_ms" => Ok(ModTarget::EnvRelease(i)),
+                _ => Err(unknown()),
+            }
+        }
+        _ => Err(unknown()),
+    }
+}
+
+/// A synth's parts name each other: envelope and LFO IDs are sources and
+/// may not be the matrix's own names or each other's, and every entry's
+/// source and target exist.
+pub fn synth_references(synth: &crate::schema::Synth) -> Result<(), String> {
+    for id in synth.envelopes.keys().chain(synth.lfos.keys()) {
+        if RESERVED_SOURCES.contains(&id.as_str()) {
+            return Err(format!("{id} is a modulation source of its own; name the envelope or LFO something else"));
+        }
+    }
+    if let Some(id) = synth.lfos.keys().find(|id| synth.envelopes.contains_key(*id)) {
+        return Err(format!("An envelope and an LFO are both named {id}; the matrix names them by ID"));
+    }
+    for (i, m) in synth.modulation.iter().enumerate() {
+        mod_source(synth, &m.source).map_err(|e| format!("modulation {i}: {e}"))?;
+        mod_target(synth, &m.target).map_err(|e| format!("modulation {i}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// An automatable field of a synth by its path in the patch, such as
+/// `filter.cutoff_hz`, `oscillators.a.level_db` or `macros.tone`: its
+/// interpolation domain and range.
+pub fn synth_param(synth: &crate::schema::Synth, path: &str) -> Result<(Domain, Range), String> {
+    use crate::describe::{self, Kind};
+    let parts: Vec<&str> = path.split('.').collect();
+    let field = |table: &'static [describe::Field], name: &str, what: &str| -> Result<(Domain, Range), String> {
+        let f = table
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| format!("{path}: {what} has no field {name}"))?;
+        if f.kind != Kind::Number || f.structural {
+            let names: Vec<&str> = table.iter().filter(|f| f.kind == Kind::Number && !f.structural).map(|f| f.name).collect();
+            return Err(format!("{path}: {name} cannot be automated; automatable: {}", names.join(", ")));
+        }
+        Ok((if f.log { Domain::Log } else { Domain::Linear }, Range::closed(f.min, f.max)))
+    };
+    match parts.as_slice() {
+        [name] if synth.macros.contains_key(*name) => Err(format!("{path}: a macro is automated as macros.{name}")),
+        [name] => field(describe::SYNTH, name, "the synth"),
+        ["oscillators", id, name] => {
+            if !synth.oscillators.contains_key(*id) {
+                return Err(format!("{path}: no oscillator {id}"));
+            }
+            field(describe::OSCILLATOR, name, "an oscillator")
+        }
+        ["filter", name] => field(describe::SYNTH_FILTER, name, "the filter"),
+        ["envelopes", id, name] => {
+            if !synth.envelopes.contains_key(*id) {
+                return Err(format!("{path}: no envelope {id}"));
+            }
+            field(describe::ENVELOPE, name, "an envelope")
+        }
+        ["lfos", id, name] => {
+            if !synth.lfos.contains_key(*id) {
+                return Err(format!("{path}: no LFO {id}"));
+            }
+            field(describe::LFO, name, "an LFO")
+        }
+        ["macros", name] => {
+            if !synth.macros.contains_key(*name) {
+                return Err(format!("{path}: no macro {name}"));
+            }
+            Ok((Domain::Linear, Range::closed(0.0, 100.0)))
+        }
+        _ => Err(format!("{path}: unknown synth field; see daw describe synth")),
+    }
+}
+
+/// Every automatable path of a synth, in the patch's order.
+pub fn synth_params(synth: &crate::schema::Synth) -> Vec<String> {
+    use crate::describe::{self, Kind};
+    let names = |table: &'static [describe::Field]| table.iter().filter(|f| f.kind == Kind::Number && !f.structural).map(|f| f.name);
+    let mut out: Vec<String> = names(describe::SYNTH).map(str::to_string).collect();
+    for id in synth.oscillators.keys() {
+        out.extend(names(describe::OSCILLATOR).map(|n| format!("oscillators.{id}.{n}")));
+    }
+    out.extend(names(describe::SYNTH_FILTER).map(|n| format!("filter.{n}")));
+    for id in synth.envelopes.keys() {
+        out.extend(names(describe::ENVELOPE).map(|n| format!("envelopes.{id}.{n}")));
+    }
+    for id in synth.lfos.keys() {
+        out.extend(names(describe::LFO).map(|n| format!("lfos.{id}.{n}")));
+    }
+    out.extend(synth.macros.keys().map(|n| format!("macros.{n}")));
+    out
+}
+
+/// A synth field's value by its path, for what shows or automates it.
+pub fn synth_value(synth: &crate::schema::Synth, path: &str) -> Option<f64> {
+    let number = |v: Option<&crate::value::Value>| match v {
+        Some(crate::value::Value::Float(x)) => Some(*x),
+        Some(crate::value::Value::Int(n)) => n.to_f64(),
+        _ => None,
+    };
+    let parts: Vec<&str> = path.split('.').collect();
+    match parts.as_slice() {
+        [name] => number(synth.dump(false).get(name)),
+        ["macros", name] => synth.macros.get(*name).copied(),
+        [group, id, name] => number(synth.dump(false).get(group)?.get(id)?.get(name)),
+        ["filter", name] => number(synth.filter.dump(false).get(name)),
+        _ => None,
     }
 }
 
@@ -229,6 +487,21 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
         }
     }
     if let Owner::Track(track) = owner {
+        if parts[0] == "instrument" {
+            let synth = track
+                .midi
+                .as_ref()
+                .and_then(|m| m.synth())
+                .ok_or_else(|| format!("{param}: {} has no synth to automate", track.id))?;
+            let path = param.strip_prefix("instrument.").filter(|p| !p.is_empty()).ok_or_else(|| format!("{param}: expected instrument.FIELD"))?;
+            let (domain, range) = synth_param(synth, path)?;
+            return Ok(Target {
+                kind: TargetKind::Instrument,
+                field: path.to_string(),
+                domain,
+                range,
+            });
+        }
         if parts[0] == "sends" && parts.len() == 3 {
             if parts[2] != "gain_db" {
                 return Err(format!("{param}: only a send's gain_db can be automated"));
@@ -297,12 +570,58 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
     Err(format!(
         "{param}: unknown automation target; use gain_db{}{} or effects.REF.FIELD",
         if matches!(owner, Owner::Master(_)) { "" } else { ", pan" },
-        if matches!(owner, Owner::Track(_)) {
-            ", sends.RETURN.gain_db"
-        } else {
-            ""
+        match owner {
+            Owner::Track(t) if t.midi.as_ref().is_some_and(|m| m.synth().is_some()) => ", sends.RETURN.gain_db, instrument.FIELD",
+            Owner::Track(_) => ", sends.RETURN.gain_db",
+            _ => "",
         }
     ))
+}
+
+/// What `daw check` says of a song's synths: a macro no entry uses, more
+/// notes stacked than the synth has voices, and a release the song's end
+/// cuts short.
+pub fn synth_warnings(p: &Project) -> Vec<String> {
+    let mut out = Vec::new();
+    let length = p.session.length_exact();
+    for t in &p.tracks {
+        let Some(midi) = &t.midi else { continue };
+        let Some(synth) = midi.synth() else { continue };
+        for name in synth.macros.keys() {
+            if !synth.modulation.iter().any(|m| m.source == format!("macros.{name}")) {
+                out.push(format!("{}: macro {name} moves nothing; the matrix has no entry with source macros.{name}", t.id));
+            }
+        }
+        // The notes as they sound, in order: the most at once against the voices.
+        let notes = crate::schedule::track_notes(p, midi);
+        let mut edges: Vec<(i64, i32)> = notes.iter().flat_map(|n| [(n.start, 1), (n.end, -1)]).collect();
+        edges.sort();
+        let (mut now, mut most) = (0i64, 0i64);
+        for (_, d) in edges {
+            now += i64::from(d);
+            most = most.max(now);
+        }
+        if most > synth.voices {
+            out.push(format!(
+                "{}: {most} notes sound at once and the synth has {} voices, so the oldest are cut off",
+                t.id, synth.voices
+            ));
+        }
+        let release = synth.envelopes.get("amp").map_or(0.0, |e| e.release_ms);
+        let tail = release / 1000.0 * p.session.tempo / 60.0;
+        if let Some(last) = notes.iter().map(|n| &n.at + &n.beats).max() {
+            let ends = last + BigRational::from_float(tail).unwrap_or_default();
+            if ends > length {
+                out.push(format!(
+                    "{}: the last note's release ends at beat {} and the song ends at {}, so the end fade cuts it",
+                    t.id,
+                    format_g(ends.to_f64().unwrap_or(f64::NAN), 4),
+                    p.session.length_beats.text()
+                ));
+            }
+        }
+    }
+    out
 }
 
 /// Every owner in document order: tracks, returns, then the master.

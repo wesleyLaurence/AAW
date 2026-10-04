@@ -205,6 +205,101 @@ pub const PAD: &[Field] = &[
     },
 ];
 
+const fn flag(name: &'static str, label: &'static str, default: bool) -> Field {
+    Field {
+        kind: Kind::Flag,
+        default: Initial::Flag(default),
+        suggested: Initial::Flag(default),
+        structural: true,
+        ..number(name, label, 0.0, 1.0, 0.0, "")
+    }
+}
+
+const fn integer(name: &'static str, label: &'static str, min: f64, max: f64, default: f64) -> Field {
+    Field {
+        kind: Kind::Integer,
+        ..number(name, label, min, max, default, "")
+    }
+}
+
+/// The Synth's own fields, outside its parts. `voices` and `seed` change
+/// nothing in a voice already sounding, so they are not structural.
+pub const SYNTH: &[Field] = &[
+    integer("voices", "Voices", 1.0, 16.0, 8.0),
+    number("glide_ms", "Glide", 0.0, 5000.0, 0.0, "ms"),
+    number("velocity_percent", "Velocity", 0.0, 100.0, 100.0, "%"),
+    integer("seed", "Seed", 0.0, 4294967295.0, 0.0),
+];
+
+/// An oscillator's fields. A change of wave or of its filter routing jumps
+/// the waveform, so a playing song fades through it; `phase`, which only a
+/// new note reads, is sent when a change ends and is not automated, and
+/// left out starts each note at a random place; the rest glide.
+pub const OSCILLATOR: &[Field] = &[
+    choice("wave", "Wave", &crate::schema::Wave::NAMES, Initial::Text("saw")),
+    number("level_db", "Level", -96.0, 24.0, 0.0, "dB"),
+    number("pan", "Pan", -1.0, 1.0, 0.0, ""),
+    integer("octave", "Octave", -4.0, 4.0, 0.0),
+    number("semitones", "Semitones", -36.0, 36.0, 0.0, "st"),
+    number("detune_cents", "Detune", -100.0, 100.0, 0.0, "cents"),
+    number("pulse_width", "Pulse width", 1.0, 99.0, 50.0, "%"),
+    structural(optional(number("phase", "Phase", 0.0, 100.0, 0.0, "%"), 0.0)),
+    flag("filter", "Filtered", true),
+];
+
+/// The Synth's filter's fields.
+pub const SYNTH_FILTER: &[Field] = &[
+    flag("enabled", "Enabled", true),
+    choice("mode", "Mode", &crate::schema::SynthFilterMode::NAMES, Initial::Text("lowpass")),
+    Field {
+        kind: Kind::Integer,
+        choices: &["12", "24"],
+        structural: true,
+        ..number("slope_db_per_octave", "Slope", 12.0, 24.0, 12.0, "dB/oct")
+    },
+    log(number("cutoff_hz", "Cutoff", 10.0, 20000.0, 20000.0, "Hz")),
+    number("resonance_percent", "Resonance", 0.0, 100.0, 0.0, "%"),
+    number("drive_db", "Drive", 0.0, 24.0, 0.0, "dB"),
+    number("keytrack_percent", "Key track", 0.0, 100.0, 0.0, "%"),
+];
+
+/// An envelope's fields.
+pub const ENVELOPE: &[Field] = &[
+    number("attack_ms", "Attack", 0.0, 20000.0, 1.0, "ms"),
+    number("decay_ms", "Decay", 0.0, 20000.0, 100.0, "ms"),
+    number("sustain_percent", "Sustain", 0.0, 100.0, 100.0, "%"),
+    number("release_ms", "Release", 0.0, 20000.0, 50.0, "ms"),
+];
+
+/// An LFO's fields. `rate_beats`, when given, replaces `rate_hz`.
+pub const LFO: &[Field] = &[
+    choice("shape", "Shape", &crate::schema::LfoShape::NAMES, Initial::Text("sine")),
+    log(number("rate_hz", "Rate", 0.01, 100.0, 1.0, "Hz")),
+    Field {
+        kind: Kind::Beats,
+        default: Initial::Absent,
+        suggested: Initial::Text("1"),
+        structural: true,
+        ..number("rate_beats", "Rate in beats", 0.0, 64.0, 0.0, "beats")
+    },
+    number("phase_percent", "Phase", 0.0, 100.0, 0.0, "%"),
+    flag("retrigger", "Retrigger", false),
+];
+
+/// A macro: a knob from 0 to 100.
+pub const MACRO: Field = number("macro", "Macro", 0.0, 100.0, 0.0, "");
+
+/// The fields of each part of the Synth, by the part's name in the patch,
+/// for anything that lists them: `synth` for the Synth's own fields, then
+/// `oscillators`, `filter`, `envelopes` and `lfos`.
+pub const SYNTH_PARTS: &[(&str, &[Field])] = &[
+    ("synth", SYNTH),
+    ("oscillators", OSCILLATOR),
+    ("filter", SYNTH_FILTER),
+    ("envelopes", ENVELOPE),
+    ("lfos", LFO),
+];
+
 /// The fields of an effect type, in the order the document writes them,
 /// without `type`, `id` and `bypass`, which every effect has. An equalizer's
 /// are its bands': see `BAND`.
@@ -405,5 +500,108 @@ mod tests {
         assert!(pad(&[("end_seconds", Value::Float(0.0))]).is_err());
         assert!(pad(&[("start_seconds", Value::Float(2.0)), ("end_seconds", Value::Float(1.0))]).is_err());
         assert_eq!(pad(&[("end_seconds", Value::Float(1.5))]).unwrap().end_seconds, Some(1.5));
+    }
+}
+
+#[cfg(test)]
+mod synth_tests {
+    use super::*;
+    use crate::rules::synth_param;
+    use crate::value::{dict, Value};
+    use crate::Project;
+
+    /// A song with one synth of every part, `with` set at `path` in it.
+    fn synth(path: &[&str], with: Option<Value>) -> Result<crate::Synth, String> {
+        let mut song = crate::yaml_load::load(
+            "session: {}\ntracks:\n- id: t\n  type: midi\n  instrument:\n    synth:\n      oscillators: {a: {}}\n      lfos: {l: {}}\n      macros: {m: 0}\n",
+        )
+        .unwrap();
+        let mut node = &mut song;
+        for key in ["tracks", "0", "instrument", "synth"] {
+            node = match node {
+                Value::Dict(d) => d.get_mut(&crate::value::Key::str(key)).unwrap(),
+                Value::List(l) => &mut l[key.parse::<usize>().unwrap()],
+                _ => unreachable!(),
+            };
+        }
+        for key in &path[..path.len() - 1] {
+            let Value::Dict(d) = node else { unreachable!() };
+            node = d.entry(crate::value::Key::str(key)).or_insert_with(|| dict(vec![]));
+        }
+        let Value::Dict(d) = node else { unreachable!() };
+        match with {
+            Some(v) => {
+                d.insert(crate::value::Key::str(path[path.len() - 1]), v);
+            }
+            None => {
+                d.shift_remove(&crate::value::Key::str(path[path.len() - 1]));
+            }
+        }
+        Project::validate(&song)
+            .map(|p| p.tracks[0].midi.as_ref().unwrap().synth().unwrap().clone())
+            .map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn synth_fields_agree_with_validation_defaults_and_automation() {
+        let plain = synth(&["voices"], None).unwrap();
+        let dump = plain.dump(false);
+        for (part, fields) in SYNTH_PARTS {
+            let (prefix, holder): (Vec<&str>, Value) = match *part {
+                "synth" => (vec![], dump.clone()),
+                "oscillators" => (vec!["oscillators", "a"], dump.get("oscillators").unwrap().get("a").unwrap().clone()),
+                "filter" => (vec!["filter"], dump.get("filter").unwrap().clone()),
+                "envelopes" => (vec!["envelopes", "amp"], dump.get("envelopes").unwrap().get("amp").unwrap().clone()),
+                _ => (vec!["lfos", "l"], dump.get("lfos").unwrap().get("l").unwrap().clone()),
+            };
+            let Value::Dict(d) = &holder else { panic!() };
+            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| *k != "patch").collect();
+            let listed: Vec<&str> = fields.iter().map(|f| f.name).collect();
+            let listed: Vec<&str> = if *part == "synth" {
+                listed.into_iter().chain(["oscillators", "filter", "envelopes", "lfos", "modulation", "macros"]).collect()
+            } else {
+                listed
+            };
+            assert_eq!(names, listed, "{part}");
+            for f in fields.iter() {
+                let got = holder.get(f.name).unwrap();
+                match f.default {
+                    Initial::Number(x) => assert!(crate::value::py_eq(got, &Value::Float(x)), "{part}.{}: {got:?}", f.name),
+                    Initial::Text(s) => assert!(crate::value::py_eq(got, &Value::str(s)), "{part}.{}", f.name),
+                    Initial::Flag(b) => assert!(crate::value::py_eq(got, &Value::Bool(b)), "{part}.{}", f.name),
+                    Initial::Absent => assert!(got.is_none(), "{part}.{}", f.name),
+                    Initial::Required => unreachable!("every synth field has a default"),
+                }
+                let path: Vec<&str> = prefix.iter().copied().chain([f.name]).collect();
+                let with = |v: Value| synth(&path, Some(v));
+                match f.kind {
+                    Kind::Number | Kind::Integer if f.choices.is_empty() => {
+                        let n = |x: f64| if f.kind == Kind::Integer { Value::int(x as i64) } else { Value::Float(x) };
+                        assert!(with(n(f.min)).is_ok() && with(n(f.max)).is_ok(), "{part}.{} at its limits", f.name);
+                        let step = if f.kind == Kind::Integer { 1.0 } else { 1e-6 * f.max.abs().max(1.0) };
+                        assert!(with(n(f.min - step)).is_err(), "{part}.{} below {}", f.name, f.min);
+                        assert!(with(n(f.max + step)).is_err(), "{part}.{} above {}", f.name, f.max);
+                    }
+                    Kind::Integer | Kind::Choice => {
+                        for c in f.choices {
+                            let v = if f.kind == Kind::Integer { Value::int(c.parse().unwrap()) } else { Value::str(c) };
+                            assert!(with(v).is_ok(), "{part}.{} = {c}", f.name);
+                        }
+                        assert!(with(Value::str("other")).is_err(), "{part}.{}", f.name);
+                    }
+                    Kind::Flag => assert!(with(Value::Bool(!matches!(f.default, Initial::Flag(true)))).is_ok()),
+                    Kind::Beats => {
+                        assert!(with(Value::str("1/2")).is_ok() && with(Value::int(f.max as i64)).is_ok());
+                        assert!(with(Value::int(0)).is_err() && with(Value::Float(f.max + 0.5)).is_err());
+                    }
+                    Kind::Track | Kind::Number => unreachable!("{part}.{}", f.name),
+                }
+                // A lane moves exactly the numbers that are not structural.
+                let automatable = synth_param(&plain, &path.join(".")).is_ok();
+                assert_eq!(automatable, f.kind == Kind::Number && !f.structural, "{part}.{}", f.name);
+            }
+        }
+        assert!(synth_param(&plain, "macros.m").is_ok() && synth_param(&plain, "macros.x").is_err());
+        assert!(synth_param(&plain, "oscillators.b.level_db").is_err());
     }
 }

@@ -40,6 +40,7 @@ dependencies = [
  "num-bigint",
  "num-rational",
  "num-traits",
+ "realfft",
  "rtrb",
  "sha2",
  "signalsmith-stretch",

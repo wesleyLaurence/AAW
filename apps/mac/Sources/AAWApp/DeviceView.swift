@@ -357,10 +357,10 @@ private struct ChainHeader: View {
 
 /// A MIDI track's instrument, first in its chain, and the mark that takes it
 /// off. A sampler that is empty or one pad on every note is the Sampler
-/// device, drawn by `SamplerPanel`; a sampler of several pads lists them and
-/// the notes that play each. The notes are kept whatever is done here. A
-/// sample dropped here, or on the track's header, becomes the instrument's,
-/// in place of the one it had.
+/// device, drawn by `SamplerPanel`; the Synth is drawn by `SynthPanel`; a
+/// sampler of several pads lists them and the notes that play each. The
+/// notes are kept whatever is done here. A sample dropped here, or on the
+/// track's header, becomes the instrument's, in place of the one it had.
 private struct InstrumentPanel: View {
     let model: SongModel
     let track: TrackView
@@ -373,7 +373,14 @@ private struct InstrumentPanel: View {
 
     private var title: String {
         if track.sampler != nil { return "Sampler" }
+        if let synth = track.synth { return synth.patch.map { "Synth · \($0)" } ?? "Synth" }
         return track.instrument.map(readable) ?? "No instrument"
+    }
+
+    private var width: CGFloat {
+        if track.sampler != nil { return SamplerPanel.width }
+        if let synth = track.synth { return SynthPanel.width(synth) }
+        return 216
     }
 
     var body: some View {
@@ -398,6 +405,8 @@ private struct InstrumentPanel: View {
             .background(Color(nsColor: Theme.gray(0.24)))
             if let sampler = track.sampler {
                 SamplerPanel(model: model, track: track, sampler: sampler)
+            } else if let synth = track.synth {
+                SynthPanel(model: model, track: track, synth: synth)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
@@ -428,7 +437,7 @@ private struct InstrumentPanel: View {
             }
             Spacer(minLength: 0)
         }
-        .frame(width: track.sampler == nil ? 216 : SamplerPanel.width, height: DetailView.height - 16, alignment: .top)
+        .frame(width: width, height: DetailView.height - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: targeted ? 2 : 0))
         .clipShape(RoundedRectangle(cornerRadius: 4))

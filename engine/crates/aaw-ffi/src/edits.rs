@@ -135,6 +135,12 @@ pub enum Edit {
     /// or `60`, or takes it off, so that the keys play the sample as it is
     /// at middle C. The note is the sample's, so every pad of it follows.
     SamplerRoot { track: u64, note: Option<String> },
+    /// Sets a field of a MIDI track's Synth, named by its path in the
+    /// patch as its `FieldView` names it, such as `filter.cutoff_hz` or
+    /// `oscillators.a.wave`. An absent `phase` is a random one.
+    SynthSet { track: u64, field: String, value: FieldValue },
+    /// Takes an entry out of the Synth's matrix, by its place in the list.
+    SynthModRemove { track: u64, index: u32 },
     /// Moves an audio clip's start, its end or both to a beat. Its audio
     /// stays where it is on the timeline, and an edge goes no further than
     /// the file does. The end is where its sound ends: the clip leaves its
@@ -579,6 +585,12 @@ fn static_value(project: &Project, owner: Owner, param: &str) -> Result<f64> {
         (TargetKind::Channel, Owner::Track(x)) => Ok(if t.field == "pan" { x.pan } else { x.gain_db }),
         (TargetKind::Channel, Owner::Return(x)) => Ok(if t.field == "pan" { x.pan } else { x.gain_db }),
         (TargetKind::Send(to), Owner::Track(x)) => x.sends.iter().find(|s| &s.to == to).map(|s| s.gain_db).ok_or_else(missing),
+        (TargetKind::Instrument, Owner::Track(x)) => x
+            .midi
+            .as_ref()
+            .and_then(|m| m.synth())
+            .and_then(|s| aaw_model::rules::synth_value(s, &t.field))
+            .ok_or_else(missing),
         (TargetKind::Effect { index, band }, _) => {
             let dump = owner.effects()[*index].dump(false);
             let holder = match band {
@@ -693,6 +705,14 @@ fn sampler_device<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'
     }
     let loaded = crate::view::device(t).ok_or_else(|| format!("The sampler on {} is a kit of several pads, which `daw pad set` edits", t.id))?;
     Ok((t, loaded))
+}
+
+/// The MIDI track a Synth is on, and its patch.
+fn synth_track<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'a aaw_model::Track, &'a aaw_model::Synth)> {
+    let place = items(tree, "tracks").iter().position(|i| i.handle == key).ok_or("The track is no longer in the song")?;
+    let t = &project.tracks[place];
+    let synth = t.midi.as_ref().and_then(|m| m.synth()).ok_or_else(|| format!("{} has no Synth", t.id))?;
+    Ok((t, synth))
 }
 
 /// Whether a track is a MIDI track.
@@ -1092,6 +1112,24 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 value => json!({"op": "set", "path": path, "value": field_json(value)}),
             };
             Ok(batch(vec![command], format!("Set the Sampler's {} on {}", spec.label.to_lowercase(), t.id)))
+        }
+        Edit::SynthSet { track: key, field, value } => {
+            let tree = doc.tree();
+            let (t, _) = synth_track(project, &tree, *key)?;
+            let (label, _) = crate::view::synth_label(field);
+            let path = format!("tracks.{}.instrument.synth.{field}", handle_text(*key));
+            let command = match value {
+                FieldValue::Absent => json!({"op": "remove", "path": path}),
+                value => json!({"op": "set", "path": path, "value": field_json(value)}),
+            };
+            Ok(batch(vec![command], format!("Set the Synth's {} on {}", label.to_lowercase(), t.id)))
+        }
+        Edit::SynthModRemove { track: key, index } => {
+            let tree = doc.tree();
+            let (t, synth) = synth_track(project, &tree, *key)?;
+            let m = synth.modulation.get(*index as usize).ok_or("The matrix has no such entry")?;
+            let path = format!("tracks.{}.instrument.synth.modulation.{index}", handle_text(*key));
+            Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Remove modulation of {} by {} on {}", m.target, m.source, t.id)))
         }
         Edit::SamplerRoot { track: key, note } => {
             let tree = doc.tree();
