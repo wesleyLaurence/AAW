@@ -1,9 +1,9 @@
 name: Pluck
-description: A saw and a square an octave up, the filter snapped open by an envelope and closing as the note dies. Harder notes open it further.
+description: A saw in two copies and a square an octave up, the filter snapped open by an envelope and closing as the note dies, with a dotted-eighth echo under it. Harder notes open it further.
 tags: [pluck, keys, short]
 synth:
   oscillators:
-    a: {wave: saw, level_db: -9}
+    a: {wave: saw, level_db: -9, unison: 2, unison_detune_cents: 6, unison_width_percent: 40}
     b: {wave: square, level_db: -15, octave: 1}
   filter: {cutoff_hz: 300, slope_db_per_octave: 24, resonance_percent: 20, keytrack_percent: 50}
   envelopes:
@@ -12,3 +12,5 @@ synth:
   modulation:
   - {source: env2, target: filter.cutoff_hz, amount: 4}
   - {source: velocity, target: filter.cutoff_hz, amount: 1}
+  effects:
+  - {type: delay, time_beats: 3/4, feedback_percent: 30, highcut_hz: 5000, mix_percent: 20}

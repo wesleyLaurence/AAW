@@ -1,5 +1,5 @@
 name: Reese
-description: Two saws detuned against each other over a sub, driven into a low filter; the beating is the sound. Tone opens the filter.
+description: Two saws detuned against each other over a sub, driven into a low filter and then into soft saturation; the beating is the sound. Tone opens the filter.
 tags: [bass, mono, dark]
 synth:
   voices: 1
@@ -14,3 +14,5 @@ synth:
   macros: {tone: 40}
   modulation:
   - {source: macros.tone, target: filter.cutoff_hz, amount: 3}
+  effects:
+  - {type: saturation, mode: soft, drive_db: 8, output_db: -4}

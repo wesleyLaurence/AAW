@@ -179,6 +179,10 @@ pub enum Edit {
     SynthModSet { track: u64, index: u32, amount: f64 },
     /// Takes an entry out of the Synth's matrix, by its place in the list.
     SynthModRemove { track: u64, index: u32 },
+    /// Adds an effect of `kind` to the chain inside a MIDI track's Synth, at
+    /// `index` or its end, as `daw effect add` on the synth's path does; the
+    /// effect is then edited, moved, bypassed and removed as any effect is.
+    SynthEffectAdd { track: u64, kind: String, index: Option<u32> },
     /// Saves a MIDI track's Synth to the library as a patch named `name`,
     /// as `daw patch save` does, and names the song's patch after it. Over
     /// a patch already saved under that name only with `replace`, which
@@ -1212,8 +1216,8 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         }
         Edit::SynthSet { track: key, field, value } => {
             let tree = doc.tree();
-            let (t, _) = synth_track(project, &tree, *key)?;
-            let (label, _) = crate::view::synth_label(field);
+            let (t, synth) = synth_track(project, &tree, *key)?;
+            let (label, _) = crate::view::synth_label(synth, field);
             let path = format!("tracks.{}.instrument.synth.{field}", handle_text(*key));
             let command = match value {
                 FieldValue::Absent => json!({"op": "remove", "path": path}),
@@ -1223,7 +1227,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         }
         Edit::SynthSetFields { track: key, fields } => {
             let tree = doc.tree();
-            let (t, _) = synth_track(project, &tree, *key)?;
+            let (t, synth) = synth_track(project, &tree, *key)?;
             if fields.is_empty() {
                 return Ok(Vec::new());
             }
@@ -1231,7 +1235,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             let mut labels = Vec::new();
             for f in fields {
                 values.insert(f.field.clone(), field_json(&f.value));
-                labels.push(crate::view::synth_label(&f.field).0.to_lowercase());
+                labels.push(crate::view::synth_label(synth, &f.field).0.to_lowercase());
             }
             let named = match labels.len() {
                 1 => labels[0].clone(),
@@ -1293,6 +1297,26 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 vec![json!({"op": "synth.set", "track": handle_text(*key), "values": values})],
                 format!("Remove {what} {name} from the Synth on {}", t.id),
             ))
+        }
+        Edit::SynthEffectAdd { track: key, kind, index } => {
+            let tree = doc.tree();
+            let (t, _) = synth_track(project, &tree, *key)?;
+            let mut command = json!({"op": "effect.add", "owner": format!("{}.instrument.synth", handle_text(*key)), "type": kind});
+            if let Some(i) = index {
+                command["index"] = json!(i);
+            }
+            let fields = command.as_object_mut().expect("an object");
+            match kind.as_str() {
+                "eq" => {
+                    fields.insert("bands".into(), json!([start(describe::BAND)]));
+                }
+                _ => fields.extend(start(describe::effect(kind))),
+            }
+            // Inside a patch a delay or reverb sits under the voices.
+            if matches!(kind.as_str(), "delay" | "reverb") {
+                fields.insert("mix_percent".into(), json!(25));
+            }
+            Ok(batch(vec![command], format!("Add {kind} to the Synth on {}", t.id)))
         }
         Edit::SynthModAdd { track: key, source, target, amount } => {
             let tree = doc.tree();

@@ -64,8 +64,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 - `aaw-model`: the strict schema (version 1, and 2 with MIDI tracks), exact musical time, stable YAML, validation,
   hashes, the event schedule and the schema `daw describe` prints.
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
-  compressor/sidechain, limiter, delay and reverb devices with explicit block
-  state, and the Synth, a polyphonic synthesizer played from a patch; see
+  compressor/sidechain, limiter, delay, reverb, chorus and saturation devices
+  with explicit block state, wavetables, and the Synth, a polyphonic
+  synthesizer played from a patch; see
   [effects.md](features/effects.md), [automation.md](features/automation.md)
   and [synth.md](features/synth.md).
 - `aaw-engine`: compiles a song into a program of voices, chains, routing and
@@ -159,15 +160,17 @@ Muted or solo-muted tracks send nothing; returns are never solo-muted. No groups
 or return-to-return sends exist yet.
 
 Effects: `filter`, `eq`, `compressor` (optional `sidechain` track), `limiter`,
-`delay` and `reverb`, listed in order under `tracks[].effects`, `returns[].effects`
-or `master.effects`, each with an optional `id` unique within its chain. Track
-inserts come before track gain and pan; return effects precede return gain and pan;
+`delay`, `reverb`, `chorus` and `saturation`, listed in order under
+`tracks[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
+patch, `tracks[].instrument.synth.effects`, each with an optional `id` unique
+within its chain. A patch's effects come before the track's inserts, which
+come before track gain and pan; return effects precede return gain and pan;
 master effects follow `master_gain_db` and precede the end fade. See
 [effects.md](features/effects.md) for parameters and semantics.
 
 Automation: `tracks[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db`,
-`effects.REF.FIELD` or, on a MIDI track with a synth, `instrument.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
+`effects.REF.FIELD` or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).
@@ -188,8 +191,9 @@ not overlap; a pitched entry repitches its pad from its sample's root note, or
 from middle C (C4, 60) when the sample has none, to the note. The schedule gives a MIDI track's notes to its instrument as pitch,
 velocity, start and note-off, and the sampler makes of them the hits a pattern
 event would make. The Synth plays them itself, every frame, from a patch of
-oscillators, a filter a voice, envelopes, LFOs, a modulation matrix and
-macros, whose fields a track's lanes reach as `instrument.FIELD`; see
+oscillators with unison and wavetables, a filter a voice, envelopes, LFOs, a
+modulation matrix, macros and a chain of effects of its own, whose fields a
+track's lanes reach as `instrument.FIELD`; see
 [synth.md](features/synth.md) and `daw describe synth`. A patch is that
 mapping as a YAML file: twelve factory patches are built into `daw`, and
 `daw patch save` writes the person's own to the workspace library,

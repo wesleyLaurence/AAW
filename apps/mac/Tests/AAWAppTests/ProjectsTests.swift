@@ -187,7 +187,7 @@ final class ProjectsTests: XCTestCase {
         XCTAssertNil(track.synth?.patch)
         model.addBrowserDevice("synth", to: .track(track.key), patch: "Soft Pad")
         wait(for: "the patch loaded") { model.arrangement.tracks[0].synth?.patch == "Soft Pad" }
-        XCTAssertEqual(model.arrangement.tracks[0].synth?.oscillators.map(\.name), ["a", "b", "sub"])
+        XCTAssertEqual(model.arrangement.tracks[0].synth?.oscillators.map(\.name), ["a", "sub"])
         // A patch under the tracks makes a track named after it.
         model.addBrowserDevice("synth", to: nil, patch: "Bright Lead")
         wait(for: "a track named after the patch") { model.arrangement.tracks.count == 2 }

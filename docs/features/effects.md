@@ -62,6 +62,8 @@ render with and without it and use `daw compare`.
 | `limiter` | `ceiling_db` −24…−0.1, `release_ms`, `lookahead_ms` 0.5–20 |
 | `delay` | `time_beats` (0–16, fractions allowed), `feedback_percent` 0–95, `lowcut_hz`, `highcut_hz`, `ping_pong`, `mix_percent` |
 | `reverb` | `decay_seconds` 0.1–12, `predelay_ms` 0–250, `damping_hz` 500–20000, `lowcut_hz` 20–2000, `width_percent`, `mix_percent`, `seed` |
+| `chorus` | `rate_hz` 0.05–10, `depth_ms` 0–20, `delay_ms` 1–40, `mix_percent` (50 unless given) |
+| `saturation` | `mode` soft/hard/tube, `drive_db` 0–36, `output_db` ±24, `mix_percent` |
 
 ## Semantics
 
@@ -109,15 +111,33 @@ render with and without it and use `daw compare`.
   spectrum. The reverb adds no latency. Its noise comes from the Rust engine's
   own generator, so a tail has the decay, spectrum and energy of the same reverb
   in a render made by the earlier Python engine, but not its samples.
-- **mix_percent**: delay and reverb output `input × (1 − mix) + wet × mix`. The
-  default 100 is fully wet, which is what a return needs. When using them as a
-  track insert, set it lower. `mix_percent: 0` passes the input through
-  bit-identical.
+- **chorus**: a stereo chorus, added October 4, 2026 with the Synth's last
+  item. Each channel goes through a delay of `delay_ms` moved `depth_ms` either
+  side by a sine at `rate_hz`, the right channel a quarter cycle behind the
+  left, so the two sides drift apart; the line is read with linear
+  interpolation. `mix_percent` 100 is the wet signal alone, a vibrato. The
+  sweep is a function of the frames processed, so a render is the same bytes
+  twice, and it goes on while the transport stands. Adds no latency.
+- **saturation**: the signal driven by `drive_db` into a curve, added the same
+  day. `soft` is `tanh`, odd harmonics that thicken as the drive rises; `hard`
+  clips at full scale; `tube` is `tanh(x + 0.3x²)`, asymmetric, even harmonics
+  too, with its offset removed by a one-pole highpass at 10 Hz. `output_db`
+  trims the result and `mix_percent` blends it under the dry signal. No
+  oversampling: a hard clip high up aliases a little.
+- **mix_percent**: delay, reverb, chorus and saturation output `input × (1 −
+  mix) + wet × mix`. The default is 100, fully wet, which is what a return
+  needs, and 50 for the chorus. When using a delay or reverb as a track insert,
+  set it lower. `mix_percent: 0` passes the input through bit-identical.
 
 Parameters are static unless an automation lane moves them; see
 [automation.md](automation.md) for which ones can be automated.
 Delay and reverb tails that run past the session end are cut by the end fade;
 leave room after the last note.
+
+A Synth patch carries a chain of these kinds of its own,
+`tracks[].instrument.synth.effects`, run on the sum of its voices before the
+track's inserts and edited by the same commands on the synth's path; a
+compressor there has no sidechain. See [synth.md](synth.md).
 
 ## Sends and returns
 
@@ -207,6 +227,6 @@ A 179-second local song with 12 tracks, 3 returns, 32 effects and 10 lanes
 renders in about 9 seconds on an M2, where the Python engine took over 30, and
 plays at 128-frame buffers using about 0.1 ms of each 2.67 ms callback.
 
-Not yet implemented: saturation, chorus and other modulation effects, groups,
+Not yet implemented: a clipper, a phaser and other modulation effects, groups,
 return-to-return sends, sidechain filtering, RMS detection, true-peak limiting,
 loudness-target export and impulse-response samples for the reverb.

@@ -138,3 +138,53 @@ fn lanes_reach_the_synths_fields_and_go_with_the_instrument() {
     assert_eq!(r["also"], json!(["tracks.lead: removed lane instrument.filter.cutoff_hz"]));
     assert_eq!(get(&s, "tracks.lead.automation"), json!([]));
 }
+
+#[test]
+fn the_patchs_effects_are_edited_as_a_chain_and_automated_from_the_track() {
+    let (dir, mut s) = open();
+    edit(&mut s, json!({"op": "synth.add", "track": "lead"})).unwrap();
+    // Added as to any chain, by the synth's path; set by path; one undo step each.
+    let r = edit(&mut s, json!({"op": "effect.add", "owner": "tracks.lead.instrument.synth", "type": "chorus", "id": "wide", "mix_percent": 40})).unwrap();
+    assert_eq!(r["label"], json!("Add chorus to tracks.lead.instrument.synth"));
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.lead.instrument.synth", "type": "saturation", "mode": "tube"})).unwrap();
+    edit(&mut s, json!({"op": "set", "path": "tracks.lead.instrument.synth.effects.wide.rate_hz", "value": 2})).unwrap();
+    let got = synth(&s);
+    assert_eq!(got["effects"], json!([{"type": "chorus", "id": "wide", "rate_hz": 2.0, "mix_percent": 40.0}, {"type": "saturation", "mode": "tube"}]));
+    // Lanes reach them as instrument.effects.REF.FIELD, by ID or index, and
+    // one that names a field the effect lacks or a sidechain is refused.
+    edit(&mut s, json!({"op": "lane.set", "owner": "tracks.lead", "param": "instrument.effects.wide.mix_percent", "points": [{"at": 0, "value": 0}, {"at": 8, "value": 100}]})).unwrap();
+    edit(&mut s, json!({"op": "lane.set", "owner": "tracks.lead", "param": "instrument.effects.1.drive_db", "points": [{"at": 0, "value": 6}]})).unwrap();
+    let e = edit(&mut s, json!({"op": "lane.set", "owner": "tracks.lead", "param": "instrument.effects.1.mode", "points": [{"at": 0, "value": 1}]})).unwrap_err();
+    assert!(e.contains("mode cannot be automated"), "{e}");
+    // The same field by its index is the same lane.
+    let e = edit(&mut s, json!({"op": "lane.set", "owner": "tracks.lead", "param": "instrument.effects.0.mix_percent", "points": [{"at": 0, "value": 50}]})).unwrap_err();
+    assert!(e.contains("more than one lane"), "{e}");
+    let e = edit(&mut s, json!({"op": "effect.add", "owner": "tracks.lead.instrument.synth", "type": "compressor", "threshold_db": -20, "sidechain": "bass"})).unwrap_err();
+    assert!(e.contains("no sidechain"), "{e}");
+    // Moving an effect carries its lanes' indices; removing one takes its lanes with it.
+    let r = edit(&mut s, json!({"op": "effect.move", "effect": "tracks.lead.instrument.synth.effects.1", "index": 0})).unwrap();
+    assert_eq!(r["also"], json!(["tracks.lead: lane instrument.effects.1.drive_db is now instrument.effects.0.drive_db"]));
+    assert_eq!(synth(&s)["effects"][0]["type"], json!("saturation"));
+    let r = edit(&mut s, json!({"op": "effect.remove", "effect": "tracks.lead.instrument.synth.effects.wide"})).unwrap();
+    assert_eq!(r["also"], json!(["tracks.lead: removed lane instrument.effects.wide.mix_percent"]));
+    let lanes = get(&s, "tracks.lead.automation");
+    assert_eq!(lanes.as_array().unwrap().len(), 1);
+    assert_eq!(lanes[0]["param"], json!("instrument.effects.0.drive_db"));
+    // Bypassed as any effect, and saved and read back.
+    edit(&mut s, json!({"op": "effect.bypass", "effect": "tracks.lead.instrument.synth.effects.0", "bypass": true})).unwrap();
+    assert_eq!(synth(&s)["effects"][0]["bypass"], json!(true));
+    s.save().unwrap();
+    let again = Session::open(&dir.path().join("song.yaml"), true).unwrap();
+    assert_eq!(synth(&again)["effects"][0]["mode"], json!("tube"));
+    // A patch loaded without the effect takes the lane with it.
+    let r = edit(&mut s, json!({"op": "instrument.set", "track": "lead", "instrument": {"synth": {"oscillators": {"a": {}}}}})).unwrap();
+    assert_eq!(r["also"], json!(["tracks.lead: removed lane instrument.effects.0.drive_db"]));
+    // Unison and a table are fields like any other; a wavetable names a sample.
+    edit(&mut s, json!({"op": "synth.set", "track": "lead", "values": {"oscillators.a.unison": 5, "oscillators.a.unison_detune_cents": 22, "oscillators.b": {"wave": "wavetable", "table": "fold"}}})).unwrap();
+    assert_eq!(synth(&s)["oscillators"]["b"], json!({"wave": "wavetable", "table": "fold"}));
+    edit(&mut s, json!({"op": "synth.mod", "track": "lead", "source": "velocity", "target": "oscillators.a.unison_detune_cents", "amount": 10})).unwrap();
+    let e = edit(&mut s, json!({"op": "synth.set", "track": "lead", "values": {"oscillators.b.table": "nothing"}})).unwrap_err();
+    assert!(e.contains("wavetable nothing"), "{e}");
+    edit(&mut s, json!({"op": "synth.set", "track": "lead", "values": {"oscillators.b.table": "tone"}})).unwrap();
+    assert_eq!(get(&s, "tracks.lead.instrument.synth.oscillators.b.table"), json!("tone"));
+}

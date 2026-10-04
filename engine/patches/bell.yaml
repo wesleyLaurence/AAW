@@ -1,5 +1,5 @@
 name: Bell
-description: A sine with a partial a twelfth up and a bright inharmonic one that fades first, struck and left to ring.
+description: A sine with a partial a twelfth up and a bright inharmonic one that fades first, struck and left to ring in a long room.
 tags: [bell, keys, mallet, long]
 synth:
   voices: 8
@@ -14,3 +14,5 @@ synth:
   modulation:
   - {source: env2, target: oscillators.c.level_db, amount: 24}
   - {source: velocity, target: oscillators.b.level_db, amount: 6}
+  effects:
+  - {type: reverb, decay_seconds: 3, predelay_ms: 15, damping_hz: 7000, mix_percent: 30}

@@ -1,16 +1,16 @@
 name: Supersaw
-description: Four saws spread in detune and across the stereo field, for chords and big leads. Tone opens the filter.
+description: One saw in seven copies, spread eighteen cents and across the whole field, through a slow chorus, for chords and big leads. Tone opens the filter; Spread is the detune.
 tags: [lead, chords, wide, bright]
 synth:
   voices: 8
   oscillators:
-    a: {wave: saw, level_db: -14, detune_cents: -18, pan: -0.7}
-    b: {wave: saw, level_db: -14, detune_cents: -6, pan: -0.25}
-    c: {wave: saw, level_db: -14, detune_cents: 6, pan: 0.25}
-    d: {wave: saw, level_db: -14, detune_cents: 18, pan: 0.7}
+    a: {wave: saw, level_db: -8, unison: 7, unison_detune_cents: 18}
   filter: {cutoff_hz: 2500, slope_db_per_octave: 12}
   envelopes:
     amp: {attack_ms: 20, decay_ms: 300, sustain_percent: 85, release_ms: 350}
-  macros: {tone: 70}
+  macros: {tone: 70, spread: 50}
   modulation:
   - {source: macros.tone, target: filter.cutoff_hz, amount: 2}
+  - {source: macros.spread, target: oscillators.a.unison_detune_cents, amount: 20}
+  effects:
+  - {type: chorus, rate_hz: 0.4, depth_ms: 2.5, mix_percent: 30}

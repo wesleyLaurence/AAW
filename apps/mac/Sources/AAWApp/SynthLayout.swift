@@ -263,7 +263,19 @@ enum SynthLayout {
         case "dB": 6
         case "points": 25
         case "pan": 0.5
+        case "cents": 10
         default: 1
         }
+    }
+
+    /// A table's cycle, given as points over one cycle, at `t` (0 to 1),
+    /// interpolated between the points; nothing without points.
+    static func table(_ cycle: [Double], at t: Double) -> Double {
+        guard !cycle.isEmpty else { return 0 }
+        let x = (t - floor(t)) * Double(cycle.count)
+        let i = Int(x) % cycle.count
+        let frac = x - floor(x)
+        let next = cycle[(i + 1) % cycle.count]
+        return cycle[i] + (next - cycle[i]) * frac
     }
 }

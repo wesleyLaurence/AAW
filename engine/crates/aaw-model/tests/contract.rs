@@ -28,6 +28,8 @@ tracks:
       - {type: limiter}
       - {type: delay, time_beats: 1}
       - {type: reverb}
+      - {type: chorus}
+      - {type: saturation}
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
   - id: m
@@ -45,6 +47,7 @@ tracks:
         lfos: {lfo1: {}}
         macros: {tone: 50}
         modulation: [{source: macros.tone, target: filter.cutoff_hz, amount: 1}]
+        effects: [{type: chorus}, {type: saturation}]
     automation: [{param: instrument.filter.cutoff_hz, points: [{at: 0, value: 900}]}]
 returns: [{id: r}]
 sections: [{id: a, at: 0, length_beats: 4}]

@@ -1,23 +1,23 @@
-# The Synth — engine and commands implemented October 3, 2026; patches and the panel October 4, 2026
+# The Synth — engine and commands implemented October 3, 2026; patches, the panel, and unison, wavetables and the patch's effects October 4, 2026
 
-Status: three of four items are built. The engine, the patch in the song,
-`daw synth` and `daw describe synth`, automation of the patch's fields,
-`daw check` warnings, patches as files with the factory patches, `daw patch`
-and the browser's Synth, and the panel with its drawings, its Save and Load,
-its keys and `note.preview` are built and described here in the present
-tense. Unison, wavetables and the patch's effects are the item that remains,
-described under [What remains](#what-remains). D69 records what the person
-settled on October 3, 2026, D71 what was decided in building the first item,
-D72 what was decided in building patches and D73 what was decided in
-building the panel.
+Status: built. The engine, the patch in the song, `daw synth` and `daw
+describe synth`, automation of the patch's fields, `daw check` warnings,
+patches as files with the factory patches, `daw patch` and the browser's
+Synth, the panel with its drawings, its Save and Load, its keys and
+`note.preview`, and unison, wavetables and the patch's own effects are built
+and described here in the present tense. D69 records what the person settled
+on October 3, 2026, D71 what was decided in building the first item, D72 what
+was decided in building patches, D73 what was decided in building the panel
+and D74 what was decided in building the last item.
 
 ## What
 
 A polyphonic synthesizer the agent operates from the terminal and the person
-from the device panel, with the same controls, on a MIDI track: oscillators, a
-filter, envelopes, LFOs, a modulation matrix and macros, in the shape of a
-modern software synth. The sound is a text patch inside the song, so a project
-is self-contained. It plays what the sampler plays: the notes of the track's
+from the device panel, with the same controls, on a MIDI track: oscillators
+with unison and wavetables, a filter, envelopes, LFOs, a modulation matrix,
+macros and a chain of effects of its own, in the shape of a modern software
+synth. The sound is a text patch inside the song, so a project is
+self-contained. It plays what the sampler plays: the notes of the track's
 note clips. It is for basses, leads, chords, pads, plucks, drums designed from
 nothing and sound effects. It is not a plugin host and not a generative model.
 
@@ -43,9 +43,9 @@ tracks:
         velocity_percent: 100        # how much velocity moves the level
         seed: 1                      # random phases and the random source
         oscillators:
-          a: {wave: saw, level_db: -6}
-          b: {wave: saw, level_db: -9, semitones: 7, detune_cents: -5}
-          sub: {wave: sine, level_db: -12, octave: -1, filter: false}
+          a: {wave: saw, level_db: -10, unison: 3, unison_detune_cents: 8, unison_width_percent: 60}
+          b: {wave: wavetable, table: vowel, level_db: -14, octave: 1}
+          sub: {wave: sine, level_db: -16, octave: -1, filter: false}
         filter:
           mode: lowpass              # lowpass, highpass, bandpass, notch
           slope_db_per_octave: 24    # 12 or 24
@@ -61,11 +61,14 @@ tracks:
           lfo2: {shape: triangle, rate_beats: 2, phase_percent: 0, retrigger: false}
         modulation:
           - {source: env2, target: filter.cutoff_hz, amount: 2}         # octaves
-          - {source: lfo1, target: oscillators.b.pitch, amount: 0.08}   # semitones
+          - {source: lfo1, target: oscillators.a.pitch, amount: 0.08}   # semitones
           - {source: macros.tone, target: filter.cutoff_hz, amount: 3}
           - {source: velocity, target: filter.cutoff_hz, amount: 1}
         macros:
           tone: 40
+        effects:                     # the patch's own, before the track's inserts
+          - {type: chorus, rate_hz: 0.5, depth_ms: 3, mix_percent: 35}
+          - {type: reverb, id: room, decay_seconds: 2.5, mix_percent: 25}
     clips: [...]
 ```
 
@@ -82,11 +85,39 @@ MIDI track is.
 (`a`, `b`, `sub`, `noise` are conventions, not slots), summed in the order
 written. `wave` is `sine`, `triangle`, `saw`, `square`, `pulse` (with
 `pulse_width`, the percent of the cycle that is high; the wave is kept
-centered) or `noise`. Each has `level_db`, `pan`, `octave`, `semitones`,
-`detune_cents`, `phase` (a percent of the cycle, or left out for a random
-place each note, from `seed`) and `filter`, true unless it is to bypass the
-filter, as a sub often does. Saw, square and pulse are bandlimited with
-PolyBLEP, at a cost that does not depend on pitch; the triangle is plain.
+centered), `noise` or `wavetable`. Each has `level_db`, `pan`, `octave`,
+`semitones`, `detune_cents`, `phase` (a percent of the cycle, or left out for
+a random place each note, from `seed`) and `filter`, true unless it is to
+bypass the filter, as a sub often does. Saw, square and pulse are bandlimited
+with PolyBLEP, at a cost that does not depend on pitch; the triangle is plain.
+
+**Unison.** `unison` (1 to 16) plays that many copies of the oscillator at
+once, spread evenly from `-unison_detune_cents` to `+unison_detune_cents`
+around the pitch and from left to right across `unison_width_percent` of the
+stereo field either side of `pan`. Each copy starts at its own random phase
+from the seed, or every copy at `phase` when it is given, and the sum is held
+at the level of one copy (each at 1/√n), so turning unison up thickens a sound
+without making it louder. A supersaw is one saw with `unison: 7` and
+`unison_detune_cents: 18`. `unison_detune_cents` is a matrix target, in cents,
+and a lane target; `unison_width_percent` is a lane target; `unison` itself is
+structural, so a change of it swaps through the dip.
+
+**Wavetables.** `wave: wavetable` reads one cycle from `table`: a built-in
+table, or the ID of a sample in the project. The built-in tables are `organ`
+(the drawbars: harmonics 1, 2, 3, 4, 6 and 8), `bright` (every harmonic to the
+64th, falling as 1/√k), `hollow` (odd harmonics falling as 1/k^1.5, between a
+triangle and a square), `vowel` (an "ah": formants at the fifth, ninth and
+twentieth harmonics), `fold` (a sine through a wavefolder) and `steps` (a sine
+in eight steps). A sample's file is read whole as one cycle, up to 65536
+frames, summed to mono, its DC removed and its level normalized, so a cycle
+drawn or cut from any sound becomes a wave; the project must have the sample,
+and `table` naming anything else is refused with the oscillator named. Every
+table is kept as a stack of levels, the same cycle with its harmonics cut off
+lower and lower, and a copy reads the level whose harmonics all fall below
+half the sample rate at its pitch, so a table does not alias; a table of 1024
+harmonics has eleven levels of 2048 samples, read with linear interpolation.
+The table is structural: a change of it swaps through the dip. A table is one
+cycle; multi-frame tables with a sweepable position are a Later line.
 
 **The filter** is one a voice, a Simper state-variable filter: `mode`, 12 or
 24 dB an octave, `cutoff_hz`, `resonance_percent` (0 is a Q of a half, 100
@@ -118,18 +149,33 @@ random and macros are unipolar, 0 to 1; `note` and LFOs are bipolar. `amount`
 is how far the target moves at full modulation, in the unit `describe` gives
 that target: semitones for a pitch, octaves for the cutoff and for an
 envelope's times (1 doubles, -1 halves), dB for a level, points for a
-percentage, and the pan's own units. Targets are `pitch` for all oscillators
-at once; an oscillator's `pitch`, `level_db`, `pan` and `pulse_width`; the
-filter's `cutoff_hz`, `resonance_percent` and `drive_db`; and an envelope's
-four fields, taken when the note starts and held for the note. An entry whose
-source or target the patch lacks is refused, naming it; an envelope or LFO may
-not be named `velocity`, `note` or `random`, and an envelope and an LFO may not
-share a name, since the matrix names them by ID.
+percentage, cents for a unison detune, and the pan's own units. Targets are
+`pitch` for all oscillators at once; an oscillator's `pitch`, `level_db`,
+`pan`, `pulse_width` and `unison_detune_cents`; the filter's `cutoff_hz`,
+`resonance_percent` and `drive_db`; and an envelope's four fields, taken when
+the note starts and held for the note. An entry whose source or target the
+patch lacks is refused, naming it; an envelope or LFO may not be named
+`velocity`, `note` or `random`, and an envelope and an LFO may not share a
+name, since the matrix names them by ID.
 
 **Macros** are a mapping of up to eight named knobs, 0 to 100. They do nothing
 but through the matrix, so a patch decides what Tone or Movement means, and an
 automation lane on `instrument.macros.tone` moves everything the patch wired to
 it. `daw check` names a macro nothing uses.
+
+**The patch's effects.** `effects` inside the patch is a chain of the song's
+effect kinds ([effects.md](effects.md)), run on the sum of the voices before
+the track's inserts, so a patch carries its chorus, saturation or reverb and
+sounds finished on any track, and `daw synth audition` hears it without
+`--track-chain`. The chain is edited as any chain is: `daw effect add SONG
+tracks.lead.instrument.synth chorus --mix-percent 30`, `daw effect remove`,
+`move` and `bypass` on `tracks.lead.instrument.synth.effects.REF`, and `daw
+set` of a field. A compressor here has no sidechain, since the chain hears
+only the synth; a limiter's look-ahead is latency the track's chain counts, so
+the track lands where it does with the limiter on the inserts. Lanes reach
+the chain as `instrument.effects.REF.FIELD`, `REF` an `id` or an index, and
+follow the effect when it is moved or removed, as an owner's lanes do. The
+render report lists them under the track's `instrument_effects`.
 
 **Polyphony and glide.** `voices` is 1 to 16. Beyond it the oldest releasing
 voice is stolen, else the oldest sounding, over a 5 ms fade. `glide_ms` slides
@@ -141,39 +187,48 @@ sampler's, 0 none.
 **Determinism.** A voice is a function of the patch, the note and the frames
 since its start. Its oscillators and filter run every frame; every control
 value (the envelopes, the LFOs, the matrix, the filter's tuning, the pitch
-with its glide) is worked out every 16 frames of the voice's own time, so the
-output does not depend on how the stream is cut into blocks, a song played
-from the start equals its render, and the same song rendered twice is the
-same bytes. Random phases and the `random` value come from `seed`, the
-track's ID and the note's place among the track's notes. Playback from a
-locate chases the notes sounding there: each starts at that frame with its
-envelopes and free LFOs where time would have brought them and its filter
-empty, as effects start empty at a locate today.
+with its glide, each unison copy's tuning and place) is worked out every 16
+frames of the voice's own time, so the output does not depend on how the
+stream is cut into blocks, a song played from the start equals its render, and
+the same song rendered twice is the same bytes. Random phases and the `random`
+value come from `seed`, the track's ID, the note's place among the track's
+notes and the copy's place in its unison. Playback from a locate chases the
+notes sounding there: each starts at that frame with its envelopes and free
+LFOs where time would have brought them and its filter empty, as effects start
+empty at a locate today.
 
 **Live edits** follow D44. A knob the panel or the agent moves glides over
 5 ms: the new patch's values blend from the old patch's, frequencies in the
-log domain, while every voice carries on. A change of wave, of the filter's
-mode, slope or enabling, of an oscillator's filter routing, of the parts a
-patch has or of its matrix swaps through the 10 ms dip, since it would jump
-the waveform. Describe marks these fields structural, and the panel sends them
-when a change ends. The notes stay shared between the programs a patch edit
-makes, so the voices are the same objects across the edit.
+log domain, while every voice carries on. A change of wave, of a table, of a
+unison count, of the filter's mode, slope or enabling, of an oscillator's
+filter routing, of the parts a patch has, of its matrix or of the effects in
+its chain swaps through the 10 ms dip, since it would jump the waveform; a
+knob on one of the patch's effects glides as an insert's does, and the
+effect's state carries across the edit. Describe marks these fields
+structural, and the panel sends them when a change ends. The notes stay shared
+between the programs a patch edit makes, so the voices are the same objects
+across the edit.
 
 **Automation** of a MIDI track gains the targets `instrument.FIELD` for every
 field describe marks automatable: `instrument.filter.cutoff_hz`,
-`instrument.oscillators.a.level_db`, `instrument.macros.tone`,
-`instrument.envelopes.amp.release_ms`, `instrument.lfos.lfo1.rate_hz`.
-Frequencies and LFO rates interpolate in the log domain as effects' do; a
-lane is read at the song's frame at each control tick. The matrix adds to the
-automated value; neither replaces the other. A lane on a field the instrument
-no longer has goes with the instrument when it is replaced or removed, and
-the reply says so; a part removed while a lane names it is refused.
+`instrument.oscillators.a.level_db`, `instrument.oscillators.a.unison_detune_cents`,
+`instrument.macros.tone`, `instrument.envelopes.amp.release_ms`,
+`instrument.lfos.lfo1.rate_hz`, and the patch's effects as
+`instrument.effects.REF.FIELD`. Frequencies and LFO rates interpolate in the
+log domain as effects' do; a lane is read at the song's frame at each control
+tick. The matrix adds to the automated value; neither replaces the other. A
+lane on a field the instrument no longer has goes with the instrument when it
+is replaced or removed, and the reply says so; a part removed while a lane
+names it is refused.
 
 **Cost.** Eight voices of three oscillators with a filter each is a few
-hundred oscillator steps a frame, a small fraction of a core. The state of
-every voice, 16 of them and 16 more ringing out, is allocated when a renderer
-is built, never in the callback; the renderer's take-over carries it between
-programs.
+hundred oscillator steps a frame, a small fraction of a core; a patch of
+four oscillators in sixteen copies each on sixteen voices is a thousand steps
+a frame, still well within one. The state of every voice, 16 of them and 16
+more ringing out, with room for every copy, is allocated when a renderer is
+built, never in the callback; the renderer's take-over carries it between
+programs. Built-in tables are made once and shared; a sample's table is kept
+between compiles while the file is as it was.
 
 ## What the agent does
 
@@ -186,18 +241,21 @@ these verbs are the shorter way and the one `daw describe synth` teaches.
 daw synth add SONG lead                                # on a MIDI track, or a new one
 daw synth show SONG lead                               # the patch as the song holds it
 daw synth set SONG lead filter.cutoff_hz 900 envelopes.amp.release_ms 600
-daw synth set SONG lead oscillators.sub '{"wave": "sine", "octave": -1, "filter": false}'
+daw synth set SONG lead oscillators.a.unison 7 oscillators.a.unison_detune_cents 18
+daw synth set SONG lead oscillators.b '{"wave": "wavetable", "table": "vowel"}'
 daw synth set SONG lead oscillators.sub null           # a part removed
 daw synth mod SONG lead env2 filter.cutoff_hz 2        # add, or change the amount
 daw synth mod SONG lead env2 filter.cutoff_hz --remove
+daw effect add SONG tracks.lead.instrument.synth chorus --mix-percent 30
+daw effect remove SONG tracks.lead.instrument.synth.effects.0
 daw synth audition SONG lead --notes C2,C3 --velocity 100 --length-beats 2 [--track-chain]
 ```
 
 `synth set` takes pairs, each a field path from the patch and a value or a
 JSON object, and makes one undo step; `synth add` attaches the plain saw, or
 makes a new MIDI track with it when no track has the name. `synth audition`
-renders the given notes one after another, or middle C, through the patch,
-and with `--track-chain` through the track's inserts too, to
+renders the given notes one after another, or middle C, through the patch and
+its own effects, and with `--track-chain` through the track's inserts too, to
 `renders/auditions/TRACK-HASH.wav`, named for what was heard so the same
 audition writes the same file, and replies with its path, peak, loudness in
 LUFS and spectral centroid, so `daw listen` can work on it; every step leaves
@@ -209,8 +267,9 @@ the panel, read the defaults.
 `daw describe synth` prints the schema; every part's fields with label, unit,
 range, default, choices and whether a lane can move the field or a change
 swaps through a dip; the modulation sources and every target with its unit;
-the semantics above; and recipes for a sub, a pluck, a pad, a lead, a kick, a
-hat and a riser, the way `describe edit` teaches an edit.
+the built-in wavetables; the semantics above; and recipes for a sub, a pluck,
+a pad, a supersaw, a lead, an organ, a kick, a hat and a riser, the way
+`describe edit` teaches an edit.
 
 `daw check` warns of a macro no entry uses, of more notes stacked than the
 synth has voices, and of a last note whose amp release ends past the song's
@@ -235,11 +294,15 @@ synth:
     a: {wave: sine, level_db: -6, filter: false}
     b: {level_db: -18, octave: 1}
   filter: {cutoff_hz: 200, slope_db_per_octave: 24}
+  effects:
+  - {type: saturation, drive_db: 6}
 ```
 
 The mapping is written as the song saves it, fields at their defaults left
 out, and validated as the song validates a synth, so a file with a wrong wave
-or an entry naming a part the patch lacks is refused with the field named.
+or an entry naming a part the patch lacks is refused with the field named. A
+patch whose wavetable names a sample loads into a song that has the sample,
+and is refused, naming the oscillator, by one that does not.
 
 **Where they live.** Saved patches are files in the workspace's library,
 `~/Music/AAW/library/patches/`, or `library/patches/` under `AAW_WORKSPACE`:
@@ -250,8 +313,12 @@ capitals and the file has neither (D72). A `.yaml` file anywhere loads by its
 path too. Twelve factory patches are built into `daw` from
 `engine/patches/`: Init, Sub Bass, Reese, Supersaw, Pluck, Soft Pad, Bright
 Lead, Organ, Bell, Kick, Hat and Riser, generic sounds that start from the
-recipes `daw describe synth` teaches. A saved patch whose slug is a factory
-patch's shadows it.
+recipes `daw describe synth` teaches. Supersaw is one saw in seven copies
+with a Spread macro on its detune; Soft Pad, Pluck and Riser stack copies;
+Organ is the organ wavetable over a sub; and Supersaw, Soft Pad and Organ
+carry a chorus, Reese, Bright Lead and Kick a saturation, Soft Pad, Bell and
+Riser a reverb and Pluck a delay. Sub Bass, Hat and Init carry nothing. A
+saved patch whose slug is a factory patch's shadows it.
 
 **Commands.**
 
@@ -297,9 +364,11 @@ window comes back to the front, so a patch saved from the terminal appears.
 The Synth takes the instrument's place at the head of a MIDI track's chain, as
 the Sampler does, drawn from describe as an effect's panel is: a column for the
 Synth's own fields, one for each oscillator, the filter, each envelope, each
-LFO, the macros, and the matrix. Each control is the one effects' panels have,
-with the lane mark that adds or removes a lane on the field; a wave or a mode
-is sent when chosen and a knob is heard as it is dragged.
+LFO, the macros, the matrix, and one for each of the patch's effects. Each
+control is the one effects' panels have, with the lane mark that adds or
+removes a lane on the field; a wave, a table, a unison count or a mode is sent
+when chosen and a knob is heard as it is dragged. A Table menu lists the
+built-in tables and the project's samples.
 
 **The header** shows the patch's name, or Synth when the sound came from
 none, with ◂ ▸ through the patches the browser lists, Factory then Mine, and
@@ -311,24 +380,32 @@ saved unless asked to write over it. Both send `patch.save`; loading sends
 `patch.load`, and × takes the Synth off.
 
 **The drawings**, at the head of each column: an oscillator's wave over one
-cycle, with its pulse width; the filter's response from 10 Hz to 20 kHz,
--36 to +36 dB, with a corner at the cutoff that a drag moves across for the
-cutoff and up and down for the resonance, both in one undo step and heard as
-they move, a press elsewhere on the curve taking the cutoff alone; an
-envelope with a handle at the end of its attack, of its decay, which also
-sets the sustain, and of its release, each time taking up to a quarter of the
-width in equal ratios of (1 + ms); an LFO's shape over one cycle from its
-phase. Under a control a matrix entry moves, a line reaches from its value to
-where full modulation takes it, one line an entry. Each envelope's and LFO's
-title, each macro's name, and velocity, note and random in the Matrix column
-are tabs: dropped on a control, they add an entry from that source to the
-control's target, an oscillator's semitones standing for its pitch, with an
-amount enough to hear (an octave, a semitone, 6 dB, 25 points or half the
-pan). An entry's amount is a bar in the matrix, and × takes it out. + in the
-Synth column adds an oscillator (`a` to `d`, the plain saw), an envelope
-(`env2` on, a decay to nothing), an LFO (`lfo1` on) or a macro (`macro1` on,
-at 0), and × on a column or a macro takes it off; the last oscillator, `amp`
-and a part the matrix names are refused with the reason.
+cycle, with its pulse width, or its table's cycle as it is read at low
+pitches; the filter's response from 10 Hz to 20 kHz, -36 to +36 dB, with a
+corner at the cutoff that a drag moves across for the cutoff and up and down
+for the resonance, both in one undo step and heard as they move, a press
+elsewhere on the curve taking the cutoff alone; an envelope with a handle at
+the end of its attack, of its decay, which also sets the sustain, and of its
+release, each time taking up to a quarter of the width in equal ratios of
+(1 + ms); an LFO's shape over one cycle from its phase. Under a control a
+matrix entry moves, a line reaches from its value to where full modulation
+takes it, one line an entry. Each envelope's and LFO's title, each macro's
+name, and velocity, note and random in the Matrix column are tabs: dropped
+on a control, they add an entry from that source to the control's target, an
+oscillator's semitones standing for its pitch, with an amount enough to hear
+(an octave, a semitone, 6 dB, 25 points, 10 cents or half the pan). An
+entry's amount is a bar in the matrix, and × takes it out. + in the Synth
+column adds an oscillator (`a` to `d`, the plain saw), an envelope (`env2`
+on, a decay to nothing), an LFO (`lfo1` on), a macro (`macro1` on, at 0) or,
+from a submenu of the kinds, an effect at the end of the patch's chain, and ×
+on a column or a macro takes it off; the last oscillator, `amp` and a part
+the matrix names are refused with the reason.
+
+**The effect columns** are the patch's chain in order, each with the marks
+an effect's panel has: bypass, ◂ ▸ to move it in the chain and × to remove it
+with its lanes, and a row for each of its fields; an equalizer lists its bands
+with + and − for them. Each row's lane mark adds a lane under the track on
+`instrument.effects.REF.FIELD`.
 
 **The keys.** The Synth column ends in an octave of keys, C3 to C4 until the
 octave is stepped, that play a note now through the track: a beat long,
@@ -341,34 +418,20 @@ daw synth audition SONG lead --notes C2,G2 --play     # the same notes, through 
 ```
 
 `note.preview` is a transport command, as `metronome` is: it plays a note of
-a pitch, velocity and length through a MIDI track's Synth and the track's
-chain, from where the stream stands, whether or not the song plays, outside
-the timeline and the undo history, and nothing of it is rendered. A note
-held while a knob is dragged carries on under the new patch, and through a
-change of wave. It needs a host, which opens the output if nothing has played
-yet; it refuses a track with no synth, and plays nothing through a Sampler.
-While the transport stands still the stream is no longer cut at the song's
-end: a tail or a previewed note is heard whole wherever the transport is.
-`--play` sends the audition's notes one after another and needs a running
-host; the file is written as well.
+a pitch, velocity and length through a MIDI track's Synth, the patch's effects
+and the track's chain, from where the stream stands, whether or not the song
+plays, outside the timeline and the undo history, and nothing of it is
+rendered. A note held while a knob is dragged carries on under the new patch,
+and through a change of wave. It needs a host, which opens the output if
+nothing has played yet; it refuses a track with no synth, and plays nothing
+through a Sampler. While the transport stands still the stream is no longer
+cut at the song's end: a tail or a previewed note is heard whole wherever the
+transport is. `--play` sends the audition's notes one after another and needs
+a running host; the file is written as well.
 
 **The detail panel's height** is dragged at its top edge, 214 points the
 least and kept between projects, so the Synth has room; at the least height
 the panel's columns scroll.
-
-## What remains
-
-4. **Unison, wavetables and the patch's effects.** `unison` (1 to 16 voices),
-   `unison_detune_cents` and `unison_width_percent` on an oscillator, with
-   `unison_detune_cents` a matrix target; `wave: wavetable` with built-in
-   tables and a single cycle read from a WAV in the project; `chorus` and
-   `saturation` as effect kinds anywhere; and `effects` inside the patch, the
-   song's effect kinds in a chain of their own run on the sum of the voices
-   before the track's inserts, automated as `instrument.effects.REF.FIELD`.
-   The factory patches gain unison and effects where they want them.
-
-Its pull request moves its line and rewrites this file toward the present
-tense.
 
 ## Done when
 
@@ -429,6 +492,31 @@ Of the panel item:
   taller were seen in scripted pictures; nothing was dragged by hand, no key
   was pressed and nothing was heard.
 
+Of the last item:
+
+- Unison copies are spread in detune and across the field at the level of
+  one, two copies beat at their difference, and the matrix moves the detune
+  in cents. Done: `crates/aaw-dsp/src/synth.rs`.
+- A built-in table plays at its pitch with its harmonics in their ratios, a
+  table high up keeps only the harmonics under half the rate, a cycle of any
+  length becomes a table, a sample's file is read as one cycle and a missing
+  one is refused with the oscillator named. Done: `crates/aaw-dsp/src/wavetable.rs`,
+  `crates/aaw-dsp/src/synth.rs` and `crates/aaw-engine/tests/synth.rs`.
+- The chorus sweeps and the saturation shapes as described, each the same in
+  any block size. Done: `crates/aaw-dsp/src/chorus.rs` and `crates/aaw-dsp/src/saturation.rs`.
+- The patch's effects run before the inserts, a limiter inside the patch
+  lands the track where one on the inserts does, a lane reaches a patch
+  effect by its ID, playback never allocates with the chain, and an effect
+  added changes the program's structure where a knob does not. Done:
+  `crates/aaw-engine/tests/synth.rs`.
+- The chain is edited through the effect commands on the synth's path, its
+  lanes follow a move and go with a removal and with a patch that lacks the
+  effect, and the panel draws it and edits it. Done:
+  `crates/aaw-host/tests/synth.rs` and `crates/aaw-ffi/tests/song.rs`.
+- Every factory patch, with its unison, table and effects, renders under full
+  scale: done in `crates/aaw-host/tests/patches.rs`. Whether each sounds like
+  its name is a line under Verify, as is the panel's effect column by hand.
+
 Of the whole: the factory patches are heard and one of each kind sounds like
 its name. Listening by hand is a line under Verify.
 
@@ -465,7 +553,7 @@ Decided in building the first item, October 3, 2026 (D71):
 - **An entry on an envelope's field is taken when the note starts;** an LFO's
   fields are not targets.
 - **The amp release reaches exactly nothing** at `release_ms`, 60 dB down and
-  then zero, so a voice ends without a step and the song is quiet after it.
+  then zero, so a voice ends without a step.
 
 Decided in building patches, October 4, 2026 (D72):
 
@@ -476,8 +564,6 @@ Decided in building patches, October 4, 2026 (D72):
   header shows it; `patch load` sets it too. Nothing reads the field.
 - **A patch file is validated as the song validates a synth,** so one
   refusal names a bad field whether it is in a song or a file.
-- **The factory patches are written for the Synth as it is:** four detuned
-  saws stand in for unison, and no effects are in them, until item 4.
 
 Decided in building the panel, October 4, 2026 (D73):
 
@@ -489,9 +575,26 @@ Decided in building the panel, October 4, 2026 (D73):
 - **◂ ▸ step through the browser's list,** Factory then Mine, and Save…
   writes over a patch of the person's own only.
 
+Decided in building the last item, October 4, 2026 (D74):
+
+- **Unison is on the oscillator,** copies spread evenly in detune and width
+  and summed at the level of one, each copy with its own random phase.
+- **A wavetable is one cycle, from a built-in table or a sample of the
+  project,** read bandlimited from a stack of levels; the sample's file is
+  the cycle, at most 65536 frames.
+- **The patch's effects are the song's effect kinds,** edited by the effect
+  commands on the synth's path and automated as `instrument.effects`, with
+  no sidechain and with a limiter's latency counted into the track's; chorus
+  and saturation are effect kinds anywhere, not the patch's alone.
+
 ## Limits
 
-- No unison, wavetables or effects inside the patch until item 4.
+- A wavetable is one cycle, not a sweep of frames; a sample's cycle is read
+  at most 65536 frames long, whole; a patch naming a sample loads only into a
+  song that has it.
+- The panel's effects come from the + menu; an effect dragged from the
+  browser lands on the track's inserts, not in the patch.
+- A compressor inside a patch has no sidechain.
 - `note.preview` plays nothing through a Sampler: a Sampler's note needs
   audio prepared for its pitch, which the compiled song has only for the
   notes it plays. A Later line.

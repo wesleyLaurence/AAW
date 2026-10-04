@@ -16,6 +16,7 @@ use aaw_dsp::device::{Kernels, Plan};
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
 use aaw_dsp::synth::{track_seed, Patch};
+use aaw_dsp::wavetable::Wavetable;
 use aaw_model::rules::{midi, target, Owner, TargetKind, MIDDLE_C};
 use aaw_model::schedule::{track_notes, track_triggers, NoteOn, Trigger};
 use aaw_model::{frame, AudioClip, Effect, Event, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
@@ -144,12 +145,14 @@ pub struct SendProgram {
 }
 
 /// A MIDI track's Synth: the notes it plays, shared with every program
-/// compiled while the track's clips stay as they are, and its patch as the
-/// synth plays it.
+/// compiled while the track's clips stay as they are, its patch as the
+/// synth plays it, and the patch's own effects, run on the sum of the
+/// voices before the track's inserts.
 #[derive(Debug)]
 pub struct SynthProgram {
     pub notes: Arc<Vec<NoteOn>>,
     pub patch: Arc<Patch>,
+    pub chain: ChainProgram,
 }
 
 #[derive(Debug)]
@@ -304,6 +307,8 @@ pub struct Cache {
     /// Each Synth track's notes, with what they were made from, so that a
     /// patch edit leaves them as they are and a playing synth carries on.
     notes: HashMap<String, (u64, String, Arc<Vec<NoteOn>>)>,
+    /// Wavetables read from samples, by the file and its stamp.
+    tables: HashMap<(PathBuf, Stamp), (u64, Arc<Wavetable>)>,
     kernels: Kernels,
 }
 
@@ -319,7 +324,26 @@ impl Cache {
         self.prepared.retain(|_, e| e.0 == g);
         self.tracks.retain(|_, e| e.generation == g);
         self.notes.retain(|_, e| e.0 == g);
+        self.tables.retain(|_, e| e.0 == g);
         self.kernels.finish();
+    }
+
+    /// The wavetable of a sample's file, one cycle, from the cache when the
+    /// file is as it was.
+    fn wavetable(&mut self, p: &Project, directory: &Path, sample: &str) -> Result<Arc<Wavetable>, String> {
+        let asset = p.samples.get(sample).ok_or_else(|| format!("unknown sample {sample}"))?;
+        let path = directory.join(&asset.path);
+        let stamp = stamp(&path)?;
+        let g = self.generation;
+        if let Some(entry) = self.tables.get_mut(&(path.clone(), stamp.clone())) {
+            entry.0 = g;
+            return Ok(entry.1.clone());
+        }
+        let audio = sndfile::read(&path)?;
+        let key = format!("{}@{}:{:?}", sample, stamp.len, stamp.modified);
+        let table = Arc::new(Wavetable::from_cycle(&key, &audio.data, audio.channels).map_err(|e| format!("{sample}: {e}"))?);
+        self.tables.insert((path, stamp), (g, table.clone()));
+        Ok(table)
     }
 
     /// A Synth track's notes, from the cache when its clips, the tempo and
@@ -823,20 +847,25 @@ impl Lanes {
 }
 
 /// A chain without its sidechain routing, which needs every chain's latency.
-fn chain(effects: &[Effect], lanes: &mut Lanes, p: &Project, kernels: &mut Kernels) -> ChainProgram {
-    let mut out = ChainProgram::default();
+/// `lanes(i)` gives the lanes on the chain's effect `i` by field; `upstream`
+/// is the latency of what comes before the chain, counted into its own.
+fn chain(
+    effects: &[Effect],
+    mut lanes: impl FnMut(usize) -> BTreeMap<String, Arc<Envelope>>,
+    p: &Project,
+    kernels: &mut Kernels,
+    upstream: usize,
+) -> ChainProgram {
+    let mut out = ChainProgram {
+        latency: upstream,
+        ..ChainProgram::default()
+    };
     for (i, effect) in effects.iter().enumerate() {
         if effect.bypass() {
             out.effects.push((effect.kind(), None));
             continue;
         }
-        let plan = Plan::new(
-            effect,
-            lanes.effects.remove(&i).unwrap_or_default(),
-            p.session.sample_rate,
-            p.session.tempo,
-            kernels,
-        );
+        let plan = Plan::new(effect, lanes(i), p.session.sample_rate, p.session.tempo, kernels);
         out.effects.push((effect.kind(), Some(out.devices.len())));
         let upstream = out.latency;
         out.latency += plan.latency;
@@ -847,6 +876,16 @@ fn chain(effects: &[Effect], lanes: &mut Lanes, p: &Project, kernels: &mut Kerne
         });
     }
     out
+}
+
+/// The lanes on a patch's effect `i`, by field, out of the track's lanes
+/// on `instrument.effects.i.FIELD`.
+fn patch_effect_lanes(instrument: &BTreeMap<String, Arc<Envelope>>, i: usize) -> BTreeMap<String, Arc<Envelope>> {
+    let prefix = format!("effects.{i}.");
+    instrument
+        .iter()
+        .filter_map(|(path, env)| path.strip_prefix(&prefix).map(|field| (field.to_string(), env.clone())))
+        .collect()
 }
 
 /// Routes a chain's sidechains: `offset(source)` is how far the source's
@@ -932,11 +971,31 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         };
         let voices = voices(p, index[t.id.as_str()], key, directory, cache)?;
         let mut lanes = Lanes::new(Owner::Track(t), &t.automation, p);
-        let synth = t.midi.as_ref().and_then(|m| m.synth().map(|s| (m, s))).map(|(midi, spec)| SynthProgram {
-            notes: cache.synth_notes(p, t, midi),
-            patch: Arc::new(Patch::new(spec, &lanes.instrument, rate as f64, p.session.tempo, track_seed(&t.id))),
-        });
-        let mut chain = chain(&t.effects, &mut lanes, p, &mut cache.kernels);
+        let mut synth = None;
+        if let Some((midi, spec)) = t.midi.as_ref().and_then(|m| m.synth().map(|s| (m, s))) {
+            // Each wavetable oscillator's table: built in, or a sample's cycle.
+            let mut tables = HashMap::new();
+            for (id, o) in &spec.oscillators {
+                if o.wave != aaw_model::Wave::Wavetable {
+                    continue;
+                }
+                let table = match Wavetable::builtin(&o.table) {
+                    Some(t) => t,
+                    None => cache.wavetable(p, directory, &o.table).map_err(|e| format!("{}: oscillator {id}: {e}", t.id))?,
+                };
+                tables.insert(id.clone(), table);
+            }
+            synth = Some(SynthProgram {
+                notes: cache.synth_notes(p, t, midi),
+                patch: Arc::new(Patch::new(spec, &lanes.instrument, rate as f64, p.session.tempo, track_seed(&t.id), &tables)),
+                chain: chain(&spec.effects, |i| patch_effect_lanes(&lanes.instrument, i), p, &mut cache.kernels, 0),
+            });
+        }
+        // The inserts follow the patch's effects, so their latency counts
+        // the patch chain's.
+        let patch_latency = synth.as_ref().map_or(0, |s| s.chain.latency);
+        let mut effect_lanes = std::mem::take(&mut lanes.effects);
+        let mut chain = chain(&t.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, &mut cache.kernels, patch_latency);
         // The track waits for the slowest of its keys.
         let delay = chain
             .devices
@@ -983,7 +1042,8 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     let mut buses: Vec<ReturnProgram> = Vec::new();
     for r in returns {
         let mut lanes = Lanes::new(Owner::Return(r), &r.automation, p);
-        let mut chain = chain(&r.effects, &mut lanes, p, &mut cache.kernels);
+        let mut effect_lanes = std::mem::take(&mut lanes.effects);
+        let mut chain = chain(&r.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, &mut cache.kernels, 0);
         route(&mut chain, &tracks, |source| track_offset - (source.delay + source.chain.latency));
         buses.push(ReturnProgram {
             id: r.id.clone(),
@@ -1003,9 +1063,10 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     // Track and return previews are stems, so they omit the master chain.
     let mut lanes = Lanes::new(Owner::Master(&p.master), &p.master.automation, p);
     let master_effects: &[Effect] = if matches!(scope, Scope::Song) { &p.master.effects } else { &[] };
+    let mut effect_lanes = std::mem::take(&mut lanes.effects);
     let master = MasterProgram {
         gain: lanes.channel("gain_db", p.session.master_gain_db),
-        chain: chain(master_effects, &mut lanes, p, &mut cache.kernels),
+        chain: chain(master_effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, &mut cache.kernels, 0),
         automation: lanes.params,
     };
     cache.finish();
@@ -1020,6 +1081,9 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     (rate, track_offset, return_latency, latency).hash(&mut h);
     for t in &tracks {
         (&t.id, t.delay, t.align, t.in_mix, t.synth.as_ref().map(|s| s.patch.signature)).hash(&mut h);
+        if let Some(s) = &t.synth {
+            devices(&s.chain, &mut h);
+        }
         devices(&t.chain, &mut h);
     }
     for r in &buses {

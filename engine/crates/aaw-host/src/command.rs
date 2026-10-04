@@ -855,12 +855,27 @@ impl<'a> Edit<'a> {
         Ok(())
     }
 
+    /// A chain's owner: a track, a return, the master, or a MIDI track's
+    /// synth, whose patch has a chain of its own.
     fn owner(&self, path: &str) -> Result<Loc> {
         let loc = self.at(path)?;
-        if self.node(&loc).get("effects").is_none() || self.node(&loc).get("automation").is_none() {
-            return Err(format!("{path} is not a track, return or master"));
+        if self.node(&loc).get("effects").is_none() || self.lane_owner(&loc).is_none() {
+            return Err(format!("{path} is not a track, return, master or synth"));
         }
         Ok(loc)
+    }
+
+    /// Where the lanes on a chain owner's effects live, and the prefix they
+    /// address the chain by: an owner's own lanes as `effects.REF.FIELD`, or
+    /// for a synth the track's as `instrument.effects.REF.FIELD`.
+    fn lane_owner(&self, owner: &[Step]) -> Option<(Loc, &'static str)> {
+        if self.node(owner).get("automation").is_some() {
+            return Some((owner.to_vec(), ""));
+        }
+        match owner {
+            [track @ .., Step::Key(i), Step::Key(s)] if i == "instrument" && s == "synth" => Some((track.to_vec(), "instrument.")),
+            _ => None,
+        }
     }
 
     fn track(&self, id: &str) -> Result<Loc> {
@@ -869,19 +884,24 @@ impl<'a> Edit<'a> {
 
     /// Rewrites or removes an owner's lanes on effects after its chain changes:
     /// `index` maps old effect positions to new ones, None where removed.
+    /// A synth's chain is automated from its track, as `instrument.effects`.
     fn remap_lanes(&mut self, owner: &[Step], index: impl Fn(usize) -> Option<usize>, removed_id: Option<&str>) -> Result<()> {
-        let name = self.text(owner);
-        let lanes = self.list(owner, "automation")?;
+        let (lane_owner, prefix) = self.lane_owner(owner).ok_or_else(|| format!("{} has no chain", self.text(owner)))?;
+        let name = self.text(&lane_owner);
+        let lanes = self.list(&lane_owner, "automation")?;
         let mut notes = Vec::new();
         lanes.retain_mut(|lane| {
             let Some(param) = lane.node.field("param").map(str::to_string) else {
                 return true;
             };
-            let Some((r, rest)) = effect_ref(&param) else {
+            let Some(own) = param.strip_prefix(prefix) else {
+                return true;
+            };
+            let Some((r, rest)) = effect_ref(own) else {
                 return true;
             };
             let target = match index_ref(r) {
-                Some(i) => index(i).map(|j| format!("effects.{j}.{rest}")),
+                Some(i) => index(i).map(|j| format!("{prefix}effects.{j}.{rest}")),
                 None if Some(r) == removed_id => None,
                 None => return true,
             };
