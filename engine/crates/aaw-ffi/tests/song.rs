@@ -2037,6 +2037,118 @@ fn a_sample_on_a_midi_track_becomes_its_instrument_and_the_notes_stay() {
 }
 
 #[test]
+fn the_sampler_device_is_loaded_shaped_and_given_a_root_note() {
+    let (dir, path, song, seen, waves) = open_with_waveforms();
+    transport(&seen);
+    std::fs::create_dir(dir.path().join("samples")).unwrap();
+    let tone: Vec<[f32; 2]> = (0..24_000).map(|i| [(i as f32 * 0.0575).sin() * 0.3; 2]).collect();
+    for name in ["piano", "organ"] {
+        std::fs::write(dir.path().join(format!("samples/{name}.wav")), float_wav_bytes(&tone, 48000)).unwrap();
+    }
+    let asset = |name: &str| aaw_ffi::library::Asset {
+        sha256: aaw_model::digest(&dir.path().join(format!("samples/{name}.wav"))).unwrap(),
+        path: format!("samples/{name}.wav"),
+        source: format!("/library/{name}.wav"),
+        source_sha256: None,
+        root_note: Some("A3".into()),
+    };
+    // Dragged from the browser, the Sampler is empty.
+    let track = song.edit(Edit::InstrumentAdd { track: None }, None).unwrap()[0];
+    let u = update(&seen);
+    let keys = &u.arrangement.tracks[2];
+    let empty = keys.sampler.clone().expect("an empty sampler is the device");
+    assert_eq!((empty.pad.clone(), empty.fields.len(), empty.file), (None, 0, 0));
+    assert!(song.edit(Edit::SamplerSet { track, field: "attack_ms".into(), value: number(20.0) }, None).is_err());
+
+    // A sample dropped on it plays on every note, as it is at middle C.
+    song.edit(Edit::SamplerLoad { track, asset: asset("piano"), name: "Piano".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Load piano into the Sampler on sampler-1");
+    let keys = &u.arrangement.tracks[2];
+    assert_eq!(keys.map, [aaw_ffi::view::NoteMapView { low: 0, high: 127, pad: "piano".into(), pitched: true }]);
+    let s = keys.sampler.clone().unwrap();
+    assert_eq!((s.pad.as_deref(), s.sample.as_deref(), s.root, s.root_text.as_str()), (Some("piano"), Some("piano"), None, ""));
+    assert_eq!(s.path, "samples/piano.wav");
+    assert!(s.file != 0 && u.arrangement.files.iter().any(|f| f.identity == s.file));
+    assert_eq!((s.seconds, s.start_seconds, s.end_seconds), (0.5, 0.0, 0.5));
+    let names: Vec<&str> = s.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["mode", "gain_db", "pan", "transpose", "start_seconds", "end_seconds", "attack_ms", "release_ms", "reverse"]);
+    let field = |s: &aaw_ffi::view::SamplerView, name: &str| s.fields.iter().find(|f| f.name == name).unwrap().clone();
+    assert_eq!((field(&s, "mode").value, field(&s, "mode").choices.clone()), (text("one_shot"), vec!["one_shot".to_string(), "gate".into()]));
+    assert_eq!((field(&s, "attack_ms").value, field(&s, "attack_ms").live, field(&s, "attack_ms").param.clone()), (number(0.3), false, None));
+    assert_eq!((field(&s, "start_seconds").max, field(&s, "end_seconds").max, field(&s, "end_seconds").value), (0.5, 0.5, FieldValue::Absent));
+    assert_eq!(field(&s, "end_seconds").initial, number(0.5));
+    assert_eq!(field(&s, "reverse").value, FieldValue::Flag { value: false });
+    // The file's peaks come for the panel's waveform.
+    let (revision, file) = (u.change.revision, s.file);
+    loop {
+        let w = waves.recv_timeout(Duration::from_secs(10)).expect("waveforms");
+        if w.revision < revision {
+            continue;
+        }
+        assert!(w.files.contains(&file));
+        if let Some(peaks) = w.file_peaks.iter().find(|p| p.identity == file) {
+            assert_eq!((peaks.frames_per_second, peaks.frames), (48000.0, 24000));
+            break;
+        }
+    }
+
+    // Each control is a field of the pad.
+    song.edit(Edit::SamplerSet { track, field: "attack_ms".into(), value: number(20.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the Sampler's attack on sampler-1");
+    assert_eq!(field(u.arrangement.tracks[2].sampler.as_ref().unwrap(), "attack_ms").value, number(20.0));
+    song.edit(Edit::SamplerSet { track, field: "mode".into(), value: text("gate") }, None).unwrap();
+    assert!(update(&seen).arrangement.tracks[2].pads[0].gate);
+    song.edit(Edit::SamplerSet { track, field: "end_seconds".into(), value: number(0.25) }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].sampler.as_ref().unwrap().end_seconds, 0.25);
+    assert!(song.edit(Edit::SamplerSet { track, field: "start_seconds".into(), value: number(0.3) }, None).is_err(), "a start past the end");
+    song.edit(Edit::SamplerSet { track, field: "end_seconds".into(), value: FieldValue::Absent }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].sampler.as_ref().unwrap().end_seconds, 0.5);
+    assert!(song.edit(Edit::SamplerSet { track, field: "mono".into(), value: FieldValue::Flag { value: true } }, None).is_err());
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.sampler-1.instrument.sampler.pads.piano"})), json!({"sample": "piano", "mode": "gate", "attack_ms": 20.0}));
+
+    // The root note is typed as a number or a name, and is the sample's.
+    song.edit(Edit::SamplerRoot { track, note: Some("60".into()) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the root note of piano to C4");
+    let s = u.arrangement.tracks[2].sampler.clone().unwrap();
+    assert_eq!((s.root, s.root_text.as_str(), u.arrangement.tracks[2].pads[0].root), (Some(60), "C4", Some(60)));
+    song.edit(Edit::SamplerRoot { track, note: Some(" a3 ".into()) }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].sampler.as_ref().unwrap().root, Some(57));
+    assert!(song.edit(Edit::SamplerRoot { track, note: Some("H9".into()) }, None).is_err());
+    song.edit(Edit::SamplerRoot { track, note: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Take the root note off piano");
+    assert_eq!(u.arrangement.tracks[2].sampler.as_ref().unwrap().root, None);
+
+    // Another sample takes its place and keeps the settings, apart from the
+    // start and the end, in one undo step.
+    song.edit(Edit::SamplerSet { track, field: "end_seconds".into(), value: number(0.25) }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::SamplerLoad { track, asset: asset("organ"), name: "Organ".into() }, None).unwrap();
+    let u = update(&seen);
+    let keys = &u.arrangement.tracks[2];
+    let s = keys.sampler.clone().unwrap();
+    assert_eq!((keys.pads.len(), s.pad.as_deref(), keys.map[0].pad.as_str()), (1, Some("organ"), "organ"));
+    assert_eq!((field(&s, "attack_ms").value, field(&s, "mode").value, s.end_seconds), (number(20.0), text("gate"), 0.5));
+    assert_eq!(agent(&path, json!({"op": "get", "path": "samples.organ.root_note"})), Json::Null);
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.tracks[2].sampler.as_ref().unwrap().pad.as_deref(), u.arrangement.tracks[2].sampler.as_ref().unwrap().end_seconds), (Some("piano"), 0.25));
+
+    // A kit of several pads is listed, not drawn as the device.
+    agent(&path, json!({"op": "instrument.set", "track": "sampler-1", "instrument": {"sampler": {
+        "pads": {"kick": {"sample": "piano"}, "snare": {"sample": "piano"}},
+        "map": [{"notes": 36, "pad": "kick"}, {"notes": 38, "pad": "snare"}],
+    }}}));
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[2].sampler, None);
+    assert!(song.edit(Edit::SamplerSet { track, field: "attack_ms".into(), value: number(1.0) }, None).is_err());
+    song.close();
+}
+
+#[test]
 fn a_midi_file_dropped_becomes_a_note_clip_and_a_clip_is_exported() {
     let (dir, _path, song, seen) = open();
     transport(&seen);

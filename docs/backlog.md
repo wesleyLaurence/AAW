@@ -14,35 +14,39 @@ kept.
 
 ## Next
 
-1. **The Sampler device.** Sampler in the browser's Instruments, dropped on a MIDI
-   track as an empty sampler in the device panel, and a sample dragged onto that
-   device to play it on the keys. Its panel shows the sample's waveform and sets
-   the root note, start and end, one-shot or held, attack and release.
-   [features/sampler-device.md](features/sampler-device.md)
-2. **The Synth.** A polyphonic synthesizer on a MIDI track with oscillators,
+1. **The Synth.** A polyphonic synthesizer on a MIDI track with oscillators,
    unison, a filter, envelopes, LFOs, a modulation matrix, macros and its own
    effects; text patches saved to `~/Music/AAW/library/patches/` and loaded into
    any song; `daw synth` and `daw patch` for the agent and a panel in the app.
    Four pull requests: the engine and commands, patches, the panel, then unison,
    wavetables and the patch's effects. [features/synth.md](features/synth.md)
-3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-4. **The `.aaw` file type and the project ID.** The project file under the app's
+3. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-5. **The workspace and the two levels.** The workspace folder with its managed
+4. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-6. **The agent panel.** A conversation in the window, per project, over the
+5. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-7. **Other Macs.** The rest of the Python ported or carried in the bundle,
+6. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-8. **Sign-in buttons and other agents,** as the companies' terms allow.
+7. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
+
+- **The Sampler device by hand and ear:** drag Sampler from the browser onto a
+  MIDI track, drop a sample on the device from the browser and from the
+  Finder, draw a few notes and listen across the keys; drag the markers, type
+  a root note and press Measure on a note and on a drum, switch Held and hear
+  the release, and drop a second sample over the first. Scripted `--drop`,
+  marker drags and a click on Measure were seen in pictures and read from the
+  song; nothing was dragged by hand or heard, and the outline of a drop over
+  the panel was not seen.
 
 - **Browser folders and device drags:** use Add Folder with multiple directories, reopen another project, search across selected folders, refresh and remove a source; drag effects onto track, return and master headers and between devices, and Sampler onto a MIDI track and below the rows. Automated tests and scripted snapshots passed; the native picker and actual mouse drags have not been tried by hand.
 

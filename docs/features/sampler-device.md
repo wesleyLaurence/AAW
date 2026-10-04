@@ -1,7 +1,8 @@
-# The Sampler device — proposed October 3, 2026
+# The Sampler device — implemented October 3, 2026
 
-Status: proposed, not built. Backlog item 1, after the [browser](browser.md),
-which it is dragged out of.
+Status: implemented in [#51](https://github.com/wesleyLaurence/AAW/pull/51).
+Backlog item 1, after the [browser](browser.md), which it is dragged out of.
+The [Synth](synth.md) is next and shares its wide instrument panel.
 
 ## What
 
@@ -16,89 +17,106 @@ loads with a sample, as Ableton's Simpler is used:
    lower on the keys around it (D66).
 4. Shape it in the device: where in the file it starts and ends, its root
    note, whether a note plays it to its end or only while held, its attack and
-   release, its level and pan.
+   release, its level and pan, and whether it plays backwards.
 
 ## Why
 
 The person wants to play a sample as an instrument and shape it where it
-plays, not only to drop it on a header and live with what it does. Today a
-sampler on a MIDI track shows a list of its pads and the notes each plays, and
-its sound can be changed only with `daw pad set` or the agent. A sample dropped
-on a header was not pitched until D66, which is how this came up.
+plays, not only to drop it on a header and live with what it does. Before
+this, a sampler on a MIDI track showed a list of its pads and the notes each
+plays, and its sound could be changed only with `daw pad set` or by the agent.
 
-## Design
+## How it works
 
-**The model needs nothing new.** A Sampler is the `sampler` instrument the song
-already holds. Empty, it is `{sampler: {pads: {}, map: []}}`, which the model
-takes and which plays nothing. Loaded, it is one pad and one pitched map entry
-on every note, `{notes: [0, 127], pad, pitched: true}`, the same as a sample
-dropped on a header makes now. Every control in its panel is a field the song
-has, so the agent reads and changes what the person sees with the commands it
-has.
+**The model has nothing new.** A Sampler is the `sampler` instrument the song
+already holds. Empty, it is `{sampler: {pads: {}, map: []}}`, which plays
+nothing. Loaded, it is one pad and one pitched map entry on every note,
+`{notes: [0, 127], pad, pitched: true}`, the same as a sample dropped on a
+header makes. Every control in its panel is a field the song has, so the
+agent reads and changes what the person sees with the commands it has: `daw
+pad set` for the pad, `daw set samples.S.root_note` for the root note. `daw
+describe sampler` says so under `device`.
+
+**When a sampler is the device.** The app draws the Sampler panel for a
+sampler that is empty, or that is exactly one pad played on every note at its
+pitch. A sampler of several pads, such as a kit made with `daw instrument
+map`, keeps the list of pads and notes it had, and is not this device; a kit
+made in the app is the drum kit line under Later in the backlog. A track with
+no instrument takes a sample dropped on its panel as an empty Sampler would.
 
 **Dropping a sample on the device.** The app copies it into the project as a
-drop on a header does, and makes one batch: the sample, the pad, the map entry.
-On a Sampler that already has a sample, the new one takes its place and the
-pad's other settings stay, as in Simpler, apart from the start and end, which
-go back to the whole file. One undo step, "Load piano into the Sampler on
-keys".
+drop on a header does, and sends one batch: the sample listed, then
+`instrument.set` with the pad and the map entry. The pad is named after the
+sample, as a pad from a header is. On a Sampler that already has a sample,
+the new one takes its place: the pad is renamed after the new sample so that
+commands name it for what it plays, and its mode, level, pan, transpose,
+attack, release and reverse carry over, as in Simpler, while the start and
+the end go back to the whole file. A sample new to the song comes in with no
+root note, whatever pitch the browser measured (D66); one the song already
+lists keeps the root note it has. One undo step, "Load piano into the Sampler
+on keys".
 
 **Dropping a sample on a MIDI track's header** stays the shortcut it is: an
 empty Sampler and a sample in one step.
 
-**The panel.** It takes the place of the list of pads and notes when the
-instrument is one pad on every note, and is wider than an effect's panel to
-leave room for the waveform.
+**The panel** is 448 points wide, in place of the 216-point list. At its left
+the file's waveform, 204 by 92 points, with the part outside the start and
+the end dimmed and a marker at each, with a handle at the top that points
+inward. Under it the start and the end as seconds to type, and a line naming
+the sample, its length and the note it plays as it is at. At its right, a
+row for each control:
 
 | Control | Field | Notes |
 |---|---|---|
-| Waveform, with a start and an end marker to drag | `start_seconds`, `end_seconds` | The file's waveform as clips draw it. The part outside the markers is dimmed |
-| Root | the sample's `root_note` | Typed as C4 or 60. Empty means middle C. A Measure button sets it to the pitch `daw samples analyze` finds, for a sample of one note |
-| Transpose | `transpose` | Semitones, with hundredths as cents |
+| Waveform markers; Start, End | `start_seconds`, `end_seconds` | Dragging a marker moves it to a thousandth of a second, no further than the file or the other marker, and sends the place when the drag ends. An end at the file's end, or an empty End, takes `end_seconds` off: the pad plays to the file's end. The host refuses a start typed past the end, and the panel shows the reason |
+| Root, Measure | the sample's `root_note` | Typed as C4 or 60, kept as C4. Empty takes it off: the sample plays as it is at middle C. Measure runs `daw samples analyze` on the file off the main thread and sets the note it finds; a file with no one pitch, such as a drum, is refused with a message and nothing changes |
 | Mode: One-shot or Held | `mode`: `one_shot` or `gate` | Held stops a note at its note-off, after the release |
+| Transpose | `transpose` | Semitones, with hundredths as cents |
 | Attack, Release | `attack_ms`, `release_ms` | |
 | Level, Pan | `gain_db`, `pan` | |
 | Reverse | `reverse` | |
 
-The controls are drawn from the fields as an effect's panel is (D44): label,
-unit, range and default from the schema, with a bar dragged or a value typed,
-and Shift for finer steps. The waveform and the Root field are the two drawn
-for the Sampler alone.
+The bars, the picker and the checkbox are the controls an effect's panel
+uses (D44), drawn from `aaw_model::describe::PAD`: label, unit, range and
+default from the model, a bar dragged or a value typed, Shift for finer
+steps, a double-click for the default. Every pad field gives the sampler new
+voices, so a bar sends its value when the drag ends and a playing song fades
+through the change over 10 ms, as it does for a delay's time. The start and
+the end take the file's length as their range. No pad field has an
+automation lane, so no diamond is drawn.
 
 **Playing it from a keyboard,** the computer's or a MIDI keyboard, is not part
 of this; it is the MIDI keyboard line under Later. Notes are drawn in the piano
 roll, as now.
 
-**A sampler of several pads,** such as a kit made with `daw instrument map`,
-keeps the list it has now, and is not this device. A kit made in the app is
-the drum kit line under Later.
+**For the agent,** the arrangement `aaw-ffi` builds has `sampler` on each MIDI
+track: the pad, its sample and file, the fields as `FieldView`s, the root
+note, the file's identity and length, and the seconds played. Its file's
+peaks are sent as an audio clip's are, so the waveform is drawn from the
+same store. The edits are `SamplerLoad`, `SamplerSet` and `SamplerRoot`.
 
-## Done when
+## Verification
 
-- A Sampler dragged onto a MIDI track is empty and says to drop a sample; a
-  sample dropped on it, from the browser and from the Finder, plays across the
-  keys from middle C, in one undo step.
-- A second sample replaces the first and keeps the pad's settings.
-- Each control changes its field, is heard while playing, and shows the value an
-  agent's command sets.
-- The Root field set by hand and by Measure changes the pitch the keys play at,
-  and `daw check` has no root warning after Measure.
-- Engine tests cover the batch a load makes; `./build.sh test` covers the
-  panel's edits, and the window is seen in a picture empty, loaded, and with the
-  markers moved. Listening to it by hand is a line under Verify.
-- `apps/mac/README.md` describes the device, `daw describe sampler` says what an
-  empty Sampler is, and this file is rewritten as its reference.
+An FFI test loads a Sampler made from the browser, reads its fields, sets
+each kind of field, refuses a start past the end and a field the panel does
+not set, types the root note as a number and a name and takes it off, loads
+a second sample over the first and undoes it, and finds a kit of two pads is
+not the device; it also waits for the file's peaks. A model test holds the
+pad's described fields to validation and the defaults. Swift tests cover the
+waveform's layout: seconds to points, which marker a point takes, and how far
+a drag goes. Scripted runs of the app on a generated tone: the empty panel,
+a `--drop` on the panel, both markers dragged, Measure clicked and the root
+note set to A3 with `daw check` quiet, and a second tone dropped over the
+first with the mode and attack kept. Nothing was dragged by hand or heard;
+that is a line under Verify.
 
-## Open questions
+## Limits
 
-- **Root note on the sample or the pad.** The song keeps a root note per
-  sample, so setting it in one Sampler changes every pad that plays the same
-  file. Ableton keeps it per instrument. A `root_note` on the pad that overrides
-  the sample's would match Ableton; it is a model change, and is to be decided
-  when this is picked up.
-- **A note range.** Simpler plays on every key. Whether the panel should set
-  the lowest and highest note, so that a Sampler plays only a part of the keys,
-  is left for later.
-- **Glide, a sustain loop, a filter and velocity to level** are what Simpler has
-  beyond this. Glide and sustain loops are already in the concept, under
-  Instruments.
+- The Sampler plays on every key; there is no note range to set.
+- Glide, a sustain loop, a filter and velocity to level are what Simpler has
+  beyond this. Glide and sustain loops are under Later.
+- The root note is the sample's, so setting it in one Sampler sets it for
+  every pad that plays the same file (D70).
+- A sample dropped on the panel from the browser is taken from what the
+  browser remembers of the drag, as a drop on the headers is; a file from
+  the Finder is read from the drag.

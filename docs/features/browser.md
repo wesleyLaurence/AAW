@@ -1,7 +1,7 @@
 # The browser — implemented October 3, 2026
 
 Status: implemented in [#48](https://github.com/wesleyLaurence/AAW/pull/48).
-The [Sampler device](sampler-device.md) is next.
+The [Sampler device](sampler-device.md) followed in #51.
 
 ## What
 
@@ -114,8 +114,9 @@ Folders, including a folder selection that narrows results.
 
 The native folder picker and actual mouse drags onto headers and device insertion
 strips still need a hands-on check. Folder changes are refreshed explicitly;
-there is no filesystem watcher. Loading and editing samples in the Sampler panel
-remains the next backlog item; the track header accepts a sample today.
+there is no filesystem watcher. Loading and editing a sample in the Sampler's
+panel is the [Sampler device](sampler-device.md); the track header accepts a
+sample too.
 
 ## Open questions
 

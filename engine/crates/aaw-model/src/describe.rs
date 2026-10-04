@@ -181,6 +181,30 @@ const REVERB: &[Field] = &[
     },
 ];
 
+/// The fields of a sampler's pad that the Sampler device sets, in the order
+/// the document writes them: what shapes how one sample plays on the keys.
+/// `start_seconds` and `end_seconds` go as far as the pad's file does, which
+/// only the song knows, so their `max` here is 0 and is to be replaced by
+/// the file's length. Every pad field gives the sampler new voices, so a
+/// playing song fades through a change rather than gliding to it.
+pub const PAD: &[Field] = &[
+    choice("mode", "Mode", &["one_shot", "gate"], Initial::Text("one_shot")),
+    structural(number("gain_db", "Level", -96.0, 24.0, 0.0, "dB")),
+    structural(number("pan", "Pan", -1.0, 1.0, 0.0, "")),
+    structural(number("transpose", "Transpose", -36.0, 36.0, 0.0, "st")),
+    structural(number("start_seconds", "Start", 0.0, 0.0, 0.0, "s")),
+    optional(structural(number("end_seconds", "End", 0.0, 0.0, 0.0, "s")), 0.0),
+    structural(number("attack_ms", "Attack", 0.0, 10000.0, 0.3, "ms")),
+    structural(number("release_ms", "Release", 0.0, 10000.0, 8.0, "ms")),
+    Field {
+        kind: Kind::Flag,
+        default: Initial::Flag(false),
+        suggested: Initial::Flag(false),
+        structural: true,
+        ..number("reverse", "Reverse", 0.0, 1.0, 0.0, "")
+    },
+];
+
 /// The fields of an effect type, in the order the document writes them,
 /// without `type`, `id` and `bypass`, which every effect has. An equalizer's
 /// are its bands': see `BAND`.
@@ -323,5 +347,63 @@ mod tests {
                 assert!(fields.iter().any(|f| f.name == *name), "{kind}.{name} is automatable");
             }
         }
+    }
+
+    /// A song with one pad on one track, with `with` set on the pad, or the
+    /// reason it is refused.
+    fn pad(with: &[(&str, Value)]) -> Result<crate::Pad, String> {
+        let mut fields: Vec<(&str, Value)> = vec![("sample", Value::str("s"))];
+        fields.extend(with.iter().cloned());
+        let song = dict(vec![
+            ("session", dict(vec![])),
+            ("samples", dict(vec![("s", dict(vec![("path", Value::str("s.wav"))]))])),
+            ("tracks", Value::List(vec![dict(vec![("id", Value::str("t")), ("pads", dict(vec![("p", dict(fields))]))])])),
+        ]);
+        Project::validate(&song).map(|p| p.tracks[0].pads["p"].clone()).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn pad_fields_agree_with_validation_and_defaults() {
+        let plain = pad(&[]).unwrap();
+        let dumped = plain.dump(false);
+        for f in PAD {
+            let got = dumped.get(f.name).unwrap();
+            match f.default {
+                Initial::Number(x) => assert!(crate::value::py_eq(got, &Value::Float(x)), "pad.{}: {got:?}", f.name),
+                Initial::Text(s) => assert!(crate::value::py_eq(got, &Value::str(s)), "pad.{}", f.name),
+                Initial::Flag(b) => assert!(crate::value::py_eq(got, &Value::Bool(b)), "pad.{}", f.name),
+                Initial::Absent => assert!(got.is_none(), "pad.{}", f.name),
+                Initial::Required => unreachable!("every pad field but its sample has a default"),
+            }
+            let with = |v: Value| pad(&[(f.name, v)]);
+            match f.kind {
+                Kind::Number => {
+                    // An end is after a start of 0, so its least is past 0.
+                    if f.name != "end_seconds" {
+                        assert!(with(Value::Float(f.min)).is_ok(), "pad.{} at its least", f.name);
+                    }
+                    assert!(with(Value::Float(f.min - 1e-6)).is_err(), "pad.{} below {}", f.name, f.min);
+                    // The file's length bounds the start and the end.
+                    if f.max > 0.0 {
+                        assert!(with(Value::Float(f.max)).is_ok() && with(Value::Float(f.max + 1e-3)).is_err(), "pad.{} at its most", f.name);
+                    } else {
+                        assert!(with(Value::Float(1e6)).is_ok(), "pad.{} is bounded by its file", f.name);
+                    }
+                }
+                Kind::Choice => {
+                    for c in f.choices {
+                        assert!(with(Value::str(c)).is_ok(), "pad.{} = {c}", f.name);
+                    }
+                    assert!(with(Value::str("other")).is_err());
+                }
+                Kind::Flag => assert!(with(Value::Bool(true)).is_ok()),
+                _ => unreachable!("pad.{}", f.name),
+            }
+            assert!(f.structural, "pad.{} gives the sampler new voices", f.name);
+        }
+        // An end is positive, and after the start.
+        assert!(pad(&[("end_seconds", Value::Float(0.0))]).is_err());
+        assert!(pad(&[("start_seconds", Value::Float(2.0)), ("end_seconds", Value::Float(1.0))]).is_err());
+        assert_eq!(pad(&[("end_seconds", Value::Float(1.5))]).unwrap().end_seconds, Some(1.5));
     }
 }

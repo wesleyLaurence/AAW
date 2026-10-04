@@ -117,6 +117,24 @@ pub enum Edit {
     InstrumentRemove { track: u64 },
     /// Attach an empty sampler, or create a MIDI track with one.
     InstrumentAdd { track: Option<u64> },
+    /// Loads a sample that `library::import` copied into the project into
+    /// the Sampler on a MIDI track: one pad, named after `name`, played on
+    /// every note at its pitch, as it is at middle C. Loaded over a sample
+    /// the Sampler has, it takes that one's place and keeps the pad's
+    /// settings, apart from the start and the end, which go back to the
+    /// whole file. A track with no instrument gets a Sampler of it.
+    SamplerLoad {
+        track: u64,
+        asset: crate::library::Asset,
+        name: String,
+    },
+    /// Sets a field of the Sampler's pad, named as its `FieldView` names
+    /// it. An absent `end_seconds` plays to the file's end.
+    SamplerSet { track: u64, field: String, value: FieldValue },
+    /// Sets the root note of the sample the Sampler plays, as typed, `C4`
+    /// or `60`, or takes it off, so that the keys play the sample as it is
+    /// at middle C. The note is the sample's, so every pad of it follows.
+    SamplerRoot { track: u64, note: Option<String> },
     /// Moves an audio clip's start, its end or both to a beat. Its audio
     /// stays where it is on the timeline, and an edge goes no further than
     /// the file does. The end is where its sound ends: the clip leaves its
@@ -663,6 +681,20 @@ fn pad_root(project: &Project, pattern: &str, pad: &str) -> Option<i64> {
     project.tracks.iter().filter(plays).find_map(root).or_else(|| project.tracks.iter().find_map(root)).map(i64::from)
 }
 
+/// The MIDI track a Sampler device is on, and its pad once a sample is
+/// loaded. A track with no instrument counts as an empty Sampler, since a
+/// sample dropped there makes one; a sampler of several pads is refused.
+fn sampler_device<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'a aaw_model::Track, Option<(&'a str, &'a aaw_model::Pad)>)> {
+    let place = items(tree, "tracks").iter().position(|i| i.handle == key).ok_or("The track is no longer in the song")?;
+    let t = &project.tracks[place];
+    let midi = t.midi.as_ref().ok_or_else(|| format!("{} is not a MIDI track", t.id))?;
+    if midi.instrument.is_none() {
+        return Ok((t, None));
+    }
+    let loaded = crate::view::device(t).ok_or_else(|| format!("The sampler on {} is a kit of several pads, which `daw pad set` edits", t.id))?;
+    Ok((t, loaded))
+}
+
 /// Whether a track is a MIDI track.
 fn is_midi(project: &Project, tree: &Node, key: u64) -> bool {
     let place = items(tree, "tracks").iter().position(|i| i.handle == key);
@@ -1014,6 +1046,72 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             })
         }
         Edit::InstrumentRemove { track } => Ok(vec![json!({"op": "instrument.set", "track": handle_text(*track), "instrument": null})]),
+        Edit::SamplerLoad { track: key, asset, name } => {
+            let tree = doc.tree();
+            let (t, loaded) = sampler_device(project, &tree, *key)?;
+            let stem = ident(name, "sample");
+            // A sample new to the song plays as it is at middle C (D66).
+            let unrooted = crate::library::Asset { root_note: None, ..asset.clone() };
+            let (sample, mut commands) = listed(project, &unrooted, &stem);
+            // The pad's settings carry over; the start and the end are the new file's.
+            let mut pad = serde_json::Map::new();
+            if let Some((_, old)) = loaded {
+                for f in describe::PAD {
+                    if matches!(f.name, "start_seconds" | "end_seconds") {
+                        continue;
+                    }
+                    let value = match f.name {
+                        "mode" => json!(old.mode.as_str()),
+                        "gain_db" => number(old.gain_db),
+                        "pan" => number(old.pan),
+                        "transpose" => number(old.transpose),
+                        "attack_ms" => number(old.attack_ms),
+                        "release_ms" => number(old.release_ms),
+                        "reverse" => json!(old.reverse),
+                        _ => continue,
+                    };
+                    pad.insert(f.name.to_string(), value);
+                }
+            }
+            pad.insert("sample".into(), json!(sample));
+            let instrument = json!({"sampler": {
+                "pads": {stem.clone(): pad},
+                "map": [{"notes": [0, 127], "pad": stem, "pitched": true}],
+            }});
+            commands.push(json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument}));
+            Ok(batch(commands, format!("Load {sample} into the Sampler on {}", t.id)))
+        }
+        Edit::SamplerSet { track: key, field, value } => {
+            let tree = doc.tree();
+            let (t, loaded) = sampler_device(project, &tree, *key)?;
+            let (pad, _) = loaded.ok_or("The Sampler has no sample yet")?;
+            let spec = describe::PAD.iter().find(|f| f.name == field).ok_or_else(|| format!("A Sampler's {field} is not set here"))?;
+            let path = format!("tracks.{}.instrument.sampler.pads.{pad}.{field}", handle_text(*key));
+            let command = match value {
+                FieldValue::Absent => json!({"op": "remove", "path": path}),
+                value => json!({"op": "set", "path": path, "value": field_json(value)}),
+            };
+            Ok(batch(vec![command], format!("Set the Sampler's {} on {}", spec.label.to_lowercase(), t.id)))
+        }
+        Edit::SamplerRoot { track: key, note } => {
+            let tree = doc.tree();
+            let (_, loaded) = sampler_device(project, &tree, *key)?;
+            let (_, pad) = loaded.ok_or("The Sampler has no sample yet")?;
+            let sample = pad.sample.clone();
+            let path = format!("samples.{sample}.root_note");
+            let note = note.as_deref().map(str::trim).filter(|n| !n.is_empty());
+            Ok(match note {
+                // A number or a name, kept as a name, as the song writes it.
+                Some(typed) => {
+                    let name = match typed.parse::<i64>() {
+                        Ok(n) => note_name(n)?,
+                        Err(_) => note_name(midi(typed)?)?,
+                    };
+                    batch(vec![json!({"op": "set", "path": path, "value": name})], format!("Set the root note of {sample} to {name}"))
+                }
+                None => batch(vec![json!({"op": "remove", "path": path})], format!("Take the root note off {sample}")),
+            })
+        }
         Edit::ClipsRemove { clips } => {
             let tree = doc.tree();
             let commands: Vec<Json> = clips

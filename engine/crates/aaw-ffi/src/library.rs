@@ -160,6 +160,17 @@ pub fn library_search_folders(
     Ok(found.as_array().map(|rows| rows.iter().map(sample).collect()).unwrap_or_default())
 }
 
+/// The pitch `daw samples analyze` measures from the file at `path`, as a
+/// note with its octave, such as `A3`; None when the file has no one pitch
+/// it is sure of, as a drum or a chord has not. Blocks while Python runs,
+/// so call it off the main thread.
+#[uniffi::export]
+pub fn library_pitch(db: String, path: String) -> Result<Option<String>, SongError> {
+    let report = python::run("samples", &["--db", &db, "analyze", &path])?;
+    let pitch = &report["pitch"];
+    Ok(pitch["pitched"].as_bool().unwrap_or(false).then(|| optional(pitch, "note")).flatten())
+}
+
 /// Copies a sample file into the project of the song at `song`, leaving the
 /// original as it is, and returns the copy as the song would list it. A
 /// compressed file is decoded to WAV there. A file already copied or decoded
