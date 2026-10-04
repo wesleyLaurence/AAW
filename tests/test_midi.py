@@ -60,7 +60,7 @@ def test_a_phrase_made_by_commands_is_read_back_by_python_and_by_daw(tmp_path):
     inspected = daw("inspect", path)["tracks"][0]
     assert (inspected["type"], inspected["instrument"], inspected["events"]) == ("midi", None, 0)
     assert inspected["clips"][0]["notes"] == 6
-    described = daw("describe", "midi")
+    described = daw("describe", "midi", "--schema")
     assert "MidiTrack" in json.dumps(described["schema"]["track"]) and described["semantics"]["notes"]
 
 

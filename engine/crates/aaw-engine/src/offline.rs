@@ -105,6 +105,28 @@ fn write_text(path: &Path, text: &str) -> Result<(), String> {
     aaw_model::atomic_write(path, text).map_err(|e| e.to_string())
 }
 
+/// The error for a mix that would clip: its peak, the loudest stems with
+/// theirs, and what to change, as paths and a command.
+fn clipped(p: &Project, peak: f64, names: &[(&str, bool)], peaks: &[f64]) -> String {
+    let mut loudest: Vec<(&(&str, bool), f64)> = names.iter().zip(peaks.iter().copied()).collect();
+    loudest.sort_by(|a, b| b.1.total_cmp(&a.1));
+    loudest.truncate(3);
+    let stems: Vec<String> = loudest.iter().map(|((name, _), peak)| format!("{name} {:+.1}", db(*peak))).collect();
+    let mut fixes = Vec::new();
+    if let Some(((name, is_return), _)) = loudest.first() {
+        fixes.push(format!("`{}.{name}.gain_db`", if *is_return { "returns" } else { "tracks" }));
+    }
+    fixes.push("`session.master_gain_db`".to_string());
+    let limited = p.master.effects.iter().any(|e| e.kind() == "limiter");
+    let fix = if limited {
+        format!("lower {}, or what follows the master limiter", fixes.join(" or "))
+    } else {
+        format!("lower {}, or add a limiter: daw effect add PROJECT master --type limiter", fixes.join(" or "))
+    };
+    let stems = if stems.is_empty() { String::new() } else { format!("; loudest stems {}", stems.join(", ")) };
+    format!("Unsafe PCM export: the mix peaks at {:+.2} dBFS{stems}; {fix}", db(peak))
+}
+
 /// Renders a project the way `daw render` does: the whole song, one track or
 /// return as its stem, or one section.
 pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
@@ -198,12 +220,12 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     }
     // An unsafe mix writes nothing. Its other measurements wait until the
     // files are written, beside them.
+    if !mix.iter().all(|f| f[0].is_finite() && f[1].is_finite()) {
+        return Err("Unsafe PCM export: the mix has samples that are not numbers".into());
+    }
     let peak = mix.iter().fold(0.0f64, |m, f| m.max(f[0].abs()).max(f[1].abs()));
-    if peak >= 1.0 || !mix.iter().all(|f| f[0].is_finite() && f[1].is_finite()) {
-        return Err(format!(
-            "Unsafe PCM export: peak {:.2} dBFS; lower master_gain_db or add a master limiter",
-            db(peak)
-        ));
+    if peak >= 1.0 {
+        return Err(clipped(&p, peak, &names, &peaks));
     }
     let fingerprint = project_hash(&p);
     let engine = engine_hash()?;

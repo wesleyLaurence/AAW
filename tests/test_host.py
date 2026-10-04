@@ -10,6 +10,7 @@ import random
 import subprocess
 import tempfile
 import time
+from fractions import Fraction
 
 import numpy as np
 import pytest
@@ -50,6 +51,11 @@ def song_with_routing(rng, directory):
     return path
 
 
+def in_order(clips):
+    """Clips with their places in the song, in the order they play."""
+    return sorted(enumerate(clips), key=lambda item: Fraction(str(item[1]["at"])))
+
+
 def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
     rng = random.Random(21)
     for i in range(6):
@@ -82,7 +88,7 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
                     "automation": params(t),
                     "clips": [
                         {"ref": f"tracks.{t['id']}.clips.{n}", "pattern": c["pattern"], "at": c["at"], "repeats": c["repeats"]}
-                        for n, c in enumerate(t["clips"])
+                        for n, c in in_order(t["clips"])
                     ],
                     "audio": [
                         {
@@ -92,7 +98,7 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
                             "source_start_seconds": c["source_start_seconds"],
                             "source_end_seconds": c["source_end_seconds"],
                         }
-                        for n, c in enumerate(t["audio"])
+                        for n, c in in_order(t["audio"])
                     ],
                 }
                 for t in song["tracks"]

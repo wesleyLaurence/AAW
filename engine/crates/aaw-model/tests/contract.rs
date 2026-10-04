@@ -315,16 +315,78 @@ fn each_topic_describes_its_models() {
     for topic in contract::TOPICS {
         let described = contract::describe(topic).unwrap();
         assert!(described["semantics"].as_object().is_some_and(|s| !s.is_empty()), "{topic}");
+        // The short form says everything the semantics say, without the schema.
+        let full = contract::describe_with_schema(topic).unwrap();
+        assert_eq!(described["semantics"], full["semantics"], "{topic}");
+        assert!(described.get("schema").is_none(), "{topic}");
     }
     assert!(contract::describe("other").is_none());
-    let effects = contract::describe("effects").unwrap();
+    let topics = contract::topics();
+    assert_eq!(topics["topics"].as_object().unwrap().keys().collect::<Vec<_>>(), contract::TOPICS);
+    let effects = contract::describe_with_schema("effects").unwrap();
     let kinds: Vec<&String> = effects["schema"].as_object().unwrap().keys().collect();
     assert_eq!(kinds, aaw_model::EFFECT_TYPES.iter().collect::<Vec<_>>());
     // A model on its own carries the models it refers to, and no others.
     assert_eq!(effects["schema"]["eq"]["$defs"].as_object().unwrap().keys().collect::<Vec<_>>(), ["EqBand"]);
     assert!(effects["schema"]["filter"].get("$defs").is_none());
     assert!(effects["routing"]["return"]["$defs"].get("Point").is_some());
-    let automation = contract::describe("automation").unwrap();
+    let automation = contract::describe_with_schema("automation").unwrap();
     assert_eq!(automation["automatable"]["effects"]["eq"]["q"], "log");
     assert!(automation["automatable"]["effects"].get("limiter").is_none());
+}
+
+#[test]
+fn a_topic_lists_its_fields_a_line_each() {
+    let midi = contract::describe("midi").unwrap();
+    let text = serde_json::to_string_pretty(&midi).unwrap();
+    assert!(text.len() < 8000, "{} bytes", text.len());
+    let fields = &midi["fields"];
+    assert_eq!(fields["tracks[].type"], "midi, required");
+    assert_eq!(fields["tracks[].clips[].notes[].pitch"], "integer 0..127 or text, required");
+    assert_eq!(fields["tracks[].instrument.sampler.pads"], "map of names to Pad (daw describe sampler)");
+    assert_eq!(fields["tracks[].effects"], "list of effect (daw describe effects), at most 32");
+    let project = contract::describe("project").unwrap();
+    assert_eq!(project["fields"]["session.sample_rate"], "44100|48000, default 48000");
+    assert_eq!(project["fields"]["tracks[].clips[].velocity_scale"], "number >0..2, default 1");
+    assert_eq!(project["fields"]["patterns.ID.events[].duration"], "beats or null, default null");
+    assert_eq!(project["fields"]["tracks[]"], "MidiTrack (daw describe midi)");
+    let effects = contract::describe("effects").unwrap();
+    assert_eq!(effects["fields"]["eq.bands[].q"], "number 0.1..18, default 0.71");
+    assert_eq!(effects["fields"]["filter.mode"], "highpass|lowpass, required");
+    // Every field of a model the topic lists has its line.
+    for (name, line) in contract::model_fields("Lfo") {
+        assert_eq!(contract::describe("synth").unwrap()["fields"][format!("lfos.ID.{name}")], Json::String(line));
+    }
+}
+
+#[test]
+fn an_unknown_field_is_answered_with_the_nearest() {
+    let song = yaml_load::load(
+        "session: {}\npatterns: {}\ntracks:\n  - id: drums\n    pads: {}\n    clips: []\n    volume: -3\nmaster: {effects: [{type: limiter, ceiling: -1}]}\nbpm: 90\n",
+    )
+    .unwrap();
+    let error = Project::validate(&song).unwrap_err();
+    let hint = aaw_model::hint::hint(&song, &error).unwrap();
+    let lines: Vec<&str> = hint.lines().collect();
+    assert_eq!(
+        lines,
+        [
+            "`tracks.drums.volume` is not a field; did you mean `tracks.drums.gain_db`?",
+            "`master.effects.0.ceiling` is not a field; did you mean `master.effects.0.ceiling_db`?",
+            "`bpm` is not a field; did you mean `session.tempo`?",
+        ]
+    );
+    let explained = aaw_model::hint::explain(&song, &error);
+    assert!(explained.starts_with(&hint) && explained.ends_with(&error.to_string()));
+    // A misspelling, a unit left off, and a name with nothing near it.
+    let near = |yaml: &str| {
+        let song = yaml_load::load(yaml).unwrap();
+        aaw_model::hint::hint(&song, &Project::validate(&song).unwrap_err()).unwrap()
+    };
+    assert_eq!(near("session: {tempoo: 90}"), "`session.tempoo` is not a field; did you mean `session.tempo`?");
+    assert_eq!(near("session: {end_fade: 9}"), "`session.end_fade` is not a field; did you mean `session.end_fade_ms`?");
+    assert!(near("session: {zzz: 1}").starts_with("`session.zzz` is not a field; session has title, tempo,"));
+    // Errors of other kinds have no hint.
+    let song = yaml_load::load("session: {tempo: 9000}").unwrap();
+    assert!(aaw_model::hint::hint(&song, &Project::validate(&song).unwrap_err()).is_none());
 }

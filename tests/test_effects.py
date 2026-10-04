@@ -215,7 +215,7 @@ def test_master_limiter_allows_hot_mix(beat, tmp_path):
     path, data = beat
     data["session"]["master_gain_db"] = 12
     save(data, path)
-    with pytest.raises(ValueError, match="master limiter"):
+    with pytest.raises(ValueError, match="master --type limiter"):
         render(path, tmp_path / "hot")
     data["master"] = {"effects": [{"type": "limiter", "ceiling_db": -1}]}
     save(data, path)
@@ -285,7 +285,7 @@ def test_effects_round_trip_and_cli(beat, tmp_path):
     save(load(path), path)
     assert path.read_text() == text
     assert "type: limiter" in text
-    code, described = cli("describe", "effects")
+    code, described = cli("describe", "effects", "--schema")
     assert code == 0, described
     assert set(described["schema"]) >= {"filter", "eq", "compressor", "limiter"}
     code, inspected = cli("inspect", path)

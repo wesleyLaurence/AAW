@@ -7,7 +7,9 @@ capabilities; developing them follows [development.md](development.md).
 
 A command's PROJECT is a project folder or its `song.yaml`. Use the supplied
 path, or `uv run daw projects` to find open projects, the front window first.
-For a new song, `uv run daw init projects/NAME` creates an empty project.
+For a new song, `uv run daw init projects/NAME` creates an empty project;
+`uv run daw describe start` is the dozen commands from there to a rendered song,
+and the quickest way to learn the verbs.
 Before continuing a song, read its local `HANDOFF.md` if present.
 
 Run `uv run daw inspect PROJECT` before editing and `uv run daw status PROJECT`
@@ -33,8 +35,11 @@ triplets. A grid of `1/4` means sixteenth notes.
 
 ## Load detail when needed
 
-Use `uv run daw COMMAND --help` for syntax. The commands below also use the
-`uv run` prefix; read only the topics the operation needs.
+Use `uv run daw COMMAND --help` for syntax and the fields a command takes.
+`daw describe TOPIC` says what a topic's fields mean and gives each field's path,
+range and default on one line; `--schema` adds the JSON Schema when it is
+needed. The commands below also use the `uv run` prefix; read only the topics
+the operation needs. A refused edit names the field it meant and the fix.
 
 | Task | Read or do |
 |---|---|

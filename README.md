@@ -160,10 +160,12 @@ uv run daw init projects/my-beat --tempo 160 --bars 20
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
 uv run daw samples import ~/Music/song.m4a --project projects/my-beat/song.yaml --id song
+uv run daw describe
+uv run daw describe start
 uv run daw describe sampler
 uv run daw describe effects
 uv run daw describe automation
-uv run daw describe project
+uv run daw describe project --schema
 
 uv run daw check projects/my-beat/song.yaml
 uv run daw inspect projects/my-beat/song.yaml
