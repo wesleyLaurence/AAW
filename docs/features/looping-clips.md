@@ -1,6 +1,6 @@
 # Clips that loop — proposed October 4, 2026
 
-Status: proposed, not built. Backlog: Later, under Sound. D63 left note clips
+Status: proposed, not built. Backlog: Next, Clips that loop. D63 left note clips
 without repeats until audio clips could loop too, "so that one rule serves
 both"; this is that rule.
 

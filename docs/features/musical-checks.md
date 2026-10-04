@@ -1,7 +1,6 @@
 # Musical checks — proposed October 4, 2026
 
-Status: proposed, not built. Backlog: Later, under What the agent reads and
-writes. What it is for is in [concept.md](../concept.md#what-the-agent-works-with)
+Status: proposed, not built. Backlog: Next, Musical checks. What it is for is in [concept.md](../concept.md#what-the-agent-works-with)
 as Checks: a linter for music.
 
 ## What

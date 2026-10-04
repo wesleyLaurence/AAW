@@ -1,6 +1,6 @@
 # Comparing with a reference — proposed October 4, 2026
 
-Status: proposed, not built. Backlog: Later, under Library and perception. What
+Status: proposed, not built. Backlog: Next, Comparing with a reference. What
 it is for is in [concept.md](../concept.md#library-and-perception): tracks the
 person points to as "this is what good sounds like", analyzed once and compared
 with every mix.
