@@ -1,7 +1,7 @@
-# The browser — implementation October 3, 2026
+# The browser — implemented October 3, 2026
 
-Status: in development on `feat/browser-folders`. Backlog item 1. The [Sampler device](sampler-device.md),
-item 2, is dragged out of it.
+Status: implemented in [#48](https://github.com/wesleyLaurence/AAW/pull/48).
+The [Sampler device](sampler-device.md) is next.
 
 ## What
 
@@ -103,22 +103,7 @@ be, including "Add Sampler track" and "Attach Sampler". These are `Edit`s in
 does now (D66). The Add Effect menu stays in the device panel, for a person who
 does not want to drag.
 
-## Done when
-
-- The browser opens and closes, shows each category, and remembers the last.
-- Folder registration survives app restarts and project changes; exact multi-folder search, overlapping sources, removal and unavailable folders are tested with generated audio.
-- An effect dragged onto each kind of header and between two devices lands
-  there, as one undo step; an instrument dragged onto a MIDI track's header,
-  its device panel and under the tracks attaches or makes a track; drops on
-  the wrong rows are refused while dragging.
-- Double-click and + add to the selected row.
-- `./build.sh test` covers the edits each drop makes, and the window is seen in
-  a picture with each category shown. A drag by hand is a line under Verify,
-  since scripted input cannot start one.
-- `apps/mac/README.md` describes the browser, and this file is rewritten as its
-  reference.
-
-## Verification on the branch
+## Verification
 
 Generated fixtures cover shared defaults across project directories, multi-folder
 search, exact path boundaries, overlapping roots, safe removal, file symlinks,
@@ -139,7 +124,7 @@ remains the next backlog item; the track header accepts a sample today.
   saved clips. Folders already registers sample directories.
 - **The person's own presets.** The concept puts the person's devices in
   `devices/` in the workspace. Whether an effect saved with its settings shows
-  in the browser beside the built-in ones belongs with the workspace (item 5).
+  in the browser beside the built-in ones belongs with the workspace.
 - **A drop on an audio track.** Ableton turns an instrument dropped on an audio
   track into a new MIDI track next to it. Refusing it is simpler; whether the
   person expects Ableton's behavior is to be asked.

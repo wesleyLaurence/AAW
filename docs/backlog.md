@@ -14,36 +14,31 @@ kept.
 
 ## Next
 
-1. **A browser of samples, instruments and effects.** The Samples panel on the
-   left becomes a browser that opens and closes, with categories as in
-   Ableton: Samples, Instruments, Audio Effects and shared Folders. Add Folder
-   registers sample sources across projects for the browser and agent, with search
-   across one or several folders. An instrument or effect is
-   dragged from it onto a track, or onto the device panel.
-   [features/browser.md](features/browser.md)
-2. **The Sampler device.** Sampler in the browser's Instruments, dropped on a MIDI
+1. **The Sampler device.** Sampler in the browser's Instruments, dropped on a MIDI
    track as an empty sampler in the device panel, and a sample dragged onto that
    device to play it on the keys. Its panel shows the sample's waveform and sets
    the root note, start and end, one-shot or held, attack and release.
    [features/sampler-device.md](features/sampler-device.md)
-3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-4. **The `.aaw` file type and the project ID.** The project file under the app's
+3. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-5. **The workspace and the two levels.** The workspace folder with its managed
+4. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-6. **The agent panel.** A conversation in the window, per project, over the
+5. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-7. **Other Macs.** The rest of the Python ported or carried in the bundle,
+6. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-8. **Sign-in buttons and other agents,** as the companies' terms allow.
+7. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
+
+- **Browser folders and device drags:** use Add Folder with multiple directories, reopen another project, search across selected folders, refresh and remove a source; drag effects onto track, return and master headers and between devices, and Sampler onto a MIDI track and below the rows. Automated tests and scripted snapshots passed; the native picker and actual mouse drags have not been tried by hand.
 
 - **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads and song-edit is discoverable. Links, ignore rules and the shared skill path were checked locally; fresh sessions have not been tried.
 
