@@ -1,0 +1,16 @@
+name: Kick
+description: A sine whose pitch drops three octaves in forty milliseconds, with a click of filtered noise on top. Play it at C2 or below.
+tags: [drum, kick, percussion]
+synth:
+  voices: 4
+  oscillators:
+    a: {wave: sine, level_db: -3, filter: false}
+    click: {wave: noise, level_db: -60}
+  filter: {mode: highpass, cutoff_hz: 2000, slope_db_per_octave: 12}
+  envelopes:
+    amp: {attack_ms: 0, decay_ms: 350, sustain_percent: 0, release_ms: 80}
+    env2: {attack_ms: 0, decay_ms: 45, sustain_percent: 0, release_ms: 45}
+    env3: {attack_ms: 0, decay_ms: 15, sustain_percent: 0, release_ms: 15}
+  modulation:
+  - {source: env2, target: oscillators.a.pitch, amount: 36}
+  - {source: env3, target: oscillators.click.level_db, amount: 48}

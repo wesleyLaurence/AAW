@@ -8,6 +8,7 @@ pub mod client;
 pub mod command;
 pub mod host;
 pub mod midi_file;
+pub mod patches;
 pub mod project;
 pub mod python;
 pub mod registry;

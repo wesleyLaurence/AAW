@@ -1,0 +1,17 @@
+name: Bright Lead
+description: A square with a saw a fifth up, one voice with glide, a little drive, and vibrato that starts with each note.
+tags: [lead, mono, bright]
+synth:
+  voices: 1
+  glide_ms: 60
+  oscillators:
+    a: {wave: square, level_db: -9}
+    b: {wave: saw, level_db: -15, semitones: 7}
+  filter: {cutoff_hz: 4000, slope_db_per_octave: 12, drive_db: 4, keytrack_percent: 30}
+  envelopes:
+    amp: {attack_ms: 5, decay_ms: 150, sustain_percent: 85, release_ms: 120}
+  lfos:
+    lfo1: {shape: sine, rate_hz: 5.5, retrigger: true}
+  modulation:
+  - {source: lfo1, target: pitch, amount: 0.25}
+  - {source: velocity, target: filter.cutoff_hz, amount: 1.5}

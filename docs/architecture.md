@@ -190,7 +190,12 @@ velocity, start and note-off, and the sampler makes of them the hits a pattern
 event would make. The Synth plays them itself, every frame, from a patch of
 oscillators, a filter a voice, envelopes, LFOs, a modulation matrix and
 macros, whose fields a track's lanes reach as `instrument.FIELD`; see
-[synth.md](features/synth.md) and `daw describe synth`. A Standard MIDI file of one part is imported as a note clip
+[synth.md](features/synth.md) and `daw describe synth`. A patch is that
+mapping as a YAML file: twelve factory patches are built into `daw`, and
+`daw patch save` writes the person's own to the workspace library,
+`~/Music/AAW/library/patches/` (or `AAW_WORKSPACE`), the first folder of the
+workspace, which `daw patch load`, `daw synth add --patch` and the browser
+load into any song. A Standard MIDI file of one part is imported as a note clip
 and a note clip exported as one; the file is not kept or linked, and its tempo
 is not taken. See [midi-clips.md](features/midi-clips.md) and `daw describe midi`.
 

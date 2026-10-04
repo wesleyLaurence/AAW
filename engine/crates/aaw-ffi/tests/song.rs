@@ -58,6 +58,8 @@ fn registry_dir() {
             std::env::set_var("AAW_HOST_DIR", dir.path());
             // Untitled projects go here, not into the person's own.
             std::env::set_var("AAW_DATA_DIR", dir.path().join("data"));
+            // And saved patches, so the person's library is read and not written.
+            std::env::set_var("AAW_WORKSPACE", dir.path().join("workspace"));
         }
         dir
     });
@@ -2362,4 +2364,54 @@ fn the_synth_is_drawn_from_its_fields_and_turned_by_its_paths() {
     // A sampler track has no synth to set.
     let bass = u.arrangement.tracks[1].key;
     assert!(song.edit(Edit::SynthSet { track: bass, field: "filter.cutoff_hz".into(), value: number(900.0) }, None).is_err());
+}
+
+#[test]
+fn the_browsers_synth_and_its_patches_are_dropped_on_tracks_and_under_them() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    // The browser lists the factory patches, and a search narrows them by name and tag.
+    let all = aaw_ffi::library::library_patches(String::new());
+    assert!(all.len() >= 12 && all.iter().all(|p| p.factory), "{all:?}");
+    assert_eq!(all[0].name, "Init");
+    let pads = aaw_ffi::library::library_patches("pad".into());
+    assert!(pads.iter().any(|p| p.name == "Soft Pad") && pads.iter().all(|p| p.name.to_lowercase().contains("pad") || p.tags.iter().any(|t| t.contains("pad"))));
+    // Synth dropped under the tracks: a new track with the plain saw.
+    song.edit(Edit::SynthAdd { track: None, patch: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add Synth track synth-1");
+    let synth = u.arrangement.tracks.iter().find(|t| t.id == "synth-1").unwrap().clone();
+    assert_eq!(synth.instrument.as_deref(), Some("synth"));
+    assert_eq!(synth.synth.as_ref().unwrap().patch, None);
+    // A patch dropped under the tracks: a new track named after it.
+    song.edit(Edit::SynthAdd { track: None, patch: Some("Soft Pad".into()) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add Synth track soft-pad with Soft Pad");
+    let pad = u.arrangement.tracks.iter().find(|t| t.id == "soft-pad").unwrap().clone();
+    assert_eq!(pad.synth.as_ref().unwrap().patch.as_deref(), Some("Soft Pad"));
+    assert_eq!(pad.synth.as_ref().unwrap().oscillators.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["a", "b", "sub"]);
+    // A second drop of the same patch takes the next name.
+    song.edit(Edit::SynthAdd { track: None, patch: Some("soft-pad".into()) }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Add Synth track soft-pad-2 with Soft Pad");
+    // A patch dropped on a track that has a synth loads it; the notes stay.
+    agent(&path, json!({"op": "clip.add", "track": "synth-1", "length_beats": 4, "notes": [{"pitch": 60, "duration": 1}]}));
+    update(&seen);
+    song.edit(Edit::SynthAdd { track: Some(synth.key), patch: Some("Kick".into()) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Load patch Kick into synth-1");
+    let loaded = u.arrangement.tracks.iter().find(|t| t.id == "synth-1").unwrap().clone();
+    assert_eq!(loaded.synth.as_ref().unwrap().patch.as_deref(), Some("Kick"));
+    assert_eq!(loaded.note_clips.len(), 1);
+    // Synth dropped on a MIDI track with a sampler takes its place; on a pattern track it is refused.
+    song.edit(Edit::InstrumentAdd { track: None }, None).unwrap();
+    let u = update(&seen);
+    let sampler = u.arrangement.tracks.iter().find(|t| t.instrument.as_deref() == Some("sampler")).unwrap().clone();
+    song.edit(Edit::SynthAdd { track: Some(sampler.key), patch: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, format!("Attach a Synth to {}", sampler.id));
+    let drums = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().key;
+    let e = song.edit(Edit::SynthAdd { track: Some(drums), patch: Some("Hat".into()) }, None).unwrap_err();
+    assert!(e.to_string().contains("not a MIDI track"), "{e}");
+    let e = song.edit(Edit::SynthAdd { track: None, patch: Some("no-such".into()) }, None).unwrap_err();
+    assert!(e.to_string().contains("No patch named"), "{e}");
 }

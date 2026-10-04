@@ -263,9 +263,20 @@ struct DeviceView: View {
             }
             .padding(8)
         }
-        .onDrop(of: (DeviceChain.kinds + (chain.track?.midi == true ? ["sampler"] : [])).map { Browser.deviceType + "." + $0 }, isTargeted: nil) { providers in
-            guard let provider = providers.first,
-                  let kind = (DeviceChain.kinds + ["sampler"]).first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }),
+        .onDrop(of: (DeviceChain.kinds + (chain.track?.midi == true ? Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
+                    + (chain.track?.midi == true ? [Browser.patchType] : []), isTargeted: nil) { providers in
+            guard let provider = providers.first else { return false }
+            if provider.hasItemConformingToTypeIdentifier(Browser.patchType) {
+                // A Synth patch: loaded into the track's Synth, or a Synth attached with it.
+                guard model.canAddBrowserDevice("synth", to: chain.row) else { return false }
+                let row = chain.row
+                provider.loadDataRepresentation(forTypeIdentifier: Browser.patchType) { data, _ in
+                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
+                    DispatchQueue.main.async { model.addBrowserDevice("synth", to: row, patch: name) }
+                }
+                return true
+            }
+            guard let kind = (DeviceChain.kinds + Browser.instruments).first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }),
                   model.canAddBrowserDevice(kind, to: chain.row) else { return false }
             model.addBrowserDevice(kind, to: chain.row)
             return true

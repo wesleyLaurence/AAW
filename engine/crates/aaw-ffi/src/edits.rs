@@ -117,6 +117,11 @@ pub enum Edit {
     InstrumentRemove { track: u64 },
     /// Attach an empty sampler, or create a MIDI track with one.
     InstrumentAdd { track: Option<u64> },
+    /// Attaches a Synth to a MIDI track, in place of the instrument it had,
+    /// or creates a MIDI track with one: the plain saw, or the patch
+    /// `patch` names, after which a new track is named. What the browser's
+    /// Synth and its patches do when dropped.
+    SynthAdd { track: Option<u64>, patch: Option<String> },
     /// Loads a sample that `library::import` copied into the project into
     /// the Sampler on a MIDI track: one pad, named after `name`, played on
     /// every note at its pitch, as it is at middle C. Loaded over a sample
@@ -715,6 +720,16 @@ fn synth_track<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'a a
     Ok((t, synth))
 }
 
+/// A MIDI track by its key.
+fn midi_track<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<&'a aaw_model::Track> {
+    let place = items(tree, "tracks").iter().position(|i| i.handle == key).ok_or("The track is no longer in the song")?;
+    let t = &project.tracks[place];
+    if t.midi.is_none() {
+        return Err(format!("{} is not a MIDI track; a Synth goes on one", t.id));
+    }
+    Ok(t)
+}
+
 /// Whether a track is a MIDI track.
 fn is_midi(project: &Project, tree: &Node, key: u64) -> bool {
     let place = items(tree, "tracks").iter().position(|i| i.handle == key);
@@ -1063,6 +1078,37 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Ok(match track {
                 Some(key) => batch(vec![json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument})], "Attach Sampler".into()),
                 None => batch(vec![json!({"op": "track.add", "id": free_name(project, "sampler"), "type": "midi", "instrument": instrument})], "Add Sampler track".into()),
+            })
+        }
+        Edit::SynthAdd { track, patch } => {
+            let found = patch.as_deref().map(aaw_host::patches::find).transpose()?;
+            Ok(match (track, &found) {
+                (Some(key), Some(p)) => {
+                    let t = midi_track(project, &doc.tree(), *key)?;
+                    batch(
+                        vec![json!({"op": "patch.load", "track": handle_text(*key), "patch": p.name})],
+                        format!("Load patch {} into {}", p.name, t.id),
+                    )
+                }
+                (Some(key), None) => {
+                    let t = midi_track(project, &doc.tree(), *key)?;
+                    batch(
+                        vec![json!({"op": "synth.add", "track": handle_text(*key)})],
+                        format!("Attach a Synth to {}", t.id),
+                    )
+                }
+                (None, Some(p)) => {
+                    let taken = |name: &str| project.tracks.iter().any(|t| t.id == name) || project.returns.iter().any(|r| r.id == name);
+                    let id = unique(&ident(&p.name, "synth"), taken);
+                    batch(
+                        vec![json!({"op": "synth.add", "track": id, "patch": p.name})],
+                        format!("Add Synth track {id} with {}", p.name),
+                    )
+                }
+                (None, None) => {
+                    let id = free_name(project, "synth");
+                    batch(vec![json!({"op": "synth.add", "track": id})], format!("Add Synth track {id}"))
+                }
             })
         }
         Edit::InstrumentRemove { track } => Ok(vec![json!({"op": "instrument.set", "track": handle_text(*track), "instrument": null})]),

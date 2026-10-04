@@ -269,6 +269,8 @@ enum Top {
     #[command(subcommand)]
     Synth(SynthCmd),
     #[command(subcommand)]
+    Patch(PatchCmd),
+    #[command(subcommand)]
     Midi(MidiCmd),
     #[command(subcommand)]
     Pattern(PatternCmd),
@@ -511,8 +513,15 @@ enum InstrumentCmd {
 /// patch in the song. See `daw describe synth`.
 #[derive(Subcommand)]
 enum SynthCmd {
-    /// Attach the plain saw to a MIDI track, or make a new MIDI track with it.
-    Add { project: Song, track: String },
+    /// Attach the plain saw, or a patch, to a MIDI track, or make a new MIDI
+    /// track with it.
+    Add {
+        project: Song,
+        track: String,
+        /// A patch's name, from `daw patch list`, or a .yaml file.
+        #[arg(long)]
+        patch: Option<String>,
+    },
     /// The patch as the song holds it, with its modulation listed; fields at
     /// their defaults are left out, as `daw get` leaves them, and `daw
     /// describe synth` lists the defaults.
@@ -557,6 +566,38 @@ enum SynthCmd {
         #[arg(long)]
         output: Option<PathBuf>,
     },
+}
+
+/// Patches: a Synth's sound as a YAML file, saved in the workspace library
+/// (~/Music/AAW/library/patches, or under AAW_WORKSPACE) beside the factory
+/// patches built into daw. A patch loaded into any song is the same sound.
+#[derive(Subcommand)]
+enum PatchCmd {
+    /// The patches, factory and saved, with their names, tags and files;
+    /// WORDS keep those with every word in the name or a tag.
+    List {
+        #[arg(trailing_var_arg = true)]
+        words: Vec<String>,
+    },
+    /// A patch as its file holds it.
+    Show { patch: String },
+    /// Save a track's synth as a patch named NAME, and name the song's patch
+    /// after it. Over a patch already saved under that name only with --replace.
+    Save {
+        project: Song,
+        track: String,
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        /// Words, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Load a patch into a MIDI track, in place of its whole synth; the
+    /// notes stay. PATCH is a name from `daw patch list` or a .yaml file.
+    Load { project: Song, track: String, patch: String },
 }
 
 /// Standard MIDI files of one part: its notes and velocities, as a note clip.
@@ -803,6 +844,20 @@ fn model_entry(path: &Path) -> Json {
 }
 
 /// An engine result as JSON, keeping its key order.
+/// A patch as `daw patch list` prints it: everything but the mapping.
+fn patch_json(p: &aaw_host::patches::Patch) -> Json {
+    json!({
+        "name": p.name,
+        "slug": p.slug,
+        "description": p.description,
+        "tags": p.tags,
+        "factory": p.factory,
+        "file": p.file,
+        "saved_by": p.saved_by,
+        "saved_at": p.saved_at,
+    })
+}
+
 fn value(v: aaw_model::value::Value) -> Json {
     aaw_host::session::value_json(&v)
 }
@@ -1339,7 +1394,14 @@ fn run(cli: &Cli) -> Result<Json> {
             ),
         },
         Top::Synth(s) => match s {
-            SynthCmd::Add { project, track } => edit(project, C::SynthAdd { track: track.clone(), index: None }),
+            SynthCmd::Add { project, track, patch } => edit(
+                project,
+                C::SynthAdd {
+                    track: track.clone(),
+                    index: None,
+                    patch: patch.clone(),
+                },
+            ),
             SynthCmd::Show { project, track } => {
                 let reply = edit(project, C::Get { path: format!("tracks.{track}.instrument.synth") })?;
                 if reply.is_null() {
@@ -1393,6 +1455,43 @@ fn run(cli: &Cli) -> Result<Json> {
                 )
                 .map(value)
             }
+        },
+        Top::Patch(p) => match p {
+            PatchCmd::List { words } => {
+                let query = words.join(" ");
+                let listing = aaw_host::patches::list();
+                let mut out = json!({
+                    "directory": aaw_host::patches::dir(),
+                    "patches": listing.patches.iter().filter(|p| aaw_host::patches::matches(p, &query)).map(patch_json).collect::<Vec<_>>(),
+                });
+                if !listing.problems.is_empty() {
+                    out["problems"] = json!(listing.problems);
+                }
+                Ok(out)
+            }
+            PatchCmd::Show { patch } => {
+                let p = aaw_host::patches::find(patch)?;
+                let mut out = patch_json(&p);
+                out["synth"] = value(p.synth.clone());
+                Ok(out)
+            }
+            PatchCmd::Save { project, track, name, description, tags, replace } => edit(
+                project,
+                C::PatchSave {
+                    track: track.clone(),
+                    name: name.clone(),
+                    description: description.clone(),
+                    tags: tags.clone(),
+                    replace: *replace,
+                },
+            ),
+            PatchCmd::Load { project, track, patch } => edit(
+                project,
+                C::PatchLoad {
+                    track: track.clone(),
+                    patch: patch.clone(),
+                },
+            ),
         },
         Top::Midi(m) => match m {
             MidiCmd::Import { project, file, track, at } => edit(
@@ -1707,6 +1806,7 @@ fn name(top: &Top) -> String {
         Top::Midi(_) => group("midi", ""),
         Top::Instrument(_) => group("instrument", ""),
         Top::Synth(_) => group("synth", ""),
+        Top::Patch(_) => group("patch", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),

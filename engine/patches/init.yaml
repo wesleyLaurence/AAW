@@ -1,0 +1,6 @@
+name: Init
+description: The plain saw with the plain envelope, where a sound starts.
+tags: [init]
+synth:
+  oscillators:
+    a: {level_db: -9}

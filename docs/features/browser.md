@@ -12,7 +12,8 @@ the chosen category holds.
 - **Samples:** the library's samples by search, category and kind, as the panel
   shows them today.
 - **Folders:** sample directories shared across projects and with the agent; select one or several to scope sample search.
-- **Instruments:** Sampler, and the instruments that come after it.
+- **Instruments:** Sampler and Synth, and under Synth its patches, Factory
+  and Mine ([the Synth](synth.md)).
 - **Audio Effects:** filter, equalizer, compressor, limiter, delay and reverb,
   and the effects that come after them.
 
@@ -86,7 +87,11 @@ types, since they are a few.
 
 A Sampler dropped this way is empty: `{sampler: {pads: {}, map: []}}`, which
 the model already takes, and which plays nothing until a sample is dropped on
-it ([Sampler device](sampler-device.md)).
+it ([Sampler device](sampler-device.md)). A Synth dropped this way is the
+plain saw, and a new track for it is `synth-1`. A patch dropped on a MIDI
+track loads it into the track's Synth, or attaches a Synth with it, and under
+the tracks makes a track named after the patch, `soft-pad` ([the
+Synth](synth.md)); the search field narrows the patches by name and tag.
 
 **Double-click and +.** Add the item to the row selected, as a drop on its
 header would. With no row selected, an instrument makes a new MIDI track and an

@@ -15,12 +15,11 @@ kept.
 ## Next
 
 1. **The Synth's remaining items.** Its engine, `daw synth`, automation of the
-   patch and a panel of plain fields are built. Left: patches as text files in
-   `~/Music/AAW/library/patches/` with factory patches, `daw patch` and the
-   browser's Synth; the panel's drawings, `note.preview` and the keys, with the
-   detail panel's height draggable; then unison, wavetables and the patch's own
-   effects. Three pull requests, in that order or with the first two swapped.
-   [features/synth.md](features/synth.md)
+   patch, a panel of plain fields, patches as files with the factory patches,
+   `daw patch` and the browser's Synth are built. Left: the panel's drawings,
+   its Save and Load, `note.preview` and the keys, with the detail panel's
+   height draggable; then unison, wavetables and the patch's own effects. Two
+   pull requests, in that order. [features/synth.md](features/synth.md)
 2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
@@ -40,6 +39,16 @@ kept.
 
 ## Verify
 
+- **The factory patches by ear, and the browser's Synth by hand:** each of
+  the twelve factory patches on a MIDI track of its kind of part, a chord or
+  a bass line, heard through `daw synth audition` and in the app, and whether
+  each sounds like its name; a patch saved with `daw patch save` and loaded
+  into another song by hand; in the browser, Synth and a patch dragged onto a
+  MIDI track's header, its device panel and under the tracks, + and a
+  double-click on a patch, and a search by tag. Tests render every factory
+  patch under full scale and hold a saved patch's audition in two songs byte
+  for byte; the browser's drops ran through the model and its list was seen in a
+  scripted picture; nothing was dragged by hand.
 - **The Synth by ear:** `daw synth add` on a MIDI track of a few chords and a
   bass line, each factory-style recipe from `daw describe synth` built with
   `daw synth set` and heard through `daw synth audition` and in the app: the

@@ -1,0 +1,14 @@
+name: Sub Bass
+description: A sine under a saw an octave up, closed down to the fundamental; velocity opens it a little. Play it low, one note at a time.
+tags: [bass, sub, mono]
+synth:
+  voices: 1
+  glide_ms: 30
+  oscillators:
+    a: {wave: sine, level_db: -6, filter: false}
+    b: {wave: saw, level_db: -18, octave: 1}
+  filter: {cutoff_hz: 200, slope_db_per_octave: 24}
+  envelopes:
+    amp: {attack_ms: 4, decay_ms: 200, sustain_percent: 90, release_ms: 120}
+  modulation:
+  - {source: velocity, target: filter.cutoff_hz, amount: 1}

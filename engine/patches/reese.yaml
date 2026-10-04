@@ -1,0 +1,16 @@
+name: Reese
+description: Two saws detuned against each other over a sub, driven into a low filter; the beating is the sound. Tone opens the filter.
+tags: [bass, mono, dark]
+synth:
+  voices: 1
+  glide_ms: 40
+  oscillators:
+    a: {wave: saw, level_db: -10, detune_cents: -12}
+    b: {wave: saw, level_db: -10, detune_cents: 12}
+    sub: {wave: sine, level_db: -12, octave: -1, filter: false}
+  filter: {cutoff_hz: 700, slope_db_per_octave: 24, resonance_percent: 10, drive_db: 6}
+  envelopes:
+    amp: {attack_ms: 10, decay_ms: 100, sustain_percent: 100, release_ms: 150}
+  macros: {tone: 40}
+  modulation:
+  - {source: macros.tone, target: filter.cutoff_hz, amount: 3}
