@@ -316,3 +316,25 @@ explicit source registration; it is workspace configuration, outside a song and
 its undo history. Removing a source never deletes its files or project copies.
 The browser item includes this shared index and folder management; porting search
 and import from Python to Rust remains the standalone-app item.
+
+**D69. The Synth is a Serum-class instrument with text patches in the workspace library, built after the Sampler device.**
+
+Chosen by the person on October 3, 2026, when the synth was planned
+([features/synth.md](features/synth.md)). The concept's "subtractive synth"
+widens to a polyphonic synthesizer with oscillators in unison, wavetables, a
+filter, envelopes, LFOs, a modulation matrix, macros and an effect chain of its
+own, so a patch sounds finished on any track; the patch is a plain mapping in
+the song under `instrument: {synth: ...}`, self-describing as effects are
+(D44), with modulation amounts in each target's own unit. Oscillators are a
+mapping by ID, as pads are, not fixed slots: a smaller schema and stable
+command paths. Saved patches are YAML files in
+`~/Music/AAW/library/patches/`, the first folder of the workspace the concept
+describes, made when the first is saved; the hidden app data folder and a
+registered folder were the alternatives. Factory patches ship in `daw`.
+Wavetables start as built-in tables and a single cycle from a WAV; multi-frame
+tables with a position stay in Later. The detail panel's height becomes
+draggable rather than the synth opening a window of its own. A MIDI keyboard
+is not part of it; the host's `note.preview` is its hook. It is backlog item 2,
+after the Sampler device, whose wide instrument panel it shares, and is built
+as four pull requests: engine and commands, patches, panel, then unison,
+wavetables and the patch's effects.
