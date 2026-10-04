@@ -358,9 +358,12 @@ address that stays valid as other edits land, and every error says how to fix it
   note clips become note clips when the person asks (D62).
 - **Sampler tracks and audio clips:** pads that play, hold and repitch samples,
   and parts of a file placed on beats with fades.
-- **Instruments:** a subtractive synth with text patches and modulation (LFOs,
-  envelopes, velocity, seeded randomness), enough to design kicks, basses, pads
-  and leads from nothing. Glide and sustain loops on the sampler.
+- **Instruments:** a polyphonic synthesizer with text patches, in the shape of
+  a modern software synth: oscillators with unison and wavetables, a filter,
+  envelopes, LFOs, a modulation matrix, macros and its own effects, enough to
+  design kicks, basses, pads and leads from nothing. Patches are saved to the
+  library and loaded into any song, and factory patches ship with it (D69).
+  Glide and sustain loops on the sampler.
 - **Effects:** filter, equalizer, compressor with sidechain, limiter, delay,
   reverb, saturation and a clipper, utility, chorus, phaser, gate, transient
   shaper, multiband compressor, pitch shift.

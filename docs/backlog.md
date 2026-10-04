@@ -19,22 +19,28 @@ kept.
    device to play it on the keys. Its panel shows the sample's waveform and sets
    the root note, start and end, one-shot or held, attack and release.
    [features/sampler-device.md](features/sampler-device.md)
-2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+2. **The Synth.** A polyphonic synthesizer on a MIDI track with oscillators,
+   unison, a filter, envelopes, LFOs, a modulation matrix, macros and its own
+   effects; text patches saved to `~/Music/AAW/library/patches/` and loaded into
+   any song; `daw synth` and `daw patch` for the agent and a panel in the app.
+   Four pull requests: the engine and commands, patches, the panel, then unison,
+   wavetables and the patch's effects. [features/synth.md](features/synth.md)
+3. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-3. **The `.aaw` file type and the project ID.** The project file under the app's
+4. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-4. **The workspace and the two levels.** The workspace folder with its managed
+5. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-5. **The agent panel.** A conversation in the window, per project, over the
+6. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-6. **Other Macs.** The rest of the Python ported or carried in the bundle,
+7. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-7. **Sign-in buttons and other agents,** as the companies' terms allow.
+8. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
@@ -140,9 +146,9 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 ### Sound
 
 - Saturation and a clipper. Agents making loud mixes stopped at the limiter.
-- A subtractive synth with text patches, and modulation: LFOs, envelopes,
-  velocity, seeded randomness. Agents wrote scripts to synthesize subs, pads and
-  glides the DAW then could not see.
+- Beyond the Synth (Next 2): multi-frame wavetables with a sweepable position
+  and Serum's or other WAV tables read; a second filter with routing; a MIDI
+  keyboard played through `note.preview`.
 - Generated audio: a sound, a loop or a whole song from a description, with the
   person's own ElevenLabs key kept in the Keychain, saved in the project as a
   sample; a `daw generate` command for the agent and a panel in the app.
