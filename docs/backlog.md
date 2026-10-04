@@ -175,16 +175,26 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### What the agent reads and writes
 
-- An arrangement map: tracks by bars in a few hundred tokens.
+- An arrangement map: tracks by bars in a few hundred tokens, with the same
+  music under the same letter and stacked clips marked.
+  [features/arrangement-map.md](features/arrangement-map.md)
 - A text piano roll of one clip or a few bars.
 - Queries: which bars the bass plays in, every snare off the backbeat.
-- Musical checks in `daw check`: a note cut off by its clip's end, two tracks in
-  one register, a snare off the backbeat in a half-time section.
+- Musical checks in `daw check`: stacked and overlapping clips, a note struck
+  again while it sounds, a song that ends inside a part, two tracks in one low
+  register; and `clip duplicate` laying repeated copies in a row.
+  [features/musical-checks.md](features/musical-checks.md)
+- A range of beats copied, inserted, deleted or cleared across every track, with
+  its lanes and sections; a section duplicated with what is under it.
+  [features/bar-ranges.md](features/bar-ranges.md)
 - A client library over the host, where a block of calls is one turn.
 - Structure in the document: chord symbols, named motifs, a clip defined by its
   relation to another.
 - Positions as `m:ss` wherever a command takes a beat.
 - An MCP adapter, only if it proves more reliable for agents than the CLI.
+- `daw describe` short by default, help that lists what a command accepts, a
+  first-song recipe, and errors that name the fix.
+  [features/cli-discovery.md](features/cli-discovery.md)
 
 ### Sound
 
@@ -226,9 +236,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   each pattern clip a note clip that owns its events, and the sound unchanged
   against generated fixtures (D62). What a track with two pitched pads maps to
   is its open question.
-- Audio clips: a cut that moves the other tracks with it; clips that loop,
-  reverse or repeat; perhaps one list for pattern clips and audio clips. Note
-  clips that loop, by the same rule (D63).
+- Audio clips that reverse; perhaps one list for pattern clips and audio clips.
+  A cut that moves the other tracks with it is a range edit, above.
+- Note clips and audio clips that loop, by one rule (D63).
+  [features/looping-clips.md](features/looping-clips.md)
 - A join check that places a pad transposed by an event at its transposed length.
 - A long song streamed from disk; a decoded song is held whole in memory.
 - A trimmed audio clip prepared from audio already at the song's rate. A trim
@@ -260,6 +271,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Key and chord detection, swing detection.
 - Masking between two tracks, with the bars where it is worst.
 - A reference library, and a mix compared with a reference section by section.
+  [features/reference-comparison.md](features/reference-comparison.md)
+- Each sample measured for brightness, attack, decay, low end and noise, with
+  search sorted by them and samples like a chosen one.
+  [features/sound-descriptors.md](features/sound-descriptors.md)
 - An audio-capable model as an optional critic, with its own consent.
 - A certified true-peak measurement; the engine's 4× oversampled peak is an
   estimate.
@@ -334,5 +349,3 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 ## Ideas
 
 One line each, newest first.
-
-- **CLI discovery and first-task recipes:** focused help with accepted fields, a concrete batch JSON example, concise describe output separate from full schemas, and complete first-task recipes. Task-based entry guides are in place; CLI help is unchanged.
