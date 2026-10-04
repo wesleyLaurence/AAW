@@ -7,6 +7,7 @@ backlog.
 
 | Date | What | PR | Tried by a person |
 |---|---|---|---|
+| 2026-10-03 | Browser with Samples, Instruments, Audio Effects and persistent shared Folders; multi-folder sample search in the app and CLI, and undoable device additions ([browser](features/browser.md), D68) | #48 | Automated Rust, Python and Mac tests and scripted snapshots; folder scoping, Sampler creation and effect addition checked by script. Native folder picker and real mouse drags not tried by hand |
 | 2026-10-03 | Task-based agent entry instructions, separate music and development guides, and one song-edit skill shared with Codex through a relative symlink ([skills](features/skills.md)) | #47 | Local link, ignore-rule and symlink checks; fresh Claude/Codex sessions not tried |
 | 2026-10-03 | A metronome icon in the transport bar, with a beat-aligned monitoring click during playback, including an empty song ([metronome](features/metronome.md), D67) | #46 | Automated audio timing and host tests, scripted UI input and screenshots; not heard or tried by hand |
 | 2026-10-03 | Editable BPM in the transport bar, saved through the host with validation and undo ([manual BPM](features/tempo-control.md)) | #45 | Automated host tests and scripted UI checks; not tried by hand or heard |

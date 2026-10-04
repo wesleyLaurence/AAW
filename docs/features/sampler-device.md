@@ -1,6 +1,6 @@
 # The Sampler device — proposed October 3, 2026
 
-Status: proposed, not built. Backlog item 2, after the [browser](browser.md),
+Status: proposed, not built. Backlog item 1, after the [browser](browser.md),
 which it is dragged out of.
 
 ## What
