@@ -1,6 +1,6 @@
 # Sound descriptors — proposed October 4, 2026
 
-Status: proposed, not built. Backlog: Later, under Library and perception. What
+Status: proposed, not built. Backlog: Next, Sound descriptors. What
 it is for is in [concept.md](../concept.md#library-and-perception): the
 library's samples measured for loudness and spectrum, not only pitch and tempo.
 

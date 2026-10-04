@@ -1,7 +1,6 @@
 # Editing a range of bars — proposed October 4, 2026
 
-Status: proposed, not built. Backlog: Later, under What the agent reads and
-writes.
+Status: proposed, not built. Backlog: Next, Editing a range of bars.
 
 ## What
 

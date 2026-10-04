@@ -442,3 +442,28 @@ wanted as either in a patch, and the schema and `daw describe effects` gained
 them; a clipper and a phaser stay Later lines. The panel draws the patch's
 chain as columns after the matrix and adds to it from the + menu; an effect
 dragged from the browser still lands on the track's inserts.
+
+**D75. The backlog is ordered by how much an item helps the person and the agent make good music; packaging waits.**
+
+Chosen by the person on October 4, 2026. Next had been the road to a
+distributable app: an app that stands alone, the `.aaw` file type, the
+workspace, the agent panel, other Macs and sign-in. The person builds the app
+from this checkout and opens it without trouble, and what limits the work is
+making music with it, by hand in the app and by the agent through `daw`. So Next
+is ordered by that, and the four packaging items wait under Later › Shipping.
+The workspace and the agent panel stay in Next, lower, since `SONG.md`, taste
+and a conversation in the window help the two work together.
+
+The order, from an agent's trial song made the same day and the person's
+editing in the app: first what the agent needs on every song and costs little
+(a short `describe` and errors that name the fix, the arrangement map, musical
+checks); then what the person does most by hand (the piano roll, selecting
+several things); then working at the scale of a song (ranges of bars, clips
+that loop); then playing and working together (a MIDI keyboard, listening
+markers, a `daw init` project in the app, turns with A/B); then the mix
+(a clipper and a utility, groups, a reference); then choosing and shaping
+material (sound descriptors, note transformations and chords, slicing, key
+detection, presets); then the workspace, the agent panel, stem separation and
+generated audio. Verify is ordered too, with the Synth, the piano roll and the
+Sampler first, since everything after them is built on how they sound.
+

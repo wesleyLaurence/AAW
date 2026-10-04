@@ -1,7 +1,6 @@
 # Learning the CLI quickly — proposed October 4, 2026
 
-Status: proposed, not built. Backlog: Later, under What the agent reads and
-writes. The concept asks that "every error says how to fix it"
+Status: proposed, not built. Backlog: Next, Learning the CLI quickly. The concept asks that "every error says how to fix it"
 ([concept.md](../concept.md#what-the-agent-works-with)).
 
 ## What
@@ -99,4 +98,4 @@ clip placed earlier than another.
 - Whether the field list should be YAML-like text inside the JSON result rather
   than JSON, for fewer tokens.
 - Whether the Python commands (`samples`, `listen`, `check`) should have the same
-  help treatment now, or after they move to Rust (Next, item 1).
+  help treatment now, or after they move to Rust (Later, under Shipping).

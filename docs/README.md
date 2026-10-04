@@ -45,21 +45,21 @@ Built:
 | [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
 | [the browser](features/browser.md) | Samples, instruments, effects and shared folders at the window's left |
 | [the Sampler device](features/sampler-device.md) | A sample loaded onto an empty Sampler and shaped in its panel |
-| [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth` and a panel of fields are built; patches as files, the panel's drawings and unison are next |
+| [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 
-Proposed:
+Proposed, in the order of Next in the backlog:
 
-| Feature | Backlog item |
+| Feature | Backlog |
 |---|---|
-| [the agent panel](features/agent-panel.md) | 5 |
-| [generated audio](features/generated-audio.md) | Later, under Sound |
-| [the arrangement map](features/arrangement-map.md) | Later, under What the agent reads and writes |
-| [musical checks](features/musical-checks.md) | Later, under What the agent reads and writes |
-| [editing a range of bars](features/bar-ranges.md) | Later, under What the agent reads and writes |
-| [learning the CLI quickly](features/cli-discovery.md) | Later, under What the agent reads and writes |
-| [clips that loop](features/looping-clips.md) | Later, under Sound |
-| [comparing with a reference](features/reference-comparison.md) | Later, under Library and perception |
-| [sound descriptors](features/sound-descriptors.md) | Later, under Library and perception |
+| [learning the CLI quickly](features/cli-discovery.md) | Next |
+| [the arrangement map](features/arrangement-map.md) | Next |
+| [musical checks](features/musical-checks.md) | Next |
+| [editing a range of bars](features/bar-ranges.md) | Next |
+| [clips that loop](features/looping-clips.md) | Next |
+| [comparing with a reference](features/reference-comparison.md) | Next |
+| [sound descriptors](features/sound-descriptors.md) | Next |
+| [the agent panel](features/agent-panel.md) | Next |
+| [generated audio](features/generated-audio.md) | Next |
 
 ## Archive
 

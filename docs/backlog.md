@@ -6,33 +6,118 @@ has a design. When an item is finished its line moves to
 [completed.md](completed.md). [development.md](development.md) says how these files are
 kept.
 
-- **Next** is in the order to build.
-- **Verify** is work that is merged and that nobody has heard or tried by hand.
+- **Next** is in the order to build: by how much each item helps the person
+  and the agent make good music with the tool (D75).
+- **Verify** is work that is merged and that nobody has heard or tried by hand,
+  with what is most worth hearing first.
 - **Later** is wanted and not ordered.
 - **Ideas** is the inbox: anything said out loud lands there in a line, and is
   later moved up, written into the concept or dropped.
 
 ## Next
 
-1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
-   the browser needs no Python. An app icon. An install step that puts the app in
-   Applications. The Python tools found through a setting, not a path compiled in.
-2. **The `.aaw` file type and the project ID.** The project file under the app's
-   own extension, opened by double-click, and an ID in it that the index matches a
-   moved project by.
-3. **The workspace and the two levels.** The workspace folder with its managed
-   instructions and `profile/`, `SONG.md` in a project, skills listed by name and
-   description, the fixed project layout created by the tool, and `daw check`
-   flagging files outside it.
-4. **The agent panel.** A conversation in the window, per project, over the
-   person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-5. **Other Macs.** The rest of the Python ported or carried in the bundle,
-   signing with a Developer ID and notarizing, the licenses of the Rust crates
-   gathered into the bundle, and first launch creating the workspace.
-6. **Sign-in buttons and other agents,** as the companies' terms allow.
+Between items, the sessions at the top of Verify come first: they find what is
+wrong with the sounds everything else is built on.
 
+1. **Learning the CLI quickly.** `daw describe` short by default, help that lists
+   what a command accepts, a first-song recipe, and errors that name the fix.
+   Small, and every agent session gains from it.
+   [features/cli-discovery.md](features/cli-discovery.md)
+2. **The arrangement map.** Tracks by bars in a few hundred tokens, with the same
+   music under the same letter and stacked clips marked: the song as a whole,
+   for an agent that cannot see the window.
+   [features/arrangement-map.md](features/arrangement-map.md)
+3. **Musical checks.** `daw check` warning of stacked and overlapping clips, a
+   note struck again while it sounds, a song that ends inside a part, two tracks
+   in one low register; and `clip duplicate` laying repeated copies in a row.
+   [features/musical-checks.md](features/musical-checks.md)
+4. **The piano roll for writing by hand.** A note heard as it is drawn, moved or
+   clicked; a velocity lane under the notes; zoom up and down as well as across;
+   the left end of a note dragged; a note dragged with Option copied, as in
+   Ableton; the grid, and the pattern's step menu, in note values (1/16, 1/8T)
+   rather than beats, whose 1/4 is a sixteenth note.
+5. **Selecting several things in the app.** Several clips selected by dragging
+   over them and moved, copied or deleted together; several notes or events
+   copied and pasted; several automation points selected.
+6. **Editing a range of bars.** A range copied, inserted, deleted or cleared
+   across every track, with its lanes and sections, and a section duplicated
+   with what is under it; through `daw` first, then a time selection across the
+   tracks in the app. [features/bar-ranges.md](features/bar-ranges.md)
+7. **Clips that loop.** Note clips and audio clips that repeat until they end,
+   by one rule (D63), so a phrase is changed once.
+   [features/looping-clips.md](features/looping-clips.md)
+8. **A MIDI keyboard.** Notes played through the selected track, held and let
+   go rather than a beat long, through a Synth and through a Sampler, whose
+   pitch needs audio prepared on the way; recording into note clips; quantize.
+   The person plays a riff and the agent builds around it.
+9. **Listening markers.** The person drops a marker at the playhead while the
+   song plays, with a word if they want, and the agent reads them with `daw`:
+   "this bar", without a timecode.
+10. **A project made with `daw init` in the app's index,** so a song the agent
+    starts in a terminal opens from Open Recent.
+11. **Turns and A/B.** An agent request's commands grouped, named for the
+    request, kept or reverted as one, and the song restored to before any turn;
+    one key flips between before and after a turn while the loop plays.
+12. **A clipper and a utility.** Agents making loud mixes stopped at the
+    limiter; saturation is built, a clipper that holds a ceiling as a limiter
+    does without its look-ahead is not. A utility for gain, width, mono below a
+    frequency and phase.
+13. **Groups.** Tracks summed into a group with its own effects and level, a
+    drum bus, as in any DAW.
+14. **Comparing with a reference.** A song the person names as a reference,
+    analyzed once and compared with a mix section by section, so the agent has
+    targets for the low end, the brightness and the loudness of each section.
+    [features/reference-comparison.md](features/reference-comparison.md)
+15. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+    low end and noise, with search sorted by them and samples like a chosen
+    one, so the agent chooses sounds by more than their names.
+    [features/sound-descriptors.md](features/sound-descriptors.md)
+16. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+    vary; chord symbols written as notes; a theory library of scales and chords.
+17. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+    that replays it.
+18. **Key and chord detection,** and swing detection, of samples and songs: a
+    loop matched to the song's key before it is placed.
+19. **Presets.** Effect chains, pad setups and whole tracks saved as text and
+    loaded into any song.
+20. **The workspace and the two levels.** The workspace folder with its managed
+    instructions and `profile/`, `SONG.md` in a project, skills listed by name
+    and description, the fixed project layout created by the tool, and
+    `daw check` flagging files outside it; what the agent learned, said at the
+    end of a session and written to `taste.md` with evidence.
+21. **The agent panel.** A conversation in the window, per project, over the
+    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
+22. **Stem separation** of a song.
+23. **Generated audio.** A sound, a loop or a whole song from a description, with
+    the person's own ElevenLabs key kept in the Keychain, saved in the project as
+    a sample; a `daw generate` command for the agent and a panel in the app.
+    [features/generated-audio.md](features/generated-audio.md)
 ## Verify
 
+Merged, and never heard or tried by a person, in the order worth doing: the
+sounds everything else is built from first. Each wants a short session at the
+Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
+
+- **The factory patches by ear, and the browser's Synth by hand:** each of
+  the twelve factory patches on a MIDI track of its kind of part, a chord or
+  a bass line, heard through `daw synth audition` and in the app, and whether
+  each sounds like its name; a patch saved with `daw patch save` and loaded
+  into another song by hand; in the browser, Synth and a patch dragged onto a
+  MIDI track's header, its device panel and under the tracks, + and a
+  double-click on a patch, and a search by tag. Tests render every factory
+  patch under full scale and hold a saved patch's audition in two songs byte
+  for byte; the browser's drops ran through the model and its list was seen in a
+  scripted picture; nothing was dragged by hand.
+- **The Synth by ear:** `daw synth add` on a MIDI track of a few chords and a
+  bass line, each factory-style recipe from `daw describe synth` built with
+  `daw synth set` and heard through `daw synth audition` and in the app: the
+  plain saw, a sub, a pluck with a filter envelope, a pad, a glide with one
+  voice, a kick from a pitch envelope; a knob dragged in the panel while the
+  song plays, a wave chosen, a lane on the cutoff, a locate into a held note
+  and a stop. Engine tests hold a render to playback, to every block size and
+  to itself, and measure a sine's pitch, an envelope, a sweep, a glide and
+  stealing; nobody listened, and the panel was built and tested but not seen
+  in a picture.
 - **Unison, wavetables and the patch's effects by ear and by hand:** Supersaw,
   Soft Pad, Pluck and Riser heard for their unison, with the detune and width
   dragged while a note sounds and the Spread macro moved; each built-in table
@@ -58,26 +143,20 @@ kept.
   header, drawings, keys, reach lines and the taller panel were seen in
   scripted pictures; nothing was dragged by hand, no key was pressed and
   nothing was heard.
-- **The factory patches by ear, and the browser's Synth by hand:** each of
-  the twelve factory patches on a MIDI track of its kind of part, a chord or
-  a bass line, heard through `daw synth audition` and in the app, and whether
-  each sounds like its name; a patch saved with `daw patch save` and loaded
-  into another song by hand; in the browser, Synth and a patch dragged onto a
-  MIDI track's header, its device panel and under the tracks, + and a
-  double-click on a patch, and a search by tag. Tests render every factory
-  patch under full scale and hold a saved patch's audition in two songs byte
-  for byte; the browser's drops ran through the model and its list was seen in a
-  scripted picture; nothing was dragged by hand.
-- **The Synth by ear:** `daw synth add` on a MIDI track of a few chords and a
-  bass line, each factory-style recipe from `daw describe synth` built with
-  `daw synth set` and heard through `daw synth audition` and in the app: the
-  plain saw, a sub, a pluck with a filter envelope, a pad, a glide with one
-  voice, a kick from a pitch envelope; a knob dragged in the panel while the
-  song plays, a wave chosen, a lane on the cutoff, a locate into a held note
-  and a stop. Engine tests hold a render to playback, to every block size and
-  to itself, and measure a sine's pitch, an envelope, a sweep, a glide and
-  stealing; nobody listened, and the panel was built and tested but not seen
-  in a picture.
+- **The piano roll by hand and ear:** a MIDI track and a clip made, a chord
+  and a melody drawn and moved on and off the grid, ends dragged, several notes
+  selected with Shift and a drag, velocity, a clip copied and its copy changed,
+  a left edge dragged past notes and back, Copy and Paste of clips and notes,
+  and a sample dropped on the track's header, swapped and removed while the
+  song plays. Scripted clicks and keys did each of these but the drag of a
+  sample, which `--drop` stood in for, and the results were read from the song;
+  nobody held the mouse or listened. Whether a note is easy to take hold of at
+  10 points a row, and whether its end is.
+- **Note clips by ear:** a phrase of chords and an off-beat melody played by
+  a pitched sampler, a drum clip played by a mapped kit, a sampler swapped
+  while the song plays, and the new MIDI track and its notes in the window. The
+  engine's tests hold a note clip to the same hits written as a pattern, and
+  the window was seen in a picture; nobody listened or looked by hand.
 - **The Sampler device by hand and ear:** drag Sampler from the browser onto a
   MIDI track, drop a sample on the device from the browser and from the
   Finder, draw a few notes and listen across the keys; drag the markers, type
@@ -86,17 +165,8 @@ kept.
   marker drags and a click on Measure were seen in pictures and read from the
   song; nothing was dragged by hand or heard, and the outline of a drop over
   the panel was not seen.
-
-- **Browser folders and device drags:** use Add Folder with multiple directories, reopen another project, search across selected folders, refresh and remove a source; drag effects onto track, return and master headers and between devices, and Sampler onto a MIDI track and below the rows. Automated tests and scripted snapshots passed; the native picker and actual mouse drags have not been tried by hand.
-
-- **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads and song-edit is discoverable. Links, ignore rules and the shared skill path were checked locally; fresh sessions have not been tried.
-
-- **Metronome by hand and ear:** toggle it on an empty song, change BPM while playing, loop, and listen for alignment and a comfortable click level. Engine timing tests and scripted UI input do not replace listening.
-- **Manual BPM by hand and ear:** type a tempo while playing, undo it, and hear the new tempo. Scripted input and engine tests cover validation and undo.
-
-Merged, and never heard or tried by a person. Each wants a short session at the
-Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
-
+- **A sample dropped on a MIDI track's header in the rebuilt app,** played on
+  notes above and below middle C, from the browser and from the Finder.
 - **How the app sounds.** Nobody listened during the scripted runs of the rebuild:
   the glide of a level or knob, the 10 ms dip when an effect is added or removed
   while playing, tails ringing through an edit, a locate and a stop.
@@ -109,19 +179,25 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   handles, a split and what follows it deleted, on a song of a few minutes.
   Whether the edges and the handles are easy to take hold of, how a faded and a
   trimmed end sound, and how long a trim of a long file takes.
+- **MIDI files by hand:** a `.mid` saved from a synth or another DAW dragged
+  from the Finder onto a MIDI track's lane and onto the timeline, its outline
+  on the way, and the chords heard through a sampler; File › Export MIDI
+  Clip… and its panel, and the file opened in Ableton or Logic. Scripted
+  `--drop` handed a file written by mido to a header, a MIDI lane and the
+  timeline past the song's end, and mido read an exported file; nobody
+  dragged a file, used the panel or listened.
+- **Metronome by hand and ear:** toggle it on an empty song, change BPM while playing, loop, and listen for alignment and a comfortable click level. Engine timing tests and scripted UI input do not replace listening.
+- **Manual BPM by hand and ear:** type a tempo while playing, undo it, and hear the new tempo. Scripted input and engine tests cover validation and undo.
+- **A stretched render, by ear.** The default stretcher was chosen on licensing,
+  speed and timing measurements.
 - **The beat map on a clip,** on a real song measured with `daw samples beats`:
   whether the ticks sit on the hits, and how they read in a song at another
   tempo.
-- **Install Command Line Tool:** its alerts and the request for an administrator's
-  password.
-- **A stretched render, by ear.** The default stretcher was chosen on licensing,
-  speed and timing measurements.
 - **The song-edit path on a real song:** a purchased file decoded and beat-mapped,
   an edit made with the `song-edit` skill, its joins heard, the export played. The
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
-- **Signing with a Developer ID and notarizing,** and the app on another Mac
-  (with item 7).
+- **Browser folders and device drags:** use Add Folder with multiple directories, reopen another project, search across selected folders, refresh and remove a source; drag effects onto track, return and master headers and between devices, and Sampler onto a MIDI track and below the rows. Automated tests and scripted snapshots passed; the native picker and actual mouse drags have not been tried by hand.
 - **Save As… in the app:** the panel on an Untitled project and on one that has
   a name, a name that is taken, and work carried on in the copy. Scripted input
   cannot answer a panel; `daw move` and `daw copy` were run in its place.
@@ -132,42 +208,19 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   left.
 - **Opening a project while its copy is open,** so that its path answers for it
   again.
-
-- **Note clips by ear:** a phrase of chords and an off-beat melody played by
-  a pitched sampler, a drum clip played by a mapped kit, a sampler swapped
-  while the song plays, and the new MIDI track and its notes in the window. The
-  engine's tests hold a note clip to the same hits written as a pattern, and
-  the window was seen in a picture; nobody listened or looked by hand.
-- **A sample dropped on a MIDI track's header in the rebuilt app,** played on
-  notes above and below middle C, from the browser and from the Finder.
-- **MIDI files by hand:** a `.mid` saved from a synth or another DAW dragged
-  from the Finder onto a MIDI track's lane and onto the timeline, its outline
-  on the way, and the chords heard through a sampler; File › Export MIDI
-  Clip… and its panel, and the file opened in Ableton or Logic. Scripted
-  `--drop` handed a file written by mido to a header, a MIDI lane and the
-  timeline past the song's end, and mido read an exported file; nobody
-  dragged a file, used the panel or listened.
-- **The piano roll by hand and ear:** a MIDI track and a clip made, a chord
-  and a melody drawn and moved on and off the grid, ends dragged, several notes
-  selected with Shift and a drag, velocity, a clip copied and its copy changed,
-  a left edge dragged past notes and back, Copy and Paste of clips and notes,
-  and a sample dropped on the track's header, swapped and removed while the
-  song plays. Scripted clicks and keys did each of these but the drag of a
-  sample, which `--drop` stood in for, and the results were read from the song;
-  nobody held the mouse or listened. Whether a note is easy to take hold of at
-  10 points a row, and whether its end is.
+- **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads and song-edit is discoverable. Links, ignore rules and the shared skill path were checked locally; fresh sessions have not been tried.
+- **Install Command Line Tool:** its alerts and the request for an administrator's
+  password.
+- **Signing with a Developer ID and notarizing,** and the app on another Mac
+  (Later, under Shipping).
 
 ## Later
 
 ### Working together
 
-- Turns: an agent request's commands grouped, named for the request, kept or
-  reverted as one; the song restored to before any turn.
-- A/B while looping: one key flips between before and after a turn.
 - Variations and versions: `daw version save`, and versions the person flips
   through on the loop.
 - Locks the host enforces: "don't touch the drums".
-- Listening markers dropped at the playhead during playback.
 - How much the agent may do: Ask, Edit, Propose, Background.
 - The undo history kept across closing a project.
 - Persistent IDs on legacy pattern clips and audio clips; note clips and
@@ -175,56 +228,29 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### What the agent reads and writes
 
-- An arrangement map: tracks by bars in a few hundred tokens, with the same
-  music under the same letter and stacked clips marked.
-  [features/arrangement-map.md](features/arrangement-map.md)
 - A text piano roll of one clip or a few bars.
 - Queries: which bars the bass plays in, every snare off the backbeat.
-- Musical checks in `daw check`: stacked and overlapping clips, a note struck
-  again while it sounds, a song that ends inside a part, two tracks in one low
-  register; and `clip duplicate` laying repeated copies in a row.
-  [features/musical-checks.md](features/musical-checks.md)
-- A range of beats copied, inserted, deleted or cleared across every track, with
-  its lanes and sections; a section duplicated with what is under it.
-  [features/bar-ranges.md](features/bar-ranges.md)
 - A client library over the host, where a block of calls is one turn.
-- Structure in the document: chord symbols, named motifs, a clip defined by its
-  relation to another.
+- Structure in the document: named motifs, a clip defined by its relation to
+  another. Chord symbols are Next.
 - Positions as `m:ss` wherever a command takes a beat.
 - An MCP adapter, only if it proves more reliable for agents than the CLI.
-- `daw describe` short by default, help that lists what a command accepts, a
-  first-song recipe, and errors that name the fix.
-  [features/cli-discovery.md](features/cli-discovery.md)
 
 ### Sound
 
-- A clipper. Agents making loud mixes stopped at the limiter; saturation is
-  built, a clipper that holds a ceiling as a limiter does without its look-ahead
-  is not.
 - Beyond the Synth: multi-frame wavetables with a sweepable position and
-  Serum's or other WAV tables read; a second filter with routing; a MIDI
-  keyboard played through `note.preview`; a note held and let go rather than
-  a beat long, and `note.preview` through a Sampler, whose pitch needs audio
-  prepared on the way; an LFO's rate and phase as matrix targets; a
+  Serum's or other WAV tables read; a second filter with routing; an LFO's
+  rate and phase as matrix targets; a
   bandlimited triangle; a locate that carries a chased voice's oscillator
   phases and filter state as a render has them.
-- Generated audio: a sound, a loop or a whole song from a description, with the
-  person's own ElevenLabs key kept in the Keychain, saved in the project as a
-  sample; a `daw generate` command for the agent and a panel in the app.
-  [features/generated-audio.md](features/generated-audio.md)
 - Glide and a sustain loop on the sampler.
-- More effects: utility, phaser, gate, transient shaper, multiband
+- More effects: phaser, gate, transient shaper, multiband
   compressor, pitch shift. An effect dragged from the browser into a Synth's
   patch, as the + menu adds one.
-- Groups, and sends from a return to a return.
+- Sends from a return to a return.
 - Tempo and time signature changes. 4/4 and one tempo are assumed throughout,
   the beat map included.
 - Warp markers for a song whose tempo drifts.
-- Slicing a break into pads with the pattern that replays it.
-- Stem separation of a song.
-- Note transformations (quantize, humanize, arpeggiate, vary) and a theory
-  library.
-- MIDI keyboard input and recording into note clips.
 - MIDI controller and expression editing, including pedal, pitch bend and MPE.
 - MIDI files beyond one part (D65): a file of several tracks or channels made
   into several tracks, the file's tempo taken when asked, the pedal, pitch
@@ -237,9 +263,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   against generated fixtures (D62). What a track with two pitched pads maps to
   is its open question.
 - Audio clips that reverse; perhaps one list for pattern clips and audio clips.
-  A cut that moves the other tracks with it is a range edit, above.
-- Note clips and audio clips that loop, by one rule (D63).
-  [features/looping-clips.md](features/looping-clips.md)
+  A cut that moves the other tracks with it is a range edit, in Next.
 - A join check that places a pad transposed by an event at its transposed length.
 - A long song streamed from disk; a decoded song is held whole in memory.
 - A trimmed audio clip prepared from audio already at the song's rate. A trim
@@ -258,8 +282,6 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Offline devices: a script as an effect, re-run when its input changes.
 - Real-time devices in a sandboxed language, after a spike (FAUST is the
   candidate).
-- Presets: effect chains, pad setups and whole tracks saved as text and loaded
-  into any song.
 - `daw promote`: a render, slice or pattern into the library with its recipe.
 
 ### Library and perception
@@ -268,13 +290,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Search by description with an audio-text model, only if a labeled test shows
   it beats names and measurements.
 - What the person declares about their right to use a sound, carried with it.
-- Key and chord detection, swing detection.
 - Masking between two tracks, with the bars where it is worst.
-- A reference library, and a mix compared with a reference section by section.
-  [features/reference-comparison.md](features/reference-comparison.md)
-- Each sample measured for brightness, attack, decay, low end and noise, with
-  search sorted by them and samples like a chosen one.
-  [features/sound-descriptors.md](features/sound-descriptors.md)
 - An audio-capable model as an optional critic, with its own consent.
 - A certified true-peak measurement; the engine's 4× oversampled peak is an
   estimate.
@@ -305,23 +321,14 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Save As… over a folder that is already there, after asking.
 - The Python commands (`check`, `timeline`, `export`, `samples import`)
   following a project that was saved under another name, as the Rust ones do.
-- A project made with `daw init` in the app's index.
 - A track's color saved in the song.
 - A pad's own settings (level, tuning, held or not) in the device panel.
 - A sample added as a pad shows where it went. Nothing on the timeline changes,
   and the person looked for the file on the track.
-- The pattern's step menu and the piano roll's grid in note values: 1/16 and
-  1/8T, as other DAWs write them. They list beats, so their 1/4 is a sixteenth
-  note.
-- In the piano roll: a note heard as it is drawn, moved or clicked; a velocity
-  lane under the notes; zoom up and down as well as across; the left end of a
-  note dragged; a note dragged with Option copied, as in Ableton.
 - A drum kit made in the app: a sample dropped on a key of the piano roll as a
   pad that the note plays. A sample on a MIDI track's header replaces the
   instrument with one pad on every note, and `daw instrument map` makes kits.
 - A loop from the browser fitted to the song's tempo when it is added.
-- Several events selected, copied and pasted; several clips selected by dragging
-  over them; several automation points selected.
 - A sample auditioned through the song's engine, at the song's tempo and level.
 - Names that are not IDs: spaces and any character in a track's name.
 - An effect's ID set in its panel.
@@ -333,14 +340,25 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 - A definition of done as a skill, and a bounded, resumable loop that keeps the
   best so far.
-- What the agent learned, said at the end of a session and written to
-  `taste.md` with evidence.
 - Craft skills shipped with the app: mix to a reference, finish a song, prepare
   stems.
 - Agent roles: a drummer and a mix engineer at once, each an origin.
 
 ### Shipping
 
+Waiting since October 4, 2026, while the app is built and opened from this
+checkout (D75):
+
+- **An app that stands alone on this Mac.** Sample search and import in Rust, so
+  the browser needs no Python. An app icon. An install step that puts the app in
+  Applications. The Python tools found through a setting, not a path compiled in.
+- **The `.aaw` file type and the project ID.** The project file under the app's
+  own extension, opened by double-click, and an ID in it that the index matches a
+  moved project by.
+- **Other Macs.** The rest of the Python ported or carried in the bundle,
+  signing with a Developer ID and notarizing, the licenses of the Rust crates
+  gathered into the bundle, and first launch creating the workspace.
+- **Sign-in buttons and other agents,** as the companies' terms allow.
 - A record of every dependency and model: version, license, whether it may be
   redistributed.
 - A statement of what leaves the machine, tested with the network off.
