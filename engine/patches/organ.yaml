@@ -1,18 +1,18 @@
 name: Organ
-description: Sines at the drawbars' intervals, an octave below to a fifth above the octave, with no filter, a fast envelope and a slight tremolo. Velocity barely matters.
+description: The organ wavetable, the drawbars in one cycle, over a sine an octave below, with no filter, a fast envelope, a slight tremolo and a slow chorus. Velocity barely matters.
 tags: [keys, organ, chords]
 synth:
   voices: 8
   velocity_percent: 20
   oscillators:
-    sub: {wave: sine, level_db: -12, octave: -1}
-    a: {wave: sine, level_db: -10}
-    b: {wave: sine, level_db: -14, octave: 1}
-    c: {wave: sine, level_db: -20, octave: 1, semitones: 7}
+    a: {wave: wavetable, table: organ, level_db: -9}
+    sub: {wave: sine, level_db: -14, octave: -1}
   filter: {enabled: false}
   envelopes:
     amp: {attack_ms: 3, decay_ms: 0, sustain_percent: 100, release_ms: 40}
   lfos:
     lfo1: {shape: sine, rate_hz: 6}
   modulation:
-  - {source: lfo1, target: oscillators.b.level_db, amount: 2}
+  - {source: lfo1, target: oscillators.a.level_db, amount: 1.5}
+  effects:
+  - {type: chorus, rate_hz: 0.7, depth_ms: 2, mix_percent: 40}

@@ -731,7 +731,9 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
-                "reverb": "#/$defs/Reverb"
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation"
               },
               "propertyName": "type"
             },
@@ -753,6 +755,12 @@
               },
               {
                 "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
               }
             ]
           },
@@ -838,7 +846,9 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
-                "reverb": "#/$defs/Reverb"
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation"
               },
               "propertyName": "type"
             },
@@ -860,6 +870,12 @@
               },
               {
                 "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
               }
             ]
           },
@@ -1105,9 +1121,16 @@
             "saw",
             "square",
             "pulse",
-            "noise"
+            "noise",
+            "wavetable"
           ],
           "title": "Wave",
+          "type": "string"
+        },
+        "table": {
+          "default": "organ",
+          "description": "The wavetable a wavetable wave reads: organ, bright, hollow, vowel, fold or steps, or the ID of a sample in the project whose file is one cycle.",
+          "title": "Table",
           "type": "string"
         },
         "level_db": {
@@ -1167,6 +1190,30 @@
           "default": null,
           "description": "Where in its cycle the wave starts, in percent; null starts each note at a random place from the seed.",
           "title": "Phase"
+        },
+        "unison": {
+          "default": 1,
+          "description": "How many copies of the wave play at once, spread in detune and across the stereo field.",
+          "maximum": 16,
+          "minimum": 1,
+          "title": "Unison",
+          "type": "integer"
+        },
+        "unison_detune_cents": {
+          "default": 15,
+          "description": "How far the outermost copies are detuned either side of the pitch.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Unison Detune Cents",
+          "type": "number"
+        },
+        "unison_width_percent": {
+          "default": 100,
+          "description": "How far the copies are spread across the stereo field from the pan.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Unison Width Percent",
+          "type": "number"
         },
         "filter": {
           "default": true,
@@ -1442,7 +1489,9 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
-                "reverb": "#/$defs/Reverb"
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation"
               },
               "propertyName": "type"
             },
@@ -1464,6 +1513,12 @@
               },
               {
                 "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
               }
             ]
           },
@@ -1885,6 +1940,53 @@
           "description": "Up to eight knobs, 0 to 100, that do nothing but through the matrix.",
           "title": "Macros",
           "type": "object"
+        },
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array",
+          "description": "The patch's own effects, run on the sum of the voices before the track's inserts; a compressor here has no sidechain."
         }
       },
       "required": [
@@ -2055,7 +2157,9 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
-                "reverb": "#/$defs/Reverb"
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation"
               },
               "propertyName": "type"
             },
@@ -2077,6 +2181,12 @@
               },
               {
                 "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
               }
             ]
           },
@@ -2106,6 +2216,131 @@
         "pads"
       ],
       "title": "Track",
+      "type": "object"
+    },
+    "Chorus": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "chorus",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "rate_hz": {
+          "default": 0.8,
+          "maximum": 10,
+          "minimum": 0.05,
+          "title": "Rate Hz",
+          "type": "number"
+        },
+        "depth_ms": {
+          "default": 3,
+          "maximum": 20,
+          "minimum": 0,
+          "title": "Depth Ms",
+          "type": "number"
+        },
+        "delay_ms": {
+          "default": 12,
+          "maximum": 40,
+          "minimum": 1,
+          "title": "Delay Ms",
+          "type": "number"
+        },
+        "mix_percent": {
+          "default": 50,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Mix Percent",
+          "type": "number"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Chorus",
+      "type": "object"
+    },
+    "Saturation": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "saturation",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "mode": {
+          "default": "soft",
+          "enum": [
+            "soft",
+            "hard",
+            "tube"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "drive_db": {
+          "default": 12,
+          "maximum": 36,
+          "minimum": 0,
+          "title": "Drive Db",
+          "type": "number"
+        },
+        "output_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -24,
+          "title": "Output Db",
+          "type": "number"
+        },
+        "mix_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Mix Percent",
+          "type": "number"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Saturation",
       "type": "object"
     }
   },

@@ -157,6 +157,8 @@ pub enum ModTarget {
     OscLevel(usize),
     OscPan(usize),
     OscPulseWidth(usize),
+    /// One oscillator's unison detune, in cents.
+    OscUnisonDetune(usize),
     /// The filter's cutoff in octaves, its resonance in points and its drive
     /// in dB.
     Cutoff,
@@ -177,6 +179,7 @@ impl ModTarget {
             ModTarget::Pitch | ModTarget::OscPitch(_) => "semitones",
             ModTarget::OscLevel(_) | ModTarget::Drive => "dB",
             ModTarget::OscPan(_) => "pan",
+            ModTarget::OscUnisonDetune(_) => "cents",
             ModTarget::OscPulseWidth(_) | ModTarget::Resonance | ModTarget::EnvSustain(_) => "points",
             ModTarget::Cutoff | ModTarget::EnvAttack(_) | ModTarget::EnvDecay(_) | ModTarget::EnvRelease(_) => "octaves",
         }
@@ -208,6 +211,7 @@ pub const MOD_TARGETS: &[(&str, &str)] = &[
     ("oscillators.ID.level_db", "dB"),
     ("oscillators.ID.pan", "pan"),
     ("oscillators.ID.pulse_width", "points"),
+    ("oscillators.ID.unison_detune_cents", "cents"),
     ("filter.cutoff_hz", "octaves"),
     ("filter.resonance_percent", "points"),
     ("filter.drive_db", "dB"),
@@ -270,6 +274,7 @@ pub fn mod_target(synth: &crate::schema::Synth, target: &str) -> Result<ModTarge
                 "level_db" => Ok(ModTarget::OscLevel(i)),
                 "pan" => Ok(ModTarget::OscPan(i)),
                 "pulse_width" => Ok(ModTarget::OscPulseWidth(i)),
+                "unison_detune_cents" => Ok(ModTarget::OscUnisonDetune(i)),
                 _ => Err(unknown()),
             }
         }
@@ -312,11 +317,60 @@ pub fn synth_references(synth: &crate::schema::Synth) -> Result<(), String> {
     Ok(())
 }
 
+/// An effect of a patch by `effects.REF.FIELD` (or `effects.REF.bands.N.FIELD`
+/// for an equalizer), REF being its ID or its index: the effect's index,
+/// the field's name within the effect (`bands.N.FIELD` for a band), its
+/// domain and its range.
+pub fn synth_effect_param(synth: &crate::schema::Synth, path: &str) -> Result<(usize, String, Domain, Range), String> {
+    let parts: Vec<&str> = path.split('.').collect();
+    let (r, rest) = match parts.as_slice() {
+        ["effects", r, rest @ ..] if !rest.is_empty() => (*r, rest),
+        _ => return Err(format!("{path}: expected effects.REF.FIELD")),
+    };
+    let effects = &synth.effects;
+    let index = match is_ascii_digits(r).then(|| r.parse::<usize>().ok()).flatten().filter(|i| *i < effects.len()) {
+        Some(i) => i,
+        None => effects
+            .iter()
+            .position(|e| e.id() == Some(r))
+            .ok_or_else(|| format!("{path}: the patch has no effect with id or index {r}"))?,
+    };
+    let spec = &effects[index];
+    let allowed = effect_params(spec.kind());
+    let (name, field) = if let Effect::Eq(eq) = spec {
+        let [bands, b, field] = rest else {
+            return Err(format!("{path}: address eq bands as effects.REF.bands.N.FIELD"));
+        };
+        if *bands != "bands" || !is_ascii_digits(b) {
+            return Err(format!("{path}: address eq bands as effects.REF.bands.N.FIELD"));
+        }
+        let b: usize = b.parse().unwrap_or(usize::MAX);
+        if b >= eq.bands.len() {
+            return Err(format!("{path}: eq has {} bands", eq.bands.len()));
+        }
+        (format!("bands.{b}.{field}"), *field)
+    } else {
+        let [field] = rest else {
+            return Err(format!("{path}: expected effects.REF.FIELD"));
+        };
+        (field.to_string(), *field)
+    };
+    let Some((_, domain)) = allowed.iter().find(|(n, _)| *n == field) else {
+        let names: Vec<&str> = allowed.iter().map(|(n, _)| *n).collect();
+        let list = if names.is_empty() { "none".to_string() } else { names.join(", ") };
+        return Err(format!("{path}: {} {field} cannot be automated; automatable: {list}", spec.kind()));
+    };
+    Ok((index, name, *domain, effect_range(spec.kind(), field)))
+}
+
 /// An automatable field of a synth by its path in the patch, such as
-/// `filter.cutoff_hz`, `oscillators.a.level_db` or `macros.tone`: its
-/// interpolation domain and range.
+/// `filter.cutoff_hz`, `oscillators.a.level_db`, `macros.tone` or
+/// `effects.verb.mix_percent`: its interpolation domain and range.
 pub fn synth_param(synth: &crate::schema::Synth, path: &str) -> Result<(Domain, Range), String> {
     use crate::describe::{self, Kind};
+    if path.starts_with("effects.") {
+        return synth_effect_param(synth, path).map(|(_, _, domain, range)| (domain, range));
+    }
     let parts: Vec<&str> = path.split('.').collect();
     let field = |table: &'static [describe::Field], name: &str, what: &str| -> Result<(Domain, Range), String> {
         let f = table
@@ -377,6 +431,17 @@ pub fn synth_params(synth: &crate::schema::Synth) -> Vec<String> {
         out.extend(names(describe::LFO).map(|n| format!("lfos.{id}.{n}")));
     }
     out.extend(synth.macros.keys().map(|n| format!("macros.{n}")));
+    for (i, e) in synth.effects.iter().enumerate() {
+        let reference = e.id().filter(|id| !id.is_empty()).map_or_else(|| i.to_string(), str::to_string);
+        match e {
+            Effect::Eq(eq) => {
+                for j in 0..eq.bands.len() {
+                    out.extend(effect_params("eq").iter().map(|(n, _)| format!("effects.{reference}.bands.{j}.{n}")));
+                }
+            }
+            _ => out.extend(effect_params(e.kind()).iter().map(|(n, _)| format!("effects.{reference}.{n}"))),
+        }
+    }
     out
 }
 
@@ -387,6 +452,18 @@ pub fn synth_value(synth: &crate::schema::Synth, path: &str) -> Option<f64> {
         Some(crate::value::Value::Int(n)) => n.to_f64(),
         _ => None,
     };
+    if path.starts_with("effects.") {
+        let (index, name, _, _) = synth_effect_param(synth, path).ok()?;
+        let dump = synth.effects[index].dump(false);
+        return match name.split('.').collect::<Vec<_>>().as_slice() {
+            ["bands", b, field] => match dump.get("bands") {
+                Some(crate::value::Value::List(bands)) => number(bands.get(b.parse::<usize>().ok()?)?.get(field)),
+                _ => None,
+            },
+            [field] => number(dump.get(field)),
+            _ => None,
+        };
+    }
     let parts: Vec<&str> = path.split('.').collect();
     match parts.as_slice() {
         [name] => number(synth.dump(false).get(name)),
@@ -439,11 +516,14 @@ pub fn effect_params(kind: &str) -> &'static [(&'static str, Domain)] {
         "compressor" => &[("threshold_db", Domain::Linear), ("makeup_db", Domain::Linear)],
         "delay" => &[("feedback_percent", Domain::Linear), ("mix_percent", Domain::Linear)],
         "reverb" => &[("mix_percent", Domain::Linear)],
+        "chorus" => &[("rate_hz", Domain::Log), ("depth_ms", Domain::Linear), ("delay_ms", Domain::Linear), ("mix_percent", Domain::Linear)],
+        "saturation" => &[("drive_db", Domain::Linear), ("output_db", Domain::Linear), ("mix_percent", Domain::Linear)],
         _ => &[],
     }
 }
 
-fn effect_range(kind: &str, field: &str) -> Range {
+/// The range of an automatable effect field.
+pub fn effect_range(kind: &str, field: &str) -> Range {
     match (kind, field) {
         ("filter", "cutoff_hz") => Range::closed(10.0, 20000.0),
         ("eq", "freq_hz") => Range::closed(20.0, 20000.0),
@@ -452,6 +532,11 @@ fn effect_range(kind: &str, field: &str) -> Range {
         ("compressor", "threshold_db") => Range::closed(-60.0, 0.0),
         ("compressor", "makeup_db") => Range::closed(-24.0, 24.0),
         ("delay", "feedback_percent") => Range::closed(0.0, 95.0),
+        ("chorus", "rate_hz") => Range::closed(0.05, 10.0),
+        ("chorus", "depth_ms") => Range::closed(0.0, 20.0),
+        ("chorus", "delay_ms") => Range::closed(1.0, 40.0),
+        ("saturation", "drive_db") => Range::closed(0.0, 36.0),
+        ("saturation", "output_db") => Range::closed(-24.0, 24.0),
         (_, "mix_percent") => Range::closed(0.0, 100.0),
         _ => unreachable!("not automatable: {kind}.{field}"),
     }
@@ -494,6 +579,17 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
                 .and_then(|m| m.synth())
                 .ok_or_else(|| format!("{param}: {} has no synth to automate", track.id))?;
             let path = param.strip_prefix("instrument.").filter(|p| !p.is_empty()).ok_or_else(|| format!("{param}: expected instrument.FIELD"))?;
+            // A patch's effect is addressed by its index in the key, as an
+            // owner's effects are.
+            if path.starts_with("effects.") {
+                let (index, name, domain, range) = synth_effect_param(synth, path)?;
+                return Ok(Target {
+                    kind: TargetKind::Instrument,
+                    field: format!("effects.{index}.{name}"),
+                    domain,
+                    range,
+                });
+            }
             let (domain, range) = synth_param(synth, path)?;
             return Ok(Target {
                 kind: TargetKind::Instrument,
@@ -705,14 +801,14 @@ pub fn references(p: &Project) -> Result<(), String> {
     let tempo = float_fraction(p.session.tempo);
     let ms = parse_fraction("1/1000").ok().expect("fraction");
     let ten = BigRational::from_integer(10.into());
-    for owner in owners(p) {
-        for e in owner.effects() {
+    let synth_effects = p.tracks.iter().filter_map(|t| t.midi.as_ref().and_then(|m| m.synth()).map(|s| (t.id.as_str(), &s.effects[..])));
+    for (name, effects) in owners(p).iter().map(|o| (o.name(), o.effects())).chain(synth_effects) {
+        for e in effects {
             if let Effect::Delay(d) = e {
                 let seconds = d.time_exact() * BigRational::from_integer(60.into()) / &tempo;
                 if !(ms <= seconds && seconds <= ten) {
                     return Err(format!(
-                        "{}: delay time must be 1 ms to 10 s at the session tempo, not {} s",
-                        owner.name(),
+                        "{name}: delay time must be 1 ms to 10 s at the session tempo, not {} s",
                         format_g(seconds.to_f64().unwrap_or(f64::NAN), 4)
                     ));
                 }
@@ -806,6 +902,19 @@ pub fn references(p: &Project) -> Result<(), String> {
         if let Some(midi) = &t.midi {
             if let Some(sampler) = midi.sampler() {
                 sampler_references(p, &t.id, sampler)?;
+            }
+            if let Some(synth) = midi.synth() {
+                for (id, o) in &synth.oscillators {
+                    if let Some(sample) = o.sample_table() {
+                        if !p.samples.contains_key(sample) {
+                            return Err(format!(
+                                "{}: oscillator {id} names wavetable {sample}, which is neither a built-in table ({}) nor a sample of the project",
+                                t.id,
+                                crate::schema::WAVETABLES.join(", ")
+                            ));
+                        }
+                    }
+                }
             }
             for clip in &midi.clips {
                 if clip.at_exact() + clip.length_exact() > length {

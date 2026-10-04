@@ -47,7 +47,8 @@ fn a_factory_patch_is_attached_to_a_new_track_or_loaded_into_one() {
     assert_eq!((&r["patch"], &r["factory"]), (&json!("Soft Pad"), &json!(true)));
     let got = synth(&s, "keys");
     assert_eq!(got["patch"], json!("Soft Pad"));
-    assert_eq!(got["oscillators"]["b"]["detune_cents"], json!(8.0));
+    assert_eq!(got["oscillators"]["a"]["unison_detune_cents"], json!(8.0));
+    assert_eq!(got["effects"][0]["type"], json!("chorus"));
     assert_eq!(get(&s, "tracks.keys.instrument.synth.envelopes.amp.attack_ms"), json!(400.0));
     // The name is the first field, as the song writes it.
     let keys: Vec<&str> = got.as_object().unwrap().keys().map(String::as_str).collect();

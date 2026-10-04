@@ -313,8 +313,10 @@ impl Strip {
 
 struct TrackState {
     voices: Voices,
-    /// A MIDI track's Synth, with its voices.
+    /// A MIDI track's Synth, with its voices, and its patch's own effects,
+    /// which the voices go through before the inserts.
     synth: Option<Synth>,
+    patch_chain: Chain,
     /// The track of the renderer being taken over from whose voices ring out
     /// here, when this track's voices differ from them.
     inherits: Option<usize>,
@@ -459,6 +461,10 @@ impl Renderer {
             .map(|t| TrackState {
                 voices: Voices::new(&t.voices, max_block),
                 synth: t.synth.as_ref().map(|s| Synth::new(s.patch.clone(), s.notes.clone(), max_block, fade)),
+                patch_chain: match &t.synth {
+                    Some(s) => Chain::new(&s.chain, max_block, fade, &mut reverbs),
+                    None => Chain { slots: Vec::new() },
+                },
                 inherits: None,
                 chain: Chain::new(&t.chain, max_block, fade, &mut reverbs),
                 out: vec![SILENCE; max_block],
@@ -631,11 +637,14 @@ impl Renderer {
             if let (Some(track), Some(old)) = (state.inherits, old.as_deref_mut()) {
                 old.ring(track, out);
             }
+            if !state.patch_chain.slots.is_empty() {
+                state.patch_chain.process(out, clock(start), sources, &mut self.key);
+            }
             if !state.chain.slots.is_empty() {
                 state.chain.process(out, clock(start), sources, &mut self.key);
-                if rolling {
-                    gate(out, start - t.chain.latency as i64, step, total);
-                }
+            }
+            if rolling && !(state.chain.slots.is_empty() && state.patch_chain.slots.is_empty()) {
+                gate(out, start - t.chain.latency as i64, step, total);
             }
             let x = &mut self.work[..n];
             x.copy_from_slice(out);
@@ -811,6 +820,7 @@ impl Renderer {
                 state.inherits = Some(i);
             }
             inherits |= state.inherits.is_some();
+            state.patch_chain.take_over(&mut was.patch_chain);
             state.chain.take_over(&mut was.chain);
             state.align.take_over(&mut was.align);
             state.strip.take_over(&was.strip, t.gain != o.gain || t.pan != o.pan, t.silent != o.silent);
@@ -854,6 +864,7 @@ impl Renderer {
         let program = self.program.clone();
         for (state, t) in self.tracks.iter_mut().zip(&program.tracks) {
             if let Some(i) = old.program.tracks.iter().position(|o| o.id == t.id) {
+                state.patch_chain.take_over(&mut old.tracks[i].patch_chain);
                 state.chain.take_over(&mut old.tracks[i].chain);
                 // A note being previewed carries on under the new patch.
                 if let (Some(s), Some(w)) = (&mut state.synth, &mut old.tracks[i].synth) {
@@ -869,9 +880,10 @@ impl Renderer {
         self.master_chain.take_over(&mut old.master_chain);
     }
 
-    /// What each channel's effects did: tracks in render order, returns, then
-    /// the master.
-    pub fn report(&self) -> (Vec<Vec<DeviceReport>>, Vec<Vec<DeviceReport>>, Vec<DeviceReport>) {
+    /// What each channel's effects did: tracks in render order, the patch
+    /// effects of each track's Synth, returns, then the master.
+    #[allow(clippy::type_complexity)]
+    pub fn report(&self) -> (Vec<Vec<DeviceReport>>, Vec<Vec<DeviceReport>>, Vec<Vec<DeviceReport>>, Vec<DeviceReport>) {
         let chain = |program: &ChainProgram, chain: &Chain| {
             program
                 .effects
@@ -896,6 +908,12 @@ impl Renderer {
         };
         (
             self.program.tracks.iter().zip(&self.tracks).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
+            self.program
+                .tracks
+                .iter()
+                .zip(&self.tracks)
+                .map(|(p, s)| p.synth.as_ref().map_or_else(Vec::new, |synth| chain(&synth.chain, &s.patch_chain)))
+                .collect(),
             self.program.returns.iter().zip(&self.returns).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
             chain(&self.program.master.chain, &self.master_chain),
         )

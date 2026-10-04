@@ -19,6 +19,7 @@ bindgen = ["uniffi/cli"]
 
 [dependencies]
 aaw-model.workspace = true
+aaw-dsp.workspace = true
 aaw-engine.workspace = true
 aaw-host.workspace = true
 num-rational = { version = "0.4", features = ["num-bigint"] }

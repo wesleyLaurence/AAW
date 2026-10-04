@@ -16,11 +16,12 @@
 //! values glide to their new ones.
 
 use crate::envelope::Envelope;
+use crate::wavetable::Wavetable;
 use crate::Frame;
 use aaw_model::rules::{mod_source, mod_target, ModSource, ModTarget};
 use aaw_model::schedule::NoteOn;
 use aaw_model::{LfoShape, Synth as Spec, SynthFilterMode, Wave};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::{PI, TAU};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -30,6 +31,8 @@ pub const CONTROL: usize = 16;
 /// The most voices a patch may ask for; every synth allocates this many.
 pub const MAX_VOICES: usize = 16;
 const MAX_OSC: usize = 4;
+/// The most copies an oscillator's unison stacks.
+const MAX_UNISON: usize = aaw_model::MAX_UNISON as usize;
 const MAX_ENV: usize = 4;
 const MAX_LFO: usize = 4;
 const MAX_MACRO: usize = 8;
@@ -39,7 +42,7 @@ const MAX_MACRO: usize = 8;
 const GLIDE: usize = 0;
 const VELOCITY: usize = 1;
 const OSC: usize = 2;
-const OSC_FIELDS: usize = 5; // level_db, pan, semitones, detune_cents, pulse_width
+const OSC_FIELDS: usize = 7; // level_db, pan, semitones, detune_cents, pulse_width, unison_detune_cents, unison_width_percent
 const CUTOFF: usize = OSC + MAX_OSC * OSC_FIELDS;
 const RESONANCE: usize = CUTOFF + 1;
 const DRIVE: usize = CUTOFF + 2;
@@ -112,6 +115,10 @@ struct OscSpec {
     /// Where each note's cycle starts, 0 to 1, or None for a random place.
     phase: Option<f64>,
     filtered: bool,
+    /// How many copies play at once.
+    unison: usize,
+    /// The table a wavetable wave reads.
+    table: Option<Arc<Wavetable>>,
 }
 
 #[derive(Clone, Debug)]
@@ -155,24 +162,37 @@ pub struct Patch {
 
 impl Patch {
     /// `lanes` are the track's lanes on `instrument.FIELD`, by FIELD. `seed`
-    /// is the track's part of every random value.
-    pub fn new(spec: &Spec, lanes: &BTreeMap<String, Arc<Envelope>>, rate: f64, tempo: f64, seed: u64) -> Patch {
+    /// is the track's part of every random value. `tables` holds the
+    /// wavetable of each oscillator whose wave is one, by the oscillator's
+    /// ID; a wavetable oscillator with none is silent.
+    pub fn new(
+        spec: &Spec,
+        lanes: &BTreeMap<String, Arc<Envelope>>,
+        rate: f64,
+        tempo: f64,
+        seed: u64,
+        tables: &HashMap<String, Arc<Wavetable>>,
+    ) -> Patch {
         let mut v = Values([0.0; LEN]);
         v.0[GLIDE] = spec.glide_ms;
         v.0[VELOCITY] = spec.velocity_percent;
         let mut oscillators = Vec::with_capacity(MAX_OSC);
-        for (i, o) in spec.oscillators.values().enumerate().take(MAX_OSC) {
+        for (i, (id, o)) in spec.oscillators.iter().enumerate().take(MAX_OSC) {
             let at = OSC + i * OSC_FIELDS;
             v.0[at] = o.level_db;
             v.0[at + 1] = o.pan;
             v.0[at + 2] = o.semitones;
             v.0[at + 3] = o.detune_cents;
             v.0[at + 4] = o.pulse_width;
+            v.0[at + 5] = o.unison_detune_cents;
+            v.0[at + 6] = o.unison_width_percent;
             oscillators.push(OscSpec {
                 wave: o.wave,
                 octave: o.octave as f64,
                 phase: o.phase.map(|p| p / 100.0),
                 filtered: o.filter,
+                unison: (o.unison.max(1) as usize).min(MAX_UNISON),
+                table: (o.wave == Wave::Wavetable).then(|| tables.get(id).cloned()).flatten(),
             });
         }
         v.0[CUTOFF] = spec.filter.cutoff_hz;
@@ -221,7 +241,7 @@ impl Patch {
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for o in &oscillators {
-            (o.wave, o.filtered, o.phase.is_none()).hash(&mut h);
+            (o.wave, o.filtered, o.phase.is_none(), o.unison, o.table.as_ref().map(|t| t.key.as_str())).hash(&mut h);
         }
         (spec.filter.enabled, spec.filter.mode, spec.filter.slope_db_per_octave).hash(&mut h);
         spec.envelopes.len().hash(&mut h);
@@ -285,6 +305,8 @@ fn slot(spec: &Spec, path: &str) -> Option<usize> {
                     "semitones" => 2,
                     "detune_cents" => 3,
                     "pulse_width" => 4,
+                    "unison_detune_cents" => 5,
+                    "unison_width_percent" => 6,
                     _ => return None,
                 }
         }
@@ -419,6 +441,18 @@ fn wave_sample(wave: Wave, t: f64, dt: f64, width: f64, noise: &mut u64) -> f64 
             *noise = x;
             unit(x) * 2.0 - 1.0
         }
+        // A wavetable is read from its table by the voice, which knows the level.
+        Wave::Wavetable => 0.0,
+    }
+}
+
+/// Where copy `k` of `n` sits across a spread: -1 to 1, 0 alone.
+#[inline]
+fn spread(k: usize, n: usize) -> f64 {
+    if n < 2 {
+        0.0
+    } else {
+        2.0 * k as f64 / (n - 1) as f64 - 1.0
     }
 }
 
@@ -520,11 +554,14 @@ struct Voice {
     random: f64,
     seed: u64,
     env: [Env; MAX_ENV],
-    phase: [f64; MAX_OSC],
-    inc: [f64; MAX_OSC],
-    gain: [[f64; 2]; MAX_OSC],
+    /// Each oscillator's copies: their phases, increments, gains, noise
+    /// states and, for a wavetable, the level each reads.
+    phase: [[f64; MAX_UNISON]; MAX_OSC],
+    inc: [[f64; MAX_UNISON]; MAX_OSC],
+    gain: [[[f64; 2]; MAX_UNISON]; MAX_OSC],
+    noise: [[u64; MAX_UNISON]; MAX_OSC],
+    table_level: [[u8; MAX_UNISON]; MAX_OSC],
     width: [f64; MAX_OSC],
-    noise: [u64; MAX_OSC],
     /// A retriggered LFO's phase, cycle and held value.
     lfo_phase: [f64; MAX_LFO],
     lfo_cycle: [u64; MAX_LFO],
@@ -557,11 +594,12 @@ impl Voice {
             random: 0.0,
             seed: 0,
             env: [Env::default(); MAX_ENV],
-            phase: [0.0; MAX_OSC],
-            inc: [0.0; MAX_OSC],
-            gain: [[0.0; 2]; MAX_OSC],
+            phase: [[0.0; MAX_UNISON]; MAX_OSC],
+            inc: [[0.0; MAX_UNISON]; MAX_OSC],
+            gain: [[[0.0; 2]; MAX_UNISON]; MAX_OSC],
+            noise: [[1; MAX_UNISON]; MAX_OSC],
+            table_level: [[0; MAX_UNISON]; MAX_OSC],
             width: [0.5; MAX_OSC],
-            noise: [1; MAX_OSC],
             lfo_phase: [0.0; MAX_LFO],
             lfo_cycle: [0; MAX_LFO],
             lfo_held: [0.0; MAX_LFO],
@@ -606,8 +644,12 @@ impl Voice {
         let vp = base.0[VELOCITY] / 100.0;
         v.level = (1.0 - vp) + vp * v.velocity;
         for (i, o) in patch.oscillators.iter().enumerate() {
-            v.phase[i] = o.phase.unwrap_or_else(|| unit(hash(&[seed, 2, i as u64])));
-            v.noise[i] = hash(&[seed, 3, i as u64]) | 1;
+            for k in 0..o.unison {
+                // A fixed phase starts every copy there; otherwise each copy
+                // starts at its own random place.
+                v.phase[i][k] = o.phase.unwrap_or_else(|| unit(hash(&[seed, 2, i as u64, k as u64])));
+                v.noise[i][k] = hash(&[seed, 3, i as u64, k as u64]) | 1;
+            }
         }
         for i in 0..patch.lfos.len() {
             v.lfo_phase[i] = base.0[LFO + i * LFO_FIELDS + 1] / 100.0;
@@ -721,6 +763,7 @@ impl Voice {
                 ModTarget::OscLevel(i) => v.0[OSC + i * OSC_FIELDS] += d,
                 ModTarget::OscPan(i) => v.0[OSC + i * OSC_FIELDS + 1] += d,
                 ModTarget::OscPulseWidth(i) => v.0[OSC + i * OSC_FIELDS + 4] += d,
+                ModTarget::OscUnisonDetune(i) => v.0[OSC + i * OSC_FIELDS + 5] += d,
                 ModTarget::Cutoff => v.0[CUTOFF] *= 2f64.powf(d),
                 ModTarget::Resonance => v.0[RESONANCE] += d,
                 ModTarget::Drive => v.0[DRIVE] += d,
@@ -733,10 +776,21 @@ impl Voice {
         for (i, o) in patch.oscillators.iter().enumerate() {
             let at = OSC + i * OSC_FIELDS;
             let semis = self.at_pitch + o.octave * 12.0 + v.0[at + 2] + v.0[at + 3] / 100.0 + pitch[i] + all;
-            self.inc[i] = (hz(semis) / rate).clamp(0.0, 0.5);
-            let g = amplitude(v.0[at]);
-            let [l, r] = pan_gains(v.0[at + 1]);
-            self.gain[i] = [g * l, g * r];
+            // The copies are spread evenly in detune and across the field,
+            // and the sum is held at the level of one.
+            let g = amplitude(v.0[at]) / (o.unison as f64).sqrt();
+            let detune = v.0[at + 5].max(0.0) / 100.0;
+            let width = (v.0[at + 6] / 100.0).clamp(0.0, 1.0);
+            for k in 0..o.unison {
+                let s = spread(k, o.unison);
+                let inc = (hz(semis + detune * s) / rate).clamp(0.0, 0.5);
+                self.inc[i][k] = inc;
+                let [l, r] = pan_gains(v.0[at + 1] + width * s);
+                self.gain[i][k] = [g * l, g * r];
+                if let Some(table) = &o.table {
+                    self.table_level[i][k] = table.level_for(inc) as u8;
+                }
+            }
             self.width[i] = (v.0[at + 4] / 100.0).clamp(0.01, 0.99);
         }
         if patch.filter_enabled {
@@ -780,16 +834,24 @@ impl Voice {
             let mut dry = [0.0; 2];
             for i in 0..n_osc {
                 let o = &patch.oscillators[i];
-                let s = wave_sample(o.wave, self.phase[i], self.inc[i], self.width[i], &mut self.noise[i]);
-                let p = self.phase[i] + self.inc[i];
-                self.phase[i] = if p >= 1.0 { p - 1.0 } else { p };
-                let g = self.gain[i];
+                let mut sum = [0.0; 2];
+                for k in 0..o.unison {
+                    let s = match &o.table {
+                        Some(table) => table.sample(self.table_level[i][k] as usize, self.phase[i][k]),
+                        None => wave_sample(o.wave, self.phase[i][k], self.inc[i][k], self.width[i], &mut self.noise[i][k]),
+                    };
+                    let p = self.phase[i][k] + self.inc[i][k];
+                    self.phase[i][k] = if p >= 1.0 { p - 1.0 } else { p };
+                    let g = self.gain[i][k];
+                    sum[0] += s * g[0];
+                    sum[1] += s * g[1];
+                }
                 if o.filtered {
-                    wet[0] += s * g[0];
-                    wet[1] += s * g[1];
+                    wet[0] += sum[0];
+                    wet[1] += sum[1];
                 } else {
-                    dry[0] += s * g[0];
-                    dry[1] += s * g[1];
+                    dry[0] += sum[0];
+                    dry[1] += sum[1];
                 }
             }
             if patch.filter_enabled {
@@ -1190,7 +1252,83 @@ mod tests {
     }
 
     fn patch(yaml: &str) -> Arc<Patch> {
-        Arc::new(Patch::new(&spec(yaml), &BTreeMap::new(), 48000.0, 120.0, 7))
+        Arc::new(Patch::new(&spec(yaml), &BTreeMap::new(), 48000.0, 120.0, 7, &tables(&spec(yaml))))
+    }
+
+    /// The built-in tables the patch's wavetable oscillators name.
+    fn tables(spec: &Spec) -> HashMap<String, Arc<Wavetable>> {
+        spec.oscillators
+            .iter()
+            .filter(|(_, o)| o.wave == Wave::Wavetable)
+            .filter_map(|(id, o)| Wavetable::builtin(&o.table).map(|t| (id.clone(), t)))
+            .collect()
+    }
+
+    /// Cycles a second of the left channel, from its rising zero crossings.
+    fn rate_of(out: &[Frame], from: usize, to: usize) -> f64 {
+        let c = out[from..to].windows(2).filter(|w| w[0][0] <= 0.0 && w[1][0] > 0.0).count();
+        c as f64 / ((to - from) as f64 / 48000.0)
+    }
+
+    #[test]
+    fn unison_spreads_copies_in_detune_and_width_at_the_level_of_one() {
+        let notes = Arc::new(vec![note(69, 0, 48000)]);
+        let one = render(&mut Synth::new(patch("{oscillators: {a: {wave: saw, level_db: -6}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), notes.clone(), 4096, 240), 48000, 4096);
+        let seven = render(&mut Synth::new(patch("{oscillators: {a: {wave: saw, level_db: -6, unison: 7, unison_detune_cents: 20}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), notes.clone(), 4096, 240), 48000, 4096);
+        let rms = |x: &[Frame]| (x.iter().map(|f| f[0] * f[0] + f[1] * f[1]).sum::<f64>() / x.len() as f64).sqrt();
+        // Seven detuned copies at 1/sqrt(7) each sum to about the level of one.
+        assert!((rms(&seven[4800..]) / rms(&one[4800..]) - 1.0).abs() < 0.25, "{} against {}", rms(&seven[4800..]), rms(&one[4800..]));
+        // Spread across the field, the sides differ; at no width they are the same.
+        assert!(seven[4800..].iter().any(|f| (f[0] - f[1]).abs() > 0.05));
+        let narrow = render(&mut Synth::new(patch("{oscillators: {a: {wave: saw, unison: 7, unison_width_percent: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), notes.clone(), 4096, 240), 48000, 4096);
+        assert!(narrow.iter().all(|f| (f[0] - f[1]).abs() < 1e-9));
+        // Two copies 50 cents apart on a sine beat: the sum swells and fades at their difference, about 12.7 Hz at A4.
+        let two = render(&mut Synth::new(patch("{oscillators: {a: {wave: sine, unison: 2, unison_detune_cents: 50, unison_width_percent: 0, phase: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), notes.clone(), 4096, 240), 48000, 4096);
+        let envelope: Vec<f64> = two[4800..].chunks(120).map(|c| c.iter().fold(0.0f64, |m, f| m.max(f[0].abs()))).collect();
+        let (lo, hi) = (envelope.iter().cloned().fold(f64::MAX, f64::min), envelope.iter().cloned().fold(0.0, f64::max));
+        assert!(lo < 0.2 * hi, "beating: {lo} against {hi}");
+        // The matrix moves the unison detune in cents: at 0 the copies are one.
+        let still = render(&mut Synth::new(patch("{oscillators: {a: {wave: sine, unison: 2, unison_detune_cents: 50, unison_width_percent: 0, phase: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}, macros: {tight: 100}, modulation: [{source: macros.tight, target: oscillators.a.unison_detune_cents, amount: -50}]}"), notes, 4096, 240), 48000, 4096);
+        let envelope: Vec<f64> = still[4800..].chunks(120).map(|c| c.iter().fold(0.0f64, |m, f| m.max(f[0].abs()))).collect();
+        let (lo, hi) = (envelope.iter().cloned().fold(f64::MAX, f64::min), envelope.iter().cloned().fold(0.0, f64::max));
+        assert!(lo > 0.9 * hi, "no beating: {lo} against {hi}");
+    }
+
+    /// The amplitude of a tone at `hz` in the left channel over frames `from..to`.
+    fn magnitude(out: &[Frame], hz: f64, from: usize, to: usize) -> f64 {
+        let (mut re, mut im) = (0.0, 0.0);
+        for (i, f) in out[from..to].iter().enumerate() {
+            let a = TAU * hz * i as f64 / 48000.0;
+            re += f[0] * a.cos();
+            im += f[0] * a.sin();
+        }
+        2.0 * (re * re + im * im).sqrt() / (to - from) as f64
+    }
+
+    #[test]
+    fn a_wavetable_plays_at_its_pitch_bandlimited_and_a_missing_table_is_silent() {
+        let notes = Arc::new(vec![note(69, 0, 48000)]);
+        let organ = render(&mut Synth::new(patch("{oscillators: {a: {wave: wavetable, table: organ, phase: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), notes.clone(), 4096, 240), 48000, 4096);
+        // The fundamental sits at 440 Hz, with the drawbars' second harmonic
+        // three quarters of it and nothing beside or below.
+        let at = |hz: f64| magnitude(&organ, hz, 4800, 44800);
+        assert!(at(440.0) > 0.15, "{}", at(440.0));
+        assert!((at(880.0) / at(440.0) - 0.75).abs() < 0.03, "{}", at(880.0) / at(440.0));
+        assert!(at(420.0) < 0.02 && at(460.0) < 0.02 && at(220.0) < 0.02, "{} {} {}", at(420.0), at(460.0), at(220.0));
+        // High up, the bright table keeps only the harmonics under half the
+        // rate: at G9 (12544 Hz) the fundamental alone fits, a sine, and
+        // nothing folds back.
+        let high = Arc::new(vec![note(127, 0, 48000)]);
+        let bright = render(&mut Synth::new(patch("{oscillators: {a: {wave: wavetable, table: bright, phase: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), high, 4096, 240), 48000, 4096);
+        assert!((rate_of(&bright, 4800, 44800) - 12543.85).abs() < 60.0, "{}", rate_of(&bright, 4800, 44800));
+        let peak = bright[4800..].iter().fold(0.0f64, |m, f| m.max(f[0].abs()));
+        let rms = (bright[4800..].iter().map(|f| f[0] * f[0]).sum::<f64>() / (bright.len() - 4800) as f64).sqrt();
+        assert!((peak / rms - 2f64.sqrt()).abs() < 0.05, "a sine's crest: {}", peak / rms);
+        // A wavetable oscillator with no table plays nothing.
+        let spec = spec("{oscillators: {a: {wave: wavetable, table: organ}}}");
+        let none = Arc::new(Patch::new(&spec, &BTreeMap::new(), 48000.0, 120.0, 7, &HashMap::new()));
+        let quiet = render(&mut Synth::new(none, notes, 4096, 240), 48000, 4096);
+        assert!(quiet.iter().all(|f| *f == [0.0; 2]));
     }
 
     #[test]
@@ -1271,7 +1409,7 @@ mod tests {
         let env = Arc::new(Envelope::new(&lane, aaw_model::rules::Domain::Log, 120.0, 48000));
         let mut lanes = BTreeMap::new();
         lanes.insert("filter.cutoff_hz".to_string(), env);
-        let sweep = Arc::new(Patch::new(&spec("{oscillators: {a: {wave: saw, phase: 0}}, filter: {cutoff_hz: 20000, slope_db_per_octave: 24}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), &lanes, 48000.0, 120.0, 7));
+        let sweep = Arc::new(Patch::new(&spec("{oscillators: {a: {wave: saw, phase: 0}}, filter: {cutoff_hz: 20000, slope_db_per_octave: 24}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), &lanes, 48000.0, 120.0, 7, &HashMap::new()));
         let notes = Arc::new(vec![note(60, 0, 48000)]);
         let out = render(&mut Synth::new(sweep, notes, 4096, 240), 30000, 4096);
         let rms = |from: usize, to: usize| (out[from..to].iter().map(|f| f[0] * f[0]).sum::<f64>() / (to - from) as f64).sqrt();

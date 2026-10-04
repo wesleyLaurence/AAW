@@ -184,3 +184,114 @@ fn a_patch_edit_keeps_the_notes_and_the_program_structure_follows_the_waves() {
     let c = compile_cached(&p, dir.path(), &mut cache).unwrap();
     assert_ne!(b.structure, c.structure);
 }
+
+#[test]
+fn the_patchs_effects_run_before_the_inserts_and_count_in_the_latency() {
+    let dir = tempfile::tempdir().unwrap();
+    // A sine through the patch's own saturation: odd harmonics appear that the plain patch lacks.
+    let plain = song("{oscillators: {a: {wave: sine, phase: 0, level_db: -3}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}", "");
+    let driven = song("{oscillators: {a: {wave: sine, phase: 0, level_db: -3}}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}, effects: [{type: saturation, drive_db: 18}]}", "");
+    let (a, b) = (render(&compiled(dir.path(), &plain), 4096), render(&compiled(dir.path(), &driven), 4096));
+    let harmonic = |x: &[Frame], k: f64| {
+        // The C3 at beat 1 (130.81 Hz), over half a second.
+        let (mut re, mut im) = (0.0, 0.0);
+        for (i, f) in x[26000..50000].iter().enumerate() {
+            let t = std::f64::consts::TAU * 130.8128 * k * i as f64 / 48000.0;
+            re += f[0] * t.cos();
+            im += f[0] * t.sin();
+        }
+        2.0 * (re * re + im * im).sqrt() / 24000.0
+    };
+    assert!(harmonic(&a, 3.0) < 0.01 && harmonic(&b, 3.0) > 0.03, "{} {}", harmonic(&a, 3.0), harmonic(&b, 3.0));
+    // A render equals playback in every block size with a chorus and a limiter in the patch.
+    let rich = song("{oscillators: {a: {wave: saw, unison: 3}}, effects: [{type: chorus, id: wide}, {type: limiter, ceiling_db: -3}]}", "");
+    let p = compiled(dir.path(), &rich);
+    let whole = render(&p, 4096);
+    assert_eq!(whole, render(&p, 128));
+    assert!(whole[24000..48000].iter().any(|f| f[0].abs() > 0.05));
+    assert!(whole.iter().all(|f| f[0].abs() <= aaw_engine::program::amplitude(-3.0) + 1e-6));
+    // The limiter's look-ahead is latency the track's chain counts, so the
+    // note lands where it does with the limiter on the inserts instead.
+    let on_inserts = format!(
+        "{HEAD}tracks:\n- id: lead\n  type: midi\n  instrument:\n    synth: {{oscillators: {{a: {{wave: saw, unison: 3}}}}, effects: [{{type: chorus, id: wide}}]}}\n  effects: [{{type: limiter, ceiling_db: -3}}]\n  clips:\n  - at: 1\n    length_beats: 6\n    notes:\n    - {{pitch: 48, duration: 1}}\n    - {{pitch: 52, duration: 1, velocity: 64}}\n    - {{pitch: 55, duration: 1}}\n    - {{pitch: 60, at: 1/3, duration: 2/3}}\n    - {{pitch: 67, at: 2, duration: 1.5}}\n    - {{pitch: 36, at: 4, duration: 1}}\n"
+    );
+    let q = compiled(dir.path(), &on_inserts);
+    assert_eq!(p.latency, q.latency);
+    assert!(p.latency > 0);
+    let moved = render(&q, 4096);
+    let first = |x: &[Frame]| x.iter().position(|f| f[0].abs() > 1e-6).unwrap();
+    assert_eq!(first(&whole), first(&moved));
+    // The output trails the transport by the latency, so the chord at beat 1 is that much in.
+    assert!((first(&whole) as i64 - (24000 + p.latency as i64)).abs() <= 1, "{} against {}", first(&whole), 24000 + p.latency);
+    // A lane on the patch's chorus mix, by its ID: all wet at one end and dry at the other.
+    let lane = "  automation:\n  - param: instrument.effects.wide.mix_percent\n    points: [{at: 0, value: 0}, {at: 8, value: 0}]\n";
+    let dry = render(&compiled(dir.path(), &song("{oscillators: {a: {wave: saw, unison: 3}}, effects: [{type: chorus, id: wide}]}", lane)), 4096);
+    let none = render(&compiled(dir.path(), &song("{oscillators: {a: {wave: saw, unison: 3}}}", "")), 4096);
+    assert_eq!(dry, none, "a chorus at no mix passes the voices through");
+    let wet = render(&compiled(dir.path(), &song("{oscillators: {a: {wave: saw, unison: 3}}, effects: [{type: chorus, id: wide}]}", "")), 4096);
+    assert_ne!(wet, none);
+    // Playback never allocates with the patch's effects in the chain.
+    let (mut control, mut player) = channel(p.clone());
+    control.play(0).unwrap();
+    let mut out = vec![[0.0; 2]; 24000];
+    assert_no_alloc::assert_no_alloc(|| {
+        for chunk in out.chunks_mut(128) {
+            player.render(chunk);
+        }
+    });
+    // An effect added to the patch changes the structure; a knob on it does not.
+    let mut cache = Cache::default();
+    let path = dir.path().join("song.yaml");
+    std::fs::write(&path, song("{oscillators: {a: {}}, effects: [{type: chorus, mix_percent: 30}]}", "")).unwrap();
+    let mut project = aaw_model::load(&path, true).unwrap();
+    let before = compile_cached(&project, dir.path(), &mut cache).unwrap();
+    if let Some(aaw_model::Instrument::Synth(s)) = project.tracks[0].midi.as_mut().unwrap().instrument.as_mut() {
+        if let aaw_model::Effect::Chorus(c) = &mut s.effects[0] {
+            c.mix_percent = 60.0;
+        }
+    }
+    let turned = compile_cached(&project, dir.path(), &mut cache).unwrap();
+    assert_eq!(before.structure, turned.structure);
+    if let Some(aaw_model::Instrument::Synth(s)) = project.tracks[0].midi.as_mut().unwrap().instrument.as_mut() {
+        s.effects.push(aaw_model::Effect::Saturation(aaw_model::Saturation {
+            id: None,
+            mode: aaw_model::SaturationMode::Soft,
+            drive_db: 6.0,
+            output_db: 0.0,
+            mix_percent: 100.0,
+            bypass: false,
+        }));
+    }
+    let more = compile_cached(&project, dir.path(), &mut cache).unwrap();
+    assert_ne!(turned.structure, more.structure);
+}
+
+#[test]
+fn a_wavetable_oscillator_reads_a_sample_of_the_project_as_one_cycle() {
+    let dir = tempfile::tempdir().unwrap();
+    // One cycle of a saw, 200 frames, as a sample of the project.
+    let cycle: Vec<[f32; 2]> = (0..200).map(|i| [(2.0 * i as f64 / 200.0 - 1.0) as f32; 2]).collect();
+    std::fs::write(dir.path().join("cycle.wav"), aaw_engine::wav::float_wav_bytes(&cycle, 48000)).unwrap();
+    let yaml = format!(
+        "{HEAD}samples:\n  cycle: {{path: cycle.wav}}\ntracks:\n- id: lead\n  type: midi\n  instrument:\n    synth: {{oscillators: {{a: {{wave: wavetable, table: cycle, phase: 0}}}}, envelopes: {{amp: {{attack_ms: 0, release_ms: 0}}}}}}\n  clips:\n  - at: 0\n    length_beats: 4\n    notes:\n    - {{pitch: 69, duration: 4}}\n"
+    );
+    let out = render(&compiled(dir.path(), &yaml), 4096);
+    // A saw at 440 Hz: its harmonics fall as 1/k, and the fundamental is there.
+    let harmonic = |k: f64| {
+        let (mut re, mut im) = (0.0, 0.0);
+        for (i, f) in out[4800..52800].iter().enumerate() {
+            let t = std::f64::consts::TAU * 440.0 * k * i as f64 / 48000.0;
+            re += f[0] * t.cos();
+            im += f[0] * t.sin();
+        }
+        2.0 * (re * re + im * im).sqrt() / 48000.0
+    };
+    assert!(harmonic(1.0) > 0.1, "{}", harmonic(1.0));
+    assert!((harmonic(2.0) / harmonic(1.0) - 0.5).abs() < 0.05, "{}", harmonic(2.0) / harmonic(1.0));
+    // A sample that is not there is refused with the oscillator named.
+    let missing = yaml.replace("table: cycle", "table: nope");
+    let path = dir.path().join("song.yaml");
+    std::fs::write(&path, missing).unwrap();
+    let e = aaw_model::load(&path, true).map(|_| ()).unwrap_err().to_string();
+    assert!(e.contains("oscillator a names wavetable nope"), "{e}");
+}

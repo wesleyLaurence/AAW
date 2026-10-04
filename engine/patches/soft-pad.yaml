@@ -1,11 +1,10 @@
 name: Soft Pad
-description: Two detuned saws either side of a sub, rising slowly under a filter an envelope opens over a second, with a slow drift of pitch. Tone opens the filter.
+description: A saw in three copies either side of a sub, rising slowly under a filter an envelope opens over a second, with a slow drift of pitch, a chorus and a room. Tone opens the filter.
 tags: [pad, chords, slow, warm]
 synth:
   voices: 8
   oscillators:
-    a: {wave: saw, level_db: -12, detune_cents: -8, pan: -0.3}
-    b: {wave: saw, level_db: -12, detune_cents: 8, pan: 0.3}
+    a: {wave: saw, level_db: -10, unison: 3, unison_detune_cents: 8, unison_width_percent: 60}
     sub: {wave: sine, level_db: -16, octave: -1, filter: false}
   filter: {cutoff_hz: 900, slope_db_per_octave: 24, resonance_percent: 15, keytrack_percent: 50}
   envelopes:
@@ -16,6 +15,9 @@ synth:
   macros: {tone: 40}
   modulation:
   - {source: env2, target: filter.cutoff_hz, amount: 2}
-  - {source: lfo1, target: oscillators.b.pitch, amount: 0.08}
+  - {source: lfo1, target: oscillators.a.pitch, amount: 0.08}
   - {source: macros.tone, target: filter.cutoff_hz, amount: 3}
   - {source: velocity, target: filter.cutoff_hz, amount: 1}
+  effects:
+  - {type: chorus, rate_hz: 0.5, depth_ms: 3, mix_percent: 35}
+  - {type: reverb, decay_seconds: 2.5, predelay_ms: 20, damping_hz: 5000, mix_percent: 25}

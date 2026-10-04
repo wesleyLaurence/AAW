@@ -1,5 +1,5 @@
 name: Bright Lead
-description: A square with a saw a fifth up, one voice with glide, a little drive, and vibrato that starts with each note.
+description: A square with a saw a fifth up, one voice with glide, a little drive, vibrato that starts with each note, and tube saturation on the way out.
 tags: [lead, mono, bright]
 synth:
   voices: 1
@@ -15,3 +15,5 @@ synth:
   modulation:
   - {source: lfo1, target: pitch, amount: 0.25}
   - {source: velocity, target: filter.cutoff_hz, amount: 1.5}
+  effects:
+  - {type: saturation, mode: tube, drive_db: 10, output_db: -6}

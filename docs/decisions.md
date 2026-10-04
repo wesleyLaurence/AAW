@@ -411,3 +411,34 @@ asking for a name otherwise, so a factory patch is never overwritten by
 accident and nothing is written without a name the person gave. The detail
 panel's height is kept in the app's defaults, not in the song, as the window's
 size is.
+
+**D74. Unison is on the oscillator at the level of one, a wavetable is one cycle from a built-in table or a sample, and the patch's effects are the song's effect kinds on the synth's path.**
+
+Decided on October 4, 2026, in building the Synth's last item
+([features/synth.md](features/synth.md)). Unison is three fields of the
+oscillator, `unison`, `unison_detune_cents` and `unison_width_percent`,
+rather than a layer of its own: the copies are spread evenly in detune and
+across the field either side of the oscillator's pan, each at its own random
+phase from the seed unless `phase` is given, and summed at 1/√n each, so
+turning unison up thickens a sound without making it louder and the Supersaw
+patch is one saw in seven copies with a macro on its detune. The detune is a
+matrix target in cents and a lane target; the count is structural. A
+wavetable is one cycle, read bandlimited from a stack of levels with fewer
+harmonics each, so it never aliases, and `table` names a built-in table or a
+sample of the project: the project already knows its samples by ID, a cycle
+drawn or cut from any sound is then a wave, and a patch that names a sample
+loads only into a song that has it, which validation says with the
+oscillator named; a table of several frames with a sweepable position stays
+a Later line. The patch's effects are the song's effect kinds, not a
+second kind of device: they are edited with the effect commands on
+`tracks.T.instrument.synth`, automated as `instrument.effects.REF.FIELD`
+from the track's lanes, which follow a move and go with a removal as an
+owner's do, and run on the sum of the voices before the inserts, with a
+limiter's look-ahead counted into the track's latency so the track lands
+where it does either way; a compressor there has no sidechain, since the
+chain hears only the synth. Chorus and saturation were built as effect kinds
+anywhere, since a chorus on a return or a saturation on a drum track are as
+wanted as either in a patch, and the schema and `daw describe effects` gained
+them; a clipper and a phaser stay Later lines. The panel draws the patch's
+chain as columns after the matrix and adds to it from the + menu; an effect
+dragged from the browser still lands on the track's inserts.

@@ -299,7 +299,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         )
     });
     written?;
-    let (track_effects, return_effects, master_effects) = renderer.report();
+    let (track_effects, patch_effects, return_effects, master_effects) = renderer.report();
     let effects = |chain: &[DeviceReport]| Value::List(chain.iter().map(device_report).collect());
     let params = |lanes: &[String]| Value::List(lanes.iter().map(|l| Value::str(l)).collect());
     let mut track_reports = Vec::new();
@@ -325,6 +325,9 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
             ("events", Value::int(events as i64)),
             ("effects", effects(&track_effects[ti])),
         ];
+        if !patch_effects[ti].is_empty() {
+            fields.push(("instrument_effects", effects(&patch_effects[ti])));
+        }
         if !track.automation.is_empty() {
             fields.push(("automation", params(&track.automation)));
         }

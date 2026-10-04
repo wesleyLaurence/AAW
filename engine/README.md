@@ -10,7 +10,7 @@ reads songs through `aaw-py`.
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the six effects and the Synth |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the eight effects, wavetables and the Synth |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
@@ -65,13 +65,13 @@ project's folder or the song file in it. It implements:
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
-| `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE] [--play]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part; a matrix entry added, changed or removed; and notes rendered through the patch to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply, and with `--play` also played now, one after another, through the running host (`note.preview`). See `daw describe synth` |
+| `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE] [--play]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part, an oscillator's `unison`, `unison_detune_cents`, `unison_width_percent` and `table` among them; a matrix entry added, changed or removed; and notes rendered through the patch and its own effects to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply, and with `--play` also played now, one after another, through the running host (`note.preview`). The patch's effects are edited with `daw effect add\|remove\|move\|bypass` on `tracks.T.instrument.synth`. See `daw describe synth` |
 | `daw patch list [WORDS]`, `daw patch show NAME`, `daw patch save PROJECT TRACK NAME [--description TEXT] [--tags a,b] [--replace]`, `daw patch load PROJECT TRACK NAME` | Patches: a Synth's sound as a YAML file, the twelve factory patches built into `daw` and the saved ones in the workspace library, `~/Music/AAW/library/patches/` or `library/patches/` under `AAW_WORKSPACE`, each named by the slug of its name; a track's synth saved there, over a saved name only with `--replace`, naming the song's patch after it; and a patch, by name or as a `.yaml` path, put in place of a MIDI track's whole synth in one undo step, the notes staying. See `daw describe synth` |
 | `daw midi import PROJECT FILE [--track T] [--at BEAT]`, `daw midi export PROJECT CLIP FILE` | A Standard MIDI file of one part made into a note clip, on a MIDI track or a new one, with what the song cannot hold counted in the reply; a note clip's notes that play written as a type 0 file at 960 ticks a beat. The file's tempo is not taken. See `daw describe midi` |
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
-repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the six effects on tracks, returns
+repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the eight effects on tracks, returns
 and the master, sidechains, pre- and post-fader sends, automation lanes, track
 gain, pan, mute and solo, master gain and the end fade. `render` writes the
 mix, a stem for each track and return, the snapshot and `report.json` with what
@@ -115,7 +115,14 @@ stream is cut into blocks, and processing never allocates.
   change of wave, filter mode or routing changes the program's structure and
   swaps through the dip. A locate chases the notes sounding there with their
   envelopes and free LFOs where time would have brought them. A track with a
-  synth has no sample voices and no peaks of its own.
+  synth has no sample voices and no peaks of its own. Unison copies are
+  spread in detune and width inside the voice and summed at the level of
+  one; a wavetable (`aaw-dsp/src/wavetable.rs`) is one cycle as a stack of
+  bandlimited levels, built in or read from a sample through the compile's
+  cache; the patch's own effects (`chorus.rs`, `saturation.rs` and the rest)
+  are a chain run on the voices before the inserts, whose latency the
+  inserts count as upstream, and the render report lists them under the
+  track's `instrument_effects`.
 - **Patches** (`aaw-host/src/patches.rs`) are the synth mapping as a YAML
   file with a name, description, tags, `saved_by` and `saved_at` around it,
   validated as a song's synth is. The factory patches are `engine/patches/`,

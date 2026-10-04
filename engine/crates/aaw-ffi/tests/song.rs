@@ -2468,7 +2468,7 @@ fn the_browsers_synth_and_its_patches_are_dropped_on_tracks_and_under_them() {
     assert_eq!(u.change.label, "Add Synth track soft-pad with Soft Pad");
     let pad = u.arrangement.tracks.iter().find(|t| t.id == "soft-pad").unwrap().clone();
     assert_eq!(pad.synth.as_ref().unwrap().patch.as_deref(), Some("Soft Pad"));
-    assert_eq!(pad.synth.as_ref().unwrap().oscillators.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["a", "b", "sub"]);
+    assert_eq!(pad.synth.as_ref().unwrap().oscillators.iter().map(|o| o.name.as_str()).collect::<Vec<_>>(), ["a", "sub"]);
     // A second drop of the same patch takes the next name.
     song.edit(Edit::SynthAdd { track: None, patch: Some("soft-pad".into()) }, None).unwrap();
     assert_eq!(update(&seen).change.label, "Add Synth track soft-pad-2 with Soft Pad");
@@ -2493,4 +2493,70 @@ fn the_browsers_synth_and_its_patches_are_dropped_on_tracks_and_under_them() {
     assert!(e.to_string().contains("not a MIDI track"), "{e}");
     let e = song.edit(Edit::SynthAdd { track: None, patch: Some("no-such".into()) }, None).unwrap_err();
     assert!(e.to_string().contains("No patch named"), "{e}");
+}
+
+#[test]
+fn the_patchs_effects_unison_and_tables_are_drawn_and_edited() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "synth.add", "track": "lead"}));
+    agent(&path, json!({"op": "synth.set", "track": "lead", "values": {"oscillators.a.unison": 5, "oscillators.b": {"wave": "wavetable", "table": "vowel"}}}));
+    let mut u = update(&seen);
+    while u.change.op != "synth.set" {
+        u = update(&seen);
+    }
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    let track = lead.key;
+    let s = lead.synth.clone().unwrap();
+    // Unison fields are rows of the oscillator, the detune a lane target; the
+    // table's choices are the built-in tables and the project's samples, and
+    // a wavetable oscillator has a cycle to draw.
+    let a = &s.oscillators[0];
+    let unison = a.fields.iter().find(|f| f.name == "oscillators.a.unison").unwrap();
+    assert_eq!((unison.value.clone(), unison.live, unison.kind), (number(5.0), false, FieldKind::Integer));
+    let detune = a.fields.iter().find(|f| f.name == "oscillators.a.unison_detune_cents").unwrap();
+    assert_eq!(detune.param.as_deref(), Some("instrument.oscillators.a.unison_detune_cents"));
+    assert_eq!(aaw_ffi::view::synth_mod_target("oscillators.a.unison_detune_cents".into()).as_deref(), Some("oscillators.a.unison_detune_cents"));
+    let table = a.fields.iter().find(|f| f.name == "oscillators.a.table").unwrap();
+    assert_eq!(table.choices, ["organ", "bright", "hollow", "vowel", "fold", "steps", "hit"]);
+    assert!(a.cycle.is_empty());
+    let b = &s.oscillators[1];
+    assert_eq!(b.cycle.len(), 64);
+    assert!(b.cycle.iter().any(|x| x.abs() > 0.5) && b.cycle.iter().all(|x| x.abs() <= 1.0 + 1e-9));
+    // An effect added to the patch is drawn with its fields and lanes of the track's.
+    song.edit(Edit::SynthEffectAdd { track, kind: "chorus".into(), index: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add chorus to the Synth on lead");
+    song.edit(Edit::SynthEffectAdd { track, kind: "reverb".into(), index: Some(0) }, None).unwrap();
+    let u = update(&seen);
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    let s = lead.synth.clone().unwrap();
+    assert_eq!(s.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["reverb", "chorus"]);
+    let mix = s.effects[1].fields.iter().find(|f| f.name == "mix_percent").unwrap();
+    assert_eq!((mix.value.clone(), mix.param.as_deref(), mix.lane), (number(50.0), Some("instrument.effects.1.mix_percent"), None));
+    assert_eq!(s.effects[0].fields.iter().find(|f| f.name == "mix_percent").unwrap().value, number(25.0));
+    assert!(lead.lane_targets.iter().any(|t| t.param == "instrument.effects.1.rate_hz" && t.label == "Synth chorus rate"));
+    // Its knob, its lane, its place and its removal go through the effect edits.
+    let chorus = s.effects[1].key;
+    song.edit(Edit::EffectSet { effect: chorus, field: "depth_ms".into(), value: number(6.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().synth.as_ref().unwrap().effects[1].fields.iter().find(|f| f.name == "depth_ms").unwrap().value, number(6.0));
+    song.edit(Edit::LaneAdd { row: Row::Track { key: track }, param: "instrument.effects.1.mix_percent".into() }, None).unwrap();
+    let u = update(&seen);
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    assert_eq!((lead.lanes[0].param.as_str(), lead.lanes[0].label.as_str(), lead.lanes[0].unit.as_str()), ("instrument.effects.1.mix_percent", "Synth chorus mix", "%"));
+    assert_eq!(lead.lanes[0].points[0].value, 50.0);
+    assert_eq!(lead.synth.as_ref().unwrap().effects[1].fields.iter().find(|f| f.name == "mix_percent").unwrap().lane, Some(lead.lanes[0].key));
+    song.edit(Edit::EffectMove { effect: chorus, index: 0 }, None).unwrap();
+    let u = update(&seen);
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    assert_eq!(lead.synth.as_ref().unwrap().effects[0].kind, "chorus");
+    assert_eq!(lead.lanes[0].param, "instrument.effects.0.mix_percent");
+    song.edit(Edit::EffectRemove { effect: chorus }, None).unwrap();
+    let u = update(&seen);
+    let lead = u.arrangement.tracks.iter().find(|t| t.id == "lead").unwrap().clone();
+    assert_eq!(lead.synth.as_ref().unwrap().effects.len(), 1);
+    assert!(lead.lanes.is_empty(), "the lane went with the effect");
+    let left = agent(&path, json!({"op": "get", "path": "tracks.lead.instrument.synth.effects"}));
+    assert_eq!((left[0]["type"].clone(), left[0]["mix_percent"].clone(), left.as_array().unwrap().len()), (json!("reverb"), json!(25.0), 1));
 }

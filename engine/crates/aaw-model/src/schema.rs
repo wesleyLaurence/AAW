@@ -1027,10 +1027,13 @@ pub enum Wave {
     Square,
     Pulse,
     Noise,
+    /// One cycle read from a table: a built-in one, or a sample in the
+    /// project, named by the oscillator's `table`.
+    Wavetable,
 }
 
 impl Wave {
-    pub const NAMES: [&'static str; 6] = ["sine", "triangle", "saw", "square", "pulse", "noise"];
+    pub const NAMES: [&'static str; 7] = ["sine", "triangle", "saw", "square", "pulse", "noise", "wavetable"];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -1040,6 +1043,7 @@ impl Wave {
             Wave::Square => "square",
             Wave::Pulse => "pulse",
             Wave::Noise => "noise",
+            Wave::Wavetable => "wavetable",
         }
     }
 
@@ -1050,16 +1054,27 @@ impl Wave {
             "square" => Wave::Square,
             "pulse" => Wave::Pulse,
             "noise" => Wave::Noise,
+            "wavetable" => Wave::Wavetable,
             _ => Wave::Saw,
         }
     }
 }
+
+/// The wavetables built into the Synth, which an oscillator's `table` names
+/// when it is not a sample of the project.
+pub const WAVETABLES: [&str; 6] = ["organ", "bright", "hollow", "vowel", "fold", "steps"];
+
+/// The most sub-oscillators an oscillator's unison stacks.
+pub const MAX_UNISON: i64 = 16;
 
 /// An oscillator of the Synth: one of up to four, each with its own wave,
 /// level, pan and tuning.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Oscillator {
     pub wave: Wave,
+    /// The wavetable a `wavetable` wave reads: one of `WAVETABLES`, or the
+    /// ID of a sample in the project whose file is one cycle.
+    pub table: String,
     pub level_db: f64,
     pub pan: f64,
     pub octave: i64,
@@ -1070,19 +1085,39 @@ pub struct Oscillator {
     /// Where in its cycle the wave starts, in percent; None starts each note
     /// at a random place, from the patch's seed.
     pub phase: Option<f64>,
+    /// How many copies of the wave play at once, spread in detune and across
+    /// the stereo field; 1 is one.
+    pub unison: i64,
+    /// How far the outermost copies are detuned either side of the pitch.
+    pub unison_detune_cents: f64,
+    /// How far the copies are spread across the stereo field from the pan.
+    pub unison_width_percent: f64,
     /// Whether it goes through the filter.
     pub filter: bool,
 }
 
 impl Oscillator {
     const FIELDS: &'static [&'static str] = &[
-        "wave", "level_db", "pan", "octave", "semitones", "detune_cents", "pulse_width", "phase", "filter",
+        "wave", "table", "level_db", "pan", "octave", "semitones", "detune_cents", "pulse_width", "phase", "unison",
+        "unison_detune_cents", "unison_width_percent", "filter",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Oscillator> {
         let f = Fields::of(ctx, x, "Oscillator", Self::FIELDS)?;
         let before = ctx.count();
         let wave = f.opt(ctx, "wave", Wave::Saw, |c, x| v::literal_str(c, x, &Wave::NAMES).map(Wave::from_str));
+        let table = f.opt(ctx, "table", WAVETABLES[0].to_string(), |c, x| {
+            let s = v::string(c, x)?;
+            if WAVETABLES.contains(&s.as_str()) || ID_RE.is_match(&s) {
+                Some(s)
+            } else {
+                c.value_error(format!(
+                    "table is a built-in wavetable ({}) or the ID of a sample in the project",
+                    WAVETABLES.join(", ")
+                ));
+                None
+            }
+        });
         let level_db = f.opt(ctx, "level_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let octave = f.opt(ctx, "octave", 0, |c, x| v::int(c, x, Bounds::ge_le("-4", "4")));
@@ -1090,6 +1125,9 @@ impl Oscillator {
         let detune_cents = f.opt(ctx, "detune_cents", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-100", "100")));
         let pulse_width = f.opt(ctx, "pulse_width", 50.0, |c, x| v::float(c, x, Bounds::ge_le("1", "99")));
         let phase = f.opt(ctx, "phase", None, |c, x| v::optional(c, x, |c, x| v::float(c, x, Bounds::ge_le("0", "100"))));
+        let unison = f.opt(ctx, "unison", 1, |c, x| v::int(c, x, Bounds::ge_le("1", "16")));
+        let unison_detune_cents = f.opt(ctx, "unison_detune_cents", 15.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let unison_width_percent = f.opt(ctx, "unison_width_percent", 100.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
         let filter = f.opt(ctx, "filter", true, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
@@ -1097,6 +1135,7 @@ impl Oscillator {
         }
         Some(Oscillator {
             wave: wave?,
+            table: table?,
             level_db: level_db?,
             pan: pan?,
             octave: octave?,
@@ -1104,13 +1143,24 @@ impl Oscillator {
             detune_cents: detune_cents?,
             pulse_width: pulse_width?,
             phase: phase?,
+            unison: unison?,
+            unison_detune_cents: unison_detune_cents?,
+            unison_width_percent: unison_width_percent?,
             filter: filter?,
         })
+    }
+
+    /// The sample of the project the oscillator's table names, if it is not
+    /// a built-in one; it is read when the wave is `wavetable`, and must be
+    /// in the project either way.
+    pub fn sample_table(&self) -> Option<&str> {
+        (!WAVETABLES.contains(&self.table.as_str())).then_some(self.table.as_str())
     }
 
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         o.str("wave", self.wave.as_str(), "saw");
+        o.str("table", &self.table, WAVETABLES[0]);
         o.float("level_db", self.level_db, 0.0);
         o.float("pan", self.pan, 0.0);
         o.int("octave", self.octave, 0);
@@ -1118,6 +1168,9 @@ impl Oscillator {
         o.float("detune_cents", self.detune_cents, 0.0);
         o.float("pulse_width", self.pulse_width, 50.0);
         o.opt("phase", self.phase.map(Value::Float));
+        o.int("unison", self.unison, 1);
+        o.float("unison_detune_cents", self.unison_detune_cents, 15.0);
+        o.float("unison_width_percent", self.unison_width_percent, 100.0);
         o.bool("filter", self.filter, true);
         o.done()
     }
@@ -1128,6 +1181,7 @@ impl Default for Oscillator {
     fn default() -> Self {
         Oscillator {
             wave: Wave::Saw,
+            table: WAVETABLES[0].to_string(),
             level_db: 0.0,
             pan: 0.0,
             octave: 0,
@@ -1135,6 +1189,9 @@ impl Default for Oscillator {
             detune_cents: 0.0,
             pulse_width: 50.0,
             phase: None,
+            unison: 1,
+            unison_detune_cents: 15.0,
+            unison_width_percent: 100.0,
             filter: true,
         }
     }
@@ -1455,12 +1512,16 @@ pub struct Synth {
     pub modulation: Vec<Modulation>,
     /// Up to eight knobs, 0 to 100, that do nothing but through the matrix.
     pub macros: IndexMap<String, f64>,
+    /// The patch's own effects, the song's effect kinds in a chain run on
+    /// the sum of the voices before the track's inserts. A compressor here
+    /// has no sidechain.
+    pub effects: Vec<Effect>,
 }
 
 impl Synth {
     const FIELDS: &'static [&'static str] = &[
         "patch", "voices", "glide_ms", "velocity_percent", "seed", "oscillators", "filter", "envelopes", "lfos",
-        "modulation", "macros",
+        "modulation", "macros", "effects",
     ];
     pub const MAX_OSCILLATORS: usize = 4;
     pub const MAX_ENVELOPES: usize = 4;
@@ -1486,6 +1547,7 @@ impl Synth {
         let macros = f.opt(ctx, "macros", IndexMap::new(), |c, x| {
             id_dict(c, x, |c, x| v::float(c, x, Bounds::ge_le("0", "100")))
         });
+        let effects = effects_field(ctx, &f);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -1502,6 +1564,7 @@ impl Synth {
             lfos: lfos?,
             modulation: modulation?,
             macros: macros?,
+            effects: effects?,
         };
         // The amp envelope is always there, first.
         if !synth.envelopes.contains_key("amp") {
@@ -1518,6 +1581,16 @@ impl Synth {
             count("envelopes", synth.envelopes.len(), 1, Self::MAX_ENVELOPES)?;
             count("LFOs", synth.lfos.len(), 0, Self::MAX_LFOS)?;
             count("macros", synth.macros.len(), 0, Self::MAX_MACROS)?;
+            if let Some(e) = synth.effects.iter().find(|e| e.sidechain().is_some()) {
+                return Err(format!(
+                    "A compressor inside a patch has no sidechain ({}): the patch's effects hear only the synth",
+                    e.sidechain().unwrap_or_default()
+                ));
+            }
+            let ids: Vec<&str> = synth.effects.iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
+            if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
+                return Err("The patch's effect IDs must be unique".into());
+            }
             rules::synth_references(&synth)
         };
         if let Err(msg) = check() {
@@ -1550,6 +1623,7 @@ impl Synth {
             "macros",
             Value::Dict(self.macros.iter().map(|(k, x)| (Key::str(k), Value::Float(*x))).collect()),
         );
+        o.coll("effects", list(&self.effects, saved, Effect::dump));
         o.done()
     }
 }
@@ -1573,6 +1647,7 @@ impl Default for Synth {
             lfos: IndexMap::new(),
             modulation: Vec::new(),
             macros: IndexMap::new(),
+            effects: Vec::new(),
         }
     }
 }
@@ -1823,6 +1898,53 @@ pub struct Reverb {
     pub bypass: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum SaturationMode {
+    /// A soft clip, `tanh`: odd harmonics.
+    Soft,
+    /// A hard clip at full scale.
+    Hard,
+    /// An asymmetric curve: even harmonics too, as a valve's.
+    Tube,
+}
+
+impl SaturationMode {
+    pub const NAMES: [&'static str; 3] = ["soft", "hard", "tube"];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            SaturationMode::Soft => "soft",
+            SaturationMode::Hard => "hard",
+            SaturationMode::Tube => "tube",
+        }
+    }
+}
+
+/// A stereo chorus: each channel through a delay of `delay_ms` moved by
+/// `depth_ms` either side at `rate_hz`, the right channel a quarter cycle
+/// behind the left, mixed under the dry signal.
+#[derive(Clone, Debug)]
+pub struct Chorus {
+    pub id: Option<String>,
+    pub rate_hz: f64,
+    pub depth_ms: f64,
+    pub delay_ms: f64,
+    pub mix_percent: f64,
+    pub bypass: bool,
+}
+
+/// Saturation: the signal driven by `drive_db` into a curve, trimmed by
+/// `output_db` and mixed under the dry signal.
+#[derive(Clone, Debug)]
+pub struct Saturation {
+    pub id: Option<String>,
+    pub mode: SaturationMode,
+    pub drive_db: f64,
+    pub output_db: f64,
+    pub mix_percent: f64,
+    pub bypass: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum Effect {
     Filter(Filter),
@@ -1831,9 +1953,18 @@ pub enum Effect {
     Limiter(Limiter),
     Delay(Delay),
     Reverb(Reverb),
+    Chorus(Chorus),
+    Saturation(Saturation),
 }
 
-pub const EFFECT_TYPES: [&str; 6] = ["filter", "eq", "compressor", "limiter", "delay", "reverb"];
+pub const EFFECT_TYPES: [&str; 8] = ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation"];
+
+impl PartialEq for Effect {
+    /// Two effects are equal when the song would write them the same.
+    fn eq(&self, other: &Effect) -> bool {
+        crate::value::py_eq(&self.dump(false), &other.dump(false))
+    }
+}
 
 impl Effect {
     pub fn kind(&self) -> &'static str {
@@ -1844,6 +1975,8 @@ impl Effect {
             Effect::Limiter(_) => "limiter",
             Effect::Delay(_) => "delay",
             Effect::Reverb(_) => "reverb",
+            Effect::Chorus(_) => "chorus",
+            Effect::Saturation(_) => "saturation",
         }
     }
 
@@ -1855,6 +1988,8 @@ impl Effect {
             Effect::Limiter(e) => e.id.as_deref(),
             Effect::Delay(e) => e.id.as_deref(),
             Effect::Reverb(e) => e.id.as_deref(),
+            Effect::Chorus(e) => e.id.as_deref(),
+            Effect::Saturation(e) => e.id.as_deref(),
         }
     }
 
@@ -1866,6 +2001,8 @@ impl Effect {
             Effect::Limiter(e) => e.bypass,
             Effect::Delay(e) => e.bypass,
             Effect::Reverb(e) => e.bypass,
+            Effect::Chorus(e) => e.bypass,
+            Effect::Saturation(e) => e.bypass,
         }
     }
 
@@ -1899,7 +2036,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb', 'chorus', 'saturation'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -1923,6 +2060,8 @@ impl Effect {
                 "type", "id", "time_beats", "feedback_percent", "lowcut_hz", "highcut_hz",
                 "ping_pong", "mix_percent", "bypass",
             ],
+            "chorus" => &["type", "id", "rate_hz", "depth_ms", "delay_ms", "mix_percent", "bypass"],
+            "saturation" => &["type", "id", "mode", "drive_db", "output_db", "mix_percent", "bypass"],
             _ => &[
                 "type", "id", "decay_seconds", "predelay_ms", "damping_hz", "lowcut_hz",
                 "width_percent", "mix_percent", "seed", "bypass",
@@ -2032,6 +2171,46 @@ impl Effect {
                     }))
                 })()
             }
+            "chorus" => {
+                let rate_hz = float(ctx, "rate_hz", 0.8, Bounds::ge_le("0.05", "10"));
+                let depth_ms = float(ctx, "depth_ms", 3.0, Bounds::ge_le("0", "20"));
+                let delay_ms = float(ctx, "delay_ms", 12.0, Bounds::ge_le("1", "40"));
+                let mix_percent = float(ctx, "mix_percent", 50.0, Bounds::ge_le("0", "100"));
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    Some(Effect::Chorus(Chorus {
+                        id: id?,
+                        rate_hz: rate_hz?,
+                        depth_ms: depth_ms?,
+                        delay_ms: delay_ms?,
+                        mix_percent: mix_percent?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+            "saturation" => {
+                let mode = f.opt(ctx, "mode", SaturationMode::Soft, |c, x| {
+                    v::literal_str(c, x, &SaturationMode::NAMES).map(|m| match m {
+                        "hard" => SaturationMode::Hard,
+                        "tube" => SaturationMode::Tube,
+                        _ => SaturationMode::Soft,
+                    })
+                });
+                let drive_db = float(ctx, "drive_db", 12.0, Bounds::ge_le("0", "36"));
+                let output_db = float(ctx, "output_db", 0.0, Bounds::ge_le("-24", "24"));
+                let mix_percent = float(ctx, "mix_percent", 100.0, Bounds::ge_le("0", "100"));
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    Some(Effect::Saturation(Saturation {
+                        id: id?,
+                        mode: mode?,
+                        drive_db: drive_db?,
+                        output_db: output_db?,
+                        mix_percent: mix_percent?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
             _ => {
                 let decay_seconds = float(ctx, "decay_seconds", 1.5, Bounds::ge_le("0.1", "12"));
                 let predelay_ms = float(ctx, "predelay_ms", 10.0, Bounds::ge_le("0", "250"));
@@ -2130,6 +2309,18 @@ impl Effect {
                 o.float("width_percent", e.width_percent, 100.0);
                 o.float("mix_percent", e.mix_percent, 100.0);
                 o.int("seed", e.seed, 0);
+            }
+            Effect::Chorus(e) => {
+                o.float("rate_hz", e.rate_hz, 0.8);
+                o.float("depth_ms", e.depth_ms, 3.0);
+                o.float("delay_ms", e.delay_ms, 12.0);
+                o.float("mix_percent", e.mix_percent, 50.0);
+            }
+            Effect::Saturation(e) => {
+                o.str("mode", e.mode.as_str(), "soft");
+                o.float("drive_db", e.drive_db, 12.0);
+                o.float("output_db", e.output_db, 0.0);
+                o.float("mix_percent", e.mix_percent, 100.0);
             }
         }
         o.bool("bypass", self.bypass(), false);

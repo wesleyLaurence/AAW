@@ -32,9 +32,10 @@ struct SynthPanel: View {
     /// data is the source's name, `env2`, `lfo1`, `macros.tone`, `velocity`.
     static let sourceType = "org.aaw.synth-source"
 
-    /// How wide the panel is: a column for each part.
+    /// How wide the panel is: a column for each part, and one for each of
+    /// the patch's effects.
     static func width(_ synth: SynthView) -> CGFloat {
-        let columns = 2 + synth.oscillators.count + synth.envelopes.count + synth.lfos.count + (synth.macros.isEmpty ? 0 : 1) + 1
+        let columns = 2 + synth.oscillators.count + synth.envelopes.count + synth.lfos.count + (synth.macros.isEmpty ? 0 : 1) + 1 + synth.effects.count
         return CGFloat(columns) * (column + gap) + gap
     }
 
@@ -112,13 +113,19 @@ struct SynthPanel: View {
                                 .disabled(synth.lfos.count >= 4)
                             Button("Add Macro") { model.edit(.synthPartAdd(track: track.key, part: "macros")) }
                                 .disabled(synth.macros.count >= 8)
+                            Menu("Add Effect") {
+                                ForEach(DeviceChain.kinds, id: \.self) { kind in
+                                    Button(readable(kind)) { model.edit(.synthEffectAdd(track: track.key, kind: kind, index: nil)) }
+                                }
+                            }
+                            .disabled(synth.effects.count >= 32)
                         } label: {
                             Image(systemName: "plus").font(.system(size: 9))
                         }
                         .menuStyle(.borderlessButton)
                         .menuIndicator(.hidden)
                         .fixedSize()
-                        .help("Add an oscillator, an envelope, an LFO or a macro")
+                        .help("Add an oscillator, an envelope, an LFO, a macro or an effect of the patch's own")
                     }
                     .frame(height: 14)
                     ForEach(synth.fields, id: \.name) { field in row(field) }
@@ -129,9 +136,9 @@ struct SynthPanel: View {
                     column {
                         title("Osc \(group.name)", remove: synth.oscillators.count > 1 ? { removePart("oscillators", group.name) } : nil,
                               help: "Remove oscillator \(group.name)")
-                        WaveShape(wave: text(group.fields, ".wave"), pulseWidth: value(group.fields, ".pulse_width"))
+                        WaveShape(wave: text(group.fields, ".wave"), pulseWidth: value(group.fields, ".pulse_width"), cycle: group.cycle)
                             .frame(width: Self.drawingWidth, height: Self.waveHeight)
-                            .help("One cycle of the wave")
+                            .help(group.cycle.isEmpty ? "One cycle of the wave" : "One cycle of the table, as it is read at low pitches")
                         ForEach(group.fields, id: \.name) { field in row(field) }
                     }
                 }
@@ -206,11 +213,119 @@ struct SynthPanel: View {
                         MatrixRow(model: model, track: track, index: index, entry: entry)
                     }
                 }
+                ForEach(Array(synth.effects.enumerated()), id: \.element.key) { index, effect in
+                    column {
+                        SynthEffectColumn(model: model, track: track, effect: effect, index: index, count: synth.effects.count)
+                    }
+                }
             }
             .padding(.horizontal, Self.gap)
             .padding(.vertical, 5)
         }
         .frame(height: height)
+    }
+}
+
+/// One of the patch's own effects as a column: its name with the marks that
+/// bypass, move and remove it, and a row for each of its fields, each with
+/// the lane mark of the track, as an effect's panel has them. An equalizer
+/// lists its bands, each a group of rows with a mark to take it out.
+private struct SynthEffectColumn: View {
+    let model: SongModel
+    let track: TrackView
+    let effect: EffectView
+    let index: Int
+    let count: Int
+
+    private var title: String {
+        let kind = readable(effect.kind)
+        return effect.id.map { "\(kind) · \($0)" } ?? kind
+    }
+
+    private func row(_ field: FieldView, label: String) -> some View {
+        HStack(spacing: 4) {
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(width: 58, alignment: .leading)
+                .lineLimit(1)
+            FieldControl(model: model, effect: effect.key, field: field)
+            SynthLaneMark(model: model, track: track, field: field)
+        }
+        .frame(height: 18)
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Button {
+                model.edit(.effectBypass(effect: effect.key, on: !effect.bypass))
+            } label: {
+                Image(systemName: "power").foregroundStyle(effect.bypass ? Color.secondary : Color.green)
+            }
+            .help(effect.bypass ? "Bypassed: the effect does not process" : "Bypass")
+            Text(title).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 0)
+            if effect.kind == "eq" {
+                Button {
+                    model.edit(.bandAdd(effect: effect.key))
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("Add a band")
+                .disabled(effect.bands >= 16)
+            }
+            Button {
+                model.edit(.effectMove(effect: effect.key, index: UInt32(index - 1)))
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            .help("Move earlier in the patch's chain")
+            .disabled(index == 0)
+            Button {
+                model.edit(.effectMove(effect: effect.key, index: UInt32(index + 1)))
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+            .help("Move later in the patch's chain")
+            .disabled(index == count - 1)
+            Button {
+                model.edit(.effectRemove(effect: effect.key))
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .help("Remove the effect from the patch, with the lanes that automate it")
+        }
+        .buttonStyle(.borderless)
+        .font(.system(size: 8))
+        .frame(height: 14)
+        Group {
+            if effect.kind == "eq" {
+                ForEach(0..<Int(effect.bands), id: \.self) { band in
+                    HStack(spacing: 4) {
+                        Text("Band \(band + 1)").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
+                        Spacer(minLength: 0)
+                        Button {
+                            model.edit(.bandRemove(effect: effect.key, band: UInt32(band)))
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                        .buttonStyle(.borderless)
+                        .font(.system(size: 8))
+                        .help("Remove the band")
+                        .disabled(effect.bands <= 1)
+                    }
+                    .frame(height: 14)
+                    ForEach(effect.fields.filter { $0.band == UInt32(band) }, id: \.name) { field in
+                        row(field, label: field.label)
+                    }
+                }
+            } else {
+                ForEach(effect.fields, id: \.name) { field in
+                    row(field, label: field.label)
+                }
+            }
+        }
+        .opacity(effect.bypass ? 0.5 : 1)
     }
 }
 
@@ -282,6 +397,7 @@ extension SynthLayout {
         if target == "pitch" || target.hasSuffix(".pitch") { return "semitones" }
         if target.hasSuffix(".level_db") || target.hasSuffix(".drive_db") { return "dB" }
         if target.hasSuffix(".pan") { return "pan" }
+        if target.hasSuffix(".unison_detune_cents") { return "cents" }
         if target.hasSuffix("_percent") || target.hasSuffix(".pulse_width") { return "points" }
         return "octaves"
     }
@@ -538,10 +654,11 @@ private struct PatchSaveSheet: View {
 
 // MARK: Drawings
 
-/// One cycle of an oscillator's wave.
+/// One cycle of an oscillator's wave, or of its table.
 private struct WaveShape: View {
     let wave: String
     let pulseWidth: Double
+    var cycle: [Double] = []
 
     var body: some View {
         Canvas { context, size in
@@ -555,7 +672,8 @@ private struct WaveShape: View {
             let n = Int(size.width)
             for i in 0...n {
                 let t = Double(i) / Double(max(n, 1))
-                let y = box.midY - CGFloat(SynthLayout.wave(wave, at: t, pulseWidth: pulseWidth)) * box.height / 2
+                let value = cycle.isEmpty ? SynthLayout.wave(wave, at: t, pulseWidth: pulseWidth) : SynthLayout.table(cycle, at: t)
+                let y = box.midY - CGFloat(value) * box.height / 2
                 if i == 0 { path.move(to: CGPoint(x: CGFloat(i), y: y)) } else { path.addLine(to: CGPoint(x: CGFloat(i), y: y)) }
             }
             context.stroke(path, with: .color(Color(nsColor: Theme.knob).opacity(0.95)), lineWidth: 1.5)

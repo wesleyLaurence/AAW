@@ -14,31 +14,38 @@ kept.
 
 ## Next
 
-1. **The Synth's last item.** Its engine, `daw synth`, automation of the
-   patch, patches as files with the factory patches, `daw patch`, the
-   browser's Synth and the panel with its drawings, Save and Load, keys and
-   `note.preview` are built. Left: unison, wavetables and the patch's own
-   effects, and the factory patches gaining them. One pull request.
-   [features/synth.md](features/synth.md)
-2. **An app that stands alone on this Mac.** Sample search and import in Rust, so
+1. **An app that stands alone on this Mac.** Sample search and import in Rust, so
    the browser needs no Python. An app icon. An install step that puts the app in
    Applications. The Python tools found through a setting, not a path compiled in.
-3. **The `.aaw` file type and the project ID.** The project file under the app's
+2. **The `.aaw` file type and the project ID.** The project file under the app's
    own extension, opened by double-click, and an ID in it that the index matches a
    moved project by.
-4. **The workspace and the two levels.** The workspace folder with its managed
+3. **The workspace and the two levels.** The workspace folder with its managed
    instructions and `profile/`, `SONG.md` in a project, skills listed by name and
    description, the fixed project layout created by the tool, and `daw check`
    flagging files outside it.
-5. **The agent panel.** A conversation in the window, per project, over the
+4. **The agent panel.** A conversation in the window, per project, over the
    person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-6. **Other Macs.** The rest of the Python ported or carried in the bundle,
+5. **Other Macs.** The rest of the Python ported or carried in the bundle,
    signing with a Developer ID and notarizing, the licenses of the Rust crates
    gathered into the bundle, and first launch creating the workspace.
-7. **Sign-in buttons and other agents,** as the companies' terms allow.
+6. **Sign-in buttons and other agents,** as the companies' terms allow.
 
 ## Verify
 
+- **Unison, wavetables and the patch's effects by ear and by hand:** Supersaw,
+  Soft Pad, Pluck and Riser heard for their unison, with the detune and width
+  dragged while a note sounds and the Spread macro moved; each built-in table
+  heard on a chord and seen drawn in the panel, and a cycle cut from a sample
+  with `daw samples import` named as a table; the Organ patch against the old
+  sines; a chorus, a saturation of each mode, a delay and a reverb heard in a
+  patch and on a track, the chorus on a return; an effect added to the patch
+  from the + menu, its knob dragged, its lane added from the diamond, moved
+  with ◂ ▸ and removed with ×; a limiter inside a patch with a kick on
+  another track, for alignment. Tests measured unison's spread, level and
+  beating, a table's harmonics and bandlimit, the chorus's sweep, the
+  saturation's harmonics and the chain's latency; the panel's effect columns
+  were not seen in a picture and nothing was heard.
 - **The Synth's panel by hand and ear:** a patch loaded with ◂ ▸ and from
   the menu while the song plays, Save… over one of Mine and Save As… with a
   name that is taken; the filter's corner and an envelope's handles dragged
@@ -181,9 +188,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### Sound
 
-- Saturation and a clipper. Agents making loud mixes stopped at the limiter.
-- Beyond the Synth (Next 1): multi-frame wavetables with a sweepable position
-  and Serum's or other WAV tables read; a second filter with routing; a MIDI
+- A clipper. Agents making loud mixes stopped at the limiter; saturation is
+  built, a clipper that holds a ceiling as a limiter does without its look-ahead
+  is not.
+- Beyond the Synth: multi-frame wavetables with a sweepable position and
+  Serum's or other WAV tables read; a second filter with routing; a MIDI
   keyboard played through `note.preview`; a note held and let go rather than
   a beat long, and `note.preview` through a Sampler, whose pitch needs audio
   prepared on the way; an LFO's rate and phase as matrix targets; a
@@ -194,8 +203,9 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   sample; a `daw generate` command for the agent and a panel in the app.
   [features/generated-audio.md](features/generated-audio.md)
 - Glide and a sustain loop on the sampler.
-- More effects: utility, chorus, phaser, gate, transient shaper, multiband
-  compressor, pitch shift.
+- More effects: utility, phaser, gate, transient shaper, multiband
+  compressor, pitch shift. An effect dragged from the browser into a Synth's
+  patch, as the + menu adds one.
 - Groups, and sends from a return to a return.
 - Tempo and time signature changes. 4/4 and one tempo are assumed throughout,
   the beat map included.

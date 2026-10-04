@@ -4,10 +4,12 @@
 //! exactly as the static spec would; only moving lanes take the automated path.
 
 use crate::biquad::{band, butter, Cascade};
+use crate::chorus::Chorus;
 use crate::delay::Delay;
 use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reduction};
 use crate::envelope::{Envelope, Knob, Param};
 use crate::reverb::{Kernel, Reverb, Shape};
+use crate::saturation::Saturation;
 use crate::svf::{self, Svf};
 use crate::{Clock, Frame};
 use aaw_model::{frame, Effect, FilterMode};
@@ -101,6 +103,8 @@ impl Plan {
                 kernel = Some(kernels.get(shape));
                 hash(("reverb", shape.key()))
             }
+            Effect::Chorus(_) => hash("chorus"),
+            Effect::Saturation(s) => hash(("saturation", s.mode)),
         };
         Plan {
             effect: effect.clone(),
@@ -127,6 +131,8 @@ pub enum Device {
     Limiter(Limiter),
     Delay(Delay),
     Reverb(Reverb),
+    Chorus(Chorus),
+    Saturation(Saturation),
 }
 
 /// A device in a chain.
@@ -214,6 +220,22 @@ impl Unit {
                 let kernel = plan.kernel.clone().expect("a reverb's plan has its kernel");
                 Device::Reverb(Reverb::new(kernel, knob("mix_percent", r.mix_percent), max_block, stagger * 37 % 256))
             }
+            Effect::Chorus(c) => Device::Chorus(Chorus::new(
+                knob("rate_hz", c.rate_hz),
+                knob("depth_ms", c.depth_ms),
+                knob("delay_ms", c.delay_ms),
+                knob("mix_percent", c.mix_percent),
+                rate,
+                max_block,
+            )),
+            Effect::Saturation(s) => Device::Saturation(Saturation::new(
+                s.mode,
+                knob("drive_db", s.drive_db),
+                knob("output_db", s.output_db),
+                knob("mix_percent", s.mix_percent),
+                rate,
+                max_block,
+            )),
         };
         Unit {
             device,
@@ -232,6 +254,8 @@ impl Unit {
             Device::Limiter(d) => d.process(x, clock),
             Device::Delay(d) => d.process(x, clock),
             Device::Reverb(d) => d.process(x, clock),
+            Device::Chorus(d) => d.process(x, clock),
+            Device::Saturation(d) => d.process(x, clock),
         }
     }
 
@@ -247,6 +271,8 @@ impl Unit {
             (Device::Limiter(new), Device::Limiter(was)) => new.take_over(was),
             (Device::Delay(new), Device::Delay(was)) => new.take_over(was),
             (Device::Reverb(new), Device::Reverb(was)) => new.take_over(was),
+            (Device::Chorus(new), Device::Chorus(was)) => new.take_over(was),
+            (Device::Saturation(new), Device::Saturation(was)) => new.take_over(was),
             _ => {}
         }
     }

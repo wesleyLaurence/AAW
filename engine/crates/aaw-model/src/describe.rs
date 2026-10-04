@@ -181,6 +181,20 @@ const REVERB: &[Field] = &[
     },
 ];
 
+const CHORUS: &[Field] = &[
+    log(number("rate_hz", "Rate", 0.05, 10.0, 0.8, "Hz")),
+    number("depth_ms", "Depth", 0.0, 20.0, 3.0, "ms"),
+    number("delay_ms", "Delay", 1.0, 40.0, 12.0, "ms"),
+    number("mix_percent", "Mix", 0.0, 100.0, 50.0, "%"),
+];
+
+const SATURATION: &[Field] = &[
+    choice("mode", "Mode", &crate::schema::SaturationMode::NAMES, Initial::Text("soft")),
+    number("drive_db", "Drive", 0.0, 36.0, 12.0, "dB"),
+    number("output_db", "Output", -24.0, 24.0, 0.0, "dB"),
+    number("mix_percent", "Mix", 0.0, 100.0, 100.0, "%"),
+];
+
 /// The fields of a sampler's pad that the Sampler device sets, in the order
 /// the document writes them: what shapes how one sample plays on the keys.
 /// `start_seconds` and `end_seconds` go as far as the pad's file does, which
@@ -231,12 +245,16 @@ pub const SYNTH: &[Field] = &[
     integer("seed", "Seed", 0.0, 4294967295.0, 0.0),
 ];
 
-/// An oscillator's fields. A change of wave or of its filter routing jumps
-/// the waveform, so a playing song fades through it; `phase`, which only a
-/// new note reads, is sent when a change ends and is not automated, and
-/// left out starts each note at a random place; the rest glide.
+/// An oscillator's fields. A change of wave, of its table, of its unison
+/// count or of its filter routing jumps the waveform, so a playing song
+/// fades through it; `phase`, which only a new note reads, is sent when a
+/// change ends and is not automated, and left out starts each note at a
+/// random place; the rest glide. `table`'s choices are the built-in
+/// wavetables; a sample of the project is a choice too, which only the song
+/// knows.
 pub const OSCILLATOR: &[Field] = &[
     choice("wave", "Wave", &crate::schema::Wave::NAMES, Initial::Text("saw")),
+    choice("table", "Table", &crate::schema::WAVETABLES, Initial::Text("organ")),
     number("level_db", "Level", -96.0, 24.0, 0.0, "dB"),
     number("pan", "Pan", -1.0, 1.0, 0.0, ""),
     integer("octave", "Octave", -4.0, 4.0, 0.0),
@@ -244,6 +262,9 @@ pub const OSCILLATOR: &[Field] = &[
     number("detune_cents", "Detune", -100.0, 100.0, 0.0, "cents"),
     number("pulse_width", "Pulse width", 1.0, 99.0, 50.0, "%"),
     structural(optional(number("phase", "Phase", 0.0, 100.0, 0.0, "%"), 0.0)),
+    structural(integer("unison", "Unison", 1.0, 16.0, 1.0)),
+    number("unison_detune_cents", "Unison detune", 0.0, 100.0, 15.0, "cents"),
+    number("unison_width_percent", "Unison width", 0.0, 100.0, 100.0, "%"),
     flag("filter", "Filtered", true),
 ];
 
@@ -310,6 +331,8 @@ pub fn effect(kind: &str) -> &'static [Field] {
         "limiter" => LIMITER,
         "delay" => DELAY,
         "reverb" => REVERB,
+        "chorus" => CHORUS,
+        "saturation" => SATURATION,
         _ => &[],
     }
 }
@@ -558,7 +581,7 @@ mod synth_tests {
             let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| *k != "patch").collect();
             let listed: Vec<&str> = fields.iter().map(|f| f.name).collect();
             let listed: Vec<&str> = if *part == "synth" {
-                listed.into_iter().chain(["oscillators", "filter", "envelopes", "lfos", "modulation", "macros"]).collect()
+                listed.into_iter().chain(["oscillators", "filter", "envelopes", "lfos", "modulation", "macros", "effects"]).collect()
             } else {
                 listed
             };
@@ -603,5 +626,31 @@ mod synth_tests {
         }
         assert!(synth_param(&plain, "macros.m").is_ok() && synth_param(&plain, "macros.x").is_err());
         assert!(synth_param(&plain, "oscillators.b.level_db").is_err());
+        // The patch's effects are automated as effects.REF.FIELD, by ID or index.
+        let with = synth(&["effects"], Some(Value::List(vec![
+            dict(vec![("type", Value::str("chorus")), ("id", Value::str("wide"))]),
+            dict(vec![("type", Value::str("saturation"))]),
+            dict(vec![("type", Value::str("eq")), ("bands", Value::List(vec![dict(vec![("shape", Value::str("bell")), ("freq_hz", Value::Float(500.0)), ("gain_db", Value::Float(2.0))])]))]),
+        ])))
+        .unwrap();
+        assert!(synth_param(&with, "effects.wide.mix_percent").is_ok() && synth_param(&with, "effects.0.rate_hz").is_ok());
+        assert!(synth_param(&with, "effects.1.drive_db").is_ok() && synth_param(&with, "effects.1.mode").is_err());
+        assert!(synth_param(&with, "effects.2.bands.0.gain_db").is_ok() && synth_param(&with, "effects.2.gain_db").is_err());
+        assert!(synth_param(&with, "effects.3.mix_percent").is_err() && synth_param(&with, "effects.nope.mix_percent").is_err());
+        assert_eq!(crate::rules::synth_value(&with, "effects.wide.mix_percent"), Some(50.0));
+        assert_eq!(crate::rules::synth_value(&with, "effects.2.bands.0.gain_db"), Some(2.0));
+        let params = crate::rules::synth_params(&with);
+        assert!(params.contains(&"effects.wide.rate_hz".to_string()) && params.contains(&"effects.1.output_db".to_string()) && params.contains(&"effects.2.bands.0.q".to_string()));
+        // A patch's compressor has no sidechain, and a wavetable is a built-in table or a sample.
+        let e = synth(&["effects"], Some(Value::List(vec![dict(vec![("type", Value::str("compressor")), ("threshold_db", Value::Float(-20.0)), ("sidechain", Value::str("t"))])]))).unwrap_err();
+        assert!(e.contains("no sidechain"), "{e}");
+        assert!(synth(&["oscillators", "a", "table"], Some(Value::str("fold"))).is_ok());
+        let e = synth(&["oscillators", "a", "wave"], Some(Value::str("wavetable"))).map(|s| s.oscillators["a"].table.clone());
+        assert_eq!(e.unwrap(), "organ");
+        let mut both = synth(&["oscillators", "a", "wave"], Some(Value::str("wavetable"))).unwrap();
+        both.oscillators[0].table = "missing".into();
+        let e = synth(&["oscillators", "a"], Some(both.oscillators[0].dump(true))).unwrap_err();
+        assert!(e.contains("wavetable missing"), "{e}");
+        assert!(synth(&["oscillators", "a", "table"], Some(Value::str("not an id"))).unwrap_err().contains("built-in wavetable"));
     }
 }
