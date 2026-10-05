@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "beats", "joins", "export"];
+pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -115,7 +115,14 @@ const AUTOMATION: &[(&str, &str)] = &[
     ("sidechain", "Sidechain keys are taken after the source's inserts and before its fader, so gain_db, pan and send automation on a key track never change ducking; its effect automation does."),
     ("stems", "Track and return stems include their gain, pan and effect automation and master gain automation, like the static values."),
     ("report", "Render reports list each channel's lane params under tracks.ID.automation, master lanes under master_automation, and automated effect fields under the effect's automated key."),
-    ("check", "daw check warns about lanes on bypassed effects."),
+    ("check", "daw check warns about lanes on bypassed effects (lane-on-bypassed-effect); see daw describe check."),
+];
+
+const CHECK: &[(&str, &str)] = &[
+    ("command", "daw check PROJECT prints daw inspect's summary, each sample's root_note against the pitch measured from its audio, and warnings: what a render will play that was probably not meant. It reads the song and is cheap: run it after writing notes or placing clips, before rendering."),
+    ("warnings", "warnings is a list of objects: code, listed under codes; level, warning or info for what is often deliberate; message, in words; paths, what it is about as commands name it (tracks.drums.clips.1, tracks.keys.clips.chords, samples.kick); and at, the song beat, when it has a place in time. An empty list is a clean song."),
+    ("duplicate", "daw clip duplicate SONG CLIP puts the copy right after the original or, when copies already follow it there, after the last of them, so duplicating again lays the copies in a row; --times N makes N copies in a row as one step, and --at BEAT puts them from that beat."),
+    ("limits", "Checks read the song, not the audio: two tracks masking each other is for daw listen. A note is counted at its written pitch; an instrument tuned an octave away, or filtered thin, is not known to register-crowded."),
 ];
 
 const EDIT: &[(&str, &str)] = &[
@@ -305,6 +312,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("effects", "Insert effects and what each takes, sends and returns."),
     ("automation", "Lanes and points: what a lane can move and how values move between points."),
     ("edit", "Editing a finished song from audio clips: cuts, joins, crossfades, speed."),
+    ("check", "daw check: warnings about the song, each with a code: stacked clips, notes struck twice, crowded low registers."),
     ("beats", "daw samples beats: a song's tempo, beats, downbeats and phrases."),
     ("joins", "daw joins: checking a render's joins and length."),
     ("export", "daw export: a named WAV, AAC or MP3 file at a stated level."),
@@ -637,8 +645,9 @@ pub fn describe(topic: &str) -> Option<Json> {
     if let Some(lines) = fields(topic) {
         out.insert("fields".into(), lines);
     }
-    // What the schema cannot say: the matrix and what lanes can move.
-    for key in ["modulation", "automatable"] {
+    // What the schema cannot say: the matrix, what lanes can move and what
+    // check's codes mean.
+    for key in ["modulation", "automatable", "codes"] {
         if let Some(v) = full.remove(key) {
             out.insert(key.into(), v);
         }
@@ -694,6 +703,7 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
             "semantics": texts(AUTOMATION),
         }),
         "edit" => json!({"schema": {"audio_clip": model("AudioClip")}, "semantics": texts(EDIT)}),
+        "check" => json!({"semantics": texts(CHECK), "codes": texts(crate::check::CODES)}),
         "beats" => json!({"semantics": texts(BEATS)}),
         "joins" => json!({"semantics": texts(JOINS)}),
         "export" => json!({"semantics": texts(EXPORT)}),

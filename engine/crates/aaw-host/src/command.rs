@@ -113,6 +113,9 @@ pub enum Command {
         /// A note clip copy's ID; without one it is given the next free one.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         id: Option<String>,
+        /// How many copies, one after another; one when left out.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        times: Option<Json>,
     },
     #[serde(rename = "clip.remove")]
     ClipRemove { clip: String },
@@ -1246,31 +1249,20 @@ impl<'a> Edit<'a> {
                 self.set_leaf(&loc, "repeats", json_value(repeats)?);
                 out.label = format!("Set repeats of clip {} to {}", self.clip_name(&loc), short(repeats));
             }
-            ClipDuplicate { clip, track, at, id } => {
+            ClipDuplicate { clip, track, at, id, times } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
                 let source = self.node(&owner).get("clips").expect("clips").items()[i].node.clone();
                 let midi = self.is_midi(&owner);
-                let at = match at {
-                    Some(a) => json_value(a)?,
-                    None if midi => match (exact(source.get("at")), exact(source.get("length_beats"))) {
-                        (Some(s), Some(l)) => beat_value(&(s + l)),
-                        _ => return Err(format!("{clip}: cannot place the copy; pass at")),
+                let times = match times {
+                    None => 1,
+                    Some(t) => match t.as_i64() {
+                        Some(n @ 1..=1000) => n as usize,
+                        _ => return Err(format!("times is a number of copies from 1 to 1000, not {}", short(t))),
                     },
-                    None => {
-                        // Right after the original: its start plus its span.
-                        let pattern = source.field("pattern").unwrap_or_default();
-                        let length = exact(self.root.get("patterns").and_then(|p| p.get(pattern)).and_then(|p| p.get("length_beats")));
-                        let start = exact(source.get("at"));
-                        let repeats = match source.get("repeats") {
-                            Some(Node::Leaf(Value::Int(n))) => Some(BigRational::from_integer(n.clone())),
-                            _ => None,
-                        };
-                        match (start, length, repeats) {
-                            (Some(s), Some(l), Some(r)) => beat_value(&(s + l * r)),
-                            _ => return Err(format!("{clip}: cannot place the copy; pass at")),
-                        }
-                    }
                 };
+                if times > 1 && id.is_some() {
+                    return Err(format!("{clip}: id names one copy; leave it out to make {times}"));
+                }
                 let dest = match track {
                     Some(t) => self.track(t)?,
                     None => owner.clone(),
@@ -1278,24 +1270,55 @@ impl<'a> Edit<'a> {
                 if self.is_midi(&dest) != midi {
                     return Err(format!("{clip} cannot be copied to {}, which holds the other kind of clip", self.name(&dest)));
                 }
-                // The copy owns its notes, as new objects. A note clip's copy
-                // has an ID of its own, and its notes keep theirs, which are
-                // their clip's.
-                let mut copy = Node::new(&source.value());
-                let id = match id {
-                    Some(id) => Some(id.clone()),
-                    None => midi.then(|| self.next_clip_id()),
+                let span = self.clip_span(&source);
+                // Copies at a beat given go one after another from it; without
+                // one, each goes right after the original or, past clips that
+                // already follow it there, after the last of them, so that
+                // duplicating again lays the copies in a row.
+                let mut next = match at {
+                    Some(a) => Some(beat_at(a)?),
+                    None => match (exact(source.get("at")).or_else(|| source.get("at").is_none().then(BigRational::default)), &span) {
+                        (Some(s), Some(l)) => Some(s + l),
+                        _ => return Err(format!("{clip}: cannot place the copy; pass at")),
+                    },
                 };
-                if let Some(m) = copy.map_mut() {
-                    m.insert("at".into(), Node::Leaf(at));
-                    if let Some(id) = id {
-                        m.insert("id".into(), Node::Leaf(Value::Str(id)));
+                let name = self.clip_name(&[owner.clone(), vec![Step::Key("clips".into()), Step::Index(i)]].concat());
+                for k in 0..times {
+                    let mut place = next.take().ok_or_else(|| format!("{clip}: cannot place the next copy; pass at"))?;
+                    // A copy goes in the list after the clip it follows, so
+                    // the list reads in the order the copies play.
+                    let mut index = (dest == owner).then_some(i + 1 + k);
+                    if at.is_none() {
+                        let (beat, after) = self.past_run(&dest, place);
+                        place = beat;
+                        index = after.map(|j| j + 1).or(index);
                     }
+                    // The copy owns its notes, as new objects. A note clip's copy
+                    // has an ID of its own, and its notes keep theirs, which are
+                    // their clip's.
+                    let mut copy = Node::new(&source.value());
+                    let id = match id {
+                        Some(id) => Some(id.clone()),
+                        None => midi.then(|| self.next_clip_id()),
+                    };
+                    let value = match (k, at) {
+                        // A beat given for one copy is written as it was given.
+                        (0, Some(a)) => json_value(a)?,
+                        _ => beat_value(&place),
+                    };
+                    if let Some(m) = copy.map_mut() {
+                        m.insert("at".into(), Node::Leaf(value));
+                        if let Some(id) = id {
+                            m.insert("id".into(), Node::Leaf(Value::Str(id)));
+                        }
+                    }
+                    out.made.push(self.insert(&dest, "clips", index, copy)?);
+                    next = span.as_ref().map(|l| place + l);
                 }
-                let index = (dest == owner).then_some(i + 1);
-                let name = self.clip_name(&[owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat());
-                out.made.push(self.insert(&dest, "clips", index, copy)?);
-                out.label = format!("Duplicate clip {name}");
+                out.label = match times {
+                    1 => format!("Duplicate clip {name}"),
+                    n => format!("Duplicate clip {name} {n} times"),
+                };
             }
             ClipRemove { clip } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
@@ -2104,6 +2127,42 @@ impl<'a> Edit<'a> {
 
     fn is_midi(&self, track: &[Step]) -> bool {
         self.node(track).field("type") == Some("midi")
+    }
+
+    /// How many beats a pattern or note clip lasts: a note clip's length, a
+    /// pattern clip's pattern by its repeats.
+    fn clip_span(&self, clip: &Node) -> Option<BigRational> {
+        if let Some(length) = exact(clip.get("length_beats")) {
+            return Some(length);
+        }
+        let pattern = clip.field("pattern")?;
+        let length = exact(self.root.get("patterns").and_then(|p| p.get(pattern)).and_then(|p| p.get("length_beats")))?;
+        let repeats = match clip.get("repeats") {
+            Some(Node::Leaf(Value::Int(n))) => BigRational::from_integer(n.clone()),
+            None => BigRational::from_integer(1.into()),
+            _ => return None,
+        };
+        Some(length * repeats)
+    }
+
+    /// The first beat at or after `beat` where no clip of `track` starts:
+    /// past the run of clips that follow one another from it, each starting
+    /// where the last ends; and the index of the last clip of the run, if any.
+    fn past_run(&self, track: &[Step], mut beat: BigRational) -> (BigRational, Option<usize>) {
+        let clips = self.node(track).get("clips").map_or(&[][..], Node::items);
+        let mut last = None;
+        loop {
+            let ends = clips
+                .iter()
+                .enumerate()
+                .filter(|(_, c)| exact(c.node.get("at")).unwrap_or_default() == beat)
+                .filter_map(|(j, c)| self.clip_span(&c.node).map(|l| (&beat + l, j)))
+                .max();
+            match ends {
+                Some((end, j)) if end > beat => (beat, last) = (end, Some(j)),
+                _ => return (beat, last),
+            }
+        }
     }
 
     fn midi_track(&self, id: &str) -> Result<Loc> {

@@ -82,7 +82,8 @@ def test_a_sampler_plays_the_notes_and_check_names_the_ones_it_cannot(tmp_path):
     assert np.abs(x[: 4 * beat]).max() == 0
     code, checked = cli("check", path)
     assert code == 0, checked
-    assert "keys.clip1: the sampler maps no pad to notes 69 (A4), which are silent" in checked["warnings"]
+    messages = [w["message"] for w in checked["warnings"]]
+    assert "keys.clip1: the sampler maps no pad to notes 69 (A4), which are silent" in messages
     # The Python timeline reads a MIDI track's sounds and clips.
     code, timeline = cli("timeline", path)
     assert code == 0, timeline
@@ -114,8 +115,9 @@ def test_a_synth_plays_the_phrase_is_checked_and_auditioned(tmp_path):
     assert again["audio_sha256"] == report["audio_sha256"]
     code, checked = cli("check", path)
     assert code == 0, checked
-    assert "keys: macro tone moves nothing; the matrix has no entry with source macros.tone" in checked["warnings"]
-    assert any(w.startswith("keys: 3 notes sound at once and the synth has 2 voices") for w in checked["warnings"])
+    messages = [w["message"] for w in checked["warnings"]]
+    assert "keys: macro tone moves nothing; the matrix has no entry with source macros.tone" in messages
+    assert any(m.startswith("keys: 3 notes sound at once and the synth has 2 voices") for m in messages)
     heard = daw("synth", "audition", path, "keys", "--notes", "C2,G2", "--length-beats", 1)
     assert heard["notes"] == ["C2", "G2"] and heard["seconds"] > 1.0
     assert heard["peak_dbfs"] < 3 and heard["loudness_lufs"] < 0

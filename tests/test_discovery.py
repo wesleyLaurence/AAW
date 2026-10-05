@@ -12,7 +12,7 @@ import soundfile as sf
 from agent_daw.model import save
 from helpers import SR, cli, daw
 
-TOPICS = ["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "beats", "joins", "export"]
+TOPICS = ["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export"]
 
 
 def run(*args, cwd=None):
@@ -127,7 +127,7 @@ def test_inspect_lists_clips_in_the_order_they_play(tmp_path):
     assert [c["id"] for c in tracks[1]["clips"]] == ["first", "later"]
 
 
-def test_the_map_shows_copies_stacked_on_one_bar(tmp_path):
+def test_duplicates_lay_out_in_a_row_and_a_stack_is_mapped_and_checked(tmp_path):
     # The agent's song of October 4, 2026: a clip duplicated three times.
     song = daw("init", tmp_path / "song", "--bars", 8)["project"]
     sf.write(tmp_path / "song" / "kick.wav", np.zeros(SR // 10), SR)
@@ -141,12 +141,20 @@ def test_the_map_shows_copies_stacked_on_one_bar(tmp_path):
         daw("clip", "duplicate", song, "tracks.drums.clips.0")
     out = run("map", song).stdout
     # Printed JSON keeps the grid's columns, a line of map each.
-    assert '    "drums  AA##....",' in out.splitlines()
+    assert '    "drums  AAAAAAAA",' in out.splitlines()
     mapped = json.loads(out)
     assert mapped["map"][0] == "bar    1   5"
     assert mapped["clips"]["A"].split() == [f"tracks.drums.clips.{i}" for i in range(4)]
-    assert "pattern p, 4 beats, 4 hits; drums bars 1 ×2, 3 ×2, 3 ×2, 3 ×2" in mapped["map"][3]
+    assert "pattern p, 4 beats, 4 hits; drums bars 1 ×2, 3 ×2, 5 ×2, 7 ×2" in mapped["map"][3]
     assert "daw map PROJECT" in daw("describe", "project")["semantics"]["map"]
+    assert cli("check", song)[1]["warnings"] == []
+    # A copy put on a beat where the same clip starts is stacked, and said so.
+    daw("clip", "duplicate", song, "tracks.drums.clips.0", "--at", 8)
+    assert '    "drums  AA##AAAA",' in run("map", song).stdout.splitlines()
+    warnings = cli("check", song)[1]["warnings"]
+    assert [w["code"] for w in warnings] == ["clips-stacked"]
+    assert warnings[0]["at"] == 8 and len(warnings[0]["paths"]) == 2
+    assert "clips-stacked" in daw("describe", "check")["codes"]
 
 
 def test_the_first_song_recipe_runs_as_written(tmp_path, monkeypatch):

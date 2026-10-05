@@ -619,7 +619,12 @@ def test_automation_round_trip_and_cli(song):
     assert inspected["master_automation"] == []
     checked = ok("check", path)
     assert checked["warnings"] == [
-        "space: effects.echo.feedback_percent automates a bypassed effect"
+        {
+            "code": "lane-on-bypassed-effect",
+            "level": "warning",
+            "message": "space: effects.echo.feedback_percent automates a bypassed effect",
+            "paths": ["returns.space.automation.0"],
+        }
     ]
     described = ok("describe", "automation", "--schema")
     assert described["automatable"]["effects"]["filter"] == {"cutoff_hz": "log"}

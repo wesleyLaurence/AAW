@@ -84,13 +84,13 @@ def test_check_warns_of_a_stretch_that_can_be_heard(tmp_path):
     song = tone_song(tmp_path / "song", 120 * FASTER)
     assert cli("check", song)[1]["warnings"] == []
     daw("set", song, "session.tempo", 132)
-    assert cli("check", song)[1]["warnings"] == [
+    assert [w["message"] for w in cli("check", song)[1]["warnings"]] == [
         "tone.x: stretched +10.0% from 120 BPM; more than about 8% can be heard"
     ]
     project = load(song)
     project["tracks"][0]["pads"]["x"]["source_bpm"] = None
     save(project, song)
-    assert "nothing is stretched" in cli("check", song)[1]["warnings"][0]
+    assert "nothing is stretched" in cli("check", song)[1]["warnings"][0]["message"]
 
 
 def test_a_missing_stretcher_is_named(tmp_path, monkeypatch):

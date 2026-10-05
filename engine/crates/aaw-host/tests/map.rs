@@ -46,10 +46,11 @@ fn three_duplicates_on_one_beat_show_as_stacked() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
     let mut s = Session::open(&path, true).unwrap();
-    // The drums' second clip plays from bar 5 to bar 8; each copy lands after it.
+    // The drums' second clip plays from bar 5 to bar 8; each copy is put on
+    // bar 9, as a duplicate was before copies were laid in a row.
     edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 48})).unwrap();
     for _ in 0..3 {
-        edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.1"})).unwrap();
+        edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.1", "at": 32})).unwrap();
     }
     let m = map(&s, None, None, None, &["drums"], false);
     let t = lines(&m);

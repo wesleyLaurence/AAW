@@ -176,6 +176,46 @@ fn clips_add_repeat_and_duplicate() {
     assert_eq!(get(&s, "tracks.drums.clips").as_array().unwrap().len(), 3);
 }
 
+#[test]
+fn duplicating_again_lays_the_copies_in_a_row() {
+    let (_d, mut s) = open(false);
+    edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 64})).unwrap();
+    edit(&mut s, json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": 40})).unwrap();
+    let starts = |s: &Session| -> Vec<Json> {
+        let clips = get(s, "tracks.drums.clips");
+        clips.as_array().unwrap().iter().map(|c| c["at"].clone()).collect()
+    };
+    let before = starts(&s);
+    // Three duplicates of the one-bar clip at beat 40 lay out four in a row,
+    // as pressing ⌘D three times does.
+    let mut made = Vec::new();
+    for _ in 0..3 {
+        let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2"})).unwrap();
+        made.push(get(&s, &format!("{}.at", r["path"].as_str().unwrap())));
+    }
+    assert_eq!(made, [json!(44), json!(48), json!(52)]);
+    // Each copy goes in the list after the clip it follows, so the list reads
+    // in the order they play.
+    assert_eq!(starts(&s)[2..6], [json!(40), json!(44), json!(48), json!(52)]);
+    // --times makes copies in a row as one step, past those already there.
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2})).unwrap();
+    assert_eq!(r["label"], json!("Duplicate clip beat at 40 2 times"));
+    let paths: Vec<&str> = r["paths"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
+    let ats: Vec<Json> = paths.iter().map(|p| get(&s, &format!("{p}.at"))).collect();
+    assert_eq!(ats, [json!(56), json!(60)]);
+    assert_eq!(starts(&s).len(), before.len() + 5);
+    // With a beat, the copies go from it, one after another.
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "at": "1/3", "times": 2})).unwrap();
+    let ats: Vec<Json> = r["paths"].as_array().unwrap().iter().map(|p| get(&s, &format!("{}.at", p.as_str().unwrap()))).collect();
+    assert_eq!(ats, [json!("1/3"), json!("13/3")]);
+    // Copies that would run past the song are refused, and so is an ID for several.
+    assert!(edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2})).unwrap_err().contains("exceeds session"));
+    let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2, "id": "x"})).unwrap_err();
+    assert!(e.contains("id names one copy"), "{e}");
+    let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 0})).unwrap_err();
+    assert!(e.contains("times is a number of copies from 1 to 1000"), "{e}");
+}
+
 /// A song of ten seconds at 120 BPM on a track of its own, as one audio clip
 /// whose second 1 plays on beat 4.
 fn with_song(s: &mut Session) -> String {

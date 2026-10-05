@@ -71,7 +71,7 @@ status per sample under `root_notes`:
 - `unverified`: no reliable pitch was measured, as with noise, chords or heavy
   modulation.
 
-Any status other than `ok` also appears in `warnings`. Warnings do not make a
+Any status other than `ok` also appears in `warnings`, as `root-note-mismatch`. Warnings do not make a
 project invalid. The declared note stays authoritative, because a deliberately
 different root is sometimes wanted.
 

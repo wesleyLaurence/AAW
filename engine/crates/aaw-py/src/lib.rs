@@ -6,7 +6,6 @@
 //! lists, numbers and strings. Anything that takes a song validates it first.
 //! A document the model refuses raises `ValueError` with the model's message.
 
-use aaw_model::rules::{owners, target, TargetKind};
 use aaw_model::value::{Key, Value};
 use aaw_model::{Beat, ModelError, Project};
 use num_bigint::BigInt;
@@ -15,6 +14,7 @@ use num_traits::ToPrimitive;
 use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// A Python object as the tree validation reads. Tuples read as lists.
@@ -151,51 +151,16 @@ fn schedule(data: &Bound<'_, PyAny>) -> PyResult<Vec<(i64, String, String, Optio
     Ok(triggers.into_iter().map(|t| (t.start, t.track_id, t.pad, t.cutoff)).collect())
 }
 
-/// What `daw check` warns about in a valid song: lanes on bypassed effects,
-/// pads stretched far enough to hear or with nothing to stretch to, and notes
-/// that do not play because they start past their clip's end or no pad is
-/// mapped to them.
+/// What `daw check` warns about in a valid song, as a JSON list of objects
+/// with a code, a level, a message, the paths of what each is about and its
+/// beat. `seconds` is each sample's file length by sample ID, for audio clips
+/// that play to the end of their file.
 #[pyfunction]
-fn warnings(data: &Bound<'_, PyAny>) -> PyResult<Vec<String>> {
+#[pyo3(signature = (data, seconds=None))]
+fn warnings(data: &Bound<'_, PyAny>, seconds: Option<HashMap<String, f64>>) -> PyResult<String> {
     let p = project(data)?;
-    let mut out = Vec::new();
-    for t in &p.tracks {
-        let pads = t.sound_pads().iter().map(|(name, pad)| (name.clone(), pad.stretch, pad.source_bpm));
-        let clips = t.audio.iter().enumerate().map(|(i, clip)| (format!("audio.{i}"), clip.stretch, clip.source_bpm));
-        for (name, stretch, source_bpm) in pads.chain(clips) {
-            if stretch != aaw_model::Stretch::PreservePitch {
-                continue;
-            }
-            match source_bpm {
-                None => out.push(format!(
-                    "{}.{name}: stretch is preserve_pitch but source_bpm is not set, so nothing is stretched",
-                    t.id
-                )),
-                Some(bpm) => {
-                    let percent = (p.session.tempo / bpm - 1.0) * 100.0;
-                    if percent.abs() > 8.0 {
-                        out.push(format!(
-                            "{}.{name}: stretched {percent:+.1}% from {bpm} BPM; more than about 8% can be heard",
-                            t.id
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    for owner in owners(&p) {
-        for lane in owner.automation() {
-            let Ok(t) = target(owner, &lane.param) else { continue };
-            if let TargetKind::Effect { index, .. } = t.kind {
-                if owner.effects()[index].bypass() {
-                    out.push(format!("{}: {} automates a bypassed effect", owner.name(), lane.param));
-                }
-            }
-        }
-    }
-    out.extend(aaw_model::rules::note_warnings(&p));
-    out.extend(aaw_model::rules::synth_warnings(&p));
-    Ok(out)
+    let found = aaw_model::check::check(&p, &seconds.unwrap_or_default());
+    Ok(serde_json::Value::Array(found.iter().map(|w| w.to_json()).collect()).to_string())
 }
 
 /// A beat written as an integer, a decimal or a fraction, as an exact

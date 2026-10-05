@@ -5,7 +5,7 @@ use crate::beat::{float_fraction, parse_fraction};
 use crate::pyfmt::{float_repr, format_g};
 use crate::schema::{Effect, Lane, PadMode, Project, Return, Track};
 use num_rational::BigRational;
-use num_traits::{Signed, ToPrimitive};
+use num_traits::ToPrimitive;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -674,52 +674,6 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
     ))
 }
 
-/// What `daw check` says of a song's synths: a macro no entry uses, more
-/// notes stacked than the synth has voices, and a release the song's end
-/// cuts short.
-pub fn synth_warnings(p: &Project) -> Vec<String> {
-    let mut out = Vec::new();
-    let length = p.session.length_exact();
-    for t in &p.tracks {
-        let Some(midi) = &t.midi else { continue };
-        let Some(synth) = midi.synth() else { continue };
-        for name in synth.macros.keys() {
-            if !synth.modulation.iter().any(|m| m.source == format!("macros.{name}")) {
-                out.push(format!("{}: macro {name} moves nothing; the matrix has no entry with source macros.{name}", t.id));
-            }
-        }
-        // The notes as they sound, in order: the most at once against the voices.
-        let notes = crate::schedule::track_notes(p, midi);
-        let mut edges: Vec<(i64, i32)> = notes.iter().flat_map(|n| [(n.start, 1), (n.end, -1)]).collect();
-        edges.sort();
-        let (mut now, mut most) = (0i64, 0i64);
-        for (_, d) in edges {
-            now += i64::from(d);
-            most = most.max(now);
-        }
-        if most > synth.voices {
-            out.push(format!(
-                "{}: {most} notes sound at once and the synth has {} voices, so the oldest are cut off",
-                t.id, synth.voices
-            ));
-        }
-        let release = synth.envelopes.get("amp").map_or(0.0, |e| e.release_ms);
-        let tail = release / 1000.0 * p.session.tempo / 60.0;
-        if let Some(last) = notes.iter().map(|n| &n.at + &n.beats).max() {
-            let ends = last + BigRational::from_float(tail).unwrap_or_default();
-            if ends > length {
-                out.push(format!(
-                    "{}: the last note's release ends at beat {} and the song ends at {}, so the end fade cuts it",
-                    t.id,
-                    format_g(ends.to_f64().unwrap_or(f64::NAN), 4),
-                    p.session.length_beats.text()
-                ));
-            }
-        }
-    }
-    out
-}
-
 /// Every owner in document order: tracks, returns, then the master.
 pub fn owners(p: &Project) -> Vec<Owner<'_>> {
     p.tracks
@@ -949,53 +903,6 @@ fn sampler_references(p: &Project, track: &str, sampler: &crate::schema::Sampler
         }
     }
     Ok(())
-}
-
-/// What `daw check` says of a song's notes: those that start before their
-/// clip or at or after its end, which are kept and do not play, and those the track's
-/// sampler maps to no pad, which are silent.
-pub fn note_warnings(p: &Project) -> Vec<String> {
-    let mut out = Vec::new();
-    for t in &p.tracks {
-        let Some(midi) = &t.midi else { continue };
-        let sampler = midi.sampler();
-        for clip in &midi.clips {
-            let length = clip.length_exact();
-            let ids = |keep: &dyn Fn(&BigRational) -> bool| -> Vec<&str> {
-                clip.notes.iter().filter(|n| keep(&n.at_exact())).map(|n| n.id.as_str()).collect()
-            };
-            for (outside, place) in [
-                (ids(&|at| at.is_negative()), "before the clip's start"),
-                (ids(&|at| *at >= length), "at or after the clip's end"),
-            ] {
-                if !outside.is_empty() {
-                    out.push(format!("{}.{}: notes {} start {place} and do not play", t.id, clip.id, outside.join(", ")));
-                }
-            }
-            let Some(sampler) = sampler else { continue };
-            let mut unmapped: Vec<i64> = clip
-                .notes
-                .iter()
-                .filter(|n| clip.plays(n) && sampler.entry(n.pitch).is_none())
-                .map(|n| n.pitch)
-                .collect();
-            unmapped.sort_unstable();
-            unmapped.dedup();
-            if !unmapped.is_empty() {
-                let names: Vec<String> = unmapped
-                    .iter()
-                    .map(|n| format!("{n} ({})", note_name(*n).unwrap_or_default()))
-                    .collect();
-                out.push(format!(
-                    "{}.{}: the sampler maps no pad to notes {}, which are silent",
-                    t.id,
-                    clip.id,
-                    names.join(", ")
-                ));
-            }
-        }
-    }
-    out
 }
 
 #[cfg(test)]

@@ -62,7 +62,9 @@ render artifacts did not change
 Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 
 - `aaw-model`: the strict schema (version 1, and 2 with MIDI tracks), exact musical time, stable YAML, validation,
-  hashes, the event schedule and the schema `daw describe` prints.
+  hashes, the event schedule, the schema `daw describe` prints, and the
+  warnings `daw check` gives of a valid song, each with a code (`check`); see
+  [musical-checks.md](features/musical-checks.md).
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
   compressor/sidechain, limiter, delay, reverb, chorus and saturation devices
   with explicit block state, wavetables, and the Synth, a polyphonic
@@ -105,7 +107,8 @@ Python, in `src/agent_daw`:
   the start of a sound that ends on a beat, and fitting the session's length; see
   [timeline.md](features/timeline.md).
 - `cli.py`: `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and
-  `export`. `check` is `inspect` with measured root notes and automation warnings.
+  `export`. `check` is `inspect` with measured root notes and the model's
+  warnings, as objects with a code.
   Every other command is passed to the Rust `daw`, which passes these seven back, so
   there is one command either way. A
   sample import copies the file, or decodes a compressed one, and adds it to the

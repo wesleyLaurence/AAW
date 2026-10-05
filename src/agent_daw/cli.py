@@ -142,7 +142,9 @@ def parser():
         help="Note with octave, e.g. C2, or auto to use the measured pitch",
     )
     check = sub.add_parser(
-        "check", help="inspect, plus root notes against measured pitch and warnings"
+        "check",
+        help="inspect, plus root notes against measured pitch and warnings, "
+        "each with a code (daw describe check)",
     )
     check.add_argument("project", type=song_file)
     listen = sub.add_parser(
@@ -388,28 +390,40 @@ def check(path):
 
     project = load(path)
     result = run_engine("inspect", path)
-    result.update(root_notes(project, path.parent))
-    result["warnings"] += warnings(project)
+    checked = root_notes(project, path.parent)
+    seconds = checked.pop("seconds")
+    result.update(checked)
+    result["warnings"] += warnings(project, seconds)
     return result
+
+
+def warning(code, message, path):
+    """A warning as `daw check` gives them; daw describe check lists the codes."""
+    return {"code": code, "level": "warning", "message": message, "paths": [path]}
 
 
 def root_notes(project, root):
     """Compare each declared root_note with the pitch measured from its asset.
 
     A sample the engine cannot read is a warning here and not a note to compare.
+    Also gives each readable sample's length in seconds, for the checks of
+    audio clips that play to the end of their file.
     """
     from .analysis import compare_root, measure_pitch, PITCH_SECONDS
     from .library import probe
     import soundfile as sf
 
-    report, warnings = {}, []
+    report, warnings, seconds = {}, [], {}
     for name, sample in project["samples"].items():
         path = root / sample["path"]
         try:
             info = probe(path)
         except ValueError as e:
-            warnings.append(f"{name}: {e}; a render will fail")
+            warnings.append(
+                warning("sample-unreadable", f"{name}: {e}; a render will fail", f"samples.{name}")
+            )
             continue
+        seconds[name] = info.frames / info.samplerate
         if not sample["root_note"]:
             continue
         x, sr = sf.read(
@@ -422,10 +436,14 @@ def root_notes(project, root):
         report[name] = entry
         if entry["status"] != "ok":
             warnings.append(
-                f"{name}: root_note {entry['declared']} but measured "
-                f"{entry['measured']} ({entry['status']})"
+                warning(
+                    "root-note-mismatch",
+                    f"{name}: root_note {entry['declared']} but measured "
+                    f"{entry['measured']} ({entry['status']})",
+                    f"samples.{name}",
+                )
             )
-    return {"root_notes": report, "warnings": warnings}
+    return {"root_notes": report, "warnings": warnings, "seconds": seconds}
 
 
 def main():

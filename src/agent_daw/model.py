@@ -11,6 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import NamedTuple
 import hashlib
+import json
 import os
 import tempfile
 from . import aaw_py
@@ -86,9 +87,11 @@ def schedule(project) -> list[Trigger]:
     return [Trigger(*t) for t in aaw_py.schedule(project)]
 
 
-def warnings(project) -> list[str]:
-    """What daw check warns about in a valid song."""
-    return aaw_py.warnings(project)
+def warnings(project, seconds=None) -> list[dict]:
+    """What daw check warns about in a valid song: objects with a code, a
+    level, a message, the paths of what each is about and, with a place in
+    time, its beat. `seconds` is each sample's file length by sample ID."""
+    return json.loads(aaw_py.warnings(project, seconds or {}))
 
 
 def digest(path: Path) -> str:

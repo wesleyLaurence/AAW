@@ -98,6 +98,7 @@ enum Topic {
     Effects,
     Automation,
     Edit,
+    Check,
     Beats,
     Joins,
     Export,
@@ -444,8 +445,10 @@ enum ClipCmd {
         at: Option<String>,
     },
     Repeats { project: Song, clip: String, repeats: String },
-    /// Copy a clip, by default right after the original. A note clip's copy
-    /// owns its notes; --id names it.
+    /// Copy a clip, by default right after the original, or after the copies
+    /// already in a row there, so that duplicating again lays them in a row.
+    /// --times N makes N copies one after another as one step. A note clip's
+    /// copy owns its notes; --id names it.
     Duplicate {
         project: Song,
         clip: String,
@@ -455,6 +458,8 @@ enum ClipCmd {
         at: Option<String>,
         #[arg(long)]
         id: Option<String>,
+        #[arg(long)]
+        times: Option<String>,
     },
     Remove { project: Song, clip: String },
     /// Set a note clip's length; its notes stay where they are.
@@ -1550,13 +1555,14 @@ fn run(cli: &Cli) -> Result<Json> {
                     repeats: parse_value(repeats),
                 },
             ),
-            ClipCmd::Duplicate { project, clip, track, at, id } => edit(
+            ClipCmd::Duplicate { project, clip, track, at, id, times } => edit(
                 project,
                 C::ClipDuplicate {
                     clip: clip.clone(),
                     track: track.clone(),
                     at: at.as_deref().map(parse_value),
                     id: id.clone(),
+                    times: times.as_deref().map(parse_value),
                 },
             ),
             ClipCmd::Remove { project, clip } => edit(project, C::ClipRemove { clip: clip.clone() }),
