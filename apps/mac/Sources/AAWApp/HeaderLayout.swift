@@ -289,6 +289,27 @@ public struct ValueScale: Equatable {
         value(at: Double((rect.maxY - Self.inset - y) / (rect.height - 2 * Self.inset)))
     }
 
+    /// The number a person typed into a control, read in the control's unit:
+    /// the unit may follow it ("800 Hz", "-6 dB", "50%"), the minus may be the
+    /// typographic one a control shows, and a frequency may be given in
+    /// thousands ("2.5k", "2.50 kHz"). Nil for anything that is not a number.
+    public static func parse(_ typed: String, unit: String) -> Double? {
+        var text = typed.lowercased().replacingOccurrences(of: "−", with: "-").trimmingCharacters(in: .whitespaces)
+        let suffix = unit.lowercased()
+        var factor = 1.0
+        if !suffix.isEmpty, text.hasSuffix(suffix) {
+            text.removeLast(suffix.count)
+            text = text.trimmingCharacters(in: .whitespaces)
+        }
+        if suffix == "hz", text.hasSuffix("k") {
+            text.removeLast()
+            factor = 1000
+            text = text.trimmingCharacters(in: .whitespaces)
+        }
+        guard let value = Double(text), value.isFinite else { return nil }
+        return value * factor
+    }
+
     /// A number as it is written: without a fraction where it has none, and
     /// else to three places at the most.
     public static func plain(_ value: Double) -> String {
