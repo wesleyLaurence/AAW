@@ -500,3 +500,25 @@ do. `#` marks clips that sound at once, not clips that only meet in a cell. The
 legend counts places past six, and the same music on two tracks has one letter
 so that a doubled part shows. Whether `inspect` lists clips in the order they
 play was settled by D76.
+
+**D78. `daw check`'s warnings are objects with a code and a list of paths; overlaps are information rather than ignorable, and duplicates chain.**
+
+Made while building [musical checks](features/musical-checks.md) on October 4,
+2026, settling the design's open questions without the person. A warning is
+`{code, level, message, paths, at}`: the design gave it one `path`, but a
+stacked pair and two crowded tracks are about two things, so `paths` is always
+a list. `level` is `warning`, or `info` for `clips-overlap`, which is
+sometimes deliberate; rather than a `check_ignore` field in the song, the agent
+reads information as information and moves on, and the song holds nothing for
+the checks. `clip-after-end` was dropped: validation already refuses a clip
+that starts at or after the song's end, or a pattern or note clip that runs
+past it, so `song-ends-inside` is about audio clips, whose length Python passes
+in from each file. `register-crowded` counts notes at their written pitch, and
+leaves out a drum map's notes and pattern hits without a note, so a kick on C2
+is not a bass part; an instrument's own range stays unknown. Warnings that
+could run to hundreds (`note-retriggered`, `pad-far-from-root`,
+`note-below-hearing`) are one a clip, pad or track, with the count and the
+first beat. `daw render` does not run the checks. `clip duplicate` without
+`--at` places a copy past the run of clips that follow the original, and
+`--times N` makes a row as one step; `--at` with `--times` lays them from that
+beat whatever is there.

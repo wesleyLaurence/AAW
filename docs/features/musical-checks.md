@@ -1,14 +1,13 @@
-# Musical checks — proposed October 4, 2026
+# Musical checks — implemented 2026-10-04
 
-Status: proposed, not built. Backlog: Next, Musical checks. What it is for is in [concept.md](../concept.md#what-the-agent-works-with)
-as Checks: a linter for music.
-
-## What
-
-More warnings from `daw check`, about the music and not only the file: clips on
-one track sounding at once, notes that strike twice, a song that ends inside a
-part, two parts crowding one register, a pad played far from its root. Also a
-change to `clip duplicate` so that repeating it does not stack the copies.
+Status: implemented (D78). `daw check` warns about the music and not only the
+file: clips on one track stacked or sounding at once, a note struck again while
+it sounds, an audio clip the song ends inside, a track with nothing to play, two
+tracks crowding one low octave, a sample repitched far from its root and a Synth
+note below hearing.
+`clip duplicate` lays repeated copies in a row. What it is for is in
+[concept.md](../concept.md#what-the-agent-works-with) as Checks: a linter for
+music.
 
 ## Why
 
@@ -17,66 +16,78 @@ result as it goes. The mistakes it makes most are mechanical and visible in the
 song file. A check catches them before a render, every time, cheaply.
 
 On October 4, 2026, an agent ran `clip duplicate` three times on one drum clip.
-Each copy was placed "right after the original", so all three landed on the same
-bar, and `daw check` returned `[]`. Today it warns only about lanes on bypassed
-effects, pads stretched far enough to hear or with no tempo to stretch to, and
-notes that cannot play (they start past their clip's end, or no pad is mapped to
-them).
+Each copy was placed right after the original, so all three landed on the same
+bar, and `daw check` returned `[]`.
 
-## Design
+## Warnings are objects
 
-**Warnings become objects.** Each has a `code`, a `message` in words, the `path`
-of what it is about, and `at` in beats when it has a place in time. Today's
-string warnings become the `message` of their objects. A command that lists only
-the codes, or reads only errors, can ignore the rest. The warnings are made in
-Rust in the model crate (they are in `aaw-py` today), so that `daw check` and a
-future host check share them.
+```json
+{"code": "clips-stacked", "level": "warning",
+ "message": "drums: tracks.drums.clips.1 and tracks.drums.clips.2 start on beat 16 with the same music, so it plays twice at once",
+ "paths": ["tracks.drums.clips.1", "tracks.drums.clips.2"], "at": 16}
+```
 
-**New checks.**
+- `code` says what kind; `daw describe check` lists every code and what it means.
+- `level` is `warning`, or `info` for what is often deliberate. Only
+  `clips-overlap` is `info`.
+- `message` is the warning in words. The warnings `daw check` gave before
+  objects are the messages of theirs, unchanged.
+- `paths` names what it is about as commands do: `tracks.drums.clips.1` (a
+  pattern clip by index), `tracks.keys.clips.chords` (a note clip by ID),
+  `tracks.edit.audio.0`, `tracks.bass`, `tracks.bass.instrument.synth`,
+  `tracks.kit.instrument.sampler.pads.kick`, `samples.kick`. A warning about two
+  things names both.
+- `at` is the song beat, written as commands take one, when the warning has a
+  place in time.
+
+The warnings are made in Rust, in `aaw-model`'s `check` module, so a host can
+give the same ones. Python's `daw check` adds the two that need the audio
+(`sample-unreadable`, `root-note-mismatch`) and passes each readable sample's
+length in seconds, which an audio clip without an end needs.
+
+## The codes
 
 | Code | When |
 |---|---|
-| `clips-stacked` | Two clips on one track start on the same beat with the same music. This is almost always a mistake |
-| `clips-overlap` | Two clips on one track sound at once. This is sometimes deliberate, and is reported as information |
-| `note-retriggered` | A note starts while another of the same pitch on the same track is still sounding |
-| `song-ends-inside` | A clip or a note runs past `session.length_beats` and is cut off |
-| `clip-after-end` | A clip starts at or after the song's end and is never heard |
-| `track-empty` | A track has an instrument and nothing to play, or notes and no instrument |
-| `register-crowded` | Two tracks hold notes in the same octave below C3 in the same bars, the beats listed. Two low parts in one register are the most common cause of a muddy mix |
-| `pad-far-from-root` | A pitched pad is played more than two octaves from its root, where repitching sounds artificial |
-| `note-below-hearing` | A Synth note whose fundamental is under 20 Hz |
+| `clips-stacked` | Two or more clips of a track start on the same beat with the same music: the same pattern, the same playing notes, or the same file from the same second. One warning a group |
+| `clips-overlap` | Two clips of a track sound at once, as information. A pair already stacked is not reported again |
+| `note-retriggered` | A note starts while one of the same pitch on its track still sounds. One warning a clip, with the count and the first |
+| `song-ends-inside` | An audio clip sounds past `session.length_beats`. Validation refuses a pattern or note clip that would, or any clip that starts at or after the end |
+| `track-empty` | An instrument and no notes, notes and no instrument, pads and no clips, or nothing |
+| `register-crowded` | Two unmuted tracks hold notes in the same octave below C3 in the same bars. One warning a pair of tracks and an octave, the bars listed |
+| `pad-far-from-root` | A hit repitches its sample more than 24 semitones: the note against the sample's root (middle C without one), plus the event's and the pad's transpose. One warning a pad |
+| `note-below-hearing` | A Synth note whose lowest pitched oscillator, with its octave, semitones and detune, is under 20 Hz. One warning a track |
+| `notes-outside-clip`, `notes-unmapped` | Notes that start outside their clip, and notes a sampler maps to no pad |
+| `macro-unused`, `voices-exceeded`, `release-cut` | A Synth macro that moves nothing, more notes at once than voices, a release the song's end cuts |
+| `stretch-without-tempo`, `stretch-audible` | `preserve_pitch` without `source_bpm`, and a stretch past about 8% |
+| `lane-on-bypassed-effect` | A lane that moves a bypassed effect |
+| `sample-unreadable`, `root-note-mismatch` | From Python: a file the engine cannot read, and a root note the audio disagrees with |
 
-Checks read only the song. A check that needs audio, such as two tracks masking
-one another, belongs to perception, a separate Later line.
+What counts as a pitched note, for `register-crowded`: a Synth's notes, a
+sampler's notes that a pitched map entry plays, and pattern events with a
+`note`, a beat long when they have no duration. A drum map's kick on C2 has no
+register.
 
-**`clip duplicate` without `--at` chains.** The copy goes right after the
-original, as now. If a clip already starts there, the copy goes after the run of
-clips that follow one another from there, each starting where the last ends. So
-duplicating one clip three times lays out four in a row, as pressing ⌘D three
-times in Ableton does. `--times N` makes N copies in a row as one step. The reply
-gives each copy's beat, as now.
+## `clip duplicate` lays copies in a row
 
-**Ignoring a warning.** A deliberate overlap can be marked with `check_ignore`,
-a list of codes on the clip or the track, so that a song does not keep reporting
-it. This is an open question below.
+Without `--at`, the copy goes right after the original; if a clip of the
+destination track already starts there, the copy goes after the run of clips
+that follow one another from there, each starting where the last ends. Three
+duplicates of one clip lay out four in a row, as pressing ⌘D three times in
+Ableton does. `--times N` makes N copies in a row as one undo step, labeled
+"Duplicate clip NAME N times", and the reply lists their paths. With `--at`,
+the copies go from that beat one after another, whatever is there. `--id`
+names one copy and is refused with `--times` above one. The app's duplicate
+passes a beat, so it is unchanged.
 
-## Done when
+## Limits
 
-- Three duplicates of one clip lay out four in a row. A generated song with two
-  clips stacked on purpose reports `clips-stacked` with both paths and the beat.
-- Each code has a generated song that raises it and one that does not, in Rust
-  tests, and `daw check` prints the objects.
-- `daw describe` lists the codes and says what each means.
-- The existing warnings are unchanged in substance and carry codes.
-
-## Open questions
-
-- Whether `register-crowded` should know about an instrument's own range: a
-  bass patch an octave above its notes, or a pad that has been filtered thin.
-  Notes alone cannot tell.
-- Whether `check_ignore` belongs in the song, or the agent should simply read
-  `clips-overlap` as information and move on.
-- Whether `daw render` should run the checks and print their codes on stderr.
-- Checks that need to know a section's feel, such as a snare off the backbeat in
-  a half-time section, which the backlog's line named. The song does not record
-  a feel today.
+- Checks read the song, not the audio. Two tracks masking each other is a
+  perception line in the backlog.
+- `register-crowded` knows notes, not instruments: a bass patch an octave above
+  its notes, or a pad filtered thin, is counted at its written pitch.
+- A warning cannot be marked as meant. `clips-overlap` is information for that
+  reason.
+- `daw render` does not run the checks.
+- A section's feel is not in the song, so a check such as a snare off the
+  backbeat in a half-time section cannot be made.

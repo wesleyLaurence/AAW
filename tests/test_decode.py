@@ -165,7 +165,8 @@ def test_check_warns_of_a_sample_the_engine_cannot_read(tmp_path):
     code, checked = cli("check", path)
     assert code == 0, checked
     assert len(checked["warnings"]) == 1
-    assert checked["warnings"][0].startswith("song: Cannot read song.m4a as audio")
+    assert checked["warnings"][0]["code"] == "sample-unreadable"
+    assert checked["warnings"][0]["message"].startswith("song: Cannot read song.m4a as audio")
 
 
 @pytest.mark.parametrize("kind", ["m4a", "mp3"])

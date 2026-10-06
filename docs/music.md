@@ -57,7 +57,8 @@ the operation needs. A refused edit names the field it meant and the fix.
 
 ## Check and hand off
 
-Run `daw check PROJECT` and investigate edits with a short section or isolated
+Run `daw check PROJECT` before rendering and read each warning's code
+(`daw describe check`); investigate edits with a short section or isolated
 track render. Full mixes point from `renders/latest.json`; previews use
 `renders/latest-preview.json`. `daw listen` and `daw compare` measure audio;
 do not claim listening when only numerical analysis was performed.

@@ -141,7 +141,12 @@ fn instruments_are_attached_replaced_and_removed_and_the_notes_stay() {
     assert_eq!(clips(&s), notes);
     let hits = aaw_model::schedule::schedule(s.project()).into_iter().filter(|t| t.track_id == "keys").count();
     assert_eq!(hits, 1, "only note 60 is mapped");
-    assert_eq!(aaw_model::rules::note_warnings(s.project()), ["keys.clip1: the sampler maps no pad to notes 62 (D4), 64 (E4), 65 (F4), 67 (G4), which are silent"]);
+    let unmapped: Vec<String> = aaw_model::check::check(s.project(), &Default::default())
+        .into_iter()
+        .filter(|w| w.code == "notes-unmapped")
+        .map(|w| w.message)
+        .collect();
+    assert_eq!(unmapped, ["keys.clip1: the sampler maps no pad to notes 62 (D4), 64 (E4), 65 (F4), 67 (G4), which are silent"]);
     let r = edit(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": null})).unwrap();
     assert_eq!(r["label"], json!("Remove the instrument of keys"));
     assert_eq!(clips(&s), notes);

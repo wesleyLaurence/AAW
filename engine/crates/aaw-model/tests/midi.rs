@@ -164,10 +164,15 @@ fn the_sampler_plays_mapped_notes_and_releases_gated_pads_at_the_note_off() {
     let midi = p.tracks[0].midi.as_ref().unwrap();
     let notes = track_notes(&p, midi);
     assert_eq!(notes.len(), 5, "the notes outside the clip are left out");
-    assert_eq!(aaw_model::rules::note_warnings(&p), [
-        "keys.phrase: notes n7 start before the clip's start and do not play",
-        "keys.phrase: notes n6 start at or after the clip's end and do not play",
-        "keys.phrase: the sampler maps no pad to notes 90 (F#6), which are silent",
+    let notes: Vec<(&str, String)> = aaw_model::check::check(&p, &Default::default())
+        .into_iter()
+        .filter(|w| w.code.starts_with("notes-"))
+        .map(|w| (w.code, w.message))
+        .collect();
+    assert_eq!(notes, [
+        ("notes-outside-clip", "keys.phrase: notes n7 start before the clip's start and do not play".into()),
+        ("notes-outside-clip", "keys.phrase: notes n6 start at or after the clip's end and do not play".into()),
+        ("notes-unmapped", "keys.phrase: the sampler maps no pad to notes 90 (F#6), which are silent".into()),
     ]);
 }
 

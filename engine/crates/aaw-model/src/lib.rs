@@ -7,6 +7,7 @@
 //! behavior on a generated corpus.
 
 pub mod beat;
+pub mod check;
 pub mod contract;
 pub mod describe;
 pub mod hash;

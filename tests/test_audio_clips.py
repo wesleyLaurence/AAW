@@ -94,7 +94,7 @@ def test_an_edit_of_clips_keeps_its_joins_when_sped_up(song):
     assert join["at_beats"] == pytest.approx(20 - 0.005 * 124.8 / 60, abs=1e-4)
     # Past about eight percent, check says so of each clip.
     daw("set", song, "session.tempo", 132)
-    assert cli("check", song)[1]["warnings"] == [
+    assert [w["message"] for w in cli("check", song)[1]["warnings"]] == [
         f"song.audio.{n}: stretched +10.0% from 120 BPM; more than about 8% can be heard" for n in (0, 1)
     ]
 

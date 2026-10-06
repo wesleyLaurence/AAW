@@ -212,7 +212,9 @@ def test_cli_auto_root_and_check_warnings(tmp_path):
     project.write_text(text)
     code, result = run("check", project)
     assert result["root_notes"]["bass"]["status"] == "octave_mismatch"
-    assert "octave_mismatch" in result["warnings"][0]
+    assert result["warnings"][0]["code"] == "root-note-mismatch"
+    assert result["warnings"][0]["paths"] == ["samples.bass"]
+    assert "octave_mismatch" in result["warnings"][0]["message"]
     code, result = run("samples", "--db", db, "analyze", source)
     assert code == 0 and result["pitch"]["note"] == "A2" and not result["indexed"]
     code, result = run("samples", "--db", db, "search", "--note-range", "C2")

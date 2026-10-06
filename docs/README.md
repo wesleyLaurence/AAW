@@ -45,15 +45,15 @@ Built:
 | [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
 | [the browser](features/browser.md) | Samples, instruments, effects and shared folders at the window's left |
 | [the Sampler device](features/sampler-device.md) | A sample loaded onto an empty Sampler and shaped in its panel |
+| [learning the CLI quickly](features/cli-discovery.md) | Short `daw describe` topics, `daw describe start`, `--help` with fields, and errors that say what to do |
+| [the arrangement map](features/arrangement-map.md) | `daw map`: the song as a grid of tracks by bars, the same music under the same letter |
+| [musical checks](features/musical-checks.md) | `daw check`'s warnings as objects with codes, the checks of the music, and `clip duplicate` laying copies in a row |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [learning the CLI quickly](features/cli-discovery.md) | Next |
-| [the arrangement map](features/arrangement-map.md) | Next |
-| [musical checks](features/musical-checks.md) | Next |
 | [editing a range of bars](features/bar-ranges.md) | Next |
 | [clips that loop](features/looping-clips.md) | Next |
 | [comparing with a reference](features/reference-comparison.md) | Next |
