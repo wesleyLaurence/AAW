@@ -232,15 +232,20 @@ log, handles and the transport need a host.
 
 The host also accepts `{"op":"note.preview","track":"lead","pitch":"C4",
 "velocity":100,"length_beats":1}`: a note played now through a MIDI track's
-Synth and the track's chain, from where the stream stands, whether or not the
-song plays, outside the timeline and the undo history and in no render. The
-app's Synth panel sends it from its keys (`Song.preview_note`) and `daw synth
-audition --play` from the terminal. It opens the output if nothing has played
-yet, refuses a track with no synth and a note outside 0 to 127, and plays
-nothing through a Sampler. The player keeps previewed notes apart from the
-song's: they survive a program swap, and while the transport stands still the
-stream is cut by nothing, the end fade and the gate at the song's end applying
-only while it rolls.
+instrument, its Synth or its Sampler, and the track's chain, from where the
+stream stands, whether or not the song plays, outside the timeline and the
+undo history and in no render. The app's Synth panel sends it from its keys
+and the piano roll as notes are drawn, clicked and moved (`Song.preview_note`),
+and `daw synth audition --play` from the terminal. It opens the output if
+nothing has played yet, and refuses a track with no instrument and a note
+outside 0 to 127. A Sampler plays it as the same note in a clip would: the
+host prepares the voice (`program::preview_voice`) and the player plays up to
+16 such notes at once, the oldest giving its place; a pitch no map entry
+plays is silent, and the reply's `sounds` is false. The player keeps
+previewed notes apart from the song's: they survive a program swap, voices it
+has finished with go back to the host to be freed, and while the transport
+stands still the stream is cut by nothing, the end fade and the gate at the
+song's end applying only while it rolls.
 
 The host also accepts `{"op":"metronome","enabled":true}` (or false), sent by
 `Song.set_metronome` from the app. `daw status` and transport observer updates

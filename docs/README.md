@@ -48,6 +48,7 @@ Built:
 | [learning the CLI quickly](features/cli-discovery.md) | Short `daw describe` topics, `daw describe start`, `--help` with fields, and errors that say what to do |
 | [the arrangement map](features/arrangement-map.md) | `daw map`: the song as a grid of tracks by bars, the same music under the same letter |
 | [musical checks](features/musical-checks.md) | `daw check`'s warnings as objects with codes, the checks of the music, and `clip duplicate` laying copies in a row |
+| [the piano roll](features/piano-roll.md) | Writing notes by hand: previews through either instrument, the velocity lane, zoom up and down, a note's start, Option-drag copies, ⌘ off the grid and grids as note values |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 
 Proposed, in the order of Next in the backlog:

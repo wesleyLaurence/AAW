@@ -211,7 +211,7 @@ final class PatternEditor: NSView {
             return
         }
         model.select(event: nil)
-        let free = event.modifierFlags.contains(.option)
+        let free = event.modifierFlags.contains(.command)
         if row.kind == .steps, !free {
             // A step goes on or off at the press, and a drag takes the steps
             // it passes with it.
@@ -221,7 +221,7 @@ final class PatternEditor: NSView {
             heldSteps = (row.pad.name, [step: was == 0 ? 10 : 0])
             needsDisplay = true
         } else if free || event.clickCount == 2 {
-            // An event: where the pointer is with Option, else on the step
+            // An event: where the pointer is with ⌘, else on the step
             // under it; at the note under it in a row of notes; and held for
             // a step on a pad that is held.
             let at = free ? layout.beat(atX: p.x) : Double(layout.step(atX: p.x)) * layout.grid
@@ -258,9 +258,9 @@ final class PatternEditor: NSView {
             let (dx, dy) = (p.x - origin.x, p.y - origin.y)
             if !moved, hypot(dx, dy) < 3 { return }
             // By whole steps, so that an event off the grid stays as far off
-            // it; with Option, by thousandths of a beat. It stays in the pattern.
+            // it; with ⌘, by thousandths of a beat. It stays in the pattern.
             var (steps, by) = (0, 0.0)
-            if event.modifierFlags.contains(.option) {
+            if event.modifierFlags.contains(.command) {
                 by = (Double(dx / layout.pixelsPerBeat) * 1000).rounded() / 1000
                 by = min(max(by, -e.at), layout.lengthBeats - e.at - 0.001)
             } else {
@@ -654,7 +654,7 @@ struct PatternHeader: View {
                     set: { model.edit(.patternGrid(pattern: pattern.name, grid: $0)) }
                 )) {
                     ForEach(Self.grids.contains(pattern.gridText) ? Self.grids : Self.grids + [pattern.gridText], id: \.self) {
-                        Text("\($0) beat").tag($0)
+                        Text(PianoRollLayout.noteValue($0)).tag($0)
                     }
                 }
                 .labelsHidden()

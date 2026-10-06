@@ -957,7 +957,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
             clipDown(hit.hit, rect: hit.rect, at: p, event)
         } else {
-            let free = event.modifierFlags.contains(.option)
+            let free = event.modifierFlags.contains(.command)
             // Clips are pasted on the track whose lane was clicked last.
             if let track = track(atLane: p) { model.cueTrack = track }
             if event.clickCount == 2, let track = track(atLane: p) {
@@ -1091,7 +1091,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         guard let near else {
             if event.clickCount == 2 {
                 let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
-                let at = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.option))
+                let at = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.command))
                 model.edit(.pointAdd(lane: lane.key, at: at, value: scale.value(atY: p.y, in: rect))) { [weak self] made in
                     self?.model.select(point: made.first)
                 }
@@ -1217,7 +1217,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .clips(var d):
             if !d.moved, hypot(p.x - d.start.x, p.y - d.start.y) < 3 { return }
             d.moved = true
-            d.by = layout.move(byX: p.x - d.start.x, free: event.modifierFlags.contains(.option), within: d.range)
+            d.by = layout.move(byX: p.x - d.start.x, free: event.modifierFlags.contains(.command), within: d.range)
             d.rows = min(max(trackIndex(atY: p.y) - trackIndex(atY: d.start.y), d.rowRange.lowerBound), d.rowRange.upperBound)
             let tracks = model.arrangement.tracks
             for (key, origin) in d.origin {
@@ -1233,7 +1233,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             drag = .clips(d)
         case .trim(var d):
-            let wanted = snappedBeat(atX: p.x, free: event.modifierFlags.contains(.option))
+            let wanted = snappedBeat(atX: p.x, free: event.modifierFlags.contains(.command))
             let beat = d.start ? d.layout.start(draggedTo: wanted) : d.layout.end(draggedTo: wanted)
             if beat != d.beat {
                 d.beat = beat
@@ -1245,9 +1245,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             drag = .trim(d)
         case .noteTrim(var d):
-            // On the grid or, with Option, off it; a grid step long at the
+            // On the grid or, with ⌘, off it; a grid step long at the
             // least, and inside the song. The notes stay where they are.
-            let free = event.modifierFlags.contains(.option)
+            let free = event.modifierFlags.contains(.command)
             let least = free ? 0.001 : layout.grid
             let (start, end) = (d.clip.at, d.clip.at + d.clip.lengthBeats)
             let wanted = snappedBeat(atX: p.x, free: free)
@@ -1281,7 +1281,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         case .point(var d):
             let scale = ValueScale(min: d.lane.min, max: d.lane.max, log: d.lane.log)
-            let wanted = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.option))
+            let wanted = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.command))
             let at = min(max(wanted, d.range.lowerBound), d.range.upperBound)
             let value = scale.value(atY: p.y, in: d.rect)
             if at != d.at || value != d.value {
@@ -1313,7 +1313,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.setLoop(start: region.start, length: region.length)
             } else {
                 // A click in the loop strip sets the start position like any other.
-                model.locate(layout.target(atX: anchor, free: event.modifierFlags.contains(.option)))
+                model.locate(layout.target(atX: anchor, free: event.modifierFlags.contains(.command)))
             }
         case .slider(let s):
             model.endDrag()
@@ -1520,7 +1520,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         guard let file = sample(of: sender) else { return [] }
         let p = convert(sender.draggingLocation, from: nil)
-        let free = NSEvent.modifierFlags.contains(.option)
+        let free = NSEvent.modifierFlags.contains(.command)
         let target = Self.isMIDI(file.path) ? midiLanding(at: p, free: free) : landing(at: p, free: free)
         if target != dropTarget {
             dropTarget = target

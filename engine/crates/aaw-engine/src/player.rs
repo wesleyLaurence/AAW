@@ -3,7 +3,8 @@
 //!
 //! The host thread builds each program's `Deck`, a renderer with fresh state,
 //! and sends it through a lock-free queue. The player swaps decks between
-//! blocks and returns replaced decks to the host to be freed.
+//! blocks and returns replaced decks to the host to be freed, as it does the
+//! voices of notes previewed through a Sampler once later ones replace them.
 //!
 //! A program with the same channels and devices takes over without a break:
 //! its devices continue from the old ones' state, its levels and knobs glide
@@ -16,7 +17,7 @@
 //! stop, and rests once its output has been silent for a second.
 //! `Player::render` never allocates, frees, locks or blocks.
 
-use crate::program::Program;
+use crate::program::{Program, Voice};
 use crate::render::{Frame, Renderer};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
@@ -60,6 +61,16 @@ pub enum Message {
         velocity: f64,
         frames: usize,
     },
+    /// A note played now through a track's Sampler, outside the timeline:
+    /// the track's place among the program's tracks, and the voice
+    /// `program::preview_voice` made for it.
+    PreviewVoice { track: usize, voice: Voice },
+}
+
+/// What the audio thread hands back to the host to be freed.
+pub enum Garbage {
+    Deck(Box<Deck>),
+    Voice(Voice),
 }
 
 enum Fade {
@@ -85,8 +96,8 @@ pub struct Shared {
     /// Frames rendered while playing.
     pub played: AtomicU64,
     pub swaps: AtomicU64,
-    /// Decks that could not be returned because the queue was full. They are
-    /// leaked rather than freed on the audio thread.
+    /// Decks and preview voices that could not be returned because the queue
+    /// was full. They are leaked rather than freed on the audio thread.
     pub leaked: AtomicU64,
 }
 
@@ -104,14 +115,14 @@ pub struct Player {
     quiet: usize,
     resting: bool,
     inbox: rtrb::Consumer<Message>,
-    garbage: rtrb::Producer<Box<Deck>>,
+    garbage: rtrb::Producer<Garbage>,
     shared: Arc<Shared>,
 }
 
 /// The host thread's handle on a player.
 pub struct Control {
     inbox: rtrb::Producer<Message>,
-    garbage: rtrb::Consumer<Box<Deck>>,
+    garbage: rtrb::Consumer<Garbage>,
     shared: Arc<Shared>,
     program: Arc<Program>,
 }
@@ -195,6 +206,14 @@ impl Control {
         })
     }
 
+    /// Plays a note now through the Sampler of the program's track at
+    /// `track`, whether or not the transport rolls: `note.preview` on a
+    /// track with a Sampler, with the voice `program::preview_voice` made.
+    pub fn preview_voice(&mut self, track: usize, voice: Voice) -> Result<(), String> {
+        self.collect();
+        self.send(Message::PreviewVoice { track, voice })
+    }
+
     /// The last program sent.
     pub fn program(&self) -> &Arc<Program> {
         &self.program
@@ -213,10 +232,10 @@ impl Control {
         &self.shared
     }
 
-    /// Frees decks the audio thread has finished with.
+    /// Frees decks and voices the audio thread has finished with.
     pub fn collect(&mut self) {
-        while let Ok(deck) = self.garbage.pop() {
-            drop(deck);
+        while let Ok(garbage) = self.garbage.pop() {
+            drop(garbage);
         }
     }
 }
@@ -317,6 +336,14 @@ impl Player {
                 self.quiet = 0;
                 self.deck.renderer.preview(track, pitch, velocity, frames);
             }
+            Message::PreviewVoice { track, voice } => {
+                self.resting = false;
+                self.quiet = 0;
+                // The voice it takes the place of may hold the last of its audio.
+                if let Some(old) = self.deck.renderer.preview_voice(track, voice) {
+                    self.throw(Garbage::Voice(old));
+                }
+            }
         }
     }
 
@@ -379,8 +406,12 @@ impl Player {
     }
 
     fn discard(&mut self, deck: Box<Deck>) {
-        if let Err(rtrb::PushError::Full(deck)) = self.garbage.push(deck) {
-            std::mem::forget(deck);
+        self.throw(Garbage::Deck(deck));
+    }
+
+    fn throw(&mut self, garbage: Garbage) {
+        if let Err(rtrb::PushError::Full(garbage)) = self.garbage.push(garbage) {
+            std::mem::forget(garbage);
             self.shared.leaked.fetch_add(1, Relaxed);
         }
     }

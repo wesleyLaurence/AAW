@@ -25,7 +25,7 @@ window, and there a dropped file is a region.
 
 | Dropped on | Makes |
 |---|---|
-| A track's lane | An audio clip on that track, at the grid line nearest the pointer; with Option, off the grid |
+| A track's lane | An audio clip on that track, at the grid line nearest the pointer; with ⌘ (Option until D79), off the grid |
 | The timeline under the tracks | A new track named after the file, with the clip at that beat |
 | A track's header | A pad of that track |
 | The headers' column under the tracks | A new track with a pad |
@@ -63,7 +63,7 @@ fade's tail, as far as the file goes. The edits below keep it that way.
 | Input | Does |
 |---|---|
 | Click, Shift-click, ⌘A, Escape | Selects, as pattern clips |
-| Drag the body | Moves the selected clips by grid steps and to other tracks; with Option, off the grid. Pattern clips and audio clips move together |
+| Drag the body | Moves the selected clips by grid steps and to other tracks; with ⌘ (Option until D79), off the grid. Pattern clips and audio clips move together |
 | Drag an edge | Trims: the audio stays where it is and the clip shows more or less of it, no further than the file goes. The end is where the sound ends, so the clip leaves its fade out's length before that; a fade out that no longer fits is shortened to half the clip |
 | Drag a corner's handle | Sets the fade in, or the fade out: the sound still ends where it did, and a longer fade out starts earlier. A fade goes no further than the other one |
 | Arrow keys, ⌘D, Delete | Nudge, duplicate and remove, as pattern clips |

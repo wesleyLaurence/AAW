@@ -1845,6 +1845,35 @@ fn the_app_makes_a_midi_track_and_draws_and_edits_its_notes() {
     assert_eq!(ns[5..], [note("n6", 72, "1", "0.75", 90), note("n7", 76, "1", "0.75", 90), note("n8", 79, "1", "0.75", 90)]);
     song.edit(Edit::NotesRemove { notes: copies }, None).unwrap();
     assert_eq!(notes_of(&update(&seen).arrangement.tracks[2], 0).len(), 5);
+
+    // Dragged with Option two steps later and down a fifth: copies there,
+    // and the chord where it was.
+    let copies = song.edit(Edit::NotesCopy { notes: chord.clone(), steps: 2, grid: "1/4".into(), by: 0.0, semitones: -7 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Copy 3 notes");
+    assert_eq!(copies.len(), 3);
+    let ns = notes_of(&u.arrangement.tracks[2], 0);
+    assert_eq!(ns[0], note("n1", 72, "0.25", "0.75", 90));
+    assert_eq!(ns[5..], [note("n6", 65, "0.75", "0.75", 90), note("n7", 69, "0.75", "0.75", 90), note("n8", 72, "0.75", "0.75", 90)]);
+    assert!(song.edit(Edit::NotesCopy { notes: chord.clone(), steps: 0, grid: "1/4".into(), by: 0.0, semitones: 60 }, None).is_err());
+    // The copies' starts dragged to the nearest line, and off the grid:
+    // their ends stay where they are.
+    song.edit(Edit::NotesStart { notes: copies.clone(), grabbed: copies[0], start: 1.1, free: false, grid: "1/4".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move the start of 3 notes");
+    assert!(notes_of(&u.arrangement.tracks[2], 0)[5..].iter().all(|n| n.2 == "1" && n.3 == "0.5"));
+    song.edit(Edit::NotesStart { notes: vec![copies[0]], grabbed: copies[0], start: 0.3333, free: true, grid: "1/4".into() }, None).unwrap();
+    assert_eq!(notes_of(&update(&seen).arrangement.tracks[2], 0)[5], note("n6", 65, "0.333", "1.167", 90));
+    assert!(song.edit(Edit::NotesStart { notes: vec![copies[1]], grabbed: copies[1], start: 1.5, free: false, grid: "1/4".into() }, None).is_err());
+    // Velocities moved together, each held within 1 to 127.
+    song.edit(Edit::NotesVelocity { notes: copies.clone(), by: 50 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Change the velocity of 3 notes");
+    assert!(notes_of(&u.arrangement.tracks[2], 0)[5..].iter().all(|n| n.4 == 127));
+    song.edit(Edit::NotesVelocity { notes: copies.clone(), by: -200 }, None).unwrap();
+    assert!(notes_of(&update(&seen).arrangement.tracks[2], 0)[5..].iter().all(|n| n.4 == 1));
+    song.edit(Edit::NotesRemove { notes: copies }, None).unwrap();
+    assert_eq!(notes_of(&update(&seen).arrangement.tracks[2], 0).len(), 5);
     // Pasted at a beat of the clip, the earliest there and the rest after it.
     let copied: Vec<aaw_ffi::NoteCopy> = u.arrangement.tracks[2].note_clips[0].notes.iter()
         .filter(|n| n.key == late || n.key == chord[0])
@@ -2439,10 +2468,10 @@ fn the_panel_adds_parts_and_entries_sets_several_fields_saves_a_patch_and_previe
     // Written over without a description, the file keeps the one it had; the
     // song already named the patch, so nothing in it changed.
     assert_eq!(aaw_ffi::library::library_patches("panel".into())[0].description, "From the panel");
-    // A note previewed on a track without a Synth is refused before anything opens.
+    // A note previewed on a track without an instrument is refused before anything opens.
     let drums = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().key;
     let e = song.preview_note(drums, 60, 100, 1.0).unwrap_err();
-    assert!(e.to_string().contains("no Synth"), "{e}");
+    assert!(e.to_string().contains("no instrument"), "{e}");
 }
 
 #[test]

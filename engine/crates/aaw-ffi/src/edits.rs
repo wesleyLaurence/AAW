@@ -105,6 +105,27 @@ pub enum Edit {
         free: bool,
         grid: String,
     },
+    /// Starts `grabbed` at a beat of its clip, on the nearest line of `grid`
+    /// unless `free`, and the other notes as much later or earlier; each
+    /// note's end stays where it is.
+    NotesStart {
+        notes: Vec<u64>,
+        grabbed: u64,
+        start: f64,
+        free: bool,
+        grid: String,
+    },
+    /// Copies notes of one clip to as far from them as `NotesMove` would move
+    /// them, leaving them where they are. The copies are what the edit makes.
+    NotesCopy {
+        notes: Vec<u64>,
+        steps: i32,
+        grid: String,
+        by: f64,
+        semitones: i32,
+    },
+    /// Changes the velocity of notes by `by`, each within 1 to 127.
+    NotesVelocity { notes: Vec<u64>, by: i32 },
     /// Sets fields of notes, as typed: a pitch as a number or a name such as
     /// `C4`, beats such as `1/3` or `1.975`.
     NotesSet {
@@ -760,11 +781,22 @@ fn sampler_device<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'
     Ok((t, loaded))
 }
 
-/// The ID of the MIDI track with a Synth at `key`, for a command that names
-/// tracks by ID, such as `note.preview`.
-pub fn synth_track_id(doc: &Doc, key: u64) -> Result<String> {
+/// `notes` and `grabbed`, each once, in that order.
+fn with_grabbed(notes: &[u64], grabbed: u64) -> Vec<u64> {
+    notes.iter().copied().chain(std::iter::once(grabbed)).fold(Vec::new(), |mut seen, k| {
+        if !seen.contains(&k) {
+            seen.push(k);
+        }
+        seen
+    })
+}
+
+/// The ID of the track at `key`, for a command that names tracks by ID,
+/// such as `note.preview`.
+pub fn track_id(doc: &Doc, key: u64) -> Result<String> {
     let tree = doc.tree();
-    synth_track(&doc.project, &tree, key).map(|(t, _)| t.id.clone())
+    let place = items(&tree, "tracks").iter().position(|i| i.handle == key).ok_or("The track is no longer in the song")?;
+    Ok(doc.project.tracks[place].id.clone())
 }
 
 /// The MIDI track a Synth is on, and its patch.
@@ -1027,12 +1059,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 return Ok(Vec::new());
             }
             let mut commands = Vec::new();
-            for key in notes.iter().chain(std::iter::once(grabbed)).fold(Vec::new(), |mut seen, k| {
-                if !seen.contains(k) {
-                    seen.push(*k);
-                }
-                seen
-            }) {
+            for key in with_grabbed(notes, *grabbed) {
                 let (_, n) = note(project, &tree, key)?;
                 let duration = n.duration_exact() + &by;
                 if !duration.is_positive() {
@@ -1043,6 +1070,74 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Ok(match commands.len() {
                 1 => commands,
                 n => batch(commands, format!("Lengthen {n} notes")),
+            })
+        }
+        Edit::NotesStart { notes, grabbed, start, free, grid } => {
+            let tree = doc.tree();
+            let (_, n) = note(project, &tree, *grabbed)?;
+            let grid = grid_exact(grid)?;
+            let start = if *free {
+                aaw_model::signed_beat(&Beat::Float((start * 1000.0).round() / 1000.0))?
+            } else {
+                let line = (start / grid.to_f64().unwrap_or(1.0)).round();
+                BigRational::from_float(line).unwrap_or_default() * &grid
+            };
+            let by = start - n.at_exact();
+            if by.is_zero() {
+                return Ok(Vec::new());
+            }
+            let mut commands = Vec::new();
+            for key in with_grabbed(notes, *grabbed) {
+                let (_, n) = note(project, &tree, key)?;
+                let duration = n.duration_exact() - &by;
+                if !duration.is_positive() {
+                    return Err(format!("Note {} would start after it ends", n.id));
+                }
+                let at = n.at_exact() + &by;
+                commands.push(json!({"op": "note.set", "note": handle_text(key), "at": signed_beat(&at), "duration": beat(&duration)}));
+            }
+            Ok(match commands.len() {
+                1 => commands,
+                n => batch(commands, format!("Move the start of {n} notes")),
+            })
+        }
+        Edit::NotesCopy { notes, steps, grid, by, semitones } => {
+            let tree = doc.tree();
+            let found = notes.iter().map(|key| note(project, &tree, *key)).collect::<Result<Vec<_>>>()?;
+            let Some((clip_key, _)) = found.first() else { return Ok(Vec::new()) };
+            if found.iter().any(|(c, _)| c != clip_key) {
+                return Err("Notes are copied within one clip".into());
+            }
+            let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
+            let by = if *by < 0.0 { -distance } else { distance };
+            let shift = grid_exact(grid)? * BigRational::from_integer((*steps).into()) + by;
+            let mut copies = Vec::new();
+            for (_, n) in &found {
+                let pitch = n.pitch + i64::from(*semitones);
+                if !(0..=127).contains(&pitch) {
+                    return Err(format!("A copy of note {} would be outside MIDI notes 0 to 127", n.id));
+                }
+                copies.push(json!({
+                    "pitch": pitch, "at": signed_beat(&(n.at_exact() + &shift)),
+                    "duration": beat(&n.duration_exact()), "velocity": n.velocity,
+                }));
+            }
+            let label = format!("Copy {}", count(found.len(), "note"));
+            Ok(batch(vec![json!({"op": "note.add", "clip": handle_text(*clip_key), "notes": copies})], label))
+        }
+        Edit::NotesVelocity { notes, by } => {
+            let tree = doc.tree();
+            let mut commands = Vec::new();
+            for key in notes {
+                let (_, n) = note(project, &tree, *key)?;
+                let velocity = (n.velocity + i64::from(*by)).clamp(1, 127);
+                if velocity != n.velocity {
+                    commands.push(json!({"op": "note.set", "note": handle_text(*key), "velocity": velocity}));
+                }
+            }
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Change the velocity of {n} notes")),
             })
         }
         Edit::NotesSet { notes, pitch, at, duration, velocity } => {

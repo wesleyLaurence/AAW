@@ -274,10 +274,13 @@ commands edit the file. [../engine/README.md](../engine/README.md) lists the com
 and describes the host; decisions D36 to D38, D41 and D44 record the choices.
 
 `note.preview` is a transport command too: a note of a pitch, velocity and
-length played now through a MIDI track's Synth and the track's chain, from
-where the stream stands, whether or not the song plays, outside the timeline
-and the undo history and in no render. The app's Synth panel sends it from
-its keys and `daw synth audition --play` from the terminal. While the
+length played now through a MIDI track's instrument, a Synth or a Sampler,
+and the track's chain, from where the stream stands, whether or not the song
+plays, outside the timeline and the undo history and in no render. A
+Sampler's note is prepared by the host, as the same note in a clip would be,
+and handed to the audio thread, which hands it back to be freed. The app's
+Synth panel sends it from its keys, the piano roll as notes are drawn,
+clicked and moved, and `daw synth audition --play` from the terminal. While the
 transport stands still the stream is cut by nothing: the end fade and the
 gate at the song's end apply only while it rolls, so a tail or a previewed
 note is heard whole wherever the transport is.

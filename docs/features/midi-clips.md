@@ -98,7 +98,8 @@ Edits from the agent and the app go through the host, with its validation,
 
 A MIDI track is added with ⇧⌘T and a note clip by a double-click on its lane.
 The piano roll shows all 128 notes whatever the instrument, and adds, selects,
-moves, stretches, types and removes notes on its grid or, with Option, off it.
+moves, stretches, types and removes notes on its grid or, with ⌘, off it
+(Option until D79).
 Note clips are moved, trimmed at either edge and duplicated, and Copy, Cut and
 Paste take clips or notes as they are. A sample dropped on a MIDI track's header
 becomes its instrument, a sampler that plays it at every note's pitch, as it

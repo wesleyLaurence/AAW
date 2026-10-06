@@ -6,7 +6,8 @@ import UniformTypeIdentifiers
 /// How the app was started: `AAW [PROJECT...]`, each a project's folder or its
 /// song file, and with none a new Untitled project. For checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
-/// X,Y`, `--drag X1,Y1,X2,Y2`, `--key KEY`, `--type TEXT` and `--wait SECONDS`
+/// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
+/// held), `--key KEY`, `--type TEXT` and `--wait SECONDS`
 /// in the order to perform them, then `--measure JSON [--frames N]` and
 /// `--snapshot PNG`, with `--after SECONDS` and `--size WxH`.
 struct Launch {
@@ -14,7 +15,7 @@ struct Launch {
     /// the window's content, from its top left.
     enum Action: Equatable {
         case click(CGPoint, shift: Bool = false, count: Int = 1)
-        case drag(CGPoint, CGPoint)
+        case drag(CGPoint, CGPoint, flags: NSEvent.ModifierFlags = [])
         case key(Key)
         /// An audio file let go at a point, as a drag from the Finder ends.
         case drop(URL, CGPoint)
@@ -94,9 +95,10 @@ struct Launch {
                     actions.append(.click(CGPoint(x: n[0], y: n[1]), shift: argument == "--shift-click",
                                           count: argument == "--double-click" ? 2 : 1))
                 }
-            case "--drag":
+            case "--drag", "--opt-drag", "--cmd-drag":
                 let n = numbers()
-                if n.count == 4 { actions.append(.drag(CGPoint(x: n[0], y: n[1]), CGPoint(x: n[2], y: n[3]))) }
+                let flags: NSEvent.ModifierFlags = argument == "--opt-drag" ? .option : argument == "--cmd-drag" ? .command : []
+                if n.count == 4 { actions.append(.drag(CGPoint(x: n[0], y: n[1]), CGPoint(x: n[2], y: n[3]), flags: flags)) }
             case "--drop":
                 // FILE,X,Y: the file's path may have commas of its own.
                 let parts = (rest.popFirst() ?? "").split(separator: ",", omittingEmptySubsequences: false)
@@ -398,11 +400,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 mouse(.leftMouseDown, p, flags: shift ? .shift : [], count: n)
                 mouse(.leftMouseUp, p, flags: shift ? .shift : [], count: n)
             }
-        case .drag(let from, let to):
-            mouse(.leftMouseDown, from)
-            mouse(.leftMouseDragged, CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2))
-            mouse(.leftMouseDragged, to)
-            mouse(.leftMouseUp, to)
+        case .drag(let from, let to, let flags):
+            mouse(.leftMouseDown, from, flags: flags)
+            mouse(.leftMouseDragged, CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2), flags: flags)
+            mouse(.leftMouseDragged, to, flags: flags)
+            mouse(.leftMouseUp, to, flags: flags)
         case .key(let key):
             // With Shift, a letter arrives as its capital, which menus match.
             let characters = key.modifiers.contains(.shift) ? key.characters.uppercased() : key.characters

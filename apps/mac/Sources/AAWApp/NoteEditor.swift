@@ -3,20 +3,29 @@ import AppKit
 import SwiftUI
 
 /// The piano roll: the notes of the note clip last selected, by pitch and in
-/// time, every MIDI note whether or not an instrument plays it. Notes are
-/// added, selected, moved, stretched and removed here, on the grid or off it,
-/// and each edit is a command to the host, as an agent's `daw note` is. The
-/// clip owns its notes, so no other clip changes.
+/// time, every MIDI note whether or not an instrument plays it, and their
+/// velocities in a lane under them. Notes are added, selected, moved, copied,
+/// stretched at either end and removed here, on the grid or off it, and each
+/// edit is a command to the host, as an agent's `daw note` is. The clip owns
+/// its notes, so no other clip changes. A note is heard through the track's
+/// instrument as it is drawn, clicked or moved to another pitch.
 final class NoteEditor: NSView {
     private enum Drag {
-        /// Notes being moved: by whole steps, or with Option by beats, and by
-        /// notes. `collapse` is the note to select alone if the press is a click.
-        case move(notes: [NoteView], origin: CGPoint, steps: Int, by: Double, semitones: Int, moved: Bool, collapse: UInt64?)
+        /// Notes being moved, or with Option copied: by whole steps, or with
+        /// ⌘ by beats, and by notes. `collapse` is the note to select alone
+        /// if the press is a click.
+        case move(notes: [NoteView], grabbed: NoteView, origin: CGPoint, steps: Int, by: Double, semitones: Int, moved: Bool, collapse: UInt64?)
         /// Notes being made longer or shorter by the end of `grabbed`.
         case stretch(notes: [NoteView], grabbed: NoteView, end: Double, free: Bool, moved: Bool)
+        /// Notes' starts being moved by the start of `grabbed`; their ends stay.
+        case start(notes: [NoteView], grabbed: NoteView, start: Double, free: Bool, moved: Bool)
+        /// Notes' velocities changed together by a drag in the velocity lane.
+        case velocity(notes: [NoteView], origin: CGPoint, by: Int)
         /// A rectangle drawn around notes to select them, with those that
         /// were selected before when Shift was held.
         case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>)
+        /// A key held, and the keys dragged across, each played.
+        case keys(pitch: Int)
     }
 
     /// A note shown ahead of the host, where a drag has it.
@@ -24,6 +33,7 @@ final class NoteEditor: NSView {
         var at: Double
         var duration: Double
         var pitch: Int
+        var velocity: Int
     }
 
     private let model: SongModel
@@ -34,6 +44,9 @@ final class NoteEditor: NSView {
     private var fitted: UInt64?
     private var drag: Drag?
     private var held: [UInt64: Held] = [:]
+    /// The copies an Option-drag would make, or has made until the host's
+    /// song has them.
+    private var ghosts: [Held] = []
     private var holds = 0
     private var link: CADisplayLink?
     private let playhead = NSView()
@@ -84,12 +97,16 @@ final class NoteEditor: NSView {
         if context.clip.key != self.context?.clip.key {
             drag = nil
             held = [:]
+            ghosts = []
             model.noteInsert = nil
         }
         self.context = context
         self.color = color
         // What was shown ahead of the host has arrived, or was refused.
-        if changed, drag == nil { held = [:] }
+        if changed, drag == nil {
+            held = [:]
+            ghosts = []
+        }
         relayout()
         link?.isPaused = !playing
         if !playing { playhead.isHidden = true }
@@ -109,11 +126,11 @@ final class NoteEditor: NSView {
 
     /// The clip's notes where they are drawn: the song's place, or the
     /// person's while they hold one. Selected notes last, so on top.
-    private func notes() -> [(note: NoteView, at: Double, duration: Double, pitch: Int)] {
+    private func notes() -> [(note: NoteView, at: Double, duration: Double, pitch: Int, velocity: Int)] {
         guard let context else { return [] }
         let all = context.clip.notes.map { note in
             let h = held[note.key]
-            return (note, h?.at ?? note.at, h?.duration ?? note.duration, h?.pitch ?? Int(note.pitch))
+            return (note, h?.at ?? note.at, h?.duration ?? note.duration, h?.pitch ?? Int(note.pitch), h?.velocity ?? Int(note.velocity))
         }
         return all.filter { !model.selectedNotes.contains($0.0.key) } + all.filter { model.selectedNotes.contains($0.0.key) }
     }
@@ -125,6 +142,13 @@ final class NoteEditor: NSView {
             if rect.insetBy(dx: -1, dy: 0).contains(p) { return (n.note, rect) }
         }
         return nil
+    }
+
+    /// Plays a note through the track's instrument, as the Synth panel's keys
+    /// do: as long as the note, from an eighth of a beat to a beat.
+    private func preview(pitch: Int, velocity: Int, duration: Double) {
+        guard model.notePreview, let track = context?.track, track.instrument != nil else { return }
+        model.previewNote(track: track.key, pitch: pitch, velocity: min(max(velocity, 1), 127), lengthBeats: min(max(duration, 0.125), 1))
     }
 
     // MARK: Frames
@@ -149,9 +173,13 @@ final class NoteEditor: NSView {
     // MARK: Zoom and scroll
 
     override func scrollWheel(with event: NSEvent) {
-        if event.modifierFlags.contains(.command) || event.modifierFlags.contains(.option) {
-            let x = convert(event.locationInWindow, from: nil).x
-            layout.zoom(by: exp(event.scrollingDeltaY * 0.01), anchorX: max(x, PianoRollLayout.gutter))
+        let p = convert(event.locationInWindow, from: nil)
+        if event.modifierFlags.contains(.option) {
+            // Up and down, as in Ableton: the rows taller or shorter.
+            let y = min(max(p.y, PianoRollLayout.rulerHeight), layout.notesBottom)
+            layout.zoomRows(by: exp(event.scrollingDeltaY * 0.01), anchorY: y)
+        } else if event.modifierFlags.contains(.command) {
+            layout.zoom(by: exp(event.scrollingDeltaY * 0.01), anchorX: max(p.x, PianoRollLayout.gutter))
         } else {
             layout.scroll.x -= event.scrollingDeltaX
             layout.scroll.y -= event.scrollingDeltaY
@@ -172,9 +200,24 @@ final class NoteEditor: NSView {
         window?.makeFirstResponder(self)
         guard let context else { return }
         let p = convert(event.locationInWindow, from: nil)
-        guard p.x >= PianoRollLayout.gutter, p.y >= PianoRollLayout.rulerHeight else { return }
+        guard p.y >= PianoRollLayout.rulerHeight else { return }
+        if p.x < PianoRollLayout.gutter {
+            // A key plays its note.
+            guard p.y < layout.notesBottom else { return }
+            let pitch = layout.pitch(atY: p.y)
+            preview(pitch: pitch, velocity: 100, duration: 1)
+            drag = .keys(pitch: pitch)
+            needsDisplay = true
+            return
+        }
         let shift = event.modifierFlags.contains(.shift)
-        let free = event.modifierFlags.contains(.option)
+        if layout.inVelocity(p) {
+            velocityDown(at: p, shift: shift)
+            return
+        }
+        guard p.y < layout.notesBottom else { return }
+        let free = event.modifierFlags.contains(.command)
+        let copy = event.modifierFlags.contains(.option)
         if let hit = note(at: p) {
             let key = hit.note.key
             if event.clickCount == 2 {
@@ -197,11 +240,15 @@ final class NoteEditor: NSView {
                 collapse = key
             }
             model.select(notes: selection)
+            preview(pitch: Int(hit.note.pitch), velocity: Int(hit.note.velocity), duration: hit.note.duration)
             let chosen = context.clip.notes.filter { selection.contains($0.key) }
-            if PianoRollLayout.onEnd(p, of: hit.rect) {
+            // With Option held the press copies, whichever part of the note it is on.
+            if !copy, PianoRollLayout.onEnd(p, of: hit.rect) {
                 drag = .stretch(notes: chosen, grabbed: hit.note, end: hit.note.at + hit.note.duration, free: free, moved: false)
+            } else if !copy, PianoRollLayout.onStart(p, of: hit.rect) {
+                drag = .start(notes: chosen, grabbed: hit.note, start: hit.note.at, free: free, moved: false)
             } else {
-                drag = .move(notes: chosen, origin: p, steps: 0, by: 0, semitones: 0, moved: false, collapse: collapse)
+                drag = .move(notes: chosen, grabbed: hit.note, origin: p, steps: 0, by: 0, semitones: 0, moved: false, collapse: collapse)
             }
             needsDisplay = true
             return
@@ -209,12 +256,13 @@ final class NoteEditor: NSView {
         let beat = layout.beat(atX: p.x)
         let pitch = layout.pitch(atY: p.y)
         if event.clickCount == 2 {
-            // A note on the step under the pointer, or with Option where it
-            // is, at the note under it, a step of the grid long.
+            // A note on the step under the pointer, or with ⌘ where it is, at
+            // the note under it, a step of the grid long.
             guard beat >= 0, beat < context.clip.lengthBeats else {
                 NSSound.beep()
                 return
             }
+            preview(pitch: pitch, velocity: 100, duration: layout.grid)
             model.edit(.noteAdd(clip: context.clip.key, at: beat, free: free, grid: model.noteGrid, pitch: Int32(pitch))) { [weak self] made in
                 self?.model.select(notes: Set(made))
             }
@@ -228,25 +276,64 @@ final class NoteEditor: NSView {
         needsDisplay = true
     }
 
+    /// A press in the velocity lane: on a note's stalk, which selects the
+    /// note as a click on it does, and starts a drag of the selected notes'
+    /// velocities; in the clear, nothing selected.
+    private func velocityDown(at p: CGPoint, shift: Bool) {
+        // A stalk and its head, from the note's start to a few points right of it.
+        let reach = { (n: (note: NoteView, at: Double, duration: Double, pitch: Int, velocity: Int)) in abs(self.layout.x(n.at) + 3 - p.x) }
+        let near = notes().filter { reach($0) <= 4 }
+        // The nearest stalk, a selected one where several are as near.
+        guard let hit = near.min(by: { a, b in
+            let (da, db) = (reach(a), reach(b))
+            if abs(da - db) > 0.5 { return da < db }
+            return model.selectedNotes.contains(a.note.key) && !model.selectedNotes.contains(b.note.key)
+        }) else {
+            if !shift { model.select(notes: []) }
+            needsDisplay = true
+            return
+        }
+        var selection = model.selectedNotes
+        if shift {
+            if selection.remove(hit.note.key) == nil { selection.insert(hit.note.key) }
+        } else if !selection.contains(hit.note.key) {
+            selection = [hit.note.key]
+        }
+        model.select(notes: selection)
+        if let context, selection.contains(hit.note.key) {
+            drag = .velocity(notes: context.clip.notes.filter { selection.contains($0.key) }, origin: p, by: 0)
+        }
+        needsDisplay = true
+    }
+
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        let free = event.modifierFlags.contains(.option)
+        let free = event.modifierFlags.contains(.command)
         switch drag {
-        case .move(let notes, let origin, _, _, _, let moved, let collapse):
+        case .move(let notes, let grabbed, let origin, _, _, let was, let moved, let collapse):
             let (dx, dy) = (p.x - origin.x, p.y - origin.y)
             if !moved, hypot(dx, dy) < 3 { return }
             // By whole steps, so that a note off the grid stays as far off
-            // it; with Option, by thousandths of a beat.
+            // it; with ⌘, by thousandths of a beat.
             let steps = free ? 0 : layout.steps(forDrag: dx)
             let by = free ? layout.beats(forDrag: dx) : 0
             // Up and down by notes, as far as every note stays a MIDI note.
             let pitches = notes.map { Int($0.pitch) }
             let semitones = min(max(layout.semitones(forDrag: dy), -(pitches.min() ?? 0)), 127 - (pitches.max() ?? 127))
-            let shift = Double(steps) * layout.grid + by
-            for n in notes {
-                held[n.key] = Held(at: n.at + shift, duration: n.duration, pitch: Int(n.pitch) + semitones)
+            if semitones != was {
+                preview(pitch: Int(grabbed.pitch) + semitones, velocity: Int(grabbed.velocity), duration: grabbed.duration)
             }
-            drag = .move(notes: notes, origin: origin, steps: steps, by: by, semitones: semitones, moved: true, collapse: collapse)
+            let shift = Double(steps) * layout.grid + by
+            let placed = notes.map { Held(at: $0.at + shift, duration: $0.duration, pitch: Int($0.pitch) + semitones, velocity: Int($0.velocity)) }
+            // With Option, copies go there and the notes stay where they are.
+            if event.modifierFlags.contains(.option) {
+                held = [:]
+                ghosts = placed
+            } else {
+                ghosts = []
+                held = Dictionary(uniqueKeysWithValues: zip(notes.map(\.key), placed))
+            }
+            drag = .move(notes: notes, grabbed: grabbed, origin: origin, steps: steps, by: by, semitones: semitones, moved: true, collapse: collapse)
         case .stretch(let notes, let grabbed, _, _, _):
             let wanted = layout.beat(atX: p.x)
             var end = free ? (wanted * 1000).rounded() / 1000 : layout.line(at: wanted)
@@ -258,14 +345,40 @@ final class NoteEditor: NSView {
             by = max(by, 0.001 - (notes.map(\.duration).min() ?? 1))
             end = grabbed.at + grabbed.duration + by
             for n in notes {
-                held[n.key] = Held(at: n.at, duration: n.duration + by, pitch: Int(n.pitch))
+                held[n.key] = Held(at: n.at, duration: n.duration + by, pitch: Int(n.pitch), velocity: Int(n.velocity))
             }
             drag = .stretch(notes: notes, grabbed: grabbed, end: end, free: free, moved: true)
+        case .start(let notes, let grabbed, _, _, _):
+            let wanted = layout.beat(atX: p.x)
+            var start = free ? (wanted * 1000).rounded() / 1000 : layout.line(at: wanted)
+            // Every note keeps a length: the grabbed one from the last line
+            // before its end, or a thousandth off the grid.
+            let end = grabbed.at + grabbed.duration
+            let latest = free ? end - 0.001 : ((end / layout.grid - 1e-9).rounded(.up) - 1) * layout.grid
+            start = min(start, latest)
+            var by = start - grabbed.at
+            by = min(by, (notes.map(\.duration).min() ?? 1) - 0.001)
+            start = grabbed.at + by
+            for n in notes {
+                held[n.key] = Held(at: n.at + by, duration: n.duration - by, pitch: Int(n.pitch), velocity: Int(n.velocity))
+            }
+            drag = .start(notes: notes, grabbed: grabbed, start: start, free: free, moved: true)
+        case .velocity(let notes, let origin, _):
+            let by = layout.velocities(forDrag: p.y - origin.y)
+            for n in notes {
+                held[n.key] = Held(at: n.at, duration: n.duration, pitch: Int(n.pitch), velocity: min(max(Int(n.velocity) + by, 1), 127))
+            }
+            drag = .velocity(notes: notes, origin: origin, by: by)
         case .marquee(let origin, _, let base):
             drag = .marquee(origin: origin, now: p, base: base)
             let box = CGRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x - origin.x), height: abs(p.y - origin.y))
             let inside = notes().filter { layout.rect(at: $0.at, duration: $0.duration, pitch: $0.pitch).intersects(box) }.map(\.note.key)
             model.select(notes: base.union(inside))
+        case .keys(let pitch):
+            let now = layout.pitch(atY: min(p.y, layout.notesBottom - 1))
+            guard now != pitch else { return }
+            preview(pitch: now, velocity: 100, duration: 1)
+            drag = .keys(pitch: now)
         case nil:
             return
         }
@@ -276,12 +389,20 @@ final class NoteEditor: NSView {
         guard let ended = drag else { return }
         drag = nil
         switch ended {
-        case .move(let notes, _, let steps, let by, let semitones, let moved, let collapse):
+        case .move(let notes, _, _, let steps, let by, let semitones, let moved, let collapse):
             if moved, steps != 0 || by != 0 || semitones != 0 {
-                model.edit(.notesMove(notes: notes.map(\.key), steps: Int32(steps), grid: model.noteGrid, by: by, semitones: Int32(semitones)))
+                let keys = notes.map(\.key)
+                if event.modifierFlags.contains(.option) {
+                    model.edit(.notesCopy(notes: keys, steps: Int32(steps), grid: model.noteGrid, by: by, semitones: Int32(semitones))) { [weak self] made in
+                        self?.model.select(notes: Set(made))
+                    }
+                } else {
+                    model.edit(.notesMove(notes: keys, steps: Int32(steps), grid: model.noteGrid, by: by, semitones: Int32(semitones)))
+                }
                 hold()
             } else {
                 held = [:]
+                ghosts = []
                 if !moved, let collapse { model.select(notes: [collapse]) }
             }
         case .stretch(let notes, let grabbed, let end, let free, let moved):
@@ -291,7 +412,21 @@ final class NoteEditor: NSView {
             } else {
                 held = [:]
             }
-        case .marquee:
+        case .start(let notes, let grabbed, let start, let free, let moved):
+            if moved, abs(start - grabbed.at) > 1e-9 {
+                model.edit(.notesStart(notes: notes.map(\.key), grabbed: grabbed.key, start: start, free: free, grid: model.noteGrid))
+                hold()
+            } else {
+                held = [:]
+            }
+        case .velocity(let notes, _, let by):
+            if by != 0 {
+                model.edit(.notesVelocity(notes: notes.map(\.key), by: Int32(by)))
+                hold()
+            } else {
+                held = [:]
+            }
+        case .marquee, .keys:
             break
         }
         needsDisplay = true
@@ -306,6 +441,7 @@ final class NoteEditor: NSView {
             MainActor.assumeIsolated {
                 guard let self, self.holds == mine, self.drag == nil else { return }
                 self.held = [:]
+                self.ghosts = []
                 self.needsDisplay = true
             }
         }
@@ -344,7 +480,8 @@ final class NoteEditor: NSView {
         needsDisplay = true
     }
 
-    /// Moves the selected notes a step earlier or later, or up or down.
+    /// Moves the selected notes a step earlier or later, or up or down, and
+    /// plays the first at its new pitch.
     private func nudge(steps: Int, semitones: Int) {
         let notes = model.selectedNoteViews
         guard !notes.isEmpty else {
@@ -357,8 +494,9 @@ final class NoteEditor: NSView {
             return
         }
         model.edit(.notesMove(notes: notes.map(\.key), steps: Int32(steps), grid: model.noteGrid, by: 0, semitones: Int32(semitones)))
-        if semitones != 0, let pitch = pitches.first {
-            layout.reveal(pitch: pitch + semitones)
+        if semitones != 0, let first = notes.first {
+            preview(pitch: Int(first.pitch) + semitones, velocity: Int(first.velocity), duration: first.duration)
+            layout.reveal(pitch: Int(first.pitch) + semitones)
             needsDisplay = true
         }
     }
@@ -396,7 +534,7 @@ final class NoteEditor: NSView {
     /// The pitches whose rows are in view.
     private var visiblePitches: ClosedRange<Int> {
         let high = layout.pitch(atY: PianoRollLayout.rulerHeight)
-        let low = layout.pitch(atY: bounds.height)
+        let low = layout.pitch(atY: layout.notesBottom)
         return low...max(low, high)
     }
 
@@ -410,26 +548,46 @@ final class NoteEditor: NSView {
     override func draw(_ dirtyRect: NSRect) {
         let gutter = PianoRollLayout.gutter
         let ruler = PianoRollLayout.rulerHeight
+        let bottom = layout.notesBottom
         fill(bounds, Theme.gray(0.13))
         guard let context else { return }
-        let lanes = CGRect(x: gutter, y: ruler, width: bounds.width - gutter, height: bounds.height - ruler)
+        let lanes = CGRect(x: gutter, y: ruler, width: bounds.width - gutter, height: bottom - ruler)
+        let velocity = CGRect(x: gutter, y: bottom, width: bounds.width - gutter, height: bounds.height - bottom)
         clipped(to: lanes) {
             drawRows()
-            drawGrid(top: ruler)
-            drawOutside(context.clip)
+            drawGrid(top: ruler, bottom: bottom)
+            drawOutside(context.clip, top: ruler, bottom: bottom)
             drawNotes(context.clip)
+            drawGhosts()
             drawInsert()
             drawMarquee()
-            let end = layout.x(layout.last)
-            if end < bounds.width {
-                fill(CGRect(x: end, y: ruler, width: bounds.width - end, height: bounds.height - ruler), Theme.gray(0.13))
-            }
+            drawPastLast(top: ruler, bottom: bottom)
         }
-        clipped(to: CGRect(x: 0, y: ruler, width: gutter, height: bounds.height - ruler)) { drawKeys() }
+        if velocity.height > 0 {
+            clipped(to: velocity) {
+                fill(velocity, Theme.gray(0.11))
+                drawGrid(top: bottom, bottom: bounds.height)
+                drawOutside(context.clip, top: bottom, bottom: bounds.height)
+                drawVelocities(context.clip)
+                drawPastLast(top: bottom, bottom: bounds.height)
+            }
+            fill(CGRect(x: 0, y: bottom, width: gutter, height: bounds.height - bottom), Theme.ruler)
+            text("Velocity", in: CGRect(x: 6, y: bottom + 5, width: gutter - 12, height: 12), font: Self.nameFont, color: Theme.dimText)
+            fill(CGRect(x: 0, y: bottom, width: bounds.width, height: 1), Theme.separator)
+        }
+        clipped(to: CGRect(x: 0, y: ruler, width: gutter, height: bottom - ruler)) { drawKeys() }
         clipped(to: CGRect(x: gutter, y: 0, width: bounds.width - gutter, height: ruler)) { drawRuler() }
         fill(CGRect(x: 0, y: 0, width: gutter, height: ruler), Theme.ruler)
         fill(CGRect(x: gutter - 1, y: 0, width: 1, height: bounds.height), Theme.separator)
         fill(CGRect(x: 0, y: ruler - 1, width: bounds.width, height: 1), Theme.separator)
+    }
+
+    /// Past the last beat shown, the background.
+    private func drawPastLast(top: CGFloat, bottom: CGFloat) {
+        let end = layout.x(layout.last)
+        if end < bounds.width {
+            fill(CGRect(x: end, y: top, width: bounds.width - end, height: bottom - top), Theme.gray(0.13))
+        }
     }
 
     /// A row for each note, as a piano's keys: the black ones darker, a line
@@ -437,23 +595,24 @@ final class NoteEditor: NSView {
     private func drawRows() {
         let left = PianoRollLayout.gutter
         let width = bounds.width - left
+        let row = layout.row
         for pitch in visiblePitches {
             let y = layout.y(pitch)
-            fill(CGRect(x: left, y: y, width: width, height: PianoRollLayout.semitone), Theme.lane)
+            fill(CGRect(x: left, y: y, width: width, height: row), Theme.lane)
             if PianoRollLayout.black(pitch) {
-                fill(CGRect(x: left, y: y, width: width, height: PianoRollLayout.semitone), Theme.gray(0, 0.16))
+                fill(CGRect(x: left, y: y, width: width, height: row), Theme.gray(0, 0.16))
             }
             if !sounds(pitch) {
-                fill(CGRect(x: left, y: y, width: width, height: PianoRollLayout.semitone), Theme.gray(0, 0.22))
+                fill(CGRect(x: left, y: y, width: width, height: row), Theme.gray(0, 0.22))
             }
             if pitch % 12 == 0 {
-                fill(CGRect(x: left, y: (y + PianoRollLayout.semitone).rounded() - 1, width: width, height: 1), Theme.gray(1, 0.1))
+                fill(CGRect(x: left, y: (y + row).rounded() - 1, width: width, height: 1), Theme.gray(1, 0.1))
             }
         }
     }
 
     /// A line at each step once they have room, at each beat and each bar.
-    private func drawGrid(top: CGFloat) {
+    private func drawGrid(top: CGFloat, bottom: CGFloat) {
         let grid = layout.grid
         let stepWidth = CGFloat(grid) * layout.pixelsPerBeat
         let first = Int((max(layout.first, layout.beat(atX: PianoRollLayout.gutter)) / grid).rounded(.down))
@@ -464,16 +623,15 @@ final class NoteEditor: NSView {
             let onBeat = abs(beat - beat.rounded()) < 1e-9
             let onBar = onBeat && Int(beat.rounded()) % 4 == 0
             guard onBar || (onBeat && layout.pixelsPerBeat >= 6) || stepWidth >= 6 else { continue }
-            fill(CGRect(x: layout.x(beat).rounded(), y: top, width: 1, height: bounds.height - top),
+            fill(CGRect(x: layout.x(beat).rounded(), y: top, width: 1, height: bottom - top),
                  onBar ? Theme.gray(1, 0.2) : onBeat ? Theme.gray(1, 0.1) : Theme.gridLine)
         }
     }
 
     /// Before the clip's start and after its end, where notes are kept and
     /// do not play: shaded, with a line at each edge.
-    private func drawOutside(_ clip: NoteClipView) {
-        let top = PianoRollLayout.rulerHeight
-        let height = bounds.height - top
+    private func drawOutside(_ clip: NoteClipView, top: CGFloat, bottom: CGFloat) {
+        let height = bottom - top
         let start = layout.x(0)
         let end = layout.x(clip.lengthBeats)
         if layout.first < 0 { fill(CGRect(x: layout.x(layout.first), y: top, width: start - layout.x(layout.first), height: height), Theme.pastEnd) }
@@ -483,25 +641,64 @@ final class NoteEditor: NSView {
         }
     }
 
-    private func drawNotes(_ clip: NoteClipView) {
+    /// A note's fill: its track's color, lighter, where it plays, and gray
+    /// outside the clip, where it is kept and does not; fainter the softer it is.
+    private func shade(at: Double, velocity: Int, in clip: NoteClipView) -> NSColor {
         let lit = color.blended(withFraction: 0.25, of: .white) ?? color
+        let plays = at >= 0 && at < clip.lengthBeats
+        return (plays ? lit : Theme.gray(0.55)).withAlphaComponent(0.4 + 0.6 * CGFloat(velocity) / 127)
+    }
+
+    private func drawNotes(_ clip: NoteClipView) {
         for n in notes() {
             let rect = layout.rect(at: n.at, duration: n.duration, pitch: n.pitch)
             guard rect.maxX >= PianoRollLayout.gutter, rect.minX <= bounds.width,
-                  rect.maxY >= PianoRollLayout.rulerHeight, rect.minY <= bounds.height else { continue }
+                  rect.maxY >= PianoRollLayout.rulerHeight, rect.minY <= layout.notesBottom else { continue }
             let selected = model.selectedNotes.contains(n.note.key)
-            // A note outside the clip is kept and does not play: gray.
-            let plays = n.at >= 0 && n.at < clip.lengthBeats
             let bar = rect.insetBy(dx: 0, dy: 0.5)
             let shape = NSBezierPath(roundedRect: bar, xRadius: 2, yRadius: 2)
-            (plays ? lit : Theme.gray(0.55)).withAlphaComponent(0.4 + 0.6 * CGFloat(n.note.velocity) / 127).setFill()
+            shade(at: n.at, velocity: n.velocity, in: clip).setFill()
             shape.fill()
             (selected ? Theme.selectedClip : Theme.gray(0, 0.5)).setStroke()
             shape.lineWidth = selected ? 1.5 : 0.5
             shape.stroke()
-            if bar.width >= 22 {
+            if bar.width >= 22, layout.row >= 9 {
                 text(noteName(midi: Int32(n.pitch)), in: CGRect(x: bar.minX + 3, y: bar.midY - 5.5, width: bar.width - 4, height: 11),
                      font: Self.noteFont, color: Theme.gray(0.05, 0.9))
+            }
+        }
+    }
+
+    /// Where an Option-drag puts its copies: outlined, over the notes.
+    private func drawGhosts() {
+        for g in ghosts {
+            let bar = layout.rect(at: g.at, duration: g.duration, pitch: g.pitch).insetBy(dx: 0, dy: 0.5)
+            let shape = NSBezierPath(roundedRect: bar, xRadius: 2, yRadius: 2)
+            color.withAlphaComponent(0.35).setFill()
+            shape.fill()
+            Theme.selectedClip.setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+        }
+    }
+
+    /// Each note's velocity as a stalk from the lane's bottom, at its start:
+    /// selected ones on top, and their value while they are dragged.
+    private func drawVelocities(_ clip: NoteClipView) {
+        let bottom = bounds.height - PianoRollLayout.velocityInset
+        var dragged = false
+        if case .velocity = drag { dragged = true }
+        for n in notes() {
+            let x = layout.x(n.at).rounded()
+            guard x >= PianoRollLayout.gutter - 4, x <= bounds.width + 4 else { continue }
+            let top = layout.velocityY(n.velocity)
+            let selected = model.selectedNotes.contains(n.note.key)
+            let ink = selected ? Theme.selectedClip : shade(at: n.at, velocity: 127, in: clip)
+            // The head reaches right of the stalk, so one at the clip's start shows.
+            fill(CGRect(x: x + 1, y: top, width: 1, height: bottom - top), ink)
+            fill(CGRect(x: x + 1, y: top - 1, width: 5, height: 3), ink)
+            if selected, dragged {
+                text("\(n.velocity)", in: CGRect(x: x + 5, y: max(top - 6, layout.notesBottom + 1), width: 30, height: 11), font: Self.numberFont, color: Theme.text)
             }
         }
     }
@@ -509,7 +706,7 @@ final class NoteEditor: NSView {
     /// Where pasted notes go.
     private func drawInsert() {
         guard let at = model.noteInsert, model.selectedNotes.isEmpty else { return }
-        fill(CGRect(x: layout.x(at).rounded(), y: PianoRollLayout.rulerHeight, width: 1, height: bounds.height), Theme.cue.withAlphaComponent(0.8))
+        fill(CGRect(x: layout.x(at).rounded(), y: PianoRollLayout.rulerHeight, width: 1, height: layout.notesBottom), Theme.cue.withAlphaComponent(0.8))
     }
 
     private func drawMarquee() {
@@ -520,24 +717,28 @@ final class NoteEditor: NSView {
         NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)).stroke()
     }
 
-    /// The keys: each C by its name, and a note that plays a pad of its own,
-    /// as a drum's does, by the pad's name.
+    /// The keys: each C by its name, a note that plays a pad of its own, as
+    /// a drum's does, by the pad's name when there is room, and the key held.
     private func drawKeys() {
         let gutter = PianoRollLayout.gutter
+        let row = layout.row
         let drums = Dictionary(
             (context?.track.map ?? []).filter { !$0.pitched && $0.low == $0.high }.map { (Int($0.low), $0.pad) },
             uniquingKeysWith: { first, _ in first }
         )
+        var pressed: Int?
+        if case .keys(let pitch) = drag { pressed = pitch }
         for pitch in visiblePitches {
             let y = layout.y(pitch)
-            let row = CGRect(x: 0, y: y, width: gutter - 1, height: PianoRollLayout.semitone)
-            fill(row, PianoRollLayout.black(pitch) ? Theme.gray(0.12) : Theme.gray(0.26))
-            fill(CGRect(x: 0, y: y + PianoRollLayout.semitone - 1, width: gutter - 1, height: 1), Theme.gray(0, 0.3))
-            let label = CGRect(x: 4, y: y + PianoRollLayout.semitone / 2 - 5.5, width: gutter - 10, height: 11)
-            if let pad = drums[pitch] {
+            let key = CGRect(x: 0, y: y, width: gutter - 1, height: row)
+            fill(key, pitch == pressed ? Theme.selectedClip.withAlphaComponent(0.6) : PianoRollLayout.black(pitch) ? Theme.gray(0.12) : Theme.gray(0.26))
+            fill(CGRect(x: 0, y: y + row - 1, width: gutter - 1, height: 1), Theme.gray(0, 0.3))
+            let label = CGRect(x: 4, y: y + row / 2 - 5.5, width: gutter - 10, height: 11)
+            let named = row >= 9 ? drums[pitch] : nil
+            if let pad = named {
                 text(pad, in: CGRect(x: 4, y: label.minY, width: gutter - 40, height: 11), font: Self.nameFont, color: Theme.text)
             }
-            if pitch % 12 == 0 || drums[pitch] != nil {
+            if pitch % 12 == 0 || named != nil {
                 text(noteName(midi: Int32(pitch)), in: label, font: Self.numberFont,
                      color: pitch % 12 == 0 ? Theme.text : Theme.dimText, align: .right)
             }
@@ -584,8 +785,8 @@ struct NotePane: NSViewRepresentable {
     }
 }
 
-/// Beside the piano roll: the clip's ID, length and the grid, and the
-/// selected notes' fields.
+/// Beside the piano roll: the clip's ID, length, the grid and whether notes
+/// are heard as they are edited, and the selected notes' fields.
 struct NoteClipHeader: View {
     let model: SongModel
     let context: NoteContext
@@ -625,11 +826,17 @@ struct NoteClipHeader: View {
             }
             row("Grid") {
                 Picker("", selection: Binding(get: { model.noteGrid }, set: { model.noteGrid = $0 })) {
-                    ForEach(PatternHeader.grids, id: \.self) { Text("\($0) beat").tag($0) }
+                    ForEach(PianoRollLayout.grids, id: \.self) { Text(PianoRollLayout.noteValue($0)).tag($0) }
                 }
                 .labelsHidden()
                 .controlSize(.mini)
-                .help("The steps notes are added and moved on. With Option, a note goes off the grid")
+                .help("The steps notes are added and moved on, as note values: 1/16 is a sixteenth note and 1/8T an eighth-note triplet. With ⌘, a note goes off the grid")
+                Toggle(isOn: Binding(get: { model.notePreview }, set: { model.notePreview = $0 })) {
+                    Image(systemName: "headphones")
+                }
+                .toggleStyle(.button)
+                .controlSize(.mini)
+                .help("Preview: hear a note as it is drawn, clicked or moved, and as its key is pressed")
             }
             Divider().padding(.vertical, 2)
             let notes = model.selectedNoteViews
@@ -643,7 +850,7 @@ struct NoteClipHeader: View {
                     }
                 }
             } else {
-                Text("Double-click to add a note on the grid; with Option, off it. Drag a note to move it, its end to lengthen it, and around notes to select them.")
+                Text("Double-click to add a note on the grid; with ⌘, off it. Drag a note to move it, with Option to copy it, either end to lengthen it, and around notes to select them. Drag a stalk under them to change velocity.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

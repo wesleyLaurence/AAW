@@ -124,6 +124,9 @@ public final class SongModel {
     /// The steps the piano roll draws, adds and moves notes on, in beats as
     /// the song writes them.
     var noteGrid = "1/4"
+    /// Whether the piano roll plays a note as it is drawn, clicked or moved
+    /// to another pitch, and as its key is pressed.
+    var notePreview = true
     /// Where in the note clip being edited notes are pasted: the beat of the
     /// clip last clicked in the clear in the piano roll.
     @ObservationIgnored var noteInsert: Double?

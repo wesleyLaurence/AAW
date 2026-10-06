@@ -349,6 +349,35 @@ pub struct DeviceReport {
     pub reduction: Option<Reduction>,
 }
 
+/// How many notes previewed through Samplers sound at once, across the
+/// tracks; past that the oldest stops.
+const PREVIEWS: usize = 16;
+
+/// A note previewed through a track's Sampler, outside the timeline.
+struct Previewed {
+    track: usize,
+    voice: Voice,
+    cursor: usize,
+    /// Its place in the order previews arrived in.
+    number: u64,
+}
+
+impl Previewed {
+    fn sounding(&self) -> bool {
+        self.cursor < self.voice.length
+    }
+
+    fn render(&mut self, out: &mut [Frame]) {
+        let frames = out.len().min(self.voice.length - self.cursor);
+        for (k, o) in out[..frames].iter_mut().enumerate() {
+            let i = self.cursor + k;
+            o[0] += self.voice.sample(i, 0);
+            o[1] += self.voice.sample(i, 1);
+        }
+        self.cursor += frames;
+    }
+}
+
 pub struct Renderer {
     program: Arc<Program>,
     /// The transport's position: the timeline frame of voices with no delay.
@@ -369,6 +398,10 @@ pub struct Renderer {
     post: Vec<Frame>,
     key: Vec<Frame>,
     values: [Vec<f64>; 5],
+    /// Notes previewed through Samplers, in slots that are kept, finished or
+    /// not, until a later preview takes their place.
+    previews: Vec<Option<Previewed>>,
+    previewed: u64,
 }
 
 /// A frame of one program at the same beat in another.
@@ -498,6 +531,8 @@ impl Renderer {
             post: vec![SILENCE; max_block],
             key: vec![SILENCE; max_block],
             values: [0; 5].map(|_| vec![0.0; max_block]),
+            previews: (0..PREVIEWS).map(|_| None).collect(),
+            previewed: 0,
             program,
         };
         r.seek(from, false);
@@ -529,9 +564,30 @@ impl Renderer {
         }
     }
 
+    /// Plays `voice`, a note of the Sampler of the track at `track` made by
+    /// `program::preview_voice`, now and outside the timeline, as `preview`
+    /// does through a Synth. Returns the voice whose slot it takes, a
+    /// finished one or else the oldest, for the caller to free off the audio
+    /// thread. Does not allocate.
+    pub fn preview_voice(&mut self, track: usize, voice: Voice) -> Option<Voice> {
+        self.previewed += 1;
+        let slot = match self.previews.iter().position(|s| s.as_ref().is_none_or(|s| !s.sounding())) {
+            Some(free) => free,
+            None => (0..self.previews.len()).min_by_key(|&i| self.previews[i].as_ref().map_or(0, |s| s.number)).unwrap_or(0),
+        };
+        let new = Previewed {
+            track,
+            voice,
+            cursor: 0,
+            number: self.previewed,
+        };
+        self.previews[slot].replace(new).map(|old| old.voice)
+    }
+
     /// Whether a previewed note is sounding on any track.
     pub fn previewing(&self) -> bool {
         self.tracks.iter().any(|t| t.synth.as_ref().is_some_and(|s| s.previewing()))
+            || self.previews.iter().flatten().any(Previewed::sounding)
     }
 
     /// Lets the sounding voices ring out over a fade, as on a stop.
@@ -633,6 +689,9 @@ impl Renderer {
             state.voices.ring(&t.voices, out, self.fade, self.ramp);
             if let Some(s) = &mut state.synth {
                 s.render(out, start, total, rolling, self.ramp);
+            }
+            for p in self.previews.iter_mut().flatten().filter(|p| p.track == ti && p.sounding()) {
+                p.render(out);
             }
             if let (Some(track), Some(old)) = (state.inherits, old.as_deref_mut()) {
                 old.ring(track, out);
@@ -844,6 +903,9 @@ impl Renderer {
         self.master_chain.take_over(&mut old.master_chain);
         self.master_gain.take_over(&old.master_gain, program.master.gain != old.program.master.gain);
         self.dry_line.take_over(&mut old.dry_line);
+        // Notes being previewed through Samplers carry on, on the same tracks.
+        std::mem::swap(&mut self.previews, &mut old.previews);
+        self.previewed = old.previewed;
         inherits
     }
 
@@ -878,6 +940,19 @@ impl Renderer {
             }
         }
         self.master_chain.take_over(&mut old.master_chain);
+        // Notes being previewed through Samplers carry on, on tracks that are
+        // still there; the rest are freed with the old renderer.
+        self.previewed = old.previewed;
+        let mut free = 0;
+        for slot in old.previews.iter_mut() {
+            let Some(p) = slot.as_ref().filter(|p| p.sounding()) else { continue };
+            let Some(track) = program.tracks.iter().position(|t| t.id == old.program.tracks[p.track].id) else { continue };
+            if let Some(mut p) = slot.take() {
+                p.track = track;
+                self.previews[free] = Some(p);
+                free += 1;
+            }
+        }
     }
 
     /// What each channel's effects did: tracks in render order, the patch
