@@ -26,7 +26,11 @@ struct SongView: View {
                 VStack(spacing: 0) {
                     ArrangementPane(model: model)
                     if model.showsDetail {
+                        // Fixed here: SwiftUI takes an NSView's intrinsic
+                        // height as an ideal and would share the leftover
+                        // height between the strip and the arrangement.
                         DetailResizer(model: model)
+                            .frame(height: DetailResizerView.thickness)
                         DetailView(model: model)
                     }
                 }
