@@ -155,7 +155,7 @@ Python gets a song as plain data, the full dump of the validated document as dic
 
 With the reference gone, parity tests cannot run. What the Python model did is pinned instead: for 533 generated documents, their canonical YAML and fingerprints or their errors, and the outcomes of 120 generated edits, recorded from the Python model on its last day and checked against the Rust model in `tests/test_model.py`; a deliberate change is accepted by updating the pinned file. The engine is held to its own promises: generated songs are rendered whole, in other block sizes, as sections and as single channels and the results compared, and the Python suite's device, routing and automation tests now run through `daw render`, a chain alone being a song that plays the test signal once on a track with those effects. The suite drives the release build, which is the one `uv run daw` runs. The last comparison of the two engines is recorded in [../engine/README.md](../engine/README.md).
 
-**D46. A clip's waveform is its track's sampler output, patterns are edited by the host's commands, and the browser asks Python.**
+**D46. A clip's waveform is its track's sampler output, patterns are edited by the host's commands, and the browser asks Python.** Revised by D80.
 Recorded with M8 of [Rust-Swift-Update.md](archive/Rust-Swift-Update.md). Clips are patterns that trigger samples, so a clip has no audio file to show. Its waveform is what its track's voices sum to over its span, before the track's inserts, fader and sends. That is what the clip is, as an audio clip's file is in other DAWs; it does not change when a level or an effect does, so mixing redraws nothing; and it needs no effects to render, so it is cheap. A track's program carries an identity of everything its voices are made from (pads, clips, the patterns they play, samples and their files, tempo, rate and session length), which is the plan's "compiled identity". The host tells an embedding process each revision's program once it is compiled, and `aaw-ffi` works out peaks on a thread of its own for the tracks whose identity it has not seen: the least and greatest sample of every 64 frames as signed bytes, and coarser levels four times as long each, so the app reads a few buckets for a column at any zoom. A sum louder than full scale is drawn as full scale. The app is told each track's identity at the revision with the peaks it has not been sent, and draws a track's peaks only for the revision they are of. Until then a clip keeps the waveform it had, sourced from where the clip was, so a moved clip carries its picture along instead of blinking, which is the plan's placeholder made unobtrusive; a new clip shows a line. Only the latest revision is worked on, and peaks are kept for sixteen revisions, so undo finds them.
 
 The pattern editor shows the pattern of the clip last selected with a row for each pad of that clip's track, because a pattern names pads and only a track gives them samples. A row's kind follows what the engine does with the pad: steps where a one-shot pad plays its sample through, events with a length where the pad is held, since a step has no length and the model refuses it there, and events by note where the sample has a root note. Steps and events of a pad both play, and both are shown. Edits are the host's commands as they were (`pattern.steps`, `event.add`, `event.set`, `event.remove`, `set`, and batches of them), composed in `aaw-ffi` from the song's exact beats: an event moves by whole steps of its pattern's grid, so one on a third stays on thirds, and a step row keeps its spaces and bar lines when a step in it changes. A row left without steps is removed. Changing a pattern's length or step rewrites its rows in the same batch and refuses a step that would not fall on the new grid. A click on a clip shows its pattern and a click on a header shows devices, as in Live; the two marks on the panel change between them. Double-clicking an empty part of a track makes a pattern one bar long and a clip of it, which with the browser lets a person build a beat without an agent; Own Copy duplicates a shared pattern for one clip. One event is selected at a time. Delete in the pattern editor removes the selected event and never the clip. `daw status` lists the selected event with the clip, so an agent can be asked about "the selected note".
@@ -554,4 +554,39 @@ is its left five points when the note is at least fifteen wide, so a short note
 can still be moved. The grid and the pattern's step are named as note values
 (1/16, 1/8T, 1 Bar) and still written in beats in the song, so no song changes;
 the piano roll's grid gained 1 Bar and 1/2.
+
+**D80. A rectangle in the clear selects, Option-drag copies everywhere a thing is dragged, and several events and points are selected as notes are.**
+
+Made while building [selecting several things in the app](features/selection.md)
+on October 6, 2026, without the person, settling what the backlog item left
+open. It revises the part of D46 that one event is selected at a time.
+
+A drag from the clear of the timeline selects the clips a rectangle touches,
+as Logic's does, rather than making a time selection across the tracks, as
+Ableton's does. Every other editor of the app already selects by a
+rectangle (the piano roll since D64), and a time range is what [editing a
+range of bars](features/bar-ranges.md) is about, which will take a gesture
+of its own, such as a drag in the ruler under the loop strip. The press
+still sets the start position, so a click in the clear means what it did.
+
+Option-drag copies clips and pattern events as D79 made it copy notes, so
+that one key means one thing wherever something is dragged; a press with
+Option on an edge copies instead of trimming, as on a note's end. A copy
+of a pattern clip plays the same pattern, as ⌘D's does, since a copy that
+owns its pattern is one Own Copy away and a shared pattern is how the song
+repeats a part.
+
+Events and automation points are selected as notes are: Shift-click, a
+rectangle from the clear, and a drag that moves every selected one by the
+grabbed one. In a row of steps a press still paints, so a rectangle starts
+only in a row of events. Points of several lanes move together in time and
+by the same share of each lane's height, which on a frequency's lane is a
+ratio, and they stop together at a lane's edge rather than each at its own,
+so that the shape of what was drawn is kept; the time each can move is
+bounded by the points of its lane that stay. Pasted events go where the
+pattern was last clicked in the clear, as notes do in the piano roll. Events
+in pitch move only where they have one, so a selection across a row of notes
+and a row of hits can be moved up an octave. The edits that took one event
+or point now take a list, so the app has one edit for one or several, and
+each is one undo step named for how many it changed.
 

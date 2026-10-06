@@ -101,3 +101,6 @@ checks show the result.
   should check it as a join.
 - Locks the host enforces ("don't touch the drums", a Later line) would decide
   which tracks a range can change.
+- Which gesture makes the time selection in the app: a drag in the clear of
+  the timeline selects clips by a rectangle (D80), so perhaps a drag in the
+  ruler under the loop strip.

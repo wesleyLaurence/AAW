@@ -102,4 +102,22 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(TimelineLayout.position(5.75, beatsPerBar: 4), "2.2.4")
         XCTAssertEqual(TimelineLayout.position(53.25, beatsPerBar: 4), "14.2.2")
     }
+
+    func testPointsMoveTogetherNoFurtherThanThePointsThatStay() {
+        let range = TimelineLayout.pointRange
+        // One point: between its neighbors.
+        XCTAssertEqual(range([[(0, false), (8, true), (16, false)]], 32), -8...8)
+        // Two of a lane: the first's left neighbor and the second's right one.
+        XCTAssertEqual(range([[(0, false), (4, true), (6, true), (10, false)]], 32), -4...4)
+        // Lanes together: the tightest of each; the song's start and end.
+        XCTAssertEqual(range([[(2, true), (20, true)], [(0, false), (12, true), (13, false)]], 32), -2...1)
+        XCTAssertEqual(range([[(30, true)]], 32), -30...2)
+        XCTAssertEqual(range([], 32), 0...0, "nothing moves")
+    }
+
+    func testPointsGoUpTogetherInsideTheirLanes() {
+        XCTAssertEqual(TimelineLayout.liftRange([0.25, 0.5]), -0.25...0.5)
+        XCTAssertEqual(TimelineLayout.liftRange([0, 1]), 0...0)
+        XCTAssertEqual(TimelineLayout.liftRange([]), 0...0)
+    }
 }

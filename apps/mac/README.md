@@ -159,7 +159,7 @@ front first.
 | Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
 | Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a header naming its patch, a column for its own fields and an octave of keys, one for each oscillator with its wave or its table's cycle drawn, the filter with its response, each envelope drawn with its handles, each LFO with its shape, the macros, the matrix's entries with their amounts, a line under each control an entry moves, and one for each of the patch's own effects; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
-| Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note. While the clip plays, a line shows where |
+| Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note, or the velocity of several. While the clip plays, a line shows where |
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play. Under the notes, a lane of each note's velocity as a stalk at its start. Beside it the clip's ID, its length, the grid, Preview, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
 | Samples | Left of the arrangement, when shown: the library's samples by search, category and kind, each with its length and what is known of its tempo, key and pitch |
 | Activity | Each change with who made it (agent, you, or an edit of the file), newest first. A drag is one entry |
@@ -177,8 +177,9 @@ front first.
 | Drag a volume, pan or send sideways | Changes it, heard as it moves; with Shift, ten times finer. Double-click sets volume to 0 dB and pan to center, and removes a send |
 | Click M or S | Mutes or solos |
 | Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
+| Drag in the clear of the timeline | Selects the clips a rectangle touches, across tracks; with Shift, as well as those selected. The press sets the start position |
 | Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in; on a MIDI track, an empty note clip a bar long |
-| Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid. An audio clip can pass the song's end, which grows with it |
+| Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid; with Option, copies them there, outlined on the way, and leaves them, whichever part of the clip was pressed. An audio clip can pass the song's end, which grows with it |
 | Drag a pattern clip's end | Changes its repeats |
 | Drag a note clip's start or end | Moves that edge, on the grid or with ⌘ off it. The notes stay where they are in the song: those an edge passes are kept outside the clip and do not play, and come back when it moves back |
 | Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid |
@@ -193,8 +194,9 @@ front first.
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
 | Click A in a header | Shows or hides the row's automation lanes; with Option, every row's |
 | Double-click in a lane | Adds a point there, on the grid; with ⌘, off it |
-| Drag a point | Moves it in time, no further than its neighbors, and in value, heard as it moves. Its value shows beside it |
-| Double-click a point, or Delete | Removes it; a lane's last point takes the lane with it. Option-click changes whether it holds its value until the next |
+| Click a point; Shift-click; drag in the clear of a lane | Selects it; adds it to the selection or takes it out; selects the points a rectangle holds, in every lane it crosses |
+| Drag a point | Moves the selected points in time, no further than the points of their lanes that stay, and up or down by as much of each lane, heard as they move, one undo step. They stop together at a lane's edge. The value shows beside the one point selected |
+| Double-click a point, or Delete | Removes it, or Delete the selected points; a lane's last point takes the lane with it. Option-click changes whether it holds its value until the next |
 | Click × by a lane; + Lane | Removes the lane; offers the row's parameters that have none |
 | Add Effect, in the device panel | Adds an effect to the end of the chain, with a place to start |
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
@@ -203,9 +205,11 @@ front first.
 | ⌥⌘D, ⌥⌘P | Show the devices or the pattern in the detail panel, or hide the panel when it shows them already |
 | Click a step | Turns it on or off; a drag along the row takes the steps it passes with it. A drag up or down on a step that is on sets how hard it plays, 1 to 9 |
 | Double-click a row of held hits or of notes | Adds an event on the step under the pointer, at the note under it, held for a step on a pad that is held. With ⌘, a click adds one off the grid, in a row of steps too |
-| Click an event; drag it; drag its end | Selects it; moves it by steps of the pattern's grid, and in a row of notes up and down by notes; ends it on a line of the grid. With ⌘ it moves off the grid |
-| Arrow keys, in the pattern | Move the selected event a step earlier or later, or a note up or down; with Shift, an octave |
-| Double-click an event, or Delete | Removes it |
+| Click an event; Shift-click; drag in the clear of a row of events | Selects it; adds it to the selection or takes it out; selects the events a rectangle touches, in any row. ⌘A selects every event, Escape none. A click in the clear sets where events are pasted |
+| Drag an event; drag its end | Moves the selected events by steps of the pattern's grid, as far as each stays in the pattern, and those in rows of notes up and down by notes; with ⌘ off the grid; with Option, copies them there and leaves them. Its end ends that event alone on a line of the grid |
+| Arrow keys, in the pattern | Move the selected events a step earlier or later, or a note up or down; with Shift, an octave |
+| Double-click an event, or Delete | Removes it, or Delete the selected events |
+| ⌘D, ⌘C, ⌘X, ⌘V, in the pattern | Copies the selected events to right after them; copies or cuts them, and pastes them into the pattern shown, where it was last clicked in the clear, or else right after themselves in their own pattern and at their own beats in another. A pad the pattern's tracks lack is refused with the reason |
 | Type a length; choose a step; drag the swing | Change the pattern: step rows grow or shrink with its length, and are written on a new grid when their hits fall on it |
 | Own Copy, by a pattern's name | Gives the clip a copy of the pattern, so that editing it leaves the other clips that play it as they are |
 | Scroll, pinch, Command-scroll, in the pattern | Scroll and zoom the pattern |
@@ -432,11 +436,8 @@ wave or an LFO and 56 for the filter or an envelope. A key pressed by
   clip's lead is not shown. The window does not zoom out when the song grows.
 - A trim or a fade out of a long file at another sample rate than the song's
   takes the engine a moment: about half a second for two minutes of audio.
-- One event is selected at a time, and events are not copied or pasted. An
-  event's transpose is set with `daw`.
-- A note is not heard as it is drawn or clicked, and velocity is set in the
-  fields beside the piano roll, not in a lane under it. The piano roll zooms
-  across and not up and down.
+- Steps are not selected or copied, and an event's transpose is set with
+  `daw`. Events of two patterns are not moved or copied together.
 - A sample on a MIDI track's header or its Sampler makes a sampler of one pad
   on every note, played as it is at middle C whatever its pitch until Root is
   set; a kit of pads on notes is made with `daw instrument map`. The Sampler
@@ -456,8 +457,8 @@ wave or an LFO and 56 for the filter or an envelope. A key pressed by
 - A sample is played from its file by the system, not through the song's
   engine, so it is heard at its own level, pitch and tempo.
 - Names are IDs: letters, digits, `-` and `_`, starting with a letter.
-- Several clips cannot be selected by dragging over them, and one automation
-  point is selected at a time.
+- A drag in the clear of the timeline selects clips, not a range of time.
+  Automation points are not copied.
 - A lane shows levels from -60 to +6 dB (sends to 0), as the faders do; a point
   outside that is drawn at the edge, and a drag brings it inside.
 - An effect's ID is set with `daw set`; the panel shows it.

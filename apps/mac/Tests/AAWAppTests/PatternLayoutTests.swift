@@ -123,4 +123,17 @@ final class PatternLayoutTests: XCTestCase {
         XCTAssertEqual(PatternLayout.level(from: 3, draggedBy: 200), 1, "never off: a click does that")
         XCTAssertEqual(PatternLayout.level(from: 3, draggedBy: -200), 9)
     }
+
+    func testEventsMoveTogetherAndStayInThePattern() {
+        let bass = PatternLayout.Pad(name: "sub", gate: true, root: 33, pitches: [33, 36, 40])
+        let l = layout(pads: kit + [bass])
+        // By whole steps: the earliest to the start, the latest to the last step.
+        XCTAssertEqual(l.stepRange(of: [0.5, 2]), -2...7)
+        XCTAssertEqual(l.stepRange(of: [0.1, 3.9]), 0...0, "off the grid, as far off it")
+        XCTAssertEqual(l.beatRange(of: [0.5, 2]), -0.5...1.999)
+        // Up and down inside each one's row of notes, from 31 to 43.
+        XCTAssertEqual(l.semitoneRange(of: [(row: 3, pitch: 33), (row: 3, pitch: 40)]), -2...3)
+        XCTAssertEqual(l.semitoneRange(of: [(row: 0, pitch: 60)]), 0...0, "a row of steps has no notes")
+        XCTAssertEqual(l.semitoneRange(of: []), 0...0)
+    }
 }

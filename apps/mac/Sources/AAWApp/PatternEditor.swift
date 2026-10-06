@@ -16,14 +16,19 @@ final class PatternEditor: NSView {
         case paint(row: Int, level: Int, steps: Set<Int>, origin: CGPoint, was: Int)
         /// A step's level being dragged up or down.
         case level(row: Int, step: Int, from: Int, originY: CGFloat, level: Int)
-        case move(event: EventView, row: Int, origin: CGPoint, steps: Int, by: Double, semitones: Int, moved: Bool)
+        /// The selected events being moved, or with Option copied, by the
+        /// one grabbed. `collapse` is the event to select alone if the press
+        /// turns out to be a click.
+        case move(events: [EventView], grabbed: EventView, origin: CGPoint, steps: Int, by: Double, semitones: Int, moved: Bool, collapse: UInt64?)
         /// An event's end being dragged to a line of the grid.
         case stretch(event: EventView, row: Int, line: Int)
+        /// A rectangle that selects the events it touches, with those
+        /// selected before it when Shift was held.
+        case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>)
     }
 
     /// An event shown ahead of the host, where a drag has it.
     private struct HeldEvent {
-        var key: UInt64
         var at: Double
         var pitch: Int?
         var duration: Double?
@@ -38,7 +43,10 @@ final class PatternEditor: NSView {
     private var drag: Drag?
     /// Steps of a pad shown ahead of the host: each one's level.
     private var heldSteps: (pad: String, levels: [Int: Int])?
-    private var heldEvent: HeldEvent?
+    /// Events shown ahead of the host, by key.
+    private var held: [UInt64: HeldEvent] = [:]
+    /// Where an Option-drag puts its copies: each one's row and place.
+    private var ghosts: [(row: Int, event: HeldEvent)] = []
     private var holds = 0
     private var link: CADisplayLink?
     private let playhead = NSView()
@@ -96,7 +104,8 @@ final class PatternEditor: NSView {
         // What was shown ahead of the host has arrived, or was refused.
         if changed, drag == nil {
             heldSteps = nil
-            heldEvent = nil
+            held = [:]
+            ghosts = []
         }
         relayout()
         link?.isPaused = !playing
@@ -134,7 +143,7 @@ final class PatternEditor: NSView {
         guard let context else { return [] }
         return context.pattern.events.compactMap { event in
             guard let row = layout.rows.firstIndex(where: { $0.pad.name == event.pad }) else { return nil }
-            let held = heldEvent.flatMap { $0.key == event.key ? $0 : nil }
+            let held = self.held[event.key]
             let rect = layout.event(row: row, at: held?.at ?? event.at, duration: held.map(\.duration) ?? event.duration,
                                     pitch: held.map(\.pitch) ?? event.pitch.map { Int($0) })
             return (event, row, rect)
@@ -194,25 +203,50 @@ final class PatternEditor: NSView {
         let p = convert(event.locationInWindow, from: nil)
         guard p.x >= PatternLayout.gutter, p.y >= PatternLayout.rulerHeight, let index = layout.row(atY: p.y),
               layout.beat(atX: p.x) < layout.lengthBeats else {
-            model.select(event: nil)
+            model.select(events: [])
             return
         }
         let row = layout.rows[index]
         let name = context.pattern.name
+        let shift = event.modifierFlags.contains(.shift)
         if let hit = self.event(at: p) {
-            model.select(event: hit.event.key)
+            let key = hit.event.key
             if event.clickCount == 2 {
-                model.edit(.eventRemove(event: hit.event.key))
-            } else if hit.event.duration != nil || layout.rows[hit.row].pad.gate, hit.rect.width >= 10, p.x >= hit.rect.maxX - 5 {
+                model.edit(.eventsRemove(events: [key]))
+                return
+            }
+            var selection = model.selectedEvents
+            var collapse: UInt64?
+            if shift {
+                // Shift adds an event to the selection, or takes it out.
+                if selection.remove(key) == nil { selection.insert(key) }
+                guard selection.contains(key) else {
+                    model.select(events: selection)
+                    needsDisplay = true
+                    return
+                }
+            } else if !selection.contains(key) {
+                selection = [key]
+            } else if selection.count > 1 {
+                collapse = key
+            }
+            // With Option held the press copies, whichever part of the event it is on.
+            let copy = event.modifierFlags.contains(.option)
+            if !copy, hit.event.duration != nil || layout.rows[hit.row].pad.gate, hit.rect.width >= 10, p.x >= hit.rect.maxX - 5 {
+                // An end is of one event, which it selects alone.
+                model.select(events: [key])
                 drag = .stretch(event: hit.event, row: hit.row, line: layout.line(atX: hit.rect.maxX))
             } else {
-                drag = .move(event: hit.event, row: hit.row, origin: p, steps: 0, by: 0, semitones: 0, moved: false)
+                model.select(events: selection)
+                let chosen = context.pattern.events.filter { selection.contains($0.key) }
+                drag = .move(events: chosen, grabbed: hit.event, origin: p, steps: 0, by: 0, semitones: 0, moved: false, collapse: collapse)
             }
+            needsDisplay = true
             return
         }
-        model.select(event: nil)
         let free = event.modifierFlags.contains(.command)
         if row.kind == .steps, !free {
+            model.select(events: [])
             // A step goes on or off at the press, and a drag takes the steps
             // it passes with it.
             let step = layout.step(atX: p.x)
@@ -227,8 +261,15 @@ final class PatternEditor: NSView {
             let at = free ? layout.beat(atX: p.x) : Double(layout.step(atX: p.x)) * layout.grid
             let pitch = layout.pitch(atY: p.y, row: index).map { Int32($0) }
             model.edit(.eventAdd(pattern: name, pad: row.pad.name, at: at, free: free, pitch: pitch, steps: row.pad.gate ? 1 : 0)) { [weak self] made in
-                self?.model.select(event: made.first)
+                self?.model.select(events: Set(made))
             }
+        } else {
+            // A click in the clear of a row of events: where pasted events
+            // go, and a rectangle to select events with.
+            model.eventInsert = Double(layout.step(atX: p.x)) * layout.grid
+            if !shift { model.select(events: []) }
+            drag = .marquee(origin: p, now: p, base: shift ? model.selectedEvents : [])
+            needsDisplay = true
         }
     }
 
@@ -254,35 +295,56 @@ final class PatternEditor: NSView {
             let level = PatternLayout.level(from: from, draggedBy: p.y - originY)
             drag = .level(row: index, step: step, from: from, originY: originY, level: level)
             heldSteps = (layout.rows[index].pad.name, [step: level])
-        case .move(let e, let index, let origin, _, _, _, let moved):
+        case .move(let events, let grabbed, let origin, _, _, _, let moved, let collapse):
             let (dx, dy) = (p.x - origin.x, p.y - origin.y)
             if !moved, hypot(dx, dy) < 3 { return }
             // By whole steps, so that an event off the grid stays as far off
-            // it; with ⌘, by thousandths of a beat. It stays in the pattern.
+            // it; with ⌘, by thousandths of a beat. They stay in the pattern.
+            let ats = events.map(\.at)
             var (steps, by) = (0, 0.0)
             if event.modifierFlags.contains(.command) {
-                by = (Double(dx / layout.pixelsPerBeat) * 1000).rounded() / 1000
-                by = min(max(by, -e.at), layout.lengthBeats - e.at - 0.001)
+                let range = layout.beatRange(of: ats)
+                by = min(max((Double(dx / layout.pixelsPerBeat) * 1000).rounded() / 1000, range.lowerBound), range.upperBound)
             } else {
-                let least = -Int((e.at / layout.grid + 1e-9).rounded(.down))
-                let most = Int(((layout.lengthBeats - e.at) / layout.grid - 1e-9).rounded(.up)) - 1
-                steps = min(max(layout.steps(forDrag: dx), least), max(least, most))
+                let range = layout.stepRange(of: ats)
+                steps = min(max(layout.steps(forDrag: dx), range.lowerBound), range.upperBound)
             }
-            // In a row of notes, up and down by notes.
+            // In rows of notes, up and down by notes, as the grabbed one's row has them.
+            let rowOf = { (e: EventView) in self.layout.rows.firstIndex { $0.pad.name == e.pad } }
+            let pitchOf = { (e: EventView, row: Int) -> Int? in
+                guard case .notes = self.layout.rows[row].kind else { return nil }
+                return e.pitch.map { Int($0) } ?? self.layout.rows[row].pad.root
+            }
             var semitones = 0
-            let row = layout.rows[index]
-            let from = e.pitch.map { Int($0) } ?? row.pad.root
-            if case .notes(let low, let high) = row.kind, let from {
-                semitones = min(max(-Int((dy / row.semitone).rounded()), low - from), high - from)
+            if let row = rowOf(grabbed), case .notes = layout.rows[row].kind {
+                let pitched = events.compactMap { e in rowOf(e).flatMap { r in pitchOf(e, r).map { (row: r, pitch: $0) } } }
+                let range = layout.semitoneRange(of: pitched)
+                semitones = min(max(-Int((dy / layout.rows[row].semitone).rounded()), range.lowerBound), range.upperBound)
             }
-            drag = .move(event: e, row: index, origin: origin, steps: steps, by: by, semitones: semitones, moved: true)
-            heldEvent = HeldEvent(key: e.key, at: e.at + Double(steps) * layout.grid + by,
-                                  pitch: semitones == 0 ? e.pitch.map { Int($0) } : from.map { $0 + semitones }, duration: e.duration)
+            let shift = Double(steps) * layout.grid + by
+            let placed: [(key: UInt64, row: Int, event: HeldEvent)] = events.compactMap { e in
+                guard let row = rowOf(e) else { return nil }
+                let pitch = pitchOf(e, row).map { $0 + semitones } ?? e.pitch.map { Int($0) }
+                return (e.key, row, HeldEvent(at: e.at + shift, pitch: semitones == 0 ? e.pitch.map { Int($0) } : pitch, duration: e.duration))
+            }
+            // With Option, copies go there and the events stay where they are.
+            if event.modifierFlags.contains(.option) {
+                held = [:]
+                ghosts = placed.map { ($0.row, $0.event) }
+            } else {
+                ghosts = []
+                held = Dictionary(uniqueKeysWithValues: placed.map { ($0.key, $0.event) })
+            }
+            drag = .move(events: events, grabbed: grabbed, origin: origin, steps: steps, by: by, semitones: semitones, moved: true, collapse: collapse)
         case .stretch(let e, let index, _):
             let first = Int((e.at / layout.grid + 1e-9).rounded(.down)) + 1
             let line = max(first, layout.line(atX: p.x))
             drag = .stretch(event: e, row: index, line: line)
-            heldEvent = HeldEvent(key: e.key, at: e.at, pitch: e.pitch.map { Int($0) }, duration: Double(line) * layout.grid - e.at)
+            held = [e.key: HeldEvent(at: e.at, pitch: e.pitch.map { Int($0) }, duration: Double(line) * layout.grid - e.at)]
+        case .marquee(let origin, _, let base):
+            drag = .marquee(origin: origin, now: p, base: base)
+            let box = CGRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x - origin.x), height: abs(p.y - origin.y))
+            model.select(events: base.union(events().filter { $0.rect.intersects(box) }.map(\.event.key)))
         case nil:
             return
         }
@@ -304,18 +366,29 @@ final class PatternEditor: NSView {
             } else {
                 heldSteps = nil
             }
-        case .move(let e, _, _, let steps, let by, let semitones, let moved):
+        case .move(let events, _, _, let steps, let by, let semitones, let moved, let collapse):
             if moved, steps != 0 || by != 0 || semitones != 0 {
-                model.edit(.eventMove(event: e.key, steps: Int32(steps), by: by, semitones: Int32(semitones)))
+                let keys = events.map(\.key)
+                if event.modifierFlags.contains(.option) {
+                    model.edit(.eventsCopy(events: keys, steps: Int32(steps), by: by, semitones: Int32(semitones))) { [weak self] made in
+                        self?.model.select(events: Set(made))
+                    }
+                } else {
+                    model.edit(.eventsMove(events: keys, steps: Int32(steps), by: by, semitones: Int32(semitones)))
+                }
                 hold()
             } else {
-                heldEvent = nil
+                held = [:]
+                ghosts = []
+                if !moved, let collapse { model.select(events: [collapse]) }
             }
         case .stretch(let e, _, let line):
-            if heldEvent != nil {
+            if !held.isEmpty {
                 model.edit(.eventEnd(event: e.key, step: UInt32(line)))
                 hold()
             }
+        case .marquee:
+            break
         }
         needsDisplay = true
     }
@@ -329,7 +402,8 @@ final class PatternEditor: NSView {
             MainActor.assumeIsolated {
                 guard let self, self.holds == mine, self.drag == nil else { return }
                 self.heldSteps = nil
-                self.heldEvent = nil
+                self.held = [:]
+                self.ghosts = []
                 self.needsDisplay = true
             }
         }
@@ -346,8 +420,8 @@ final class PatternEditor: NSView {
         let octave = event.modifierFlags.contains(.shift)
         switch event.specialKey {
         case .delete?, .backspace?, .deleteForward?:
-            // Here, the selected event and nothing else: not the clip being edited.
-            if model.selectedEvent != nil { model.deleteSelection() } else { NSSound.beep() }
+            // Here, the selected events and nothing else: not the clip being edited.
+            if model.selectedEvents.isEmpty { NSSound.beep() } else { model.deleteSelection() }
         case .leftArrow?: nudge(steps: -1, semitones: 0)
         case .rightArrow?: nudge(steps: 1, semitones: 0)
         case .upArrow?: nudge(steps: 0, semitones: octave ? 12 : 1)
@@ -357,19 +431,25 @@ final class PatternEditor: NSView {
             switch event.charactersIgnoringModifiers {
             case " ": model.togglePlay()
             case "l": model.toggleLoop()
-            case "\u{1b}": model.select(event: nil)
+            case "\u{1b}": model.select(events: [])
             default: super.keyDown(with: event)
             }
         }
     }
 
-    /// Moves the selected event a step earlier or later, or a note up or down.
+    override func selectAll(_ sender: Any?) {
+        model.select(events: Set(context?.pattern.events.map(\.key) ?? []))
+        needsDisplay = true
+    }
+
+    /// Moves the selected events a step earlier or later, or a note up or down.
     private func nudge(steps: Int, semitones: Int) {
-        guard let event = model.selectedEvent else {
+        let events = model.selectedEvents
+        guard !events.isEmpty else {
             NSSound.beep()
             return
         }
-        model.edit(.eventMove(event: event, steps: Int32(steps), by: 0, semitones: Int32(semitones)))
+        model.edit(.eventsMove(events: events.sorted(), steps: Int32(steps), by: 0, semitones: Int32(semitones)))
     }
 
     // MARK: Drawing
@@ -432,6 +512,9 @@ final class PatternEditor: NSView {
             drawGrid(top: ruler)
             drawSteps()
             drawEvents()
+            drawGhosts()
+            drawInsert()
+            drawMarquee()
             let end = layout.x(layout.lengthBeats)
             if end < bounds.width {
                 fill(CGRect(x: end, y: ruler, width: bounds.width - end, height: bounds.height - ruler), Theme.gray(0.13))
@@ -517,7 +600,7 @@ final class PatternEditor: NSView {
             guard rect.maxX >= PatternLayout.gutter, rect.minX <= bounds.width,
                   rect.maxY >= PatternLayout.rulerHeight, rect.minY <= bounds.height else { continue }
             let row = layout.rows[index]
-            let selected = model.selectedEvent == event.key
+            let selected = model.selectedEvents.contains(event.key)
             let bar = rect.insetBy(dx: 0, dy: rect.height > 6 ? 0.5 : 0)
             let shape = NSBezierPath(roundedRect: bar, xRadius: 2, yRadius: 2)
             let lit = color.blended(withFraction: 0.25, of: .white) ?? color
@@ -527,12 +610,39 @@ final class PatternEditor: NSView {
             shape.lineWidth = selected ? 1.5 : 0.5
             shape.stroke()
             if case .notes = row.kind, bar.height >= 9, bar.width >= 22 {
-                let held = heldEvent.flatMap { $0.key == event.key ? $0.pitch : nil }
+                let held = self.held[event.key]?.pitch
                 let name = held.map { noteName(midi: Int32($0)) } ?? event.note ?? ""
                 text(name, in: CGRect(x: bar.minX + 3, y: bar.midY - 5.5, width: bar.width - 4, height: 11),
                      font: Self.noteFont, color: Theme.gray(0.05, 0.9))
             }
         }
+    }
+
+    /// Where an Option-drag puts its copies: outlined, over the events.
+    private func drawGhosts() {
+        for (row, g) in ghosts where layout.rows.indices.contains(row) {
+            let bar = layout.event(row: row, at: g.at, duration: g.duration, pitch: g.pitch)
+            let shape = NSBezierPath(roundedRect: bar.insetBy(dx: 0, dy: bar.height > 6 ? 0.5 : 0), xRadius: 2, yRadius: 2)
+            color.withAlphaComponent(0.35).setFill()
+            shape.fill()
+            Theme.selectedClip.setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+        }
+    }
+
+    /// Where pasted events go.
+    private func drawInsert() {
+        guard let at = model.eventInsert, model.selectedEvents.isEmpty, at < layout.lengthBeats else { return }
+        fill(CGRect(x: layout.x(at).rounded(), y: PatternLayout.rulerHeight, width: 1, height: bounds.height), Theme.cue.withAlphaComponent(0.8))
+    }
+
+    private func drawMarquee() {
+        guard case .marquee(let origin, let now, _) = drag, origin != now else { return }
+        let box = CGRect(x: min(origin.x, now.x), y: min(origin.y, now.y), width: abs(now.x - origin.x), height: abs(now.y - origin.y))
+        fill(box, Theme.gray(1, 0.08))
+        Theme.gray(1, 0.6).setStroke()
+        NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)).stroke()
     }
 
     /// Each row's pad beside it, and beside a row of notes its Cs and its root.
@@ -588,8 +698,8 @@ struct PatternPane: NSViewRepresentable {
     let context: PatternContext
     let color: NSColor
     let playing: Bool
-    /// The selected event, which the editor outlines.
-    let selected: UInt64?
+    /// The selected events, which the editor outlines.
+    let selected: Set<UInt64>
 
     func makeNSView(context: Context) -> PatternEditor {
         PatternEditor(model: model)
@@ -666,10 +776,18 @@ struct PatternHeader: View {
                 }
             }
             Divider().padding(.vertical, 2)
-            if let event = model.selectedEventView {
+            let events = model.selectedEventViews
+            if events.count == 1, let event = events.first {
                 EventFields(model: model, event: event, pitched: context.track.pads.first { $0.name == event.pad }?.root != nil)
+            } else if let first = events.first {
+                Text("\(events.count) events").font(.system(size: 10, weight: .medium))
+                row("Velocity") {
+                    KnobBar(model: model, spec: BarSpec(value: Double(first.velocity), min: 1, max: 127, initial: 100, live: false, whole: true)) { [keys = events.map(\.key)] value in
+                        .eventsSet(events: keys, at: nil, duration: nil, velocity: UInt32(value), transpose: nil, note: nil)
+                    }
+                }
             } else {
-                Text("Click a step to turn it on or off. Double-click a row of held hits or of notes to add one; select one to change it.")
+                Text("Click a step to turn it on or off. Double-click a row of held hits or of notes to add one; drag around events to select them, and with Option to copy them.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -699,13 +817,13 @@ private struct EventFields: View {
     }
 
     private func set(at: String? = nil, duration: String? = nil, velocity: UInt32? = nil, note: String? = nil) -> Edit {
-        .eventSet(event: event.key, at: at, duration: duration, velocity: velocity, transpose: nil, note: note)
+        .eventsSet(events: [event.key], at: at, duration: duration, velocity: velocity, transpose: nil, note: note)
     }
 
     var body: some View {
         row("Velocity") {
             KnobBar(model: model, spec: BarSpec(value: Double(event.velocity), min: 1, max: 127, initial: 100, whole: true)) { [event] value in
-                .eventSet(event: event.key, at: nil, duration: nil, velocity: UInt32(value), transpose: nil, note: nil)
+                .eventsSet(events: [event.key], at: nil, duration: nil, velocity: UInt32(value), transpose: nil, note: nil)
             }
         }
         // Where it starts in the pattern, and how long a held pad is held, in beats.

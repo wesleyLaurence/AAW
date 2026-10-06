@@ -59,10 +59,18 @@ struct NoteContext: Equatable {
 }
 
 /// What Copy took, for Paste: clips, as the host wrote them down, and the
-/// beats they covered; or notes, with the clip they came from.
+/// beats they covered; notes, with the clip they came from; or a pattern's
+/// events, with the pattern's name.
 enum Clipboard {
     case clips(copied: String, span: Double)
     case notes([NoteCopy], from: UInt64)
+    case events([EventCopy], from: String)
+}
+
+/// Where Copy, Cut and Paste act: on the timeline's clips, the piano roll's
+/// notes or the pattern editor's events, by which has the keys.
+public enum EditPlace {
+    case clips, notes, events
 }
 
 /// The audio clip the detail panel shows, with its track and its file.
@@ -106,10 +114,10 @@ public final class SongModel {
     /// What undo and redo would do, and whose change each is.
     public private(set) var undoStep: HistoryStep?
     public private(set) var redoStep: HistoryStep?
-    /// The selected clips, or else the selected row or automation point.
+    /// The selected clips, or else the selected row or automation points.
     private(set) var selectedClips: Set<UInt64> = []
     private(set) var selectedRow: RowID?
-    private(set) var selectedPoint: UInt64?
+    private(set) var selectedPoints: Set<UInt64> = []
     /// The row whose devices the detail panel shows: the last one selected.
     private(set) var deviceRow: RowID?
     /// What the detail panel shows: devices after a row is selected, and a
@@ -117,8 +125,8 @@ public final class SongModel {
     var detail = Detail.devices
     /// The clip whose pattern the detail panel edits: the last one selected.
     private(set) var patternClip: UInt64?
-    /// The selected event of that pattern.
-    private(set) var selectedEvent: UInt64?
+    /// The selected events of that pattern.
+    private(set) var selectedEvents: Set<UInt64> = []
     /// The selected notes of the note clip the detail panel shows.
     private(set) var selectedNotes: Set<UInt64> = []
     /// The steps the piano roll draws, adds and moves notes on, in beats as
@@ -130,6 +138,9 @@ public final class SongModel {
     /// Where in the note clip being edited notes are pasted: the beat of the
     /// clip last clicked in the clear in the piano roll.
     @ObservationIgnored var noteInsert: Double?
+    /// Where in the pattern being edited events are pasted: the beat last
+    /// clicked in the clear in the pattern editor.
+    @ObservationIgnored var eventInsert: Double?
     /// What Copy took.
     @ObservationIgnored private(set) var clipboard: Clipboard?
     /// The track whose lane was last clicked, where clips are pasted.
@@ -455,8 +466,9 @@ public final class SongModel {
         if let clip = focus ?? (clips.count == 1 ? clips.first : nil), clips.contains(clip) {
             if patternClip != clip {
                 patternClip = clip
-                select(event: nil)
+                select(events: [])
                 select(notes: [])
+                eventInsert = nil
             }
             detail = .pattern
         }
@@ -466,19 +478,19 @@ public final class SongModel {
     func select(notes: Set<UInt64>) {
         guard notes != selectedNotes else { return }
         selectedNotes = notes
-        if !notes.isEmpty, selectedPoint != nil {
-            selectedPoint = nil
+        if !notes.isEmpty, !selectedPoints.isEmpty {
+            selectedPoints = []
             onSelection?()
         }
         sendSelection()
     }
 
-    /// Selects an event of the pattern the detail panel shows.
-    func select(event: UInt64?) {
-        guard event != selectedEvent else { return }
-        selectedEvent = event
-        if event != nil, selectedPoint != nil {
-            selectedPoint = nil
+    /// Selects events of the pattern the detail panel shows.
+    func select(events: Set<UInt64>) {
+        guard events != selectedEvents else { return }
+        selectedEvents = events
+        if !events.isEmpty, !selectedPoints.isEmpty {
+            selectedPoints = []
             onSelection?()
         }
         sendSelection()
@@ -524,25 +536,32 @@ public final class SongModel {
         return nil
     }
 
-    /// The selected event, in the pattern the detail panel shows.
-    var selectedEventView: EventView? {
-        guard let key = selectedEvent else { return nil }
-        return patternContext?.pattern.events.first { $0.key == key }
+    /// The selected events, in the pattern the detail panel shows.
+    var selectedEventViews: [EventView] {
+        guard !selectedEvents.isEmpty else { return [] }
+        return patternContext?.pattern.events.filter { selectedEvents.contains($0.key) } ?? []
     }
 
     func select(row: RowID?) {
         setSelection(clips: [], row: row)
     }
 
-    /// Selects an automation point, in place of clips, rows and events.
-    func select(point: UInt64?) {
-        if point != nil {
+    /// Selects automation points, in place of clips, rows and events.
+    func select(points: Set<UInt64>) {
+        if !points.isEmpty {
             setSelection(clips: [], row: nil)
-            select(event: nil)
+            select(events: [])
         }
-        guard point != selectedPoint else { return }
-        selectedPoint = point
+        guard points != selectedPoints else { return }
+        selectedPoints = points
         onSelection?()
+        sendSelection()
+    }
+
+    /// Every automation point, by its key, with its lane.
+    func pointLanes() -> [UInt64: LaneView] {
+        let lanes = arrangement.tracks.flatMap(\.lanes) + arrangement.returns.flatMap(\.lanes) + arrangement.master.lanes
+        return Dictionary(lanes.flatMap { lane in lane.points.map { ($0.key, lane) } }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Shows a row's devices without selecting it.
@@ -592,9 +611,9 @@ public final class SongModel {
         guard clips != selectedClips || row != selectedRow else { return }
         selectedClips = clips
         selectedRow = row
-        selectedEvent = nil
+        selectedEvents = []
         selectedNotes = []
-        if !clips.isEmpty || row != nil { selectedPoint = nil }
+        if !clips.isEmpty || row != nil { selectedPoints = [] }
         // The detail panel follows the selection, and stays on the last row.
         if let row {
             deviceRow = row
@@ -614,8 +633,9 @@ public final class SongModel {
         case .track(let key), .bus(let key): keys.append(key)
         case .master, nil: break
         }
-        if let selectedEvent { keys.append(selectedEvent) }
+        keys += selectedEvents.sorted()
         keys += selectedNotes.sorted()
+        keys += selectedPoints.sorted()
         commands.async { [song, keys] in try? song.select(keys: keys) }
     }
 
@@ -628,15 +648,12 @@ public final class SongModel {
         case .bus(let key): if !arrangement.returns.contains(where: { $0.key == key }) { row = nil }
         case .master, nil: break
         }
-        var point = selectedPoint
-        if let key = point {
-            let lanes = arrangement.tracks.flatMap(\.lanes) + arrangement.returns.flatMap(\.lanes) + arrangement.master.lanes
-            if !lanes.contains(where: { $0.points.contains { $0.key == key } }) { point = nil }
-        }
-        if clips != selectedClips || row != selectedRow || point != selectedPoint {
+        var points = selectedPoints
+        if !points.isEmpty { points.formIntersection(pointLanes().keys) }
+        if clips != selectedClips || row != selectedRow || points != selectedPoints {
             selectedClips = clips
             selectedRow = row
-            selectedPoint = point
+            selectedPoints = points
             onSelection?()
         }
         switch deviceRow {
@@ -646,7 +663,10 @@ public final class SongModel {
         }
         if deviceRow == nil { deviceRow = arrangement.tracks.first.map { .track($0.key) } }
         if patternClip != nil, patternContext == nil, audioContext == nil, noteContext == nil { patternClip = nil }
-        if selectedEvent != nil, selectedEventView == nil { selectedEvent = nil }
+        if !selectedEvents.isEmpty {
+            let events = selectedEvents.intersection(patternContext?.pattern.events.map(\.key) ?? [])
+            if events != selectedEvents { selectedEvents = events }
+        }
         if !selectedNotes.isEmpty {
             let notes = selectedNotes.intersection(noteContext?.clip.notes.map(\.key) ?? [])
             if notes != selectedNotes { selectedNotes = notes }
@@ -654,7 +674,7 @@ public final class SongModel {
     }
 
     public var canDelete: Bool {
-        selectedEvent != nil || !selectedNotes.isEmpty || !selectedClips.isEmpty || selectedPoint != nil
+        !selectedEvents.isEmpty || !selectedNotes.isEmpty || !selectedClips.isEmpty || !selectedPoints.isEmpty
             || (selectedRow != nil && selectedRow != .master)
     }
 
@@ -664,29 +684,41 @@ public final class SongModel {
         !selectedNotes.isEmpty && detail == .pattern && showsDetail
     }
 
-    /// Removes the selected event or notes of the clip being edited, or else
-    /// the selected clips, automation point, track or return.
+    /// Whether the selected events are what Delete and Duplicate act on: the
+    /// pattern editor shows them.
+    var eventsInHand: Bool {
+        !selectedEvents.isEmpty && detail == .pattern && showsDetail
+    }
+
+    /// Removes the selected events or notes of the clip being edited, or else
+    /// the selected clips, automation points, track or return.
     public func deleteSelection() {
-        if let event = selectedEvent, detail == .pattern, showsDetail {
-            edit(.eventRemove(event: event))
+        if eventsInHand {
+            edit(.eventsRemove(events: selectedEvents.sorted()))
         } else if notesInHand {
             edit(.notesRemove(notes: selectedNotes.sorted()))
         } else if !selectedClips.isEmpty {
             edit(.clipsRemove(clips: selectedClips.sorted()))
-        } else if let point = selectedPoint {
-            edit(.pointRemove(point: point))
+        } else if !selectedPoints.isEmpty {
+            edit(.pointsRemove(points: selectedPoints.sorted()))
         } else if let row = selectedRow, row != .master {
             edit(.remove(row: row.row))
         }
     }
 
     public var canDuplicate: Bool {
-        notesInHand || !selectedClips.isEmpty
+        eventsInHand || notesInHand || !selectedClips.isEmpty
     }
 
-    /// Copies the selected notes, or else clips, to right after them and
-    /// selects the copies.
+    /// Copies the selected events or notes, or else clips, to right after
+    /// them and selects the copies.
     public func duplicateSelection() {
+        if eventsInHand {
+            edit(.eventsDuplicate(events: selectedEvents.sorted())) { [weak self] made in
+                self?.select(events: Set(made))
+            }
+            return
+        }
         if notesInHand {
             edit(.notesDuplicate(notes: selectedNotes.sorted())) { [weak self] made in
                 self?.select(notes: Set(made))
@@ -699,15 +731,23 @@ public final class SongModel {
         }
     }
 
-    /// Takes what is selected for Paste, as it is now: the selected notes
-    /// when `notes`, else the selected clips. Paste works after they change
-    /// or are gone.
-    public func copySelection(notes: Bool) {
-        if notes {
+    /// Takes what is selected in `place` for Paste, as it is now: the
+    /// selected notes, events or clips. Paste works after they change or are
+    /// gone.
+    public func copySelection(in place: EditPlace) {
+        switch place {
+        case .notes:
             let chosen = selectedNoteViews
             guard let from = noteContext?.clip.key, !chosen.isEmpty else { return }
             clipboard = .notes(chosen.map { NoteCopy(pitch: $0.pitch, at: $0.atText, duration: $0.durationText, velocity: $0.velocity) }, from: from)
-        } else if let span = selectedSpan {
+        case .events:
+            let chosen = selectedEventViews
+            guard let from = patternContext?.pattern.name, !chosen.isEmpty else { return }
+            clipboard = .events(chosen.map {
+                EventCopy(pad: $0.pad, at: $0.atText, duration: $0.durationText, velocity: $0.velocity, note: $0.note, transpose: $0.transpose)
+            }, from: from)
+        case .clips:
+            guard let span = selectedSpan else { return }
             do {
                 clipboard = .clips(copied: try song.copyClips(clips: selectedClips.sorted()), span: span.end - span.start)
             } catch {
@@ -716,22 +756,48 @@ public final class SongModel {
         }
     }
 
+    /// Whether `place` has something selected to copy.
+    func canCopy(in place: EditPlace) -> Bool {
+        switch place {
+        case .clips: !selectedClips.isEmpty
+        case .notes: !selectedNotes.isEmpty
+        case .events: !selectedEvents.isEmpty
+        }
+    }
+
     /// Copies what is selected, then removes it.
-    public func cutSelection(notes: Bool) {
-        copySelection(notes: notes)
-        if notes ? notesInHand : !selectedClips.isEmpty { deleteSelection() }
+    public func cutSelection(in place: EditPlace) {
+        copySelection(in: place)
+        let held = switch place {
+        case .clips: !selectedClips.isEmpty
+        case .notes: notesInHand
+        case .events: eventsInHand
+        }
+        if held { deleteSelection() }
     }
 
     /// Pastes copied notes into the note clip being edited, at the beat of
     /// the clip last clicked in the clear, or else where they were in another
     /// clip and right after themselves in their own; or copied clips at the
     /// start position, on the track whose lane was last clicked, or the
-    /// selected track, or else the tracks they came from. Selects the copies,
-    /// and moves the place pasted at to their end, so that the next paste
-    /// follows them.
-    public func paste(intoNotes: Bool) {
+    /// selected track, or else the tracks they came from; or copied events
+    /// into the pattern being edited, at the beat last clicked in the clear,
+    /// or else where they were in another pattern and right after themselves
+    /// in their own. Selects the copies, and moves the place pasted at to
+    /// their end, so that the next paste follows them.
+    public func paste(in place: EditPlace) {
         switch clipboard {
-        case .notes(let notes, let from) where intoNotes:
+        case .events(let events, let from) where place == .events:
+            guard let pattern = patternContext?.pattern else { return }
+            let starts = events.compactMap { PianoRollLayout.beats($0.at) }
+            let first = starts.min() ?? 0
+            let end = zip(events, starts).map { e, at in at + (e.duration.flatMap { PianoRollLayout.beats($0) } ?? pattern.grid) }.max() ?? first
+            let at = eventInsert ?? (pattern.name == from ? nil : first)
+            edit(.eventsPaste(events: events, pattern: pattern.name, at: at)) { [weak self] made in
+                self?.select(events: Set(made))
+            }
+            if let at { eventInsert = at + end - first }
+        case .notes(let notes, let from) where place == .notes:
             guard let clip = noteContext?.clip.key else { return }
             let first = notes.compactMap { PianoRollLayout.beats($0.at) }.min() ?? 0
             let end = notes.compactMap { n in PianoRollLayout.beats(n.at).flatMap { at in PianoRollLayout.beats(n.duration).map { at + $0 } } }.max() ?? first
@@ -740,7 +806,7 @@ public final class SongModel {
                 self?.select(notes: Set(made))
             }
             if let at { noteInsert = at + end - first }
-        case .clips(let copied, let span) where !intoNotes:
+        case .clips(let copied, let span) where place == .clips:
             var track = cueTrack
             if case .track(let key) = selectedRow { track = key }
             let at = transport.cue
@@ -754,10 +820,11 @@ public final class SongModel {
     }
 
     /// Whether Paste has something to paste where the keys are.
-    func canPaste(intoNotes: Bool) -> Bool {
+    func canPaste(in place: EditPlace) -> Bool {
         switch clipboard {
-        case .notes?: intoNotes && noteContext != nil
-        case .clips?: !intoNotes
+        case .notes?: place == .notes && noteContext != nil
+        case .events?: place == .events && patternContext != nil
+        case .clips?: place == .clips
         case nil: false
         }
     }
