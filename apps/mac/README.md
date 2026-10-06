@@ -177,6 +177,8 @@ front first.
 | Drag a volume, pan or send sideways | Changes it, heard as it moves; with Shift, ten times finer. Double-click sets volume to 0 dB and pan to center, and removes a send |
 | Click M or S | Mutes or solos |
 | Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
+| Double-click a clip | Opens its editor in the detail panel, shown if it was hidden: a pattern clip's pattern, an audio clip's settings or a note clip's piano roll |
+| Right-click or Control-click a clip | Selects it, or keeps a selection it is part of, and offers its editor, Cut, Copy, Duplicate, Split at Start Position, Loop Selection and Delete, each as the menus do them |
 | Drag in the clear of the timeline | Selects the clips a rectangle touches, across tracks; with Shift, as well as those selected. The press sets the start position |
 | Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in; on a MIDI track, an empty note clip a bar long |
 | Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid; with Option, copies them there, outlined on the way, and leaves them, whichever part of the clip was pressed. An audio clip can pass the song's end, which grows with it |
@@ -189,7 +191,9 @@ front first.
 | ⌘D, Delete | Copies the selected clips to right after them; deletes them, or else the selected track or return. In the piano roll, the selected notes |
 | ⌘C, ⌘X, ⌘V | Copies or cuts the selected clips, and pastes them at the start position, on the track whose lane was clicked last or else the tracks they came from; the start position moves to their end. In the piano roll, notes, pasted where the clip was last clicked in the clear, or else right after themselves. A copy is its own: changing it changes nothing else |
 | Click a header; drag it up or down | Selects the track or return; moves it among the others |
-| Double-click a name, or ⌘R | Renames the track or return: Return keeps the name, Escape drops it |
+| Double-click a header | Selects the row and shows its devices in the detail panel, shown if it was hidden |
+| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Show Automation, Add Track, Add MIDI Track, Add Return and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
+| Rename in that menu, or ⌘R | Renames the track or return where its name is: Return keeps the name, Escape drops it |
 | ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, a MIDI track with no instrument, or a return, and asks for its name |
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
 | Click A in a header | Shows or hides the row's automation lanes; with Option, every row's |
@@ -364,7 +368,8 @@ further right, at x = 308: a row of steps or hits is 24 points high, and rows
 of notes share the rest. A pattern of a few bars fills the panel's width, and
 a longer one scrolls. While the samples show, everything else is 361 points
 further right.
-A menu, such as Add Effect, a choice in a device or + Lane, waits for a person
+A menu, such as Add Effect, a choice in a device, + Lane or a header's or a
+clip's context menu, waits for a person
 and cannot be scripted, and neither can a drag from the samples or the Finder:
 `--drop` does what a drag from the Finder does when it ends, without the
 outline shown on the way, and the + by a sample or a `daw` command does the
@@ -401,6 +406,7 @@ wave or an LFO and 56 for the filter or an envelope. A key pressed by
 | `Sources/AAWApp/TextLines.swift` | Lines of text laid out once and drawn many times |
 | `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid and what a click or drag means, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
+| `Sources/AAWApp/ContextMenus.swift` | What a right click on a header or a clip offers, as lists the arrangement makes menus from, tested in `Tests` |
 | `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, a MIDI track's instrument, and the bar a number is dragged with |
 | `Sources/AAWApp/SamplerPanel.swift` | The Sampler device: its waveform with the markers for the part the keys play, an AppKit view, the root note and Measure, the pad's fields, and what a drop on it loads |
 | `Sources/AAWApp/SamplerLayout.swift` | Where the Sampler's markers are on its waveform, which one a point takes hold of and how far a drag goes, tested in `Tests` |
