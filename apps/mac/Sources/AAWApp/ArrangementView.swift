@@ -201,6 +201,9 @@ private struct ClipDrag {
     var by = 0.0
     var rows = 0
     var moved = false
+    /// Whether Option was held, last the drag looked: the clips are copied
+    /// there and stay where they are.
+    var copy = false
     /// The clip to select alone if the press turns out to be a click.
     var collapse: UInt64?
 }
@@ -245,17 +248,30 @@ private struct ReorderDrag {
     var slot: Int?
 }
 
-private struct PointDrag {
-    var lane: LaneView
-    var point: UInt64
-    /// The lane on the timeline when the drag began.
+/// Automation points being dragged together, by the one grabbed.
+private struct PointsDrag {
+    /// A point dragged: its lane's scale, and where it was.
+    struct Point {
+        var key: UInt64
+        var scale: ValueScale
+        var at: Double
+        var fraction: Double
+    }
+
+    var points: [Point]
+    var grabbed: Point
+    /// The grabbed point's lane on the timeline when the drag began.
     var rect: CGRect
-    /// Where the point can go in time: no further than its neighbors.
+    /// How far they can go in time, no further than the points that stay,
+    /// and up, each staying in its lane.
     var range: ClosedRange<Double>
+    var lift: ClosedRange<Double>
     var gesture: String
-    var at: Double
-    var value: Double
+    var by = 0.0
+    var up = 0.0
     var moved = false
+    /// The point to select alone if the press turns out to be a click.
+    var collapse: UInt64?
 }
 
 private enum Drag {
@@ -268,7 +284,10 @@ private enum Drag {
     case noteTrim(NoteTrimDrag)
     case fade(FadeDrag)
     case reorder(ReorderDrag)
-    case point(PointDrag)
+    case points(PointsDrag)
+    /// A rectangle that selects what it touches: clips, or the points of
+    /// the lanes shown; with those selected before it when Shift was held.
+    case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>, points: Bool)
 }
 
 /// A parameter chosen from the menu that adds a lane.
@@ -397,7 +416,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// The clips whose place the person holds in a drag.
     private var draggedClips: Set<UInt64> {
         switch drag {
-        case .clips(let d) where d.moved: Set(d.origin.keys)
+        case .clips(let d) where d.moved && !d.copy: Set(d.origin.keys)
         case .resize(let clip, _): [clip.key]
         case .trim(let d): [d.clip.key]
         case .noteTrim(let d): [d.clip.key]
@@ -640,7 +659,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         held.removeAll()
         heldPoints.removeAll()
         switch drag {
-        case .slider, .point, .trim, .noteTrim, .fade: drag = nil
+        case .slider, .points, .trim, .noteTrim, .fade: drag = nil
         default: break
         }
         show(model.arrangement, animated: true)
@@ -918,6 +937,35 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return found
     }
 
+    /// The clips a rectangle of the timeline touches.
+    private func clipKeys(in box: CGRect) -> [UInt64] {
+        var keys: [UInt64] = []
+        for track in model.arrangement.tracks {
+            guard let frame = frame(of: .track(track.key)) else { continue }
+            let rects = track.clips.map { ($0.key, clipRect(at: $0.at, length: $0.patternBeats * Double($0.repeats), top: frame.top)) }
+                + track.audio.map { clip in
+                    let shape = audioLayout(clip)
+                    return (clip.key, clipRect(at: shape.start, length: shape.length, top: frame.top))
+                }
+                + track.noteClips.map { ($0.key, clipRect(at: $0.at, length: $0.lengthBeats, top: frame.top)) }
+            keys += rects.filter { $0.1.intersects(box) }.map(\.0)
+        }
+        return keys
+    }
+
+    /// The points of the lanes shown that a rectangle of the timeline holds.
+    private func pointKeys(in box: CGRect) -> [UInt64] {
+        let grown = box.insetBy(dx: -3, dy: -3)
+        var keys: [UInt64] = []
+        for (id, row) in rows {
+            guard let frame = frame(of: id) else { continue }
+            for (lane, rect) in laneRects(id, row, top: frame.top) where rect.intersects(box) {
+                keys += positions(lane, in: rect).filter { grown.contains($0.at) }.map(\.point.key)
+            }
+        }
+        return keys
+    }
+
     /// What of an audio clip a point is on: an edge, a fade's handle or the clip.
     private func part(of clip: AudioClipView, at p: CGPoint, in rect: CGRect) -> AudioClipLayout.Part {
         audioLayout(clip).part(at: p, in: body(of: rect))
@@ -967,8 +1015,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.addClip(to: track, at: layout.step(atX: p.x, free: free))
                 return
             }
-            if p.y >= TimelineLayout.rulerHeight { model.select(clips: []) }
             model.locate(layout.target(atX: p.x, free: free))
+            guard p.y >= TimelineLayout.rulerHeight else { return }
+            // A press in the clear selects nothing, and a drag from it the
+            // clips a rectangle touches; with Shift, as well as those selected.
+            let shift = event.modifierFlags.contains(.shift)
+            if !shift { model.select(clips: []) }
+            drag = .marquee(origin: p, now: p, base: shift ? model.selectedClips : [], points: false)
         }
     }
 
@@ -1080,39 +1133,72 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.edit(.laneAdd(row: choice.row.row, param: choice.param))
     }
 
-    /// A press in a lane: on a point it selects it and may drag it, twice it
-    /// removes it, with Option it changes whether it holds; twice on the lane
-    /// it adds a point there.
+    /// A press in a lane: on a point it selects it and may drag the selected
+    /// points, twice it removes it, with Option it changes whether it holds,
+    /// and with Shift it adds it to the selection or takes it out; twice on
+    /// the lane it adds a point there, and a drag in the clear selects the
+    /// points a rectangle touches.
     private func laneDown(_ lane: LaneView, rect: CGRect, at p: CGPoint, _ event: NSEvent) {
-        let near = positions(lane, in: rect).enumerated()
-            .map { (index: $0.offset, point: $0.element.point, distance: hypot($0.element.at.x - p.x, $0.element.at.y - p.y)) }
+        let near = positions(lane, in: rect)
+            .map { (point: $0.point, distance: hypot($0.at.x - p.x, $0.at.y - p.y)) }
             .filter { $0.distance <= 7 }
             .min { $0.distance < $1.distance }
+        let shift = event.modifierFlags.contains(.shift)
         guard let near else {
             if event.clickCount == 2 {
                 let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
                 let at = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.command))
                 model.edit(.pointAdd(lane: lane.key, at: at, value: scale.value(atY: p.y, in: rect))) { [weak self] made in
-                    self?.model.select(point: made.first)
+                    self?.model.select(points: Set(made))
                 }
             } else {
-                model.select(point: nil)
+                if !shift { model.select(points: []) }
+                drag = .marquee(origin: p, now: p, base: shift ? model.selectedPoints : [], points: true)
             }
             return
         }
-        model.select(point: near.point.key)
+        let key = near.point.key
         if event.clickCount == 2 {
-            model.edit(.pointRemove(point: near.point.key))
-        } else if event.modifierFlags.contains(.option) {
-            model.edit(.pointSet(point: near.point.key, at: nil, value: nil, hold: !near.point.hold))
-        } else {
-            let before = near.index > 0 ? lane.points[near.index - 1].at : 0
-            let after = near.index + 1 < lane.points.count ? lane.points[near.index + 1].at : layout.lengthBeats
-            drag = .point(PointDrag(
-                lane: lane, point: near.point.key, rect: rect, range: before...max(before, after),
-                gesture: model.newGesture(), at: near.point.at, value: near.point.value
-            ))
+            model.edit(.pointsRemove(points: [key]))
+            return
         }
+        if event.modifierFlags.contains(.option) {
+            model.select(points: [key])
+            model.edit(.pointSet(point: key, at: nil, value: nil, hold: !near.point.hold))
+            return
+        }
+        var selection = model.selectedPoints
+        var collapse: UInt64?
+        if shift {
+            if selection.remove(key) == nil { selection.insert(key) }
+            guard selection.contains(key) else {
+                model.select(points: selection)
+                return
+            }
+        } else if !selection.contains(key) {
+            selection = [key]
+        } else if selection.count > 1 {
+            collapse = key
+        }
+        model.select(points: selection)
+        // Every selected point moves with the grabbed one, each lane's no
+        // further than the points of it that stay.
+        let lanes = model.pointLanes()
+        var moving: [PointsDrag.Point] = []
+        var around: [UInt64: [(at: Double, moving: Bool)]] = [:]
+        for point in selection.sorted() {
+            guard let of = lanes[point], let view = of.points.first(where: { $0.key == point }) else { continue }
+            let scale = ValueScale(min: of.min, max: of.max, log: of.log)
+            moving.append(PointsDrag.Point(key: point, scale: scale, at: view.at, fraction: scale.fraction(view.value)))
+            if around[of.key] == nil { around[of.key] = of.points.map { ($0.at, selection.contains($0.key)) } }
+        }
+        guard let grabbed = moving.first(where: { $0.key == key }) else { return }
+        drag = .points(PointsDrag(
+            points: moving, grabbed: grabbed, rect: rect,
+            range: TimelineLayout.pointRange(Array(around.values), length: layout.lengthBeats),
+            lift: TimelineLayout.liftRange(moving.map(\.fraction)),
+            gesture: model.newGesture(), collapse: collapse
+        ))
     }
 
     /// How far right an audio clip can be dragged: the song grows with it.
@@ -1125,7 +1211,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         var resize = false
         // A note clip's start, or else its end.
         var edge: Bool?
+        // With Option held the press copies, whichever part of the clip it is on.
         switch hit {
+        case _ where event.modifierFlags.contains(.option): break
         case .pattern: resize = onResizeEdge(p, of: rect)
         case .audio(let clip): grabbed = part(of: clip, at: p, in: rect)
         case .notes:
@@ -1219,17 +1307,26 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             d.moved = true
             d.by = layout.move(byX: p.x - d.start.x, free: event.modifierFlags.contains(.command), within: d.range)
             d.rows = min(max(trackIndex(atY: p.y) - trackIndex(atY: d.start.y), d.rowRange.lowerBound), d.rowRange.upperBound)
-            let tracks = model.arrangement.tracks
-            for (key, origin) in d.origin {
-                clips[key]?.at = Animated(origin.at + d.by)
-                if tracks.indices.contains(origin.track + d.rows), let row = rows[.track(tracks[origin.track + d.rows].key)] {
-                    clips[key]?.y = Animated(row.y.to)
-                }
+            let copying = event.modifierFlags.contains(.option)
+            if copying != d.copy {
+                d.copy = copying
+                // The clips go back while their copies are shown, and come with the drag after.
+                drag = .clips(d)
+                show(model.arrangement, animated: false)
             }
-            for (key, origin) in d.origin {
-                // An audio clip's audio moves with it, and a note clip's notes.
-                if let audio = clips[key]?.audio { clips[key]?.anchor = Animated(audioLayout(audio).fileStart + d.by) }
-                if clips[key]?.notes != nil { clips[key]?.anchor = Animated(origin.at + d.by) }
+            if !d.copy {
+                let tracks = model.arrangement.tracks
+                for (key, origin) in d.origin {
+                    clips[key]?.at = Animated(origin.at + d.by)
+                    if tracks.indices.contains(origin.track + d.rows), let row = rows[.track(tracks[origin.track + d.rows].key)] {
+                        clips[key]?.y = Animated(row.y.to)
+                    }
+                }
+                for (key, origin) in d.origin {
+                    // An audio clip's audio moves with it, and a note clip's notes.
+                    if let audio = clips[key]?.audio { clips[key]?.anchor = Animated(audioLayout(audio).fileStart + d.by) }
+                    if clips[key]?.notes != nil { clips[key]?.anchor = Animated(origin.at + d.by) }
+                }
             }
             drag = .clips(d)
         case .trim(var d):
@@ -1279,19 +1376,36 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 clips[clip.key]?.length = Animated(clip.patternBeats * Double(wanted))
                 drag = .resize(clip: clip, repeats: wanted)
             }
-        case .point(var d):
-            let scale = ValueScale(min: d.lane.min, max: d.lane.max, log: d.lane.log)
+        case .points(var d):
+            // The grabbed point goes to the grid line under the pointer, or
+            // with ⌘ anywhere, and to the height of it; the others as far.
             let wanted = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.command))
-            let at = min(max(wanted, d.range.lowerBound), d.range.upperBound)
-            let value = scale.value(atY: p.y, in: d.rect)
-            if at != d.at || value != d.value {
-                d.at = at
-                d.value = value
+            let by = min(max(wanted - d.grabbed.at, d.range.lowerBound), d.range.upperBound)
+            let reach = Double(d.rect.height - 2 * ValueScale.inset)
+            let fraction = reach > 0 ? Double(d.rect.maxY - ValueScale.inset - p.y) / reach : d.grabbed.fraction
+            let up = min(max(fraction - d.grabbed.fraction, d.lift.lowerBound), d.lift.upperBound)
+            if by != d.by || up != d.up {
+                d.by = by
+                d.up = up
                 d.moved = true
-                heldPoints[d.point] = HeldPoint(at: at, value: value, until: nil)
-                model.drag(.pointSet(point: d.point, at: at, value: value, hold: nil), gesture: d.gesture)
+                var places: [PointPlace] = []
+                for point in d.points {
+                    let at = ((point.at + by) * 1000).rounded() / 1000
+                    let value = point.scale.value(at: point.fraction + up)
+                    heldPoints[point.key] = HeldPoint(at: at, value: value, until: nil)
+                    places.append(PointPlace(point: point.key, at: at, value: value))
+                }
+                model.drag(.pointsSet(points: places), gesture: d.gesture)
             }
-            drag = .point(d)
+            drag = .points(d)
+        case .marquee(let origin, _, let base, let points):
+            drag = .marquee(origin: origin, now: p, base: base, points: points)
+            let box = CGRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x - origin.x), height: abs(p.y - origin.y))
+            if points {
+                model.select(points: base.union(pointKeys(in: box)))
+            } else {
+                model.select(clips: base.union(clipKeys(in: box)))
+            }
         case .reorder(var r):
             if r.slot == nil, abs(p.y - r.startY) < 4 { return }
             // The gap the pointer is nearest: above the first row whose middle is below it.
@@ -1320,7 +1434,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             // The level stays as dragged until the host's song has it.
             if s.moved { held[s.slider]?.until = CACurrentMediaTime() + 1 }
         case .clips(let d):
-            if d.moved {
+            if d.moved, event.modifierFlags.contains(.option) {
+                // Copies where the clips would have gone, which are then the selection.
+                show(model.arrangement, animated: false)
+                model.edit(.clipsCopy(clips: d.origin.keys.sorted(), by: d.by, rows: Int32(d.rows))) { [weak self] made in
+                    if !made.isEmpty { self?.model.select(clips: Set(made)) }
+                }
+            } else if d.moved {
                 model.edit(.clipsMove(clips: d.origin.keys.sorted(), by: d.by, rows: Int32(d.rows)))
             } else if let key = d.collapse {
                 model.select(clips: [key])
@@ -1338,10 +1458,16 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 let ms = (AudioClipLayout.ms(beats: d.beats, tempo: model.arrangement.tempo) * 10).rounded() / 10
                 model.edit(.audioFade(clip: d.clip.key, fadeInMs: d.fadeIn ? ms : nil, fadeOutMs: d.fadeIn ? nil : ms))
             }
-        case .point(let d):
+        case .points(let d):
             model.endDrag()
-            // The point stays as dragged until the host's song has it.
-            if d.moved { heldPoints[d.point]?.until = CACurrentMediaTime() + 1 }
+            // The points stay as dragged until the host's song has them.
+            if d.moved {
+                for point in d.points { heldPoints[point.key]?.until = CACurrentMediaTime() + 1 }
+            } else if let key = d.collapse {
+                model.select(points: [key])
+            }
+        case .marquee:
+            break
         case .reorder(let r):
             // Taking the row out moves the gaps below it up by one.
             if let slot = r.slot {
@@ -1386,11 +1512,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// Drops a drag that has sent nothing yet. True if there was one.
     private func cancelDrag() -> Bool {
         switch drag {
-        case .clips, .resize, .trim, .noteTrim, .fade, .reorder, .loop:
+        case .clips, .resize, .trim, .noteTrim, .fade, .reorder, .loop, .marquee:
             drag = nil
             show(model.arrangement, animated: true)
             return true
-        case .slider, .point, nil:
+        case .slider, .points, nil:
             return false
         }
     }
@@ -1575,7 +1701,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             case "\u{1b}":
                 if !cancelDrag() {
                     model.select(clips: [])
-                    model.select(point: nil)
+                    model.select(points: [])
                 }
             default: super.keyDown(with: event)
             }
@@ -1723,6 +1849,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
         clipped(to: CGRect(x: header, y: ruler, width: bounds.width - header, height: bounds.height - ruler)) {
             drawLanes(order, at: now)
+            drawCopies()
+            drawMarquee()
         }
         clipped(to: CGRect(x: 0, y: ruler, width: header, height: bounds.height - ruler)) {
             for (id, row) in order { drawHeader(id, row, at: now) }
@@ -1762,6 +1890,31 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 fill(CGRect(x: 0, y: y - 1.5, width: bounds.width, height: 2), Theme.insertion)
             }
         }
+    }
+
+    /// Where an Option-drag puts its copies: outlined, at the clips' length.
+    private func drawCopies() {
+        guard case .clips(let d) = drag, d.moved, d.copy else { return }
+        let tracks = model.arrangement.tracks
+        for (key, origin) in d.origin {
+            guard let clip = clips[key], tracks.indices.contains(origin.track + d.rows),
+                  let frame = frame(of: .track(tracks[origin.track + d.rows].key)) else { continue }
+            let rect = clipRect(at: origin.at + d.by, length: clip.length.to, top: frame.top)
+            let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
+            clip.color.withAlphaComponent(0.3).setFill()
+            shape.fill()
+            Theme.selectedClip.setStroke()
+            shape.lineWidth = 1.5
+            shape.stroke()
+        }
+    }
+
+    private func drawMarquee() {
+        guard case .marquee(let origin, let now, _, _) = drag, origin != now else { return }
+        let box = CGRect(x: min(origin.x, now.x), y: min(origin.y, now.y), width: abs(now.x - origin.x), height: abs(now.y - origin.y))
+        fill(box, Theme.gray(1, 0.08))
+        Theme.gray(1, 0.6).setStroke()
+        NSBezierPath(rect: box.insetBy(dx: 0.5, dy: 0.5)).stroke()
     }
 
     /// The outline of the clip a dragged file would make: from its beat for
@@ -2079,8 +2232,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             line.lineJoinStyle = .round
             Theme.automation.withAlphaComponent(alpha).setStroke()
             line.stroke()
+            // The value shows beside the one point selected, or the one grabbed.
+            var named: UInt64?
+            if case .points(let d) = drag { named = d.grabbed.key } else if model.selectedPoints.count == 1 { named = model.selectedPoints.first }
             for (point, at) in placed {
-                let selected = model.selectedPoint == point.key
+                let selected = model.selectedPoints.contains(point.key)
                 let radius: CGFloat = selected ? 4.5 : 3
                 let dot = NSBezierPath(ovalIn: CGRect(x: at.x - radius, y: at.y - radius, width: 2 * radius, height: 2 * radius))
                 (selected ? Theme.selectedClip : Theme.automation).withAlphaComponent(alpha).setFill()
@@ -2089,6 +2245,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 Theme.automation.withAlphaComponent(alpha).setStroke()
                 dot.lineWidth = 1.5
                 dot.stroke()
+                guard point.key == named else { continue }
                 // The selected point's value, beside it.
                 let value = heldPoints[point.key]?.value ?? point.value
                 let x = at.x + 80 > rect.maxX ? at.x - 78 : at.x + 9

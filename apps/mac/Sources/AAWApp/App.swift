@@ -775,9 +775,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
     @objc func splitSelection(_ sender: Any?) { model.splitSelection() }
     /// Delete, for what has the keys: in the pattern editor the selected
-    /// event and nothing else, so that it never takes the clip being edited.
+    /// events and nothing else, so that it never takes the clip being edited.
     @objc func deleteSelection(_ sender: Any?) {
-        if window?.firstResponder is PatternEditor, model.selectedEvent == nil {
+        if window?.firstResponder is PatternEditor, model.selectedEvents.isEmpty {
             NSSound.beep()
         } else if window?.firstResponder is NoteEditor, model.selectedNotes.isEmpty {
             NSSound.beep()
@@ -785,11 +785,20 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             model.deleteSelection()
         }
     }
-    /// Copy and Paste: in the piano roll, notes, pasted where the clip was
-    /// last clicked; elsewhere, clips, pasted at the start position.
-    @objc func copy(_ sender: Any?) { model.copySelection(notes: window?.firstResponder is NoteEditor) }
-    @objc func cut(_ sender: Any?) { model.cutSelection(notes: window?.firstResponder is NoteEditor) }
-    @objc func paste(_ sender: Any?) { model.paste(intoNotes: window?.firstResponder is NoteEditor) }
+    /// Where Copy and Paste act: in the piano roll, notes, and in the pattern
+    /// editor, events, pasted where the clip or pattern was last clicked;
+    /// elsewhere, clips, pasted at the start position.
+    private var editPlace: EditPlace {
+        switch window?.firstResponder {
+        case is NoteEditor: .notes
+        case is PatternEditor: .events
+        default: .clips
+        }
+    }
+
+    @objc func copy(_ sender: Any?) { model.copySelection(in: editPlace) }
+    @objc func cut(_ sender: Any?) { model.cutSelection(in: editPlace) }
+    @objc func paste(_ sender: Any?) { model.paste(in: editPlace) }
     @objc func addTrack(_ sender: Any?) { model.addTrack() }
     @objc func addMIDITrack(_ sender: Any?) { model.addTrack(midi: true) }
     @objc func addReturn(_ sender: Any?) { model.addReturn() }
@@ -832,8 +841,8 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             return model.redoStep != nil && !typing
         case #selector(duplicateSelection(_:)): return model.canDuplicate && !typing
         case #selector(copy(_:)), #selector(cut(_:)):
-            return !typing && (window?.firstResponder is NoteEditor ? !model.selectedNotes.isEmpty : !model.selectedClips.isEmpty)
-        case #selector(paste(_:)): return !typing && model.canPaste(intoNotes: window?.firstResponder is NoteEditor)
+            return !typing && model.canCopy(in: editPlace)
+        case #selector(paste(_:)): return !typing && model.canPaste(in: editPlace)
         case #selector(splitSelection(_:)): return model.canSplit && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing

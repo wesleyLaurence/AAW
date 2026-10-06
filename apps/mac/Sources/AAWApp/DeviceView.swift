@@ -56,7 +56,7 @@ struct DetailView: View {
                              playing: model.transport.playing, selected: model.selectedNotes, grid: model.noteGrid)
                 } else if let context = model.patternContext {
                     PatternPane(model: model, context: context, color: model.color(of: context.track.key),
-                                playing: model.transport.playing, selected: model.selectedEvent)
+                                playing: model.transport.playing, selected: model.selectedEvents)
                 }
             }
             Spacer(minLength: 0)

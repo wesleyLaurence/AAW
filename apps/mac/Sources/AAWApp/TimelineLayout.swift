@@ -121,6 +121,33 @@ public struct TimelineLayout: Equatable {
     /// How far a drag of `dx` points moves clips, in beats: whole grid steps,
     /// or with `free` thousandths of a beat, and no further than `range`, which
     /// is how far the clips can move and stay in the song.
+    /// How far automation points can move in time together: each no further
+    /// than the nearest point of its lane that stays, nor before the song or
+    /// past its end. `lanes` holds each lane's points in time order, with
+    /// whether each one moves.
+    public static func pointRange(_ lanes: [[(at: Double, moving: Bool)]], length: Double) -> ClosedRange<Double> {
+        var least = -Double.infinity
+        var most = Double.infinity
+        for points in lanes {
+            for (index, point) in points.enumerated() where point.moving {
+                let before = points[..<index].last { !$0.moving }?.at ?? 0
+                let after = points[(index + 1)...].first { !$0.moving }?.at ?? length
+                least = max(least, before - point.at)
+                most = min(most, after - point.at)
+            }
+        }
+        guard least.isFinite, most.isFinite, least <= 0, most >= 0 else { return 0...0 }
+        return least...most
+    }
+
+    /// How far up automation points can move together, as a fraction of
+    /// their lanes' height, each staying inside its lane: `fractions` is how
+    /// far up its lane each one is.
+    public static func liftRange(_ fractions: [Double]) -> ClosedRange<Double> {
+        guard let low = fractions.min(), let high = fractions.max() else { return 0...0 }
+        return min(0, -low)...max(0, 1 - high)
+    }
+
     public func move(byX dx: CGFloat, free: Bool, within range: ClosedRange<Double>) -> Double {
         let step = free ? 0.001 : grid
         let steps = (Double(dx / pixelsPerBeat) / step).rounded()

@@ -62,5 +62,5 @@ removed. This file is what was added for writing parts by hand, as in Ableton.
 - Only the grabbed note is heard while a chord is moved.
 - The velocity lane's height is fixed, and velocity is not drawn by sweeping
   across stalks.
-- Option-drag copies notes only; clips copied by a drag belong to selecting
-  several things in the app, on the backlog.
+- Option-drag copied notes only until [selecting several things](selection.md)
+  made it copy clips and pattern events too.

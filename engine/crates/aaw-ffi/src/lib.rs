@@ -16,7 +16,7 @@ use aaw_host::command::{Command, Origin};
 use aaw_host::host::{self, Clock, Event, Options, Running};
 use aaw_host::project;
 use aaw_host::session::{Change, Doc};
-pub use edits::{Edit, NoteCopy, Row, SynthFieldValue};
+pub use edits::{Edit, EventCopy, NoteCopy, PointPlace, Row, SynthFieldValue};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};

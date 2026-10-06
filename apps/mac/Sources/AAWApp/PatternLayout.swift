@@ -229,6 +229,37 @@ public struct PatternLayout: Equatable {
         Int((Double(dx / pixelsPerBeat) / grid).rounded())
     }
 
+    /// How many steps of the grid events that start at `ats` can move
+    /// together and each still start inside the pattern: by whole steps, so
+    /// that one off the grid stays as far off it.
+    public func stepRange(of ats: [Double]) -> ClosedRange<Int> {
+        let least = ats.map { -Int(($0 / grid + 1e-9).rounded(.down)) }.max() ?? 0
+        let most = ats.map { Int(((lengthBeats - $0) / grid - 1e-9).rounded(.up)) - 1 }.min() ?? 0
+        return least...max(least, most)
+    }
+
+    /// How many beats events that start at `ats` can move together off the
+    /// grid and each still start inside the pattern.
+    public func beatRange(of ats: [Double]) -> ClosedRange<Double> {
+        let least = -(ats.min() ?? 0)
+        return least...max(least, lengthBeats - (ats.max() ?? 0) - 0.001)
+    }
+
+    /// How many notes events of rows of notes can move up or down together,
+    /// each from its pitch, and stay inside its row: `pitched` pairs each
+    /// one's row with its pitch. Nothing when none has a pitch.
+    public func semitoneRange(of pitched: [(row: Int, pitch: Int)]) -> ClosedRange<Int> {
+        var least = Int.min
+        var most = Int.max
+        for (index, pitch) in pitched where rows.indices.contains(index) {
+            guard case .notes(let low, let high) = rows[index].kind else { continue }
+            least = max(least, low - pitch)
+            most = min(most, high - pitch)
+        }
+        guard least != Int.min, least <= 0, most >= 0 else { return 0...0 }
+        return least...most
+    }
+
     /// The velocity a step's level plays at: 1 to 9 from soft to hard, and 10,
     /// an `x`, at 100.
     public static func velocity(ofLevel level: Int) -> Int {

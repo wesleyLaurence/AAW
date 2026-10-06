@@ -33,6 +33,26 @@ pub struct NoteCopy {
     pub velocity: u32,
 }
 
+/// A pattern's event as Copy took it: its pad, and its place and length as
+/// the song wrote them.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct EventCopy {
+    pub pad: String,
+    pub at: String,
+    pub duration: Option<String>,
+    pub velocity: u32,
+    pub note: Option<String>,
+    pub transpose: f64,
+}
+
+/// Where an automation point goes, as a drag of several puts each.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct PointPlace {
+    pub point: u64,
+    pub at: f64,
+    pub value: f64,
+}
+
 /// A field of the Synth with the value to set it to, by its path in the
 /// patch, for an edit that sets several at once, as a drag of the filter's
 /// corner sets the cutoff and the resonance.
@@ -62,6 +82,10 @@ pub enum Edit {
     /// Copies clips to right after the span they cover together, so that a
     /// group repeats as a group. The copies are what the edit makes.
     ClipsDuplicate { clips: Vec<u64> },
+    /// Copies clips to as far from them as `ClipsMove` would move them,
+    /// leaving them where they are, as an Option-drag does. The copies are
+    /// what the edit makes.
+    ClipsCopy { clips: Vec<u64>, by: f64, rows: i32 },
     ClipsRemove { clips: Vec<u64> },
     /// Adds the clips `copied` took, so that the earliest starts at `at`, on
     /// `track` or else on the track it was copied from, and the others as far
@@ -274,8 +298,10 @@ pub enum Edit {
         value: Option<f64>,
         hold: Option<bool>,
     },
-    /// Removes a point; a lane's last point takes the lane with it.
-    PointRemove { point: u64 },
+    /// Moves points, of one lane or several, each to its place, as one step.
+    PointsSet { points: Vec<PointPlace> },
+    /// Removes points; a lane's last point takes the lane with it.
+    PointsRemove { points: Vec<u64> },
     /// Sets steps of a pad's row in a pattern to a level: 0 for none, 1 to 9
     /// for the row's digits and 10 for an `x`. A pad gets a row with its
     /// first step, and a row left without steps goes.
@@ -296,28 +322,46 @@ pub enum Edit {
         pitch: Option<i32>,
         steps: u32,
     },
-    /// Moves an event later by `steps` grid steps and `by` beats, and up by
-    /// `semitones` from its note, or from its sample's root when it has none.
-    EventMove {
-        event: u64,
+    /// Moves events of one pattern later by `steps` grid steps and `by`
+    /// beats, and up by `semitones` from each one's note, or from its
+    /// sample's root when it has none; in pitch, only those that have one,
+    /// unless none does.
+    EventsMove {
+        events: Vec<u64>,
         steps: i32,
         by: f64,
         semitones: i32,
     },
+    /// Copies events of one pattern to as far from them as `EventsMove`
+    /// would move them, leaving them where they are. The copies are what the
+    /// edit makes.
+    EventsCopy {
+        events: Vec<u64>,
+        steps: i32,
+        by: f64,
+        semitones: i32,
+    },
+    /// Copies events of one pattern to right after the span they cover
+    /// together. The copies are what the edit makes.
+    EventsDuplicate { events: Vec<u64> },
+    /// Adds copied events to a pattern, the earliest at `at`, a beat of the
+    /// pattern, and the others as far after it as they were; without `at`,
+    /// right after the span they covered. The copies are what the edit makes.
+    EventsPaste { events: Vec<EventCopy>, pattern: String, at: Option<f64> },
     /// Ends an event on a line of the pattern's grid: it is held from where
     /// it starts to there.
     EventEnd { event: u64, step: u32 },
-    /// Sets fields of an event. Beats are as typed, such as `1/3` or `0.75`;
+    /// Sets fields of events. Beats are as typed, such as `1/3` or `0.75`;
     /// an empty duration or note takes the field away.
-    EventSet {
-        event: u64,
+    EventsSet {
+        events: Vec<u64>,
         at: Option<String>,
         duration: Option<String>,
         velocity: Option<u32>,
         transpose: Option<f64>,
         note: Option<String>,
     },
-    EventRemove { event: u64 },
+    EventsRemove { events: Vec<u64> },
     PatternSwing { pattern: String, swing: f64 },
     /// Changes a pattern's length, as typed. Step rows grow or shrink with
     /// it, and events past the new end go.
@@ -705,6 +749,69 @@ fn event<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<(&'a str, &'
     }
 }
 
+/// Events of one pattern, which an edit of several is of: the pattern's name,
+/// the pattern and each event with its key.
+fn pattern_events<'a>(project: &'a Project, tree: &Node, keys: &[u64], verb: &str) -> Result<(&'a str, &'a aaw_model::Pattern, Vec<(u64, &'a aaw_model::Event)>)> {
+    let mut found = Vec::new();
+    let mut of: Option<(&str, &aaw_model::Pattern)> = None;
+    for key in keys {
+        let (name, p, e) = event(project, tree, *key)?;
+        if of.is_some_and(|(n, _)| n != name) {
+            return Err(format!("Events are {verb} within one pattern"));
+        }
+        of = Some((name, p));
+        found.push((*key, e));
+    }
+    let (name, p) = of.ok_or("No events were given")?;
+    Ok((name, p, found))
+}
+
+/// How far `steps` steps of a pattern's grid and `by` beats go, exactly;
+/// none when it is nowhere.
+fn event_shift(p: &aaw_model::Pattern, steps: i32, by: f64) -> Result<Option<BigRational>> {
+    if steps == 0 && by == 0.0 {
+        return Ok(None);
+    }
+    let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
+    let by = if by < 0.0 { -distance } else { distance };
+    Ok(Some(p.grid_exact() * BigRational::from_integer(steps.into()) + by))
+}
+
+/// The pitch each event is moved up from by `semitones`: its note, or else
+/// its sample's root, and none for an event that has neither, which then
+/// keeps its place in pitch. Refused when no event has a pitch.
+fn pitched_events(project: &Project, name: &str, found: &[(u64, &aaw_model::Event)], semitones: i32) -> Result<std::collections::HashMap<u64, Option<i64>>> {
+    if semitones == 0 {
+        return Ok(Default::default());
+    }
+    let mut pitches = std::collections::HashMap::new();
+    for (key, e) in found {
+        let from = match e.note.as_deref().filter(|n| !n.is_empty()) {
+            Some(note) => Some(midi(note)?),
+            None => pad_root(project, name, &e.pad),
+        };
+        pitches.insert(*key, from);
+    }
+    if pitches.values().all(Option::is_none) {
+        let pad = &found[0].1.pad;
+        return Err(format!("Pad {pad} plays a sample without a root note, so its events have no pitch"));
+    }
+    Ok(pitches)
+}
+
+/// The command that adds a copy of an event to its pattern at `at`, with
+/// its fields as the song wrote them.
+fn event_add(tree: &Node, name: &str, key: u64, at: &BigRational) -> Result<Json> {
+    let loc = tree::find(tree, key).ok_or("The event is no longer in the song")?;
+    let mut command = node_json(tree::get(tree, &loc));
+    let fields = command.as_object_mut().ok_or("An event is an object")?;
+    fields.retain(|_, value| !value.is_null());
+    fields.insert("op".into(), json!("event.add"));
+    fields.insert("pattern".into(), json!(name));
+    fields.insert("at".into(), beat(at));
+    Ok(command)
+}
+
 /// A beat as typed: a number where it reads as one, else a fraction.
 fn typed_beat(text: &str) -> Json {
     serde_json::from_str::<Json>(text.trim()).ok().filter(Json::is_number).unwrap_or(json!(text.trim()))
@@ -939,6 +1046,19 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             };
             let span = end - start;
             song.copies(&tree, clips, &spans, &span, 0, "Duplicate")
+        }
+        Edit::ClipsCopy { clips, by, rows } => {
+            if clips.is_empty() || (*by == 0.0 && *rows == 0) {
+                return Ok(Vec::new());
+            }
+            let tree = doc.tree();
+            let spans = clips.iter().map(|key| placed(&tree, *key)).collect::<Result<Vec<_>>>()?;
+            let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
+            let by = if *by < 0.0 { -distance } else { distance };
+            if spans.iter().any(|s| s.start.clone() + &by < BigRational::zero()) {
+                return Err("A copy cannot start before the song".into());
+            }
+            song.copies(&tree, clips, &spans, &by, (*rows).into(), "Copy")
         }
         Edit::ClipsPaste { copied, at, track } => {
             let tree = doc.tree();
@@ -1746,7 +1866,24 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             Ok(vec![command])
         }
-        Edit::PointRemove { point } => Ok(vec![json!({"op": "point.remove", "point": handle_text(*point)})]),
+        Edit::PointsSet { points } => {
+            let commands = points
+                .iter()
+                .map(|p| Ok(json!({"op": "point.set", "point": handle_text(p.point), "at": beat_at(p.at)?, "value": number(p.value)})))
+                .collect::<Result<Vec<_>>>()?;
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Move {n} automation points")),
+            })
+        }
+        Edit::PointsRemove { points } => {
+            // The host takes a lane away with its last point.
+            let commands: Vec<Json> = points.iter().map(|key| json!({"op": "point.remove", "point": handle_text(*key)})).collect();
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Remove {n} automation points")),
+            })
+        }
         Edit::Steps { pattern: name, pad, steps, level } => {
             let p = pattern(project, name)?;
             let grid = p.grid_exact();
@@ -1802,31 +1939,112 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             Ok(vec![command])
         }
-        Edit::EventMove { event: key, steps, by, semitones } => {
+        Edit::EventsMove { events, steps, by, semitones } => {
             if *steps == 0 && *by == 0.0 && *semitones == 0 {
                 return Ok(Vec::new());
             }
             let tree = doc.tree();
-            let (name, p, e) = event(project, &tree, *key)?;
-            let mut command = json!({"op": "event.set", "event": handle_text(*key)});
-            if *steps != 0 || *by != 0.0 {
-                let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
-                let by = if *by < 0.0 { -distance } else { distance };
-                let at = e.at_exact() + p.grid_exact() * BigRational::from_integer((*steps).into()) + by;
-                if at < BigRational::zero() {
-                    return Err("An event cannot start before its pattern".into());
+            let (name, p, found) = pattern_events(project, &tree, events, "moved")?;
+            let shift = event_shift(p, *steps, *by)?;
+            let pitched = pitched_events(project, name, &found, *semitones)?;
+            let mut commands = Vec::new();
+            for (key, e) in &found {
+                let mut command = json!({"op": "event.set", "event": handle_text(*key)});
+                if let Some(shift) = &shift {
+                    let at = e.at_exact() + shift;
+                    if at < BigRational::zero() {
+                        return Err("An event cannot start before its pattern".into());
+                    }
+                    command["at"] = beat(&at);
                 }
-                command["at"] = beat(&at);
+                if let Some(Some(from)) = pitched.get(key) {
+                    command["note"] = json!(note_name(from + i64::from(*semitones))?);
+                }
+                if command.as_object().is_some_and(|c| c.len() > 2) {
+                    commands.push(command);
+                }
             }
-            if *semitones != 0 {
-                let from = match e.note.as_deref().filter(|n| !n.is_empty()) {
-                    Some(note) => midi(note)?,
-                    None => pad_root(project, name, &e.pad)
-                        .ok_or_else(|| format!("Pad {} plays a sample without a root note, so its events have no pitch", e.pad))?,
-                };
-                command["note"] = json!(note_name(from + i64::from(*semitones))?);
-            }
-            Ok(vec![command])
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Move {n} events of {name}")),
+            })
+        }
+        Edit::EventsCopy { events, steps, by, semitones } => {
+            let tree = doc.tree();
+            let (name, p, found) = pattern_events(project, &tree, events, "copied")?;
+            let shift = event_shift(p, *steps, *by)?.unwrap_or_else(BigRational::zero);
+            let pitched = pitched_events(project, name, &found, *semitones)?;
+            let commands = found
+                .iter()
+                .map(|(key, e)| {
+                    let at = e.at_exact() + &shift;
+                    if at < BigRational::zero() {
+                        return Err("A copy cannot start before its pattern".to_string());
+                    }
+                    let mut command = event_add(&tree, name, *key, &at)?;
+                    if let Some(Some(from)) = pitched.get(key) {
+                        command["note"] = json!(note_name(from + i64::from(*semitones))?);
+                    }
+                    Ok(command)
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok(match commands.len() {
+                0 => commands,
+                n => batch(commands, format!("Copy {} of {name}", count(n, "event"))),
+            })
+        }
+        Edit::EventsDuplicate { events } => {
+            let tree = doc.tree();
+            let (name, p, found) = pattern_events(project, &tree, events, "copied")?;
+            // A hit without a length takes a step of the grid.
+            let (Some(start), Some(end)) = (
+                found.iter().map(|(_, e)| e.at_exact()).min(),
+                found.iter().map(|(_, e)| e.at_exact() + e.duration_exact().unwrap_or_else(|| p.grid_exact())).max(),
+            ) else {
+                return Ok(Vec::new());
+            };
+            let span = end - start;
+            let commands = found.iter().map(|(key, e)| event_add(&tree, name, *key, &(e.at_exact() + &span))).collect::<Result<Vec<_>>>()?;
+            let label = format!("Duplicate {} of {name}", count(commands.len(), "event"));
+            Ok(batch(commands, label))
+        }
+        Edit::EventsPaste { events, pattern: name, at } => {
+            let p = pattern(project, name)?;
+            let places = events.iter().map(|e| typed_exact(&e.at)).collect::<Result<Vec<_>>>()?;
+            let durations = events
+                .iter()
+                .map(|e| e.duration.as_deref().map(typed_exact).transpose())
+                .collect::<Result<Vec<_>>>()?;
+            let Some(start) = places.iter().min() else { return Ok(Vec::new()) };
+            let ends = places.iter().zip(&durations).map(|(at, d)| at + d.clone().unwrap_or_else(|| p.grid_exact()));
+            let end = ends.max().unwrap_or_else(|| start.clone());
+            let shift = match at {
+                Some(at) => aaw_model::beat(&Beat::Float((at.max(0.0) * 1000.0).round() / 1000.0))? - start,
+                None => end - start,
+            };
+            let commands: Vec<Json> = events
+                .iter()
+                .zip(&places)
+                .zip(&durations)
+                .map(|((e, at), duration)| {
+                    let mut command = json!({"op": "event.add", "pattern": name, "at": beat(&(at + &shift)), "pad": e.pad});
+                    if e.velocity != 100 {
+                        command["velocity"] = json!(e.velocity);
+                    }
+                    if let Some(note) = e.note.as_deref().filter(|n| !n.is_empty()) {
+                        command["note"] = json!(note);
+                    }
+                    if let Some(duration) = duration {
+                        command["duration"] = beat(duration);
+                    }
+                    if e.transpose != 0.0 {
+                        command["transpose"] = number(e.transpose);
+                    }
+                    command
+                })
+                .collect();
+            let label = format!("Paste {} into {name}", count(commands.len(), "event"));
+            Ok(batch(commands, label))
         }
         Edit::EventEnd { event: key, step } => {
             let tree = doc.tree();
@@ -1837,26 +2055,46 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             Ok(vec![json!({"op": "event.set", "event": handle_text(*key), "duration": beat(&duration)})])
         }
-        Edit::EventSet { event: key, at, duration, velocity, transpose, note } => {
-            let mut command = json!({"op": "event.set", "event": handle_text(*key)});
+        Edit::EventsSet { events, at, duration, velocity, transpose, note } => {
+            let mut fields = serde_json::Map::new();
             if let Some(at) = at {
-                command["at"] = typed_beat(at);
+                fields.insert("at".into(), typed_beat(at));
             }
             if let Some(duration) = duration {
-                command["duration"] = if duration.trim().is_empty() { Json::Null } else { typed_beat(duration) };
+                fields.insert("duration".into(), if duration.trim().is_empty() { Json::Null } else { typed_beat(duration) });
             }
             if let Some(velocity) = velocity {
-                command["velocity"] = json!(velocity);
+                fields.insert("velocity".into(), json!(velocity));
             }
             if let Some(transpose) = transpose {
-                command["transpose"] = number(*transpose);
+                fields.insert("transpose".into(), number(*transpose));
             }
             if let Some(note) = note {
-                command["note"] = if note.trim().is_empty() { Json::Null } else { json!(note.trim()) };
+                fields.insert("note".into(), if note.trim().is_empty() { Json::Null } else { json!(note.trim()) });
             }
-            Ok(vec![command])
+            if fields.is_empty() {
+                return Ok(Vec::new());
+            }
+            let commands: Vec<Json> = events
+                .iter()
+                .map(|key| {
+                    let mut command = json!({"op": "event.set", "event": handle_text(*key)});
+                    command.as_object_mut().expect("an object").extend(fields.clone());
+                    command
+                })
+                .collect();
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Change {n} events")),
+            })
         }
-        Edit::EventRemove { event } => Ok(vec![json!({"op": "event.remove", "event": handle_text(*event)})]),
+        Edit::EventsRemove { events } => {
+            let commands: Vec<Json> = events.iter().map(|key| json!({"op": "event.remove", "event": handle_text(*key)})).collect();
+            Ok(match commands.len() {
+                0 | 1 => commands,
+                n => batch(commands, format!("Remove {n} events")),
+            })
+        }
         Edit::PatternSwing { pattern: name, swing } => {
             pattern(project, name)?;
             Ok(vec![json!({"op": "set", "path": format!("patterns.{name}.swing"), "value": swing})])
@@ -2085,6 +2323,7 @@ pub fn label(edit: &Edit, count: usize) -> Option<String> {
         _ if count < 2 => return None,
         Edit::ClipsMove { .. } => "Move",
         Edit::ClipsDuplicate { .. } => "Duplicate",
+        Edit::ClipsCopy { .. } => "Copy",
         Edit::ClipsRemove { .. } => "Remove",
         Edit::AudioSplit { .. } => "Split",
         _ => return None,

@@ -432,6 +432,92 @@ fn clips_move_resize_and_duplicate_on_exact_beats() {
 }
 
 #[test]
+fn clips_dragged_with_option_are_copied_as_far_as_a_move_goes() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
+    let perc_clip = start.tracks[1].clips[0].key;
+    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(u64, f64, u32)> {
+        a.tracks[track].clips.iter().map(|c| (c.key, c.at, c.repeats)).collect()
+    };
+
+    // A copy goes where a move would, and the clip stays.
+    let made = song.edit(Edit::ClipsCopy { clips: vec![fill], by: 4.0, rows: 1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(made.len(), 1);
+    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 4), (fill, 16.0, 1)]);
+    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 2), (made[0], 20.0, 1)]);
+    song.undo().unwrap();
+    update(&seen);
+
+    // Several keep their places to each other, as one step.
+    let made = song.edit(Edit::ClipsCopy { clips: vec![perc_clip, fill], by: 8.0, rows: 0 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Copy 2 clips"));
+    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 4), (fill, 16.0, 1), (made[1], 24.0, 1)]);
+    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 2), (made[0], 16.0, 2)]);
+    assert!(song.edit(Edit::ClipsCopy { clips: vec![perc_clip, fill], by: 0.0, rows: -1 }, None).is_err());
+    song.undo().unwrap();
+    update(&seen);
+
+    // Exact beats: a copy of a clip on a third stays on thirds.
+    let third = agent(&path, json!({"op": "clip.add", "track": "perc", "pattern": "fill", "at": "1/3"}));
+    let third: u64 = third["handle"].as_str().unwrap()[1..].parse().unwrap();
+    update(&seen);
+    let copy = song.edit(Edit::ClipsCopy { clips: vec![third], by: 0.125, rows: 0 }, None).unwrap()[0];
+    update(&seen);
+    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{copy}.at")})), json!("11/24"));
+
+    // Nowhere is nothing; before the song, past the tracks or the end is refused.
+    assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: 0.0, rows: 0 }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: -17.0, rows: 0 }, None).unwrap_err().to_string().contains("before the song"));
+    assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: 0.0, rows: 2 }, None).is_err());
+    assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: 15.0, rows: 0 }, None).is_err());
+    song.close();
+}
+
+#[test]
+fn several_automation_points_move_and_go_together() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let perc = Row::Track { key: start.tracks[1].key };
+    song.edit(Edit::LaneAdd { row: perc.clone(), param: "gain_db".into() }, None).unwrap();
+    let lane = update(&seen).arrangement.tracks[1].lanes[0].key;
+    let mut keys = Vec::new();
+    for (at, value) in [(4.0, -6.0), (8.0, -12.0), (12.0, -9.0)] {
+        keys.push(song.edit(Edit::PointAdd { lane, at, value }, None).unwrap()[0]);
+        update(&seen);
+    }
+    let points = |u: &Update| u.arrangement.tracks[1].lanes[0].points.iter().map(|p| (p.at, p.value)).collect::<Vec<_>>();
+    let place = |point: u64, at: f64, value: f64| aaw_ffi::PointPlace { point, at, value };
+
+    // A drag of two points is one undo step, however many times it is sent.
+    for by in [1.0, 2.0] {
+        let moved = vec![place(keys[0], 4.0 + by, -6.0 + by), place(keys[1], 8.0 + by, -12.0 + by)];
+        song.edit(Edit::PointsSet { points: moved }, Some("points".into())).unwrap();
+    }
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!(points(&u), [(0.0, -3.0), (6.0, -4.0), (10.0, -10.0), (12.0, -9.0)]);
+    assert_eq!(u.undo.unwrap().label, "Move 2 automation points");
+    song.undo().unwrap();
+    assert_eq!(points(&update(&seen)), [(0.0, -3.0), (4.0, -6.0), (8.0, -12.0), (12.0, -9.0)]);
+    // One out of range refuses them all.
+    assert!(song.edit(Edit::PointsSet { points: vec![place(keys[0], 5.0, -5.0), place(keys[1], 9.0, 99.0)] }, None).is_err());
+
+    // Removed together; the lane goes with its last point.
+    song.edit(Edit::PointsRemove { points: vec![keys[0], keys[2]] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((points(&u), u.change.label.as_str()), (vec![(0.0, -3.0), (8.0, -12.0)], "Remove 2 automation points"));
+    let rest: Vec<u64> = u.arrangement.tracks[1].lanes[0].points.iter().map(|p| p.key).collect();
+    song.edit(Edit::PointsRemove { points: rest }, None).unwrap();
+    assert!(update(&seen).arrangement.tracks[1].lanes.is_empty());
+    song.close();
+}
+
+#[test]
 fn tracks_and_returns_are_added_named_moved_and_removed() {
     let (_dir, path, song, seen) = open();
     transport(&seen);
@@ -688,7 +774,7 @@ fn lanes_and_points_are_edited_by_key() {
     song.edit(Edit::LaneRemove { lane: sweep.key }, None).unwrap();
     assert_eq!(update(&seen).arrangement.tracks[1].lanes.len(), 1);
     for point in lane(&u, 1, 0).points {
-        song.edit(Edit::PointRemove { point: point.key }, None).unwrap();
+        song.edit(Edit::PointsRemove { points: vec![point.key] }, None).unwrap();
         update(&seen);
     }
     assert!(song.arrangement().tracks[1].lanes.is_empty());
@@ -1327,24 +1413,24 @@ fn events_are_added_moved_and_shaped() {
     assert_eq!(song.edit(add("k", 0.0, false, Some(60), 0), None).unwrap_err().to_string(), "hit needs root_note for pitched events");
 
     // A move is by exact steps: an event on a third stays on thirds.
-    song.edit(Edit::EventMove { event: second, steps: 2, by: 0.0, semitones: 0 }, None).unwrap();
+    song.edit(Edit::EventsMove { events: vec![second], steps: 2, by: 0.0, semitones: 0 }, None).unwrap();
     update(&seen);
     assert_eq!(get(second)["at"], json!("11/6"));
-    song.edit(Edit::EventMove { event: second, steps: -1, by: 0.125, semitones: 0 }, None).unwrap();
+    song.edit(Edit::EventsMove { events: vec![second], steps: -1, by: 0.125, semitones: 0 }, None).unwrap();
     update(&seen);
     assert_eq!(get(second)["at"], json!("41/24"));
     // In pitch it moves from its note, or from its sample's root when it has none.
-    song.edit(Edit::EventMove { event: first, steps: 0, by: 0.0, semitones: -5 }, None).unwrap();
+    song.edit(Edit::EventsMove { events: vec![first], steps: 0, by: 0.0, semitones: -5 }, None).unwrap();
     update(&seen);
     assert_eq!(get(first)["note"], json!("G2"));
-    song.edit(Edit::EventMove { event: second, steps: 0, by: 0.0, semitones: 3 }, None).unwrap();
+    song.edit(Edit::EventsMove { events: vec![second], steps: 0, by: 0.0, semitones: 3 }, None).unwrap();
     let u = update(&seen);
     assert_eq!((get(second)["note"].clone(), pattern(&u.arrangement, "line").events[1].pitch), (json!("C3"), Some(48)));
-    assert!(song.edit(Edit::EventMove { event: first, steps: 0, by: 0.0, semitones: 0 }, None).unwrap().is_empty());
-    assert!(song.edit(Edit::EventMove { event: first, steps: -1, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("before its pattern"));
-    assert!(song.edit(Edit::EventMove { event: first, steps: 99, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("outside pattern"));
-    assert!(song.edit(Edit::EventMove { event: kick, steps: 0, by: 0.0, semitones: 1 }, None).unwrap_err().to_string().contains("without a root note"));
-    assert!(song.edit(Edit::EventMove { event: first, steps: 0, by: 0.0, semitones: 120 }, None).is_err());
+    assert!(song.edit(Edit::EventsMove { events: vec![first], steps: 0, by: 0.0, semitones: 0 }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::EventsMove { events: vec![first], steps: -1, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("before its pattern"));
+    assert!(song.edit(Edit::EventsMove { events: vec![first], steps: 99, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("outside pattern"));
+    assert!(song.edit(Edit::EventsMove { events: vec![kick], steps: 0, by: 0.0, semitones: 1 }, None).unwrap_err().to_string().contains("without a root note"));
+    assert!(song.edit(Edit::EventsMove { events: vec![first], steps: 0, by: 0.0, semitones: 120 }, None).is_err());
 
     // Its end goes to a line of the grid; it cannot end before it starts.
     song.edit(Edit::EventEnd { event: first, step: 6 }, None).unwrap();
@@ -1356,8 +1442,8 @@ fn events_are_added_moved_and_shaped() {
     assert!(song.edit(Edit::EventEnd { event: second, step: 6 }, None).is_err());
 
     // Typed values are written as typed; an empty one takes the field away.
-    let set = |event: u64, at: Option<&str>, duration: Option<&str>, velocity: Option<u32>, transpose: Option<f64>, note: Option<&str>| Edit::EventSet {
-        event,
+    let set = |event: u64, at: Option<&str>, duration: Option<&str>, velocity: Option<u32>, transpose: Option<f64>, note: Option<&str>| Edit::EventsSet {
+        events: vec![event],
         at: at.map(str::to_string),
         duration: duration.map(str::to_string),
         velocity,
@@ -1386,16 +1472,104 @@ fn events_are_added_moved_and_shaped() {
     song.undo().unwrap();
     assert_eq!(pattern(&update(&seen).arrangement, "line").events[0].velocity, 100);
 
-    song.edit(Edit::EventRemove { event: free }, None).unwrap();
+    song.edit(Edit::EventsRemove { events: vec![free] }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Remove event of line: k at 1.2345678");
     assert!(pattern(&u.arrangement, "line").events.iter().all(|e| e.key != free));
-    assert!(song.edit(Edit::EventRemove { event: free }, None).is_err());
-    assert!(song.edit(Edit::EventMove { event: free, steps: 1, by: 0.0, semitones: 0 }, None).is_err());
+    assert!(song.edit(Edit::EventsRemove { events: vec![free] }, None).is_err());
+    assert!(song.edit(Edit::EventsMove { events: vec![free], steps: 1, by: 0.0, semitones: 0 }, None).is_err());
 
     // What the person selects in the editor, the agent can ask about.
     song.select(vec![first]).unwrap();
     assert_eq!(agent(&path, json!({"op": "status"}))["selection"], json!([{"ref": format!("@{first}"), "path": "patterns.line.events.0"}]));
+    song.close();
+}
+
+#[test]
+fn several_events_move_copy_and_paste_together() {
+    let (_dir, path, song, seen) = open_with_notes();
+    let get = |key: u64| {
+        let mut j = agent(&path, json!({"op": "get", "path": format!("@{key}")}));
+        j.as_object_mut().unwrap().remove("ref");
+        j
+    };
+    let line = pattern(&song.arrangement(), "line").clone();
+    let (first, second, kick) = (line.events[0].key, line.events[1].key, line.events[2].key);
+
+    // Moved together by exact steps, as one step; in pitch, those that have one.
+    song.edit(Edit::EventsMove { events: vec![first, second, kick], steps: 1, by: 0.0, semitones: 2 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move 3 events of line");
+    assert_eq!(get(first), json!({"at": 0.25, "pad": "t", "note": "D3", "duration": 1}));
+    assert_eq!(get(second), json!({"at": "19/12", "pad": "t", "duration": "2/3", "velocity": 80, "note": "B2"}));
+    assert_eq!(get(kick), json!({"at": 2.75, "pad": "k"}));
+    song.undo().unwrap();
+    update(&seen);
+    // None with a pitch is refused, as one is; and one that would leave the pattern refuses them all.
+    assert!(song.edit(Edit::EventsMove { events: vec![kick], steps: 0, by: 0.0, semitones: 1 }, None).unwrap_err().to_string().contains("without a root note"));
+    assert!(song.edit(Edit::EventsMove { events: vec![first, kick], steps: 6, by: 0.0, semitones: 0 }, None).is_err());
+    assert_eq!(get(first)["at"], json!(0));
+
+    // Copied where a move would go, the events staying; the copies are what it made.
+    let copies = song.edit(Edit::EventsCopy { events: vec![first, kick], steps: 4, by: 0.0, semitones: -12 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Copy 2 events of line");
+    assert_eq!(pattern(&u.arrangement, "line").events.len(), 5);
+    assert_eq!(get(copies[0]), json!({"at": 1, "pad": "t", "note": "C2", "duration": 1}));
+    assert_eq!(get(copies[1]), json!({"at": 3.5, "pad": "k"}));
+    song.undo().unwrap();
+    update(&seen);
+
+    // Duplicated right after the span they cover; a hit takes a step.
+    let copies = song.edit(Edit::EventsDuplicate { events: vec![second, kick] }, None).unwrap();
+    update(&seen);
+    // From 4/3 to the kick's step after 2.5, which is 2.75: 17/12 later.
+    assert_eq!(get(copies[0])["at"], json!(2.75));
+    assert_eq!(get(copies[1])["at"], json!("47/12"));
+    song.undo().unwrap();
+    update(&seen);
+
+    // Events of two patterns are not moved or copied together.
+    agent(&path, json!({"op": "pattern.add", "pattern": "other", "length_beats": 4, "events": [{"at": 0, "pad": "k"}]}));
+    agent(&path, json!({"op": "clip.add", "track": "bass", "pattern": "other", "at": 0}));
+    update(&seen);
+    update(&seen);
+    let other = pattern(&song.arrangement(), "other").events[0].key;
+    assert!(song.edit(Edit::EventsMove { events: vec![first, other], steps: 1, by: 0.0, semitones: 0 }, None).unwrap_err().to_string().contains("within one pattern"));
+
+    // Pasted into another pattern, from the beat given or right after themselves.
+    let copied = |e: &aaw_ffi::view::EventView| aaw_ffi::EventCopy {
+        pad: e.pad.clone(),
+        at: e.at_text.clone(),
+        duration: e.duration_text.clone(),
+        velocity: e.velocity,
+        note: e.note.clone(),
+        transpose: e.transpose,
+    };
+    let taken: Vec<_> = line.events[..2].iter().map(copied).collect();
+    let pasted = song.edit(Edit::EventsPaste { events: taken.clone(), pattern: "other".into(), at: Some(1.0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Paste 2 events into other");
+    assert_eq!(get(pasted[0]), json!({"at": 1, "pad": "t", "note": "C3", "duration": 1}));
+    assert_eq!(get(pasted[1]), json!({"at": "7/3", "pad": "t", "duration": "2/3", "velocity": 80}));
+    song.undo().unwrap();
+    update(&seen);
+    let pasted = song.edit(Edit::EventsPaste { events: taken.clone(), pattern: "line".into(), at: None }, None).unwrap();
+    update(&seen);
+    assert_eq!(get(pasted[0])["at"], json!(2));
+    // Past the pattern's end, or on a pad the pattern's tracks lack, is refused.
+    assert!(song.edit(Edit::EventsPaste { events: taken.clone(), pattern: "line".into(), at: Some(3.5) }, None).is_err());
+    assert!(song.edit(Edit::EventsPaste { events: taken, pattern: "beat".into(), at: Some(0.0) }, None).is_err());
+
+    // Several set and removed at once.
+    song.edit(Edit::EventsSet { events: vec![first, kick], at: None, duration: None, velocity: Some(64), transpose: None, note: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Change 2 events");
+    assert_eq!((get(first)["velocity"].clone(), get(kick)["velocity"].clone()), (json!(64), json!(64)));
+    song.edit(Edit::EventsRemove { events: vec![first, kick] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Remove 2 events");
+    assert!(pattern(&u.arrangement, "line").events.iter().all(|e| e.key != first && e.key != kick));
     song.close();
 }
 
