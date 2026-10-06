@@ -58,6 +58,7 @@ Proposed, in the order of Next in the backlog:
 |---|---|
 | [editing a range of bars](features/bar-ranges.md) | Next |
 | [clips that loop](features/looping-clips.md) | Next |
+| [export in the app](features/export-in-app.md) | Next |
 | [comparing with a reference](features/reference-comparison.md) | Next |
 | [sound descriptors](features/sound-descriptors.md) | Next |
 | [the agent panel](features/agent-panel.md) | Next |

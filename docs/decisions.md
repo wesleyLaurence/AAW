@@ -590,3 +590,37 @@ and a row of hits can be moved up an octave. The edits that took one event
 or point now take a list, so the app has one edit for one or several, and
 each is one undo step named for how many it changed.
 
+
+**D81. The app and `daw` are held to the same reach, and what the app lacks goes into the backlog by how often the person meets it.**
+
+Chosen by the person on October 6, 2026, from a review of what each side can
+do. Because every edit is a command to one host, the two are peers for the
+song itself. What the app alone can do is hearing, the metronome, setting the
+selection, and previewing a Sampler's note or a library sample through the
+speakers; the CLI reads the selection and the metronome and lacks a command
+for the other three, which the host already has. What `daw` alone can do is of
+two kinds: the agent's tooling (`inspect`, `map`, `check`, `listen`,
+`compare`, `joins`, `timeline`, measured search), which is by design; and
+editing the app never got a control for: rendering and exporting the mix,
+sections, the session's length, master gain and end fade, a pad's settings on
+a pattern track, `audio crossfade` and `audio cut`, a send's pre-fader switch,
+a clip's velocity scale, an event's transpose, an effect's ID, and a lane
+segment's shape.
+
+The second kind is placed in the backlog by how often the person meets it,
+under D75's order. Exporting goes third in Next, after the two song-scale
+items already designed, because the person meets it on every song and the app
+cannot finish one: the only export is a MIDI clip. Sections and the length go
+after the MIDI keyboard and listening markers, since those are how the person
+and the agent make music together and a section is a label. A pad's settings
+go after presets, since the Sampler's panel has most of them and `daw pad
+set` the rest. The remaining fields and `daw check`'s warnings in the window
+are Later lines, as are the CLI's metronome and Sampler preview, which the
+agent cannot hear the result of. Crossfades and the segment's shape in the
+app were Later lines already, and a range cut is part of editing a range of
+bars.
+
+The export is built over `daw export` rather than beside it, so there is one
+export and the app shows what the command measured; whether a render should
+run inside the host, so that a bundle without Python can export, is its open
+question.
