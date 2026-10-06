@@ -160,13 +160,13 @@ front first.
 | Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a header naming its patch, a column for its own fields and an octave of keys, one for each oscillator with its wave or its table's cycle drawn, the filter with its response, each envelope drawn with its handles, each LFO with its shape, the macros, the matrix's entries with their amounts, a line under each control an entry moves, and one for each of the patch's own effects; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
 | Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note. While the clip plays, a line shows where |
-| Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play. Beside it the clip's ID, its length, the grid, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
+| Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play. Under the notes, a lane of each note's velocity as a stalk at its start. Beside it the clip's ID, its length, the grid, Preview, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
 | Samples | Left of the arrangement, when shown: the library's samples by search, category and kind, each with its length and what is known of its tempo, key and pitch |
 | Activity | Each change with who made it (agent, you, or an edit of the file), newest first. A drag is one entry |
 
 | Input | Does |
 |---|---|
-| Click in the ruler or an empty lane | Sets the start position, on the grid; with Option, off it. While playing, playback jumps there |
+| Click in the ruler or an empty lane | Sets the start position, on the grid; with ⌘, off it. While playing, playback jumps there |
 | Click the metronome icon | Turns the beat click on or off. Yellow means on. It sounds during playback, including an empty project, follows BPM and loops, and accents each 4/4 downbeat. It starts off when a project opens and is excluded from renders and stems |
 | Type in BPM | Sets the session tempo (20–400, decimals accepted). Return or leaving the field applies; Escape cancels. The edit saves and can be undone |
 | Space | Plays from the start position, or stops |
@@ -178,10 +178,10 @@ front first.
 | Click M or S | Mutes or solos |
 | Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
 | Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in; on a MIDI track, an empty note clip a bar long |
-| Drag a clip | Moves the selected clips by grid steps, and to other tracks; with Option, off the grid. An audio clip can pass the song's end, which grows with it |
+| Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid. An audio clip can pass the song's end, which grows with it |
 | Drag a pattern clip's end | Changes its repeats |
-| Drag a note clip's start or end | Moves that edge, on the grid or with Option off it. The notes stay where they are in the song: those an edge passes are kept outside the clip and do not play, and come back when it moves back |
-| Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with Option, off the grid |
+| Drag a note clip's start or end | Moves that edge, on the grid or with ⌘ off it. The notes stay where they are in the song: those an edge passes are kept outside the clip and do not play, and come back when it moves back |
+| Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid |
 | Drag the handle at an audio clip's top corner | Sets its fade in or its fade out. The clip still ends where it did: a longer fade out starts earlier |
 | ⌘E | Splits the selected audio clips at the start position, or with a track selected and no clip, that track's, and selects the later halves |
 | Arrow keys | Move the selected clips a grid step, or to the next track |
@@ -192,7 +192,7 @@ front first.
 | ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, a MIDI track with no instrument, or a return, and asks for its name |
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
 | Click A in a header | Shows or hides the row's automation lanes; with Option, every row's |
-| Double-click in a lane | Adds a point there, on the grid; with Option, off it |
+| Double-click in a lane | Adds a point there, on the grid; with ⌘, off it |
 | Drag a point | Moves it in time, no further than its neighbors, and in value, heard as it moves. Its value shows beside it |
 | Double-click a point, or Delete | Removes it; a lane's last point takes the lane with it. Option-click changes whether it holds its value until the next |
 | Click × by a lane; + Lane | Removes the lane; offers the row's parameters that have none |
@@ -202,25 +202,29 @@ front first.
 | The diamond by a field | Adds a lane for the field, or removes it; filled while a lane moves the field |
 | ⌥⌘D, ⌥⌘P | Show the devices or the pattern in the detail panel, or hide the panel when it shows them already |
 | Click a step | Turns it on or off; a drag along the row takes the steps it passes with it. A drag up or down on a step that is on sets how hard it plays, 1 to 9 |
-| Double-click a row of held hits or of notes | Adds an event on the step under the pointer, at the note under it, held for a step on a pad that is held. With Option, a click adds one off the grid, in a row of steps too |
-| Click an event; drag it; drag its end | Selects it; moves it by steps of the pattern's grid, and in a row of notes up and down by notes; ends it on a line of the grid. With Option it moves off the grid |
+| Double-click a row of held hits or of notes | Adds an event on the step under the pointer, at the note under it, held for a step on a pad that is held. With ⌘, a click adds one off the grid, in a row of steps too |
+| Click an event; drag it; drag its end | Selects it; moves it by steps of the pattern's grid, and in a row of notes up and down by notes; ends it on a line of the grid. With ⌘ it moves off the grid |
 | Arrow keys, in the pattern | Move the selected event a step earlier or later, or a note up or down; with Shift, an octave |
 | Double-click an event, or Delete | Removes it |
 | Type a length; choose a step; drag the swing | Change the pattern: step rows grow or shrink with its length, and are written on a new grid when their hits fall on it |
 | Own Copy, by a pattern's name | Gives the clip a copy of the pattern, so that editing it leaves the other clips that play it as they are |
 | Scroll, pinch, Command-scroll, in the pattern | Scroll and zoom the pattern |
-| Double-click in the piano roll | Adds a note at the note under the pointer, on the step of the grid under it or with Option where it is, a step long. Double-click a note to remove it |
-| Click a note; Shift-click; drag around notes | Selects it; adds it to the selection or takes it out; selects the notes the rectangle touches. ⌘A selects every note, Escape none. A click in the clear sets where notes are pasted |
-| Drag a note; drag its end | Moves the selected notes by whole steps of the grid and by notes, or with Option by thousandths of a beat; makes them longer or shorter, ending the grabbed one on a line of the grid or with Option anywhere |
-| Arrow keys, in the piano roll | Move the selected notes a step earlier or later, or a note up or down; with Shift, an octave |
+| Double-click in the piano roll | Adds a note at the note under the pointer, on the step of the grid under it or with ⌘ where it is, a step long, and plays it. Double-click a note to remove it |
+| Click a key, or drag along the keys | Plays the note through the track's instrument |
+| Click a note; Shift-click; drag around notes | Selects it and plays it; adds it to the selection or takes it out; selects the notes the rectangle touches. ⌘A selects every note, Escape none. A click in the clear sets where notes are pasted |
+| Drag a note; drag its end or its start | Moves the selected notes by whole steps of the grid and by notes, or with ⌘ by thousandths of a beat, playing the grabbed one at each pitch it reaches; with Option, copies them there and leaves them, as in Ableton. Its end makes them longer or shorter, ending the grabbed one on a line of the grid or with ⌘ anywhere; its start moves their starts the same way and leaves their ends. A note too short for both grips has its end only |
+| Drag a stalk in the velocity lane | Selects its note, as a click on the note does, and changes the selected notes' velocities by as much, each within 1 to 127; the values show while it is dragged. The lane is under the notes when the panel is at least 150 points tall |
+| Option-scroll, in the piano roll | Zooms up and down: the rows from 5 to 28 points, or as short as all 128 notes in view. Scroll, pinch and Command-scroll scroll and zoom across |
+| The headphones beside the grid | Preview: whether a note is heard as it is drawn, clicked or moved, and as its key is pressed. On a Synth or a Sampler; a track with no instrument plays nothing |
+| Arrow keys, in the piano roll | Move the selected notes a step earlier or later, or a note up or down, playing the first; with Shift, an octave |
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
-| Choose a grid | The steps the piano roll adds and moves notes on: a beat to a sixteenth of one, triplets too |
+| Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T. The pattern's Step menu names its steps the same way: its 1/16 is a quarter of a beat |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
 | Click a sample | Plays it, as its file is; the speaker mark turns that off |
 | Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
-| Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with Option, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
-| Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with Option, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |
+| Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with ⌘, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
+| Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with ⌘, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |
 | Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a Sampler that plays the sample at every note's pitch, as it is at middle C (C4), in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
 | Drag one onto the Sampler in the device panel | Loads it: the keys play it at every note's pitch, as it is at middle C. Over a sample the Sampler has, it takes its place and keeps the pad's mode, level, pan, transpose, attack, release and reverse; the start and the end go back to the whole file. A MIDI track with no instrument gets a Sampler of it. One undo step |
 | Drag a marker on the Sampler's waveform; type Start or End | Moves where in the file the keys play from or to, no further than the file or the other marker, heard when the drag ends. An empty End plays to the file's end |
@@ -339,7 +343,7 @@ between the last of them and the picture:
 | Argument | Does |
 |---|---|
 | `--click X,Y`, `--shift-click X,Y`, `--double-click X,Y` | Clicks |
-| `--drag X1,Y1,X2,Y2` | Presses, moves in two steps and lets go |
+| `--drag X1,Y1,X2,Y2` | Presses, moves in two steps and lets go; `--opt-drag` and `--cmd-drag` with Option or ⌘ held |
 | `--key KEY` | Presses `space`, `return`, `delete`, `escape`, `left`, `right`, `up`, `down` or a letter, after any of `cmd+`, `shift+` and `opt+`: `--key shift+cmd+z` |
 | `--type TEXT` | Types, as into a name |
 | `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there. In the detail panel, while it shows the devices of a MIDI track with a Sampler or no instrument, the file loads the Sampler |
@@ -362,7 +366,8 @@ outline shown on the way, and the + by a sample or a `daw` command does the
 rest. The piano roll's notes start 96 points right of the panel's left, as
 the pattern's rows do, under a 16-point ruler; a note is 10 points high, and the
 clip opens fitted to the width with its notes in the middle of the height, so
-read a picture to find a note's place. The selected note's fields are at the
+read a picture to find a note's place. The velocity lane is the panel's bottom
+56 points, a note's stalk a point right of its start. The selected note's fields are at the
 panel's left: Note, At and Length, and Velocity, 21 points apart. A clip's title strip is 14 points high, with its waveform under it; an
 audio clip's fade handles are in the top third of the waveform, at the corners
 until it has fades. Install

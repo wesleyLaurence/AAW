@@ -383,14 +383,15 @@ impl Song {
         self.transport(json!({"op": "play", "from": from}))
     }
 
-    /// Plays a note now through the Synth on the MIDI track at `track` and
-    /// the track's chain, outside the timeline and the undo history, as the
-    /// panel's keys do: `pitch` a MIDI number, `velocity` 1 to 127 and how
-    /// long it is held in beats. Opens the output if nothing has played yet.
+    /// Plays a note now through the instrument on the MIDI track at `track`,
+    /// a Synth or a Sampler, and the track's chain, outside the timeline and
+    /// the undo history, as the Synth panel's keys and the piano roll do:
+    /// `pitch` a MIDI number, `velocity` 1 to 127 and how long it is held in
+    /// beats. Opens the output if nothing has played yet.
     pub fn preview_note(&self, track: u64, pitch: i32, velocity: u32, length_beats: f64) -> Result<(), SongError> {
         let id = {
             let doc = locked(&self.doc);
-            edits::synth_track_id(doc.as_ref().ok_or_else(closed)?, track)?
+            edits::track_id(doc.as_ref().ok_or_else(closed)?, track)?
         };
         self.transport(json!({"op": "note.preview", "track": id, "pitch": pitch, "velocity": velocity, "length_beats": length_beats}))
     }

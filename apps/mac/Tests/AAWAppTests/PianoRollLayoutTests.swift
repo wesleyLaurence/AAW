@@ -2,7 +2,8 @@ import XCTest
 @testable import AAWApp
 
 final class PianoRollLayoutTests: XCTestCase {
-    /// A four-beat clip of sixteenths in a view 640 points wide and 198 high.
+    /// A four-beat clip of sixteenths in a view 640 points wide and 198 high,
+    /// with the velocity lane under 142 points of notes.
     private func layout(length: Double = 4, notes: [(at: Double, end: Double)] = [], pitches: [Int] = []) -> PianoRollLayout {
         var l = PianoRollLayout()
         l.size = CGSize(width: PianoRollLayout.gutter + 640, height: PianoRollLayout.rulerHeight + 198)
@@ -14,12 +15,12 @@ final class PianoRollLayoutTests: XCTestCase {
 
     func testEveryNoteHasARowWhateverTheInstrument() {
         let l = layout()
-        XCTAssertEqual(l.contentHeight, 128 * PianoRollLayout.semitone)
+        XCTAssertEqual(l.contentHeight, 128 * PianoRollLayout.defaultRow)
         // 127 at the top, 0 at the bottom, a row each.
         var top = l
         top.scroll.y = 0
         XCTAssertEqual(top.y(127), PianoRollLayout.rulerHeight)
-        XCTAssertEqual(top.y(0), PianoRollLayout.rulerHeight + 127 * PianoRollLayout.semitone)
+        XCTAssertEqual(top.y(0), PianoRollLayout.rulerHeight + 127 * PianoRollLayout.defaultRow)
         XCTAssertEqual(top.pitch(atY: PianoRollLayout.rulerHeight + 1), 127)
         XCTAssertEqual(top.pitch(atY: PianoRollLayout.rulerHeight + 10.5), 126)
         // Past either end of the keys, the nearest note.
@@ -33,7 +34,8 @@ final class PianoRollLayoutTests: XCTestCase {
         XCTAssertEqual(l.x(0), PianoRollLayout.gutter)
         XCTAssertEqual(l.beat(atX: PianoRollLayout.gutter + 320), 2)
         // The middle of 60 and 72 is in the middle of the rows shown.
-        let middle = PianoRollLayout.rulerHeight + 198 / 2
+        XCTAssertEqual(l.notesBottom, PianoRollLayout.rulerHeight + 142)
+        let middle = PianoRollLayout.rulerHeight + 142 / 2
         XCTAssertEqual(l.pitch(atY: middle), 66)
         // With no notes, middle C's octave.
         XCTAssertTrue((60...72).contains(layout().pitch(atY: middle)))
@@ -59,13 +61,20 @@ final class PianoRollLayoutTests: XCTestCase {
         XCTAssertEqual(r.minX, PianoRollLayout.gutter + 1.975 * 160, accuracy: 1e-9)
         XCTAssertEqual(r.width, 80, accuracy: 1e-9)
         XCTAssertEqual(r.minY, l.y(62))
-        XCTAssertEqual(r.height, PianoRollLayout.semitone)
+        XCTAssertEqual(r.height, PianoRollLayout.defaultRow)
         // A very short note is still wide enough to take hold of.
         XCTAssertEqual(l.rect(at: 0, duration: 0.001, pitch: 60).width, 4)
         // The end of a note stretches it; a narrow note is only moved.
         XCTAssertTrue(PianoRollLayout.onEnd(CGPoint(x: r.maxX - 2, y: r.midY), of: r))
         XCTAssertFalse(PianoRollLayout.onEnd(CGPoint(x: r.midX, y: r.midY), of: r))
         XCTAssertFalse(PianoRollLayout.onEnd(CGPoint(x: 99, y: 0), of: CGRect(x: 96, y: 0, width: 6, height: 10)))
+        // Its start moves the start; a short note keeps room to be moved by,
+        // and has its end only.
+        XCTAssertTrue(PianoRollLayout.onStart(CGPoint(x: r.minX + 2, y: r.midY), of: r))
+        XCTAssertFalse(PianoRollLayout.onStart(CGPoint(x: r.midX, y: r.midY), of: r))
+        let short = CGRect(x: 96, y: 0, width: 12, height: 10)
+        XCTAssertFalse(PianoRollLayout.onStart(CGPoint(x: 97, y: 5), of: short))
+        XCTAssertTrue(PianoRollLayout.onEnd(CGPoint(x: 107, y: 5), of: short))
     }
 
     func testTheGridSnapsAndDragsMoveByStepsBeatsAndNotes() {
@@ -97,7 +106,58 @@ final class PianoRollLayoutTests: XCTestCase {
         l.reveal(pitch: 120)
         XCTAssertTrue(l.y(120) >= PianoRollLayout.rulerHeight)
         l.reveal(pitch: 2)
-        XCTAssertTrue(l.y(2) + PianoRollLayout.semitone <= l.size.height)
+        XCTAssertTrue(l.y(2) + l.row <= l.notesBottom, "above the velocity lane")
+    }
+
+    func testRowsZoomUpAndDownAroundThePointer() {
+        var l = layout(pitches: [60])
+        let y = PianoRollLayout.rulerHeight + 50
+        let before = l.pitch(atY: y)
+        l.zoomRows(by: 2, anchorY: y)
+        XCTAssertEqual(l.row, 20)
+        XCTAssertEqual(l.pitch(atY: y), before)
+        XCTAssertEqual(l.semitones(forDrag: -41), 2, "a drag moves by the rows as they are drawn")
+        // As tall as the most, and as short as every note in view.
+        l.zoomRows(by: 100, anchorY: y)
+        XCTAssertEqual(l.row, PianoRollLayout.maxRow)
+        l.zoomRows(by: 0.01, anchorY: y)
+        XCTAssertEqual(l.row, PianoRollLayout.minRow)
+        var tall = l
+        tall.size.height = PianoRollLayout.rulerHeight + PianoRollLayout.velocityHeight + 128 * 8
+        tall.zoomRows(by: 0.01, anchorY: y)
+        XCTAssertEqual(tall.row, 8, "all 128 notes fit")
+        XCTAssertEqual(tall.scroll.y, 0)
+        // A clip opened again starts at the usual height.
+        l.fit(pitches: [60])
+        XCTAssertEqual(l.row, PianoRollLayout.defaultRow)
+    }
+
+    func testVelocityIsALaneUnderTheNotes() {
+        let l = layout()
+        XCTAssertEqual(l.velocityHeight, PianoRollLayout.velocityHeight)
+        let bottom = l.size.height - PianoRollLayout.velocityInset
+        XCTAssertEqual(l.velocityY(0), bottom)
+        XCTAssertEqual(l.velocityY(127), l.notesBottom + PianoRollLayout.velocityInset)
+        // 46 points of reach for 127 steps: up is louder.
+        XCTAssertEqual(l.velocities(forDrag: -23), 64)
+        XCTAssertEqual(l.velocities(forDrag: 46), -127)
+        XCTAssertTrue(l.inVelocity(CGPoint(x: PianoRollLayout.gutter + 10, y: l.notesBottom + 1)))
+        XCTAssertFalse(l.inVelocity(CGPoint(x: 10, y: l.notesBottom + 1)), "the keys' column")
+        XCTAssertFalse(l.inVelocity(CGPoint(x: PianoRollLayout.gutter + 10, y: l.notesBottom - 1)))
+        // A short panel keeps its height for the notes.
+        var short = l
+        short.size.height = 140
+        XCTAssertEqual(short.velocityHeight, 0)
+        XCTAssertEqual(short.notesBottom, 140)
+        XCTAssertFalse(short.inVelocity(CGPoint(x: PianoRollLayout.gutter + 10, y: 139)))
+    }
+
+    func testGridsAreNamedAsNoteValues() {
+        let names = PianoRollLayout.grids.map(PianoRollLayout.noteValue)
+        XCTAssertEqual(names, ["1 Bar", "1/2", "1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64"])
+        // A step the menus do not list keeps its beats.
+        XCTAssertEqual(PianoRollLayout.noteValue("3/4"), "3/4 beats")
+        XCTAssertEqual(PianoRollLayout.noteValue("x"), "x")
     }
 
     func testBeatsAreReadAsTheSongWritesThem() {

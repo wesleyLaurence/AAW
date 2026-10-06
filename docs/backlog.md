@@ -19,64 +19,60 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **The piano roll for writing by hand.** A note heard as it is drawn, moved or
-   clicked; a velocity lane under the notes; zoom up and down as well as across;
-   the left end of a note dragged; a note dragged with Option copied, as in
-   Ableton; the grid, and the pattern's step menu, in note values (1/16, 1/8T)
-   rather than beats, whose 1/4 is a sixteenth note.
-2. **Selecting several things in the app.** Several clips selected by dragging
-   over them and moved, copied or deleted together; several notes or events
-   copied and pasted; several automation points selected.
-3. **Editing a range of bars.** A range copied, inserted, deleted or cleared
+1. **Selecting several things in the app.** Several clips selected by dragging
+   over them and moved, copied or deleted together, and copied by a drag with
+   Option as notes are (D79); several notes or events copied and pasted;
+   several automation points selected.
+2. **Editing a range of bars.** A range copied, inserted, deleted or cleared
    across every track, with its lanes and sections, and a section duplicated
    with what is under it; through `daw` first, then a time selection across the
    tracks in the app. [features/bar-ranges.md](features/bar-ranges.md)
-4. **Clips that loop.** Note clips and audio clips that repeat until they end,
+3. **Clips that loop.** Note clips and audio clips that repeat until they end,
    by one rule (D63), so a phrase is changed once.
    [features/looping-clips.md](features/looping-clips.md)
-5. **A MIDI keyboard.** Notes played through the selected track, held and let
+4. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-6. **Listening markers.** The person drops a marker at the playhead while the
+5. **Listening markers.** The person drops a marker at the playhead while the
    song plays, with a word if they want, and the agent reads them with `daw`:
    "this bar", without a timecode.
-7. **A project made with `daw init` in the app's index,** so a song the agent
+6. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-8. **Turns and A/B.** An agent request's commands grouped, named for the
+7. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-9. **A clipper and a utility.** Agents making loud mixes stopped at the
+8. **A clipper and a utility.** Agents making loud mixes stopped at the
    limiter; saturation is built, a clipper that holds a ceiling as a limiter
    does without its look-ahead is not. A utility for gain, width, mono below a
    frequency and phase.
-10. **Groups.** Tracks summed into a group with its own effects and level, a
-    drum bus, as in any DAW.
-11. **Comparing with a reference.** A song the person names as a reference,
+9. **Groups.** Tracks summed into a group with its own effects and level, a
+   drum bus, as in any DAW.
+10. **Comparing with a reference.** A song the person names as a reference,
     analyzed once and compared with a mix section by section, so the agent has
     targets for the low end, the brightness and the loudness of each section.
     [features/reference-comparison.md](features/reference-comparison.md)
-12. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+11. **Sound descriptors.** Each sample measured for brightness, attack, decay,
     low end and noise, with search sorted by them and samples like a chosen
     one, so the agent chooses sounds by more than their names.
     [features/sound-descriptors.md](features/sound-descriptors.md)
-13. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+12. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-14. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+13. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-15. **Key and chord detection,** and swing detection, of samples and songs: a
+14. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-16. **Presets.** Effect chains, pad setups and whole tracks saved as text and
+15. **Presets.** Effect chains, pad setups and whole tracks saved as text and
     loaded into any song.
-17. **The workspace and the two levels.** The workspace folder with its managed
+16. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-18. **The agent panel.** A conversation in the window, per project, over the
+17. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-19. **Stem separation** of a song.
-20. **Generated audio.** A sound, a loop or a whole song from a description, with
+18. **Stem separation** of a song.
+19. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -131,6 +127,16 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   header, drawings, keys, reach lines and the taller panel were seen in
   scripted pictures; nothing was dragged by hand, no key was pressed and
   nothing was heard.
+- **The piano roll's preview, velocity and zoom by hand and ear:** notes
+  drawn, clicked and dragged across pitches on a Sampler track and a Synth
+  track, heard as they go, and the keys pressed and dragged; the headphones
+  turned off; a chord's velocities dragged in the lane and heard; rows zoomed
+  with Option-scroll; a note's start dragged; notes Option-dragged into a copy;
+  ⌘ held for off the grid on the timeline and in the pattern, where Option was
+  before; whether the grids named as note values read right. Scripted drags
+  (with `--opt-drag`) made the velocity, start and copy edits, read from the
+  song and seen in a picture, and engine tests held a Sampler's preview to
+  the same note in a clip; nobody listened, scrolled or held a key.
 - **The piano roll by hand and ear:** a MIDI track and a clip made, a chord
   and a melody drawn and moved on and off the grid, ends dragged, several notes
   selected with Shift and a drag, velocity, a clip copied and its copy changed,

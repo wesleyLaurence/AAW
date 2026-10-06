@@ -279,7 +279,7 @@ The plan had the host assign IDs. The host does, when a command makes a clip or 
 
 A song with a MIDI track is saved as `schema_version: 2` and one without as 1, byte for byte as before. Either version is read whatever the song holds, since the version follows from the content when the song is written. An engine from before MIDI tracks refuses version 2 with its own message, "Input should be 1". The one change to the pinned corpus is a document `schema_version: 2` with an empty session, which was refused and is now read.
 
-**D64. A note may start before its clip, a sample dropped on a MIDI track becomes its instrument, and Copy takes what it copies.** Revised by D66.
+**D64. A note may start before its clip, a sample dropped on a MIDI track becomes its instrument, and Copy takes what it copies.** Revised by D66 and D79.
 Settled on October 3, 2026, in building backlog item 2 of [MIDI tracks and note clips](features/midi-clips.md). Revises the part of D63 that a note cannot start before its clip. Its open question was what a clip shortened from its left edge does with the notes it passes. The person chose what Ableton and Logic do: the notes keep their places in the song, the ones the edge passed are kept and silent, and moving the edge back brings them back. A note is placed from its clip's start, so such a note has a negative `at`. The two other answers were to stop the edge at the first note, which no other DAW does, or to delete the notes, which a shortening from the right does not. A note that starts before its clip does not play even where it would last into the clip, as a note-on before an Ableton clip's start is not heard. The song format stays at version 2: a negative `at` is new only to note clips, which were made the same day. `daw clip trim` moves either edge to a song beat, and `daw check` and `daw note list` name notes on either side of their clip.
 
 The piano roll is a view of its own (`NoteEditor`, `PianoRollLayout`) rather than the pattern editor with one row: it shows all 128 notes and scrolls up and down, takes in notes outside the clip, and selects several notes at once, none of which the pattern editor's rows do. It reuses the pattern editor's drawing, its grid choices, its typed fields and its bars. The grid is the piano roll's own setting, since a note clip has none in the song; notes are added on it and moved by whole steps of it, so a note off the grid stays as far off it, and Option takes them off it, as on the timeline.
@@ -522,3 +522,36 @@ first beat. `daw render` does not run the checks. `clip duplicate` without
 `--at` places a copy past the run of clips that follow the original, and
 `--times N` makes a row as one step; `--at` with `--times` lays them from that
 beat whatever is there.
+
+**D79. The piano roll previews notes through either instrument, Option-drag copies and ⌘ takes things off the grid, and grids are named as note values.**
+
+Made while building [the piano roll for writing by hand](features/piano-roll.md)
+on October 5, 2026, without the person, as the backlog item asked: "as in
+Ableton". It revises the part of D64 that Option takes notes off the grid. In
+Ableton, Option-drag copies and ⌘ held during a drag bypasses the grid; the
+item asked for the first, and keeping Option for off the grid as well would
+have made one key mean two things. So ⌘ is off the grid everywhere the app
+had Option for it, the timeline, the pattern editor, automation and dropped
+files included, so that one key means one thing across the window. Option
+still shows every row's lanes and changes whether a point holds, where
+nothing is dragged. Option is read while the drag goes on and at its end,
+as the Finder does, rather than only at the press.
+
+A preview is heard on a Sampler as on a Synth, since most MIDI tracks made by
+dropping a sample have one. The host prepares the Sampler's voice, as an edit
+prepares a clip's notes, and the player hands each replaced voice back to be
+freed, keeping the audio thread free of allocation. Sixteen slots for those
+notes across the tracks: a drag across pitches with a long one-shot sample
+overlaps, as Ableton's does, and past sixteen the oldest stops. A preview
+lasts the note's length within an eighth of a beat and a beat, rather than
+while the mouse is held, which waits for the MIDI keyboard; while a chord is
+moved, only the grabbed note sounds, so a drag is not a smear of chords.
+
+The velocity lane changes the selected notes by the same amount, as Ableton's
+does, each held within 1 to 127. Zoom up and down is Option-scroll, Ableton's
+key for it in the MIDI editor; ⌘-scroll and pinch stay across. A note's start
+is its left five points when the note is at least fifteen wide, so a short note
+can still be moved. The grid and the pattern's step are named as note values
+(1/16, 1/8T, 1 Bar) and still written in beats in the song, so no song changes;
+the piano roll's grid gained 1 Bar and 1/2.
+

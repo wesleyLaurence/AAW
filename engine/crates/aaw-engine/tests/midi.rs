@@ -1,12 +1,13 @@
 //! Note clips through the engine, with generated audio: a phrase of chords,
 //! overlapping and repeated notes sounds as the same hits written as a
 //! pattern do, a gated note releases at its note-off or its clip's end, the
-//! level follows velocity, and playback equals a render.
+//! level follows velocity, playback equals a render, and a note previewed
+//! through the sampler sounds as the same note in a clip does.
 
 mod common;
 
 use aaw_engine::player::channel;
-use aaw_engine::program::compile;
+use aaw_engine::program::{compile, compile_cached, preview_voice, Cache};
 use aaw_engine::render::{Frame, Renderer};
 use common::write_sample;
 use std::f64::consts::PI;
@@ -153,4 +154,64 @@ fn playing_a_midi_track_equals_its_render() {
         }
     });
     assert_eq!(out, render(&p));
+}
+
+#[test]
+fn a_note_previewed_through_the_sampler_sounds_while_stopped_and_through_an_edit() {
+    let dir = tempfile::tempdir().unwrap();
+    write_audio(dir.path());
+    let path = dir.path().join("song.yaml");
+    std::fs::write(&path, midi_song("")).unwrap();
+    let mut project = aaw_model::load(&path, true).unwrap();
+    let mut cache = Cache::default();
+    let p = Arc::new(compile_cached(&project, dir.path(), &mut cache).unwrap());
+    let (mut control, mut player) = channel(p.clone());
+    let pull = |player: &mut aaw_engine::player::Player, n: usize| {
+        let mut out = vec![[0.0; 2]; n];
+        assert_no_alloc::assert_no_alloc(|| {
+            for chunk in out.chunks_mut(128) {
+                player.render(chunk);
+            }
+        });
+        out
+    };
+    let peak = |x: &[Frame]| x.iter().fold(0.0f64, |m, f| m.max(f[0].abs()));
+    // A pitch the map leaves silent has no voice.
+    assert!(preview_voice(&project, dir.path(), &mut cache, "keys", 20, 100, 1.0).unwrap().is_none());
+    assert!(preview_voice(&project, dir.path(), &mut cache, "nobody", 60, 100, 1.0).is_err());
+    // The level pad, gated, held a quarter of a beat at full velocity: as a note in a clip.
+    assert_eq!(peak(&pull(&mut player, 4800)), 0.0);
+    let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 127, 0.25).unwrap().unwrap();
+    control.preview_voice(0, voice).unwrap();
+    let out = pull(&mut player, 24000);
+    assert!((out[100][0] - 0.5).abs() < 1e-6, "{}", out[100][0]);
+    assert!(out[6000 + 480 + 1..].iter().all(|f| f[0] == 0.0), "released at its note-off");
+    // A pitched note: the tone's A3 played as A4.
+    let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 69, 100, 2.0).unwrap().unwrap();
+    control.preview_voice(0, voice).unwrap();
+    let out = pull(&mut player, 12000);
+    let crossings = out[1000..11000].windows(2).filter(|w| w[0][0] <= 0.0 && w[1][0] > 0.0).count();
+    assert!((crossings as f64 / (10000.0 / 48000.0) - 440.0).abs() < 10.0, "{crossings} crossings of an A");
+    // A fader moved while it sounds: the same structure takes over and the note carries on.
+    project.tracks[0].gain_db = -6.0;
+    let edited = Arc::new(compile_cached(&project, dir.path(), &mut cache).unwrap());
+    assert_eq!(edited.structure, p.structure);
+    control.load(edited).unwrap();
+    assert!(peak(&pull(&mut player, 4800)[2400..]) > 0.05, "still sounding across the take-over");
+    // An effect added: another structure, swapped through the dip, and the note is still there.
+    std::fs::write(&path, midi_song("").replace("  clips:", "  gain_db: -6\n  effects: [{type: filter, mode: lowpass, cutoff_hz: 8000}]\n  clips:")).unwrap();
+    let project = aaw_model::load(&path, true).unwrap();
+    let reshaped = Arc::new(compile_cached(&project, dir.path(), &mut cache).unwrap());
+    assert_ne!(reshaped.structure, p.structure);
+    control.load(reshaped).unwrap();
+    assert!(peak(&pull(&mut player, 4800)[2400..]) > 0.05, "the preview carries on after the swap");
+    // More previews than slots: the oldest gives its place, freed by the host.
+    for _ in 0..20 {
+        let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 64, 0.25).unwrap().unwrap();
+        control.preview_voice(0, voice).unwrap();
+        pull(&mut player, 128);
+    }
+    assert_eq!(control.shared().leaked.load(std::sync::atomic::Ordering::Relaxed), 0);
+    // A render has none of it.
+    assert!(render(&p)[..24000 - 10].iter().all(|f| *f == [0.0; 2]));
 }

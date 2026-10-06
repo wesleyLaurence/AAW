@@ -99,7 +99,7 @@ fn a_note_preview_is_refused_before_the_output_opens_and_is_no_edit() {
     h.send(json!({"op": "synth.add", "track": "lead"})).unwrap();
     // The note is checked, and the track, before any audio device is touched.
     let e = h.send(json!({"op": "note.preview", "track": "bass", "pitch": "C3"})).unwrap_err();
-    assert!(e.contains("has no synth"), "{e}");
+    assert!(e.contains("has no instrument"), "{e}");
     let e = h.send(json!({"op": "note.preview", "track": "nobody", "pitch": 60})).unwrap_err();
     assert!(e.contains("Unknown track"), "{e}");
     let e = h.send(json!({"op": "note.preview", "track": "lead", "pitch": 200})).unwrap_err();

@@ -804,6 +804,35 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
     Ok(voices)
 }
 
+/// The voice a note played now through the Sampler on track `track` has, for
+/// `note.preview`: as the same note in a clip plays it, `beats` long at the
+/// session's tempo and starting at frame 0. None when no map entry plays the
+/// pitch. What it plays is prepared here, off the audio thread.
+pub fn preview_voice(
+    p: &Project,
+    directory: &Path,
+    cache: &mut Cache,
+    track: &str,
+    pitch: i64,
+    velocity: i64,
+    beats: f64,
+) -> Result<Option<Voice>, String> {
+    let (ti, t) = p.tracks.iter().enumerate().find(|(_, t)| t.id == track).ok_or_else(|| format!("Unknown track: {track}"))?;
+    let sampler = t.midi.as_ref().and_then(|m| m.sampler()).ok_or_else(|| format!("{track} has no sampler"))?;
+    let beats = num_rational::BigRational::from_float(beats).ok_or("a note's length is a number")?;
+    let note = NoteOn {
+        pitch,
+        velocity,
+        start: 0,
+        end: frame(&beats, p.session.tempo, p.session.sample_rate),
+        at: num_rational::BigRational::from_integer(0.into()),
+        beats,
+    };
+    let Some(trigger) = aaw_model::schedule::sampler_hits(sampler, &[note], ti, track).pop() else { return Ok(None) };
+    let mut s = Sampler::new(p, directory, cache);
+    s.voice(&sampler.pads[&trigger.pad], &trigger).map(Some)
+}
+
 /// An owner's lanes as envelopes, by what they drive.
 #[derive(Default)]
 struct Lanes {

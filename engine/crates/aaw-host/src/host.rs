@@ -362,9 +362,11 @@ impl Host {
         Ok(self.status())
     }
 
-    /// `note.preview`: a note played now through a MIDI track's Synth and its
-    /// chain, from where the stream stands, outside the timeline and the
-    /// history. Opens the output if no play has yet.
+    /// `note.preview`: a note played now through a MIDI track's instrument,
+    /// its Synth or its Sampler, and its chain, from where the stream stands,
+    /// outside the timeline and the history. Opens the output if no play has
+    /// yet. A Sampler plays it as the same note in a clip would; a pitch its
+    /// map leaves silent is silent here too, and the reply says so.
     fn preview(&mut self, track: &str, pitch: &Json, velocity: Option<i64>, length_beats: Option<&Json>) -> Result<Json> {
         let pitch = match pitch {
             Json::Number(n) => n.as_i64().ok_or_else(|| format!("pitch {n} is not a whole number"))?,
@@ -387,10 +389,20 @@ impl Host {
         }
         let session = &self.session.project().session;
         let t = self.session.project().track(track).ok_or_else(|| format!("Unknown track: {track}"))?;
-        if t.midi.as_ref().and_then(|m| m.synth()).is_none() {
-            return Err(format!("{track} has no synth to play the note; daw synth add attaches one"));
+        let midi = t.midi.as_ref();
+        let synth = midi.and_then(|m| m.synth()).is_some();
+        if !synth && midi.and_then(|m| m.sampler()).is_none() {
+            return Err(format!("{track} has no instrument to play the note; daw synth add or daw instrument add attaches one"));
         }
         let frames = (length * 60.0 / session.tempo * session.sample_rate as f64).round() as usize;
+        // A Sampler's note is prepared here, as an edit's notes are.
+        let voice = match synth {
+            true => None,
+            false => {
+                let (project, dir) = (self.session.project(), self.session.dir());
+                Some(aaw_engine::program::preview_voice(project, dir, &mut self.cache, track, pitch, velocity, length)?)
+            }
+        };
         let program = self.program()?;
         if self.transport.is_none() {
             self.open_transport(program.clone())?;
@@ -401,10 +413,21 @@ impl Host {
         let index = playing
             .tracks
             .iter()
-            .position(|p| p.id == track && p.synth.is_some())
-            .ok_or_else(|| format!("{track} is not yet playing its synth; playback keeps the previous version"))?;
-        t.control.preview(index, pitch as f64, velocity as f64 / 127.0, frames)?;
+            .position(|p| p.id == track && p.synth.is_some() == synth)
+            .ok_or_else(|| format!("{track} is not yet playing its instrument; playback keeps the previous version"))?;
+        let sounds = match voice {
+            None => {
+                t.control.preview(index, pitch as f64, velocity as f64 / 127.0, frames)?;
+                true
+            }
+            Some(Some(voice)) => {
+                t.control.preview_voice(index, voice)?;
+                true
+            }
+            Some(None) => false,
+        };
         Ok(json!({
+            "sounds": sounds,
             "track": track,
             "pitch": pitch,
             "note": aaw_model::rules::note_name(pitch).unwrap_or_default(),

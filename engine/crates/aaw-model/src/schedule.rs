@@ -47,7 +47,7 @@ pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
 /// What a sampler plays for notes: the pad each note's map entry names, at the
 /// note's pitch when the entry is pitched, released at the note-off when the
 /// pad is gated. A note no entry maps plays nothing.
-fn sampler_hits(sampler: &Sampler, notes: &[NoteOn], track: usize, track_id: &str) -> Vec<Trigger> {
+pub fn sampler_hits(sampler: &Sampler, notes: &[NoteOn], track: usize, track_id: &str) -> Vec<Trigger> {
     let mut triggers = Vec::new();
     for n in notes {
         let Some(entry) = sampler.entry(n.pitch) else { continue };

@@ -3,20 +3,29 @@ import Foundation
 
 /// Where a note clip's notes fall in the piano roll: time left to right in
 /// beats of the clip, from its start, and every MIDI note from 127 at the top
-/// to 0 at the bottom, whatever the instrument. The view runs from the
-/// clip's start, or the earliest note before it, to its end, or the latest
-/// note past it. Geometry only; the notes live in the host.
+/// to 0 at the bottom, whatever the instrument, with each note's velocity in
+/// a lane under them. The view runs from the clip's start, or the earliest
+/// note before it, to its end, or the latest note past it. Geometry only; the
+/// notes live in the host.
 public struct PianoRollLayout: Equatable {
     /// The keys and the notes' names, left of the rows.
     public static let gutter: CGFloat = 96
     public static let rulerHeight: CGFloat = 16
-    /// The height of a note's row.
-    public static let semitone: CGFloat = 10
+    /// The height of a note's row a clip opens with, and as far as zoom goes.
+    public static let defaultRow: CGFloat = 10
+    public static let minRow: CGFloat = 5
+    public static let maxRow: CGFloat = 28
+    /// The velocity lane under the notes, when the view is tall enough for it.
+    public static let velocityHeight: CGFloat = 56
+    public static let velocityInset: CGFloat = 5
     public static let notes = 128
     public static let maxPixelsPerBeat: CGFloat = 480
     /// The least width of a step at the zoom a clip opens with.
     public static let minStep: CGFloat = 9
-    /// How near a note's end a press stretches it, in points.
+    /// The grids notes are drawn on, in beats as the song writes them, from a
+    /// bar to a sixty-fourth note, each triplet after its note.
+    public static let grids = ["4", "2", "1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"]
+    /// How near a note's end, or its start, a press stretches it, in points.
     public static let endGrip: CGFloat = 5
 
     public var size: CGSize = .zero
@@ -29,14 +38,20 @@ public struct PianoRollLayout: Equatable {
     /// The length of a step, in beats.
     public var grid: Double = 0.25
     public var pixelsPerBeat: CGFloat = 72
+    /// The height of a note's row.
+    public var row: CGFloat = Self.defaultRow
     public var scroll: CGPoint = .zero
 
     public init() {}
 
     public var lanesWidth: CGFloat { max(0, size.width - Self.gutter) }
-    public var lanesHeight: CGFloat { max(0, size.height - Self.rulerHeight) }
+    /// The velocity lane's height: none in a view too short for notes and it.
+    public var velocityHeight: CGFloat { size.height - Self.rulerHeight >= 150 ? Self.velocityHeight : 0 }
+    /// The bottom of the notes' rows, and the top of the velocity lane.
+    public var notesBottom: CGFloat { size.height - velocityHeight }
+    public var lanesHeight: CGFloat { max(0, notesBottom - Self.rulerHeight) }
     public var contentWidth: CGFloat { CGFloat(last - first) * pixelsPerBeat }
-    public var contentHeight: CGFloat { CGFloat(Self.notes) * Self.semitone }
+    public var contentHeight: CGFloat { CGFloat(Self.notes) * row }
 
     /// Takes the clip's length and the span of its notes, in beats of the
     /// clip: the view takes in what lies outside the clip, a beat at a time.
@@ -57,23 +72,51 @@ public struct PianoRollLayout: Equatable {
 
     /// The top of a note's row in the view.
     public func y(_ pitch: Int) -> CGFloat {
-        Self.rulerHeight + CGFloat(Self.notes - 1 - pitch) * Self.semitone - scroll.y
+        Self.rulerHeight + CGFloat(Self.notes - 1 - pitch) * row - scroll.y
     }
 
     /// The note whose row is at a height of the view, within 0 to 127.
     public func pitch(atY y: CGFloat) -> Int {
-        let down = Int(((y - Self.rulerHeight + scroll.y) / Self.semitone).rounded(.down))
+        let down = Int(((y - Self.rulerHeight + scroll.y) / row).rounded(.down))
         return min(max(Self.notes - 1 - down, 0), Self.notes - 1)
     }
 
     /// Where a note is drawn: as long as it lasts, and at least a few points.
     public func rect(at: Double, duration: Double, pitch: Int) -> CGRect {
-        CGRect(x: x(at), y: y(pitch), width: max(4, CGFloat(duration) * pixelsPerBeat), height: Self.semitone)
+        CGRect(x: x(at), y: y(pitch), width: max(4, CGFloat(duration) * pixelsPerBeat), height: row)
     }
 
     /// Whether a point on a note's rect is on its end, where a drag stretches it.
     public static func onEnd(_ p: CGPoint, of rect: CGRect) -> Bool {
         rect.width >= 10 && p.x >= rect.maxX - endGrip
+    }
+
+    /// Whether a point on a note's rect is on its start, where a drag moves
+    /// the start and leaves the end. A note keeps room between its grips to
+    /// be moved by, so a short one has only its end.
+    public static func onStart(_ p: CGPoint, of rect: CGRect) -> Bool {
+        rect.width >= 3 * endGrip && p.x <= rect.minX + endGrip
+    }
+
+    // MARK: Velocity
+
+    /// Where a velocity of 1 to 127 reaches in the lane: from its bottom, a
+    /// few points in, up to a few points under its top.
+    public func velocityY(_ velocity: Int) -> CGFloat {
+        let reach = velocityHeight - 2 * Self.velocityInset
+        return size.height - Self.velocityInset - reach * CGFloat(min(max(velocity, 0), 127)) / 127
+    }
+
+    /// How much a drag of `dy` points changes velocities: up is louder.
+    public func velocities(forDrag dy: CGFloat) -> Int {
+        let reach = velocityHeight - 2 * Self.velocityInset
+        guard reach > 0 else { return 0 }
+        return -Int((dy / reach * 127).rounded())
+    }
+
+    /// Whether a point is in the velocity lane, right of the keys.
+    public func inVelocity(_ p: CGPoint) -> Bool {
+        velocityHeight > 0 && p.y >= notesBottom && p.x >= Self.gutter
     }
 
     /// The start of the step a beat is in, on the grid.
@@ -99,7 +142,7 @@ public struct PianoRollLayout: Equatable {
 
     /// How many notes up a drag of `dy` points moves notes.
     public func semitones(forDrag dy: CGFloat) -> Int {
-        -Int((dy / Self.semitone).rounded())
+        -Int((dy / row).rounded())
     }
 
     /// The zoom at which the whole clip fits the width.
@@ -121,12 +164,20 @@ public struct PianoRollLayout: Equatable {
         pixelsPerBeat = min(max(fitPixelsPerBeat, readable), Self.maxPixelsPerBeat)
         scroll.x = CGFloat(-first) * pixelsPerBeat
         let middle = pitches.isEmpty ? 66 : Double(pitches.min()! + pitches.max()!) / 2
-        scroll.y = CGFloat(Double(Self.notes) - 0.5 - middle) * Self.semitone - lanesHeight / 2
+        row = Self.defaultRow
+        scroll.y = CGFloat(Double(Self.notes) - 0.5 - middle) * row - lanesHeight / 2
         clamp()
+    }
+
+    /// The least height of a row: every note in view, or the least zoom.
+    public var minRowHeight: CGFloat {
+        guard lanesHeight > 0 else { return Self.minRow }
+        return min(max(Self.minRow, lanesHeight / CGFloat(Self.notes)), Self.maxRow)
     }
 
     public mutating func clamp() {
         pixelsPerBeat = min(max(pixelsPerBeat, minPixelsPerBeat), Self.maxPixelsPerBeat)
+        row = min(max(row, minRowHeight), Self.maxRow)
         scroll.x = min(max(0, scroll.x), max(0, contentWidth - lanesWidth))
         scroll.y = min(max(0, scroll.y), max(0, contentHeight - lanesHeight))
     }
@@ -136,6 +187,14 @@ public struct PianoRollLayout: Equatable {
         let anchor = beat(atX: anchorX)
         pixelsPerBeat = min(max(pixelsPerBeat * factor, minPixelsPerBeat), Self.maxPixelsPerBeat)
         scroll.x = CGFloat(anchor - first) * pixelsPerBeat - (anchorX - Self.gutter)
+        clamp()
+    }
+
+    /// Zooms up and down by `factor`, keeping the note under `anchorY` where it is.
+    public mutating func zoomRows(by factor: CGFloat, anchorY: CGFloat) {
+        let anchor = (anchorY - Self.rulerHeight + scroll.y) / row
+        row = min(max(row * factor, minRowHeight), Self.maxRow)
+        scroll.y = anchor * row - (anchorY - Self.rulerHeight)
         clamp()
     }
 
@@ -153,8 +212,8 @@ public struct PianoRollLayout: Equatable {
         let top = y(pitch)
         if top < Self.rulerHeight {
             scroll.y -= Self.rulerHeight - top
-        } else if top + Self.semitone > size.height {
-            scroll.y += top + Self.semitone - size.height
+        } else if top + row > notesBottom {
+            scroll.y += top + row - notesBottom
         }
         clamp()
     }
@@ -168,6 +227,23 @@ public struct PianoRollLayout: Equatable {
         default: break
         }
         return nil
+    }
+
+    /// A length the song writes in beats, named as a note value is, a beat
+    /// being a quarter note: `1/4` is `1/16`, `1/3` is `1/8T` and `4` is
+    /// `1 Bar`. A length that is no such value keeps its beats.
+    public static func noteValue(_ text: String) -> String {
+        guard let beats = beats(text), beats > 0 else { return text }
+        if abs(beats - 4) < 1e-9 { return "1 Bar" }
+        // The length as a share of a whole note, 1/d.
+        let d = 4 / beats
+        let whole = d.rounded()
+        if abs(d - whole) < 1e-9, whole >= 1 {
+            let n = Int(whole)
+            if n & (n - 1) == 0 { return "1/\(n)" }
+            if n % 3 == 0, (n / 3) & (n / 3 - 1) == 0 { return "1/\(n / 3 * 2)T" }
+        }
+        return "\(text) beats"
     }
 
     /// Whether a note is one of a piano's black keys.
