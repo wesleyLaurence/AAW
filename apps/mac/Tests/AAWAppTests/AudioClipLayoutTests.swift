@@ -8,7 +8,7 @@ final class AudioClipLayoutTests: XCTestCase {
     /// beat and of two, the second after the clip leaves.
     private func clip() -> AudioClipView {
         AudioClipView(
-            key: 9, reference: "@9", sample: "song", at: 8, lengthBeats: 32, tailBeats: 2, sourceStartSeconds: 4,
+            key: 9, reference: "@9", sample: "song", at: 8, lengthBeats: 32, loopBeats: nil, tailBeats: 2, sourceStartSeconds: 4,
             sourceEndSeconds: 20, secondsPerBeat: 0.5, gainDb: 0, fadeInMs: 500, fadeOutMs: 1000, fadeCurve: "equal_power",
             sourceBpm: nil, stretch: "repitch", file: 3
         )

@@ -100,6 +100,44 @@
           ],
           "title": "Stretch",
           "type": "string"
+        },
+        "loop_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More than 0. With it, the first loop_beats of the clip play again and again from its start until length_beats, each repetition a copy of the clip with its lead and fades; the last is cut off where the clip ends. daw clip loop CLIP BEATS|off sets it.",
+          "title": "Loop Beats"
+        },
+        "length_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More than 0. How long a looped clip lasts on the timeline, from at; only with loop_beats. daw clip resize and daw audio trim --end set it.",
+          "title": "Length Beats"
         }
       },
       "required": [
@@ -1042,6 +1080,25 @@
           ],
           "description": "More than 0. A note is cut off at the clip's end, and one that starts at or after it does not play.",
           "title": "Length Beats"
+        },
+        "loop_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "More than 0. With it, the notes of the clip's first loop_beats play again and again from its start until length_beats, the last repetition cut off there; a note held across the loop's end is cut there, and one that starts at or after it is kept and does not play. daw clip loop CLIP BEATS|off sets it.",
+          "title": "Loop Beats"
         },
         "notes": {
           "items": {

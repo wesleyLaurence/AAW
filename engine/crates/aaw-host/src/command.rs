@@ -11,6 +11,7 @@ use crate::tree::{self, Item, Loc, Node, Step};
 use aaw_model::value::Value;
 use aaw_model::Beat;
 use num_rational::BigRational;
+use num_traits::Signed;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value as Json};
 
@@ -119,9 +120,20 @@ pub enum Command {
     },
     #[serde(rename = "clip.remove")]
     ClipRemove { clip: String },
-    /// Sets a note clip's length; its notes stay where they are.
+    /// Sets a note clip's length; its notes stay where they are. On a looped
+    /// audio clip, how long it plays.
     #[serde(rename = "clip.resize")]
     ClipResize { clip: String, length_beats: Json },
+    /// Loops a note clip or an audio clip: its first `loop_beats` play again
+    /// and again until its end. `off` or null plays it once again. An audio
+    /// clip's length is `length`, or its current length.
+    #[serde(rename = "clip.loop")]
+    ClipLoop {
+        clip: String,
+        loop_beats: Json,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        length: Option<Json>,
+    },
     /// Moves a note clip's start, its end or both to a song beat. Its notes
     /// stay where they are in the song: those the start passes are kept,
     /// before the clip, and do not play.
@@ -789,6 +801,9 @@ pub(crate) struct Span {
     pub(crate) start: f64,
     pub(crate) end: Option<f64>,
     per_beat: f64,
+    /// A looped clip's loop and its length on the timeline.
+    pub(crate) every: Option<BigRational>,
+    pub(crate) length: Option<BigRational>,
 }
 
 impl Span {
@@ -802,6 +817,8 @@ impl Span {
             start: number(clip.get("source_start_seconds")).unwrap_or(0.0),
             end: number(clip.get("source_end_seconds")),
             per_beat,
+            every: exact(clip.get("loop_beats")),
+            length: exact(clip.get("length_beats")),
         })
     }
 
@@ -813,9 +830,32 @@ impl Span {
 
     /// The beat the clip ends on; None when it plays to the end of its file.
     pub(crate) fn end_beat(&self) -> Option<BigRational> {
+        if let Some(length) = &self.length {
+            return Some(&self.at + length);
+        }
         let beats = (self.end? - self.start) / self.per_beat;
         Some(&self.at + BigRational::from_float(beats)?)
     }
+
+    /// Beats from the clip's start to `at`, when `at` is at a wrap of a clip
+    /// that loops every `every` beats; else why a looped clip is not cut there.
+    pub(crate) fn wrap(&self, at: &BigRational, every: &BigRational, what: &str) -> Result<BigRational> {
+        wrap_of(&self.at, at, every, what)
+    }
+}
+
+/// Beats from `start` to `at`, when `at` is a whole number of loops of
+/// `every` beats from it; else why a looped clip is not cut there.
+pub(crate) fn wrap_of(start: &BigRational, at: &BigRational, every: &BigRational, what: &str) -> Result<BigRational> {
+    let cut = at - start;
+    if !(&cut / every).is_integer() {
+        return Err(format!(
+            "Beat {} falls inside a repetition of {what}, which loops every {} beats; a looped clip is cut only at a wrap, or turn its loop off first",
+            beat_text(at),
+            aaw_model::fraction_str(every)
+        ));
+    }
+    Ok(cut)
 }
 
 fn map_node(fields: &Fields) -> Result<Node> {
@@ -1394,9 +1434,72 @@ impl<'a> Edit<'a> {
                 out.label = format!("Remove clip {name}");
             }
             ClipResize { clip, length_beats } => {
-                let loc = self.note_clip(clip)?;
-                self.set_leaf(&loc, "length_beats", beat_value(&beat_at(length_beats)?));
+                let length = beat_at(length_beats)?;
+                if !length.is_positive() {
+                    return Err(format!("Clip {clip} must be longer than 0 beats"));
+                }
+                let loc = match self.audio_clip(clip) {
+                    Some(loc) => {
+                        if exact(self.node(&loc).get("loop_beats")).is_none() {
+                            return Err(format!(
+                                "Audio clip {} does not loop, so its length is its audio's: audio trim --end moves its end, and clip loop makes it repeat",
+                                self.audio_name(&loc)
+                            ));
+                        }
+                        loc
+                    }
+                    None => self.note_clip(clip)?,
+                };
+                self.set_leaf(&loc, "length_beats", beat_value(&length));
                 out.label = format!("Resize clip {} to {} beats", self.clip_name(&loc), short(length_beats));
+            }
+            ClipLoop { clip, loop_beats, length } => {
+                let off = loop_beats.is_null() || loop_beats.as_str().is_some_and(|s| s.eq_ignore_ascii_case("off"));
+                let every = if off { None } else { Some(beat_at(loop_beats)?) };
+                if every.as_ref().is_some_and(|l| !l.is_positive()) {
+                    return Err("A loop is longer than 0 beats, or off".into());
+                }
+                let audio = self.audio_clip(clip);
+                let loc = match &audio {
+                    Some(loc) => loc.clone(),
+                    None => self.note_clip(clip)?,
+                };
+                let name = self.clip_name(&loc);
+                match every {
+                    Some(every) => {
+                        if audio.is_some() {
+                            // How long it plays: as given, as it did while looped, or as
+                            // long as its audio.
+                            let length = match (length, exact(self.node(&loc).get("length_beats"))) {
+                                (Some(l), _) => beat_at(l)?,
+                                (None, Some(l)) => l,
+                                (None, None) => match self.span(&loc)?.end_beat() {
+                                    Some(end) => end - exact(self.node(&loc).get("at")).unwrap_or_default(),
+                                    None => {
+                                        return Err(format!(
+                                            "Audio clip {name} plays to its file's end; give length, how many beats it should play"
+                                        ))
+                                    }
+                                },
+                            };
+                            if !length.is_positive() {
+                                return Err(format!("Audio clip {name} must play longer than 0 beats"));
+                            }
+                            self.set_leaf(&loc, "length_beats", beat_value(&length));
+                        } else if length.is_some() {
+                            return Err(format!("Clip {name} is a note clip, whose length clip resize sets"));
+                        }
+                        self.set_leaf(&loc, "loop_beats", beat_value(&every));
+                        out.label = format!("Loop clip {name} every {} beats", aaw_model::fraction_str(&every));
+                    }
+                    None => {
+                        self.set_leaf(&loc, "loop_beats", Value::None);
+                        if audio.is_some() {
+                            self.set_leaf(&loc, "length_beats", Value::None);
+                        }
+                        out.label = format!("Loop clip {name} off");
+                    }
+                }
             }
             ClipTrim { clip, start, end } => {
                 let loc = self.note_clip(clip)?;
@@ -1731,15 +1834,24 @@ impl<'a> Edit<'a> {
                     return Err(format!("Beat {} is not inside audio clip {}", beat_text(&at), self.audio_name(&loc)));
                 }
                 let name = self.audio_name(&loc);
-                let cut = span.source(&at);
-                // The halves meet where the audio is continuous, so neither fades there.
                 let mut right = self.node(&loc).clone();
-                self.set_leaf(&loc, "source_end_seconds", Value::Float(cut));
-                self.set_leaf(&loc, "fade_out_ms", Value::Float(0.0));
-                let fields = right.map_mut().expect("an audio clip is an object");
-                fields.insert("at".into(), Node::Leaf(beat_value(&at)));
-                fields.insert("source_start_seconds".into(), Node::Leaf(Value::Float(cut)));
-                fields.insert("fade_in_ms".into(), Node::Leaf(Value::Float(0.0)));
+                if let Some(every) = &span.every {
+                    // A looped clip is cut at a wrap: each half keeps the loop.
+                    let cut = span.wrap(&at, every, &format!("audio clip {name}"))?;
+                    self.set_leaf(&loc, "length_beats", beat_value(&cut));
+                    let fields = right.map_mut().expect("an audio clip is an object");
+                    fields.insert("at".into(), Node::Leaf(beat_value(&at)));
+                    fields.insert("length_beats".into(), Node::Leaf(beat_value(&(span.length.clone().expect("a looped clip has a length") - &cut))));
+                } else {
+                    let cut = span.source(&at);
+                    // The halves meet where the audio is continuous, so neither fades there.
+                    self.set_leaf(&loc, "source_end_seconds", Value::Float(cut));
+                    self.set_leaf(&loc, "fade_out_ms", Value::Float(0.0));
+                    let fields = right.map_mut().expect("an audio clip is an object");
+                    fields.insert("at".into(), Node::Leaf(beat_value(&at)));
+                    fields.insert("source_start_seconds".into(), Node::Leaf(Value::Float(cut)));
+                    fields.insert("fade_in_ms".into(), Node::Leaf(Value::Float(0.0)));
+                }
                 out.made.push(self.insert(&owner, "audio", Some(i + 1), right)?);
                 out.label = format!("Split audio clip {name} at beat {}", beat_text(&at));
             }
@@ -1750,6 +1862,19 @@ impl<'a> Edit<'a> {
                 let name = self.audio_name(&loc);
                 if start.is_none() && end.is_none() {
                     return Err("Trim needs a start or an end".into());
+                }
+                if span.every.is_some() {
+                    // A looped clip's end is how long it plays; its start is its loop's.
+                    if start.is_some() {
+                        return Err(format!("Audio clip {name} loops from its start, which cannot be trimmed; turn the loop off first (clip loop CLIP off)"));
+                    }
+                    let to = beat_at(end.as_ref().expect("an end"))?;
+                    if to <= span.at {
+                        return Err(format!("Audio clip {name} would end before it starts"));
+                    }
+                    self.set_leaf(&loc, "length_beats", beat_value(&(&to - &span.at)));
+                    out.label = format!("Trim audio clip {name}");
+                    return Ok(out);
                 }
                 let mut from = span.start;
                 if let Some(start) = start {
@@ -1812,6 +1937,13 @@ impl<'a> Edit<'a> {
                         let mut item = item;
                         set(&mut item.node, "at", beat_value(&(&span.at - &gap)));
                         kept.push(item);
+                    } else if span.every.is_some() {
+                        let name = item.node.field("sample").unwrap_or("?").to_string();
+                        *self.list(&owner, "audio")? = kept;
+                        return Err(format!(
+                            "Audio clip {name} at {} loops across the cut; daw range delete cuts a looped clip at a wrap, or turn its loop off first",
+                            beat_text(&span.at)
+                        ));
                     } else {
                         // Across it: what it plays before the cut stays, and
                         // what it plays after starts where the cut began.
@@ -2181,7 +2313,7 @@ impl<'a> Edit<'a> {
         let n = self.node(loc);
         format!(
             "{} at {}",
-            n.field("pattern").or_else(|| n.field("id")).unwrap_or("?"),
+            n.field("pattern").or_else(|| n.field("id")).or_else(|| n.field("sample")).unwrap_or("?"),
             n.get("at").map_or_else(|| "0".into(), |a| short(&node_json(a)))
         )
     }
@@ -2259,6 +2391,12 @@ impl<'a> Edit<'a> {
             return Err(format!("{id} is not a MIDI track"));
         }
         Ok(loc)
+    }
+
+    /// The audio clip a path names, if it names one.
+    fn audio_clip(&self, path: &str) -> Option<Loc> {
+        let (owner, i) = self.member(path, "audio", "an audio clip").ok()?;
+        Some([owner, vec![Step::Key("audio".into()), Step::Index(i)]].concat())
     }
 
     /// The note clip a path names.

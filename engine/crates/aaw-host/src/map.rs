@@ -192,31 +192,41 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
             .map(|info| info.seconds());
         // A file that cannot be read is given a beat, so it is still seen.
         let per_beat = 60.0 / c.source_bpm.unwrap_or(p.session.tempo);
-        let until = match (c.source_end_seconds, file) {
+        let mut until = match (c.source_end_seconds, file) {
             (Some(end), Some(file)) => end.min(file),
             (Some(end), None) => end,
             (None, Some(file)) => file,
             (None, None) => c.source_start_seconds + per_beat,
         };
-        let beats = ((until - c.source_start_seconds) / per_beat).max(0.0);
+        let (mut beats, mut onsets, mut looped) = (((until - c.source_start_seconds) / per_beat).max(0.0), vec![start], String::new());
+        if let (Some(every), Some(length)) = (c.loop_exact(), c.length_exact()) {
+            // The loop: so many beats of the file, played again at each wrap.
+            let (every, length) = (f(&every), f(&length));
+            until = until.min(c.source_start_seconds + every * per_beat);
+            beats = length;
+            onsets = c.repetitions(p.session.tempo).iter().map(|r| f(&r.at_exact())).collect();
+            looped = format!(", loops every {}", beats_text(every));
+        }
+        let repeats = onsets.len() as i64;
         out.push(Placed {
             key: format!(
-                "audio|{}|{:.3}|{:.3}|{:?}|{}",
+                "audio|{}|{:.3}|{:.3}|{:?}|{}|{:?}",
                 c.sample,
                 c.source_start_seconds,
                 until,
                 c.source_bpm,
-                matches!(c.stretch, Stretch::PreservePitch)
+                matches!(c.stretch, Stretch::PreservePitch),
+                c.loop_exact().map(|l| aaw_model::fraction_str(&l))
             ),
             loc: at("audio", i),
             start,
             end: start + beats,
-            onsets: vec![start],
+            onsets,
             pitches: Vec::new(),
             continuous: true,
-            repeats: 1,
+            repeats,
             what: format!(
-                "audio {} {}–{} s, {}{}",
+                "audio {} {}–{} s, {}{looped}{}",
                 c.sample,
                 number(c.source_start_seconds),
                 number(until),
@@ -240,23 +250,31 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
                 .map(|(at, pitch, d, v)| format!("{}:{pitch}:{}:{v}", aaw_model::fraction_str(at), aaw_model::fraction_str(d)))
                 .collect::<Vec<_>>()
                 .join(",");
-            let pitches: Vec<(f64, i64)> = playing.iter().map(|n| (start + f(&n.at_exact()), n.pitch)).collect();
+            // Each note once a repetition, where it starts inside what plays.
+            let repetitions = c.repetitions();
+            let placed: Vec<(f64, i64)> = repetitions
+                .iter()
+                .flat_map(|(from, plays)| {
+                    playing.iter().filter(move |n| n.at_exact() < *plays).map(move |n| (start + f(from) + f(&n.at_exact()), n.pitch))
+                })
+                .collect();
+            let looped = c.loop_exact().map(|l| format!(", loops every {}", beats_text(f(&l)))).unwrap_or_default();
             out.push(Placed {
-                key: format!("notes|{}|{key}", aaw_model::fraction_str(&length)),
+                key: format!("notes|{}|{:?}|{key}", aaw_model::fraction_str(&length), c.loop_exact().map(|l| aaw_model::fraction_str(&l))),
                 loc: at("clips", i),
                 start,
                 end: start + f(&length),
-                onsets: playing.iter().map(|n| start + f(&n.at_exact())).collect(),
+                onsets: placed.iter().map(|(at, _)| *at).collect(),
                 what: format!(
-                    "notes {}, {}, {}{}",
+                    "notes {}, {}{looped}, {}{}",
                     c.id,
                     beats_text(f(&length)),
                     plural(playing.len(), "note", "notes"),
                     span(&playing.iter().map(|n| n.pitch).collect::<Vec<_>>()).map(|s| format!(" {s}")).unwrap_or_default()
                 ),
-                pitches,
+                pitches: placed,
                 continuous: false,
-                repeats: 1,
+                repeats: repetitions.len() as i64,
             });
         }
     }

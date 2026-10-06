@@ -60,8 +60,9 @@ unique in its clip; the IDs last through edits, saving and reopening (D63).
 that starts at or after its clip's end, or before its start, is kept and does
 not play, so a clip trimmed from either edge and drawn out again loses nothing;
 a note before its clip has a negative `at` (D64). `daw check` and
-`daw note list` name the notes outside their clip. Note clips do not repeat: a
-copy plays a phrase again.
+`daw note list` name the notes outside their clip. A clip repeats with
+`loop_beats` ([looping-clips.md](looping-clips.md), D83): its first so many
+beats play again at each wrap until its end.
 
 **A MIDI track** has an instrument, note clips, effects, sends and automation,
 and no pads, pattern clips or audio clips. A song with a MIDI track is saved as

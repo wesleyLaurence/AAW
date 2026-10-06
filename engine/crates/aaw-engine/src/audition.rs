@@ -47,6 +47,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         id: "audition".into(),
         at: Beat::int(0),
         length_beats: Beat::Str(aaw_model::fraction_str(&(&length * BigRational::from_integer(notes.len().into())))),
+        loop_beats: None,
         notes: Vec::new(),
     };
     for (i, pitch) in notes.iter().enumerate() {

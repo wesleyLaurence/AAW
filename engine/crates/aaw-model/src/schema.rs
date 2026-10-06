@@ -8,7 +8,7 @@ use crate::validate::{self as v, Bounds, Ctx, Fields, Loc};
 use crate::value::{Dict, Key, Value};
 use indexmap::IndexMap;
 use num_rational::BigRational;
-use num_traits::Signed;
+use num_traits::{Signed, ToPrimitive, Zero};
 use regex::Regex;
 use std::sync::LazyLock;
 
@@ -658,12 +658,18 @@ pub struct AudioClip {
     pub fade_curve: FadeCurve,
     pub source_bpm: Option<f64>,
     pub stretch: Stretch,
+    /// With it, the first `loop_beats` of the clip play again and again from
+    /// the clip's start until `length_beats`, each repetition a copy of the
+    /// clip with its own lead and fades, the last cut off where the clip ends.
+    pub loop_beats: Option<Beat>,
+    /// How long a looped clip lasts on the timeline. Only with `loop_beats`.
+    pub length_beats: Option<Beat>,
 }
 
 impl AudioClip {
     const FIELDS: &'static [&'static str] = &[
         "sample", "at", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms",
-        "fade_out_ms", "fade_curve", "source_bpm", "stretch",
+        "fade_out_ms", "fade_curve", "source_bpm", "stretch", "loop_beats", "length_beats",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<AudioClip> {
@@ -700,6 +706,8 @@ impl AudioClip {
                 }
             })
         });
+        let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
+        let length_beats = f.opt(ctx, "length_beats", None, |c, x| v::optional(c, x, beat_field));
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -716,16 +724,80 @@ impl AudioClip {
             fade_curve: fade_curve?,
             source_bpm: source_bpm?,
             stretch: stretch?,
+            loop_beats: loop_beats?,
+            length_beats: length_beats?,
         };
         if clip.source_end_seconds.is_some_and(|end| end <= clip.source_start_seconds) {
             ctx.value_error("source_end_seconds must exceed source_start_seconds");
             return None;
+        }
+        match (&clip.loop_beats, &clip.length_beats) {
+            (Some(l), Some(n)) => {
+                if !exact(l).is_positive() || !exact(n).is_positive() {
+                    ctx.value_error("loop_beats and length_beats must be positive");
+                    return None;
+                }
+            }
+            (Some(_), None) => {
+                ctx.value_error("A looped audio clip needs length_beats, how long it plays");
+                return None;
+            }
+            (None, Some(_)) => {
+                ctx.value_error("length_beats is how far a loop repeats; it needs loop_beats");
+                return None;
+            }
+            (None, None) => {}
         }
         Some(clip)
     }
 
     pub fn at_exact(&self) -> BigRational {
         exact(&self.at)
+    }
+
+    /// The loop's length, when the clip loops.
+    pub fn loop_exact(&self) -> Option<BigRational> {
+        self.loop_beats.as_ref().map(exact)
+    }
+
+    /// How long a looped clip lasts on the timeline.
+    pub fn length_exact(&self) -> Option<BigRational> {
+        self.length_beats.as_ref().map(exact)
+    }
+
+    /// Seconds of the clip's file that go by in a beat of the song at
+    /// `tempo`: a clip with a tempo of its own follows the song's, so a beat
+    /// of the song is a beat of its file.
+    pub fn seconds_per_beat(&self, tempo: f64) -> f64 {
+        60.0 / self.source_bpm.unwrap_or(tempo)
+    }
+
+    /// The clip as the engine plays it: itself, or a looped clip as its
+    /// repetitions, each a copy from the clip's start to the loop's end that
+    /// starts a loop later, the last cut off where the clip ends. Each copy
+    /// keeps the clip's lead and fades, so a repetition leaves from where the
+    /// next starts, as two clips that meet do.
+    pub fn repetitions(&self, tempo: f64) -> Vec<AudioClip> {
+        let (Some(every), Some(length)) = (self.loop_exact(), self.length_exact()) else {
+            return vec![self.clone()];
+        };
+        let per_beat = self.seconds_per_beat(tempo);
+        let start = self.at_exact();
+        let mut out = Vec::new();
+        let mut from = BigRational::zero();
+        while from < length {
+            let beats = every.clone().min(&length - &from);
+            let end = self.source_start_seconds + beats.to_f64().unwrap_or(0.0) * per_beat;
+            out.push(AudioClip {
+                at: Beat::from_exact(&(&start + &from)),
+                source_end_seconds: Some(self.source_end_seconds.map_or(end, |own| own.min(end))),
+                loop_beats: None,
+                length_beats: None,
+                ..self.clone()
+            });
+            from += &every;
+        }
+        out
     }
 
     pub fn dump(&self, saved: bool) -> Value {
@@ -741,6 +813,8 @@ impl AudioClip {
         o.str("fade_curve", self.fade_curve.as_str(), "equal_power");
         o.opt("source_bpm", self.source_bpm.map(Value::Float));
         o.str("stretch", self.stretch.as_str(), "repitch");
+        o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
+        o.opt("length_beats", self.length_beats.as_ref().map(Beat::to_value));
         o.done()
     }
 }
@@ -850,13 +924,17 @@ pub struct NoteClip {
     pub id: String,
     pub at: Beat,
     pub length_beats: Beat,
+    /// With it, the notes of the clip's first `loop_beats` play again and
+    /// again from the clip's start until its end, the last repetition cut off
+    /// there; a note at or after the loop's end is kept and does not play.
+    pub loop_beats: Option<Beat>,
     /// In the order they were written. A note that starts before the clip or
-    /// at or after its end is kept and does not play.
+    /// at or after its end, or its loop's, is kept and does not play.
     pub notes: Vec<Note>,
 }
 
 impl NoteClip {
-    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "notes"];
+    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "notes"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<NoteClip> {
         let f = Fields::of(ctx, x, "NoteClip", Self::FIELDS)?;
@@ -864,6 +942,7 @@ impl NoteClip {
         let id = f.opt(ctx, "id", String::new(), id_field);
         let at = f.opt(ctx, "at", Beat::int(0), beat_field);
         let length_beats = f.req(ctx, "length_beats", beat_field);
+        let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
         let notes = f.opt(ctx, "notes", Vec::new(), |c, x| v::list(c, x, 0, None, Note::validate));
         f.finish(ctx);
         if ctx.count() > before {
@@ -873,10 +952,15 @@ impl NoteClip {
             id: id?,
             at: at?,
             length_beats: length_beats?,
+            loop_beats: loop_beats?,
             notes: notes?,
         };
         if !clip.length_exact().is_positive() {
             ctx.value_error("A clip's length must be positive");
+            return None;
+        }
+        if clip.loop_exact().is_some_and(|l| !l.is_positive()) {
+            ctx.value_error("A clip's loop_beats must be positive");
             return None;
         }
         let mut seen = std::collections::HashSet::new();
@@ -896,10 +980,38 @@ impl NoteClip {
         exact(&self.length_beats)
     }
 
-    /// Whether a note of the clip plays: it starts inside the clip.
+    /// The loop's length, when the clip loops.
+    pub fn loop_exact(&self) -> Option<BigRational> {
+        self.loop_beats.as_ref().map(exact)
+    }
+
+    /// How many beats of the clip's notes play: its loop, or the whole clip.
+    pub fn plays_until(&self) -> BigRational {
+        self.loop_exact().unwrap_or_else(|| self.length_exact())
+    }
+
+    /// Whether a note of the clip plays: it starts inside the clip and, when
+    /// the clip loops, inside the loop.
     pub fn plays(&self, note: &Note) -> bool {
         let at = note.at_exact();
-        !at.is_negative() && at < self.length_exact()
+        !at.is_negative() && at < self.plays_until()
+    }
+
+    /// Where each repetition of the clip starts, from the clip's start, and
+    /// how much of it plays: one of the clip's length, or a loop each until
+    /// the end, the last cut off there.
+    pub fn repetitions(&self) -> Vec<(BigRational, BigRational)> {
+        let length = self.length_exact();
+        let Some(every) = self.loop_exact() else {
+            return vec![(BigRational::zero(), length)];
+        };
+        let mut out = Vec::new();
+        let mut from = BigRational::zero();
+        while from < length {
+            out.push((from.clone(), every.clone().min(&length - &from)));
+            from += &every;
+        }
+        out
     }
 
     pub fn dump(&self, saved: bool) -> Value {
@@ -907,6 +1019,7 @@ impl NoteClip {
         o.req("id", Value::str(&self.id));
         o.beat("at", &self.at, &Beat::int(0));
         o.req("length_beats", self.length_beats.to_value());
+        o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
         o.coll("notes", list(&self.notes, saved, Note::dump));
         o.done()
     }

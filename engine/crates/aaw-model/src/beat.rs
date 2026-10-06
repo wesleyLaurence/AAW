@@ -22,6 +22,16 @@ impl Beat {
         Beat::Int(BigInt::from(n))
     }
 
+    /// An exact value as it is written: a whole number, or else a fraction
+    /// such as `1/3`.
+    pub fn from_exact(x: &BigRational) -> Beat {
+        if x.is_integer() {
+            Beat::Int(x.to_integer())
+        } else {
+            Beat::Str(crate::fraction_str(x))
+        }
+    }
+
     /// Python `str(value)`.
     pub fn text(&self) -> String {
         match self {

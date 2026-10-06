@@ -503,6 +503,12 @@ impl<'a> Edit<'a> {
                 set(&mut right, "at", beat_value(at));
                 set(&mut right, "length_beats", beat_value(&(&length - &cut)));
                 set(&mut right, "id", Value::Str(self.next_clip_id()));
+                if let Some(every) = exact(node.get("loop_beats")) {
+                    // A looped clip is cut at a wrap: each half keeps the loop
+                    // and its notes.
+                    crate::command::wrap_of(&start, at, &every, &format!("clip {path}"))?;
+                    return Ok((left, right));
+                }
                 let mut lefts = Vec::new();
                 let mut rights = Vec::new();
                 for n in node.get("notes").map_or(&[][..], Node::items) {
@@ -536,6 +542,14 @@ impl<'a> Edit<'a> {
             }
             Kind::Audio => {
                 let span = Span::of(node, self.tempo())?;
+                if let (Some(every), Some(length)) = (&span.every, &span.length) {
+                    // A looped clip is cut at a wrap: each half keeps the loop.
+                    let cut = span.wrap(at, every, &format!("audio clip {path}"))?;
+                    set(&mut left, "length_beats", beat_value(&cut));
+                    set(&mut right, "at", beat_value(at));
+                    set(&mut right, "length_beats", beat_value(&(length - &cut)));
+                    return Ok((left, right));
+                }
                 let cut = span.source(at);
                 // The halves meet where the audio is continuous, so neither fades there.
                 set(&mut left, "source_end_seconds", Value::Float(cut));
@@ -546,6 +560,12 @@ impl<'a> Edit<'a> {
             }
         }
         Ok((left, right))
+    }
+
+    /// Whether a clip loops, so that its halves are whole clips of their own
+    /// rather than continuous audio.
+    fn looped(node: &Node) -> bool {
+        exact(node.get("loop_beats")).is_some()
     }
 
     /// Cuts every item of the scope that crosses `at`.
@@ -568,7 +588,7 @@ impl<'a> Edit<'a> {
                     let right_handle = self.insert(&track, key, Some(i + 1), right)?;
                     report.split.push(left_handle);
                     report.made.push(right_handle);
-                    if kind == Kind::Audio {
+                    if kind == Kind::Audio && !Self::looped(&node) {
                         report.cuts.push((left_handle, right_handle));
                     }
                 }
@@ -620,6 +640,24 @@ impl<'a> Edit<'a> {
     fn merged(&self, kind: Kind, left: &Node, right: &Node) -> Option<Node> {
         let same = |key: &str| left.get(key).map(|n| crate::command::node_json(n)) == right.get(key).map(|n| crate::command::node_json(n));
         let mut out = left.clone();
+        if Self::looped(left) || Self::looped(right) {
+            // Two halves of one looped clip: the same loop of the same music,
+            // the left a whole number of loops long, so the right went on
+            // from a wrap.
+            let every = exact(left.get("loop_beats")).unwrap_or_default();
+            let length = exact(left.get("length_beats")).unwrap_or_default();
+            let more = exact(right.get("length_beats")).unwrap_or_default();
+            let music: &[&str] = match kind {
+                Kind::Note => &["notes"],
+                Kind::Audio => &["sample", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms", "fade_out_ms", "fade_curve", "source_bpm", "stretch"],
+                Kind::Pattern => return None,
+            };
+            if !(same("loop_beats") && music.iter().all(|k| same(k)) && every.is_positive() && (&length / &every).is_integer()) {
+                return None;
+            }
+            set(&mut out, "length_beats", beat_value(&(&length + &more)));
+            return Some(out);
+        }
         match kind {
             Kind::Pattern => {
                 if !(same("pattern") && same("velocity_scale")) {
@@ -749,7 +787,7 @@ impl<'a> Edit<'a> {
                     if cut_right {
                         node = self.split_node(kind, &node, e, &path)?.0;
                     }
-                    if kind == Kind::Audio {
+                    if kind == Kind::Audio && !Self::looped(&node) {
                         if cut_left {
                             set(&mut node, "fade_in_ms", Value::Float(CUT_FADE_IN_MS));
                         }

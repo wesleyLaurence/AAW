@@ -101,6 +101,9 @@ pub enum Edit {
     },
     /// Sets a note clip's length, as typed; its notes stay where they are.
     ClipLength { clip: u64, beats: String },
+    /// Loops a note clip or an audio clip every so many beats, as typed, until
+    /// its end; `off` or nothing plays it once again.
+    ClipLoop { clip: u64, beats: String },
     /// Adds a note to a note clip at a beat of the clip, one step of `grid`
     /// long: on the step under the beat, exactly, unless `free`. The note is
     /// what the edit makes.
@@ -509,8 +512,12 @@ impl<'a> Song<'a> {
                 let clip = &project.tracks[i].audio[j];
                 let start = clip.at_exact();
                 let tempo = project.session.tempo;
-                let beats = (self.source_end(clip)? - clip.source_start_seconds) / seconds_per_beat(clip, tempo)
-                    + tail_beats(clip, tempo, self.seconds(&clip.sample));
+                // A looped clip lasts its own length; another, its audio's.
+                let played = match clip.length_exact() {
+                    Some(length) => length.to_f64().unwrap_or(0.0),
+                    None => (self.source_end(clip)? - clip.source_start_seconds) / seconds_per_beat(clip, tempo),
+                };
+                let beats = played + tail_beats(clip, tempo, self.seconds(&clip.sample));
                 let end = &start + span(beats);
                 return Ok(Placed { track: i, start, end, audio: Some(clip), notes: false });
             }
@@ -1124,6 +1131,16 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 return Ok(Vec::new());
             }
             Ok(vec![json!({"op": "clip.resize", "clip": clip(key), "length_beats": typed_beat(beats)})])
+        }
+        Edit::ClipLoop { clip: key, beats } => {
+            let tree = doc.tree();
+            let at = placed(&tree, *key)?;
+            if !(at.notes || at.audio.is_some()) {
+                return Err("A pattern clip repeats; a note clip or an audio clip loops".into());
+            }
+            let off = beats.trim().is_empty() || beats.trim().eq_ignore_ascii_case("off");
+            let loop_beats = if off { Json::Null } else { typed_beat(beats) };
+            Ok(vec![json!({"op": "clip.loop", "clip": clip(key), "loop_beats": loop_beats})])
         }
         Edit::NoteAdd { clip: key, at, free, grid, pitch } => {
             let tree = doc.tree();

@@ -88,6 +88,25 @@ def clip_region(track, index, clips, project, root: Path):
     )
 
 
+def repetitions(clip, tempo) -> list[dict]:
+    """An audio clip as the engine plays it: itself, or a looped clip as its
+    repetitions, each a copy from the clip's start to the loop's end a loop
+    later, the last cut off where the clip ends."""
+    if clip.get("loop_beats") is None:
+        return [clip]
+    every, length = Fraction(str(clip["loop_beats"])), Fraction(str(clip["length_beats"]))
+    per_beat = 60 / (clip["source_bpm"] or tempo)
+    start, out, at = Fraction(str(clip["at"])), [], Fraction(0)
+    while at < length:
+        beats = min(every, length - at)
+        end = clip["source_start_seconds"] + float(beats) * per_beat
+        if clip["source_end_seconds"] is not None:
+            end = min(end, clip["source_end_seconds"])
+        out.append({**clip, "at": str(start + at), "source_end_seconds": end, "loop_beats": None, "length_beats": None})
+        at += every
+    return out
+
+
 def track_pads(track) -> dict:
     """A track's pads: its own, or the sampler's of a MIDI track."""
     if track.get("type") == "midi":
@@ -133,8 +152,9 @@ def regions(project, root: Path):
                 pad["release_ms"] / 1000,
             )
         )
+    tempo = project["session"]["tempo"]
     for track in project["tracks"]:
-        audio = track.get("audio", [])
+        audio = [r for clip in track.get("audio", []) for r in repetitions(clip, tempo)]
         clips = [clip_region(track["id"], i, audio, project, root) for i in range(len(audio))]
         if clips:
             found[track["id"]] = sorted(found.get(track["id"], []) + clips, key=lambda r: r.start)

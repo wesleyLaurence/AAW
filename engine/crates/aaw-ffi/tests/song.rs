@@ -2138,6 +2138,14 @@ fn a_note_clip_copied_in_the_app_is_its_own() {
     assert_eq!(update(&seen).arrangement.tracks[3].note_clips[0].length_beats, 11.0 / 3.0);
     assert!(song.edit(Edit::ClipLength { clip: pasted[0], beats: "0".into() }, None).is_err());
 
+    // Looped every so many beats, as typed, and off again; a pattern clip does not loop.
+    song.edit(Edit::ClipLoop { clip: pasted[0], beats: "4/3".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.label.as_str(), u.arrangement.tracks[3].note_clips[0].loop_beats), ("Loop clip clip3 at 16 every 4/3 beats", Some(4.0 / 3.0)));
+    song.edit(Edit::ClipLoop { clip: pasted[0], beats: "off".into() }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[3].note_clips[0].loop_beats, None);
+    assert!(song.edit(Edit::ClipLoop { clip: u.arrangement.tracks[0].clips[0].key, beats: "4".into() }, None).is_err());
+
     // Moved and removed as any clip.
     song.edit(Edit::ClipsMove { clips: vec![pasted[0]], by: -4.0, rows: -1 }, None).unwrap();
     let u = update(&seen);

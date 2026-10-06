@@ -464,8 +464,20 @@ enum ClipCmd {
         times: Option<String>,
     },
     Remove { project: Song, clip: String },
-    /// Set a note clip's length; its notes stay where they are.
+    /// Set a note clip's length; its notes stay where they are. On a looped
+    /// audio clip (tracks.T.audio.N), how long it plays.
     Resize { project: Song, clip: String, length: String },
+    /// Loop a note clip or an audio clip: its first BEATS play again and again
+    /// until its end, so `loop CLIP 8` then `resize CLIP 64` plays a two-bar
+    /// phrase eight times. `off` plays the clip once again. An audio clip
+    /// keeps its length, or takes --length BEATS.
+    Loop {
+        project: Song,
+        clip: String,
+        beats: String,
+        #[arg(long)]
+        length: Option<String>,
+    },
     /// Move a note clip's start or end to a song beat. Its notes stay where
     /// they are in the song; those the start passes are kept and do not play.
     Trim {
@@ -1652,6 +1664,14 @@ fn run(cli: &Cli) -> Result<Json> {
                     clip: clip.clone(),
                     start: start.as_deref().map(parse_value),
                     end: end.as_deref().map(parse_value),
+                },
+            ),
+            ClipCmd::Loop { project, clip, beats, length } => edit(
+                project,
+                C::ClipLoop {
+                    clip: clip.clone(),
+                    loop_beats: if beats.eq_ignore_ascii_case("off") { Json::Null } else { parse_value(beats) },
+                    length: length.as_deref().map(parse_value),
                 },
             ),
         },
