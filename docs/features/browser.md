@@ -68,6 +68,16 @@ also registers the source. Both interfaces use the same index and folder scopes.
 by the index as now. Instruments and effects are filtered by name as the person
 types, since they are a few.
 
+**The arrow keys** (October 6, 2026, #68). A click on a sample plays it and
+gives the samples the keys: Up and Down then move to the sample before or
+after and play it, as in the Finder, so a list of kicks is heard one after
+another without a click on each. The sample reached is kept in view. The
+selected sample is drawn as a Mac list draws its selection, in the accent
+color while the samples have the keys and gray once a click on the timeline
+or elsewhere takes them back, after which the arrow keys move clips again. At
+either end of the list nothing changes. Only the samples take the keys; the
+instruments, effects and patches do not.
+
 **Dragging an effect.**
 
 | Dropped on | Does |

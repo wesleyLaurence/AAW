@@ -225,7 +225,8 @@ front first.
 | Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T. The pattern's Step menu names its steps the same way: its 1/16 is a quarter of a beat |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
-| Click a sample | Plays it, as its file is; the speaker mark turns that off |
+| Click a sample | Plays it, as its file is, and gives the samples the keys; the speaker mark turns the playing off |
+| Up and Down, in the samples | Move to the sample before or after and play it, as in the Finder, until a click elsewhere takes the keys back. The selected sample is drawn in the accent color while the samples have the keys, gray when they do not |
 | Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
 | Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with ⌘, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
 | Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with ⌘, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |

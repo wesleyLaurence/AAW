@@ -111,6 +111,10 @@ final class Browser {
     private(set) var searched = false
     /// The sample last clicked.
     private(set) var selected: String?
+    /// Whether the samples have the keys, so the selected one is drawn in
+    /// the accent color, as a Mac list is, and gray once something else has
+    /// them. The view keeps it, from its focus.
+    var hasKeys = false
     /// Whether a click plays the sample.
     var auditions = true {
         didSet {
@@ -176,6 +180,22 @@ final class Browser {
         sound?.stop()
     }
 
+    /// The sample `delta` places after the selected one in the results, as
+    /// the arrow keys walk them: the first when none is selected or the
+    /// selected one is no longer listed, and nil past either end.
+    nonisolated static func neighbor(of selected: String?, in results: [SampleInfo], by delta: Int) -> SampleInfo? {
+        guard let selected, let index = results.firstIndex(where: { $0.id == selected }) else { return results.first }
+        let to = index + delta
+        return results.indices.contains(to) ? results[to] : nil
+    }
+
+    /// Selects and plays the next (1) or the previous (-1) sample, as the
+    /// arrow keys do in the Finder; at either end nothing changes.
+    func step(_ delta: Int) {
+        guard let sample = Self.neighbor(of: selected, in: results, by: delta) else { return }
+        audition(sample)
+    }
+
     /// What a pad or a track for a sample is named after: its category where
     /// the file's name gave one, else the name.
     nonisolated static func padName(of sample: SampleInfo) -> String {
@@ -203,6 +223,9 @@ struct BrowserView: View {
     static let width: CGFloat = 360
 
     private var browser: Browser { model.browser }
+    /// Whether the samples have the keys: after a click on one, Up and Down
+    /// walk them, as in the Finder, until a click elsewhere takes them back.
+    @FocusState private var samplesHaveKeys: Bool
 
     /// The track the mark adds a sample to: the selected one, if any.
     private var target: TrackView? {
@@ -290,7 +313,7 @@ struct BrowserView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear { browser.refreshFolders(); browser.refreshPatches() }
+        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches() }
         .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             // A patch saved from the terminal shows when the window comes back.
@@ -445,18 +468,32 @@ struct BrowserView: View {
         } else if browser.results.isEmpty {
             note(browser.folders.isEmpty ? "Add a folder to find samples across your projects." : (browser.searched ? "No samples match." : "Searching…"))
         } else {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(browser.results, id: \.id) { sample in
-                        row(sample)
-                        Divider().opacity(0.35)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(browser.results, id: \.id) { sample in
+                            row(sample).id(sample.id)
+                            Divider().opacity(0.35)
+                        }
+                        if browser.results.count >= Int(Browser.limit) {
+                            Text("The first \(Browser.limit); search to narrow them.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(.tertiary)
+                                .padding(10)
+                        }
                     }
-                    if browser.results.count >= Int(Browser.limit) {
-                        Text("The first \(Browser.limit); search to narrow them.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                            .padding(10)
-                    }
+                }
+                // The list takes the keys when a sample is clicked, without a
+                // ring around it, and Up and Down walk the samples and play
+                // each; the one reached is kept in view.
+                .focusable()
+                .focusEffectDisabled()
+                .focused($samplesHaveKeys)
+                .onKeyPress(.upArrow) { browser.step(-1); return .handled }
+                .onKeyPress(.downArrow) { browser.step(1); return .handled }
+                .onChange(of: samplesHaveKeys) { _, has in browser.hasKeys = has }
+                .onChange(of: browser.selected) { _, selected in
+                    if let selected, browser.hasKeys { proxy.scrollTo(selected) }
                 }
             }
             Divider()
@@ -471,15 +508,17 @@ struct BrowserView: View {
     }
 
     private func row(_ sample: SampleInfo) -> some View {
-        HStack(spacing: 6) {
+        let emphasized = browser.selected == sample.id && browser.hasKeys
+        return HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(sample.name)
                     .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(emphasized ? Color.white : Color.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text("\(Browser.detail(of: sample)) · \(sample.pack)")
                     .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(emphasized ? Color.white.opacity(0.8) : Color.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 0)
@@ -495,12 +534,19 @@ struct BrowserView: View {
         .padding(.leading, 10)
         .padding(.trailing, 6)
         .frame(height: 34)
-        .background(Color.white.opacity(browser.selected == sample.id ? 0.09 : 0))
+        // Selected as a Mac list shows it: in the accent color while the list
+        // has the keys, gray once something else does.
+        .background(browser.selected == sample.id
+            ? Color(nsColor: browser.hasKeys ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor)
+            : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
             model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote, to: target?.key)
         }
-        .onTapGesture { browser.audition(sample) }
+        .onTapGesture {
+            samplesHaveKeys = true
+            browser.audition(sample)
+        }
         .onDrag {
             browser.dragged = sample
             return NSItemProvider(object: sample.path as NSString)

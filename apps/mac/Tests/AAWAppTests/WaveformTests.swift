@@ -131,4 +131,19 @@ final class WaveformTests: XCTestCase {
         XCTAssertEqual(Browser.detail(of: loop), "16 s · 120 BPM · Am · ♪ A2")
         XCTAssertEqual(Browser.detail(of: sample("x.wav", "kick")), "0.50 s")
     }
+
+    func testTheArrowKeysWalkTheBrowsersSamples() {
+        let results = ["a", "b", "c"].map {
+            SampleInfo(id: $0, name: "\($0).wav", pack: "Pack", path: "/library/\($0).wav", seconds: 0.5, channels: 2,
+                       category: "kick", kind: "one-shot", bpm: nil, key: nil, note: nil, rootNote: nil)
+        }
+        XCTAssertEqual(Browser.neighbor(of: "a", in: results, by: 1)?.id, "b")
+        XCTAssertEqual(Browser.neighbor(of: "b", in: results, by: -1)?.id, "a")
+        XCTAssertNil(Browser.neighbor(of: "c", in: results, by: 1), "the last stays")
+        XCTAssertNil(Browser.neighbor(of: "a", in: results, by: -1), "the first stays")
+        XCTAssertEqual(Browser.neighbor(of: nil, in: results, by: 1)?.id, "a", "from nothing, the first")
+        XCTAssertEqual(Browser.neighbor(of: nil, in: results, by: -1)?.id, "a")
+        XCTAssertEqual(Browser.neighbor(of: "gone", in: results, by: 1)?.id, "a", "a selection the search dropped")
+        XCTAssertNil(Browser.neighbor(of: nil, in: [], by: 1))
+    }
 }
