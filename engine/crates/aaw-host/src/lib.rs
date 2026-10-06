@@ -12,6 +12,7 @@ pub mod midi_file;
 pub mod patches;
 pub mod project;
 pub mod python;
+mod range;
 pub mod registry;
 pub mod session;
 pub mod tree;

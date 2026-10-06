@@ -53,6 +53,7 @@ the operation needs. A refused edit names the field it meant and the fix.
 | A synthesized sound | `daw describe synth`; start from a factory patch with `daw synth add TRACK --patch NAME` (`daw patch list`), hear it with `daw synth audition`, keep it with `daw patch save` |
 | Effects or return buses | `daw describe effects`; track stems include inserts but exclude return contributions and master effects; returns have separate stems |
 | Automation | `daw describe automation`; give automated effects an `id` and ramp levels over a few milliseconds |
+| Repeat, insert, remove or empty whole bars across the tracks | `daw range copy\|insert\|delete\|clear` and `daw section duplicate\|move\|remove --with-content`; `daw describe edit` under `ranges` |
 | Finished-song edits from timecodes | Follow [song-edit](../.claude/skills/song-edit/SKILL.md); load its CLI topics before the relevant step |
 
 ## Check and hand off

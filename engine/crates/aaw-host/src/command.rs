@@ -395,13 +395,79 @@ pub enum Command {
     #[serde(rename = "point.remove")]
     PointRemove { point: String },
 
+    // Ranges of beats across tracks
+    /// Puts a copy of the beats from `start` for `length` at `to`, with the
+    /// clips, audio, automation and sections in them, over what is there;
+    /// `insert` opens time for it instead. `tracks` limits it to some
+    /// tracks, whose lanes go with them. Clips across an edge are cut there.
+    #[serde(rename = "range.copy")]
+    RangeCopy {
+        start: Json,
+        length: Json,
+        to: Json,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        insert: bool,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+    },
+    /// Opens `length` empty beats at `at`: everything from there moves
+    /// later, and the song grows.
+    #[serde(rename = "range.insert")]
+    RangeInsert {
+        at: Json,
+        length: Json,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+    },
+    /// Removes the beats from `start` for `length` and closes the gap: the
+    /// song shrinks.
+    #[serde(rename = "range.delete")]
+    RangeDelete {
+        start: Json,
+        length: Json,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+    },
+    /// Removes what is in the beats from `start` for `length`; nothing moves.
+    #[serde(rename = "range.clear")]
+    RangeClear {
+        start: Json,
+        length: Json,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+    },
+
     // Sections
     #[serde(rename = "section.add")]
     SectionAdd { id: String, at: Json, length_beats: Json },
+    /// Moves a section's label to `at`; with `with_content`, its beats too,
+    /// over what is there.
     #[serde(rename = "section.move")]
-    SectionMove { section: String, at: Json },
+    SectionMove {
+        section: String,
+        at: Json,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_content: bool,
+    },
+    /// Removes a section's label; with `with_content`, its beats too, as
+    /// `range.delete` does.
     #[serde(rename = "section.remove")]
-    SectionRemove { section: String },
+    SectionRemove {
+        section: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        with_content: bool,
+    },
+    /// The section and what is under it again at `to`, or right after it,
+    /// pushing what follows later; the copy is named `id`, or after the
+    /// section.
+    #[serde(rename = "section.duplicate")]
+    SectionDuplicate {
+        section: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        to: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
 
     // Whole-document edits
     #[serde(rename = "apply")]
@@ -597,16 +663,16 @@ pub struct Edit<'a> {
     pub next: &'a mut u64,
     /// Who is editing, for what an edit writes outside the song.
     pub origin: Origin,
-    also: Vec<String>,
+    pub(crate) also: Vec<String>,
 }
 
-type Result<T> = std::result::Result<T, String>;
+pub(crate) type Result<T> = std::result::Result<T, String>;
 
 pub fn json_value(j: &Json) -> Result<Value> {
     aaw_model::json_value(&j.to_string()).map_err(|e| e.to_string())
 }
 
-fn to_json(v: &Value) -> Json {
+pub(crate) fn to_json(v: &Value) -> Json {
     match v {
         Value::None => Json::Null,
         Value::Bool(b) => Json::Bool(*b),
@@ -655,7 +721,7 @@ fn beat_of(v: &Value) -> Option<Beat> {
 }
 
 /// The exact beat a leaf holds, if it holds one: a note's may be negative.
-fn exact(n: Option<&Node>) -> Option<BigRational> {
+pub(crate) fn exact(n: Option<&Node>) -> Option<BigRational> {
     match n {
         Some(Node::Leaf(v)) => beat_of(v).and_then(|b| aaw_model::signed_beat(&b).ok()),
         _ => None,
@@ -675,7 +741,7 @@ pub fn beat_value(x: &BigRational) -> Value {
     }
 }
 
-fn number(n: Option<&Node>) -> Option<f64> {
+pub(crate) fn number(n: Option<&Node>) -> Option<f64> {
     match n {
         Some(Node::Leaf(Value::Float(f))) => Some(*f),
         Some(Node::Leaf(Value::Int(i))) => num_traits::ToPrimitive::to_f64(i),
@@ -683,7 +749,7 @@ fn number(n: Option<&Node>) -> Option<f64> {
     }
 }
 
-fn set(node: &mut Node, key: &str, value: Value) {
+pub(crate) fn set(node: &mut Node, key: &str, value: Value) {
     if let Some(map) = node.map_mut() {
         map.insert(key.to_string(), Node::Leaf(value));
     }
@@ -712,21 +778,21 @@ fn offset_at(j: &Json) -> Result<BigRational> {
     }
 }
 
-fn beat_text(x: &BigRational) -> String {
+pub(crate) fn beat_text(x: &BigRational) -> String {
     short(&to_json(&beat_value(x)))
 }
 
 /// An audio clip's place: the beat it is at, the seconds of its file it plays,
 /// and how many of those seconds go by in a beat.
-struct Span {
-    at: BigRational,
-    start: f64,
-    end: Option<f64>,
+pub(crate) struct Span {
+    pub(crate) at: BigRational,
+    pub(crate) start: f64,
+    pub(crate) end: Option<f64>,
     per_beat: f64,
 }
 
 impl Span {
-    fn of(clip: &Node, tempo: f64) -> Result<Span> {
+    pub(crate) fn of(clip: &Node, tempo: f64) -> Result<Span> {
         let at = exact(clip.get("at")).ok_or("An audio clip has no beat")?;
         // A clip with a tempo of its own follows the session's, so a beat of
         // the session is a beat of its file.
@@ -740,13 +806,13 @@ impl Span {
     }
 
     /// The seconds of the file that play on a beat.
-    fn source(&self, beat: &BigRational) -> f64 {
+    pub(crate) fn source(&self, beat: &BigRational) -> f64 {
         let beats = num_traits::ToPrimitive::to_f64(&(beat - &self.at)).unwrap_or(f64::NAN);
         self.start + beats * self.per_beat
     }
 
     /// The beat the clip ends on; None when it plays to the end of its file.
-    fn end_beat(&self) -> Option<BigRational> {
+    pub(crate) fn end_beat(&self) -> Option<BigRational> {
         let beats = (self.end? - self.start) / self.per_beat;
         Some(&self.at + BigRational::from_float(beats)?)
     }
@@ -803,19 +869,19 @@ impl<'a> Edit<'a> {
         *self.next
     }
 
-    fn at(&self, path: &str) -> Result<Loc> {
+    pub(crate) fn at(&self, path: &str) -> Result<Loc> {
         tree::resolve(self.root, path, self.handles)
     }
 
-    fn node(&self, loc: &[Step]) -> &Node {
+    pub(crate) fn node(&self, loc: &[Step]) -> &Node {
         tree::get(self.root, loc)
     }
 
-    fn node_mut(&mut self, loc: &[Step]) -> &mut Node {
+    pub(crate) fn node_mut(&mut self, loc: &[Step]) -> &mut Node {
         tree::get_mut(self.root, loc)
     }
 
-    fn text(&self, loc: &[Step]) -> String {
+    pub(crate) fn text(&self, loc: &[Step]) -> String {
         tree::path_text(self.root, loc)
     }
 
@@ -828,7 +894,7 @@ impl<'a> Edit<'a> {
         }
     }
 
-    fn list(&mut self, owner: &[Step], key: &str) -> Result<&mut Vec<Item>> {
+    pub(crate) fn list(&mut self, owner: &[Step], key: &str) -> Result<&mut Vec<Item>> {
         let name = self.text(owner);
         self.node_mut(owner)
             .get_mut(key)
@@ -836,7 +902,7 @@ impl<'a> Edit<'a> {
             .ok_or_else(|| format!("{name} has no {key}"))
     }
 
-    fn insert(&mut self, owner: &[Step], key: &str, index: Option<usize>, node: Node) -> Result<u64> {
+    pub(crate) fn insert(&mut self, owner: &[Step], key: &str, index: Option<usize>, node: Node) -> Result<u64> {
         let handle = self.fresh();
         let list = self.list(owner, key)?;
         let index = index.unwrap_or(list.len());
@@ -847,7 +913,7 @@ impl<'a> Edit<'a> {
         Ok(handle)
     }
 
-    fn take(&mut self, owner: &[Step], key: &str, index: usize) -> Result<Item> {
+    pub(crate) fn take(&mut self, owner: &[Step], key: &str, index: usize) -> Result<Item> {
         Ok(self.list(owner, key)?.remove(index))
     }
 
@@ -898,7 +964,7 @@ impl<'a> Edit<'a> {
         }
     }
 
-    fn track(&self, id: &str) -> Result<Loc> {
+    pub(crate) fn track(&self, id: &str) -> Result<Loc> {
         self.at(&format!("tracks.{id}"))
     }
 
@@ -1039,7 +1105,7 @@ impl<'a> Edit<'a> {
         Ok(())
     }
 
-    fn set_leaf(&mut self, loc: &[Step], key: &str, v: Value) {
+    pub(crate) fn set_leaf(&mut self, loc: &[Step], key: &str, v: Value) {
         if let Some(m) = self.node_mut(loc).map_mut() {
             m.insert(key.to_string(), Node::Leaf(v));
         }
@@ -1999,14 +2065,36 @@ impl<'a> Edit<'a> {
                 out.made.push(self.insert(&[], "sections", None, map_node(&f)?)?);
                 out.label = format!("Add section {id}");
             }
-            SectionMove { section, at } => {
+            SectionMove { section, at, with_content: true } => {
+                self.section_move_content(&mut out, section, &beat_at(at)?)?;
+            }
+            SectionMove { section, at, with_content: false } => {
                 let loc = self.at(&format!("sections.{section}"))?;
                 self.set_leaf(&loc, "at", json_value(at)?);
                 out.label = format!("Move section {section} to {}", short(at));
             }
-            SectionRemove { section } => {
+            SectionRemove { section, with_content: true } => {
+                self.section_remove_content(&mut out, section)?;
+            }
+            SectionRemove { section, with_content: false } => {
                 let loc = self.at(&format!("sections.{section}"))?;
                 out.label = format!("Remove {}", self.remove_at(&loc)?);
+            }
+            SectionDuplicate { section, to, id } => {
+                let to = to.as_ref().map(beat_at).transpose()?;
+                self.section_duplicate(&mut out, section, to.as_ref(), id.as_deref())?;
+            }
+            RangeCopy { start, length, to, insert, tracks } => {
+                self.range_copy(&mut out, &beat_at(start)?, &beat_at(length)?, &beat_at(to)?, *insert, tracks, None)?;
+            }
+            RangeInsert { at, length, tracks } => {
+                self.range_insert(&mut out, &beat_at(at)?, &beat_at(length)?, tracks)?;
+            }
+            RangeDelete { start, length, tracks } => {
+                self.range_delete(&mut out, &beat_at(start)?, &beat_at(length)?, tracks)?;
+            }
+            RangeClear { start, length, tracks } => {
+                self.range_clear(&mut out, &beat_at(start)?, &beat_at(length)?, tracks)?;
             }
             Batch { commands, label } => {
                 let mut labels = Vec::new();
@@ -2037,7 +2125,7 @@ impl<'a> Edit<'a> {
     }
 
     /// The ID of the track or return at `loc`, for labels.
-    fn name(&self, loc: &[Step]) -> String {
+    pub(crate) fn name(&self, loc: &[Step]) -> String {
         self.node(loc).field("id").unwrap_or("?").to_string()
     }
 
@@ -2057,7 +2145,7 @@ impl<'a> Edit<'a> {
     }
 
     /// A clip described by its pattern and track, for labels.
-    fn tempo(&self) -> f64 {
+    pub(crate) fn tempo(&self) -> f64 {
         number(self.root.get("session").and_then(|s| s.get("tempo"))).unwrap_or(144.0)
     }
 
@@ -2099,7 +2187,7 @@ impl<'a> Edit<'a> {
     }
 
     /// The next `clipN` no note clip of the song has, as the model gives.
-    fn next_clip_id(&self) -> String {
+    pub(crate) fn next_clip_id(&self) -> String {
         let ids: Vec<&str> = self
             .root
             .get("tracks")
@@ -2125,13 +2213,13 @@ impl<'a> Edit<'a> {
         }
     }
 
-    fn is_midi(&self, track: &[Step]) -> bool {
+    pub(crate) fn is_midi(&self, track: &[Step]) -> bool {
         self.node(track).field("type") == Some("midi")
     }
 
     /// How many beats a pattern or note clip lasts: a note clip's length, a
     /// pattern clip's pattern by its repeats.
-    fn clip_span(&self, clip: &Node) -> Option<BigRational> {
+    pub(crate) fn clip_span(&self, clip: &Node) -> Option<BigRational> {
         if let Some(length) = exact(clip.get("length_beats")) {
             return Some(length);
         }
