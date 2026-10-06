@@ -293,6 +293,26 @@ private enum Drag {
     case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>, points: Bool)
 }
 
+/// An item chosen from a header's context menu, with the row it was on.
+private final class RowChoice: NSObject {
+    let row: RowID
+    let action: ContextMenu.RowAction
+
+    init(row: RowID, action: ContextMenu.RowAction) {
+        self.row = row
+        self.action = action
+    }
+}
+
+/// An item chosen from a clip's context menu.
+private final class ClipChoice: NSObject {
+    let action: ContextMenu.ClipAction
+
+    init(action: ContextMenu.ClipAction) {
+        self.action = action
+    }
+}
+
 /// A parameter chosen from the menu that adds a lane.
 private final class LaneChoice: NSObject {
     let row: RowID
@@ -337,6 +357,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var lanesShown: Set<RowID> = []
     private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
+    /// When AppKit last asked for a context menu, so that a Control-click it
+    /// handled is not handled again.
+    private var contextMenuEvent: TimeInterval?
     private var dropTarget: DropTarget?
     /// The file being dragged over the view and its length, in seconds for an
     /// audio file and in beats for a MIDI file, read once for the outline of
@@ -1000,6 +1023,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     override func mouseDown(with event: NSEvent) {
         endRename(commit: true)
         window?.makeFirstResponder(self)
+        if event.modifierFlags.contains(.control), event.timestamp != contextMenuEvent {
+            // A click with Control held is a right click, when AppKit has not
+            // already asked for the menu.
+            if let menu = menu(for: event) { NSMenu.popUpContextMenu(menu, with: event, for: self) }
+            return
+        }
         let p = convert(event.locationInWindow, from: nil)
         if p.x < TimelineLayout.headerWidth {
             if p.y >= TimelineLayout.rulerHeight { headerDown(at: p, event) }
@@ -1087,10 +1116,16 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                         perPoint: 0.5, step: 0.1, resetTo: nil, at: p) { .send(track: key, to: to, db: $0) }
         case .name, .body:
             model.select(row: id)
+            if twice {
+                // Twice on a header: its devices, in the detail panel, shown
+                // if it was hidden. A name is typed from the context menu or
+                // with ⌘R.
+                model.showsDetail = true
+                model.detail = .devices
+                return
+            }
             guard id != .master else { return }
-            if twice, header.part(at: p) == .name {
-                beginRename(id)
-            } else if let from = siblings(of: id).firstIndex(of: id) {
+            if let from = siblings(of: id).firstIndex(of: id) {
                 drag = .reorder(ReorderDrag(row: id, startY: p.y, from: from))
             }
         }
@@ -1136,6 +1171,93 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     @objc private func addLane(_ sender: NSMenuItem) {
         guard let choice = sender.representedObject as? LaneChoice else { return }
         model.edit(.laneAdd(row: choice.row.row, param: choice.param))
+    }
+
+    // MARK: Context menus
+
+    /// A right click or a Control-click on a header selects the row and
+    /// offers what can be done to it; on a clip, it selects the clip, or
+    /// keeps a selection the clip is part of, and offers the clip
+    /// operations. Elsewhere there is no menu.
+    override func menu(for event: NSEvent) -> NSMenu? {
+        endRename(commit: true)
+        window?.makeFirstResponder(self)
+        contextMenuEvent = event.timestamp
+        let p = convert(event.locationInWindow, from: nil)
+        guard p.y >= TimelineLayout.rulerHeight else { return nil }
+        if p.x < TimelineLayout.headerWidth {
+            guard let (id, header) = row(atY: p.y), let row = rows[id] else { return nil }
+            switch header.part(at: p) {
+            case .lane, .laneRemove, .laneAdd: return nil
+            default: break
+            }
+            model.select(row: id)
+            needsDisplay = true
+            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, lanesShown: lanesShown.contains(id))
+            return menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
+        }
+        guard let hit = clip(at: p) else { return nil }
+        let key = hit.hit.key
+        if !model.selectedClips.contains(key) { model.select(clips: [key], focus: key) } else { model.select(clips: model.selectedClips, focus: key) }
+        let editor: String
+        switch hit.hit {
+        case .pattern: editor = "Pattern"
+        case .audio: editor = "Audio Clip"
+        case .notes: editor = "Notes"
+        }
+        let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit)
+        return menu(of: items, #selector(clipMenuAction(_:))) { ClipChoice(action: $0) }
+    }
+
+    private func menu<Action: Equatable>(of items: [ContextMenu.Item<Action>], _ action: Selector,
+                              _ choice: (Action) -> NSObject) -> NSMenu {
+        let menu = NSMenu()
+        for item in items {
+            guard let what = item.action else {
+                menu.addItem(.separator())
+                continue
+            }
+            let entry = NSMenuItem(title: item.title, action: item.enabled ? action : nil, keyEquivalent: item.key)
+            entry.keyEquivalentModifierMask = item.command ? .command : []
+            entry.target = self
+            entry.representedObject = choice(what)
+            menu.addItem(entry)
+        }
+        return menu
+    }
+
+    @objc private func rowMenuAction(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? RowChoice, let row = rows[choice.row] else { return }
+        let id = choice.row
+        switch choice.action {
+        case .rename: beginRename(id)
+        case .mute: model.edit(.mute(row: id.row, on: !row.mute))
+        case .solo:
+            if case .track(let key) = id { model.edit(.solo(track: key, on: !row.solo)) }
+        case .automation:
+            if lanesShown.contains(id) { lanesShown.remove(id) } else { lanesShown.insert(id) }
+            show(model.arrangement, animated: true)
+        case .addTrack: model.addTrack()
+        case .addMIDITrack: model.addTrack(midi: true)
+        case .addReturn: model.addReturn()
+        case .delete:
+            if id != .master { model.edit(.remove(row: id.row)) }
+        }
+    }
+
+    @objc private func clipMenuAction(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? ClipChoice else { return }
+        switch choice.action {
+        case .edit:
+            model.showsDetail = true
+            model.detail = .pattern
+        case .cut: model.cutSelection(in: .clips)
+        case .copy: model.copySelection(in: .clips)
+        case .duplicate: model.duplicateSelection()
+        case .split: model.splitSelection()
+        case .loop: model.toggleLoop()
+        case .delete: model.deleteSelection()
+        }
     }
 
     /// A press in a lane: on a point it selects it and may drag the selected
@@ -1225,6 +1347,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             if onResizeEdge(p, of: rect) { edge = false } else if onStartEdge(p, of: rect) { edge = true }
         }
         model.cueTrack = nil
+        if event.clickCount == 2 {
+            // Twice on a clip: the clip's editor in the detail panel, shown
+            // if it was hidden: a pattern clip's pattern, an audio clip's
+            // settings or a note clip's piano roll.
+            model.select(clips: [key], focus: key)
+            model.showsDetail = true
+            model.detail = .pattern
+            return
+        }
         var selection = model.selectedClips
         var collapse: UInt64?
         if event.modifierFlags.contains(.shift) {
