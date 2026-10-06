@@ -19,18 +19,18 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **Editing a range of bars.** A range copied, inserted, deleted or cleared
-   across every track, with its lanes and sections, and a section duplicated
-   with what is under it; through `daw` first, then a time selection across the
-   tracks in the app. [features/bar-ranges.md](features/bar-ranges.md)
-2. **Clips that loop.** Note clips and audio clips that repeat until they end,
+1. **Clips that loop.** Note clips and audio clips that repeat until they end,
    by one rule (D63), so a phrase is changed once.
    [features/looping-clips.md](features/looping-clips.md)
-3. **Export in the app.** File › Export Audio…: a named WAV, AAC or MP3 of the
+2. **Export in the app.** File › Export Audio…: a named WAV, AAC or MP3 of the
    mix at a stated level, through `daw export`, with its measurements shown.
    The app's only export is a MIDI clip, so the person finishes a song through
    the agent or a terminal (D81).
    [features/export-in-app.md](features/export-in-app.md)
+3. **A time selection in the app.** A range of beats dragged across the
+   tracks and copied, inserted, deleted or cleared as `daw range` does it,
+   and a section dragged with its content; which gesture makes it is the
+   open question in [features/bar-ranges.md](features/bar-ranges.md).
 4. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
@@ -226,6 +226,15 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   left.
 - **Opening a project while its copy is open,** so that its path answers for it
   again.
+- **A range edit by ear:** on a song of several tracks with an audio clip and
+  a lane, a verse repeated with `daw section duplicate`, four bars inserted
+  before a drop and deleted again, and a breakdown cleared on the drums alone
+  with `daw range clear --track`; whether the 4 and 12 ms fades at a copied or
+  moved audio piece's cut edge are heard as a click or a dip, and whether a
+  note divided at a range's edge retriggers audibly. Tests held insert then
+  delete to the same bytes and a copy to the render of the clips and lane
+  edits it stands for; nothing was heard, and no agent session has used the
+  verbs.
 - **A fresh agent reading `daw check`'s codes:** an agent session asked to
   make a song of several sections, with `daw check` run before each render;
   whether it acts on `clips-stacked`, `note-retriggered` and
@@ -304,7 +313,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   against generated fixtures (D62). What a track with two pitched pads maps to
   is its open question.
 - Audio clips that reverse; perhaps one list for pattern clips and audio clips.
-  A cut that moves the other tracks with it is a range edit, in Next.
+  A cut that moves the other tracks with it is `daw range delete`
+  ([bar ranges](features/bar-ranges.md)).
 - A join check that places a pad transposed by an event at its transposed length.
 - A long song streamed from disk; a decoded song is held whole in memory.
 - A trimmed audio clip prepared from audio already at the song's rate. A trim
@@ -352,6 +362,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Audio clips: a crossfade made by dragging one clip over another, where today
   both play; an edge that snaps to the beats of the file's beat map; a clip's
   lead shown and dragged; several clips trimmed at once.
+- Positions in bars or `m:ss` for every command, beside beats.
 - A beat map measured from the app when a song is dropped. It is drawn when
   `daw samples beats` has left one.
 - A larger picture of a clip's file in the detail panel, with the part the clip

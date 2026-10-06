@@ -315,6 +315,8 @@ enum Top {
     Lane(LaneCmd),
     #[command(subcommand)]
     Section(SectionCmd),
+    #[command(subcommand)]
+    Range(RangeCmd),
 }
 
 /// Tracks.
@@ -814,12 +816,83 @@ enum PointCmd {
     Remove { project: Song, point: String },
 }
 
-/// Sections.
+/// Sections: labels over beats, and with --with-content the beats under them.
 #[derive(Subcommand)]
 enum SectionCmd {
     Add { project: Song, id: String, at: String, length: String },
-    Move { project: Song, section: String, at: String },
-    Remove { project: Song, section: String },
+    /// Move a section's label to AT; with --with-content, its beats too,
+    /// over what is there, as `range copy` puts them.
+    Move {
+        project: Song,
+        section: String,
+        at: String,
+        #[arg(long)]
+        with_content: bool,
+    },
+    /// Remove a section's label; with --with-content, its beats too, closing
+    /// the gap as `range delete` does.
+    Remove {
+        project: Song,
+        section: String,
+        #[arg(long)]
+        with_content: bool,
+    },
+    /// The section and what is under it again, right after it or at --to,
+    /// pushing what follows later; the copy is named --id, or after the
+    /// section. Clips across its edges are cut there.
+    Duplicate {
+        project: Song,
+        section: String,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        id: Option<String>,
+    },
+}
+
+/// Ranges of beats across every track, or those named with --track: the
+/// clips, audio, automation and sections in them. A clip across an edge is
+/// cut there; a pattern clip only between repeats. Positions are beats.
+#[derive(Subcommand)]
+enum RangeCmd {
+    /// Put a copy of LENGTH beats from START at --to, over what is there;
+    /// --insert opens time for it instead. A note clip's copy owns its notes.
+    Copy {
+        project: Song,
+        start: String,
+        length: String,
+        #[arg(long)]
+        to: String,
+        #[arg(long)]
+        insert: bool,
+        #[arg(long = "track")]
+        tracks: Vec<String>,
+    },
+    /// Open LENGTH empty beats at AT: everything from there moves later and
+    /// the song grows.
+    Insert {
+        project: Song,
+        at: String,
+        length: String,
+        #[arg(long = "track")]
+        tracks: Vec<String>,
+    },
+    /// Remove LENGTH beats from START and close the gap: the song shrinks.
+    Delete {
+        project: Song,
+        start: String,
+        length: String,
+        #[arg(long = "track")]
+        tracks: Vec<String>,
+    },
+    /// Remove what is in LENGTH beats from START; nothing moves.
+    Clear {
+        project: Song,
+        start: String,
+        length: String,
+        #[arg(long = "track")]
+        tracks: Vec<String>,
+    },
 }
 
 type Result<T> = std::result::Result<T, String>;
@@ -1962,14 +2035,65 @@ fn run(cli: &Cli) -> Result<Json> {
                     length_beats: parse_value(length),
                 },
             ),
-            SectionCmd::Move { project, section, at } => edit(
+            SectionCmd::Move { project, section, at, with_content } => edit(
                 project,
                 C::SectionMove {
                     section: section.clone(),
                     at: parse_value(at),
+                    with_content: *with_content,
                 },
             ),
-            SectionCmd::Remove { project, section } => edit(project, C::SectionRemove { section: section.clone() }),
+            SectionCmd::Remove { project, section, with_content } => edit(
+                project,
+                C::SectionRemove {
+                    section: section.clone(),
+                    with_content: *with_content,
+                },
+            ),
+            SectionCmd::Duplicate { project, section, to, id } => edit(
+                project,
+                C::SectionDuplicate {
+                    section: section.clone(),
+                    to: to.as_deref().map(parse_value),
+                    id: id.clone(),
+                },
+            ),
+        },
+        Top::Range(r) => match r {
+            RangeCmd::Copy { project, start, length, to, insert, tracks } => edit(
+                project,
+                C::RangeCopy {
+                    start: parse_value(start),
+                    length: parse_value(length),
+                    to: parse_value(to),
+                    insert: *insert,
+                    tracks: tracks.clone(),
+                },
+            ),
+            RangeCmd::Insert { project, at, length, tracks } => edit(
+                project,
+                C::RangeInsert {
+                    at: parse_value(at),
+                    length: parse_value(length),
+                    tracks: tracks.clone(),
+                },
+            ),
+            RangeCmd::Delete { project, start, length, tracks } => edit(
+                project,
+                C::RangeDelete {
+                    start: parse_value(start),
+                    length: parse_value(length),
+                    tracks: tracks.clone(),
+                },
+            ),
+            RangeCmd::Clear { project, start, length, tracks } => edit(
+                project,
+                C::RangeClear {
+                    start: parse_value(start),
+                    length: parse_value(length),
+                    tracks: tracks.clone(),
+                },
+            ),
         },
     }
 }
@@ -2026,6 +2150,7 @@ fn name(top: &Top) -> String {
         Top::Send(_) => group("send", ""),
         Top::Lane(_) => group("lane", ""),
         Top::Section(_) => group("section", ""),
+        Top::Range(_) => group("range", ""),
     }
     .trim()
     .to_string()

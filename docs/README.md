@@ -51,12 +51,12 @@ Built:
 | [selecting several things](features/selection.md) | Clips by a rectangle and copied by Option-drag, several pattern events and automation points selected, moved, copied and removed together |
 | [the piano roll](features/piano-roll.md) | Writing notes by hand: previews through either instrument, the velocity lane, zoom up and down, a note's start, Option-drag copies, ⌘ off the grid and grids as note values |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
+| [editing a range of bars](features/bar-ranges.md) | `daw range copy\|insert\|delete\|clear` across the tracks with the clips, audio, lanes and sections in a range, and a section duplicated, moved or removed with its content |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [editing a range of bars](features/bar-ranges.md) | Next |
 | [clips that loop](features/looping-clips.md) | Next |
 | [export in the app](features/export-in-app.md) | Next |
 | [comparing with a reference](features/reference-comparison.md) | Next |
