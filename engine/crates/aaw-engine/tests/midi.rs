@@ -115,6 +115,60 @@ fn a_gated_note_releases_at_its_note_off_or_its_clips_end_at_its_velocity() {
 }
 
 #[test]
+fn a_looped_clip_renders_as_the_clip_and_its_copies() {
+    let dir = tempfile::tempdir().unwrap();
+    write_audio(dir.path());
+    let track = "tracks:\n- id: keys\n  type: midi\n  instrument:\n    sampler:\n      pads: {PADS}\n      map: [{notes: [40, 80], pad: t, pitched: true}, {notes: 30, pad: d}]\n  clips:\n".replace("{PADS}", PADS);
+    // Four beats looped to fourteen: three repetitions and a half. A note held
+    // across the wrap is cut there, and one that starts at the loop's end is
+    // kept and does not play.
+    let held = "    - {pitch: 30, at: 3.5, duration: 2}\n";
+    let looped = format!("{HEAD}{track}  - at: 0\n    length_beats: 14\n    loop_beats: 4\n    notes:{NOTES}\n{held}    - {{pitch: 60, at: 4, duration: 1}}\n");
+    let copies: String = [0, 4, 8, 12]
+        .iter()
+        .map(|at| format!("  - at: {at}\n    length_beats: {}\n    notes:{NOTES}\n{held}", if *at == 12 { 2 } else { 4 }))
+        .collect();
+    let copies = format!("{HEAD}{track}{copies}");
+    // The schedule is the same notes at the same places.
+    let notes = |yaml: &str| {
+        let p = aaw_model::parse(yaml).unwrap_or_else(|e| panic!("{e}"));
+        aaw_model::schedule::track_notes(&p, p.tracks[0].midi.as_ref().unwrap())
+            .iter()
+            .map(|n| format!("{}:{}:{}:{}", n.at, n.beats, n.pitch, n.velocity))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(notes(&looped), notes(&copies));
+    // The held note is cut at the wrap, half a beat long, in each repetition
+    // but the last, where it does not start; the note at the loop's end never plays.
+    let scheduled = notes(&looped);
+    assert_eq!(scheduled.iter().filter(|n| n.ends_with(":1/2:30:100")).count(), 3);
+    assert!(!scheduled.iter().any(|n| n.ends_with(":60:100") && n.starts_with("4:")));
+    assert_eq!(scheduled.len(), 3 * 8 + 5);
+    let (a, b) = (compiled(dir.path(), &looped), compiled(dir.path(), &copies));
+    let (x, y) = (render(&a), render(&b));
+    assert!(x.iter().any(|f| f[0].abs() > 0.1), "the loop is silent");
+    let differs = x.iter().zip(&y).position(|(p, q)| p != q);
+    assert_eq!(differs.map(|i| (i, x[i], y[i])), None);
+    assert_eq!(x.len(), y.len());
+    // The second repetition sounds like the first, once the cut note's 10 ms
+    // release from the wrap is over.
+    let beat = 24000;
+    assert_eq!(x[1000..3 * beat], x[4 * beat + 1000..7 * beat]);
+    // Locating into the fourth repetition plays the fourth: the same as the copies from there.
+    let from = 12 * beat + 100;
+    let play = |p: &Arc<aaw_engine::program::Program>| {
+        let mut r = Renderer::new(p.clone(), from, 4096);
+        let mut out = vec![[0.0; 2]; p.total - from];
+        for chunk in out.chunks_mut(4096) {
+            r.render(chunk, |_, _, _| {});
+        }
+        out
+    };
+    assert_eq!(play(&a), play(&b));
+    assert!(play(&a).iter().any(|f| f[0].abs() > 0.1));
+}
+
+#[test]
 fn a_sample_with_no_root_note_plays_as_it_is_at_middle_c() {
     let dir = tempfile::tempdir().unwrap();
     write_audio(dir.path());

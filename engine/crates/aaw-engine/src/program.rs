@@ -442,8 +442,9 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
                 jobs.push(job);
             }
         }
-        for clip in &t.audio {
-            let leaves = sampler.clip_leaves(&t.audio, clip);
+        let audio = played_audio(p, t);
+        for clip in &audio {
+            let leaves = sampler.clip_leaves(&audio, clip);
             let Ok(job) = sampler.clip_job(clip, leaves) else { break 'tracks };
             if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
                 jobs.push(job);
@@ -477,6 +478,12 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
     for (i, prepared) in made {
         cache.prepared.insert(jobs[i].key.clone(), (g, Arc::new(prepared)));
     }
+}
+
+/// A track's audio clips as they play: each looped clip as its repetitions,
+/// so the engine plays what it would play from copies.
+fn played_audio(p: &Project, t: &aaw_model::Track) -> Vec<AudioClip> {
+    t.audio.iter().flat_map(|c| c.repetitions(p.session.tempo)).collect()
 }
 
 /// Loads and prepares pad audio through a cache.
@@ -783,8 +790,9 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
         voices.push(sampler.voice(&t.sound_pads()[&tr.pad], &tr)?);
     }
     if !t.audio.is_empty() {
-        for clip in &t.audio {
-            voices.push(sampler.clip_voice(&t.audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
+        let audio = played_audio(p, t);
+        for clip in &audio {
+            voices.push(sampler.clip_voice(&audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
         }
         // The renderer takes voices in the order they start.
         voices.sort_by_key(|v| v.start);

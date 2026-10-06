@@ -3,16 +3,18 @@
 
 mod common;
 
-use aaw_engine::program::{compile, Voice};
+use aaw_engine::program::{compile, Program, Voice};
+use aaw_engine::render::{Frame, Renderer};
 use common::write_sample;
 use std::path::Path;
+use std::sync::Arc;
 
 const RATE: usize = 48000;
 
-/// The voices of the track of a song at 120 BPM whose audio clips are `clips`.
+/// A song at `tempo` of one track whose audio clips are `clips`, compiled.
 /// `ramp` is two seconds whose every sample is its own time in seconds; `ones`
 /// is two seconds of full level, half as much on the right.
-fn voices(dir: &Path, tempo: f64, clips: &str) -> Result<Vec<Voice>, String> {
+fn program(dir: &Path, tempo: f64, clips: &str) -> Result<Program, String> {
     let ramp: Vec<[f32; 2]> = (0..2 * RATE).map(|i| [i as f32 / RATE as f32; 2]).collect();
     write_sample(dir, "ramp.wav", ramp, RATE as u32);
     write_sample(dir, "ones.wav", vec![[1.0, 0.5]; 2 * RATE], RATE as u32);
@@ -22,7 +24,23 @@ fn voices(dir: &Path, tempo: f64, clips: &str) -> Result<Vec<Voice>, String> {
     let path = dir.join("song.yaml");
     std::fs::write(&path, yaml).unwrap();
     let project = aaw_model::load(&path, true).map_err(|e| e.to_string())?;
-    Ok(compile(&project, dir)?.tracks[0].voices.to_vec())
+    compile(&project, dir)
+}
+
+/// The voices of the track of a song at `tempo` whose audio clips are `clips`.
+fn voices(dir: &Path, tempo: f64, clips: &str) -> Result<Vec<Voice>, String> {
+    Ok(program(dir, tempo, clips)?.tracks[0].voices.to_vec())
+}
+
+/// The mix of the song, rendered.
+fn rendered(dir: &Path, tempo: f64, clips: &str) -> Vec<Frame> {
+    let p = Arc::new(program(dir, tempo, clips).unwrap());
+    let mut r = Renderer::new(p.clone(), 0, 4096);
+    let mut out = vec![[0.0; 2]; p.total];
+    for chunk in out.chunks_mut(4096) {
+        r.render(chunk, |_, _, _| {});
+    }
+    out
 }
 
 fn near(a: f64, b: f64) -> bool {
@@ -117,6 +135,40 @@ fn a_clip_follows_the_tempo_at_its_own_pitch_or_not() {
     // At its own tempo both are the file as it is.
     let same = &voices(dir.path(), 120.0, &clip("preserve_pitch")).unwrap()[0];
     assert!(same.length == RATE * 3 / 2 && near(same.sample(RATE, 0), 1.0));
+}
+
+#[test]
+fn a_looped_clip_plays_as_copies_of_its_first_beats_and_wraps_without_a_click() {
+    let dir = tempfile::tempdir().unwrap();
+    // A second of the file, from 0.25 s, looped every two beats for seven at
+    // 120 BPM: three repetitions and a half.
+    let looped = "[{sample: ones, source_start_seconds: 0.25, loop_beats: 2, length_beats: 7}]";
+    let copies = "[{sample: ones, source_start_seconds: 0.25, source_end_seconds: 1.25}, {sample: ones, at: 2, source_start_seconds: 0.25, source_end_seconds: 1.25}, {sample: ones, at: 4, source_start_seconds: 0.25, source_end_seconds: 1.25}, {sample: ones, at: 6, source_start_seconds: 0.25, source_end_seconds: 0.75}]";
+    let (a, b) = (voices(dir.path(), 120.0, looped).unwrap(), voices(dir.path(), 120.0, copies).unwrap());
+    assert_eq!(a.len(), 4);
+    let shape = |v: &Voice| (v.start, v.length, v.attack, v.release, v.sample(100, 0).to_bits());
+    assert_eq!(a.iter().map(shape).collect::<Vec<_>>(), b.iter().map(shape).collect::<Vec<_>>());
+    assert_eq!(a.iter().map(|v| v.start).collect::<Vec<_>>(), [0, 48000, 96000, 144000]);
+    // The last repetition is cut off where the clip ends, and the others leave
+    // at the wrap, where the next starts, and fade out over the clip's 8 ms.
+    assert_eq!((a[3].length, a[0].length - a[0].release, a[0].release), (24000 + 384, 48000, 384));
+    assert_eq!(rendered(dir.path(), 120.0, looped), rendered(dir.path(), 120.0, copies));
+    // On a ramp, the wrap jumps back to the loop's start: with the clip's fades
+    // the mix moves a little a frame, without them it jumps (by a second of
+    // the ramp, at the new song's -6 dB).
+    let wrap = 48000;
+    let step = |clips: &str| {
+        let out = rendered(dir.path(), 120.0, clips);
+        out[wrap - 500..wrap + 500].windows(2).map(|w| (w[1][0] - w[0][0]).abs()).fold(0.0, f64::max)
+    };
+    assert!(step("[{sample: ramp, source_start_seconds: 0.25, loop_beats: 2, length_beats: 6}]") < 0.05);
+    assert!(step("[{sample: ramp, source_start_seconds: 0.25, loop_beats: 2, length_beats: 6, fade_in_ms: 0, fade_out_ms: 0}]") > 0.4);
+    // A loop of a file at another tempo is so many beats of the file and
+    // wraps on the song's beat: two beats at 100 BPM, 1.2 s, in a second at 120.
+    let stretched = voices(dir.path(), 120.0, "[{sample: ramp, source_bpm: 100, loop_beats: 2, length_beats: 6, fade_in_ms: 0, fade_out_ms: 0}]").unwrap();
+    assert_eq!(stretched.iter().map(|v| v.start).collect::<Vec<_>>(), [0, 48000, 96000]);
+    assert!(stretched.iter().all(|v| (v.length as i64 - 48000).abs() <= 2 && near(v.sample(0, 0), 0.0)));
+    assert!((stretched[1].sample(24000, 0) - 0.6).abs() < 0.01, "{}", stretched[1].sample(24000, 0));
 }
 
 #[test]

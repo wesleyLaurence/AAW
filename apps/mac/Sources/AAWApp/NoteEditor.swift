@@ -629,23 +629,32 @@ final class NoteEditor: NSView {
     }
 
     /// Before the clip's start and after its end, where notes are kept and
-    /// do not play: shaded, with a line at each edge.
+    /// do not play: shaded, with a line at each edge. A looped clip is shaded
+    /// from its loop's end too, where its notes play again from the start,
+    /// with a line there.
     private func drawOutside(_ clip: NoteClipView, top: CGFloat, bottom: CGFloat) {
         let height = bottom - top
         let start = layout.x(0)
         let end = layout.x(clip.lengthBeats)
         if layout.first < 0 { fill(CGRect(x: layout.x(layout.first), y: top, width: start - layout.x(layout.first), height: height), Theme.pastEnd) }
         fill(CGRect(x: end, y: top, width: layout.x(layout.last) - end, height: height), Theme.pastEnd)
+        if let every = clip.loopBeats, every < clip.lengthBeats {
+            let wrap = layout.x(every)
+            fill(CGRect(x: wrap, y: top, width: end - wrap, height: height), Theme.pastEnd.withAlphaComponent(0.5))
+            fill(CGRect(x: wrap.rounded() - 1, y: top, width: 2, height: height), color.withAlphaComponent(0.7))
+            fill(CGRect(x: wrap.rounded() - 1, y: top, width: 6, height: 2), color.withAlphaComponent(0.9))
+        }
         for x in [start, end] {
             fill(CGRect(x: x.rounded() - 1, y: top, width: 2, height: height), color.withAlphaComponent(0.7))
         }
     }
 
     /// A note's fill: its track's color, lighter, where it plays, and gray
-    /// outside the clip, where it is kept and does not; fainter the softer it is.
+    /// outside the clip or its loop, where it is kept and does not; fainter
+    /// the softer it is.
     private func shade(at: Double, velocity: Int, in clip: NoteClipView) -> NSColor {
         let lit = color.blended(withFraction: 0.25, of: .white) ?? color
-        let plays = at >= 0 && at < clip.lengthBeats
+        let plays = at >= 0 && at < min(clip.loopBeats ?? clip.lengthBeats, clip.lengthBeats)
         return (plays ? lit : Theme.gray(0.55)).withAlphaComponent(0.4 + 0.6 * CGFloat(velocity) / 127)
     }
 
@@ -823,6 +832,14 @@ struct NoteClipHeader: View {
                 } done: {
                     model.onFocus?()
                 }
+            }
+            row("Loop") {
+                TypedValue(text: clip.loopBeats.map(ValueScale.plain) ?? "off", unit: "beats", clears: true) { typed in
+                    model.edit(.clipLoop(clip: clip.key, beats: typed))
+                } done: {
+                    model.onFocus?()
+                }
+                .help("The clip's first so many beats play again and again until its end; off plays it once")
             }
             row("Grid") {
                 Picker("", selection: Binding(get: { model.noteGrid }, set: { model.noteGrid = $0 })) {

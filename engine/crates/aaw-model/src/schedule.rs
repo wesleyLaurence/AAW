@@ -20,24 +20,32 @@ pub struct NoteOn {
 
 /// A MIDI track's notes in the order they start. A note plays from its start
 /// to its end or its clip's, whichever is first; one that starts before its
-/// clip or at or after its end does not play.
+/// clip or at or after its end does not play. A looped clip's notes play in
+/// each repetition, cut at the loop's end, and in the last repetition only
+/// those that start before the clip ends.
 pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
     let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
     let mut notes = Vec::new();
     for clip in &midi.clips {
-        let (base, length) = (clip.at_exact(), clip.length_exact());
-        for n in clip.notes.iter().filter(|n| clip.plays(n)) {
-            let at = n.at_exact();
-            let until = (&at + n.duration_exact()).min(length.clone());
-            let beats = &until - &at;
-            notes.push(NoteOn {
-                pitch: n.pitch,
-                velocity: n.velocity,
-                start: frame(&(&base + &at), tempo, rate),
-                end: frame(&(&base + &until), tempo, rate),
-                at: &base + at,
-                beats,
-            });
+        let start = clip.at_exact();
+        for (from, plays) in clip.repetitions() {
+            let base = &start + &from;
+            for n in clip.notes.iter().filter(|n| clip.plays(n)) {
+                let at = n.at_exact();
+                if at >= plays {
+                    continue;
+                }
+                let until = (&at + n.duration_exact()).min(plays.clone());
+                let beats = &until - &at;
+                notes.push(NoteOn {
+                    pitch: n.pitch,
+                    velocity: n.velocity,
+                    start: frame(&(&base + &at), tempo, rate),
+                    end: frame(&(&base + &until), tempo, rate),
+                    at: &base + at,
+                    beats,
+                });
+            }
         }
     }
     notes.sort_by_key(|n| (n.start, n.pitch));

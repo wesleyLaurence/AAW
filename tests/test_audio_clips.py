@@ -37,7 +37,7 @@ def test_a_cut_makes_a_join_that_passes_every_check(song):
     cut = daw("audio", "cut", song, "song", "--from", 20, "--to", 28)
     assert cut["label"] == "Cut beats 20 to 28 from song and close the gap"
     assert load(song)["tracks"][0]["audio"] == [
-        {**clip, "gain_db": 0, "fade_curve": "equal_power", "source_bpm": None, "stretch": "repitch"}
+        {**clip, "gain_db": 0, "fade_curve": "equal_power", "source_bpm": None, "stretch": "repitch", "loop_beats": None, "length_beats": None}
         for clip in (
             {"sample": "song", "at": 4, "source_start_seconds": FIRST, "source_end_seconds": FIRST + 8, "lead_ms": 5, "fade_in_ms": 2, "fade_out_ms": 12},
             {"sample": "song", "at": 20, "source_start_seconds": FIRST + 12, "source_end_seconds": None, "lead_ms": 5, "fade_in_ms": 4, "fade_out_ms": 8},

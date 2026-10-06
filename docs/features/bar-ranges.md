@@ -64,6 +64,12 @@ holds exactly what plays in it:
   `Beat 6 falls inside a repeat of clip tracks.drums.clips.0, whose pattern
   beat is 4 beats long; a pattern clip is cut only between repeats`. Move the
   range to a repeat's edge, or split the pattern.
+- A looped note clip or audio clip ([looping-clips.md](looping-clips.md)) is
+  split only at a wrap, each half keeping the loop and, for a note clip, every
+  note. An edge inside a repetition refuses the command the same way, naming
+  the clip; move the range to a wrap or turn the loop off. After a delete, two
+  halves of one loop that meet again are one clip when the left is a whole
+  number of loops long.
 
 A copy reads the range without touching the source: the clips it is cut from
 stay whole, so a note held across the range's edge is not retriggered in the

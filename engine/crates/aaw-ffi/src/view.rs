@@ -364,6 +364,9 @@ pub struct NoteClipView {
     pub id: String,
     pub at: f64,
     pub length_beats: f64,
+    /// The loop's length when the clip loops: its first so many beats play
+    /// again at each wrap until its end.
+    pub loop_beats: Option<f64>,
     pub notes: Vec<NoteView>,
 }
 
@@ -397,8 +400,11 @@ pub struct AudioClipView {
     /// The beat its start plays on.
     pub at: f64,
     /// How long it plays before it leaves, in beats: to its end, or to its
-    /// file's.
+    /// file's; a looped clip's own length.
     pub length_beats: f64,
+    /// The loop's length when the clip loops: its first so many beats of the
+    /// file play again at each wrap until its end.
+    pub loop_beats: Option<f64>,
     /// How long it sounds after that while it fades out, in beats: its fade
     /// out, as far as its file goes. A clip is drawn to where its sound ends.
     pub tail_beats: f64,
@@ -1231,6 +1237,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             id: c.id.clone(),
                             at: float(c.at_exact()),
                             length_beats: float(c.length_exact()),
+                            loop_beats: c.loop_exact().map(&float),
                             notes: c
                                 .notes
                                 .iter()
@@ -1280,7 +1287,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             reference: aaw_host::tree::handle_text(key),
                             sample: c.sample.clone(),
                             at: float(c.at_exact()),
-                            length_beats: ((end - c.source_start_seconds) / per_beat).max(0.0),
+                            length_beats: c.length_exact().map_or_else(|| ((end - c.source_start_seconds) / per_beat).max(0.0), &float),
+                            loop_beats: c.loop_exact().map(&float),
                             tail_beats: tail_beats(c, p.session.tempo, (identity != 0).then_some(seconds)),
                             source_start_seconds: c.source_start_seconds,
                             source_end_seconds: end,

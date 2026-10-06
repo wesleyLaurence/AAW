@@ -112,7 +112,9 @@ Each is one step of the host's undo history, like any command.
   moved by hand.
 - A split of a clip that is stretched in time is two regions stretched apart, so
   it is close to, not exactly, the whole clip.
-- Clips do not loop, reverse or repeat.
+- Clips do not reverse. A clip loops with `loop_beats` and `length_beats`
+  ([looping-clips.md](looping-clips.md)); a looped clip's start is not trimmed
+  and it is split only at a wrap.
 
 Tests: the engine's place a clip's file on its beat to the frame, with a lead, at
 fractional beats and tempos; check both fade curves, the gain and a join; and the

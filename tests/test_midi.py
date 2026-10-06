@@ -201,3 +201,35 @@ def test_a_labeled_batch_through_a_host_is_one_undo_step(tmp_path, registry):
     finally:
         daw("close", path)
         host.wait(timeout=30)
+
+
+def test_a_clip_loops_its_first_beats_and_the_notes_past_the_loop_are_named(tmp_path):
+    path = phrase(tmp_path)
+    clip = "tracks.keys.clips.clip1"
+    looped = daw("clip", "loop", path, clip, 2)
+    assert looped["label"] == "Loop clip clip1 at 4 every 2 beats"
+    daw("clip", "resize", path, clip, 12)
+    song = load(path)["tracks"][0]["clips"][0]
+    assert (song["loop_beats"], song["length_beats"]) == (2, 12)
+    # The notes at and after beat 2 of the clip are kept and do not play.
+    listed = daw("note", "list", path, clip)["clips"][0]["notes"]
+    assert [n["id"] for n in listed if n.get("outside")] == ["n5", "n6"]
+    warnings = [w for w in daw("check", path)["warnings"] if w["code"] == "notes-outside-clip"]
+    assert [w["message"] for w in warnings] == ["keys.clip1: notes n5, n6 start at or after the loop's end and do not play"]
+    # The map shows one clip of three bars, and describe says what loops do.
+    assert "AAA" in daw("map", path, "--track", "keys")["map"][1]
+    assert "loop_beats" in daw("describe", "midi")["semantics"]["loops"]
+    assert "loop_beats" in daw("describe", "edit")["semantics"]["loops"]
+    off = daw("clip", "loop", path, clip, "off")
+    assert off["label"] == "Loop clip clip1 at 4 off"
+    assert "loop_beats" not in load(path)["tracks"][0]["clips"][0] or load(path)["tracks"][0]["clips"][0]["loop_beats"] is None
+    # An audio clip loops by the same field, and Python's timeline sees its repetitions.
+    from agent_daw.timeline import regions
+
+    sf.write(path.parent / "loop.wav", tone(110.0, seconds=4.0), SR)
+    daw("set", path, "samples.loop", json.dumps({"path": "loop.wav"}))
+    daw("track", "add", path, "drums")
+    daw("audio", "add", path, "drums", "loop", "--at", 0, "--source-end-seconds", 2)
+    daw("clip", "loop", path, "tracks.drums.audio.0", 2, "--length", 7)
+    found = regions(load(path), path.parent)["drums"]
+    assert [(r.start, round(r.length, 3)) for r in found] == [(0.0, 1.008), (1.0, 1.008), (2.0, 1.008), (3.0, 0.508)]

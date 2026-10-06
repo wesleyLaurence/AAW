@@ -258,13 +258,14 @@ fn notes_outside(p: &Project) -> Vec<Warning> {
         let sampler = midi.sampler();
         for clip in &midi.clips {
             let path = format!("tracks.{}.clips.{}", t.id, clip.id);
-            let length = clip.length_exact();
+            let until = clip.plays_until();
+            let edge = if clip.loop_beats.is_some() { "at or after the loop's end" } else { "at or after the clip's end" };
             let ids = |keep: &dyn Fn(&BigRational) -> bool| -> Vec<&str> {
                 clip.notes.iter().filter(|n| keep(&n.at_exact())).map(|n| n.id.as_str()).collect()
             };
             for (outside, place) in [
                 (ids(&|at| at.is_negative()), "before the clip's start"),
-                (ids(&|at| *at >= length), "at or after the clip's end"),
+                (ids(&|at| *at >= until), edge),
             ] {
                 if !outside.is_empty() {
                     out.push(Warning::new(
@@ -399,13 +400,18 @@ fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
         let start = c.at_exact();
         let until = c.source_end_seconds.or_else(|| seconds.get(&c.sample).copied());
         let bpm = c.source_bpm.unwrap_or(p.session.tempo);
+        let end = match c.length_exact() {
+            Some(length) => Some(f(&(&start + length))),
+            None => until.map(|u| f(&start) + (u - c.source_start_seconds).max(0.0) * bpm / 60.0),
+        };
+        let looped = c.loop_exact().map(|l| format!(" every {}", fraction_str(&l))).unwrap_or_default();
         out.push(Span {
             path: format!("tracks.{}.audio.{i}", t.id),
             index: i,
             audio: true,
-            end: until.map(|u| f(&start) + (u - c.source_start_seconds).max(0.0) * bpm / 60.0),
+            end,
             start,
-            music: format!("audio {} {}", c.sample, float_repr(c.source_start_seconds)),
+            music: format!("audio {} {}{looped}", c.sample, float_repr(c.source_start_seconds)),
         });
     }
     if let Some(midi) = &t.midi {
@@ -418,13 +424,14 @@ fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
                 .map(|n| format!("{}:{}:{}:{}", fraction_str(&n.at_exact()), n.pitch, fraction_str(&n.duration_exact()), n.velocity))
                 .collect();
             notes.sort();
+            let looped = c.loop_exact().map(|l| format!(" every {}", fraction_str(&l))).unwrap_or_default();
             out.push(Span {
                 path: format!("tracks.{}.clips.{}", t.id, c.id),
                 index: i,
                 audio: false,
                 end: Some(f(&(&start + c.length_exact()))),
                 start,
-                music: format!("notes {}", notes.join(",")),
+                music: format!("notes{looped} {}", notes.join(",")),
             });
         }
     }

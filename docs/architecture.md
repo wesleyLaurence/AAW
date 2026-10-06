@@ -154,8 +154,11 @@ An import refuses a file the engine cannot play (unreadable, empty, or more than
 two channels), and `daw check` warns of a sample like that in a song.
 
 Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
-`audio` (audio clips: parts of a sample file on the timeline; see
-[audio-clips.md](features/audio-clips.md)), `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
+`audio` (audio clips: parts of a sample file on the timeline, see
+[audio-clips.md](features/audio-clips.md); one with `loop_beats` and
+`length_beats` plays its first beats again at each wrap until its length, each
+repetition a copy with the clip's fades, see
+[looping-clips.md](features/looping-clips.md)), `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
 one per return.
 
 Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute`,
@@ -183,13 +186,19 @@ for the whole song and holds its first and last values outside its points. See
 MIDI track: `type: midi`, with `id`, `gain_db`, `pan`, `mute`, `solo`,
 `effects`, `sends` and `automation` as any track, an `instrument`, and note
 clips under `clips`; no pads, pattern clips or audio clips. A note clip is
-`{id, at, length_beats, notes}` and owns its notes, each `{id, pitch, at,
+`{id, at, length_beats, loop_beats, notes}` and owns its notes, each `{id, pitch, at,
 duration, velocity}` with `pitch` a MIDI number (a name such as `C4` is taken
 and stored as 60) and `at` from the clip's start. A clip's ID is unique in the
 song and a note's in its clip; one that arrives without an ID is given the
 next `clipN` or `nN`. A note sounds until its end or its clip's, and one that
 starts before its clip, at a negative `at`, or at or after its end is kept and
-does not play: a clip trimmed from either edge keeps the notes it passes. `instrument` is
+does not play: a clip trimmed from either edge keeps the notes it passes. With
+`loop_beats`, the notes of the clip's first so many beats play again and again
+from its start until its end, the last repetition cut off there, a note held
+across the loop's end cut there and one at or after it kept and not played;
+the schedule unrolls the loop, so the engine plays what copies would play. An
+audio clip loops by the same field, with `length_beats` for how long; see
+[looping-clips.md](features/looping-clips.md). `instrument` is
 null, which plays nothing, `{sampler: {pads, map}}` or `{synth: {...}}`: pads as below, and map
 entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
 not overlap; a pitched entry repitches its pad from its sample's root note, or
