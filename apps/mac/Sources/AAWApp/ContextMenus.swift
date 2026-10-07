@@ -15,6 +15,12 @@ public enum ContextMenu {
         case edit, cut, copy, duplicate, split, loop, delete
     }
 
+    /// What an item of an effect's menu does, to the effect that was clicked
+    /// in the device panel.
+    public enum EffectAction: Equatable {
+        case cut, copy, paste, duplicate, bypass, delete
+    }
+
     /// One line of a menu: a separator when it has no action.
     public struct Item<Action: Equatable>: Equatable {
         public var title: String
@@ -71,6 +77,22 @@ public enum ContextMenu {
             Item(title: "Split at Start Position", action: .split, enabled: canSplit, key: "e"),
             .separator,
             Item(title: "Loop Selection", action: .loop, key: "l", command: false),
+            .separator,
+            Item(title: "Delete", action: .delete, key: "\u{8}", command: false),
+        ]
+    }
+
+    /// An effect's menu, on its title in the device panel: what the Edit menu
+    /// does to it, Paste after it when an effect was copied, its bypass and
+    /// Delete. `copied` is the kind of the effect on the clipboard, if any.
+    public static func effect(bypassed: Bool, copied: String?) -> [Item<EffectAction>] {
+        [
+            Item(title: "Cut", action: .cut, key: "x"),
+            Item(title: "Copy", action: .copy, key: "c"),
+            Item(title: copied.map { "Paste \($0) After" } ?? "Paste After", action: .paste, enabled: copied != nil, key: "v"),
+            Item(title: "Duplicate", action: .duplicate, key: "d"),
+            .separator,
+            Item(title: bypassed ? "Enable" : "Bypass", action: .bypass),
             .separator,
             Item(title: "Delete", action: .delete, key: "\u{8}", command: false),
         ]

@@ -351,6 +351,12 @@ impl Song {
         Ok(edits::copied(doc.as_ref().ok_or_else(closed)?, &clips, &self.files, &directory)?)
     }
 
+    /// What Copy takes of an effect, for `Edit::EffectPaste`.
+    pub fn copy_effect(&self, effect: u64) -> Result<String, SongError> {
+        let doc = locked(&self.doc);
+        Ok(edits::copied_effect(doc.as_ref().ok_or_else(closed)?, effect)?)
+    }
+
     /// Writes the notes of a note clip that play as a MIDI file at `path`,
     /// and returns how many it wrote.
     pub fn export_midi_clip(&self, clip: u64, path: String) -> Result<u32, SongError> {

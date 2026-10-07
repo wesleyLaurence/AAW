@@ -277,6 +277,19 @@ pub enum Edit {
     /// its required fields at a place to start. The effect is what the edit
     /// makes.
     EffectAdd { row: Row, kind: String, index: Option<u32> },
+    /// Adds a copy of an effect right after it in its chain, with every
+    /// field it has and no id, as ⌘D does. The copy is what the edit makes.
+    /// Only an effect of a track, a return or the master; a Synth's own
+    /// effects are not copied.
+    EffectDuplicate { effect: u64 },
+    /// Adds a copy of an effect to a row's chain, at `index` or its end, as an
+    /// Option-drag onto a header does. The copy keeps the effect's id unless
+    /// that chain has it already. The copy is what the edit makes.
+    EffectCopy { effect: u64, row: Row, index: Option<u32> },
+    /// Adds the effect `copied` took, at `index` of a row's chain or its end,
+    /// as `EffectCopy` does; it works after the effect is changed or gone.
+    /// The effect is what the edit makes.
+    EffectPaste { copied: String, row: Row, index: Option<u32> },
     EffectRemove { effect: u64 },
     /// Moves an effect within its chain.
     EffectMove { effect: u64, index: u32 },
@@ -1799,6 +1812,25 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             Ok(vec![command])
         }
+        Edit::EffectDuplicate { effect } => {
+            let tree = doc.tree();
+            let (mut fields, row, index) = effect_taken(&tree, *effect)?;
+            fields.as_object_mut().expect("an object").remove("id");
+            effect_copy(project, &tree, fields, &row, Some(index as u32 + 1), "Duplicate")
+        }
+        Edit::EffectCopy { effect, row, index } => {
+            let tree = doc.tree();
+            let (fields, _, _) = effect_taken(&tree, *effect)?;
+            effect_copy(project, &tree, fields, row, *index, "Copy")
+        }
+        Edit::EffectPaste { copied, row, index } => {
+            let tree = doc.tree();
+            let fields: Json = serde_json::from_str(copied).map_err(|e| e.to_string())?;
+            if !fields.is_object() {
+                return Err("Nothing was copied".into());
+            }
+            effect_copy(project, &tree, fields, row, *index, "Paste")
+        }
         Edit::EffectRemove { effect } => Ok(vec![json!({"op": "effect.remove", "effect": handle_text(*effect)})]),
         Edit::EffectMove { effect, index } => Ok(vec![json!({"op": "effect.move", "effect": handle_text(*effect), "index": index})]),
         Edit::EffectBypass { effect, on } => Ok(vec![json!({"op": "effect.bypass", "effect": handle_text(*effect), "bypass": on})]),
@@ -2303,6 +2335,62 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Ok(batch(commands, label))
         }
     }
+}
+
+/// An effect's fields as Copy takes them, as JSON, with the row it is on and
+/// its place in the chain. Only an effect of a track, a return or the
+/// master: a Synth's own effects live in its patch.
+fn effect_taken(tree: &Node, effect: u64) -> Result<(Json, Row, usize)> {
+    let loc = tree::find(tree, effect).ok_or("The effect is no longer in the song")?;
+    let elsewhere = || "Only an effect on a track, a return or the master is copied; a Synth's own effects stay in its patch".to_string();
+    let (row, index) = match loc.as_slice() {
+        [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => {
+            let key = items(tree, list).get(*i).ok_or_else(elsewhere)?.handle;
+            let row = match list.as_str() {
+                "tracks" => Row::Track { key },
+                "returns" => Row::Return { key },
+                _ => return Err(elsewhere()),
+            };
+            (row, *j)
+        }
+        [Step::Key(m), Step::Key(l), Step::Index(j)] if m == "master" && l == "effects" => (Row::Master, *j),
+        _ => return Err(elsewhere()),
+    };
+    let mut fields = node_json(tree::get(tree, &loc));
+    fields.as_object_mut().ok_or("An effect is an object")?.retain(|_, value| !value.is_null());
+    Ok((fields, row, index))
+}
+
+/// The command that adds an effect with `fields` to a row's chain, at
+/// `index` or its end, as a copy: its id goes when the chain has it already.
+/// Named for `verb`, as "Duplicate compressor on tracks.drums".
+fn effect_copy(project: &Project, tree: &Node, mut fields: Json, row: &Row, index: Option<u32>, verb: &str) -> Result<Vec<Json>> {
+    let chain = owner(project, tree, row)?.effects();
+    let map = fields.as_object_mut().expect("an object");
+    if let Some(id) = map.get("id").and_then(Json::as_str) {
+        if chain.iter().any(|e| e.id() == Some(id)) {
+            map.remove("id");
+        }
+    }
+    let kind = map.get("type").and_then(Json::as_str).unwrap_or("effect").to_string();
+    map.insert("op".into(), json!("effect.add"));
+    map.insert("owner".into(), json!(owner_path(row)));
+    if let Some(i) = index {
+        map.insert("index".into(), json!(i.min(chain.len() as u32)));
+    }
+    let place = match row {
+        Row::Master => "master".to_string(),
+        Row::Track { key } | Row::Return { key } => tree::path_text(tree, &tree::find(tree, *key).ok_or("The row is no longer in the song")?),
+    };
+    let on = if verb == "Copy" { "to" } else { "on" };
+    Ok(batch(vec![fields], format!("{verb} {kind} {on} {place}")))
+}
+
+/// What Copy takes of an effect, for `Edit::EffectPaste`: its fields as
+/// JSON, so that a paste adds an effect like it after it is changed or gone.
+pub fn copied_effect(doc: &Doc, effect: u64) -> Result<String> {
+    let (fields, _, _) = effect_taken(&doc.tree(), effect)?;
+    Ok(fields.to_string())
 }
 
 /// What Copy takes of clips, for `Edit::ClipsPaste`: each clip's track,

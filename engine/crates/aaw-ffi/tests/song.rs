@@ -712,6 +712,90 @@ fn the_person_builds_a_chain_and_turns_its_knobs() {
 }
 
 #[test]
+fn an_effect_is_duplicated_copied_and_pasted() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let drums = Row::Track { key: start.tracks[0].key };
+    let perc = Row::Track { key: start.tracks[1].key };
+    let plate = Row::Return { key: start.returns[0].key };
+    let kinds = |a: &aaw_ffi::Arrangement, track: usize| a.tracks[track].effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>();
+
+    // A compressor set up on the drums, keyed from the percussion and named.
+    let compressor = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "compressor".into(), index: None }, None).unwrap()[0];
+    update(&seen);
+    song.edit(Edit::EffectSet { effect: compressor, field: "threshold_db".into(), value: number(-24.0) }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::EffectSet { effect: compressor, field: "sidechain".into(), value: text("perc") }, None).unwrap();
+    update(&seen);
+    agent(&path, json!({"op": "set", "path": format!("@{compressor}.id"), "value": "duck"}));
+    update(&seen);
+
+    // ⌘D: the copy is right after it, with its settings and no id, and is what the edit made.
+    let made = song.edit(Edit::EffectDuplicate { effect: compressor }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Duplicate compressor on tracks.drums"));
+    assert_eq!(kinds(&u.arrangement, 0), ["compressor", "compressor"]);
+    let copy = &u.arrangement.tracks[0].effects[1];
+    assert_eq!(made, [copy.key]);
+    assert_eq!((copy.id.as_deref(), copy.bypass), (None, false));
+    assert_eq!(field(copy, "threshold_db").value, number(-24.0));
+    assert_eq!(field(copy, "sidechain").value, text("perc"));
+    assert_eq!(u.arrangement.tracks[0].effects[0].id.as_deref(), Some("duck"));
+
+    // An Option-drag onto a return's header: the copy keeps its id where it is free.
+    let made = song.edit(Edit::EffectCopy { effect: compressor, row: plate.clone(), index: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Copy compressor to returns.plate");
+    let on_plate = u.arrangement.returns[0].effects.last().unwrap();
+    assert_eq!((made.as_slice(), on_plate.id.as_deref()), ([on_plate.key].as_slice(), Some("duck")));
+    assert_eq!(field(on_plate, "threshold_db").value, number(-24.0));
+    // At a place in the chain; the id is taken there now, so the copy has none.
+    song.edit(Edit::EffectCopy { effect: compressor, row: plate.clone(), index: Some(0) }, None).unwrap();
+    let u = update(&seen);
+    let first = &u.arrangement.returns[0].effects[0];
+    assert_eq!((first.kind.as_str(), first.id.as_deref()), ("compressor", None));
+    // Onto the track that keys it, the host refuses the copy and says why.
+    let before = kinds(&song.arrangement(), 1);
+    let e = song.edit(Edit::EffectCopy { effect: compressor, row: perc.clone(), index: None }, None).unwrap_err().to_string();
+    assert!(e.contains("sidechain"), "{e}");
+    assert_eq!(kinds(&song.arrangement(), 1), before);
+
+    // ⌘C then ⌘V: what Copy took is pasted after the effect has changed and after it is gone.
+    let copied = song.copy_effect(compressor).unwrap();
+    song.edit(Edit::EffectSet { effect: compressor, field: "threshold_db".into(), value: number(-6.0) }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::EffectRemove { effect: compressor }, None).unwrap();
+    update(&seen);
+    let made = song.edit(Edit::EffectPaste { copied: copied.clone(), row: drums.clone(), index: Some(0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Paste compressor on tracks.drums");
+    let pasted = &u.arrangement.tracks[0].effects[0];
+    assert_eq!(made, [pasted.key]);
+    assert_eq!((pasted.id.as_deref(), field(pasted, "threshold_db").value.clone()), (Some("duck"), number(-24.0)));
+    // An index past the chain's end is its end.
+    song.edit(Edit::EffectPaste { copied, row: drums.clone(), index: Some(9) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(kinds(&u.arrangement, 0), ["compressor", "compressor", "compressor"]);
+    assert_eq!(u.arrangement.tracks[0].effects[2].id, None);
+    assert_eq!(song.edit(Edit::EffectPaste { copied: "[]".into(), row: drums.clone(), index: None }, None).unwrap_err().to_string(), "Nothing was copied");
+
+    // A Synth's own effects are not copied this way, and an undo takes a paste back whole.
+    let synth = song.edit(Edit::SynthAdd { track: None, patch: None }, None).unwrap()[0];
+    update(&seen);
+    song.edit(Edit::SynthEffectAdd { track: synth, kind: "chorus".into(), index: None }, None).unwrap();
+    let u = update(&seen);
+    let chorus = u.arrangement.tracks.iter().find(|t| t.key == synth).unwrap().synth.as_ref().unwrap().effects[0].key;
+    let e = song.edit(Edit::EffectDuplicate { effect: chorus }, None).unwrap_err().to_string();
+    assert!(e.contains("Synth"), "{e}");
+    song.undo().unwrap();
+    song.undo().unwrap();
+    song.undo().unwrap();
+    assert_eq!(kinds(&song.arrangement(), 0), ["compressor", "compressor"]);
+    song.close();
+}
+
+#[test]
 fn lanes_and_points_are_edited_by_key() {
     let (_dir, path, song, seen) = open();
     transport(&seen);

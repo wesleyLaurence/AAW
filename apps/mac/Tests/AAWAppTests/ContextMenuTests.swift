@@ -57,4 +57,16 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(items.first { $0.action == .loop }?.key, "l")
         XCTAssertEqual(items.first { $0.action == .loop }?.command, false)
     }
+
+    func testAnEffectsMenuPastesOnlyWhatWasCopiedAndNamesItsBypass() {
+        let items = ContextMenu.effect(bypassed: false, copied: nil)
+        XCTAssertEqual(actions(items), [.cut, .copy, .paste, .duplicate, nil, .bypass, nil, .delete])
+        XCTAssertEqual(titles(items), ["Cut", "Copy", "Paste After", "Duplicate", "Bypass", "Delete"])
+        XCTAssertEqual(items.first { $0.action == .paste }?.enabled, false)
+        XCTAssertEqual(items.first { $0.action == .duplicate }?.key, "d")
+        XCTAssertEqual(items.first { $0.action == .delete }?.command, false)
+        let copied = ContextMenu.effect(bypassed: true, copied: "Compressor")
+        XCTAssertEqual(titles(copied), ["Cut", "Copy", "Paste Compressor After", "Duplicate", "Enable", "Delete"])
+        XCTAssertEqual(copied.first { $0.action == .paste }?.enabled, true)
+    }
 }

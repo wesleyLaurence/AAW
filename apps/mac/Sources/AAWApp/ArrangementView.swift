@@ -391,7 +391,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onWaveforms = { [weak self] in self?.takeWaveforms() }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
-            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType)]
+            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
                 + (DeviceChain.kinds + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
@@ -1776,7 +1776,25 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return (Browser.instruments.contains(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
     }
 
+    /// The effect being dragged by its title out of the device panel.
+    private func draggedEffect(of sender: NSDraggingInfo) -> UInt64? {
+        let board = sender.draggingPasteboard
+        guard board.types?.contains(NSPasteboard.PasteboardType(DeviceChain.effectType)) == true else { return nil }
+        return board.data(forType: NSPasteboard.PasteboardType(DeviceChain.effectType))
+            .flatMap { String(data: $0, encoding: .utf8) }.flatMap(UInt64.init)
+    }
+
+    /// The row whose header is at a point, where a dragged effect is copied
+    /// to when Option is held: any track, return or the master.
+    private func effectLanding(at point: CGPoint) -> RowID? {
+        guard NSEvent.modifierFlags.contains(.option), point.x < TimelineLayout.headerWidth, point.y >= TimelineLayout.rulerHeight else { return nil }
+        return row(atY: point.y)?.id
+    }
+
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        if draggedEffect(of: sender) != nil {
+            return effectLanding(at: convert(sender.draggingLocation, from: nil)) == nil ? [] : .copy
+        }
         if let (kind, _) = device(of: sender) {
             return deviceLanding(kind, at: convert(sender.draggingLocation, from: nil)).valid ? .copy : []
         }
@@ -1798,6 +1816,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        if let effect = draggedEffect(of: sender) {
+            guard let row = effectLanding(at: convert(sender.draggingLocation, from: nil)) else { return false }
+            model.copyEffect(effect, to: row)
+            return true
+        }
         if let (kind, patch) = device(of: sender) {
             let landing = deviceLanding(kind, at: convert(sender.draggingLocation, from: nil))
             guard landing.valid else { return false }
