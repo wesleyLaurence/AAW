@@ -445,12 +445,14 @@ pub fn note_name(midi: i32) -> String {
     aaw_model::rules::note_name(midi.into()).unwrap_or_default()
 }
 
-/// The beats a note clip made of the MIDI file at `path` would last, for
-/// the outline of a drop; None when the file is not one that is read.
+/// The beats a note clip made of the MIDI file at `path` would last in a
+/// song whose time signature is `time_signature`, for the outline of a drop;
+/// None when the file is not one that is read.
 #[uniffi::export]
-pub fn midi_file_beats(path: String) -> Option<f64> {
+pub fn midi_file_beats(path: String, time_signature: String) -> Option<f64> {
     let part = aaw_host::midi_file::read(&std::fs::read(path).ok()?).ok()?;
-    num_traits::ToPrimitive::to_f64(&part.length())
+    let meter = aaw_model::Meter::parse(&time_signature).unwrap_or_default();
+    num_traits::ToPrimitive::to_f64(&part.length(meter))
 }
 
 /// The host's reason for refusing a command, as a person reads it: the

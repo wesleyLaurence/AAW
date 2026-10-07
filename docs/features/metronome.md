@@ -16,8 +16,9 @@ The person needs to hear the beat while starting a song and setting its tempo.
 The host owns a per-open-project transport setting, outside the song and undo
 history. The app sends a transport command and follows the host's reported state.
 The audio player mixes a short synthesized click after the song's processing,
-using the audible timeline and current tempo, with a higher click on each 4/4
-downbeat. The setting survives stop, locate, looping and live edits. It does not
+using the audible timeline and current tempo, on the note the time signature
+counts, with a higher click on the first beat of each bar
+([time signature](time-signature.md)). The setting survives stop, locate, looping and live edits. It does not
 start playback itself. The offline renderer and stems never include the click.
 Toggling fades its level over 5 ms; the audio callback allocates nothing.
 

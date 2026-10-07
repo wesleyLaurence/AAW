@@ -90,3 +90,21 @@ def test_the_length_is_fitted_to_where_the_sound_ends(song):
     daw("set", song, "patterns.b.length_beats", 16)
     code, report = cli("timeline", song, "--fit")
     assert report["fitted"]["length_beats"] == 16 and "a clip reaches beat 16" in report["fitted"]["held_by_clips"]
+
+
+def test_positions_count_the_time_signatures_beats():
+    from fractions import Fraction
+
+    from agent_daw.model import meter
+    from agent_daw.timeline import position
+
+    assert meter({"time_signature": "3/4"}) == (3, 1)
+    assert meter({"time_signature": "6/8"}) == (3, Fraction(1, 2))
+    assert meter({}) == (4, 1)
+    waltz = position(5, 120, meter({"time_signature": "3/4"}))
+    assert (waltz["bar"], waltz["beat"]) == (2, 3)
+    six_eight = position(3.5, 120, meter({"time_signature": "6/8"}))
+    assert (six_eight["bar"], six_eight["beat"]) == (2, 2)
+    seven_eight = position(7, 120, meter({"time_signature": "7/8"}))
+    assert (seven_eight["bar"], seven_eight["beat"]) == (3, 1)
+    assert position(5, 120)["bar"] == 2

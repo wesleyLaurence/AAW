@@ -121,8 +121,8 @@ type 1 file's tempo track has no notes and is not a part. The notes become one
 note clip at `--at`, 0 unless given, on `--track`, which must be a MIDI track,
 or else on a new MIDI track with no instrument named after the file. The clip
 starts at the file's beat 0, so a part that begins after a rest keeps it, and
-lasts to the end of its last note in whole bars. The song grows to hold it, to
-the end of that bar. It is one command, `midi.import`, and one undo step. In
+lasts to the end of its last note in whole bars of the song's time signature.
+The song grows to hold it, to the end of that bar. It is one command, `midi.import`, and one undo step. In
 the app a `.mid` dropped on a MIDI track's lane makes its clip there, and one
 dropped anywhere else on the timeline goes on a new MIDI track; the outline
 while it is dragged is the clip's length.
@@ -152,7 +152,7 @@ notes; and a file that is not a MIDI file or ends in the middle of an event.
 **Export.** `daw midi export SONG CLIP FILE`, and File › Export MIDI Clip…
 (⇧⌘E) with one note clip selected, write the notes that play as a type 0 file
 of one track at 960 ticks a beat, named after the track, with the song's tempo
-and four beats to a bar, on channel 1. A note outside its clip is left out and
+and time signature, on channel 1. A note outside its clip is left out and
 one that lasts past its end is shortened to it. 960 ticks hold triplets and
 places such as 2.025 exactly; a place that is not a whole number of ticks is
 rounded to the nearest, and the reply names those notes. At one tick, notes end

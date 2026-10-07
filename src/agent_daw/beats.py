@@ -4,9 +4,9 @@ A song made to a click has one tempo, so the map is first a steady grid: a tempo
 and a first beat, found from the onset envelope of the whole file and then fitted
 to the transients near its beats, which places it to a fraction of a millisecond.
 How far the song's beats stray from that grid is measured, and a song that leaves
-it is followed beat by beat. Which beat of four is the downbeat is scored from what
-tends to happen there and reported with its alternatives, since it is the least
-certain part. 4/4 is assumed.
+it is followed beat by beat. Which beat of the bar is the downbeat is scored from
+what tends to happen there and reported with its alternatives, since it is the
+least certain part. A bar is four beats unless a meter is given.
 
 Every value is an estimate from decoded audio; nothing here listens.
 """
@@ -40,7 +40,7 @@ STEADY_FRAMES = 3
 STEADY_SHARE = 0.8
 AGREE_MS = 10.0  # a transient this near a grid beat is on it
 WINDOW = 8  # beats in a window when following a tempo that drifts
-PHRASE = 16  # beats either side of a downbeat compared for a phrase change
+PHRASE_BARS = 4  # bars either side of a downbeat compared for a phrase change
 
 
 def read(path: Path):
@@ -421,25 +421,40 @@ def track(mono, sr, envelope, bpm=None):
     return times, (phase + period * index) / fps + late, found
 
 
-def downbeat_odds(cues, count):
-    """For each of the four places a bar could start, the odds that it does.
+def downbeat_odds(cues, count, per_bar=4):
+    """For each of the `per_bar` places a bar could start, the odds that it does.
 
     Each cue is something that tends to happen on a downbeat. A place's score is
     the sum, over the cues, of the mean of the cue's standard values on its beats;
     such a sum's chance spread shrinks with the number of beats, which the odds
     allow for.
     """
-    place = np.arange(count) % 4
+    place = np.arange(count) % per_bar
     scores = np.array(
-        [sum(float(_standard(c)[place == p].mean()) for c in cues) for p in range(4)]
+        [sum(float(_standard(c)[place == p].mean()) for c in cues) for p in range(per_bar)]
     )
-    odds = np.exp((scores - scores.max()) * np.sqrt(count / 4) / 2)
+    odds = np.exp((scores - scores.max()) * np.sqrt(count / per_bar) / 2)
     return odds / odds.sum()
 
 
-def measure(path: Path, bpm=None, downbeat=None) -> dict:
+def bar_of(meter) -> int:
+    """How many of the map's beats make a bar, from a time signature such as 3/4:
+    its beats. The map's beat is the pulse it finds, so a 6/8 song whose pulse is
+    found as the dotted quarter is counted as 2/4."""
+    above, slash, below = str(meter).partition("/")
+    if not slash or not above.strip().isdigit() or not below.strip().isdigit():
+        raise ValueError(f"meter is a time signature such as 3/4 or 6/8, not {meter}")
+    beats = int(above)
+    if not 1 <= beats <= 32:
+        raise ValueError("meter has 1 to 32 beats a bar")
+    return beats
+
+
+def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
     """The beat map of a file. `bpm` settles half or double time; `downbeat` is a
-    time in seconds whose nearest beat is taken as a downbeat."""
+    time in seconds whose nearest beat is taken as a downbeat; `meter` is the
+    song's time signature, whose beats make a bar, 4/4 unless given."""
+    per_bar = bar_of(meter or "4/4")
     mono, sr = read(path)
     duration = len(mono) / sr
     peak = float(np.abs(mono).max())
@@ -456,7 +471,7 @@ def measure(path: Path, bpm=None, downbeat=None) -> dict:
     times, coarse, tempo = track(mono, sr, envelope, bpm)
     inside = (times >= first_sound - 0.02) & (times < min(last_sound, duration))
     times, coarse = times[inside], coarse[inside]
-    if len(times) < 8:
+    if len(times) < max(8, 2 * per_bar):
         raise ValueError(f"Too few beats for a beat map: {path}")
 
     # Each beat's strength: the envelope's peak near it, against the strongest.
@@ -477,20 +492,21 @@ def measure(path: Path, bpm=None, downbeat=None) -> dict:
             _change(notes, 2, _cosine_distance)[:-1],  # a change of harmony
             _change(notes, 4, _cosine_distance)[:-1],
             _change(levels, 4, _level_distance)[:-1],  # a change of sound
-            _change(levels, PHRASE, _level_distance)[:-1],
+            _change(levels, PHRASE_BARS * per_bar, _level_distance)[:-1],
         ],
         len(times),
+        per_bar,
     )
     chosen = int(np.argmax(odds))
     if downbeat is not None:
-        chosen = int(np.argmin(np.abs(times - downbeat))) % 4
+        chosen = int(np.argmin(np.abs(times - downbeat))) % per_bar
     candidates = [
         {
             "first_downbeat_seconds": round(float(times[p]), 6),
             "confidence": round(float(odds[p]), 3),
             "chosen": p == chosen,
         }
-        for p in sorted(range(4), key=lambda p: -odds[p])
+        for p in sorted(range(per_bar), key=lambda p: -odds[p])
     ]
 
     # Phrases: downbeats where what follows differs most from what came before,
@@ -498,9 +514,9 @@ def measure(path: Path, bpm=None, downbeat=None) -> dict:
     # The bands are wide here, so a bass line that moves is not a change of parts.
     wide = np.add.reduceat(by_beat, np.arange(0, by_beat.shape[1], 4), axis=1)
     parts = 10 * np.log10(wide + floor)
-    downbeats = np.arange(chosen, len(times), 4)
+    downbeats = np.arange(chosen, len(times), per_bar)
     change = np.zeros(len(times))
-    for span in (PHRASE, 8, 4):
+    for span in (PHRASE_BARS * per_bar, 2 * per_bar, per_bar):
         differs = _change(parts, span, _level_distance)[:-1]
         change += differs / max(float(differs[downbeats].max()), 1e-30)
     change = np.round(change / max(float(change[downbeats].max()), 1e-30), 3)
@@ -513,10 +529,10 @@ def measure(path: Path, bpm=None, downbeat=None) -> dict:
     beats = [
         {
             "seconds": round(float(t), 6),
-            "bar": int((i - chosen) // 4 + 1),
-            "beat": int((i - chosen) % 4 + 1),
+            "bar": int((i - chosen) // per_bar + 1),
+            "beat": int((i - chosen) % per_bar + 1),
             "strength": round(float(s), 3),
-            **({"change": float(change[i])} if (i - chosen) % 4 == 0 else {}),
+            **({"change": float(change[i])} if (i - chosen) % per_bar == 0 else {}),
             **({"phrase_start": True} if i in phrases else {}),
         }
         for i, (t, s) in enumerate(zip(times, strength))
@@ -527,6 +543,8 @@ def measure(path: Path, bpm=None, downbeat=None) -> dict:
         "duration": duration,
         "sample_rate": sr,
         "tempo": tempo,
+        "meter": meter or "4/4",
+        "beats_per_bar": per_bar,
         "first_beat_seconds": beats[0]["seconds"],
         "first_downbeat_seconds": beats[chosen]["seconds"],
         "downbeat": {
@@ -539,7 +557,7 @@ def measure(path: Path, bpm=None, downbeat=None) -> dict:
         ],
         "beat_count": len(beats),
         "beats": beats,
-        "assumes": "4/4; bars are counted from the first downbeat, and beats before it are bar 0",
+        "assumes": f"{per_bar} beats a bar; bars are counted from the first downbeat, and beats before it are bar 0",
         "source": "measured from decoded audio (mono sum); estimates, not ground truth",
     }
 

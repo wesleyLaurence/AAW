@@ -7,7 +7,8 @@ capabilities; developing them follows [development.md](development.md).
 
 A command's PROJECT is a project folder or its `song.yaml`. Use the supplied
 path, or `uv run daw projects` to find open projects, the front window first.
-For a new song, `uv run daw init projects/NAME` creates an empty project;
+For a new song, `uv run daw init projects/NAME` creates an empty project, in
+4/4 unless `--time-signature 3/4` says otherwise;
 `uv run daw describe start` is the dozen commands from there to a rendered song,
 and the quickest way to learn the verbs.
 Before continuing a song, read its local `HANDOFF.md` if present.

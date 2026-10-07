@@ -111,6 +111,10 @@ def parser():
     )
     beats.add_argument("--downbeat", help="A time whose nearest beat is a downbeat")
     beats.add_argument(
+        "--meter",
+        help="The song's time signature, such as 3/4; its beats make a bar (4/4 unless given)",
+    )
+    beats.add_argument(
         "--refresh", action="store_true", help="Measure again, without corrections"
     )
     beats.add_argument(
@@ -313,7 +317,9 @@ def beat_map(a, source):
         raise ValueError("window must be >0, and seconds >0 and <=60")
     downbeat = None if a.downbeat is None else beats.seconds(a.downbeat)
     at = None if a.near is None else beats.seconds(a.near)
-    report = library.beat_map(a.db, source, a.bpm, downbeat, a.refresh)
+    if a.meter is not None:
+        beats.bar_of(a.meter)
+    report = library.beat_map(a.db, source, a.bpm, downbeat, a.refresh, a.meter)
     rows = report.pop("beats")
     if a.all:
         report["beats"] = rows

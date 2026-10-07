@@ -153,11 +153,14 @@ final class PianoRollLayoutTests: XCTestCase {
     }
 
     func testGridsAreNamedAsNoteValues() {
-        let names = PianoRollLayout.grids.map(PianoRollLayout.noteValue)
+        let names = PianoRollLayout.grids.map { PianoRollLayout.noteValue($0) }
         XCTAssertEqual(names, ["1 Bar", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64"])
         // A step the menus do not list keeps its beats; whole bars are bars.
         XCTAssertEqual(PianoRollLayout.noteValue("3/4"), "3/4 beats")
         XCTAssertEqual(PianoRollLayout.noteValue("8"), "2 Bars")
+        XCTAssertEqual(PianoRollLayout.noteValue("3", bar: 3), "1 Bar")
+        XCTAssertEqual(PianoRollLayout.noteValue("2", bar: 3), "1/2")
+        XCTAssertEqual(PianoRollLayout.noteValue("7", bar: 3.5), "2 Bars")
         XCTAssertEqual(PianoRollLayout.noteValue("x"), "x")
     }
 

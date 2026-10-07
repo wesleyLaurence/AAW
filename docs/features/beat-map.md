@@ -17,6 +17,7 @@ uv run daw samples beats FILE --all                    # every beat
 uv run daw samples beats FILE --click /tmp/grid.wav --near 0:41
 uv run daw samples beats FILE --bpm 80                 # settle half or double time
 uv run daw samples beats FILE --downbeat 0:12.4        # the beat nearest this is a one
+uv run daw samples beats FILE --meter 3/4              # three of its beats to a bar
 uv run daw samples beats FILE --refresh                # measure again, no corrections
 ```
 
@@ -27,7 +28,7 @@ Times are seconds, or minutes and seconds as `m:ss` or `m:ss.mmm`.
 The map is kept beside the audio as `NAME.beats.json` and used again while the
 audio and the measuring code are unchanged, so the engine, checks and the app can
 read one grid. Nothing is written beside a file in the library index; its map is
-measured on each call. `--bpm` and `--downbeat` are corrections: they are saved
+measured on each call. `--bpm`, `--downbeat` and `--meter` are corrections: they are saved
 with the map (`requested`) and apply to later calls until `--refresh`.
 
 ## Report
@@ -49,8 +50,10 @@ them.
     transients the grid was fitted to, how tightly they sit on it, and what share
     of the beats' sharp transients are within 10 ms of it.
 - `first_beat_seconds` and `first_downbeat_seconds`.
-- `downbeat`: which of four beats starts the bar is the least certain part of a
-  beat map. `candidates` lists all four places with a `confidence` each, summing
+- `meter` and `beats_per_bar`: the time signature given with `--meter`, `4/4`
+  unless given, and how many of the map's beats make a bar, its numerator.
+- `downbeat`: which beat of the bar starts it is the least certain part of a
+  beat map. `candidates` lists every place with a `confidence` each, summing
   to one, and which is `chosen`. When the best two are close, ask, or play the
   person a `--click` audition. `set_by` is `measurement` or `request`.
 - `phrases`: downbeats where the arrangement changes, each with its `bar`,
@@ -110,7 +113,10 @@ beats to cut on. `--bpm` settles it.
 
 ## Limits
 
-- 4/4 is assumed. A song in three or six has its beats found and its bars wrong.
+- A bar is four of the map's beats unless `--meter` says otherwise, and the meter
+  is a count, not a measurement: the map cannot tell three from four on its own.
+  Its beat is the pulse it finds, so a 6/8 song whose pulse is found as the
+  dotted quarter is counted with `--meter 2/4`.
 - One tempo, or a tempo that wanders slowly, is followed. A song that changes
   tempo, or one cut off its own grid by an earlier edit, is not.
 - The grid is placed against the transients it is fitted to. Instruments differ by

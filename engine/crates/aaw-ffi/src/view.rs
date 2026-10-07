@@ -20,7 +20,12 @@ pub struct Arrangement {
     pub project_sha256: String,
     pub title: String,
     pub tempo: f64,
-    pub beats_per_bar: u32,
+    /// The time signature as written, `4/4`.
+    pub time_signature: String,
+    /// A bar in beats as the song writes them: 3 in 3/4 and 6/8, 3.5 in 7/8.
+    pub bar_beats: f64,
+    /// The note the time signature counts, in those beats: 1 in 3/4, 0.5 in 6/8.
+    pub beat_unit: f64,
     pub length_beats: f64,
     pub tracks: Vec<TrackView>,
     pub returns: Vec<ReturnView>,
@@ -1345,8 +1350,9 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         project_sha256: doc.sha.clone(),
         title: p.session.title.clone(),
         tempo: p.session.tempo,
-        // The schema allows 4/4 only.
-        beats_per_bar: 4,
+        time_signature: p.session.meter().text(),
+        bar_beats: p.session.meter().bar_f64(),
+        beat_unit: p.session.meter().beat_f64(),
         length_beats: float(p.session.length_exact()),
         tracks,
         returns,

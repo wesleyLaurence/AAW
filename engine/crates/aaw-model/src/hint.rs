@@ -11,6 +11,8 @@ use serde_json::Value as Json;
 /// Words for a field that other tools use, and the field the song has.
 const SYNONYMS: &[(&str, &str)] = &[
     ("bpm", "tempo"),
+    ("meter", "time_signature"),
+    ("signature", "time_signature"),
     ("volume", "gain_db"),
     ("vol", "gain_db"),
     ("level", "gain_db"),

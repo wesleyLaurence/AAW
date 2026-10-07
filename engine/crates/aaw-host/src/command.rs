@@ -1616,8 +1616,9 @@ impl<'a> Edit<'a> {
                 let bytes = std::fs::read(path).map_err(|e| format!("{shown}: {e}"))?;
                 let part = crate::midi_file::read(&bytes).map_err(|e| format!("{shown}: {e}"))?;
                 let start = at.as_ref().map(beat_at).transpose()?.unwrap_or_default();
-                let length = part.length();
-                let bar = BigRational::from_integer(4.into());
+                let meter = self.meter();
+                let length = part.length(meter);
+                let bar = meter.bar();
                 let end = &start + &length;
                 let song = exact(self.root.get("session").and_then(|s| s.get("length_beats")))
                     .unwrap_or_else(|| BigRational::from_integer(16.into()));
@@ -2362,6 +2363,16 @@ impl<'a> Edit<'a> {
     /// A clip described by its pattern and track, for labels.
     pub(crate) fn tempo(&self) -> f64 {
         number(self.root.get("session").and_then(|s| s.get("tempo"))).unwrap_or(144.0)
+    }
+
+    /// The song's time signature, 4/4 when the song has none it reads.
+    pub(crate) fn meter(&self) -> aaw_model::Meter {
+        self.root
+            .get("session")
+            .and_then(|s| s.get("time_signature"))
+            .and_then(|v| v.text())
+            .and_then(|t| aaw_model::Meter::parse(t).ok())
+            .unwrap_or_default()
     }
 
     /// Where the audio clip at `loc` is on the timeline and in its file.

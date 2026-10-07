@@ -653,7 +653,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         takeWaveforms()
 
         layout.contentHeight = y
-        layout.beatsPerBar = Double(a.beatsPerBar)
+        layout.beatsPerBar = a.barBeats
+        layout.beatUnit = a.beatUnit
         layout.lengthBeats = a.lengthBeats
         layout.clamp()
         needsDisplay = true
@@ -1684,7 +1685,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         // The file is read once for a drag, not at every move of it.
         if dropFile?.path != url.path {
             if Self.isMIDI(url.path) {
-                dropFile = (url.path, nil, midiFileBeats(path: url.path))
+                dropFile = (url.path, nil, midiFileBeats(path: url.path, timeSignature: model.arrangement.timeSignature))
             } else {
                 let file = try? AVAudioFile(forReading: url)
                 let rate = file?.fileFormat.sampleRate ?? 0
@@ -2158,7 +2159,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             for k in Int(first)...Int(last) {
                 let beat = Double(k) * grid
                 let onBar = perBar < 1 || k % Int(perBar.rounded()) == 0
-                let onBeat = abs(beat - beat.rounded()) < 1e-6
+                let onBeat = abs(beat / layout.beatUnit - (beat / layout.beatUnit).rounded()) < 1e-6
                 fill(CGRect(x: layout.x(beat).rounded(), y: ruler, width: 1, height: bounds.height - ruler),
                      onBar ? Theme.barLine : onBeat ? Theme.beatLine : Theme.gridLine)
             }

@@ -462,7 +462,7 @@ impl Player {
                     self.click_gain += (target - self.click_gain).clamp(-step, step);
                     let at = click_start + k as i64;
                     if at >= 0 && at < p.total as i64 {
-                        let click = metronome_sample(at as usize, p.rate, p.tempo) * self.click_gain;
+                        let click = metronome_sample(at as usize, p.rate, p.tempo, p.click_beats, p.beats_per_bar) * self.click_gain;
                         frame[0] += click;
                         frame[1] += click;
                     }
@@ -485,14 +485,16 @@ impl Player {
 }
 
 /// Derive each onset from its absolute beat, so rounded periods never drift.
-/// A short attack and decay soften the monitoring click; the higher tone marks each 4/4 downbeat.
-fn metronome_sample(frame: usize, rate: u32, tempo: f64) -> f64 {
-    let period = rate as f64 * 60.0 / tempo;
+/// The click falls on the note the time signature counts, `click_beats`
+/// quarter notes apart, and a short attack and decay soften it; the higher
+/// tone marks the first of each bar's `beats_per_bar`.
+fn metronome_sample(frame: usize, rate: u32, tempo: f64, click_beats: f64, beats_per_bar: u32) -> f64 {
+    let period = rate as f64 * 60.0 / tempo * click_beats;
     let beat = ((frame as f64 + 0.5) / period).floor();
     let onset = (beat * period).round() as usize;
     let t = frame.saturating_sub(onset) as f64 / rate as f64;
     if t >= 0.025 { return 0.0; }
-    let hz = if beat as u64 % 4 == 0 { 1760.0 } else { 1320.0 };
+    let hz = if beat as u64 % beats_per_bar.max(1) as u64 == 0 { 1760.0 } else { 1320.0 };
     let envelope = (t / 0.001).min(1.0) * (1.0 - t / 0.025).powi(3);
     0.16 * envelope * (std::f64::consts::TAU * hz * t).sin()
 }

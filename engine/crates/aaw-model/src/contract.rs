@@ -19,7 +19,7 @@ static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
 
 const PROJECT: &[(&str, &str)] = &[
-    ("time", "All at/duration/length_beats fields are quarter-note beats. at is zero-based. Use fraction strings for triplets. 4/4 only."),
+    ("time", "All at/duration/length_beats fields are quarter-note beats, whatever the time signature. at is zero-based. Use fraction strings for triplets. session.time_signature is N/D, 1 to 32 beats over 1, 2, 4, 8 or 16, 4/4 unless set: a bar of 3/4 is 3 beats, of 6/8 3 and of 7/8 3.5. It is one for the whole song and sets the bars, the grid, the metronome's count and the beats of an exported MIDI file; daw set PROJECT session.time_signature 3/4 changes it."),
     ("steps", "x = velocity 100, digits 1–9 = scaled velocities, dot = rest. Whitespace and | ignored. grid is beats per cell; 1/4 = sixteenth note."),
     ("swing", "0.5 straight, 0.75 maximum; delays odd step cells. Explicit events are unswung."),
     ("pitch", "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. daw samples analyze measures pitch; import --root-note auto uses it; check warns when a declared root disagrees with the audio."),
@@ -393,6 +393,7 @@ fn kind(node: &Json) -> String {
         Some("boolean") => "true|false".into(),
         Some("string") => match node["pattern"].as_str() {
             Some(p) if p == crate::schema::ID => "id".into(),
+            Some(p) if p == crate::meter::PATTERN => "N/D such as 4/4, 3/4 or 6/8".into(),
             Some(_) => "sha256".into(),
             None => "text".into(),
         },
@@ -585,7 +586,7 @@ pub fn topics() -> Json {
 
 /// The first-song recipe: `daw describe start`.
 const START: &[(&str, &str)] = &[
-    ("daw init song --tempo 96 --bars 8", "Makes song/song.yaml: eight bars of 4/4 at 96 BPM. song is the PROJECT every other command takes."),
+    ("daw init song --tempo 96 --bars 8", "Makes song/song.yaml: eight bars of 4/4 at 96 BPM (--time-signature 3/4 for a waltz). song is the PROJECT every other command takes."),
     ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR."),
     ("daw samples import KICK_PATH --project song --id kick", "Copies the file into the project and names it kick in the song. Import the snare and the hat the same way, as snare and hat."),
     ("daw track add song drums", "A track of pads, played by patterns."),

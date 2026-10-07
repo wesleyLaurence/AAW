@@ -30,6 +30,14 @@ def frame(value: Beat | Fraction, tempo: float, rate: int) -> int:
     return aaw_py.frame(x.numerator, x.denominator, tempo, rate)
 
 
+def meter(session: dict) -> tuple[Fraction, Fraction]:
+    """A session's bar and the note it counts, both in quarter-note beats: (3, 1)
+    in 3/4, (3, 1/2) in 6/8, (7/2, 1/2) in 7/8. 4/4 when the field is absent."""
+    above, _, below = str(session.get("time_signature", "4/4")).partition("/")
+    unit = Fraction(4, int(below))
+    return unit * int(above), unit
+
+
 def midi(note: str) -> int:
     return aaw_py.midi(note)
 

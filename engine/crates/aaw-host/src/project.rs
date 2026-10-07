@@ -87,13 +87,19 @@ pub fn resolved(path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// A song of so many 4/4 bars with everything else at its default.
-pub fn blank(tempo: f64, bars: i64, title: Option<&str>) -> Result<Project> {
+/// A song of so many bars of `meter` (4/4 when None) with everything else at
+/// its default.
+pub fn blank(tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) -> Result<Project> {
     if bars <= 0 {
         return Err("bars must be positive".into());
     }
-    let length = bars.checked_mul(4).ok_or("bars is too large")?;
-    let mut session = vec![("tempo", Value::Float(tempo)), ("length_beats", Value::int(length))];
+    let meter = meter.map(aaw_model::Meter::parse).transpose()?.unwrap_or_default();
+    let length = meter.bar() * num_rational::BigRational::from_integer(bars.into());
+    let length = aaw_model::Beat::from_exact(&length);
+    let mut session = vec![("tempo", Value::Float(tempo)), ("length_beats", length.to_value())];
+    if meter != aaw_model::Meter::COMMON {
+        session.push(("time_signature", Value::Str(meter.text())));
+    }
     if let Some(title) = title {
         session.insert(0, ("title", Value::Str(title.to_string())));
     }
@@ -102,12 +108,12 @@ pub fn blank(tempo: f64, bars: i64, title: Option<&str>) -> Result<Project> {
 
 /// Writes a blank project into a folder, which is made if it is not there,
 /// and returns its song file.
-pub fn create(directory: &Path, tempo: f64, bars: i64, title: Option<&str>) -> Result<PathBuf> {
+pub fn create(directory: &Path, tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) -> Result<PathBuf> {
     let path = directory.join(SONG_FILE);
     if path.exists() {
         return Err(format!("Project already exists: {}", path.display()));
     }
-    let project = blank(tempo, bars, title)?;
+    let project = blank(tempo, bars, title, meter)?;
     aaw_model::save(&project, &path).map_err(|e| e.to_string())?;
     Ok(path)
 }
@@ -132,7 +138,7 @@ pub fn create_untitled() -> Result<PathBuf> {
         let folder = root.join(&name);
         // Making the folder is the claim on the name.
         match std::fs::create_dir(&folder) {
-            Ok(()) => return create(&folder, UNTITLED_TEMPO, UNTITLED_BARS, Some(&name)),
+            Ok(()) => return create(&folder, UNTITLED_TEMPO, UNTITLED_BARS, Some(&name), None),
             Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(format!("{}: {e}", folder.display())),
         }
@@ -163,7 +169,7 @@ fn only_song(folder: &Path) -> bool {
 /// song, given as its canonical YAML, is the blank one the folder began with.
 pub fn untouched(folder: &Path, yaml: &str) -> bool {
     only_song(folder)
-        && blank(UNTITLED_TEMPO, UNTITLED_BARS, Some(&name_of(folder))).is_ok_and(|b| aaw_model::to_yaml(&b) == yaml)
+        && blank(UNTITLED_TEMPO, UNTITLED_BARS, Some(&name_of(folder)), None).is_ok_and(|b| aaw_model::to_yaml(&b) == yaml)
 }
 
 /// Deletes an Untitled project's folder. Refuses any other folder.

@@ -128,7 +128,9 @@ tracks; either is read (D63). Unknown fields are rejected, and an edit that
 names one is told the nearest field. Run `daw describe TOPIC` for each field's
 path, bounds and default, and `--schema` for the exact generated JSON schema.
 
-Session: `title`, `tempo`, `time_signature` (4/4), `sample_rate` (44100 or 48000),
+Session: `title`, `tempo`, `time_signature` (`N/D`, 1 to 32 beats over 1, 2, 4,
+8 or 16, `4/4` by default, one for the whole song; see
+[time-signature.md](features/time-signature.md)), `sample_rate` (44100 or 48000),
 `length_beats`, `master_gain_db`, `end_fade_ms`, and `stretcher` (`signalsmith` or
 `rubberband`; see [time-stretch.md](features/time-stretch.md)).
 
@@ -234,7 +236,8 @@ cross pattern boundaries. Sections have unique `id`, `at`, `length_beats`.
 
 ## Timing and audio semantics
 
-All `at`, `duration` and `length_beats` values are quarter-note beats. Position zero
+All `at`, `duration` and `length_beats` values are quarter-note beats, whatever the
+time signature: a bar of 3/4 is 3 beats, of 6/8 3 and of 7/8 3.5. Position zero
 is the first downbeat. Strings such as `1/3` represent exact rational beats. Decimal
 values are converted through their string representation. The scheduler computes
 each absolute frame independently using round-half-up; it never accumulates rounded
@@ -301,8 +304,9 @@ note is heard whole wherever the transport is.
 The metronome is host transport state, initially off, outside the song and its
 undo history. The player mixes its synthesized click after song processing,
 at the renderer's audible timeline and current BPM, including on an empty song.
-It follows playback, locate and loops, accents the 4/4 downbeat, and fades its
-monitoring level over 5 ms when switched. The offline renderer never receives
+It follows playback, locate and loops, clicks on the note the time signature
+counts with an accent on the first of each bar, and fades its monitoring level
+over 5 ms when switched. The offline renderer never receives
 it, so exports and stems contain only the song. See [metronome](features/metronome.md).
 
 ## Verification

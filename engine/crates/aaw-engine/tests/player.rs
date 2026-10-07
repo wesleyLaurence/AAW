@@ -467,12 +467,65 @@ fn a_stopped_stream_rests_once_it_is_silent() {
 }
 
 fn empty_metronome_song(dir: &Path, tempo: f64, rate: u32, limiter: bool) -> Arc<Program> {
+    metered_metronome_song(dir, tempo, rate, limiter, "4/4")
+}
+
+fn metered_metronome_song(dir: &Path, tempo: f64, rate: u32, limiter: bool, meter: &str) -> Arc<Program> {
     let path = dir.join("click.yaml");
     let effect = if limiter { "master: {effects: [{type: limiter, lookahead_ms: 5}]}" } else { "" };
     std::fs::write(&path, format!(
-        "session: {{tempo: {tempo}, sample_rate: {rate}, length_beats: 32}}\n{effect}\n"
+        "session: {{tempo: {tempo}, sample_rate: {rate}, length_beats: 32, time_signature: {meter}}}\n{effect}\n"
     )).unwrap();
     program(&path, |_| {})
+}
+
+/// The clicks of `out` as the frames they start on, and for each whether it
+/// is the accented one: the accent is the higher tone, so its first
+/// quarter-cycle is shorter.
+fn clicks(out: &[[f64; 2]]) -> Vec<(usize, bool)> {
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < out.len() {
+        if out[i][0] != 0.0 {
+            let onset = i - 1;
+            // The first zero crossing after the rise is half a cycle in.
+            let crossing = (i..out.len().min(i + 200)).find(|&k| out[k][0] <= 0.0).unwrap_or(i + 200);
+            found.push((onset, crossing - onset < 17));
+            i = onset + 1500;
+        } else {
+            i += 1;
+        }
+    }
+    found
+}
+
+#[test]
+fn metronome_counts_the_time_signatures_beats() {
+    let dir = tempfile::tempdir().unwrap();
+    // 3/4 at 120: a click every 24000 frames, every third one accented.
+    let waltz = metered_metronome_song(dir.path(), 120.0, 48000, false, "3/4");
+    let (mut control, mut player) = started(&waltz, 0);
+    control.set_metronome(true).unwrap();
+    let out = pull(&mut player, 24000 * 6 - 100);
+    let found = clicks(&out);
+    assert_eq!(found.iter().map(|c| c.0).collect::<Vec<_>>(), [0, 24000, 48000, 72000, 96000, 120000]);
+    assert_eq!(found.iter().map(|c| c.1).collect::<Vec<_>>(), [true, false, false, true, false, false]);
+    // 6/8 at 120: the eighth is the beat, a click every 12000 frames, every
+    // sixth one accented; a bar is still three quarter notes.
+    let six_eight = metered_metronome_song(dir.path(), 120.0, 48000, false, "6/8");
+    let (mut control, mut player) = started(&six_eight, 0);
+    control.set_metronome(true).unwrap();
+    let out = pull(&mut player, 12000 * 12 - 100);
+    let found = clicks(&out);
+    assert_eq!(found.len(), 12);
+    assert_eq!(found.iter().map(|c| c.0).collect::<Vec<_>>(), (0..12).map(|k| k * 12000).collect::<Vec<_>>());
+    assert_eq!(found.iter().map(|c| c.1).collect::<Vec<_>>(), (0..12).map(|k| k % 6 == 0).collect::<Vec<_>>());
+    // 4/4 as before: the same clicks as the two tests above measure.
+    let common = empty_metronome_song(dir.path(), 120.0, 48000, false);
+    let (mut control, mut player) = started(&common, 0);
+    control.set_metronome(true).unwrap();
+    let found = clicks(&pull(&mut player, 24000 * 8 - 100));
+    assert_eq!(found.iter().map(|c| c.1).collect::<Vec<_>>(), [true, false, false, false, true, false, false, false]);
 }
 
 #[test]

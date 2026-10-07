@@ -5,7 +5,7 @@
 //! `.` nothing.
 
 use crate::tree::Step;
-use aaw_model::{Curve, Lane, Project, Stretch};
+use aaw_model::{Curve, Lane, Meter, Project, Stretch};
 use num_traits::ToPrimitive;
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
@@ -17,8 +17,6 @@ type Result<T> = std::result::Result<T, String>;
 /// How far apart two beats may be and still be the same beat: an audio clip's
 /// end comes back from seconds.
 const EPS: f64 = 1e-6;
-/// 4/4 is the only time signature.
-const BAR: f64 = 4.0;
 /// The letters given to music in the order it first appears; what is left
 /// over is `*`.
 const LETTERS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
@@ -83,23 +81,11 @@ fn number(x: f64) -> String {
     }
 }
 
-/// A song beat as a DAW counts it: bar, then the beat of the bar and the
-/// sixteenth of the beat when it is not on the bar, from 1; a beat off the
-/// sixteenths is written as the beat commands take.
-pub fn place(beat: f64) -> String {
-    let bar = (beat / BAR + EPS).floor();
-    let rest = beat - bar * BAR;
-    let sixteenths = rest * 4.0;
-    if rest.abs() < EPS {
-        format!("{}", bar as i64 + 1)
-    } else if (rest - rest.round()).abs() < EPS {
-        format!("{}.{}", bar as i64 + 1, rest.round() as i64 + 1)
-    } else if (sixteenths - sixteenths.round()).abs() < EPS {
-        let s = sixteenths.round() as i64;
-        format!("{}.{}.{}", bar as i64 + 1, s / 4 + 1, s % 4 + 1)
-    } else {
-        format!("beat {}", number(beat))
-    }
+/// A song beat as a DAW counts it in `meter`: bar, then the beat of the bar
+/// and the sixteenth of the beat when it is not on the bar, from 1; a beat
+/// off the sixteenths is written as the beat commands take.
+pub fn place(beat: f64, meter: Meter) -> String {
+    meter.place(beat)
 }
 
 fn f(x: &num_rational::BigRational) -> f64 {
@@ -325,11 +311,11 @@ fn lane_cells(lane: &Lane, grid: &Grid) -> String {
 }
 
 /// The bar numbers over the grid, at every fourth cell where they fit.
-fn ruler(grid: &Grid) -> String {
+fn ruler(grid: &Grid, meter: Meter) -> String {
     let mut row: Vec<char> = vec![' '; grid.len()];
     let mut free = 0;
     for i in (0..grid.len()).step_by(4) {
-        let label: Vec<char> = place(grid.cell(i).0).chars().collect();
+        let label: Vec<char> = place(grid.cell(i).0, meter).chars().collect();
         if i < free {
             continue;
         }
@@ -378,6 +364,8 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
     if options.per <= 0.0 || !options.per.is_finite() {
         return Err("--per is a positive number of bars, bar or beat".into());
     }
+    let meter = p.session.meter();
+    let bar = meter.bar_f64();
     for id in &options.tracks {
         if p.track(id).is_none() {
             let ids: Vec<&str> = p.tracks.iter().map(|t| t.id.as_str()).collect();
@@ -408,7 +396,7 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
     }
     let letter = |c: &Placed| letters.get(c.key.as_str()).copied().unwrap_or('*');
 
-    let mut rows: Vec<(String, String)> = vec![("bar".into(), ruler(&grid))];
+    let mut rows: Vec<(String, String)> = vec![("bar".into(), ruler(&grid, meter))];
     if let Some(s) = sections(p, &grid) {
         rows.push(("sections".into(), s));
     }
@@ -445,7 +433,7 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
             .filter(|(_, ch)| *ch != '.')
             .map(|(i, _)| {
                 let (cs, ce) = grid.cell(i);
-                (ce - cs) / BAR
+                (ce - cs) / bar
             })
             .sum::<f64>();
         let mut parts = Vec::new();
@@ -501,7 +489,7 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
         let what = &placements[0].1.what;
         let mut by_track: Vec<(usize, Vec<String>)> = Vec::new();
         for (ti, c) in &placements {
-            let at = if c.repeats > 1 { format!("{} ×{}", place(c.start), c.repeats) } else { place(c.start) };
+            let at = if c.repeats > 1 { format!("{} ×{}", place(c.start, meter), c.repeats) } else { place(c.start, meter) };
             match by_track.iter_mut().find(|(t, _)| t == ti) {
                 Some((_, list)) => list.push(at),
                 None => by_track.push((*ti, vec![at])),
@@ -543,7 +531,7 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
     let width = rows.iter().map(|(n, _)| n.chars().count()).max().unwrap_or(0) + 2;
     let mut text: Vec<String> = rows.iter().map(|(name, cells)| format!("{name:<width$}{cells}")).collect();
     if grid.to > song_end + EPS {
-        text.push(format!("The song ends where bar {} begins; nothing after it is heard.", place(song_end)));
+        text.push(format!("The song ends where bar {} begins; nothing after it is heard.", place(song_end, meter)));
     }
     for part in [lines, details] {
         if !part.is_empty() {

@@ -217,3 +217,27 @@ fn eight_tracks_of_sixty_four_bars_map_in_under_two_thousand_characters() {
     }
     assert!(t.chars().count() < 2000, "{} characters:\n{t}", t.chars().count());
 }
+
+#[test]
+fn a_song_in_three_four_is_mapped_by_its_bars() {
+    let yaml = r#"
+session: {tempo: 120, length_beats: 12, time_signature: 3/4}
+tracks:
+- id: keys
+  type: midi
+  clips:
+  - {id: a, at: 3, length_beats: 6, notes: [{pitch: 60, duration: 1}, {pitch: 64, at: 3, duration: 1}]}
+"#;
+    let (_d, s) = song(yaml);
+    let m = map(&s, None, None, None, &[], false);
+    assert_eq!(m["per_beats"], json!(3.0), "a cell is a bar of three beats");
+    let t = lines(&m);
+    assert_eq!(row(&t, "keys"), ".AA.");
+    assert_eq!(row(&t, "bar"), "1");
+    assert!(t.contains("keys bar 2"), "{t}");
+    assert!(t.contains("1 notes/bar"), "{t}");
+    let m = map(&s, Some(json!(2)), None, None, &[], false);
+    assert_eq!(m["per_beats"], json!(6.0), "--per 2 is two bars of the meter");
+    let m = map(&s, Some(json!("beat")), Some(json!(3)), Some(json!(6)), &[], false);
+    assert_eq!(row(&lines(&m), "bar"), "2", "beat 3 is bar 2 in 3/4");
+}

@@ -46,7 +46,7 @@ project's folder or the song file in it. It implements:
 
 | Command | Does |
 |---|---|
-| `daw init DIRECTORY [--tempo T] [--bars N]` | Creates `DIRECTORY/song.yaml`, an empty song |
+| `daw init DIRECTORY [--tempo T] [--bars N] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song of N bars, in 4/4 unless a time signature such as `3/4` or `6/8` is given |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
 | `daw describe [start\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|beats\|joins\|export] [--schema]` | The authoring contract: without a topic, the topics a line each; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file. `--schema` adds the topic's JSON Schema, and with no topic prints the whole song's |

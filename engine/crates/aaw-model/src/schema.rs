@@ -2882,8 +2882,18 @@ impl Session {
         let before = ctx.count();
         let title = f.opt(ctx, "title", "Untitled".to_string(), v::string);
         let tempo = f.opt(ctx, "tempo", 144.0, |c, x| v::float(c, x, Bounds::ge_le("20", "400")));
-        let time_signature = f.opt(ctx, "time_signature", "4/4".to_string(), |c, x| {
-            v::literal_str(c, x, &["4/4"]).map(str::to_string)
+        let time_signature = f.opt(ctx, "time_signature", "4/4".to_string(), |c, x| match x {
+            Value::Str(s) => match crate::Meter::parse(s) {
+                Ok(m) => Some(m.text()),
+                Err(msg) => {
+                    c.error("value_error", msg);
+                    None
+                }
+            },
+            _ => {
+                c.error("string_type", "Input should be a valid string");
+                None
+            }
         });
         let sample_rate = f.opt(ctx, "sample_rate", 48000, |c, x| v::literal_int(c, x, &[44100, 48000]));
         let length_beats = f.opt(ctx, "length_beats", Beat::int(16), |c, x| {
@@ -2929,6 +2939,12 @@ impl Session {
 
     pub fn length_exact(&self) -> BigRational {
         exact(&self.length_beats)
+    }
+
+    /// The song's one time signature, read from the field validation held
+    /// to the form `Meter` reads.
+    pub fn meter(&self) -> crate::Meter {
+        crate::Meter::parse(&self.time_signature).unwrap_or_default()
     }
 
     pub fn dump(&self, saved: bool) -> Value {

@@ -552,9 +552,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let grid = NSMenu(title: "Grid")
         grid.addItem(item("Follow Zoom", #selector(SongWindowController.gridFollowsZoom(_:))))
         grid.addItem(.separator())
-        for size in Grid.sizes {
+        for size in Grid.sizes() {
             let entry = item(Grid.name(size), #selector(SongWindowController.chooseGrid(_:)))
-            entry.representedObject = size
+            // The bar is the song's, whatever its time signature.
+            entry.representedObject = size == "4" ? "bar" : size
             grid.addItem(entry)
         }
         grid.addItem(.separator())
@@ -803,8 +804,11 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
 
     @objc func gridFollowsZoom(_ sender: Any?) { model.timelineGrid = nil }
     @objc func chooseGrid(_ sender: NSMenuItem) {
-        if let size = sender.representedObject as? String { model.chooseGrid(size: size, in: gridPlace) }
+        if let size = sender.representedObject as? String { model.chooseGrid(size: gridSize(size), in: gridPlace) }
     }
+
+    /// A Grid menu item's size as a value: `bar` is the song's bar.
+    private func gridSize(_ item: String) -> String { item == "bar" ? Grid.text(model.barBeats) : item }
     @objc func gridFiner(_ sender: Any?) { model.stepGrid(.finer, in: gridPlace) }
     @objc func gridCoarser(_ sender: Any?) { model.stepGrid(.coarser, in: gridPlace) }
     @objc func gridTriplets(_ sender: Any?) { model.stepGrid(.triplets, in: gridPlace) }
@@ -875,8 +879,8 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.state = gridPlace == .timeline && model.timelineGrid == nil ? .on : .off
             return gridPlace == .timeline && !typing
         case #selector(chooseGrid(_:)):
-            guard let size = item.representedObject as? String else { return false }
-            item.state = Grid.size(model.grid(in: gridPlace)) == size ? .on : .off
+            guard let size = (item.representedObject as? String).map(gridSize) else { return false }
+            item.state = Grid.size(model.grid(in: gridPlace), bar: model.barBeats) == size ? .on : .off
             return model.gridValues(in: gridPlace).contains(size) && !typing
         case #selector(gridTriplets(_:)):
             item.state = Grid.isTriplet(model.grid(in: gridPlace)) ? .on : .off

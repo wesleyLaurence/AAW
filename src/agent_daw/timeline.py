@@ -13,7 +13,7 @@ from pathlib import Path
 
 import soundfile as sf
 
-from .model import load, schedule
+from .model import load, meter, schedule
 
 
 @dataclass
@@ -167,14 +167,17 @@ def clock(seconds: float) -> str:
     return f"{minutes}:{rest // 1000:02d}.{rest % 1000:03d}"
 
 
-def position(beats: float, tempo: float) -> dict:
-    """A place on the timeline in every form: beats, seconds, and bar and beat from 1."""
+def position(beats: float, tempo: float, meter=(Fraction(4), Fraction(1))) -> dict:
+    """A place on the timeline in every form: beats, seconds, and bar and beat from
+    1, the beat counted as the time signature counts it (`meter` is the bar and
+    the beat it counts, in quarter-note beats, as `model.meter` gives them)."""
+    bar, unit = (float(m) for m in meter)
     return {
         "beats": round(beats, 6),
         "seconds": round(beats * 60 / tempo, 6),
         "time": clock(beats * 60 / tempo),
-        "bar": int(beats // 4) + 1,
-        "beat": round(beats % 4 + 1, 6),
+        "bar": int(beats // bar) + 1,
+        "beat": round((beats % bar) / unit + 1, 6),
     }
 
 
@@ -184,6 +187,7 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
 
     project = load(path)
     tempo = project["session"]["tempo"]
+    bar = meter(project["session"])
     found = regions(project, path.parent)
     ends = [r.end for hits in found.values() for r in hits]
     sound_ends = max(ends) * tempo / 60 if ends else 0.0
@@ -211,12 +215,12 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
                 f"{float(clips):g}; shorten its pattern to end the song there"
             )
     length = float(Fraction(str(project["session"]["length_beats"])))
-    result["length"] = position(length, tempo)
-    result["sound_ends"] = position(sound_ends, tempo)
+    result["length"] = position(length, tempo, bar)
+    result["sound_ends"] = position(sound_ends, tempo, bar)
     result["tracks"] = {
         track: {
-            "first_sound": position(min(r.start for r in hits) * tempo / 60, tempo),
-            "last_sound_ends": position(max(r.end for r in hits) * tempo / 60, tempo),
+            "first_sound": position(min(r.start for r in hits) * tempo / 60, tempo, bar),
+            "last_sound_ends": position(max(r.end for r in hits) * tempo / 60, tempo, bar),
             "hits": len(hits),
         }
         for track, hits in found.items()
@@ -241,9 +245,9 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
             "the last beat takes more beats at a faster tempo; fit the length again.",
         }
     if seconds:
-        result["seconds"] = [position(parse(text) * tempo / 60, tempo) for text in seconds]
+        result["seconds"] = [position(parse(text) * tempo / 60, tempo, bar) for text in seconds]
     if beats:
-        result["beats"] = [position(float(Fraction(text)), tempo) for text in beats]
+        result["beats"] = [position(float(Fraction(text)), tempo, bar) for text in beats]
     if (end_at is None) != (pad is None):
         raise ValueError("--end-at and --pad go together")
     if pad is not None:
@@ -259,7 +263,7 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
             "pad": pad,
             "length_beats": round(long, 6),
             "length_seconds": round(long * 60 / tempo, 6),
-            "ends": position(target, tempo),
-            "starts": position(target - long, tempo),
+            "ends": position(target, tempo, bar),
+            "starts": position(target - long, tempo, bar),
         }
     return result

@@ -109,7 +109,7 @@ fn an_import_is_one_undo_step_and_the_song_grows_to_hold_it() {
     let file = path(dir.path(), "long.mid");
     // Ten beats of one note, past a 32-beat song from beat 28.
     let notes = [FileNote { pitch: 50, at: b("0"), duration: b("10"), velocity: 90 }];
-    std::fs::write(&file, midi_file::write(&notes, "x", 90.0).bytes).unwrap();
+    std::fs::write(&file, midi_file::write(&notes, "x", 90.0, aaw_model::Meter::COMMON).bytes).unwrap();
     let before = get(&s, "");
     edit(&mut s, json!({"op": "midi.import", "file": file, "at": 28, "index": 0})).unwrap();
     assert_eq!(get(&s, "session.length_beats"), json!(40));
@@ -125,7 +125,7 @@ fn an_import_goes_on_a_midi_track_it_is_given_and_on_no_other() {
     phrase(&mut s);
     let file = path(dir.path(), "part.mid");
     let notes = [FileNote { pitch: 38, at: b("1/2"), duration: b("1"), velocity: 100 }];
-    std::fs::write(&file, midi_file::write(&notes, "x", 120.0).bytes).unwrap();
+    std::fs::write(&file, midi_file::write(&notes, "x", 120.0, aaw_model::Meter::COMMON).bytes).unwrap();
     let r = edit(&mut s, json!({"op": "midi.import", "file": file, "track": "keys", "at": "16/3"})).unwrap();
     assert_eq!(r["label"], json!("Import part.mid to keys"));
     assert_eq!(r["path"], json!("tracks.keys.clips.clip2"));
@@ -158,4 +158,24 @@ fn only_a_note_clip_with_notes_that_play_is_exported() {
     let err = s.export_midi("tracks.keys.clips.clip2", &file).unwrap_err();
     assert_eq!(err, "Clip clip2 has no notes that play, so there is nothing to write");
     assert!(!Path::new(&file).exists());
+}
+
+#[test]
+fn an_import_fills_bars_of_the_songs_meter_and_an_export_writes_it() {
+    let (dir, mut s) = open();
+    edit(&mut s, json!({"op": "set", "path": "session.time_signature", "value": "6/8"})).unwrap();
+    let file = path(dir.path(), "waltz.mid");
+    // Four beats of notes: two bars of 6/8, three beats each, not one of 4/4.
+    let notes = [FileNote { pitch: 60, at: b("0"), duration: b("4"), velocity: 90 }];
+    std::fs::write(&file, midi_file::write(&notes, "x", 120.0, aaw_model::Meter::COMMON).bytes).unwrap();
+    edit(&mut s, json!({"op": "midi.import", "file": file, "at": 30, "index": 0})).unwrap();
+    assert_eq!(get(&s, "tracks.waltz.clips.clip1.length_beats"), json!(6));
+    assert_eq!(get(&s, "session.length_beats"), json!(36), "grown to the end of a 6/8 bar");
+    // The file written carries the song's time signature: 6 over 2^3.
+    let out = dir.path().join("out.mid");
+    let r = s.export_midi("tracks.waltz.clips.clip1", &out.to_string_lossy()).unwrap();
+    assert_eq!(r["notes"], json!(1));
+    let bytes = std::fs::read(&out).unwrap();
+    let at = bytes.windows(3).position(|w| w == [0xff, 0x58, 0x04]).expect("a time signature");
+    assert_eq!(&bytes[at + 3..at + 7], &[6, 3, 24, 8]);
 }
