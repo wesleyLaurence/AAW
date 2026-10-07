@@ -19,61 +19,68 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **A time selection in the app.** A range of beats dragged across the
+1. **A live analyzer.** An effect on a track, a group, a return or the
+   master that passes the sound unchanged and draws it as it plays: levels,
+   loudness with its history, a spectrum, a spectrogram, the stereo field
+   with its correlation and a scrolling waveform, as iZotope Insight shows
+   them; a strip in the device panel, opened into a window of its own that
+   resizes, goes full screen and stays open whatever is selected (D95).
+   [features/analyzer.md](features/analyzer.md)
+2. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-2. **A MIDI keyboard.** Notes played through the selected track, held and let
+3. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-3. **Listening markers.** The person drops a marker at the playhead while the
+4. **Listening markers.** The person drops a marker at the playhead while the
    song plays, with a word if they want, and the agent reads them with `daw`:
    "this bar", without a timecode.
-4. **Sections and the song's length in the app.** A section made, named,
+5. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-5. **A project made with `daw init` in the app's index,** so a song the agent
+6. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-6. **Turns and A/B.** An agent request's commands grouped, named for the
+7. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-7. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+8. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
    is built, a clipper that holds a ceiling as a limiter does without its
    look-ahead is not. The utility is built ([utility](features/utility.md)).
-8. **Comparing with a reference.** A song the person names as a reference,
+9. **Comparing with a reference.** A song the person names as a reference,
    analyzed once and compared with a mix section by section, so the agent has
    targets for the low end, the brightness and the loudness of each section.
    [features/reference-comparison.md](features/reference-comparison.md)
-9. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+10. **Sound descriptors.** Each sample measured for brightness, attack, decay,
     low end and noise, with search sorted by them and samples like a chosen
     one, so the agent chooses sounds by more than their names.
     [features/sound-descriptors.md](features/sound-descriptors.md)
-10. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+11. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-11. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+12. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-12. **Key and chord detection,** and swing detection, of samples and songs: a
+13. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-13. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+14. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-14. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+15. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-15. **The workspace and the two levels.** The workspace folder with its managed
+16. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-16. **The agent panel.** A conversation in the window, per project, over the
+17. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-17. **Stem separation** of a song.
-18. **Generated audio.** A sound, a loop or a whole song from a description, with
+18. **Stem separation** of a song.
+19. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -584,6 +591,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   a Synth part's or macro's name (D81).
 - `daw check`'s warnings in the window, by code, on the clips and tracks they
   name, so the person has the linter the agent has (D81).
+- The analyzer's spectrogram as a surface in three dimensions, as Insight
+  draws it, and its window's arrangements of panes saved by name.
 - A skills panel, and `@track`, `@clip`, `@section`, `@skill` in the chat.
 - Ghost clips: the agent proposes the next bars, drawn translucent, and Tab
   accepts.
