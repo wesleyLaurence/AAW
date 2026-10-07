@@ -1,14 +1,15 @@
-# The Synth — engine and commands implemented October 3, 2026; patches, the panel, and unison, wavetables and the patch's effects October 4, 2026
+# The Synth — engine and commands implemented October 3, 2026; patches, the panel, and unison, wavetables and the patch's effects October 4, 2026; the patch's width October 7, 2026
 
 Status: built. The engine, the patch in the song, `daw synth` and `daw
 describe synth`, automation of the patch's fields, `daw check` warnings,
 patches as files with the factory patches, `daw patch` and the browser's
 Synth, the panel with its drawings, its Save and Load, its keys and
-`note.preview`, and unison, wavetables and the patch's own effects are built
-and described here in the present tense. D69 records what the person settled
-on October 3, 2026, D71 what was decided in building the first item, D72 what
-was decided in building patches, D73 what was decided in building the panel
-and D74 what was decided in building the last item.
+`note.preview`, unison, wavetables and the patch's own effects, and the
+patch's width are built and described here in the present tense. D69 records
+what the person settled on October 3, 2026, D71 what was decided in building
+the first item, D72 what was decided in building patches, D73 what was
+decided in building the panel, D74 what was decided in building the last
+item and D89 what was decided in building the width.
 
 ## What
 
@@ -41,6 +42,8 @@ tracks:
         voices: 8                    # 1 is monophonic
         glide_ms: 0
         velocity_percent: 100        # how much velocity moves the level
+        width_percent: 60            # the voices placed across the field
+        width_mode: alternate        # by turns; or pitch, or random
         seed: 1                      # random phases and the random source
         oscillators:
           a: {wave: saw, level_db: -10, unison: 3, unison_detune_cents: 8, unison_width_percent: 60}
@@ -102,6 +105,23 @@ without making it louder. A supersaw is one saw with `unison: 7` and
 and a lane target; `unison_width_percent` is a lane target; `unison` itself is
 structural, so a change of it swaps through the dip.
 
+**Width.** `width_percent` (0 to 100, 0 by default) places each voice across
+the stereo field, either side of where its oscillators' pan and unison put
+it: 100 reaches the edges. Where a note lands within the width is
+`width_mode`: `alternate`, the default, puts each note of the track on the
+other side from the one before it, by the note's place among the track's
+notes, so a line swings between the sides and a chord's notes fall on both;
+`pitch` places a note by its pitch, two octaves either side of middle C
+reaching the edges, as a piano's keys lie; `random` draws a place for each
+note from `seed`. A note keeps its place for its whole length, under the
+oscillators' own pan and unison width, which are not touched: the width is
+the patch's, beside the unison width each oscillator has. `width_percent` is
+a lane target and a matrix target in points, so a macro or an LFO can open
+the field, and it glides when the panel or the agent sets it; `width_mode`
+is read when a note starts and moves no voice already sounding. In the
+panel it is a Width knob and a Placement menu in the Synth column, and a
+source dropped on the knob adds an entry on `width_percent`.
+
 **Wavetables.** `wave: wavetable` reads one cycle from `table`: a built-in
 table, or the ID of a sample in the project. The built-in tables are `organ`
 (the drawbars: harmonics 1, 2, 3, 4, 6 and 8), `bright` (every harmonic to the
@@ -151,7 +171,8 @@ that target: semitones for a pitch, octaves for the cutoff and for an
 envelope's times (1 doubles, -1 halves), dB for a level, points for a
 percentage, cents for a unison detune, and the pan's own units. Targets are
 `pitch` for all oscillators at once; an oscillator's `pitch`, `level_db`,
-`pan`, `pulse_width` and `unison_detune_cents`; the filter's `cutoff_hz`,
+`pan`, `pulse_width` and `unison_detune_cents`; the patch's `width_percent`;
+the filter's `cutoff_hz`,
 `resonance_percent` and `drive_db`; and an envelope's four fields, taken when
 the note starts and held for the note. An entry whose source or target the
 patch lacks is refused, naming it; an envelope or LFO may not be named
@@ -517,6 +538,23 @@ Of the last item:
   scale: done in `crates/aaw-host/tests/patches.rs`. Whether each sounds like
   its name is a line under Verify, as is the panel's effect column by hand.
 
+Of the width:
+
+- No width renders as before the field existed; at full width, alternate
+  puts the first note of a line on the left and the next on the right, pitch
+  puts middle C in the middle and a note two octaves up at the edge, random
+  places a note the same way twice and elsewhere under another seed; the
+  matrix opens the width, and an oscillator's own pan is kept under the
+  placement. Done: `crates/aaw-dsp/src/synth.rs`.
+- `daw synth set` sets both fields, a wrong placement is refused naming the
+  choices, a lane reaches `instrument.width_percent` and not the mode, and
+  the matrix takes `width_percent`. Done: `crates/aaw-host/tests/synth.rs`
+  and `tests/test_discovery.py` for `describe synth`.
+- The panel lists Width and Placement in the Synth column, the knob as a
+  lane and matrix target. Done: `crates/aaw-ffi/tests/song.rs`; seen in a
+  scripted picture on a Soft Pad, and 35 typed into the knob by script read
+  back from the song. Nothing heard.
+
 Of the whole: the factory patches are heard and one of each kind sounds like
 its name. Listening by hand is a line under Verify.
 
@@ -587,6 +625,19 @@ Decided in building the last item, October 4, 2026 (D74):
   no sidechain and with a limiter's latency counted into the track's; chorus
   and saturation are effect kinds anywhere, not the patch's alone.
 
+Decided in building the width, October 7, 2026 (D89):
+
+- **The width is the patch's, one knob beside the unison width,** placing
+  whole voices rather than copies, with a placement of alternate, pitch or
+  random, the three a hardware synth's pan key-follow offers; alternate is
+  the default, since "voices placed across the field as they play" is what
+  was asked for.
+- **Alternate is by the note's place among the track's notes,** so a render
+  is the same bytes twice and a chord's notes fall on both sides; it is not
+  by the order the voices were allotted.
+- **The factory patches are unchanged:** none has a width until someone
+  hears one and wants it.
+
 ## Limits
 
 - A wavetable is one cycle, not a sweep of frames; a sample's cycle is read
@@ -623,3 +674,7 @@ Decided in building the last item, October 4, 2026 (D74):
 - The panel does not rename a part or a macro, and a matrix entry's source
   and target are set when it is made: `daw synth set` and `daw synth mod`
   do the rest.
+- A voice's place within the width is fixed when its note starts; a lane or
+  the matrix moves the width, not the place, and `alternate` counts the
+  track's notes in time order, so two notes starting together take opposite
+  sides whichever was written first.

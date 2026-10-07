@@ -20,7 +20,7 @@ use crate::wavetable::Wavetable;
 use crate::Frame;
 use aaw_model::rules::{mod_source, mod_target, ModSource, ModTarget};
 use aaw_model::schedule::NoteOn;
-use aaw_model::{LfoShape, Synth as Spec, SynthFilterMode, Wave};
+use aaw_model::{LfoShape, Synth as Spec, SynthFilterMode, Wave, WidthMode};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::{PI, TAU};
 use std::hash::{Hash, Hasher};
@@ -41,7 +41,8 @@ const MAX_MACRO: usize = 8;
 // glide between two patches address them by index.
 const GLIDE: usize = 0;
 const VELOCITY: usize = 1;
-const OSC: usize = 2;
+const WIDTH: usize = 2;
+const OSC: usize = 3;
 const OSC_FIELDS: usize = 7; // level_db, pan, semitones, detune_cents, pulse_width, unison_detune_cents, unison_width_percent
 const CUTOFF: usize = OSC + MAX_OSC * OSC_FIELDS;
 const RESONANCE: usize = CUTOFF + 1;
@@ -150,6 +151,8 @@ pub struct Patch {
     lfos: Vec<LfoSpec>,
     routes: Vec<Route>,
     voices: usize,
+    /// Where each new note lands within the width.
+    width_mode: WidthMode,
     seed: u64,
     rate: f64,
     /// Lanes on the patch's fields, by the index of the value they move.
@@ -176,6 +179,7 @@ impl Patch {
         let mut v = Values([0.0; LEN]);
         v.0[GLIDE] = spec.glide_ms;
         v.0[VELOCITY] = spec.velocity_percent;
+        v.0[WIDTH] = spec.width_percent;
         let mut oscillators = Vec::with_capacity(MAX_OSC);
         for (i, (id, o)) in spec.oscillators.iter().enumerate().take(MAX_OSC) {
             let at = OSC + i * OSC_FIELDS;
@@ -264,6 +268,7 @@ impl Patch {
             lfos,
             routes,
             voices: (spec.voices.max(1) as usize).min(MAX_VOICES),
+            width_mode: spec.width_mode,
             seed: hash(&[spec.seed as u64, seed]),
             rate,
             lanes: lane_slots,
@@ -296,6 +301,7 @@ fn slot(spec: &Spec, path: &str) -> Option<usize> {
     Some(match parts.as_slice() {
         ["glide_ms"] => GLIDE,
         ["velocity_percent"] => VELOCITY,
+        ["width_percent"] => WIDTH,
         ["oscillators", id, field] => {
             let i = spec.oscillators.get_index_of(*id).filter(|i| *i < MAX_OSC)?;
             OSC + i * OSC_FIELDS
@@ -552,6 +558,9 @@ struct Voice {
     from: f64,
     at_pitch: f64,
     random: f64,
+    /// Where the note sits within the patch's width, -1 to 1, for its
+    /// whole length.
+    place: f64,
     seed: u64,
     env: [Env; MAX_ENV],
     /// Each oscillator's copies: their phases, increments, gains, noise
@@ -592,6 +601,7 @@ impl Voice {
             from: 60.0,
             at_pitch: 60.0,
             random: 0.0,
+            place: 0.0,
             seed: 0,
             env: [Env::default(); MAX_ENV],
             phase: [[0.0; MAX_UNISON]; MAX_OSC],
@@ -639,6 +649,20 @@ impl Voice {
         v.from = if from.is_nan() { v.pitch } else { from };
         v.at_pitch = v.from;
         v.random = unit(hash(&[seed, 1]));
+        // The note's place within the width: the notes of the track take
+        // turns across the field, or a note sits by its pitch, two octaves
+        // either side of middle C reaching the edges, or at a random place.
+        v.place = match patch.width_mode {
+            WidthMode::Alternate => {
+                if note % 2 == 0 {
+                    -1.0
+                } else {
+                    1.0
+                }
+            }
+            WidthMode::Pitch => ((pitch - 60.0) / 24.0).clamp(-1.0, 1.0),
+            WidthMode::Random => unit(hash(&[seed, 5])) * 2.0 - 1.0,
+        };
         v.seed = seed;
         v.fade = fade.max(1);
         let vp = base.0[VELOCITY] / 100.0;
@@ -764,6 +788,7 @@ impl Voice {
                 ModTarget::OscPan(i) => v.0[OSC + i * OSC_FIELDS + 1] += d,
                 ModTarget::OscPulseWidth(i) => v.0[OSC + i * OSC_FIELDS + 4] += d,
                 ModTarget::OscUnisonDetune(i) => v.0[OSC + i * OSC_FIELDS + 5] += d,
+                ModTarget::Width => v.0[WIDTH] += d,
                 ModTarget::Cutoff => v.0[CUTOFF] *= 2f64.powf(d),
                 ModTarget::Resonance => v.0[RESONANCE] += d,
                 ModTarget::Drive => v.0[DRIVE] += d,
@@ -773,6 +798,8 @@ impl Voice {
         // The glide from the last note's pitch, over glide_ms.
         let glide = v.0[GLIDE] * rate / 1000.0;
         self.at_pitch = if glide > 0.0 && t < glide { self.from + (self.pitch - self.from) * t / glide } else { self.pitch };
+        // The voice's place across the field, under every oscillator's pan.
+        let placed = (v.0[WIDTH] / 100.0).clamp(0.0, 1.0) * self.place;
         for (i, o) in patch.oscillators.iter().enumerate() {
             let at = OSC + i * OSC_FIELDS;
             let semis = self.at_pitch + o.octave * 12.0 + v.0[at + 2] + v.0[at + 3] / 100.0 + pitch[i] + all;
@@ -785,7 +812,7 @@ impl Voice {
                 let s = spread(k, o.unison);
                 let inc = (hz(semis + detune * s) / rate).clamp(0.0, 0.5);
                 self.inc[i][k] = inc;
-                let [l, r] = pan_gains(v.0[at + 1] + width * s);
+                let [l, r] = pan_gains(v.0[at + 1] + placed + width * s);
                 self.gain[i][k] = [g * l, g * r];
                 if let Some(table) = &o.table {
                     self.table_level[i][k] = table.level_for(inc) as u8;
@@ -1292,6 +1319,58 @@ mod tests {
         let envelope: Vec<f64> = still[4800..].chunks(120).map(|c| c.iter().fold(0.0f64, |m, f| m.max(f[0].abs()))).collect();
         let (lo, hi) = (envelope.iter().cloned().fold(f64::MAX, f64::min), envelope.iter().cloned().fold(0.0, f64::max));
         assert!(lo > 0.9 * hi, "no beating: {lo} against {hi}");
+    }
+
+    #[test]
+    fn width_places_each_voice_across_the_field_by_turns_pitch_or_chance() {
+        let amp = "envelopes: {amp: {attack_ms: 0, release_ms: 0}}";
+        // The power of each side over a stretch of frames.
+        let sides = |x: &[Frame]| {
+            let p = |c: usize| x.iter().map(|f| f[c] * f[c]).sum::<f64>().sqrt();
+            (p(0), p(1))
+        };
+        // Two notes in a row, and a chord of two, with a sine on each.
+        let line = Arc::new(vec![note(60, 0, 24000), note(64, 24000, 48000)]);
+        let render_line = |yaml: &str| render(&mut Synth::new(patch(yaml), line.clone(), 4096, 240), 48000, 4096);
+        // No width places nothing: the sides are the same, as before the field existed.
+        let center = render_line(&format!("{{oscillators: {{a: {{wave: sine}}}}, {amp}}}"));
+        assert!(center.iter().all(|f| (f[0] - f[1]).abs() < 1e-9));
+        // Alternate at full width: the first note on the left, the next on the right.
+        let turns = render_line(&format!("{{width_percent: 100, oscillators: {{a: {{wave: sine}}}}, {amp}}}"));
+        let (l, r) = sides(&turns[1000..23000]);
+        assert!(l > 100.0 * r.max(1e-9), "the first note is left: {l} against {r}");
+        let (l, r) = sides(&turns[25000..47000]);
+        assert!(r > 100.0 * l.max(1e-9), "the second note is right: {l} against {r}");
+        // At half width each note leans its way and both sides sound.
+        let half = render_line(&format!("{{width_percent: 50, oscillators: {{a: {{wave: sine}}}}, {amp}}}"));
+        let (l, r) = sides(&half[1000..23000]);
+        assert!(l > 1.5 * r && r > 0.2 * l, "leaning left: {l} against {r}");
+        // By pitch: middle C sits in the middle and a note an octave up leans right.
+        let by_pitch = render_line(&format!("{{width_percent: 100, width_mode: pitch, oscillators: {{a: {{wave: sine}}}}, {amp}}}"));
+        let (l, r) = sides(&by_pitch[1000..23000]);
+        assert!((l - r).abs() < 1e-6 * l.max(r), "middle C in the middle: {l} against {r}");
+        let (l, r) = sides(&by_pitch[25000..47000]);
+        assert!(r > 1.2 * l, "E leans right: {l} against {r}");
+        let high = Arc::new(vec![note(84, 0, 24000)]);
+        let top = render(&mut Synth::new(patch(&format!("{{width_percent: 100, width_mode: pitch, oscillators: {{a: {{wave: sine}}}}, {amp}}}")), high, 4096, 240), 24000, 4096);
+        let (l, r) = sides(&top[1000..23000]);
+        assert!(r > 100.0 * l.max(1e-9), "two octaves up is at the edge: {l} against {r}");
+        // Random: each note somewhere, the same place every time, and another with another seed.
+        let chance = render_line(&format!("{{width_percent: 100, width_mode: random, oscillators: {{a: {{wave: sine}}}}, {amp}}}"));
+        assert_eq!(chance, render_line(&format!("{{width_percent: 100, width_mode: random, oscillators: {{a: {{wave: sine}}}}, {amp}}}")));
+        let other = render_line(&format!("{{width_percent: 100, width_mode: random, seed: 3, oscillators: {{a: {{wave: sine}}}}, {amp}}}"));
+        let balance = |x: &[Frame]| {
+            let (l, r) = sides(x);
+            (l - r) / (l + r)
+        };
+        assert!((balance(&chance[1000..23000]) - balance(&other[1000..23000])).abs() > 0.05, "another seed places the note elsewhere");
+        // The matrix opens the width: a macro at 100 moving it by 100 points is full width.
+        let opened = render_line(&format!("{{oscillators: {{a: {{wave: sine}}}}, macros: {{wide: 100}}, modulation: [{{source: macros.wide, target: width_percent, amount: 100}}], {amp}}}"));
+        assert_eq!(opened, turns);
+        // The oscillator's own pan is kept under the placement.
+        let panned = render_line(&format!("{{width_percent: 50, oscillators: {{a: {{wave: sine, pan: 0.5}}}}, {amp}}}"));
+        let (l, r) = sides(&panned[1000..23000]);
+        assert!((l - r).abs() < 1e-6 * l.max(r), "half left from half right is the middle: {l} against {r}");
     }
 
     /// The amplitude of a tone at `hz` in the left channel over frames `from..to`.

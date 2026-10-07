@@ -1602,6 +1602,36 @@ impl Modulation {
     }
 }
 
+/// How the Synth places its voices across the stereo field, by
+/// `width_percent`: each note on the other side from the last, by its
+/// pitch, or at a random place from the seed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum WidthMode {
+    Alternate,
+    Pitch,
+    Random,
+}
+
+impl WidthMode {
+    pub const NAMES: [&'static str; 3] = ["alternate", "pitch", "random"];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WidthMode::Alternate => "alternate",
+            WidthMode::Pitch => "pitch",
+            WidthMode::Random => "random",
+        }
+    }
+
+    fn from_str(s: &str) -> WidthMode {
+        match s {
+            "pitch" => WidthMode::Pitch,
+            "random" => WidthMode::Random,
+            _ => WidthMode::Alternate,
+        }
+    }
+}
+
 /// The Synth: a polyphonic synthesizer whose whole sound is this mapping.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Synth {
@@ -1613,6 +1643,12 @@ pub struct Synth {
     pub glide_ms: f64,
     /// How much a note's velocity moves its level: 100 is linear, 0 none.
     pub velocity_percent: f64,
+    /// How far the voices are placed across the stereo field, either side
+    /// of each oscillator's pan: 0 keeps every note where its oscillators
+    /// are, 100 reaches the edges.
+    pub width_percent: f64,
+    /// Where each note lands within the width.
+    pub width_mode: WidthMode,
     /// What random phases and the `random` source come from.
     pub seed: i64,
     /// One to four, by an ID the patch chooses, played in this order.
@@ -1633,8 +1669,8 @@ pub struct Synth {
 
 impl Synth {
     const FIELDS: &'static [&'static str] = &[
-        "patch", "voices", "glide_ms", "velocity_percent", "seed", "oscillators", "filter", "envelopes", "lfos",
-        "modulation", "macros", "effects",
+        "patch", "voices", "glide_ms", "velocity_percent", "width_percent", "width_mode", "seed", "oscillators", "filter",
+        "envelopes", "lfos", "modulation", "macros", "effects",
     ];
     pub const MAX_OSCILLATORS: usize = 4;
     pub const MAX_ENVELOPES: usize = 4;
@@ -1649,6 +1685,10 @@ impl Synth {
         let voices = f.opt(ctx, "voices", 8, |c, x| v::int(c, x, Bounds::ge_le("1", "16")));
         let glide_ms = f.opt(ctx, "glide_ms", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "5000")));
         let velocity_percent = f.opt(ctx, "velocity_percent", 100.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let width_percent = f.opt(ctx, "width_percent", 0.0, |c, x| v::float(c, x, Bounds::ge_le("0", "100")));
+        let width_mode = f.opt(ctx, "width_mode", WidthMode::Alternate, |c, x| {
+            v::literal_str(c, x, &WidthMode::NAMES).map(WidthMode::from_str)
+        });
         let seed = f.opt(ctx, "seed", 0, |c, x| v::int(c, x, Bounds::ge_le("0", "4294967295")));
         let oscillators = f.req(ctx, "oscillators", |c, x| id_dict(c, x, Oscillator::validate));
         let filter = f.opt(ctx, "filter", SynthFilter::default(), SynthFilter::validate);
@@ -1670,6 +1710,8 @@ impl Synth {
             voices: voices?,
             glide_ms: glide_ms?,
             velocity_percent: velocity_percent?,
+            width_percent: width_percent?,
+            width_mode: width_mode?,
             seed: seed?,
             oscillators: oscillators?,
             filter: filter?,
@@ -1719,6 +1761,8 @@ impl Synth {
         o.int("voices", self.voices, 8);
         o.float("glide_ms", self.glide_ms, 0.0);
         o.float("velocity_percent", self.velocity_percent, 100.0);
+        o.float("width_percent", self.width_percent, 0.0);
+        o.str("width_mode", self.width_mode.as_str(), "alternate");
         o.int("seed", self.seed, 0);
         o.req("oscillators", str_map(&self.oscillators, saved, Oscillator::dump));
         let filter = self.filter.dump(saved);
@@ -1753,6 +1797,8 @@ impl Default for Synth {
             voices: 8,
             glide_ms: 0.0,
             velocity_percent: 100.0,
+            width_percent: 0.0,
+            width_mode: WidthMode::Alternate,
             seed: 0,
             oscillators,
             filter: SynthFilter::default(),

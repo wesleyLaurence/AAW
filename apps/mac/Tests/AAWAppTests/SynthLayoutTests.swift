@@ -120,5 +120,6 @@ final class SynthLayoutTests: XCTestCase {
         XCTAssertEqual(SynthLayout.unit(ofTarget: "oscillators.a.pitch"), "semitones")
         XCTAssertEqual(SynthLayout.unit(ofTarget: "filter.cutoff_hz"), "octaves")
         XCTAssertEqual(SynthLayout.unit(ofTarget: "envelopes.amp.sustain_percent"), "points")
+        XCTAssertEqual(SynthLayout.unit(ofTarget: "width_percent"), "points", "the patch's width, dropped on from a source")
     }
 }
