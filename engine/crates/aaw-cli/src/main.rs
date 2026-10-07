@@ -488,6 +488,18 @@ enum ClipCmd {
         #[arg(long)]
         end: Option<String>,
     },
+    /// Make one clip of two or more clips of one track that plays what they
+    /// played. Note clips become one note clip from the first's start to the
+    /// last's end, with every note that played and a loop laid out as notes;
+    /// pattern clips and audio clips (tracks.T.audio.N) join only where they
+    /// meet and are one music: the same pattern, or the same file played on
+    /// from where the one before leaves, as `audio split` left them. The
+    /// first clip is kept, with its ID and reference.
+    Join {
+        project: Song,
+        #[arg(required = true, num_args = 2..)]
+        clips: Vec<String>,
+    },
 }
 
 /// Notes of note clips, addressed as CLIP.notes.ID, e.g.
@@ -1666,6 +1678,7 @@ fn run(cli: &Cli) -> Result<Json> {
                     end: end.as_deref().map(parse_value),
                 },
             ),
+            ClipCmd::Join { project, clips } => edit(project, C::ClipJoin { clips: clips.clone() }),
             ClipCmd::Loop { project, clip, beats, length } => edit(
                 project,
                 C::ClipLoop {

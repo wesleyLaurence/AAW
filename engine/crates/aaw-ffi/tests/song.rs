@@ -432,6 +432,33 @@ fn clips_move_resize_and_duplicate_on_exact_beats() {
 }
 
 #[test]
+fn clips_in_a_row_are_joined_into_one_that_plays_the_same() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
+    // A copy of the first clip right after it, then the two joined: one clip
+    // of eight repeats, the first, which the edit returns and which is left
+    // selected once the other is gone.
+    song.edit(Edit::ClipsMove { clips: vec![fill], by: 8.0, rows: 0 }, None).unwrap();
+    update(&seen);
+    let copy = song.edit(Edit::ClipsDuplicate { clips: vec![first] }, None).unwrap()[0];
+    update(&seen);
+    let made = song.edit(Edit::ClipsJoin { clips: vec![copy, first] }, None).unwrap();
+    assert_eq!(made, [first]);
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Join 2 clips into beat at 0");
+    let joined: Vec<(u64, f64, u32)> = u.arrangement.tracks[0].clips.iter().map(|c| (c.key, c.at, c.repeats)).collect();
+    assert_eq!(joined, [(first, 0.0, 8), (fill, 24.0, 1)]);
+    assert!(u.touched.iter().any(|t| t.key == copy && t.delta == Delta::Removed));
+    // Clips of different patterns are refused with the reason, and one clip is nothing to do.
+    let e = song.edit(Edit::ClipsJoin { clips: vec![first, fill] }, None).unwrap_err().to_string();
+    assert_eq!(e, "fill at 24 does not start where beat at 0 ends, at beat 32; clips joined into one meet there");
+    assert!(song.edit(Edit::ClipsJoin { clips: vec![first] }, None).unwrap().is_empty());
+    song.close();
+}
+
+#[test]
 fn clips_dragged_with_option_are_copied_as_far_as_a_move_goes() {
     let (_dir, path, song, seen) = open();
     transport(&seen);

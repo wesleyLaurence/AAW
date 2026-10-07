@@ -33,6 +33,7 @@ fn every_command_round_trips_as_json() {
         json!({"op": "audio.cut", "track": "drums", "from": 4, "to": 8, "in_ms": 3.0}),
         json!({"op": "clip.duplicate", "clip": "tracks.keys.clips.a", "at": 8, "id": "b"}),
         json!({"op": "clip.resize", "clip": "@4", "length_beats": "7/2"}),
+        json!({"op": "clip.join", "clips": ["tracks.keys.clips.a", "@4"]}),
         json!({"op": "note.add", "clip": "@4", "notes": [{"pitch": "C4", "duration": 1}]}),
         json!({"op": "note.add", "clip": "@4", "pitch": 60, "at": 1.975, "duration": "1/3"}),
         json!({"op": "note.set", "note": "@5", "velocity": 90}),

@@ -12,7 +12,7 @@ public enum ContextMenu {
 
     /// What an item of a clip's menu does, to the selected clips.
     public enum ClipAction: Equatable {
-        case edit, cut, copy, duplicate, split, loop, delete
+        case edit, cut, copy, duplicate, split, join, loop, delete
     }
 
     /// What an item of an effect's menu does, to the effect that was clicked
@@ -66,8 +66,10 @@ public enum ContextMenu {
 
     /// A clip's menu: its editor by name, then what the Edit menu does to the
     /// selected clips, and the loop set over them as L sets it. `canSplit` is
-    /// whether the start position is inside an audio clip of the selection.
-    public static func clip(editor: String, canSplit: Bool) -> [Item<ClipAction>] {
+    /// whether the start position is inside an audio clip of the selection,
+    /// and `canJoin` whether two or more clips of one track and kind are
+    /// selected.
+    public static func clip(editor: String, canSplit: Bool, canJoin: Bool) -> [Item<ClipAction>] {
         [
             Item(title: "Edit \(editor)", action: .edit),
             .separator,
@@ -75,6 +77,7 @@ public enum ContextMenu {
             Item(title: "Copy", action: .copy, key: "c"),
             Item(title: "Duplicate", action: .duplicate, key: "d"),
             Item(title: "Split at Start Position", action: .split, enabled: canSplit, key: "e"),
+            Item(title: "Join", action: .join, enabled: canJoin, key: "j"),
             .separator,
             Item(title: "Loop Selection", action: .loop, key: "l", command: false),
             .separator,

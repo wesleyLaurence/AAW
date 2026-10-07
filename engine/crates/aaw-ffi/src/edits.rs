@@ -101,6 +101,12 @@ pub enum Edit {
     },
     /// Sets a note clip's length, as typed; its notes stay where they are.
     ClipLength { clip: u64, beats: String },
+    /// Makes one clip of clips of one track that plays what they played, as
+    /// ⌘J does: note clips into one note clip from the first's start to the
+    /// last's end with every note that played, loops unrolled; pattern clips
+    /// and audio clips only where they meet and are one music. The clip kept
+    /// is what the edit makes.
+    ClipsJoin { clips: Vec<u64> },
     /// Loops a note clip or an audio clip every so many beats, as typed, until
     /// its end; `off` or nothing plays it once again.
     ClipLoop { clip: u64, beats: String },
@@ -1136,6 +1142,12 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 command["end"] = beat_at(*end)?;
             }
             Ok(vec![command])
+        }
+        Edit::ClipsJoin { clips } => {
+            if clips.len() < 2 {
+                return Ok(Vec::new());
+            }
+            Ok(vec![json!({"op": "clip.join", "clips": clips.iter().map(|key| clip(key)).collect::<Vec<_>>()})])
         }
         Edit::ClipLength { clip: key, beats } => {
             let tree = doc.tree();

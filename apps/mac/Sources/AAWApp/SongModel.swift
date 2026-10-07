@@ -961,6 +961,25 @@ public final class SongModel {
         }
     }
 
+    /// Whether the selected clips are joined by ⌘J: two or more, on one
+    /// track and of one kind. Whether they meet and are one music is the
+    /// host's to say.
+    public var canJoin: Bool {
+        let clips = placedClips().filter { selectedClips.contains($0.key) }
+        guard clips.count >= 2, let first = clips.first else { return false }
+        return clips.allSatisfy { $0.track == first.track && ($0.audio != nil) == (first.audio != nil) }
+    }
+
+    /// Makes one clip of the selected clips that plays what they played, and
+    /// selects it: note clips into one note clip with every note that played,
+    /// pattern clips and audio clips where they meet and are one music.
+    public func joinSelection() {
+        guard canJoin else { return }
+        edit(.clipsJoin(clips: selectedClips.sorted())) { [weak self] made in
+            if let kept = made.first { self?.select(clips: Set(made), focus: kept) }
+        }
+    }
+
     /// Adds a track under the selected one, or else last, and asks for its
     /// name: a MIDI track of note clips, with no instrument, when `midi`.
     public func addTrack(midi: Bool = false) {

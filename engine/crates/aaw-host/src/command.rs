@@ -11,7 +11,7 @@ use crate::tree::{self, Item, Loc, Node, Step};
 use aaw_model::value::Value;
 use aaw_model::Beat;
 use num_rational::BigRational;
-use num_traits::Signed;
+use num_traits::{Signed, Zero};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value as Json};
 
@@ -145,6 +145,14 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         end: Option<Json>,
     },
+    /// Makes one clip of two or more clips of one track that plays what they
+    /// played. Note clips become one note clip from the first's start to the
+    /// last's end, holding every note that played, loops unrolled; pattern
+    /// clips and audio clips join only where they meet and are one music: the
+    /// same pattern, or the same file played on from where the one before
+    /// leaves. The first clip is the one kept, with its ID and reference.
+    #[serde(rename = "clip.join")]
+    ClipJoin { clips: Vec<String> },
 
     // Notes of note clips
     /// Adds notes to a note clip: `notes`, a list of notes, or one note from
@@ -1527,6 +1535,81 @@ impl<'a> Edit<'a> {
                 self.set_leaf(&loc, "length_beats", beat_value(&(&to - &from)));
                 out.label = format!("Trim clip {} to beats {} to {}", self.clip_name(&loc), beat_text(&from), beat_text(&to));
             }
+            ClipJoin { clips } => {
+                use crate::range::Kind;
+                // Each clip once: its track, its list and its index there.
+                let mut found: Vec<(Loc, &'static str, usize)> = Vec::new();
+                for path in clips {
+                    let place = match self.audio_clip(path) {
+                        Some(loc) => match loc.as_slice() {
+                            [owner @ .., Step::Key(_), Step::Index(i)] => (owner.to_vec(), "audio", *i),
+                            _ => return Err(format!("{path} is not a clip")),
+                        },
+                        None => {
+                            let (owner, i) = self.member(path, "clips", "a clip")?;
+                            (owner, "clips", i)
+                        }
+                    };
+                    if !found.contains(&place) {
+                        found.push(place);
+                    }
+                }
+                if found.len() < 2 {
+                    return Err("Name two or more clips of one track to join".into());
+                }
+                let (owner, key) = (found[0].0.clone(), found[0].1);
+                if found.iter().any(|(o, _, _)| *o != owner) {
+                    return Err("The clips are on two tracks; clips joined are on one".into());
+                }
+                if found.iter().any(|(_, k, _)| *k != key) {
+                    return Err("Pattern clips and audio clips are not joined into one; join each kind by itself".into());
+                }
+                let kind = match key {
+                    "audio" => Kind::Audio,
+                    _ if self.is_midi(&owner) => Kind::Note,
+                    _ => Kind::Pattern,
+                };
+                let loc_of = |i: usize| [owner.clone(), vec![Step::Key(key.into()), Step::Index(i)]].concat();
+                // In the order they play.
+                let mut order: Vec<(BigRational, Option<BigRational>, usize)> = Vec::new();
+                for (_, _, i) in &found {
+                    let (start, end) = self.timed(kind, self.node(&loc_of(*i)))?;
+                    order.push((start, end, *i));
+                }
+                order.sort();
+                let first = loc_of(order[0].2);
+                let joined = match kind {
+                    Kind::Note => self.joined_notes(&order.iter().map(|(_, _, i)| loc_of(*i)).collect::<Vec<_>>())?,
+                    _ => {
+                        let mut acc = self.node(&first).clone();
+                        for pair in order.windows(2) {
+                            let (a, b) = (self.clip_name(&loc_of(pair[0].2)), self.clip_name(&loc_of(pair[1].2)));
+                            let right = self.node(&loc_of(pair[1].2));
+                            let Some(end) = &pair[0].1 else {
+                                return Err(format!("Audio clip {a} plays to its file's end, so nothing goes on from it"));
+                            };
+                            if num_traits::ToPrimitive::to_f64(&(&pair[1].0 - end)).is_none_or(|d| d.abs() >= 1e-6) {
+                                return Err(format!(
+                                    "{b} does not start where {a} ends, at beat {}; clips joined into one meet there",
+                                    beat_text(end)
+                                ));
+                            }
+                            acc = self.merged(kind, &acc, right).ok_or_else(|| self.not_one_music(kind, &acc, right, &a, &b))?;
+                        }
+                        acc
+                    }
+                };
+                let count = order.len();
+                *self.node_mut(&first) = joined;
+                let kept = tree::handle_at(self.root, &first);
+                let mut gone: Vec<usize> = order[1..].iter().map(|(_, _, i)| *i).collect();
+                gone.sort_unstable();
+                for i in gone.into_iter().rev() {
+                    self.take(&owner, key, i)?;
+                }
+                out.made.push(kept);
+                out.label = format!("Join {count} clips into {}", self.clip_name(&tree::find(self.root, kept).unwrap_or(first)));
+            }
             MidiImport { file, track, at, index } => {
                 let path = std::path::Path::new(file);
                 let shown = path.file_name().map_or_else(|| file.clone(), |n| n.to_string_lossy().into_owned());
@@ -2330,6 +2413,101 @@ impl<'a> Edit<'a> {
             .filter_map(|c| c.node.field("id"))
             .collect();
         next_id(&ids, "clip")
+    }
+
+    /// One note clip of the note clips at `locs`, in the order they play:
+    /// from the first's start to the last's end, with every note that played,
+    /// where it played and cut where its clip or its loop cut it, a looped
+    /// clip's repetitions laid out as notes. A note that did not play, before
+    /// its clip or at or after its end or its loop's, is left out. The first
+    /// clip's fields and note IDs are kept; a note of another clip keeps its
+    /// ID where no note has it yet, and a repetition's copy is named anew.
+    fn joined_notes(&mut self, locs: &[Loc]) -> Result<Node> {
+        let starts: Vec<BigRational> = locs.iter().map(|l| exact(self.node(l).get("at")).unwrap_or_default()).collect();
+        let lengths: Vec<BigRational> = locs.iter().map(|l| exact(self.node(l).get("length_beats")).unwrap_or_default()).collect();
+        let start = starts.iter().min().cloned().unwrap_or_default();
+        let end = starts.iter().zip(&lengths).map(|(s, l)| s + l).max().unwrap_or_default();
+        let mut notes: Vec<(Option<u64>, Node)> = Vec::new();
+        let mut ids: Vec<String> = Vec::new();
+        for (k, loc) in locs.iter().enumerate() {
+            let node = self.node(loc);
+            let offset = &starts[k] - &start;
+            let length = lengths[k].clone();
+            let every = exact(node.get("loop_beats")).filter(|e| e.is_positive()).unwrap_or_else(|| length.clone());
+            let mut base = BigRational::zero();
+            while base < length {
+                for n in node.get("notes").map_or(&[][..], Node::items) {
+                    let at = exact(n.node.get("at")).unwrap_or_default();
+                    let duration = exact(n.node.get("duration")).unwrap_or_default();
+                    if at.is_negative() || at >= every || &base + &at >= length {
+                        continue;
+                    }
+                    let stop = [&at + &duration, every.clone(), &length - &base].into_iter().min().unwrap_or_default();
+                    if stop <= at {
+                        continue;
+                    }
+                    let mut copy = n.node.clone();
+                    set(&mut copy, "at", beat_value(&(&offset + &base + &at)));
+                    set(&mut copy, "duration", beat_value(&(&stop - &at)));
+                    let id = n.node.field("id").map(str::to_string);
+                    let keeps = base.is_zero() && id.as_ref().is_some_and(|id| !ids.contains(id));
+                    match (keeps, id) {
+                        (true, Some(id)) => ids.push(id),
+                        _ => {
+                            if let Some(m) = copy.map_mut() {
+                                m.shift_remove("id");
+                            }
+                        }
+                    }
+                    // A note of the first clip, played once, is the note it was.
+                    let handle = (k == 0 && base.is_zero()).then_some(n.handle);
+                    notes.push((handle, copy));
+                }
+                base += &every;
+            }
+        }
+        let mut out = self.node(&locs[0]).clone();
+        set(&mut out, "at", beat_value(&start));
+        set(&mut out, "length_beats", beat_value(&(&end - &start)));
+        if let Some(m) = out.map_mut() {
+            m.shift_remove("loop_beats");
+        }
+        let items: Vec<Item> = notes
+            .into_iter()
+            .map(|(handle, node)| Item {
+                handle: handle.unwrap_or_else(|| self.fresh()),
+                node,
+            })
+            .collect();
+        if let Some(m) = out.map_mut() {
+            m.insert("notes".into(), Node::List(items));
+        }
+        self.name_notes(&mut out);
+        Ok(out)
+    }
+
+    /// Why two clips that meet are not one music, for a refused join.
+    fn not_one_music(&self, kind: crate::range::Kind, left: &Node, right: &Node, a: &str, b: &str) -> String {
+        use crate::range::Kind;
+        let same = |key: &str| left.get(key).map(node_json) == right.get(key).map(node_json);
+        if exact(left.get("loop_beats")).is_some() || exact(right.get("loop_beats")).is_some() {
+            return format!("{a} and {b} are not two halves of one loop that meet at a wrap; turn the loop off first (clip loop CLIP off)");
+        }
+        match kind {
+            Kind::Pattern if !same("pattern") => format!("{a} and {b} play different patterns, so one clip cannot play what they play"),
+            Kind::Pattern => format!("{a} and {b} are at different velocity scales, so one clip cannot play what they play"),
+            Kind::Audio if !same("sample") => format!("{a} and {b} play different files, so one clip cannot play what they play"),
+            Kind::Audio => {
+                let (l, r) = (Span::of(left, self.tempo()), Span::of(right, self.tempo()));
+                match (l, r) {
+                    (Ok(l), Ok(r)) if l.end.is_none_or(|end| (end - r.start).abs() >= 1e-9) => format!(
+                        "{b} does not go on in the file from where {a} leaves, so one clip cannot play what they play; a join is of clips that were one, as audio split leaves them"
+                    ),
+                    _ => format!("{a} and {b} differ in gain, fade curve, tempo or stretch, so one clip cannot play what they play"),
+                }
+            }
+            Kind::Note => format!("{a} and {b} cannot be joined"),
+        }
     }
 
     /// Gives a note clip's notes that have no ID the next free `nN`, as the

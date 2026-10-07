@@ -1205,7 +1205,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .audio: editor = "Audio Clip"
         case .notes: editor = "Notes"
         }
-        let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit)
+        let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit, canJoin: model.canJoin)
         return menu(of: items, #selector(clipMenuAction(_:))) { ClipChoice(action: $0) }
     }
 
@@ -1255,6 +1255,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .copy: model.copySelection(in: .clips)
         case .duplicate: model.duplicateSelection()
         case .split: model.splitSelection()
+        case .join: model.joinSelection()
         case .loop: model.toggleLoop()
         case .delete: model.deleteSelection()
         }

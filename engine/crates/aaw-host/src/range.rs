@@ -33,7 +33,7 @@ fn bar() -> BigRational {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum Kind {
+pub(crate) enum Kind {
     Pattern,
     Note,
     Audio,
@@ -454,7 +454,7 @@ impl<'a> Edit<'a> {
 
     /// Where an item starts and ends; no end for an audio clip that plays to
     /// its file's end.
-    fn timed(&self, kind: Kind, node: &Node) -> Result<(BigRational, Option<BigRational>)> {
+    pub(crate) fn timed(&self, kind: Kind, node: &Node) -> Result<(BigRational, Option<BigRational>)> {
         match kind {
             Kind::Audio => {
                 let span = Span::of(node, self.tempo())?;
@@ -637,7 +637,7 @@ impl<'a> Edit<'a> {
     /// its continuation, an audio clip and the rest of its file as it was
     /// playing, a note clip and the one that follows it, with a note divided
     /// at the join made whole again.
-    fn merged(&self, kind: Kind, left: &Node, right: &Node) -> Option<Node> {
+    pub(crate) fn merged(&self, kind: Kind, left: &Node, right: &Node) -> Option<Node> {
         let same = |key: &str| left.get(key).map(|n| crate::command::node_json(n)) == right.get(key).map(|n| crate::command::node_json(n));
         let mut out = left.clone();
         if Self::looped(left) || Self::looped(right) {
