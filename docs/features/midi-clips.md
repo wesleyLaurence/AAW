@@ -86,7 +86,9 @@ is a Later item.
 
 `daw track add SONG ID --type midi` makes a MIDI track with no instrument.
 `daw clip add`, `move`, `duplicate`, `resize`, `trim` and `remove` place note
-clips; `daw note add`, `set`, `move`, `transpose` and `remove` edit notes, a
+clips, and `daw clip join SONG CLIP CLIP...` makes one of two or more on a
+track, from the first's start to the last's end, with every note that played
+where it played and a loop laid out as notes (the app's ⌘J); `daw note add`, `set`, `move`, `transpose` and `remove` edit notes, a
 clip standing for all its notes; `daw note list SONG CLIP|TRACK` reads them with
 names and song beats, between `--from` and `--to` if given. `daw instrument
 set`, `remove` and `map` attach, take off and map the sampler, and `daw pad`

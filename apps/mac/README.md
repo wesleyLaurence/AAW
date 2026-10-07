@@ -178,7 +178,7 @@ front first.
 | Click M or S | Mutes or solos |
 | Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
 | Double-click a clip | Opens its editor in the detail panel, shown if it was hidden: a pattern clip's pattern, an audio clip's settings or a note clip's piano roll |
-| Right-click or Control-click a clip | Selects it, or keeps a selection it is part of, and offers its editor, Cut, Copy, Duplicate, Split at Start Position, Loop Selection and Delete, each as the menus do them |
+| Right-click or Control-click a clip | Selects it, or keeps a selection it is part of, and offers its editor, Cut, Copy, Duplicate, Split at Start Position, Join, Loop Selection and Delete, each as the menus do them |
 | Drag in the clear of the timeline | Selects the clips a rectangle touches, across tracks; with Shift, as well as those selected. The press sets the start position |
 | Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in; on a MIDI track, an empty note clip a bar long |
 | Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid; with Option, copies them there, outlined on the way, and leaves them, whichever part of the clip was pressed. An audio clip can pass the song's end, which grows with it |
@@ -187,6 +187,7 @@ front first.
 | Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid |
 | Drag the handle at an audio clip's top corner | Sets its fade in or its fade out. The clip still ends where it did: a longer fade out starts earlier |
 | ⌘E | Splits the selected audio clips at the start position, or with a track selected and no clip, that track's, and selects the later halves |
+| ⌘J | Joins the selected clips, two or more on one track, into one that plays what they played, and selects it: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a looped clip laid out as notes; pattern clips and audio clips only where they meet and are one music, the same pattern or the same file played on as a split left it, else refused with the reason. The first clip is the one kept |
 | Arrow keys | Move the selected clips a grid step, or to the next track |
 | ⌘D, Delete | Copies the selected clips to right after them; deletes them, or else the selected track or return. In the piano roll, the selected notes |
 | ⌘C, ⌘X, ⌘V | Copies or cuts the selected clips, and pastes them at the start position, on the track whose lane was clicked last or else the tracks they came from; the start position moves to their end. In the piano roll, notes, pasted where the clip was last clicked in the clear, or else right after themselves. A copy is its own: changing it changes nothing else |

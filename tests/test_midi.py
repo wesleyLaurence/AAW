@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import tempfile
+from fractions import Fraction
 import time
 
 import numpy as np
@@ -201,6 +202,28 @@ def test_a_labeled_batch_through_a_host_is_one_undo_step(tmp_path, registry):
     finally:
         daw("close", path)
         host.wait(timeout=30)
+
+
+def test_clips_are_joined_into_one_that_plays_what_they_played(tmp_path):
+    path = phrase(tmp_path)
+    clip = "tracks.keys.clips.clip1"
+    daw("clip", "duplicate", path, clip, "--at", 12, "--id", "answer")
+    daw("clip", "loop", path, clip, 2)
+    joined = daw("clip", "join", path, "tracks.keys.clips.answer", clip)
+    assert joined["label"] == "Join 2 clips into clip1 at 4"
+    assert joined["path"] == clip
+    clips = load(path)["tracks"][0]["clips"]
+    assert len(clips) == 1
+    assert (clips[0]["at"], clips[0]["length_beats"], clips[0].get("loop_beats")) == (4, 12, None)
+    # The loop's two repetitions of the first two beats, then the copy's six
+    # notes eight beats on; the A at beat 3 was past the loop's end and silent.
+    starts = sorted(Fraction(str(n.get("at", 0))) for n in clips[0]["notes"])
+    assert starts == sorted(
+        [Fraction(0), Fraction(0), Fraction(0), Fraction("1.975"), Fraction(2), Fraction(2), Fraction(2), Fraction("3.975")]
+        + [Fraction(8), Fraction(8), Fraction(8), Fraction("9.975"), Fraction("10.025"), Fraction(11)]
+    )
+    with pytest.raises(ValueError, match="Name two or more clips"):
+        daw("clip", "join", path, clip, clip)
 
 
 def test_a_clip_loops_its_first_beats_and_the_notes_past_the_loop_are_named(tmp_path):

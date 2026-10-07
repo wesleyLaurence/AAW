@@ -531,6 +531,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Paste", #selector(NSText.paste(_:)), "v"),
             item("Duplicate", #selector(SongWindowController.duplicateSelection(_:)), "d"),
             item("Split", #selector(SongWindowController.splitSelection(_:)), "e"),
+            item("Join", #selector(SongWindowController.joinSelection(_:)), "j"),
             item("Delete", #selector(SongWindowController.deleteSelection(_:)), "\u{8}", []),
             .separator(),
             item("Select All", #selector(NSResponder.selectAll(_:)), "a"),
@@ -774,6 +775,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func redoEdit(_ sender: Any?) { model.redo() }
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
     @objc func splitSelection(_ sender: Any?) { model.splitSelection() }
+    @objc func joinSelection(_ sender: Any?) { model.joinSelection() }
     /// Delete, for what has the keys: in the pattern editor the selected
     /// events and nothing else, so that it never takes the clip being edited.
     @objc func deleteSelection(_ sender: Any?) {
@@ -844,6 +846,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             return !typing && model.canCopy(in: editPlace)
         case #selector(paste(_:)): return !typing && model.canPaste(in: editPlace)
         case #selector(splitSelection(_:)): return model.canSplit && !typing
+        case #selector(joinSelection(_:)): return model.canJoin && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
         case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing

@@ -45,15 +45,19 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertFalse(items.contains { $0.action == .rename || $0.action == .mute || $0.action == .delete })
     }
 
-    func testAClipsMenuNamesItsEditorAndSplitsOnlyWhereItCan() {
-        let items = ContextMenu.clip(editor: "Notes", canSplit: false)
+    func testAClipsMenuNamesItsEditorAndSplitsAndJoinsOnlyWhereItCan() {
+        let items = ContextMenu.clip(editor: "Notes", canSplit: false, canJoin: false)
         XCTAssertEqual(actions(items), [
-            .edit, nil, .cut, .copy, .duplicate, .split, nil, .loop, nil, .delete,
+            .edit, nil, .cut, .copy, .duplicate, .split, .join, nil, .loop, nil, .delete,
         ])
         XCTAssertEqual(items.first?.title, "Edit Notes")
         XCTAssertEqual(items.first { $0.action == .split }?.enabled, false)
-        XCTAssertEqual(ContextMenu.clip(editor: "Audio Clip", canSplit: true).first { $0.action == .split }?.enabled, true)
-        XCTAssertEqual(ContextMenu.clip(editor: "Pattern", canSplit: false).first?.title, "Edit Pattern")
+        XCTAssertEqual(items.first { $0.action == .join }?.enabled, false)
+        XCTAssertEqual(items.first { $0.action == .join }?.key, "j")
+        let several = ContextMenu.clip(editor: "Audio Clip", canSplit: true, canJoin: true)
+        XCTAssertEqual(several.first { $0.action == .split }?.enabled, true)
+        XCTAssertEqual(several.first { $0.action == .join }?.enabled, true)
+        XCTAssertEqual(ContextMenu.clip(editor: "Pattern", canSplit: false, canJoin: false).first?.title, "Edit Pattern")
         XCTAssertEqual(items.first { $0.action == .loop }?.key, "l")
         XCTAssertEqual(items.first { $0.action == .loop }?.command, false)
     }

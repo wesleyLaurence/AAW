@@ -65,6 +65,7 @@ uv run daw audio add SONG song song --at 4 --source-start-seconds 41.213 --lead-
 uv run daw audio move SONG tracks.song.audio.1 --at 44 --track other   # to a beat, a track or both
 uv run daw audio cut SONG song --from 82 --to 98        # take sixteen beats out and close the gap
 uv run daw audio split SONG tracks.song.audio.0 --at 40
+uv run daw clip join SONG tracks.song.audio.0 tracks.song.audio.1   # the split undone, as one clip again
 uv run daw audio trim SONG tracks.song.audio.1 --end 120
 uv run daw audio crossfade SONG tracks.song.audio.1 --ms 20
 uv run daw remove SONG tracks.song.audio.1              # remove one
@@ -84,6 +85,10 @@ A clip is named by its path, `tracks.TRACK.audio.N`, or by the `@N` reference
   other tracks are left where they are.
 - **`audio split CLIP --at BEAT`** makes two clips of one, with no fade between
   them. They play exactly as the one did: the same frames at the same places.
+- **`clip join CLIP CLIP...`** makes one clip of two or more that meet and are the
+  same file played on, as `audio split` left them, so the one plays exactly what
+  they did; clips a cut joined with a crossfade, or of two files, are refused
+  with the reason. The first clip is kept, with its reference.
 - **`audio trim CLIP --start BEAT --end BEAT`** moves an edge to a beat. The audio
   stays where it is on the timeline; the clip shows more or less of it.
 - **`audio crossfade CLIP`** sets the join between a clip and the one before it on
