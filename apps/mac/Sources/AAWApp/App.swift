@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 /// song file, and with none a new Untitled project. For checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
-/// held), `--key KEY`, `--type TEXT` and `--wait SECONDS`
+/// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2` and `--wait SECONDS`
 /// in the order to perform them, then `--export PATH [--export-level
 /// LEVEL]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
 /// `--after SECONDS` and `--size WxH`.
@@ -22,6 +22,10 @@ struct Launch {
         case drop(URL, CGPoint)
         /// Time for something else to happen, such as an agent's command.
         case wait(Double)
+        /// A click, or a drag, in the first analyzer window that is open, in
+        /// its content.
+        case analyzerClick(CGPoint)
+        case analyzerDrag(CGPoint, CGPoint)
     }
 
     /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
@@ -118,6 +122,12 @@ struct Launch {
                 if let key = rest.popFirst().flatMap(Key.init) { actions.append(.key(key)) }
             case "--type":
                 actions += (rest.popFirst() ?? "").map { .key(Key(typing: $0)) }
+            case "--analyzer-click":
+                let n = numbers()
+                if n.count == 2 { actions.append(.analyzerClick(CGPoint(x: n[0], y: n[1]))) }
+            case "--analyzer-drag":
+                let n = numbers()
+                if n.count == 4 { actions.append(.analyzerDrag(CGPoint(x: n[0], y: n[1]), CGPoint(x: n[2], y: n[3]))) }
             case "--wait":
                 if let seconds = rest.popFirst().flatMap(Double.init) { actions.append(.wait(seconds)) }
             case "--snapshot":
@@ -478,6 +488,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let view = arrangement(in: content) {
                 view.drop(file: file, at: view.convert(CGPoint(x: p.x, y: content.bounds.height - p.y), from: nil))
             }
+        case .analyzerClick, .analyzerDrag:
+            // The analyzer's window, whose events the song's would not take.
+            guard let analyzer = songs.first?.model.openAnalyzerWindows.first?.window, let content = analyzer.contentView else { return }
+            func post(_ type: NSEvent.EventType, _ p: CGPoint) {
+                let at = CGPoint(x: p.x, y: content.bounds.height - p.y)
+                if let event = NSEvent.mouseEvent(with: type, location: at, modifierFlags: [], timestamp: now, windowNumber: analyzer.windowNumber,
+                                                  context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                    NSApp.postEvent(event, atStart: false)
+                }
+            }
+            if case .analyzerClick(let p) = action {
+                post(.leftMouseDown, p)
+                post(.leftMouseUp, p)
+            } else if case .analyzerDrag(let from, let to) = action {
+                post(.leftMouseDown, from)
+                post(.leftMouseDragged, CGPoint(x: (from.x + to.x) / 2, y: (from.y + to.y) / 2))
+                post(.leftMouseDragged, to)
+                post(.leftMouseUp, to)
+            }
         case .wait:
             break
         }
@@ -501,6 +530,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let open = controller.model.waveformDelay.open { waveforms["after_open"] = round(open) }
             if let change = controller.model.waveformDelay.change { waveforms["after_change"] = round(change) }
             report["waveform_ms"] = waveforms
+            // An analyzer window open through the run: how its drawing kept up.
+            if let analyzer = controller.model.openAnalyzerWindows.first {
+                var times = analyzer.view.drawTimes.report
+                times["window"] = analyzer.window.map { [$0.contentView?.bounds.width ?? 0, $0.contentView?.bounds.height ?? 0] } ?? []
+                report["analyzer"] = times
+            }
             do {
                 try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys]).write(to: url)
             } catch {
@@ -516,17 +551,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Writes the first window's picture where asked, and beside it one of
+    /// each analyzer window that is open, named `NAME-analyzer.png`, then
+    /// `NAME-analyzer-2.png` and so on.
     private func snapshot(to url: URL) {
-        guard let view = songs.first?.window?.contentView,
-              let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-            exit(1)
+        guard let controller = songs.first, let view = controller.window?.contentView else { exit(1) }
+        var pictures = [(view, url)]
+        for (i, analyzer) in controller.model.openAnalyzerWindows.enumerated() {
+            guard let content = analyzer.window?.contentView else { continue }
+            let name = url.deletingPathExtension().lastPathComponent + "-analyzer" + (i == 0 ? "" : "-\(i + 1)")
+            pictures.append((content, url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension(url.pathExtension)))
         }
-        view.cacheDisplay(in: view.bounds, to: image)
-        do {
-            try image.representation(using: .png, properties: [:])?.write(to: url)
-        } catch {
-            FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
-            exit(1)
+        for (view, url) in pictures {
+            guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { exit(1) }
+            view.cacheDisplay(in: view.bounds, to: image)
+            do {
+                try image.representation(using: .png, properties: [:])?.write(to: url)
+            } catch {
+                FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
+                exit(1)
+            }
         }
         finishRun()
     }
@@ -630,6 +674,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
             item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
             item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]),
+            .separator(),
+            item("Analyzer Window", #selector(SongWindowController.openAnalyzer(_:)), "l", [.command, .option]),
         ])
         let window = NSMenu(title: "Window")
         window.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
@@ -880,6 +926,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
 
     @objc func toggleDevices(_ sender: Any?) { toggle(.devices) }
     @objc func togglePattern(_ sender: Any?) { toggle(.pattern) }
+    /// Opens the window of the selected analyzer, or of the first one on
+    /// the row whose devices show.
+    @objc func openAnalyzer(_ sender: Any?) { model.openShownAnalyzer() }
 
     /// The editor a Grid menu command is for: the piano roll or the pattern
     /// editor while it has the keys, else the timeline.
@@ -966,6 +1015,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.title = DetailView.clipTitle(model)
             item.state = model.showsDetail && model.detail == .pattern ? .on : .off
         case #selector(toggleBrowser(_:)): item.state = model.showsBrowser ? .on : .off
+        case #selector(openAnalyzer(_:)): return model.shownAnalyzer != nil && !typing
         case #selector(gridFollowsZoom(_:)):
             item.state = gridPlace == .timeline && model.timelineGrid == nil ? .on : .off
             return gridPlace == .timeline && !typing

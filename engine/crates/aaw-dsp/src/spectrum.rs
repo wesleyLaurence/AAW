@@ -7,6 +7,7 @@
 //! waits and never allocates; a reader that catches the ring mid-block sees
 //! a window a few frames torn, which a picture does not show.
 
+use crate::meter::Ring;
 use crate::Frame;
 use realfft::num_complex::Complex64;
 use realfft::{RealFftPlanner, RealToComplex};
@@ -66,44 +67,67 @@ impl Tap {
     }
 }
 
-/// The taps of a song's equalizers, by the row that owns the chain (a
-/// track's or return's ID, or `master`) and the effect's index in it, kept
-/// between compiles so that the app reads the same ring while a song is
-/// edited. Entries a compile does not ask for are dropped at `finish`.
+/// The taps of a song's equalizers and the rings of its analyzers, by the
+/// row that owns the chain (a track's, group's or return's ID, or `master`)
+/// and the effect's index in it, kept between compiles so that the app
+/// reads the same ring while a song is edited. Entries a compile does not
+/// ask for are dropped at `finish`.
 #[derive(Debug, Default)]
 pub struct Taps {
-    inner: Mutex<(u64, HashMap<(String, usize), (u64, Arc<Tap>)>)>,
+    inner: Mutex<Inner>,
+}
+
+#[derive(Debug, Default)]
+struct Inner {
+    generation: u64,
+    taps: HashMap<(String, usize), (u64, Arc<Tap>)>,
+    rings: HashMap<(String, usize), (u64, Arc<Ring>)>,
 }
 
 impl Taps {
-    fn lock(&self) -> MutexGuard<'_, (u64, HashMap<(String, usize), (u64, Arc<Tap>)>)> {
+    fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     /// Starts a compile.
     pub fn begin(&self) {
-        self.lock().0 += 1;
+        self.lock().generation += 1;
     }
 
-    /// The tap of an effect, made if the song had none there.
+    /// The tap of an equalizer, made if the song had none there.
     pub fn get(&self, owner: &str, index: usize) -> Arc<Tap> {
         let mut inner = self.lock();
-        let generation = inner.0;
-        let entry = inner.1.entry((owner.to_string(), index)).or_insert_with(|| (generation, Arc::default()));
+        let generation = inner.generation;
+        let entry = inner.taps.entry((owner.to_string(), index)).or_insert_with(|| (generation, Arc::default()));
         entry.0 = generation;
         entry.1.clone()
     }
 
-    /// Drops the taps the compile did not ask for.
-    pub fn finish(&self) {
+    /// The ring of an analyzer, made if the song had none there.
+    pub fn ring(&self, owner: &str, index: usize) -> Arc<Ring> {
         let mut inner = self.lock();
-        let generation = inner.0;
-        inner.1.retain(|_, e| e.0 == generation);
+        let generation = inner.generation;
+        let entry = inner.rings.entry((owner.to_string(), index)).or_insert_with(|| (generation, Arc::default()));
+        entry.0 = generation;
+        entry.1.clone()
     }
 
-    /// The tap of an effect, if the last compile gave it one.
+    /// Drops the taps and rings the compile did not ask for.
+    pub fn finish(&self) {
+        let mut inner = self.lock();
+        let generation = inner.generation;
+        inner.taps.retain(|_, e| e.0 == generation);
+        inner.rings.retain(|_, e| e.0 == generation);
+    }
+
+    /// The tap of an equalizer, if the last compile gave it one.
     pub fn find(&self, owner: &str, index: usize) -> Option<Arc<Tap>> {
-        self.lock().1.get(&(owner.to_string(), index)).map(|e| e.1.clone())
+        self.lock().taps.get(&(owner.to_string(), index)).map(|e| e.1.clone())
+    }
+
+    /// The ring of an analyzer, if the last compile gave it one.
+    pub fn find_ring(&self, owner: &str, index: usize) -> Option<Arc<Ring>> {
+        self.lock().rings.get(&(owner.to_string(), index)).map(|e| e.1.clone())
     }
 }
 

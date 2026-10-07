@@ -645,7 +645,8 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
-                "utility": "#/$defs/Utility"
+                "utility": "#/$defs/Utility",
+                "analyzer": "#/$defs/Analyzer"
               },
               "propertyName": "type"
             },
@@ -676,6 +677,9 @@
               },
               {
                 "$ref": "#/$defs/Utility"
+              },
+              {
+                "$ref": "#/$defs/Analyzer"
               }
             ]
           },
@@ -891,7 +895,8 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
-                "utility": "#/$defs/Utility"
+                "utility": "#/$defs/Utility",
+                "analyzer": "#/$defs/Analyzer"
               },
               "propertyName": "type"
             },
@@ -922,6 +927,9 @@
               },
               {
                 "$ref": "#/$defs/Utility"
+              },
+              {
+                "$ref": "#/$defs/Analyzer"
               }
             ]
           },
@@ -1024,7 +1032,8 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
-                "utility": "#/$defs/Utility"
+                "utility": "#/$defs/Utility",
+                "analyzer": "#/$defs/Analyzer"
               },
               "propertyName": "type"
             },
@@ -1055,6 +1064,9 @@
               },
               {
                 "$ref": "#/$defs/Utility"
+              },
+              {
+                "$ref": "#/$defs/Analyzer"
               }
             ]
           },
@@ -1690,7 +1702,8 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
-                "utility": "#/$defs/Utility"
+                "utility": "#/$defs/Utility",
+                "analyzer": "#/$defs/Analyzer"
               },
               "propertyName": "type"
             },
@@ -1721,6 +1734,9 @@
               },
               {
                 "$ref": "#/$defs/Utility"
+              },
+              {
+                "$ref": "#/$defs/Analyzer"
               }
             ]
           },
@@ -2400,7 +2416,8 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
-                "utility": "#/$defs/Utility"
+                "utility": "#/$defs/Utility",
+                "analyzer": "#/$defs/Analyzer"
               },
               "propertyName": "type"
             },
@@ -2431,6 +2448,9 @@
               },
               {
                 "$ref": "#/$defs/Utility"
+              },
+              {
+                "$ref": "#/$defs/Analyzer"
               }
             ]
           },
@@ -2669,6 +2689,39 @@
         "type"
       ],
       "title": "Utility",
+      "type": "object"
+    },
+    "Analyzer": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "analyzer",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Analyzer",
       "type": "object"
     }
   },

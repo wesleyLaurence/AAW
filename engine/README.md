@@ -10,7 +10,7 @@ reads songs through `aaw-py`.
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule, the schema `daw describe` prints, the warnings `daw check` gives |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the eight effects, wavetables and the Synth |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the ten effects, the analyzer's meter, wavetables and the Synth |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
@@ -77,7 +77,7 @@ project's folder or the song file in it. It implements:
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
-repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the nine effects on tracks, groups, returns
+repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the ten effects on tracks, groups, returns
 and the master, sidechains, pre- and post-fader sends, automation lanes, track
 and group gain, pan, mute and solo, master gain and the end fade. `render` writes the
 mix, a stem for each track, group and return, the snapshot and `report.json` with what
@@ -99,9 +99,16 @@ stream is cut into blocks, and processing never allocates.
   band's q on the last), the state-variable filter that automation moves, the
   compressor, the look-ahead limiter and the tempo-synced delay. A lane whose
   points share one value is that static value. An equalizer on a track, a
-  return or the master writes its output into a ring the app reads for the
-  spectrum under its curve (`spectrum`), kept beside the program cache so
-  that an edit leaves it where it was.
+  group, a return or the master writes its output into a ring the app reads
+  for the spectrum under its curve (`spectrum`), kept beside the program
+  cache so that an edit leaves it where it was. An analyzer, which changes
+  nothing, writes every frame of its output, both channels, into a ring of
+  65 536 frames with a count of frames written (`meter::Ring`), kept the
+  same way, and a `meter::Meter` fed from it off the audio thread works out
+  the levels, the true peak, the BS.1770 loudness with its range and
+  history, the spectrum with its peaks held and the stereo field the app's
+  analyzer window draws (`aaw-ffi`'s `Song::analysis`). The K-weighting the
+  audition's loudness uses is the same code (`measure`).
 - **The reverb** has the Python engine's impulse response except for its noise,
   which comes from a generator of its own (D40, D44), so a tail is statistically
   the same and not sample-identical. Its convolution is non-uniformly

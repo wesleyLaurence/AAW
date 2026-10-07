@@ -31,6 +31,7 @@ tracks:
       - {type: chorus}
       - {type: saturation}
       - {type: utility}
+      - {type: analyzer}
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
   - id: m

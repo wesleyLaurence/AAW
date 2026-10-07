@@ -2,49 +2,9 @@
 //! of ITU-R BS.1770 and a spectral centroid, beside the peak `metrics` gives.
 
 use crate::render::Frame;
+use aaw_dsp::meter::k_weighting;
 use realfft::RealFftPlanner;
 use std::f64::consts::PI;
-
-/// A biquad from its coefficients, run on one channel.
-struct Biquad {
-    b: [f64; 3],
-    a: [f64; 2],
-    z: [f64; 2],
-}
-
-impl Biquad {
-    fn new(b: [f64; 3], a: [f64; 2]) -> Biquad {
-        Biquad { b, a, z: [0.0; 2] }
-    }
-
-    #[inline]
-    fn next(&mut self, x: f64) -> f64 {
-        let y = self.b[0] * x + self.z[0];
-        self.z[0] = self.b[1] * x - self.a[0] * y + self.z[1];
-        self.z[1] = self.b[2] * x - self.a[1] * y;
-        y
-    }
-}
-
-/// The K-weighting of BS.1770 at a sample rate: a high shelf of +4 dB
-/// above 1.7 kHz and a highpass at 38 Hz, designed as the standard designs
-/// them, so at 48 kHz the coefficients are the standard's table.
-fn k_weighting(rate: f64) -> (Biquad, Biquad) {
-    let (f0, gain_db, q) = (1681.974450955533, 3.999843853973347, 0.7071752369554196);
-    let k = (PI * f0 / rate).tan();
-    let vh = 10f64.powf(gain_db / 20.0);
-    let vb = vh.powf(0.4996667741545416);
-    let a0 = 1.0 + k / q + k * k;
-    let shelf = Biquad::new(
-        [(vh + vb * k / q + k * k) / a0, 2.0 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0],
-        [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
-    );
-    let (f0, q) = (38.13547087602444, 0.5003270373238773);
-    let k = (PI * f0 / rate).tan();
-    let a0 = 1.0 + k / q + k * k;
-    let high = Biquad::new([1.0, -2.0, 1.0], [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0]);
-    (shelf, high)
-}
 
 /// The integrated loudness of a stereo render in LUFS, gated as BS.1770
 /// gates it; None for audio too short or too quiet to measure.

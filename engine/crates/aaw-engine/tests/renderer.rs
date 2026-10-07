@@ -239,3 +239,127 @@ fn an_equalizer_s_output_is_tapped_for_the_spectrum() {
     compile_cached(&without, dir.path(), &mut cache).unwrap();
     assert!(taps.find("bass", 0).is_none());
 }
+
+#[test]
+fn an_analyzer_changes_nothing_and_hands_every_frame_to_its_ring() {
+    use aaw_dsp::meter::{Ring, RING_FRAMES};
+    use aaw_dsp::spectrum::Taps;
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_mix_song(dir.path());
+    // The hats in a group of their own, so that a group's chain is covered.
+    let plain = std::fs::read_to_string(&path).unwrap().replace(
+        "- id: hats\n  gain_db: -4\n",
+        "- id: hats\n  gain_db: -4\n  group: kit\n",
+    ) + "groups:\n- id: kit\n  effects: [{type: utility}]\n";
+    std::fs::write(&path, &plain).unwrap();
+    let without = aaw_model::load(&path, true).unwrap();
+    // The same song with an analyzer on a track, the group, a return and the master, at the chains' ends.
+    let watched = plain
+        .replace("  - {type: filter, mode: highpass, cutoff_hz: 300}\n", "  - {type: filter, mode: highpass, cutoff_hz: 300}\n  - {type: analyzer}\n")
+        .replace("  effects: [{type: utility}]\n", "  effects: [{type: utility}, {type: analyzer, id: kitmeter}]\n")
+        .replace("  - {type: compressor, threshold_db: -30, sidechain: hats}\n  automation:", "  - {type: compressor, threshold_db: -30, sidechain: hats}\n  - {type: analyzer}\n  automation:")
+        .replace("  effects: [{type: limiter, ceiling_db: -1}]\n", "  effects: [{type: limiter, ceiling_db: -1}, {type: analyzer}]\n");
+    std::fs::write(&path, &watched).unwrap();
+    let with = aaw_model::load(&path, true).unwrap();
+    assert_eq!(
+        with.tracks[0].effects.len() + with.groups[0].effects.len() + with.returns[0].effects.len() + with.master.effects.len(),
+        without.tracks[0].effects.len() + without.groups[0].effects.len() + without.returns[0].effects.len() + without.master.effects.len() + 4
+    );
+    let taps = Arc::new(Taps::default());
+    let mut cache = Cache::with_taps(taps.clone());
+    let a = Arc::new(compile_cached(&with, dir.path(), &mut cache).unwrap());
+    let b = Arc::new(compile_cached(&without, dir.path(), &mut Cache::default()).unwrap());
+    // No latency from any of them: the chains report the same.
+    assert_eq!(a.total, b.total);
+    let ring: Arc<Ring> = taps.find_ring("master", 1).expect("the master's analyzer has a ring");
+    assert!(taps.find_ring("hats", 1).is_some() && taps.find_ring("kit", 1).is_some() && taps.find_ring("room", 2).is_some());
+    assert!(taps.find_ring("master", 0).is_none(), "the limiter has none");
+    let mut ra = Renderer::new(a.clone(), 0, 512);
+    let mut rb = Renderer::new(b, 0, 512);
+    let (mut block_a, mut block_b) = (vec![[0.0; 2]; 512], vec![[0.0; 2]; 512]);
+    let mut mix: Vec<[f64; 2]> = Vec::new();
+    let mut heard: Vec<[f64; 2]> = Vec::new();
+    let mut next = 0;
+    let half = a.total / 512 / 2;
+    for n in 0..half {
+        ra.render(&mut block_a, |_, _, _| {});
+        rb.render(&mut block_b, |_, _, _| {});
+        assert_eq!(block_a, block_b, "block {n}: the analyzers change nothing");
+        mix.extend_from_slice(&block_a);
+        if n % 5 == 4 {
+            let (at, lost) = ring.read_since(next, &mut heard);
+            assert_eq!(lost, 0);
+            next = at;
+        }
+    }
+    // An edit elsewhere compiles again with the same cache: the ring is the
+    // same, and the frames go on where they left off.
+    let mut edited = with.clone();
+    edited.tracks[1].gain_db = -9.0;
+    let a2 = Arc::new(compile_cached(&edited, dir.path(), &mut cache).unwrap());
+    assert!(Arc::ptr_eq(&ring, &taps.find_ring("master", 1).unwrap()));
+    let mut ra2 = Renderer::new(a2, half * 512, 512);
+    for n in 0..half / 2 {
+        ra2.render(&mut block_a, |_, _, _| {});
+        mix.extend_from_slice(&block_a);
+        if n % 7 == 6 {
+            let (at, lost) = ring.read_since(next, &mut heard);
+            assert_eq!(lost, 0);
+            next = at;
+        }
+    }
+    let (at, lost) = ring.read_since(next, &mut heard);
+    assert_eq!((at as usize, lost), (mix.len(), 0));
+    assert_eq!(heard.len(), mix.len());
+    // What the ring holds is the mix, frame for frame, as single precision
+    // keeps it: the master's analyzer is last, and the end fade is far off.
+    for (i, (h, m)) in heard.iter().zip(&mix).enumerate() {
+        assert!((h[0] - m[0]).abs() < 1e-6 && (h[1] - m[1]).abs() < 1e-6, "frame {i}: {h:?} against {m:?}");
+    }
+    assert!(heard.iter().any(|f| f[0].abs() > 1e-3), "something played");
+    assert!(mix.len() > RING_FRAMES, "more than the ring holds passed through, and none was lost");
+    // A bypassed analyzer has no ring, and one removed loses its ring.
+    let mut bypassed = with.clone();
+    if let aaw_model::Effect::Analyzer(an) = &mut bypassed.master.effects[1] {
+        an.bypass = true;
+    }
+    compile_cached(&bypassed, dir.path(), &mut cache).unwrap();
+    assert!(taps.find_ring("master", 1).is_none());
+    assert!(taps.find_ring("hats", 1).is_some());
+}
+
+#[test]
+fn the_meter_agrees_with_the_render_s_measurements() {
+    use aaw_dsp::meter::Meter;
+    use aaw_engine::measure::loudness_lufs;
+    use aaw_engine::offline::metrics;
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_mix_song(dir.path());
+    let p = aaw_model::load(&path, true).unwrap();
+    let program = Arc::new(compile_cached(&p, dir.path(), &mut Cache::default()).unwrap());
+    let (mix, _) = render(&program, 0, &mut || 512);
+    // Fed the render as the audio thread would hand it over, the meter's
+    // integrated loudness is the render's, and its true peak the estimate
+    // the report gives.
+    let mut meter = Meter::new(p.session.sample_rate as u32);
+    for block in mix.chunks(733) {
+        meter.feed(block);
+    }
+    let reading = meter.read();
+    let expected = loudness_lufs(&mix, p.session.sample_rate as u32).expect("the song is loud enough to measure");
+    let integrated = reading.integrated_lufs.expect("measured") as f64;
+    assert!((integrated - expected).abs() < 0.1, "{integrated} LUFS against the render's {expected}");
+    let report = metrics(&mix, p.session.sample_rate as u32);
+    let true_peak = match report.get("estimated_true_peak_dbtp") {
+        Some(aaw_model::value::Value::Float(x)) => *x,
+        other => panic!("{other:?}"),
+    };
+    let held = reading.true_peak_hold_db.iter().cloned().fold(f32::MIN, f32::max) as f64;
+    assert!((held - true_peak).abs() < 0.1, "{held} dBTP against the render's {true_peak}");
+    let peak = match report.get("peak_dbfs") {
+        Some(aaw_model::value::Value::Float(x)) => *x,
+        other => panic!("{other:?}"),
+    };
+    let held = reading.peak_hold_db.iter().cloned().fold(f32::MIN, f32::max) as f64;
+    assert!((held - peak).abs() < 0.01, "{held} dBFS against the render's {peak}");
+}

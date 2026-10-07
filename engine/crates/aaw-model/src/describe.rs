@@ -431,7 +431,8 @@ mod tests {
     fn fields_agree_with_validation_and_defaults() {
         for kind in crate::EFFECT_TYPES {
             let fields = if kind == "eq" { BAND } else { effect(kind) };
-            assert!(!fields.is_empty(), "{kind}");
+            // An analyzer has nothing to set: the song's `type`, `id` and `bypass` alone.
+            assert!(!fields.is_empty() || kind == "analyzer", "{kind}");
             // The suggested start is valid, and its dump has every field.
             let project = check(effect_value(kind, &[])).unwrap_or_else(|e| panic!("{kind}: {e}"));
             let dumped = project.master.effects[0].dump(false);
