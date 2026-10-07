@@ -151,7 +151,7 @@ front first.
 
 | Part | Shows |
 |---|---|
-| Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth, tempo, length, and "Agent editing" while an agent's changes land |
+| Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth, tempo, length, the timeline's grid as a note value with its menu, and "Agent editing" while an agent's changes land |
 | Ruler | The loop brace, section markers and bar numbers, with the start position as an orange marker |
 | Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; then the returns and the master. The A mark is orange when the row has automation |
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track are gray, and selected clips are outlined |
@@ -174,6 +174,7 @@ front first.
 | Drag in the ruler's top strip | Sets the loop |
 | L | Loops the selected clips; with none selected, turns the loop off, or on again |
 | Scroll, pinch, Command-scroll, ⌘=, ⌘-, ⌘0 | Scroll and zoom; ⌘0 fits the song |
+| The Grid menu in the transport bar, or View › Grid | Chooses the grid of the editor that has the keys, the timeline's from the transport bar: Follow Zoom, a size from 1 Bar to 1/64, ⌘1 finer, ⌘2 coarser, ⌘3 triplets, ⌘4 Snap to Grid. A chosen grid holds whatever the zoom; the transport bar names it, gray while it follows the zoom, `no snap` while snapping is off, when every click and drag lands where the pointer is and ⌘ snaps instead |
 | Drag a volume, pan or send sideways | Changes it, heard as it moves; with Shift, ten times finer. Double-click sets volume to 0 dB and pan to center, and removes a send |
 | Click M or S | Mutes or solos |
 | Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
@@ -231,7 +232,7 @@ front first.
 | The headphones beside the grid | Preview: whether a note is heard as it is drawn, clicked or moved, and as its key is pressed. On a Synth or a Sampler; a track with no instrument plays nothing |
 | Arrow keys, in the piano roll | Move the selected notes a step earlier or later, or a note up or down, playing the first; with Shift, an octave |
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
-| Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T. The pattern's Step menu names its steps the same way: its 1/16 is a quarter of a beat |
+| Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T; ⌘1, ⌘2 and ⌘3 step through them while the piano roll has the keys. The pattern's Step menu names its steps the same way, a beat to 1/64, and the same keys set it while the pattern has the keys: its 1/16 is a quarter of a beat |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
 | Click a sample | Plays it, as its file is, and gives the samples the keys; the speaker mark turns the playing off |
@@ -256,8 +257,11 @@ front first.
 | Drag a bar or type a value in the Audio Clip panel | Sets the clip's gain, fades, fade curve, tempo or stretch |
 
 The grid is the finest of bars, beats, eighths and sixteenths that the zoom has
-room to draw, and clicks and drags snap to the lines drawn. A dragged clip moves
-by whole grid steps, so one that starts off the grid stays as far off it.
+room to draw, until one is chosen in the Grid menu, which then holds whatever
+the zoom: its lines are drawn once they have room, every second or fourth
+where they do not. Clicks and drags snap to the grid, drawn or not. A dragged
+clip moves by whole grid steps, so one that starts off the grid stays as far
+off it. [docs/features/grid.md](../../docs/features/grid.md) has the menu.
 
 A device panel is drawn from what the host says of the effect: each field's
 label, unit, range, default and choices. No panel is made by hand for an
@@ -411,6 +415,7 @@ wave or an LFO and 56 for the filter or an envelope. A key pressed by
 | `Sources/AAWApp/Waveform.swift` | The peaks the host sends for each track and each file, and the columns a clip draws from them, tested in `Tests` |
 | `Sources/AAWApp/TextLines.swift` | Lines of text laid out once and drawn many times |
 | `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid and what a click or drag means, tested in `Tests` |
+| `Sources/AAWApp/Grid.swift` | The grid values, their names as note values and the steps the Grid menu takes through them, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
 | `Sources/AAWApp/ContextMenus.swift` | What a right click on a header or a clip offers, as lists the arrangement makes menus from, tested in `Tests` |
 | `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, a MIDI track's instrument, and the bar a number is dragged with |

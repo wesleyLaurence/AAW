@@ -57,16 +57,38 @@ public struct TimelineLayout: Equatable {
     /// The least distance between grid lines, in points.
     public static let gridSpacing: CGFloat = 14
 
-    /// The grid in beats, which is drawn and which clicks snap to: the finest
-    /// of sixteenths, eighths, beats, bars and multiples of bars whose lines
-    /// are at least `gridSpacing` apart.
-    public var grid: Double {
+    /// The grid the zoom allows, in beats: the finest of sixteenths, eighths,
+    /// beats, bars and multiples of bars whose lines are at least
+    /// `gridSpacing` apart.
+    public var zoomGrid: Double {
         for step in [0.25, 0.5, 1.0] where step < beatsPerBar && CGFloat(step) * pixelsPerBeat >= Self.gridSpacing {
             return step
         }
         var step = beatsPerBar
         while CGFloat(step) * pixelsPerBeat < Self.gridSpacing { step *= 2 }
         return step
+    }
+
+    /// A grid chosen in the Grid menu, in beats, in place of the zoom's; nil
+    /// follows the zoom.
+    public var fixedGrid: Double?
+
+    /// The grid clicks and drags snap to: the chosen one, or the zoom's.
+    public var grid: Double {
+        if let fixedGrid, fixedGrid > 0 { return fixedGrid }
+        return zoomGrid
+    }
+
+    /// The grid whose lines are drawn: the grid, or when its lines would be
+    /// closer than `gridSpacing`, every second, fourth or eighth line of it
+    /// while those still fall on the bars, and else the zoom's.
+    public var drawnGrid: Double {
+        var step = grid
+        while CGFloat(step) * pixelsPerBeat < Self.gridSpacing { step *= 2 }
+        let perBar = beatsPerBar / step
+        let bars = step / beatsPerBar
+        let onBars = abs(perBar - perBar.rounded()) < 1e-9 || abs(bars - bars.rounded()) < 1e-9
+        return onBars ? step : zoomGrid
     }
 
     /// Bars between bar numbers, so that the numbers do not crowd.

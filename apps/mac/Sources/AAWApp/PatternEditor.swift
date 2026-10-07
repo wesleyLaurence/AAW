@@ -244,7 +244,7 @@ final class PatternEditor: NSView {
             needsDisplay = true
             return
         }
-        let free = event.modifierFlags.contains(.command)
+        let free = model.free(event.modifierFlags)
         if row.kind == .steps, !free {
             model.select(events: [])
             // A step goes on or off at the press, and a drag takes the steps
@@ -302,7 +302,7 @@ final class PatternEditor: NSView {
             // it; with ⌘, by thousandths of a beat. They stay in the pattern.
             let ats = events.map(\.at)
             var (steps, by) = (0, 0.0)
-            if event.modifierFlags.contains(.command) {
+            if model.free(event.modifierFlags) {
                 let range = layout.beatRange(of: ats)
                 by = min(max((Double(dx / layout.pixelsPerBeat) * 1000).rounded() / 1000, range.lowerBound), range.upperBound)
             } else {
@@ -717,7 +717,7 @@ struct PatternHeader: View {
     let context: PatternContext
 
     /// The steps a pattern can have, in beats, as the song writes them.
-    static let grids = ["1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"]
+    static let grids = Grid.patternValues
 
     private var pattern: PatternView { context.pattern }
 
@@ -769,6 +769,7 @@ struct PatternHeader: View {
                 }
                 .labelsHidden()
                 .controlSize(.mini)
+                .help("The pattern's steps, as note values: 1/16 is a sixteenth note and 1/8T an eighth-note triplet. ⌘1 and ⌘2 make them finer and coarser, ⌘3 triplets; with ⌘, an event goes off the grid")
             }
             row("Swing") {
                 KnobBar(model: model, spec: BarSpec(value: pattern.swing * 100, min: 50, max: 75, unit: "%", initial: 50)) { [name = pattern.name] value in
@@ -787,7 +788,7 @@ struct PatternHeader: View {
                     }
                 }
             } else {
-                Text("Click a step to turn it on or off. Double-click a row of held hits or of notes to add one; drag around events to select them, and with Option to copy them.")
+                Text("Click a step to turn it on or off. Double-click a row of held hits or of notes to add one on the step, or with ⌘ off the grid, a little behind the beat; drag around events to select them, and with Option to copy them. Step is the grid, as a note value.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

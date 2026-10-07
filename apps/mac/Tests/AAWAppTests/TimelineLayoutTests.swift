@@ -34,6 +34,41 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.barLabelStep, 8, "a number every eight bars")
     }
 
+    func testAChosenGridHoldsWhateverTheZoom() {
+        var l = layout()
+        XCTAssertEqual(l.zoomGrid, 4)
+        l.fixedGrid = 1.0 / 3
+        XCTAssertEqual(l.grid, 1.0 / 3, "an eighth-note triplet at 10 points a beat")
+        XCTAssertEqual(l.target(atX: l.x(17.4), free: false), 17 + 1.0 / 3, accuracy: 1e-9)
+        XCTAssertEqual(l.zoomGrid, 4, "the zoom's grid is still there to go back to")
+        l.fixedGrid = nil
+        XCTAssertEqual(l.grid, 4)
+        l.fixedGrid = 0
+        XCTAssertEqual(l.grid, 4, "nothing is snapped to a grid of nothing")
+    }
+
+    func testTheDrawnGridIsTheGridWithRoomOrTheZooms() {
+        var l = layout()
+        XCTAssertEqual(l.drawnGrid, 4, "following the zoom, as drawn")
+        // Triplets at 22 points a beat: lines a third apart would be 7 points
+        // apart, so every second, which still fall on the bars. At 10 points
+        // only every eighth has room, and those miss the bars: the zoom's.
+        l.fixedGrid = 1.0 / 3
+        XCTAssertEqual(l.drawnGrid, 4)
+        l.pixelsPerBeat = 22
+        XCTAssertEqual(l.drawnGrid, 2.0 / 3, accuracy: 1e-9)
+        l.pixelsPerBeat = 60
+        XCTAssertEqual(l.drawnGrid, 1.0 / 3, accuracy: 1e-9, "room for every line")
+        // Zoomed far out, no multiple of a triplet falls on the bars: the zoom's.
+        l.pixelsPerBeat = 2
+        XCTAssertEqual(l.drawnGrid, 8)
+        // A sixty-fourth at 10 points a beat is drawn as beats.
+        l.pixelsPerBeat = 10
+        l.fixedGrid = 1.0 / 16
+        XCTAssertEqual(l.drawnGrid, 2)
+        XCTAssertEqual(l.grid, 1.0 / 16, "and still snapped to")
+    }
+
     func testAClickSnapsToTheGridAndStaysInTheSong() {
         let l = layout()
         XCTAssertEqual(l.target(atX: l.x(17.9), free: false), 16)

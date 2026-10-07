@@ -203,6 +203,10 @@ struct TransportBar: View {
             .foregroundStyle(model.sessionChanged ? Who.agent.color : Color.primary)
             .animation(.easeOut(duration: 0.4), value: model.sessionChanged)
 
+            Divider().frame(height: 18)
+
+            GridControl(model: model)
+
             Spacer(minLength: 8)
 
             if !model.warnings.isEmpty {
@@ -229,6 +233,44 @@ struct TransportBar: View {
         .padding(.horizontal, 14)
         .frame(height: 40)
         .background(Color(nsColor: Theme.gray(0.17)))
+    }
+}
+
+/// The timeline's grid in the transport bar, named as a note value, with a
+/// menu that chooses it: the zoom's grid or a fixed one, Finer, Coarser,
+/// Triplets and Snap to Grid, as View › Grid has them with ⌘1 to ⌘4.
+private struct GridControl: View {
+    let model: SongModel
+
+    var body: some View {
+        let grid = model.grid(in: .timeline)
+        Menu {
+            Toggle("Follow Zoom", isOn: Binding(get: { model.timelineGrid == nil }, set: { if $0 { model.timelineGrid = nil } }))
+            Divider()
+            ForEach(Grid.sizes, id: \.self) { size in
+                Toggle(Grid.name(size), isOn: Binding(get: { Grid.size(grid) == size }, set: { if $0 { model.chooseGrid(size: size, in: .timeline) } }))
+            }
+            Divider()
+            Button("Finer") { model.stepGrid(.finer, in: .timeline) }
+                .disabled(model.gridStep(.finer, in: .timeline) == nil)
+            Button("Coarser") { model.stepGrid(.coarser, in: .timeline) }
+                .disabled(model.gridStep(.coarser, in: .timeline) == nil)
+            Toggle("Triplets", isOn: Binding(get: { Grid.isTriplet(grid) }, set: { _ in model.stepGrid(.triplets, in: .timeline) }))
+                .disabled(model.gridStep(.triplets, in: .timeline) == nil)
+            Divider()
+            Toggle("Snap to Grid", isOn: Binding(get: { model.snapsToGrid }, set: { model.snapsToGrid = $0 }))
+        } label: {
+            // One Text: a menu's label shows its first text alone.
+            (Text("Grid ").foregroundColor(.secondary)
+                + Text(model.snapsToGrid ? Grid.name(grid) : "\(Grid.name(grid)), no snap")
+                    .foregroundColor(model.timelineGrid == nil ? .secondary : .primary))
+                .font(.system(size: 12).monospacedDigit())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Grid")
+        .accessibilityValue(Grid.name(grid))
+        .help("The timeline's grid, as a note value: what the start position, clips, points and dropped files land on. Gray follows the zoom; choose one to keep it. ⌘1 and ⌘2 make the grid finer and coarser, ⌘3 triplets, ⌘4 turns snapping off; with ⌘ held, a click or a drag goes off the grid.")
     }
 }
 

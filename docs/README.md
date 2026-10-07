@@ -50,6 +50,7 @@ Built:
 | [musical checks](features/musical-checks.md) | `daw check`'s warnings as objects with codes, the checks of the music, and `clip duplicate` laying copies in a row |
 | [selecting several things](features/selection.md) | Clips by a rectangle and copied by Option-drag, several pattern events and automation points selected, moved, copied and removed together |
 | [the piano roll](features/piano-roll.md) | Writing notes by hand: previews through either instrument, the velocity lane, zoom up and down, a note's start, Option-drag copies, ⌘ off the grid and grids as note values |
+| [the grid](features/grid.md) | The timeline's grid named in the transport bar and chosen in a Grid menu with ⌘1 to ⌘4, acting on the editor that has the keys; triplets, and Snap to Grid off |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 | [editing a range of bars](features/bar-ranges.md) | `daw range copy\|insert\|delete\|clear` across the tracks with the clips, audio, lanes and sections in a range, and a section duplicated, moved or removed with its content |
 

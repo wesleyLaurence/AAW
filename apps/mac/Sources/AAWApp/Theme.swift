@@ -33,6 +33,7 @@ enum Theme {
     static let ruler = gray(0.15)
     static let separator = gray(0.07)
     static let barLine = gray(1, 0.13)
+    static let beatLine = gray(1, 0.08)
     static let gridLine = gray(1, 0.05)
     static let pastEnd = gray(0, 0.32)
     static let text = gray(0.9)

@@ -216,7 +216,7 @@ final class NoteEditor: NSView {
             return
         }
         guard p.y < layout.notesBottom else { return }
-        let free = event.modifierFlags.contains(.command)
+        let free = model.free(event.modifierFlags)
         let copy = event.modifierFlags.contains(.option)
         if let hit = note(at: p) {
             let key = hit.note.key
@@ -308,7 +308,7 @@ final class NoteEditor: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
-        let free = event.modifierFlags.contains(.command)
+        let free = model.free(event.modifierFlags)
         switch drag {
         case .move(let notes, let grabbed, let origin, _, _, let was, let moved, let collapse):
             let (dx, dy) = (p.x - origin.x, p.y - origin.y)
@@ -847,7 +847,7 @@ struct NoteClipHeader: View {
                 }
                 .labelsHidden()
                 .controlSize(.mini)
-                .help("The steps notes are added and moved on, as note values: 1/16 is a sixteenth note and 1/8T an eighth-note triplet. With ⌘, a note goes off the grid")
+                .help("The steps notes are added and moved on, as note values: 1/16 is a sixteenth note and 1/8T an eighth-note triplet. ⌘1 and ⌘2 make them finer and coarser, ⌘3 triplets; with ⌘, a note goes off the grid")
                 Toggle(isOn: Binding(get: { model.notePreview }, set: { model.notePreview = $0 })) {
                     Image(systemName: "headphones")
                 }
