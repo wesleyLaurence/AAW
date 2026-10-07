@@ -159,6 +159,8 @@ pub enum ModTarget {
     OscPulseWidth(usize),
     /// One oscillator's unison detune, in cents.
     OscUnisonDetune(usize),
+    /// How far the voices are placed across the field, in points.
+    Width,
     /// The filter's cutoff in octaves, its resonance in points and its drive
     /// in dB.
     Cutoff,
@@ -180,7 +182,7 @@ impl ModTarget {
             ModTarget::OscLevel(_) | ModTarget::Drive => "dB",
             ModTarget::OscPan(_) => "pan",
             ModTarget::OscUnisonDetune(_) => "cents",
-            ModTarget::OscPulseWidth(_) | ModTarget::Resonance | ModTarget::EnvSustain(_) => "points",
+            ModTarget::OscPulseWidth(_) | ModTarget::Width | ModTarget::Resonance | ModTarget::EnvSustain(_) => "points",
             ModTarget::Cutoff | ModTarget::EnvAttack(_) | ModTarget::EnvDecay(_) | ModTarget::EnvRelease(_) => "octaves",
         }
     }
@@ -212,6 +214,7 @@ pub const MOD_TARGETS: &[(&str, &str)] = &[
     ("oscillators.ID.pan", "pan"),
     ("oscillators.ID.pulse_width", "points"),
     ("oscillators.ID.unison_detune_cents", "cents"),
+    ("width_percent", "points"),
     ("filter.cutoff_hz", "octaves"),
     ("filter.resonance_percent", "points"),
     ("filter.drive_db", "dB"),
@@ -267,6 +270,7 @@ pub fn mod_target(synth: &crate::schema::Synth, target: &str) -> Result<ModTarge
     };
     match parts.as_slice() {
         ["pitch"] => Ok(ModTarget::Pitch),
+        ["width_percent"] => Ok(ModTarget::Width),
         ["oscillators", id, field] => {
             let i = synth.oscillators.get_index_of(*id).ok_or_else(|| format!("target {target}: no oscillator {id}"))?;
             match *field {

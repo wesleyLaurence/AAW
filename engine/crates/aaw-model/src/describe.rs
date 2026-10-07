@@ -236,12 +236,15 @@ const fn integer(name: &'static str, label: &'static str, min: f64, max: f64, de
     }
 }
 
-/// The Synth's own fields, outside its parts. `voices` and `seed` change
-/// nothing in a voice already sounding, so they are not structural.
+/// The Synth's own fields, outside its parts. `voices`, `width_mode` and
+/// `seed` change nothing in a voice already sounding, so they are not
+/// structural.
 pub const SYNTH: &[Field] = &[
     integer("voices", "Voices", 1.0, 16.0, 8.0),
     number("glide_ms", "Glide", 0.0, 5000.0, 0.0, "ms"),
     number("velocity_percent", "Velocity", 0.0, 100.0, 100.0, "%"),
+    number("width_percent", "Width", 0.0, 100.0, 0.0, "%"),
+    choice("width_mode", "Placement", &crate::schema::WidthMode::NAMES, Initial::Text("alternate")),
     integer("seed", "Seed", 0.0, 4294967295.0, 0.0),
 ];
 

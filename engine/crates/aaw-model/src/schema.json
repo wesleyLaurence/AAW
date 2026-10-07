@@ -1947,6 +1947,25 @@
           "title": "Velocity Percent",
           "type": "number"
         },
+        "width_percent": {
+          "default": 0,
+          "description": "How far the voices are placed across the stereo field, either side of each oscillator's pan: 0 keeps every note where its oscillators are, 100 reaches the edges.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Width Percent",
+          "type": "number"
+        },
+        "width_mode": {
+          "default": "alternate",
+          "description": "Where each note lands within the width: alternate puts each note on the other side from the last, pitch places low notes left and high notes right, random draws a place from seed.",
+          "enum": [
+            "alternate",
+            "pitch",
+            "random"
+          ],
+          "title": "Width Mode",
+          "type": "string"
+        },
         "seed": {
           "default": 0,
           "maximum": 4294967295,

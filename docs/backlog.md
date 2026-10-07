@@ -19,83 +19,80 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Items 1–5 are the person's notes from using the app on October 6, 2026, and
+Items 1–4 are the person's notes from using the app on October 6, 2026, and
 come before everything else.
 
-1. **The Synth's width.** A Width or Spread for the patch, voices placed
-   across the stereo field as they play, beside the unison width each
-   oscillator has.
-2. **A utility.** Gain, pan, width, mono (and mono below a frequency) and
+1. **A utility.** Gain, pan, width, mono (and mono below a frequency) and
    phase, as Ableton's Utility.
-3. **A parametric EQ.** Up to eight bands drawn as one curve over the
+2. **A parametric EQ.** Up to eight bands drawn as one curve over the
    playing spectrum: high and low pass with their slopes, shelves and bells,
    each a point dragged for frequency and gain with its width; the three-band
    EQ stays.
-4. **Groups that fold.** Tracks summed into a group with its own effects and
+3. **Groups that fold.** Tracks summed into a group with its own effects and
    level, a drum bus, and the group folded to one row on the timeline.
-5. **Effect racks saved and loaded anywhere.** A chain of effects saved under
+4. **Effect racks saved and loaded anywhere.** A chain of effects saved under
    a name and dropped from the browser onto a track in any song, as a Synth
    patch is.
-6. **Export in the app.** File › Export Audio…: a named WAV, AAC or MP3 of the
+5. **Export in the app.** File › Export Audio…: a named WAV, AAC or MP3 of the
    mix at a stated level, through `daw export`, with its measurements shown.
    The app's only export is a MIDI clip, so the person finishes a song through
    the agent or a terminal (D81).
    [features/export-in-app.md](features/export-in-app.md)
-7. **A time selection in the app.** A range of beats dragged across the
+6. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-8. **A MIDI keyboard.** Notes played through the selected track, held and let
+7. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-9. **Listening markers.** The person drops a marker at the playhead while the
+8. **Listening markers.** The person drops a marker at the playhead while the
     song plays, with a word if they want, and the agent reads them with `daw`:
     "this bar", without a timecode.
-10. **Sections and the song's length in the app.** A section made, named,
+9. **Sections and the song's length in the app.** A section made, named,
     moved and removed in the ruler, which only draws them today; the length,
     master gain and end fade typed in the transport bar, as the tempo is. The
     agent has `daw section` and `daw set session.FIELD`; the person has neither
     (D81).
-11. **A project made with `daw init` in the app's index,** so a song the agent
+10. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-12. **Turns and A/B.** An agent request's commands grouped, named for the
+11. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-13. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+12. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
     is built, a clipper that holds a ceiling as a limiter does without its
-    look-ahead is not. The utility is item 2.
-14. **Comparing with a reference.** A song the person names as a reference,
+    look-ahead is not. The utility is item 1.
+13. **Comparing with a reference.** A song the person names as a reference,
     analyzed once and compared with a mix section by section, so the agent has
     targets for the low end, the brightness and the loudness of each section.
     [features/reference-comparison.md](features/reference-comparison.md)
-15. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+14. **Sound descriptors.** Each sample measured for brightness, attack, decay,
     low end and noise, with search sorted by them and samples like a chosen
     one, so the agent chooses sounds by more than their names.
     [features/sound-descriptors.md](features/sound-descriptors.md)
-16. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+15. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-17. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+16. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-18. **Key and chord detection,** and swing detection, of samples and songs: a
+17. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-19. **Presets.** Pad setups and whole tracks saved as text and loaded into any
-    song. Effect chains are item 5.
-20. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+18. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+    song. Effect chains are item 4.
+19. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-21. **The workspace and the two levels.** The workspace folder with its managed
+20. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-22. **The agent panel.** A conversation in the window, per project, over the
+21. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-23. **Stem separation** of a song.
-24. **Generated audio.** A sound, a loop or a whole song from a description, with
+22. **Stem separation** of a song.
+23. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -106,6 +103,19 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The Synth's width by ear and by hand:** a Soft Pad's Width dragged up
+  while a chord plays and the chord heard to open across the field; a bass
+  line under `alternate` and whether notes swinging between the sides is
+  wanted or `pitch` is the better default for a line; `pitch` on a piano
+  part, and whether two octaves either side of middle C is the right reach;
+  `random` on a pluck; the Placement menu chosen in the panel; a source
+  dropped on the Width knob and the entry's reach drawn; a lane on
+  `instrument.width_percent` heard to open the field over bars; whether
+  the knob reads as the patch's width beside Osc a's Unison width, or the
+  two confuse. Scripted runs showed the knob and the menu on a Soft Pad in
+  a picture and typed 35 into the knob, read back from the song; the
+  placements, the matrix and the oscillator's pan are held by a DSP test;
+  nothing heard or dragged by hand.
 - **A song in another meter, by hand and ear:** `3/4` typed into the
   transport bar's field and the bars, grid and position seen to follow, a
   wrong value's refusal read, and the edit undone; the metronome heard in

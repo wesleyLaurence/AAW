@@ -400,7 +400,7 @@ devices, at x = 220, with its title strip 24 points high; its waveform is
 start is at x = 226 and one at its end at x = 430, and Root's Measure button
 is at the panel's right, about x = 640 in the first row. The Synth's panel
 starts at x = 220 too, its header 24 points high; its first column holds the
-keys under four fields, from about y = 196 into the panel at its least
+keys under six fields, from about y = 258 into the panel at its least
 height, and a column's drawing is right under its title, 34 points high for a
 wave or an LFO and 56 for the filter or an envelope. A key pressed by
 `--click` plays through the speakers.

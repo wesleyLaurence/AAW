@@ -2659,7 +2659,16 @@ fn the_synth_is_drawn_from_its_fields_and_turned_by_its_paths() {
     assert_eq!(lead.instrument.as_deref(), Some("synth"));
     assert!(lead.sampler.is_none());
     let s = lead.synth.clone().expect("the synth is the device");
-    assert_eq!(s.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["voices", "glide_ms", "velocity_percent", "seed"]);
+    assert_eq!(
+        s.fields.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+        ["voices", "glide_ms", "velocity_percent", "width_percent", "width_mode", "seed"]
+    );
+    let placement = s.fields.iter().find(|f| f.name == "width_mode").unwrap();
+    assert_eq!((placement.kind, placement.value.clone()), (FieldKind::Choice, text("alternate")));
+    let width = s.fields.iter().find(|f| f.name == "width_percent").unwrap();
+    assert_eq!((width.param.as_deref(), width.live), (Some("instrument.width_percent"), true));
+    assert_eq!(aaw_ffi::view::synth_mod_target("width_percent".into()).as_deref(), Some("width_percent"));
+    assert_eq!(aaw_ffi::view::synth_mod_target("width_mode".into()), None);
     assert_eq!(s.oscillators.iter().map(|g| g.name.as_str()).collect::<Vec<_>>(), ["a", "sub"]);
     let sub = &s.oscillators[1];
     assert_eq!(sub.fields[0].name, "oscillators.sub.wave");

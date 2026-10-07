@@ -187,4 +187,13 @@ fn the_patchs_effects_are_edited_as_a_chain_and_automated_from_the_track() {
     assert!(e.contains("wavetable nothing"), "{e}");
     edit(&mut s, json!({"op": "synth.set", "track": "lead", "values": {"oscillators.b.table": "tone"}})).unwrap();
     assert_eq!(get(&s, "tracks.lead.instrument.synth.oscillators.b.table"), json!("tone"));
+    // The patch's width places voices across the field; a lane and the matrix reach it.
+    edit(&mut s, json!({"op": "synth.set", "track": "lead", "values": {"width_percent": 60, "width_mode": "pitch"}})).unwrap();
+    assert_eq!(get(&s, "tracks.lead.instrument.synth.width_mode"), json!("pitch"));
+    let e = edit(&mut s, json!({"op": "synth.set", "track": "lead", "values": {"width_mode": "wide"}})).unwrap_err();
+    assert!(e.contains("alternate"), "{e}");
+    edit(&mut s, json!({"op": "lane.set", "owner": "tracks.lead", "param": "instrument.width_percent", "points": [{"at": 0, "value": 0}, {"at": 8, "value": 100}]})).unwrap();
+    edit(&mut s, json!({"op": "synth.mod", "track": "lead", "source": "velocity", "target": "width_percent", "amount": 40})).unwrap();
+    let e = edit(&mut s, json!({"op": "lane.set", "owner": "tracks.lead", "param": "instrument.width_mode", "points": [{"at": 0, "value": 0}]})).unwrap_err();
+    assert!(e.contains("cannot be automated"), "{e}");
 }

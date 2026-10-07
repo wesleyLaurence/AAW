@@ -37,6 +37,9 @@ def test_describe_is_short_and_keeps_the_schema_for_the_asking():
     synth = daw("describe", "synth")
     assert synth["fields"]["filter.cutoff_hz"] == "number 10..20000, default 20000"
     assert synth["modulation"]["targets"]["filter.cutoff_hz"] == "octaves"
+    assert synth["modulation"]["targets"]["width_percent"] == "points"
+    assert synth["fields"]["width_mode"] == "alternate|pitch|random, default alternate"
+    assert "width_mode" in synth["semantics"]["width"]
     assert daw("describe", "effects")["fields"]["limiter.ceiling_db"] == "number -24..-0.1, default -1"
 
 

@@ -286,6 +286,7 @@ pub fn mod_field(target: &str) -> Option<String> {
     match parts.as_slice() {
         ["oscillators", id, "pitch"] => Some(format!("oscillators.{id}.semitones")),
         ["oscillators", _, "level_db" | "pan" | "pulse_width" | "unison_detune_cents"] => Some(target.to_string()),
+        ["width_percent"] => Some(target.to_string()),
         ["filter", "cutoff_hz" | "resonance_percent" | "drive_db"] => Some(target.to_string()),
         ["envelopes", _, "attack_ms" | "decay_ms" | "sustain_percent" | "release_ms"] => Some(target.to_string()),
         _ => None,
@@ -301,6 +302,7 @@ pub fn synth_mod_target(field: String) -> Option<String> {
     match parts.as_slice() {
         ["oscillators", id, "semitones"] => Some(format!("oscillators.{id}.pitch")),
         ["oscillators", _, "level_db" | "pan" | "pulse_width" | "unison_detune_cents"] => Some(field.clone()),
+        ["width_percent"] => Some(field.clone()),
         ["filter", "cutoff_hz" | "resonance_percent" | "drive_db"] => Some(field.clone()),
         ["envelopes", _, "attack_ms" | "decay_ms" | "sustain_percent" | "release_ms"] => Some(field.clone()),
         _ => None,
