@@ -162,7 +162,7 @@ front first.
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
 | Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note, or the velocity of several. While the clip plays, a line shows where |
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play, and past the end of a looped clip's loop, which is shaded with a mark at the wrap. Under the notes, a lane of each note's velocity as a stalk at its start. Beside it the clip's ID, its length, its loop in beats or off, the grid, Preview, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
-| Analyzer window | A window of its own for each analyzer opened from its strip or with View › Analyzer Window (⌥⌘L), titled for the row and the song: the levels, the loudness with its history, the spectrum with its peaks held and the stereo field as panes in two columns, drawn at the display's rate while the window can be seen, resizing freely, going full screen with the green button and staying open whatever the song's window selects; closed when the effect goes or the project closes ([the analyzer](../../docs/features/analyzer.md)) |
+| Analyzer window | A window of its own for each analyzer opened from its strip or with View › Analyzer Window (⌥⌘L), titled for the row and the song: the levels, the loudness with its history, the spectrum with its peaks held, the stereo field, and the last twenty seconds scrolling as a waveform of each channel and as a spectrogram, as panes in three columns, drawn at the display's rate while the window can be seen, resizing freely, going full screen with the green button and staying open whatever the song's window selects; closed when the effect goes or the project closes ([the analyzer](../../docs/features/analyzer.md)) |
 | Samples | Left of the arrangement, when shown: the library's samples by search, category and kind, each with its length and what is known of its tempo, key and pitch |
 | Activity | Each change with who made it (agent, you, or an edit of the file), newest first. A drag is one entry |
 
@@ -361,7 +361,10 @@ Set `AAW_DATA_DIR` to a scratch folder for such a run. The app keeps its index
 of projects there, and with no project on the command line it makes its
 Untitled project there, so neither touches the person's own. A run that takes a
 picture or measures asks nothing when it quits: an Untitled project that holds
-something is left in that folder.
+something is left in that folder. A run that plays is heard on the default
+output device; `AAW_OUTPUT_DEVICE=NAME` plays through the output device whose
+name contains NAME instead, such as a virtual device nobody hears, and is
+refused when there is none or it cannot play the song's rate.
 
 `--measure JSON [--frames N]` in place of the picture, or before it, scrolls and
 zooms the arrangement through the song for N frames (240 unless given) and
@@ -378,7 +381,7 @@ between the last of them and the picture:
 | `--key KEY` | Presses `space`, `return`, `delete`, `escape`, `left`, `right`, `up`, `down` or a letter, after any of `cmd+`, `shift+` and `opt+`: `--key shift+cmd+z` |
 | `--type TEXT` | Types, as into a name |
 | `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there. In the detail panel, while it shows the devices of a MIDI track with a Sampler or no instrument, the file loads the Sampler |
-| `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2` | A click or a drag in the first analyzer window that is open, in its content, which the song window's clicks do not reach; `--key opt+cmd+l` opens it. `--snapshot NAME.png` also writes `NAME-analyzer.png` of each open analyzer window, `-analyzer-2` for a second, and `--measure` adds `analyzer`, the first open window's draw times through the run |
+| `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2` | A click or a drag in the first analyzer window that is open, in its content, which the song window's clicks do not reach; `--key opt+cmd+l` opens it. `--snapshot NAME.png` also writes `NAME-analyzer.png` of each open analyzer window, `-analyzer-2` for a second, and `--measure` adds `analyzer`, the first open window's draw times through the run and, as `read_ms`, what each reading of the meter from the host took |
 | `--wait SECONDS` | Leaves time, such as for a `daw` command from a terminal |
 | `--export PATH [--export-level LEVEL]` | After the actions, writes the mix as PATH, as File › Export Audio… does when its panel closes: the format is the extension's (`.wav` 24-bit, `.m4a`, `.mp3`) and the level `peak=-1`, `lufs=-14`, `gain=-3` or `rendered`, as rendered unless given. What the command reported is printed, then the picture is taken if one was asked for, with the banner in it, and the run quits; a file that is there is refused as the command refuses it, and a failed export says why on stderr and ends with status 1 |
 
@@ -440,7 +443,8 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/ContextMenus.swift` | What a right click on a header or a clip offers, as lists the arrangement makes menus from, tested in `Tests` |
 | `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, the equalizer's curve as an AppKit view where its points are dragged and its spectrum read, a MIDI track's instrument, and the bar a number is dragged with |
 | `Sources/AAWApp/AnalyzerWindow.swift` | An analyzer's window and its panes, an AppKit view drawn at the display's rate, with the dividers, the fill marks and the menu of panes; the analyzer's strip in the device panel |
-| `Sources/AAWApp/AnalyzerLayout.swift` | The arrangement of an analyzer's panes, kept in the app's defaults, the rects it gives them, what a drag on a divider means, and the scales the meters, the history and the vectorscope are drawn on, tested in `Tests` |
+| `Sources/AAWApp/AnalyzerLayout.swift` | The arrangement of an analyzer's panes in three columns, kept in the app's defaults, the rects it gives them, what a drag on a divider means, the scales the meters, the history and the vectorscope are drawn on, and how the spectrogram's and the waveform's textures scroll and take a reading's new columns, tested in `Tests` |
+| `Sources/AAWApp/AnalyzerTexture.swift` | A texture that scrolls with time: a bitmap a column is written to for each moment measured, drawn as an image over its own pixels, for the spectrogram and the waveform |
 | `Sources/AAWApp/EqLayout.swift` | Where the equalizer's panel puts its points and what a drag means: each band's response as the engine's sections give it, the curve they make, a point's band and what a point dragged to a place sets, and the spectrum's columns, tested in `Tests` |
 | `Sources/AAWApp/SamplerPanel.swift` | The Sampler device: its waveform with the markers for the part the keys play, an AppKit view, the root note and Measure, the pad's fields, and what a drop on it loads |
 | `Sources/AAWApp/SamplerLayout.swift` | Where the Sampler's markers are on its waveform, which one a point takes hold of and how far a drag goes, tested in `Tests` |
@@ -513,9 +517,8 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 - Save As… does not replace a folder that is already there.
 - Which groups are folded is kept by the window, not saved with the project,
   and a group is not dragged into another: a group is not in a group.
-- The analyzer's window has no spectrogram and no scrolling waveform yet,
-  and its panes are arranged by hand each time rather than from a saved set;
-  the agent cannot read its numbers.
+- The analyzer's panes are arranged by hand each time rather than from a
+  saved set; the agent cannot read its numbers.
 - The app has no icon, and the Python tools are not in its bundle, so Export
   Audio… needs the Python the bundle's `daw` finds, and says so where there is
   none. It exports the whole mix only, one file at a time, and the transport

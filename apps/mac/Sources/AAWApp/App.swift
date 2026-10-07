@@ -533,6 +533,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // An analyzer window open through the run: how its drawing kept up.
             if let analyzer = controller.model.openAnalyzerWindows.first {
                 var times = analyzer.view.drawTimes.report
+                times["read_ms"] = controller.model.analysisReadTimes.report["draw_ms"]
                 times["window"] = analyzer.window.map { [$0.contentView?.bounds.width ?? 0, $0.contentView?.bounds.height ?? 0] } ?? []
                 report["analyzer"] = times
             }

@@ -3084,9 +3084,13 @@ fn an_analyzer_s_measurements_are_read_for_its_window() {
     assert!(e.fields.is_empty() && e.bands == 0, "nothing to set: {:?}", e.fields);
     // Nothing has played: silence everywhere, and the frames count is 0.
     let a = song.analysis(analyzer).expect("an analyzer on a track is measured");
-    assert_eq!((a.sample_rate, a.written, a.lost, a.spectrum.len(), a.scope.len()), (48000, 0, 0, 2049, 0));
+    assert_eq!((a.sample_rate, a.written, a.lost, a.spectrum.len(), a.scope.len()), (48000, 0, 0, 2049 * 4, 0), "the spectrum's bins as float bytes");
+    assert_eq!(f32::from_le_bytes(a.spectrum[..4].try_into().unwrap()), -200.0);
     assert!(a.peak_db == vec![-200.0, -200.0] && a.integrated_lufs.is_none() && a.history.is_empty());
     assert_eq!((a.correlation, a.balance_db), (0.0, 0.0));
+    // The spectrogram's and the waveform's columns: none yet, at their pace.
+    assert_eq!((a.spectrogram_rows, a.spectrogram_per_second, a.waveform_per_second), (256, 50, 100));
+    assert_eq!((a.spectrogram_columns, a.waveform_columns, a.spectrogram.len(), a.waveform.len()), (0, 0, 0, 0));
     // Other effects, and anything that is not an effect, have none; an
     // equalizer's spectrum is not an analysis and the other way round.
     let bass = &start.tracks[1];

@@ -196,9 +196,12 @@ public final class SongModel {
     @ObservationIgnored var cueTrack: UInt64?
     /// The analyzers' windows, by the effect each shows.
     @ObservationIgnored private var analyzerWindows: [UInt64: AnalyzerWindowController] = [:]
-    /// The last reading of each analyzer and when it was taken, so that its
-    /// strip and its window drawn in one frame share one reading.
-    @ObservationIgnored private var analysisCache: [UInt64: (at: CFTimeInterval, reading: Analysis)] = [:]
+    /// The last reading of each analyzer and the frame it was taken for, so
+    /// that the strip and the window share one reading a frame.
+    @ObservationIgnored private var analysisCache: [UInt64: (frame: CFTimeInterval, reading: Analysis)] = [:]
+    /// How long each reading from the host took, the last few hundred, as
+    /// `draws`, for `--measure`.
+    @ObservationIgnored private(set) var analysisReadTimes = DrawTimes()
     /// True for a moment after each change by the agent.
     public private(set) var agentWorking = false
     /// True for a moment after the tempo, title or length changed.
@@ -1629,16 +1632,21 @@ public final class SongModel {
 
     /// What an analyzer has measured lately, for its strip and its window:
     /// read from the host once a frame, however many views draw it, so that
-    /// the peaks since the last reading are not split between them. None
-    /// for an effect that is not an analyzer or is bypassed.
-    func analysis(effect: UInt64) -> Analysis? {
-        let now = CACurrentMediaTime()
-        if let cached = analysisCache[effect], now - cached.at < 0.004 { return cached.reading }
-        guard let reading = song.analysis(effect: effect) else {
+    /// the peaks since the last reading are not split between them and the
+    /// reading is paid for once. `frame` is the display link's target
+    /// timestamp, the same for every view drawing the same frame. None for
+    /// an effect that is not an analyzer or is bypassed.
+    func analysis(effect: UInt64, frame: CFTimeInterval) -> Analysis? {
+        if let cached = analysisCache[effect], cached.frame == frame { return cached.reading }
+        let started = CACurrentMediaTime()
+        let reading = song.analysis(effect: effect)
+        analysisReadTimes.draws.append((CACurrentMediaTime() - started) * 1000)
+        if analysisReadTimes.draws.count > 600 { analysisReadTimes.draws.removeFirst(analysisReadTimes.draws.count - 600) }
+        guard let reading else {
             analysisCache[effect] = nil
             return nil
         }
-        analysisCache[effect] = (now, reading)
+        analysisCache[effect] = (frame, reading)
         return reading
     }
 
