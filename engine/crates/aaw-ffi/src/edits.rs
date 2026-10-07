@@ -398,13 +398,15 @@ pub enum Edit {
     /// Gives a clip a copy of its pattern, so that editing it leaves the
     /// other clips that play the pattern as they are.
     ClipOwnPattern { clip: u64 },
-    /// Adds a sample that `library::import` copied into the project, as a
-    /// pad of a track or, without one, of a new track at `index`. Pad and
-    /// track are named after `name` as far as IDs allow. A new track is what
-    /// the edit makes. On a MIDI track the sample becomes the instrument, in
-    /// place of the one it had: a sampler that plays it on every note, from
-    /// its root note when it has one, else as it is.
-    SampleAdd {
+    /// Adds a sample that `library::import` copied into the project as the
+    /// instrument of a MIDI track, in place of the one it had, or, without a
+    /// track, of a new MIDI track at `index`: a Sampler of one pad, named
+    /// after `name` as far as IDs allow, played on every note at its pitch,
+    /// as it is at middle C (D66). A sample the browser measured a pitch of
+    /// (the asset has a root note) starts Held, so a note stops at its
+    /// note-off; any other plays to its end (D85). A new track is what the
+    /// edit makes. Never a pad: a sample lands as this or as an audio clip.
+    SamplerAdd {
         asset: crate::library::Asset,
         name: String,
         track: Option<u64>,
@@ -948,12 +950,6 @@ fn midi_track<'a>(project: &'a Project, tree: &Node, key: u64) -> Result<&'a aaw
         return Err(format!("{} is not a MIDI track; a Synth goes on one", t.id));
     }
     Ok(t)
-}
-
-/// Whether a track is a MIDI track.
-fn is_midi(project: &Project, tree: &Node, key: u64) -> bool {
-    let place = items(tree, "tracks").iter().position(|i| i.handle == key);
-    place.and_then(|i| project.tracks.get(i)).is_some_and(|t| t.midi.is_some())
 }
 
 /// A note clip in the song, with its key.
@@ -2261,42 +2257,42 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 format!("Give clip {from} at {} its own pattern {to}", beat(&at.start)),
             ))
         }
-        Edit::SampleAdd { asset, name, track, index } => {
+        Edit::SamplerAdd { asset, name, track, index } => {
             let tree = doc.tree();
             let stem = ident(name, "sample");
-            let midi = track.is_some_and(|key| is_midi(project, &tree, key));
-            // On a MIDI track a new sample plays as it is at middle C, as in
-            // Ableton, whatever pitch it measures at; one the song has keeps
-            // the root note the song gives it.
+            // A new sample plays as it is at middle C, as in Ableton, whatever
+            // pitch it measures at; one the song has keeps the root note the
+            // song gives it (D66). A sample measured as one pitch is played
+            // as an instrument, so it starts Held; a hit plays whole (D85).
             let unrooted = crate::library::Asset { root_note: None, ..asset.clone() };
-            let (sample, mut commands) = listed(project, if midi { &unrooted } else { asset }, &stem);
+            let (sample, mut commands) = listed(project, &unrooted, &stem);
+            let mut pad = json!({"sample": sample});
+            if asset.root_note.is_some() {
+                pad["mode"] = json!("gate");
+            }
+            let instrument = json!({"sampler": {
+                "pads": {stem.clone(): pad},
+                "map": [{"notes": [0, 127], "pad": stem, "pitched": true}],
+            }});
             let label = match track {
-                Some(key) if midi => {
-                    let place = items(&tree, "tracks").iter().position(|i| i.handle == *key);
-                    let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
-                    let instrument = json!({"sampler": {
-                        "pads": {stem.clone(): {"sample": sample}},
-                        "map": [{"notes": [0, 127], "pad": stem, "pitched": true}],
-                    }});
-                    commands.push(json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument}));
-                    match t.midi.as_ref().and_then(|m| m.instrument.as_ref()) {
-                        Some(_) => format!("Replace the instrument of {} with a sampler of {sample}", t.id),
-                        None => format!("Attach a sampler of {sample} to {}", t.id),
-                    }
-                }
                 Some(key) => {
                     let place = items(&tree, "tracks").iter().position(|i| i.handle == *key);
                     let t = &project.tracks[place.ok_or("The track is no longer in the song")?];
-                    let pad = unique(&stem, |n| t.pads.contains_key(n));
-                    commands.push(json!({"op": "pad.add", "track": handle_text(*key), "pad": pad, "sample": sample}));
-                    format!("Add pad {pad} to {}", t.id)
+                    let midi = t.midi.as_ref().ok_or_else(|| format!("{} is not a MIDI track: a sample lands on its lane as an audio clip", t.id))?;
+                    commands.push(json!({"op": "instrument.set", "track": handle_text(*key), "instrument": instrument}));
+                    match midi.instrument.as_ref() {
+                        Some(_) => format!("Replace the instrument of {} with a Sampler of {sample}", t.id),
+                        None => format!("Attach a Sampler of {sample} to {}", t.id),
+                    }
                 }
                 None => {
                     let taken = |n: &str| project.tracks.iter().any(|t| t.id == n) || project.returns.iter().any(|r| r.id == n);
                     let id = unique(&stem, taken);
-                    commands.push(json!({"op": "track.add", "id": id, "index": (*index as usize).min(project.tracks.len())}));
-                    commands.push(json!({"op": "pad.add", "track": id, "pad": stem, "sample": sample}));
-                    format!("Add track {id} with pad {stem}")
+                    commands.push(json!({
+                        "op": "track.add", "id": id, "type": "midi", "instrument": instrument,
+                        "index": (*index as usize).min(project.tracks.len()),
+                    }));
+                    format!("Add track {id} with a Sampler of {sample}")
                 }
             };
             Ok(batch(commands, label))

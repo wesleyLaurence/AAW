@@ -27,14 +27,15 @@ window, and there a dropped file is a region.
 |---|---|
 | A track's lane | An audio clip on that track, at the grid line nearest the pointer; with ⌘ (Option until D79), off the grid |
 | The timeline under the tracks | A new track named after the file, with the clip at that beat |
-| A track's header | A pad of that track |
-| The headers' column under the tracks | A new track with a pad |
+| A track's header | An audio clip on that track at the start position; a MIDI track's header, a Sampler (D85, [one way a sample lands](sample-landing.md)) |
+| The headers' column under the tracks | A new MIDI track with a Sampler of it (D85); until then, a new track with a pad |
 
-The + by a sample in the browser adds a pad. While a file is dragged over the
-timeline, the clip it would make is outlined at its length; a file whose length
-cannot be read is outlined a bar long. The clip plays the whole file at the
-file's own tempo, and is selected when it lands. An `.m4a` or `.mp3` is decoded
-into the project first, as for a pad.
+The + by a sample in the browser adds a clip at the start position to the
+selected track, or loads a Sampler ([sample-landing.md](sample-landing.md)).
+While a file is dragged over the timeline, the clip it would make is outlined
+at its length; a file whose length cannot be read is outlined a bar long. The
+clip plays the whole file at the file's own tempo, and is selected when it
+lands. An `.m4a` or `.mp3` is decoded into the project first.
 
 ## The song grows
 

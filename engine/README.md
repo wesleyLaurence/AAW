@@ -275,7 +275,8 @@ pads and map, and its note clips, each with its notes and their handles. The
 person's note edits work out exact beats from the piano roll's grid as typed,
 so a note added or moved on a grid of thirds is on its third; Copy takes clips
 or notes as they are, so that Paste works after the originals are gone. A
-sample added to a MIDI track becomes its instrument. A sampler that is empty
+sample added in the app is an audio clip or the instrument of a MIDI track, a
+Sampler, never a pad (D85). A sampler that is empty
 or one pad on every note is also in the arrangement as the Sampler device
 (`SamplerView`): its pad's fields as controls need them, from
 `aaw_model::describe::PAD`, the sample's root note, and its file's identity,
@@ -325,7 +326,7 @@ explicit override.
 The app's sample browser asks Python (`library.rs`, `aaw_host::python`):
 `daw samples search` for what it lists, and `daw samples import --copy-only`
 to copy a chosen file into the project, which the song then takes as one edit
-with the pad, and the track if it is new, that plays it.
+with the audio clip or the Sampler, and the track if it is new, that plays it.
 
 `crates/aaw-engine/tests/synth.rs` holds a synth's render to playback, to
 every block size and to itself, hears a lane on its filter, chases a locate,

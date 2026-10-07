@@ -114,9 +114,11 @@ be, including "Add Sampler track" and "Attach Sampler". These are `Edit`s in
 `aaw-ffi`, as the other drops are, so the agent sees the same changes in
 `daw changes`.
 
-**Kept as it is.** Dropping a sample on a header or the timeline does what it
-does now (D66). The Add Effect menu stays in the device panel, for a person who
-does not want to drag.
+**Samples.** A sample dropped on the timeline is an audio clip, and in the
+headers a Sampler on a MIDI track; + and a double-click put it where a drop
+on the selected row would, and never make a pad since D85 ([one way a sample
+lands](sample-landing.md)). The Add Effect menu stays in the device panel, for
+a person who does not want to drag.
 
 ## Verification
 

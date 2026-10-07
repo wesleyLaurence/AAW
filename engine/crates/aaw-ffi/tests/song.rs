@@ -1775,11 +1775,13 @@ fn a_clip_gets_a_new_pattern_or_a_copy_of_its_own() {
 }
 
 #[test]
-fn a_sample_becomes_a_pad_or_a_track() {
+fn a_sample_becomes_a_sampler_on_a_midi_track_or_a_new_one() {
     let (dir, path, song, seen) = open();
     transport(&seen);
     let start = song.arrangement();
     let drums = start.tracks[0].key;
+    agent(&path, json!({"op": "track.add", "id": "keys", "type": "midi"}));
+    let keys = update(&seen).arrangement.tracks[2].key;
     // A file as the library's import leaves it: copied into the project.
     std::fs::create_dir(dir.path().join("samples")).unwrap();
     let copy = |name: &str| {
@@ -1794,47 +1796,61 @@ fn a_sample_becomes_a_pad_or_a_track() {
         }
     };
     let kick = copy("0123_kick.wav");
-    let add = |asset: &aaw_ffi::library::Asset, name: &str, track: Option<u64>| Edit::SampleAdd { asset: asset.clone(), name: name.into(), track, index: 1 };
+    let add = |asset: &aaw_ffi::library::Asset, name: &str, track: Option<u64>| Edit::SamplerAdd { asset: asset.clone(), name: name.into(), track, index: 1 };
 
-    // On a track it is a new pad, in one step with the sample it plays.
-    assert!(song.edit(add(&kick, "Kick", Some(drums)), None).unwrap().is_empty());
+    // On a MIDI track it is the instrument, in one step with the sample it
+    // plays: a hit plays to its end on every note.
+    assert!(song.edit(add(&kick, "Kick", Some(keys)), None).unwrap().is_empty());
     let u = update(&seen);
-    assert_eq!((u.change.origin, u.change.op.as_str(), u.change.label.as_str()), (Who::User, "batch", "Add pad kick to drums"));
-    assert_eq!(u.arrangement.tracks[0].pads.iter().map(|p| (p.name.as_str(), p.sample.as_str())).collect::<Vec<_>>(), [("h", "hit"), ("kick", "kick")]);
+    assert_eq!((u.change.origin, u.change.op.as_str(), u.change.label.as_str()), (Who::User, "batch", "Attach a Sampler of kick to keys"));
+    let t = &u.arrangement.tracks[2];
+    assert_eq!(t.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.gate, p.root)).collect::<Vec<_>>(), [("kick", "kick", false, None)]);
+    assert_eq!(t.map, [aaw_ffi::view::NoteMapView { low: 0, high: 127, pad: "kick".into(), pitched: true }]);
     assert_eq!(
         agent(&path, json!({"op": "get", "path": "samples.kick"})),
         json!({"path": "samples/0123_kick.wav", "sha256": kick.sha256, "source": "/library/Kicks/808 Kick (Hard).wav"})
     );
-    // The same file again is the same sample, under another pad.
-    song.edit(add(&kick, "kick", Some(drums)), None).unwrap();
+    // Another sample takes the place of the Sampler it had.
+    let snare = copy("0124_snare.wav");
+    song.edit(add(&snare, "Snare", Some(keys)), None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.arrangement.tracks[0].pads.iter().map(|p| (p.name.as_str(), p.sample.as_str())).collect::<Vec<_>>()[2], ("kick-2", "kick"));
-    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(2));
+    assert_eq!(u.change.label, "Replace the instrument of keys with a Sampler of snare");
+    assert_eq!(u.arrangement.tracks[2].pads.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["snare"]);
+    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(3));
 
-    // With no track it is a new track, named after it, which the edit makes.
-    // A copy decoded from a compressed file brings that file's hash.
+    // With no track it is a new MIDI track, named after it, which the edit
+    // makes. A sample the browser measured a pitch of starts Held, so a note
+    // stops at its note-off (D85), and its measured pitch is not taken as
+    // the root note (D66). A copy decoded from a compressed file brings that
+    // file's hash.
     let mut tone = copy("4567_tone.wav");
     tone.root_note = Some("C2".into());
     tone.source_sha256 = Some("ab".repeat(32));
     let made = song.edit(add(&tone, "808 Sub (C)", None), None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.label, "Add track s-808-sub-c with pad s-808-sub-c");
+    assert_eq!(u.change.label, "Add track s-808-sub-c with a Sampler of s-808-sub-c");
     assert_eq!(agent(&path, json!({"op": "get", "path": "samples.s-808-sub-c.source_sha256"})), json!("ab".repeat(32)));
+    assert_eq!(agent(&path, json!({"op": "get", "path": "samples.s-808-sub-c.root_note"})), Json::Null);
     let track = &u.arrangement.tracks[1];
-    assert_eq!((made.as_slice(), track.id.as_str()), (&[track.key][..], "s-808-sub-c"));
-    assert_eq!(track.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.root)).collect::<Vec<_>>(), [("s-808-sub-c", "s-808-sub-c", Some(36))]);
-    // One undo takes back the track, the pad and the sample.
+    assert_eq!((made.as_slice(), track.id.as_str(), track.midi, track.instrument.as_deref()), (&[track.key][..], "s-808-sub-c", true, Some("sampler")));
+    assert_eq!(track.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.gate, p.root)).collect::<Vec<_>>(), [("s-808-sub-c", "s-808-sub-c", true, None)]);
+    assert!(track.sampler.is_some(), "one pad on every note is the Sampler device");
+    // One undo takes back the track, the Sampler and the sample.
     song.undo().unwrap();
     let u = update(&seen);
-    assert_eq!(u.arrangement.tracks.len(), 2);
-    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(2));
+    assert_eq!(u.arrangement.tracks.len(), 3);
+    assert_eq!(agent(&path, json!({"op": "inspect"}))["samples"], json!(3));
     // A name taken by a track or a return gets a number.
     song.edit(add(&tone, "plate", None), None).unwrap();
     assert_eq!(update(&seen).arrangement.tracks[1].id, "plate-2");
 
+    // A track that is not a MIDI track holds no Sampler: a sample lands on
+    // its lane as an audio clip (`SampleClip`), never as a pad.
+    let e = song.edit(add(&kick, "Kick", Some(drums)), None).unwrap_err().to_string();
+    assert_eq!(e, "drums is not a MIDI track: a sample lands on its lane as an audio clip");
     // A file that is not in the project is refused, and nothing changes.
     let missing = aaw_ffi::library::Asset { path: "samples/none.wav".into(), sha256: kick.sha256.clone(), source: String::new(), source_sha256: None, root_note: None };
-    assert_eq!(song.edit(add(&missing, "none", Some(drums)), None).unwrap_err().to_string(), "Missing asset none");
+    assert_eq!(song.edit(add(&missing, "none", Some(keys)), None).unwrap_err().to_string(), "Missing asset none");
     let ident = |name: &str| aaw_host::command::ident(name, "sample");
     assert_eq!(ident("  Hi-Hat #3 (Open)  "), "hi-hat-3-open");
     assert_eq!((ident("808"), ident("!!!"), ident("Ünïcode")), ("s-808".into(), "sample".into(), "n-code".into()));
@@ -1905,10 +1921,12 @@ fn the_library_is_searched_and_a_sample_copied_in() {
     assert_eq!(aaw_ffi::library::library_import(song_path.clone(), found.path.clone(), None).unwrap().path, asset.path);
     assert!(aaw_ffi::library::library_import(song_path, "/nowhere.wav".into(), None).unwrap_err().to_string().contains("nowhere.wav"));
 
-    // As a track of the song.
-    song.edit(Edit::SampleAdd { asset, name: found.category, track: None, index: 0 }, None).unwrap();
+    // As a MIDI track of the song with a Sampler of it, Held since the
+    // browser gave it a pitch, which is not taken as its root note.
+    song.edit(Edit::SamplerAdd { asset, name: found.category, track: None, index: 0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!((u.arrangement.tracks[0].id.as_str(), u.arrangement.tracks[0].pads[0].root), ("kick", Some(36)));
+    let t = &u.arrangement.tracks[0];
+    assert_eq!((t.id.as_str(), t.midi, t.pads[0].gate, t.pads[0].root), ("kick", true, true, None));
     song.close();
 }
 
@@ -2333,21 +2351,23 @@ fn a_sample_on_a_midi_track_becomes_its_instrument_and_the_notes_stay() {
         root_note: root.map(String::from),
     };
     // A sample attached: a sampler that plays it at every note's pitch, as it
-    // is at middle C, whatever pitch it was measured at.
-    song.edit(Edit::SampleAdd { asset: asset("piano", Some("A3")), name: "Piano".into(), track: Some(track), index: 0 }, None).unwrap();
+    // is at middle C, whatever pitch it was measured at; measured as a pitch,
+    // it starts Held.
+    song.edit(Edit::SamplerAdd { asset: asset("piano", Some("A3")), name: "Piano".into(), track: Some(track), index: 0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.label, "Attach a sampler of piano to keys");
+    assert_eq!(u.change.label, "Attach a Sampler of piano to keys");
     let keys = &u.arrangement.tracks[2];
-    assert_eq!((keys.instrument.as_deref(), keys.pads[0].name.as_str(), keys.pads[0].gate), (Some("sampler"), "piano", false));
+    assert_eq!((keys.instrument.as_deref(), keys.pads[0].name.as_str(), keys.pads[0].gate), (Some("sampler"), "piano", true));
     assert_eq!(keys.pads[0].root, None);
     assert_eq!(keys.map, [aaw_ffi::view::NoteMapView { low: 0, high: 127, pad: "piano".into(), pitched: true }]);
     assert_eq!(notes_of(keys, 0), before);
-    // Another swaps it, and is pitched too.
-    song.edit(Edit::SampleAdd { asset: asset("organ", None), name: "Organ".into(), track: Some(track), index: 0 }, None).unwrap();
+    // Another swaps it, and is pitched too; with no measured pitch it plays
+    // to its end.
+    song.edit(Edit::SamplerAdd { asset: asset("organ", None), name: "Organ".into(), track: Some(track), index: 0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.label, "Replace the instrument of keys with a sampler of organ");
+    assert_eq!(u.change.label, "Replace the instrument of keys with a Sampler of organ");
     let keys = &u.arrangement.tracks[2];
-    assert_eq!((keys.pads.len(), keys.pads[0].name.as_str()), (1, "organ"));
+    assert_eq!((keys.pads.len(), keys.pads[0].name.as_str(), keys.pads[0].gate), (1, "organ", false));
     assert!(keys.map[0].pitched);
     assert_eq!(notes_of(keys, 0), before);
     // And taken off: the notes are kept.

@@ -1041,18 +1041,47 @@ public final class SongModel {
         }
     }
 
-    /// Adds a sample file to the song: as a pad of `track`, or with no track
-    /// as a new track after the others. The file is copied into the project
-    /// first; the original stays as it is. `name` is what the pad and a new
-    /// track are named after, and `note` the sample's pitch, if it has one.
-    func addSample(path: String, name: String, note: String?, to track: UInt64?) {
+    /// Adds a sample file to the song as a Sampler holding it: the
+    /// instrument of the MIDI track `track`, in place of the one it had, or
+    /// with no track of a new MIDI track after the others. The keys play it
+    /// at every note's pitch, as it is at middle C; a sample the browser
+    /// measured a pitch of (`note`) starts Held. The file is copied into the
+    /// project first; the original stays as it is. `name` is what the pad
+    /// and a new track are named after. The Sampler then shows in the
+    /// detail panel, so the person sees where the sample went.
+    func addSampler(path: String, name: String, note: String?, to track: UInt64?) {
         let index = UInt32(arrangement.tracks.count)
         copy(path, note: note) { model, asset in
-            model.edit(.sampleAdd(asset: asset, name: name, track: track, index: index)) { [weak model] made in
-                // The row's pads show in the detail panel.
+            model.edit(.samplerAdd(asset: asset, name: name, track: track, index: index)) { [weak model] made in
                 if let key = track ?? made.first { model?.select(row: .track(key)) }
+                model?.detail = .devices
             }
         }
+    }
+
+    /// Adds a sample where + or a double-click in the browser puts it: into
+    /// a Sampler on the selected MIDI track; on any other selected track as
+    /// an audio clip at the start position; with no track selected on a new
+    /// MIDI track with a Sampler of it.
+    func addSample(path: String, name: String, note: String?) {
+        guard case .track(let key) = selectedRow, let track = arrangement.tracks.first(where: { $0.key == key }) else {
+            return addSampler(path: path, name: name, note: note, to: nil)
+        }
+        if track.midi {
+            addSampler(path: path, name: name, note: note, to: key)
+        } else {
+            addClip(path: path, name: name, note: note, to: key, at: transport.cue)
+        }
+    }
+
+    /// What + in the browser does with a sample now, for its hint.
+    public var sampleLanding: String {
+        guard case .track(let key) = selectedRow, let track = arrangement.tracks.first(where: { $0.key == key }) else {
+            return "+ adds a new MIDI track with a Sampler of the sample."
+        }
+        return track.midi
+            ? "+ loads the sample into a Sampler on \(track.id)."
+            : "+ adds the sample to \(track.id) as an audio clip at the start position."
     }
 
     /// Loads a sample file into the Sampler on a MIDI track, or gives a

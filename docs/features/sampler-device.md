@@ -57,7 +57,10 @@ lists keeps the root note it has. One undo step, "Load piano into the Sampler
 on keys".
 
 **Dropping a sample on a MIDI track's header** stays the shortcut it is: an
-empty Sampler and a sample in one step.
+empty Sampler and a sample in one step. Since D85 a sample dropped under the
+tracks in the headers' column, or added with + and no track selected, makes a
+new MIDI track with a Sampler of it, and a sample the browser measured a pitch
+of starts Held; see [one way a sample lands](sample-landing.md).
 
 **The panel** is 448 points wide, in place of the 216-point list. At its left
 the file's waveform, 204 by 92 points, with the part outside the start and
