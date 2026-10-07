@@ -72,9 +72,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   synthesizer played from a patch; see
   [effects.md](features/effects.md), [automation.md](features/automation.md)
   and [synth.md](features/synth.md).
-- `aaw-engine`: compiles a song into a program of voices, chains, routing and
-  latency-aligning delays, and runs it as one stream for real-time playback and
-  for WAV/stem export.
+- `aaw-engine`: compiles a song into a program of voices, chains, groups,
+  routing and latency-aligning delays, and runs it as one stream for real-time
+  playback and for WAV/stem export.
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It also makes a blank project, moves or copies a project's folder,
@@ -123,7 +123,7 @@ processing never allocates, so it runs in the audio callback. No second engine e
 ## Format
 
 Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
-`returns`, `sections` and `master`. `schema_version` is 2 in a song with a MIDI
+`groups`, `returns`, `sections` and `master`. `schema_version` is 2 in a song with a MIDI
 track and 1 in any other, which saves byte for byte as it did before MIDI
 tracks; either is read (D63). Unknown fields are rejected, and an edit that
 names one is told the nearest field. Run `daw describe TOPIC` for each field's
@@ -161,29 +161,40 @@ Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `cl
 [audio-clips.md](features/audio-clips.md); one with `loop_beats` and
 `length_beats` plays its first beats again at each wrap until its length, each
 repetition a copy with the clip's fades, see
-[looping-clips.md](features/looping-clips.md)), `effects`, `sends` and `automation`. A send is `{to, gain_db, pre_fader}`, at most
+[looping-clips.md](features/looping-clips.md)), `effects`, `sends`, `automation` and an optional `group`, the
+group the track's output goes into instead of the master sum. A send is `{to, gain_db, pre_fader}`, at most
 one per return.
 
-Return: `id` (unique across tracks and returns), `gain_db`, `pan`, `mute`,
-`effects` and `automation`. A return sums its sends, runs its effects and joins the stereo master.
+Group: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
+`solo`, `effects`, `sends` and `automation`, as a track has them. A group sums the
+tracks that name it, runs its effects, then its gain and pan, and joins the master
+sum and the returns it sends to, as a drum bus. Its tracks are next to each other
+in `tracks[]`, so that the app draws the group's row above them. A muted group
+silences its tracks and their sends; a soloed group is heard with its tracks, and a
+soloed track is heard through its group. A group cannot be in a group, and a
+sidechain cannot name one. See [groups.md](features/groups.md).
+
+Return: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
+`effects` and `automation`. A return sums the sends of tracks and groups, runs its effects and joins the stereo master.
 Post-fader sends tap after track gain and pan, pre-fader sends after the inserts.
-Muted or solo-muted tracks send nothing; returns are never solo-muted. No groups
-or return-to-return sends exist yet.
+Muted or solo-muted tracks send nothing; returns are never solo-muted. No
+return-to-return sends exist yet.
 
 Effects: `filter`, `eq` (the parametric EQ: bells, shelves and passes with
 their slopes, drawn in the app as one curve over the playing spectrum; see
 [parametric-eq.md](features/parametric-eq.md)), `compressor` (optional `sidechain` track), `limiter`,
 `delay`, `reverb`, `chorus`, `saturation` and `utility` (gain, pan, width, mono
 below a frequency, polarity; see [utility.md](features/utility.md)), listed in order under
-`tracks[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
+`tracks[].effects`, `groups[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
 patch, `tracks[].instrument.synth.effects`, each with an optional `id` unique
 within its chain. A patch's effects come before the track's inserts, which
-come before track gain and pan; return effects precede return gain and pan;
+come before track gain and pan; a group's effects run on the sum of its tracks
+and precede its gain and pan; return effects precede return gain and pan;
 master effects follow `master_gain_db` and precede the end fade. See
 [effects.md](features/effects.md) for parameters and semantics.
 
-Automation: `tracks[].automation`, `returns[].automation` and `master.automation`
-list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db`,
+Automation: `tracks[].automation`, `groups[].automation`, `returns[].automation` and `master.automation`
+list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` (tracks and groups),
 `effects.REF.FIELD` or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
@@ -263,7 +274,10 @@ Mono pad pan uses equal-power gains; stereo pad and track pan use balance, prese
 center stereo levels. Mono conversion averages source channels. Tracks sum in
 float64; master gain is `session.master_gain_db` unless a master `gain_db` lane
 replaces it. Sidechain keys are the source track after its
-inserts and before its gain, pan, mute and solo. Mute takes precedence over solo. Session end is
+inserts and before its gain, pan, mute and solo. Mute takes precedence over solo.
+A grouped track's output enters its group early by the group's latency, and every
+other track waits for the slowest group, so the faders, sends, group outputs and
+return inputs share one timeline; a grouped track's sends are delayed to it. Session end is
 finite and applies an explicit final fade; tails beyond it are discarded.
 
 The 4× oversampled peak reported by the engine is an estimate, not a certified

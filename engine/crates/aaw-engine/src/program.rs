@@ -187,6 +187,61 @@ pub struct TrackProgram {
     pub in_mix: bool,
     /// The parameters of the track's lanes.
     pub automation: Vec<String>,
+    /// The group among the program's groups the track's output goes into,
+    /// instead of the master sum.
+    pub group: Option<usize>,
+}
+
+/// A group: the sum of its tracks through its chain, gain and pan, to the
+/// master sum and its sends. Its tracks arrive at its input early by its
+/// chain's latency, so that its output lands on the faders' timeline.
+#[derive(Debug)]
+pub struct GroupProgram {
+    pub id: String,
+    pub chain: ChainProgram,
+    pub gain: Param,
+    pub pan: Param,
+    /// Muted, or solo-muted; its tracks are silent with it.
+    pub silent: bool,
+    /// A send for each of the program's returns.
+    pub sends: Vec<SendProgram>,
+    /// Frames the group's input leads the faders' timeline by: its chain's
+    /// latency. Its tracks' faders and sends run that much ahead, and their
+    /// sends are delayed by it.
+    pub lead: usize,
+    pub members: Vec<String>,
+    /// Whether the group is heard and has a stem; a return preview's groups,
+    /// which only feed the return, are not.
+    pub in_mix: bool,
+    pub automation: Vec<String>,
+}
+
+/// What a stem is of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StemKind {
+    Track,
+    Group,
+    Return,
+}
+
+impl StemKind {
+    /// The kind as the render report names it.
+    pub fn name(self) -> &'static str {
+        match self {
+            StemKind::Track => "track",
+            StemKind::Group => "group",
+            StemKind::Return => "return",
+        }
+    }
+
+    /// The list the channel is in, as paths name it.
+    pub fn list(self) -> &'static str {
+        match self {
+            StemKind::Track => "tracks",
+            StemKind::Group => "groups",
+            StemKind::Return => "returns",
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -224,6 +279,7 @@ pub struct Program {
     pub total: usize,
     /// Tracks in render order: sidechain sources first.
     pub tracks: Vec<TrackProgram>,
+    pub groups: Vec<GroupProgram>,
     pub returns: Vec<ReturnProgram>,
     pub master: MasterProgram,
     pub fade: usize,
@@ -262,11 +318,12 @@ impl Program {
         self.fader(f) * amplitude(self.master.gain.at(f as i64))
     }
 
-    /// Where each stem is: tracks in render order, then returns. The name, and
-    /// whether it is a return.
-    pub fn stems(&self) -> Vec<(&str, bool)> {
-        let tracks = self.tracks.iter().filter(|t| t.in_mix).map(|t| (t.id.as_str(), false));
-        tracks.chain(self.returns.iter().map(|r| (r.id.as_str(), true))).collect()
+    /// Where each stem is: tracks in render order, then groups, then
+    /// returns. The name, and what it is of.
+    pub fn stems(&self) -> Vec<(&str, StemKind)> {
+        let tracks = self.tracks.iter().filter(|t| t.in_mix).map(|t| (t.id.as_str(), StemKind::Track));
+        let groups = self.groups.iter().filter(|g| g.in_mix).map(|g| (g.id.as_str(), StemKind::Group));
+        tracks.chain(groups).chain(self.returns.iter().map(|r| (r.id.as_str(), StemKind::Return))).collect()
     }
 }
 
@@ -985,32 +1042,58 @@ pub fn compile_cached(p: &Project, directory: &Path, cache: &mut Cache) -> Resul
 pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: Scope) -> Result<Program, String> {
     let rate = p.session.sample_rate;
     let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
-    // A preview needs the target's sidechain sources; a return's also needs
-    // its senders and theirs. Only the target is heard.
+    // A preview needs the target's sidechain sources; a group's also needs
+    // its tracks and theirs, and a return's its senders, the tracks of the
+    // groups that send to it, and theirs. Only the target is heard.
     let is_return = |id: &str| p.returns.iter().any(|r| r.id == id);
-    let (needed, heard, returns): (Vec<String>, Vec<&str>, Vec<&aaw_model::Return>) = match scope {
+    type Channels<'a> = (Vec<String>, Vec<&'a str>, Vec<&'a aaw_model::Group>, Vec<&'a aaw_model::Return>);
+    let with_sources = |mut needed: Vec<String>| {
+        for id in needed.clone() {
+            needed.extend(p.sidechain_sources(&id));
+        }
+        needed
+    };
+    let (needed, heard, groups, returns): Channels = match scope {
         Scope::Song => (
             p.tracks.iter().map(|t| t.id.clone()).collect(),
             p.tracks.iter().map(|t| t.id.as_str()).collect(),
+            p.groups.iter().collect(),
             p.returns.iter().collect(),
         ),
         Scope::Channel(id) if is_return(id) => {
+            let groups: Vec<&aaw_model::Group> = p.groups.iter().filter(|g| g.sends.iter().any(|s| s.to == id)).collect();
             let mut needed: Vec<String> = p.senders(id).into_iter().map(str::to_string).collect();
-            for sender in p.senders(id) {
-                needed.extend(p.sidechain_sources(sender));
+            for g in &groups {
+                needed.extend(p.members(&g.id).iter().map(|t| t.id.clone()));
+                needed.extend(p.sidechain_sources(&g.id));
             }
+            let mut needed = with_sources(needed);
             needed.extend(p.sidechain_sources(id));
-            (needed, Vec::new(), p.returns.iter().filter(|r| r.id == id).collect())
+            (needed, Vec::new(), groups, p.returns.iter().filter(|r| r.id == id).collect())
+        }
+        Scope::Channel(id) if p.group(id).is_some() => {
+            let mut needed = with_sources(p.members(id).iter().map(|t| t.id.clone()).collect());
+            needed.extend(p.sidechain_sources(id));
+            (needed, Vec::new(), p.groups.iter().filter(|g| g.id == id).collect(), Vec::new())
         }
         Scope::Channel(id) if p.track(id).is_some() => {
             let mut needed = p.sidechain_sources(id);
             needed.push(id.to_string());
-            (needed, vec![id], Vec::new())
+            (needed, vec![id], Vec::new(), Vec::new())
         }
-        Scope::Channel(id) => return Err(format!("Unknown track or return: {id}")),
+        Scope::Channel(id) => return Err(format!("Unknown track, group or return: {id}")),
     };
     cache.begin();
-    let any_solo = p.tracks.iter().any(|t| t.solo);
+    let any_solo = p.tracks.iter().any(|t| t.solo) || p.groups.iter().any(|g| g.solo);
+    // A group is silent when muted, or when something is soloed and neither
+    // it nor a track of its is; a track is silent when it or its group is
+    // muted, or when something is soloed and neither it nor its group is.
+    let group_silent = |g: &aaw_model::Group| g.mute || (any_solo && !g.solo && !p.members(&g.id).iter().any(|t| t.solo));
+    let track_silent = |t: &aaw_model::Track| {
+        let g = t.group.as_deref().and_then(|g| p.group(g));
+        t.mute || g.is_some_and(|g| g.mute) || (any_solo && !t.solo && !g.is_some_and(|g| g.solo))
+    };
+    let group_index = |t: &aaw_model::Track| t.group.as_deref().and_then(|g| groups.iter().position(|x| x.id == g));
     let index: HashMap<&str, usize> = p.tracks.iter().enumerate().map(|(i, t)| (t.id.as_str(), i)).collect();
     let order: Vec<&aaw_model::Track> = p.render_order().into_iter().filter(|t| needed.contains(&t.id)).collect();
     let mut keys: HashMap<&str, String> = order
@@ -1089,17 +1172,75 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             chain,
             gain: lanes.channel("gain_db", t.gain_db),
             pan: lanes.channel("pan", t.pan),
-            silent: t.mute || (any_solo && !t.solo),
+            silent: track_silent(t),
             sends,
             delay,
             align: 0,
             in_mix: heard.contains(&t.id.as_str()),
             automation: lanes.params,
+            group: group_index(t),
         });
     }
-    let track_offset = tracks.iter().map(|t| t.delay + t.chain.latency).max().unwrap_or(0);
-    for t in &mut tracks {
-        t.align = track_offset - (t.delay + t.chain.latency);
+    // Groups, without their routing yet, which needs the common timeline.
+    let mut summed: Vec<GroupProgram> = Vec::new();
+    for g in &groups {
+        let mut lanes = Lanes::new(Owner::Group(g), &g.automation, p);
+        let mut effect_lanes = std::mem::take(&mut lanes.effects);
+        let chain = chain(&g.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some(&g.id), 0);
+        let sends = returns
+            .iter()
+            .map(|r| match g.sends.iter().find(|s| s.to == r.id) {
+                Some(s) => SendProgram {
+                    pre_fader: s.pre_fader,
+                    level: Some(Param::new(s.gain_db, lanes.sends.get(&r.id))),
+                },
+                None => SendProgram {
+                    pre_fader: false,
+                    level: None,
+                },
+            })
+            .collect();
+        summed.push(GroupProgram {
+            id: g.id.clone(),
+            lead: chain.latency,
+            chain,
+            gain: lanes.channel("gain_db", g.gain_db),
+            pan: lanes.channel("pan", g.pan),
+            silent: group_silent(g),
+            sends,
+            members: tracks.iter().filter(|t| t.group.is_some_and(|i| groups[i].id == g.id)).map(|t| t.id.clone()).collect(),
+            in_mix: !matches!(scope, Scope::Channel(id) if is_return(id)),
+            automation: lanes.params,
+        });
+    }
+    // The faders' timeline: every track's inserts have come through, a
+    // grouped track's early by its group's latency, so that the group's
+    // output lands on it too, and each group's keys have come through
+    // before its input.
+    let own = |t: &TrackProgram| t.delay + t.chain.latency;
+    let lead = |t: &TrackProgram| t.group.map_or(0, |i| summed[i].lead);
+    let key_delay = |g: &GroupProgram| {
+        g.chain
+            .devices
+            .iter()
+            .filter_map(|d| d.plan.effect.sidechain())
+            .filter_map(|name| tracks.iter().find(|s| s.id == name))
+            .map(own)
+            .max()
+            .unwrap_or(0)
+    };
+    let track_offset = tracks
+        .iter()
+        .map(|t| own(t) + lead(t))
+        .chain(summed.iter().map(|g| key_delay(g) + g.lead))
+        .max()
+        .unwrap_or(0);
+    for i in 0..tracks.len() {
+        tracks[i].align = track_offset - lead(&tracks[i]) - own(&tracks[i]);
+    }
+    for g in &mut summed {
+        let input = track_offset - g.lead;
+        route(&mut g.chain, &tracks, |source| input - own(source));
     }
     let mut buses: Vec<ReturnProgram> = Vec::new();
     for r in returns {
@@ -1114,7 +1255,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             pan: lanes.channel("pan", r.pan),
             mute: r.mute,
             align: 0,
-            senders: p.senders(&r.id).into_iter().map(str::to_string).collect(),
+            senders: p.senders(&r.id).into_iter().chain(p.sending_groups(&r.id)).map(str::to_string).collect(),
             automation: lanes.params,
         });
     }
@@ -1142,11 +1283,15 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     };
     (rate, track_offset, return_latency, latency).hash(&mut h);
     for t in &tracks {
-        (&t.id, t.delay, t.align, t.in_mix, t.synth.as_ref().map(|s| s.patch.signature)).hash(&mut h);
+        (&t.id, t.delay, t.align, t.in_mix, t.group, t.synth.as_ref().map(|s| s.patch.signature)).hash(&mut h);
         if let Some(s) = &t.synth {
             devices(&s.chain, &mut h);
         }
         devices(&t.chain, &mut h);
+    }
+    for g in &summed {
+        (&g.id, g.lead, g.in_mix).hash(&mut h);
+        devices(&g.chain, &mut h);
     }
     for r in &buses {
         (&r.id, r.align).hash(&mut h);
@@ -1160,6 +1305,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         beats_per_bar: p.session.meter().beats,
         total,
         tracks,
+        groups: summed,
         returns: buses,
         master,
         fade: total.min((p.session.end_fade_ms * rate as f64 / 1000.0).round_ties_even() as usize),

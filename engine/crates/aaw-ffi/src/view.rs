@@ -30,6 +30,7 @@ pub struct Arrangement {
     /// Frames a second, which an equalizer's curve is drawn against.
     pub sample_rate: u32,
     pub tracks: Vec<TrackView>,
+    pub groups: Vec<GroupView>,
     pub returns: Vec<ReturnView>,
     pub master: MasterView,
     pub sections: Vec<SectionView>,
@@ -231,6 +232,27 @@ pub struct TrackView {
     /// The instrument as the Synth, when it is one.
     pub synth: Option<SynthView>,
     pub note_clips: Vec<NoteClipView>,
+    /// The key of the group the track is in, if any. A group's tracks are
+    /// next to each other among the tracks.
+    pub group: Option<u64>,
+}
+
+/// A group: the tracks that name it summed through its own chain, gain and
+/// pan, drawn as a row above them.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct GroupView {
+    pub key: u64,
+    pub id: String,
+    pub gain_db: f64,
+    pub pan: f64,
+    pub mute: bool,
+    pub solo: bool,
+    pub effects: Vec<EffectView>,
+    pub sends: Vec<SendView>,
+    pub lanes: Vec<LaneView>,
+    pub lane_targets: Vec<LaneTarget>,
+    /// The keys of its tracks, in their order.
+    pub tracks: Vec<u64>,
 }
 
 /// A MIDI track's Synth as the panel draws it: every part's fields as
@@ -471,6 +493,7 @@ pub enum Part {
     Session,
     Track,
     Clip,
+    Group,
     Return,
     Master,
     Section,
@@ -1312,6 +1335,38 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                         }
                     })
                     .collect(),
+                group: t.group.as_deref().and_then(|g| p.groups.iter().position(|x| x.id == g)).map(|i| handle(items(&tree, "groups"), i)),
+            }
+        })
+        .collect();
+    let group_items = items(&tree, "groups");
+    let groups = p
+        .groups
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let node = group_items.get(i).map(|item| &item.node);
+            let sends: Vec<String> = g.sends.iter().map(|s| s.to.clone()).collect();
+            let (effects, lanes, lane_targets, _) = channel(Owner::Group(g), node, &keys(p, None), &sends, p, directory);
+            GroupView {
+                key: handle(group_items, i),
+                id: g.id.clone(),
+                gain_db: g.gain_db,
+                pan: g.pan,
+                mute: g.mute,
+                solo: g.solo,
+                effects,
+                sends: g
+                    .sends
+                    .iter()
+                    .map(|s| SendView {
+                        to: s.to.clone(),
+                        gain_db: s.gain_db,
+                    })
+                    .collect(),
+                lanes,
+                lane_targets,
+                tracks: tracks.iter().filter(|t| t.group == Some(handle(group_items, i))).map(|t| t.key).collect(),
             }
         })
         .collect();
@@ -1360,6 +1415,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         length_beats: float(p.session.length_exact()),
         sample_rate: p.session.sample_rate as u32,
         tracks,
+        groups,
         returns,
         master: MasterView {
             gain_db: p.session.master_gain_db,
@@ -1486,6 +1542,7 @@ pub fn touched(old: &Doc, new: &Doc) -> Vec<Touch> {
         });
     }
 
+    list_delta(Part::Group, items(&a, "groups"), items(&b, "groups"), differs, &mut out);
     list_delta(Part::Return, items(&a, "returns"), items(&b, "returns"), differs, &mut out);
     list_delta(Part::Section, items(&a, "sections"), items(&b, "sections"), differs, &mut out);
     out

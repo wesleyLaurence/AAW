@@ -754,6 +754,23 @@ impl Session {
                 })
             })
             .collect();
+        let groups: Vec<Json> = p
+            .groups
+            .iter()
+            .map(|g| {
+                json!({
+                    "id": g.id,
+                    "tracks": p.members(&g.id).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+                    "gain_db": g.gain_db,
+                    "mute": g.mute,
+                    "solo": g.solo,
+                    "effects": types(&g.effects),
+                    "sidechain": g.sidechains(),
+                    "sends": g.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
+                    "automation": params(&g.automation),
+                })
+            })
+            .collect();
         let returns: Vec<Json> = p
             .returns
             .iter()
@@ -777,6 +794,7 @@ impl Session {
             "samples": p.samples.len(),
             "patterns": p.patterns.len(),
             "tracks": tracks,
+            "groups": groups,
             "returns": returns,
             "master_effects": types(&p.master.effects),
             "master_automation": params(&p.master.automation),

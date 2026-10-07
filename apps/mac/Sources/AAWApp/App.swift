@@ -541,6 +541,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Add MIDI Track", #selector(SongWindowController.addMIDITrack(_:)), "T"),
             item("Add Return", #selector(SongWindowController.addReturn(_:)), "t", [.command, .option]),
             .separator(),
+            item("Group Tracks", #selector(SongWindowController.groupSelection(_:)), "g"),
+            item("Ungroup", #selector(SongWindowController.ungroupSelection(_:)), "G"),
+            .separator(),
             item("Rename", #selector(SongWindowController.renameSelection(_:)), "r"),
         ])
         add("Transport", [
@@ -846,6 +849,8 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func addTrack(_ sender: Any?) { model.addTrack() }
     @objc func addMIDITrack(_ sender: Any?) { model.addTrack(midi: true) }
     @objc func addReturn(_ sender: Any?) { model.addReturn() }
+    @objc func groupSelection(_ sender: Any?) { model.groupSelection() }
+    @objc func ungroupSelection(_ sender: Any?) { model.ungroupSelection() }
     @objc func renameSelection(_ sender: Any?) { model.renameSelection() }
 
     /// "Undo" with the step it would undo, and whose it is when not the
@@ -906,6 +911,8 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(joinSelection(_:)): return model.canJoin && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
+        case #selector(groupSelection(_:)): return model.canGroup && !typing
+        case #selector(ungroupSelection(_:)): return model.canUngroup && !typing
         case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
         case #selector(exportMIDIClip(_:)): return model.exportableClip != nil && !typing
         default: break

@@ -78,6 +78,25 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(master.part(at: CGPoint(x: master.volume.midX, y: master.volume.midY)), .volume)
         XCTAssertEqual(master.part(at: CGPoint(x: 100, y: 315)), .name)
         XCTAssertGreaterThan(master.volume.maxX, bus.volume.maxX)
+
+        // A group has a track's header, with the mark that folds its tracks
+        // away before the mark that shows its sends; a grouped track's marks
+        // and name sit in from the edge.
+        let group = HeaderLayout(kind: .group, top: 100, sends: 2, folds: true, collapsed: true)
+        XCTAssertEqual(group.height, track.height)
+        XCTAssertEqual(group.part(at: CGPoint(x: group.members.midX, y: group.members.midY)), .members)
+        XCTAssertEqual(group.part(at: CGPoint(x: group.fold.midX, y: group.fold.midY)), .fold)
+        XCTAssertEqual(group.part(at: CGPoint(x: group.solo.midX, y: group.solo.midY)), .solo)
+        XCTAssertEqual(group.part(at: CGPoint(x: group.sendBar(1).midX, y: group.sendBar(1).midY)), .send(1))
+        XCTAssertLessThan(group.members.maxX, group.fold.minX)
+        XCTAssertLessThan(group.fold.maxX, group.name.minX)
+        XCTAssertEqual(group.part(at: CGPoint(x: group.name.midX, y: group.name.midY)), .name)
+        let member = HeaderLayout(kind: .track, top: 100, folds: true, grouped: true)
+        XCTAssertEqual(member.fold.minX, track.fold.minX + HeaderLayout.indent)
+        XCTAssertEqual(member.name.minX, track.name.minX + HeaderLayout.indent)
+        XCTAssertEqual(member.part(at: CGPoint(x: member.fold.midX, y: member.fold.midY)), .fold)
+        XCTAssertEqual(member.part(at: CGPoint(x: track.fold.midX, y: track.fold.midY)), .body, "left of the indent")
+        XCTAssertEqual(track.part(at: CGPoint(x: track.members.midX, y: track.members.midY)), .fold, "a track has no members mark")
         for row in [bus, master] {
             XCTAssertEqual(row.part(at: CGPoint(x: row.auto.midX, y: row.auto.midY)), .auto)
             XCTAssertFalse(row.auto.intersects(row.volume) || row.auto.intersects(row.name))

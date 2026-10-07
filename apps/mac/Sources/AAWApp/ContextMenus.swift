@@ -8,6 +8,9 @@ public enum ContextMenu {
     /// What an item of a header's menu does, to the row that was clicked.
     public enum RowAction: Equatable {
         case rename, mute, solo, automation, addTrack, addMIDITrack, addReturn, delete
+        /// Group Tracks on a track, Ungroup on a group, and Remove from Group
+        /// on a track in one.
+        case group, ungroup, leaveGroup
     }
 
     /// What an item of a clip's menu does, to the selected clips.
@@ -35,15 +38,16 @@ public enum ContextMenu {
 
     /// A header's menu: Rename, what a row is set to, a row added after it,
     /// and Delete. The master has no name of its own, no mute mark and cannot
-    /// go; a return has no solo.
-    public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, lanesShown: Bool) -> [Item<RowAction>] {
+    /// go; a return has no solo. A track offers Group Tracks, or Remove from
+    /// Group when it is in one (`grouped`); a group offers Ungroup.
+    public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, lanesShown: Bool, grouped: Bool = false) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
             items.append(Item(title: "Rename", action: .rename, key: "r"))
             items.append(.separator)
             items.append(Item(title: muted ? "Unmute" : "Mute", action: .mute))
         }
-        if kind == .track {
+        if kind == .track || kind == .group {
             items.append(Item(title: soloed ? "Unsolo" : "Solo", action: .solo))
         }
         items.append(Item(title: lanesShown ? "Hide Automation" : "Show Automation", action: .automation))
@@ -52,6 +56,17 @@ public enum ContextMenu {
         case .track:
             items.append(Item(title: "Add Track", action: .addTrack, key: "t"))
             items.append(Item(title: "Add MIDI Track", action: .addMIDITrack, key: "T"))
+            items.append(.separator)
+            if grouped {
+                items.append(Item(title: "Remove from Group", action: .leaveGroup))
+            } else {
+                items.append(Item(title: "Group Tracks", action: .group, key: "g"))
+            }
+        case .group:
+            items.append(Item(title: "Add Track", action: .addTrack, key: "t"))
+            items.append(Item(title: "Add MIDI Track", action: .addMIDITrack, key: "T"))
+            items.append(.separator)
+            items.append(Item(title: "Ungroup", action: .ungroup, key: "G"))
         case .bus, .master:
             items.append(Item(title: "Add Track", action: .addTrack, key: "t"))
             items.append(Item(title: "Add MIDI Track", action: .addMIDITrack, key: "T"))

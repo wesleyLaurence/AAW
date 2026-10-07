@@ -103,6 +103,7 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
                 }
                 for t in song["tracks"]
             ],
+            "groups": [],
             "returns": [
                 {
                     "id": r["id"],

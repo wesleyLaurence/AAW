@@ -3,7 +3,7 @@
 
 use crate::beat::{float_fraction, parse_fraction};
 use crate::pyfmt::{float_repr, format_g};
-use crate::schema::{Effect, Lane, PadMode, Project, Return, Track};
+use crate::schema::{Effect, Group, Lane, PadMode, Project, Return, Send, Track};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use regex::Regex;
@@ -482,6 +482,7 @@ pub fn synth_value(synth: &crate::schema::Synth, path: &str) -> Option<f64> {
 #[derive(Clone, Copy)]
 pub enum Owner<'a> {
     Track(&'a Track),
+    Group(&'a Group),
     Return(&'a Return),
     Master(&'a crate::schema::Master),
 }
@@ -490,6 +491,7 @@ impl<'a> Owner<'a> {
     pub fn name(&self) -> &'a str {
         match self {
             Owner::Track(t) => &t.id,
+            Owner::Group(g) => &g.id,
             Owner::Return(r) => &r.id,
             Owner::Master(_) => "master",
         }
@@ -498,6 +500,7 @@ impl<'a> Owner<'a> {
     pub fn effects(&self) -> &'a [Effect] {
         match self {
             Owner::Track(t) => &t.effects,
+            Owner::Group(g) => &g.effects,
             Owner::Return(r) => &r.effects,
             Owner::Master(m) => &m.effects,
         }
@@ -506,8 +509,30 @@ impl<'a> Owner<'a> {
     pub fn automation(&self) -> &'a [Lane] {
         match self {
             Owner::Track(t) => &t.automation,
+            Owner::Group(g) => &g.automation,
             Owner::Return(r) => &r.automation,
             Owner::Master(m) => &m.automation,
+        }
+    }
+
+    /// The owner's sends, for a track or a group; a return and the master
+    /// send nothing.
+    pub fn sends(&self) -> &'a [Send] {
+        match self {
+            Owner::Track(t) => &t.sends,
+            Owner::Group(g) => &g.sends,
+            Owner::Return(_) | Owner::Master(_) => &[],
+        }
+    }
+
+    /// The list the owner is in, as paths name it: `tracks`, `groups`,
+    /// `returns` or `master`.
+    pub fn list(&self) -> &'static str {
+        match self {
+            Owner::Track(_) => "tracks",
+            Owner::Group(_) => "groups",
+            Owner::Return(_) => "returns",
+            Owner::Master(_) => "master",
         }
     }
 }
@@ -606,20 +631,20 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
                 range,
             });
         }
-        if parts[0] == "sends" && parts.len() == 3 {
-            if parts[2] != "gain_db" {
-                return Err(format!("{param}: only a send's gain_db can be automated"));
-            }
-            if !track.sends.iter().any(|s| s.to == parts[1]) {
-                return Err(format!("{param}: no send to {}", parts[1]));
-            }
-            return Ok(Target {
-                kind: TargetKind::Send(parts[1].to_string()),
-                field: "gain_db".into(),
-                domain: Domain::Linear,
-                range: Range::closed(-96.0, 12.0),
-            });
+    }
+    if matches!(owner, Owner::Track(_) | Owner::Group(_)) && parts[0] == "sends" && parts.len() == 3 {
+        if parts[2] != "gain_db" {
+            return Err(format!("{param}: only a send's gain_db can be automated"));
         }
+        if !owner.sends().iter().any(|s| s.to == parts[1]) {
+            return Err(format!("{param}: no send to {}", parts[1]));
+        }
+        return Ok(Target {
+            kind: TargetKind::Send(parts[1].to_string()),
+            field: "gain_db".into(),
+            domain: Domain::Linear,
+            range: Range::closed(-96.0, 12.0),
+        });
     }
     if parts[0] == "effects" && parts.len() >= 3 {
         let effects = owner.effects();
@@ -676,17 +701,18 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
         if matches!(owner, Owner::Master(_)) { "" } else { ", pan" },
         match owner {
             Owner::Track(t) if t.midi.as_ref().is_some_and(|m| m.synth().is_some()) => ", sends.RETURN.gain_db, instrument.FIELD",
-            Owner::Track(_) => ", sends.RETURN.gain_db",
+            Owner::Track(_) | Owner::Group(_) => ", sends.RETURN.gain_db",
             _ => "",
         }
     ))
 }
 
-/// Every owner in document order: tracks, returns, then the master.
+/// Every owner in document order: tracks, groups, returns, then the master.
 pub fn owners(p: &Project) -> Vec<Owner<'_>> {
     p.tracks
         .iter()
         .map(Owner::Track)
+        .chain(p.groups.iter().map(Owner::Group))
         .chain(p.returns.iter().map(Owner::Return))
         .chain(std::iter::once(Owner::Master(&p.master)))
         .collect()
@@ -695,23 +721,54 @@ pub fn owners(p: &Project) -> Vec<Owner<'_>> {
 /// `Project.references`: cross-references, graphs and session bounds.
 pub fn references(p: &Project) -> Result<(), String> {
     let track_ids: Vec<&str> = p.tracks.iter().map(|t| t.id.as_str()).collect();
+    let group_ids: Vec<&str> = p.groups.iter().map(|g| g.id.as_str()).collect();
     let return_ids: Vec<&str> = p.returns.iter().map(|r| r.id.as_str()).collect();
     if track_ids.iter().collect::<HashSet<_>>().len() != track_ids.len() {
         return Err("Track IDs must be unique".into());
     }
-    let all: HashSet<&str> = track_ids.iter().chain(&return_ids).copied().collect();
-    if all.len() != track_ids.len() + return_ids.len() {
-        return Err("Return IDs must be unique and distinct from track IDs".into());
+    let with_groups: HashSet<&str> = track_ids.iter().chain(&group_ids).copied().collect();
+    if with_groups.len() != track_ids.len() + group_ids.len() {
+        return Err("Group IDs must be unique and distinct from track IDs".into());
+    }
+    let all: HashSet<&str> = with_groups.iter().chain(&return_ids).copied().collect();
+    if all.len() != with_groups.len() + return_ids.len() {
+        return Err("Return IDs must be unique and distinct from track and group IDs".into());
+    }
+    // A track's group exists, and a group's tracks are next to each other,
+    // so that the group's row can sit above them in the window.
+    let mut seen: Vec<&str> = Vec::new();
+    let mut previous: Option<&str> = None;
+    for t in &p.tracks {
+        let group = t.group.as_deref();
+        if let Some(g) = group {
+            if !group_ids.contains(&g) {
+                return Err(format!("{}: unknown group {g}", t.id));
+            }
+            if previous != Some(g) {
+                if seen.contains(&g) {
+                    return Err(format!(
+                        "{}: the tracks of group {g} must be next to each other; move it beside them with daw track move",
+                        t.id
+                    ));
+                }
+                seen.push(g);
+            }
+        }
+        previous = group;
     }
     let channels = p
         .tracks
         .iter()
         .map(|t| (t.id.as_str(), t.sidechains()))
+        .chain(p.groups.iter().map(|g| (g.id.as_str(), g.sidechains())))
         .chain(p.returns.iter().map(|r| (r.id.as_str(), r.sidechains())));
     for (id, sources) in channels {
         for source in sources {
             if return_ids.contains(&source) {
                 return Err(format!("{id}: sidechain must name a track, not return {source}"));
+            }
+            if group_ids.contains(&source) {
+                return Err(format!("{id}: sidechain must name a track, not group {source}"));
             }
             if !track_ids.contains(&source) {
                 return Err(format!("{id}: unknown sidechain track {source}"));
@@ -721,15 +778,16 @@ pub fn references(p: &Project) -> Result<(), String> {
             }
         }
     }
-    for t in &p.tracks {
-        for s in &t.sends {
+    let senders = p.tracks.iter().map(|t| (t.id.as_str(), &t.sends[..])).chain(p.groups.iter().map(|g| (g.id.as_str(), &g.sends[..])));
+    for (id, sends) in senders {
+        for s in sends {
             if !return_ids.contains(&s.to.as_str()) {
-                return Err(format!("{}: send to unknown return {}", t.id, s.to));
+                return Err(format!("{id}: send to unknown return {}", s.to));
             }
         }
-        let targets: HashSet<&str> = t.sends.iter().map(|s| s.to.as_str()).collect();
-        if targets.len() != t.sends.len() {
-            return Err(format!("{}: at most one send per return", t.id));
+        let targets: HashSet<&str> = sends.iter().map(|s| s.to.as_str()).collect();
+        if targets.len() != sends.len() {
+            return Err(format!("{id}: at most one send per return"));
         }
     }
     let graph: HashMap<&str, Vec<&str>> = p.tracks.iter().map(|t| (t.id.as_str(), t.sidechains())).collect();

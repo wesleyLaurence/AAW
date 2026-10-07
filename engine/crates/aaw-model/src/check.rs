@@ -226,9 +226,8 @@ fn bypassed_lanes(p: &Project) -> Vec<Warning> {
     let mut out = Vec::new();
     for owner in owners(p) {
         let prefix = match owner {
-            Owner::Track(t) => format!("tracks.{}", t.id),
-            Owner::Return(r) => format!("returns.{}", r.id),
             Owner::Master(_) => "master".into(),
+            other => format!("{}.{}", other.list(), other.name()),
         };
         for (i, lane) in owner.automation().iter().enumerate() {
             let Ok(t) = target(owner, &lane.param) else { continue };

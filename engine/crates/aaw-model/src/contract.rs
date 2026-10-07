@@ -32,9 +32,10 @@ const PROJECT: &[(&str, &str)] = &[
     ("map", "daw map PROJECT prints the song as a grid of tracks by bars, a line of map each. A letter is a clip, and the same letter is the same music: a note clip's notes and length, a pattern clip's pattern, an audio clip's part of its file. # is two or more clips of a track sounding at once, : a clip with nothing starting in the cell, as a held chord, and . nothing. Rows above give the bars and the sections; a legend says what each letter is and where it is, and a line a track its instrument, level, range and notes per bar. --per beat or --per 2 (bars) sizes a cell, --from and --to keep beats, --track keeps tracks, --lanes adds a row a lane with ~ where it moves. clips gives each letter's clips by reference, in the order they play."),
     ("projects", "PROJECT is a project's folder or the song.yaml in it. daw projects lists the projects open in the app or another host, the window in front first, with each one's title; --all adds the ones the app knows that are not open. daw move and daw copy save a project under another name, as Save As does in the app: a running host carries on there and still answers at the old path, and a command sent there is told where the project is now by project in its result and a notice on stderr."),
     ("playback", "daw play PROJECT --from BEAT plays through the default output. Samples sounding at the start position are picked up partway through; effects start empty there. A render always runs from the start of the song."),
-    ("effects", "tracks[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects."),
-    ("returns", "returns[] are reverb/delay buses fed by tracks[].sends; see daw describe effects."),
-    ("automation", "tracks[].automation, returns[].automation and master.automation move gain, pan, send levels and effect parameters over time; see daw describe automation."),
+    ("effects", "tracks[].effects, groups[].effects, returns[].effects and master.effects are serial insert chains; see daw describe effects."),
+    ("returns", "returns[] are reverb/delay buses fed by tracks[].sends and groups[].sends; see daw describe effects."),
+    ("groups", "groups[] are buses between tracks and the master, as a drum bus: a track with group: G is summed into G instead of the master, through G's effects, gain_db, pan, mute, solo and sends. A group's tracks are next to each other in tracks[]; daw group add ID --tracks a,b makes one and moves them together. Nothing nests: a group is not in a group. See daw describe effects."),
+    ("automation", "tracks[].automation, groups[].automation, returns[].automation and master.automation move gain, pan, send levels and effect parameters over time; see daw describe automation."),
     ("midi", "A track with type: midi holds note clips and an instrument; see daw describe midi."),
     ("audio", "tracks[].audio lists audio clips: parts of a sample file placed on the track's timeline, for edits of finished songs; see daw describe edit."),
     ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. An audio clip has the same two fields. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
@@ -78,7 +79,7 @@ const MIDI: &[(&str, &str)] = &[
     ("drums", "General MIDI drum notes are the usual map: 36 (C2) kick, 38 (D2) snare, 42 (F#2) closed hat, 46 (A#2) open hat, 49 (C#3) crash."),
     ("voices", "Each note plays its own voice, overlapping notes of the same pitch included. A gate pad releases at the note-off over its release_ms; a one_shot pad plays its sample through. A voice never outlasts its sample: there is no sustain loop. Choke groups work as on any track."),
     ("commands", "daw clip add SONG TRACK --length-beats 4 [--at 16]; daw note add SONG CLIP --pitch C4 --duration 1 [--at 0 --velocity 96], or --notes '[{...}, ...]' for many; daw note set SONG NOTE --velocity 80; daw note move SONG NOTE... --by -1/48; daw note transpose SONG NOTE... --by 12; daw note remove SONG NOTE...; a clip given to move, transpose or remove stands for all its notes. daw clip duplicate, move, resize, trim, loop, join and remove place clips; daw clip trim SONG CLIP --start BEAT --end BEAT moves either edge to a song beat and leaves the notes where they are in the song; daw clip loop SONG CLIP BEATS|off sets how many of its first beats repeat. daw note list SONG CLIP|TRACK [--from BEAT --to BEAT] reads notes with their names and song beats. daw instrument set SONG TRACK JSON attaches or replaces the instrument, daw instrument remove takes it off, daw instrument map SONG TRACK NOTES PAD [--pitched] adds a map entry, and daw pad add/set/remove edit the sampler's pads. A labeled daw batch makes a phrase and its variations one undo step."),
-    ("version", "A song with a MIDI track is saved with schema_version: 2, which an engine from before MIDI tracks refuses. A song without one is saved as version 1, as before."),
+    ("version", "A song with a MIDI track is saved with schema_version: 2, which an engine from before MIDI tracks refuses; one without is saved as version 1."),
     ("files", "daw midi import SONG FILE [--track TRACK] [--at BEAT] makes a note clip of a Standard MIDI file of one part, type 0 or 1, whose notes are in one file track and on one channel; a file of more parts is refused with them named. The clip goes on --track, a MIDI track, or else on a new MIDI track named after the file, at --at (0 unless given). It starts at the file's beat 0 and lasts to its last note's end in whole bars, and the song grows to hold it. Positions are exact. The file's tempo is not taken: the notes keep their beats, and the reply's file_tempo is for information. The reply's left_out counts what the song does not hold, by kind (sustain pedal, pitch bend, controllers, program changes, aftertouch and more), and adjusted counts notes with no note-off or no length. daw midi export SONG CLIP FILE writes the clip's notes that play as a type 0 file at 960 ticks a beat with the song's tempo, on channel 1; its reply counts notes outside the clip, notes shortened to its end, notes rounded to a tick, and a note inside a longer one of its pitch, whose lengths a MIDI file cannot keep apart."),
     ("limits", "No controllers, pitch bend or pedal, and no recording. A loop starts at its clip's start, and a looped clip is cut by daw range only at a wrap. A MIDI file is one part; a file of several parts and its tempo are not read."),
 ];
@@ -88,27 +89,28 @@ const EFFECT: &[(&str, &str)] = &[
     ("filter", "Butterworth highpass or lowpass. slope_db_per_octave 12/24/36/48 is the order times 6 dB. No resonance control."),
     ("eq", "A parametric equalizer: up to 16 RBJ biquad bands in series. bell raises or lowers gain_db at freq_hz with q as its width; low_shelf and high_shelf use q as the shelf's slope (0.71 is maximally flat); highpass and lowpass cut past freq_hz at slope_db_per_octave (12, 24, 36 or 48, Butterworth), with q the resonance at the corner (0.71 is flat, higher lifts it) and gain_db ignored. gain_db is 0 unless given; slope_db_per_octave counts only on a pass. The app draws the bands as one curve over the playing spectrum."),
     ("compressor", "Stereo-linked sample-peak detector, soft knee of knee_db centered on threshold_db. attack_ms smooths onset; release_ms is the time for reduction to fall by a factor of e. makeup_db is gain added after reduction; threshold_db and makeup_db can be automated."),
-    ("sidechain", "compressor.sidechain names another track. Its key is that track after its own inserts, before its gain, pan, mute and solo, so a muted kick still ducks the bass. Cycles and self-sidechains are rejected. Master compressors cannot use a sidechain."),
+    ("sidechain", "compressor.sidechain names another track. Its key is that track after its own inserts, before its gain, pan, mute and solo, so a muted kick still ducks the bass. Cycles and self-sidechains are rejected. A group's or a return's compressor may be keyed by a track; a sidechain cannot name a group or a return. Master compressors cannot use a sidechain."),
     ("limiter", "Look-ahead brickwall on sample peaks: no output sample exceeds ceiling_db. lookahead_ms is compensated latency. Estimated true peak can still exceed the ceiling slightly; leave margin below 0 dBFS."),
     ("bypass", "bypass: true keeps an effect in the document without processing, for A/B renders with daw compare."),
-    ("stems", "Stems are post-insert, post-track and post-master gain and fade, before master effects. Track stems are dry; each return has its own stem. Without master effects track and return stems sum to the mix; report.stems_sum_to_mix says which."),
-    ("previews", "render --track TRACK renders that track plus its sidechain sources and omits returns and master effects, matching its stem. render --track RETURN renders the return with its senders, output wet only. Section previews include returns and the master chain."),
+    ("stems", "Stems are post-insert, post-track and post-master gain and fade, before master effects. Track stems are dry; each group and each return has its own stem. A grouped track's stem is its sound before its group, so the stems of the ungrouped tracks, the groups and the returns sum to the mix. Without master effects or groups every stem sums to the mix; report.stems_sum_to_mix says which."),
+    ("previews", "render --track TRACK renders that track plus its sidechain sources and omits returns and master effects, matching its stem. render --track GROUP renders the group with its tracks, the group's stem. render --track RETURN renders the return with its senders, output wet only. Section previews include groups, returns and the master chain."),
     ("delay", "Tempo-synced feedback delay. time_beats (fractions allowed, 1 ms to 10 s at the session tempo) is the echo spacing; feedback_percent is each repeat's level relative to the previous one. Optional lowcut_hz/highcut_hz are 12 dB/octave filters inside the feedback loop, so every repeat darkens further. ping_pong sums the input to mono, starts on the left and alternates channels."),
     ("reverb", "Convolution with a seeded synthetic impulse response: same parameters and seed, same tail. decay_seconds is the RT60 up to damping_hz; above it RT60 falls in proportion to 1/f. predelay_ms delays the tail; lowcut_hz is a 12 dB/octave highpass on the tail; width_percent 0 is mono, 100 fully decorrelated. Input is summed to mono. Energy-normalized: white noise in gives wet RMS equal to the input RMS. Adds no latency. Tails past the session end are cut by the end fade."),
     ("chorus", "A stereo chorus: each channel through a delay of delay_ms moved depth_ms either side by a sine at rate_hz, the right channel a quarter cycle behind the left, so the two sides drift apart. mix_percent (50 unless given) blends it under the dry signal; 100 is the wet signal alone, a vibrato. rate_hz, depth_ms, delay_ms and mix_percent can be automated. Adds no latency; the sweep is a function of the frames processed, so a render is the same bytes twice."),
     ("saturation", "The signal driven by drive_db into a curve: soft is tanh, odd harmonics that thicken as the drive rises; hard clips at full scale; tube is asymmetric, even harmonics too, with its DC removed. output_db trims the result and mix_percent (100 unless given) blends it under the dry signal, so a little tube at 30 percent is a warmth and a hard clip at 100 is a distortion. drive_db, output_db and mix_percent can be automated. No oversampling: a hard clip high up aliases a little."),
     ("utility", "The channel moves that need no other device, in this order: invert flips the polarity of the left, the right or both channels; mono sums the channels to their average; mono_below_hz, when given, sums only what lies below it, through a Linkwitz-Riley crossover of 24 dB per octave whose two halves meet flat, so a bass stays in the middle while the rest keeps its width; width_percent scales the side signal, 0 mono, 100 as it came, up to 400; gain_db; and pan, a balance as a track's. gain_db, pan and width_percent can be automated, so a utility is also a second fader or a width lane anywhere in a chain. At its defaults it passes the signal through bit-identical."),
     ("mix", "delay, reverb, chorus and saturation take mix_percent: output = input * (1 - mix) + wet * mix. The default is 100, fully wet, for delay, reverb and saturation, and 50 for chorus; set a delay's or reverb's lower when used as a track insert."),
-    ("returns", "returns[] are buses with id, gain_db, pan, mute and effects. tracks[].sends lists {to: RETURN, gain_db, pre_fader}. Post-fader sends (default) tap after the track's gain and pan; pre-fader after its inserts. Muted or solo-muted tracks send nothing. Returns are never solo-muted. A return compressor may sidechain a track; sidechains cannot name a return. Returns cannot send."),
-    ("report", "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB. Returns appear under tracks with kind: return and their senders."),
+    ("returns", "returns[] are buses with id, gain_db, pan, mute and effects. tracks[].sends and groups[].sends list {to: RETURN, gain_db, pre_fader}. Post-fader sends (default) tap after the track's gain and pan; pre-fader after its inserts. Muted or solo-muted tracks send nothing. Returns are never solo-muted. A return compressor may sidechain a track; sidechains cannot name a return. Returns cannot send."),
+    ("groups", "groups[] are buses between the tracks and the master, with id, gain_db, pan, mute, solo, effects, sends and automation. A track with group: G goes into G instead of the master sum: G's effects run on the sum of its tracks, then its gain and pan, then to the master and G's sends. A muted group silences its tracks and their sends; a soloed group is heard with its tracks, and a soloed track is heard through its group. A group's latency is waited for by every other track, so the mix stays aligned. The tracks of a group are next to each other in tracks[]."),
+    ("report", "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB. Groups appear under tracks with kind: group and their tracks, returns with kind: return and their senders; a grouped track names its group."),
     ("automation", "Effect parameters can change over time with automation lanes; see daw describe automation. Give an effect an id to address it by name."),
     ("synth", "A Synth patch carries a chain of these kinds of its own, tracks[].instrument.synth.effects, run before the track's inserts; see daw describe synth."),
-    ("limits", "No clipper, phaser, groups, return-to-return sends or impulse-response samples yet."),
+    ("limits", "No clipper, phaser, groups in groups, return-to-return sends or impulse-response samples yet."),
 ];
 
 const AUTOMATION: &[(&str, &str)] = &[
-    ("lanes", "tracks[].automation, returns[].automation and master.automation list lanes {param, points}. A lane overrides the static value for the whole song. One lane per parameter."),
-    ("params", "Tracks: gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD, and on a MIDI track with a synth instrument.FIELD, such as instrument.filter.cutoff_hz, instrument.macros.tone or instrument.effects.REF.FIELD for the patch's own effects (daw describe synth). Returns: gain_db, pan, effects.REF.FIELD. Master: gain_db (replaces session.master_gain_db) and effects.REF.FIELD. REF is an effect id or zero-based index; eq fields are effects.REF.bands.N.FIELD. Automatable effect fields are listed under automatable."),
+    ("lanes", "tracks[].automation, groups[].automation, returns[].automation and master.automation list lanes {param, points}. A lane overrides the static value for the whole song. One lane per parameter."),
+    ("params", "Tracks: gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD, and on a MIDI track with a synth instrument.FIELD, such as instrument.filter.cutoff_hz, instrument.macros.tone or instrument.effects.REF.FIELD for the patch's own effects (daw describe synth). Groups: gain_db, pan, sends.RETURN.gain_db, effects.REF.FIELD. Returns: gain_db, pan, effects.REF.FIELD. Master: gain_db (replaces session.master_gain_db) and effects.REF.FIELD. REF is an effect id or zero-based index; eq fields are effects.REF.bands.N.FIELD. Automatable effect fields are listed under automatable."),
     ("points", "points are {at, value, curve, shape} in time order; at is in beats like any position and may equal the session length. Values use the parameter's own units and bounds."),
     ("curves", "curve shapes the segment after its point. linear (default) moves in the parameter's domain: dB, pan and percent linearly, frequencies and q in equal ratios per beat (log). hold keeps the value until the next point. shape bends a linear segment, from -1 to 1: above zero it starts slowly and finishes fast (at 0.5 progress goes as its square, at 1 as its fourth power), below zero it starts fast and finishes slowly, and 0 is straight. A sweep that should hold back and then open needs two points and a shape. Two points at the same at jump there; at most two may share a position."),
     ("outside", "Before the first point the lane holds the first value; after the last it holds the last value. A lane whose points all share one value renders exactly as that static value."),
@@ -312,7 +314,7 @@ pub fn schema() -> &'static Json {
 /// What each topic is about, as `daw describe` lists them.
 const ABOUT: &[(&str, &str)] = &[
     ("start", "The commands that make a first song, from init to listen. Read this first."),
-    ("project", "The song: session, samples, patterns, tracks, returns, sections; editing, rendering and playback."),
+    ("project", "The song: session, samples, patterns, tracks, groups, returns, sections; editing, rendering and playback."),
     ("sampler", "Pads, samples and pattern events: pitch, gate, choke, stretch, and the app's Sampler."),
     ("synth", "The Synth: oscillators, filter, envelopes, LFOs, the modulation matrix, macros, patches and recipes."),
     ("midi", "MIDI tracks: note clips, notes, instruments, drum maps and MIDI files."),
@@ -334,7 +336,7 @@ fn home(model: &str) -> &'static str {
         "MidiTrack" | "NoteClip" | "Note" | "Instrument" | "Sampler" | "NoteMap" => "midi",
         "Synth" | "Oscillator" | "SynthFilter" | "SynthEnvelope" | "Lfo" | "Modulation" => "synth",
         "Lane" | "Point" => "automation",
-        "Send" | "Return" | "EqBand" => "effects",
+        "Send" | "Group" | "Return" | "EqBand" => "effects",
         m if EFFECT_TYPES.iter().any(|k| title(k) == m) => "effects",
         _ => "project",
     }
@@ -551,7 +553,7 @@ fn fields(topic: &str) -> Option<Json> {
     Some(match topic {
         "project" => listing(
             &[("", "Project")],
-            &["Session", "Sample", "Pattern", "Event", "Track", "Clip", "Section", "Master", "Return", "Send"],
+            &["Session", "Sample", "Pattern", "Event", "Track", "Clip", "Section", "Master", "Group", "Return", "Send"],
         ),
         "sampler" => listing(
             &[("samples.ID", "Sample"), ("tracks[].pads.ID", "Pad"), ("patterns.ID.events[]", "Event")],
@@ -567,9 +569,9 @@ fn fields(topic: &str) -> Option<Json> {
         "effects" => {
             let roots: Vec<(&str, String)> = EFFECT_TYPES.iter().map(|k| (*k, title(k))).collect();
             let mut roots: Vec<(&str, &str)> = roots.iter().map(|(k, m)| (*k, m.as_str())).collect();
-            roots.extend([("tracks[].sends[]", "Send"), ("returns[]", "Return")]);
+            roots.extend([("tracks[].sends[]", "Send"), ("groups[]", "Group"), ("returns[]", "Return")]);
             let mut expand: Vec<String> = EFFECT_TYPES.iter().map(|k| title(k)).collect();
-            expand.extend(["EqBand".into(), "Send".into(), "Return".into()]);
+            expand.extend(["EqBand".into(), "Send".into(), "Group".into(), "Return".into()]);
             listing(&roots, &expand.iter().map(String::as_str).collect::<Vec<_>>())
         }
         "automation" => listing(&[("tracks[].automation[]", "Lane")], &["Lane", "Point"]),
@@ -694,7 +696,7 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         }),
         "effects" => json!({
             "schema": Json::Object(EFFECT_TYPES.iter().map(|k| (k.to_string(), model(&title(k)))).collect()),
-            "routing": {"send": model("Send"), "return": model("Return")},
+            "routing": {"send": model("Send"), "group": model("Group"), "return": model("Return")},
             "semantics": texts(EFFECT),
         }),
         "automation" => json!({

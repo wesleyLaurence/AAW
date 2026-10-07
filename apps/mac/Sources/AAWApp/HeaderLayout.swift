@@ -5,12 +5,15 @@ import Foundation
 /// what a click is on. Geometry only.
 public struct HeaderLayout: Equatable {
     public enum Kind: Equatable {
-        case track, bus, master
+        /// A group has a track's header, over the tracks in it.
+        case track, group, bus, master
     }
 
     public enum Part: Equatable {
-        /// The mark that shows or hides a track's sends.
+        /// The mark that shows or hides a track's or a group's sends.
         case fold
+        /// The mark on a group that folds its tracks away or shows them.
+        case members
         case name, mute, solo, volume, pan
         /// The send to the return at this place among the returns.
         case send(Int)
@@ -38,20 +41,36 @@ public struct HeaderLayout: Equatable {
     public var kind: Kind
     /// The header's top, in the view.
     public var top: CGFloat
-    /// Sends shown under a track's header: none while they are folded away.
+    /// Sends shown under a track's or a group's header: none while they are
+    /// folded away.
     public var sends: Int
-    /// Whether the track has a fold mark, which it has when the song has returns.
+    /// Whether the row has a fold mark for its sends, which it has when the
+    /// song has returns.
     public var folds: Bool
     /// The row's automation lanes while they are shown; nil while folded away.
     public var lanes: Int?
+    /// Whether a group's tracks are folded away under it.
+    public var collapsed: Bool
+    /// Whether the track is in a group, and its name sits in from the edge.
+    public var grouped: Bool
 
-    public init(kind: Kind, top: CGFloat, sends: Int = 0, folds: Bool = false, lanes: Int? = nil) {
+    public init(kind: Kind, top: CGFloat, sends: Int = 0, folds: Bool = false, lanes: Int? = nil,
+                collapsed: Bool = false, grouped: Bool = false) {
         self.kind = kind
         self.top = top
         self.sends = sends
         self.folds = folds
         self.lanes = lanes
+        self.collapsed = collapsed
+        self.grouped = grouped
     }
+
+    /// Whether the header is a track's or a group's: two lines, with a
+    /// volume bar, solo and sends.
+    public var strip: Bool { kind == .track || kind == .group }
+
+    /// How far in a grouped track's marks and name sit.
+    public static let indent: CGFloat = 12
 
     /// How much taller a track's header is with `sends` sends shown.
     public static func extraHeight(sends: Int) -> CGFloat {
@@ -66,21 +85,36 @@ public struct HeaderLayout: Equatable {
 
     /// The row's height without its lanes.
     public var baseHeight: CGFloat {
-        kind == .track ? TimelineLayout.trackHeight + Self.extraHeight(sends: sends) : TimelineLayout.busHeight
+        strip ? TimelineLayout.trackHeight + Self.extraHeight(sends: sends) : TimelineLayout.busHeight
     }
 
     public var height: CGFloat {
         baseHeight + Self.extraHeight(lanes: lanes)
     }
 
-    public var fold: CGRect {
+    /// Where a track's or a group's marks start: in from the edge for a
+    /// grouped track, and after the members mark on a group.
+    private var left: CGFloat {
+        switch kind {
+        case .group: 8 + 16
+        case .track: 8 + (grouped ? Self.indent : 0)
+        case .bus, .master: 8
+        }
+    }
+
+    /// The mark on a group that folds its tracks away.
+    public var members: CGRect {
         CGRect(x: 8, y: top + 7, width: 12, height: 12)
+    }
+
+    public var fold: CGRect {
+        CGRect(x: left, y: top + 7, width: 12, height: 12)
     }
 
     public var name: CGRect {
         switch kind {
-        case .track:
-            let left: CGFloat = folds ? 23 : 14
+        case .track, .group:
+            let left: CGFloat = left + (folds ? 15 : 6)
             return CGRect(x: left, y: top + 5, width: auto.minX - 6 - left, height: 16)
         case .bus, .master:
             return CGRect(x: 14, y: top + 7, width: auto.minX - 6 - 14, height: 16)
@@ -90,14 +124,14 @@ public struct HeaderLayout: Equatable {
     /// The mark that shows or hides the row's automation lanes.
     public var auto: CGRect {
         switch kind {
-        case .track: CGRect(x: Self.width - 64, y: top + 6, width: 16, height: 14)
+        case .track, .group: CGRect(x: Self.width - 64, y: top + 6, width: 16, height: 14)
         case .bus, .master: CGRect(x: volume.minX - 20, y: top + 9, width: 16, height: 14)
         }
     }
 
     public var mute: CGRect {
         switch kind {
-        case .track: CGRect(x: Self.width - 46, y: top + 6, width: 16, height: 14)
+        case .track, .group: CGRect(x: Self.width - 46, y: top + 6, width: 16, height: 14)
         case .bus, .master: CGRect(x: Self.width - 24, y: top + 9, width: 16, height: 14)
         }
     }
@@ -110,20 +144,20 @@ public struct HeaderLayout: Equatable {
     /// the value box of a return or the master.
     public var volume: CGRect {
         switch kind {
-        case .track: CGRect(x: 12, y: top + 22, width: 150, height: 18)
+        case .track, .group: CGRect(x: 12, y: top + 22, width: 150, height: 18)
         case .bus: CGRect(x: Self.width - 28 - 58, y: top + 8, width: 58, height: 16)
         case .master: CGRect(x: Self.width - 8 - 58, y: top + 8, width: 58, height: 16)
         }
     }
 
-    /// A track's volume bar.
+    /// A track's or a group's volume bar.
     public var volumeBar: CGRect {
         CGRect(x: 14, y: top + 30, width: 84, height: 4)
     }
 
     public var volumeText: CGRect {
         switch kind {
-        case .track: CGRect(x: volumeBar.maxX + 6, y: top + 25, width: 56, height: 13)
+        case .track, .group: CGRect(x: volumeBar.maxX + 6, y: top + 25, width: 56, height: 13)
         case .bus, .master: volume.insetBy(dx: 4, dy: 1.5)
         }
     }
@@ -183,7 +217,8 @@ public struct HeaderLayout: Equatable {
             return laneAdd.insetBy(dx: -2, dy: -2).contains(p) ? .laneAdd : .body
         }
         switch kind {
-        case .track:
+        case .track, .group:
+            if kind == .group, members.insetBy(dx: -4, dy: -4).contains(p) { return .members }
             if folds, fold.insetBy(dx: -4, dy: -4).contains(p) { return .fold }
             if mute.contains(p) { return .mute }
             if solo.contains(p) { return .solo }

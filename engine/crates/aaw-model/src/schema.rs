@@ -2773,16 +2773,19 @@ pub struct Track {
     /// pattern clips or audio clips of its own; it is written with
     /// `type: midi` and its note clips under `clips`.
     pub midi: Option<Midi>,
+    /// The group the track's output goes into instead of the master sum,
+    /// one of `groups[]`; None for a track that goes to the master.
+    pub group: Option<String>,
 }
 
 static NO_PADS: LazyLock<IndexMap<String, Pad>> = LazyLock::new(IndexMap::new);
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
-        "id", "gain_db", "pan", "mute", "solo", "pads", "clips", "audio", "effects", "sends", "automation",
+        "id", "gain_db", "pan", "mute", "solo", "group", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
     const MIDI_FIELDS: &'static [&'static str] = &[
-        "id", "type", "gain_db", "pan", "mute", "solo", "instrument", "clips", "effects", "sends", "automation",
+        "id", "type", "gain_db", "pan", "mute", "solo", "group", "instrument", "clips", "effects", "sends", "automation",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
@@ -2804,6 +2807,7 @@ impl Track {
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
         let solo = f.opt(ctx, "solo", false, v::boolean);
+        let group = f.opt(ctx, "group", None, opt_id);
         let (pads, clips, audio, notes) = if midi {
             let instrument = f.opt(ctx, "instrument", None, |c, x| v::optional(c, x, Instrument::validate));
             let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, NoteClip::validate));
@@ -2838,6 +2842,7 @@ impl Track {
             sends: sends?,
             automation: automation?,
             midi: notes?,
+            group: group?,
         })
     }
 
@@ -2863,6 +2868,7 @@ impl Track {
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
         o.bool("solo", self.solo, false);
+        o.opt("group", self.group.as_ref().map(|g| Value::str(g)));
         match &self.midi {
             Some(m) => {
                 o.opt("instrument", m.instrument.as_ref().map(|i| i.dump(saved)));
@@ -2874,6 +2880,68 @@ impl Track {
                 o.coll("audio", list(&self.audio, saved, AudioClip::dump));
             }
         }
+        o.coll("effects", list(&self.effects, saved, Effect::dump));
+        o.coll("sends", list(&self.sends, saved, Send::dump));
+        o.coll("automation", list(&self.automation, saved, Lane::dump));
+        o.done()
+    }
+}
+
+/// A group: the tracks that name it summed through its own chain, gain and
+/// pan, then to the master and to the returns it sends to, as a drum bus.
+#[derive(Clone, Debug)]
+pub struct Group {
+    pub id: String,
+    pub gain_db: f64,
+    pub pan: f64,
+    pub mute: bool,
+    pub solo: bool,
+    pub effects: Vec<Effect>,
+    pub sends: Vec<Send>,
+    pub automation: Vec<Lane>,
+}
+
+impl Group {
+    const FIELDS: &'static [&'static str] = &["id", "gain_db", "pan", "mute", "solo", "effects", "sends", "automation"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Group> {
+        let f = Fields::of(ctx, x, "Group", Self::FIELDS)?;
+        let before = ctx.count();
+        let id = f.req(ctx, "id", id_field);
+        let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
+        let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
+        let mute = f.opt(ctx, "mute", false, v::boolean);
+        let solo = f.opt(ctx, "solo", false, v::boolean);
+        let effects = effects_field(ctx, &f);
+        let sends = f.opt(ctx, "sends", Vec::new(), |c, x| v::list(c, x, 0, Some(16), Send::validate));
+        let automation = automation_field(ctx, &f);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(Group {
+            id: id?,
+            gain_db: gain_db?,
+            pan: pan?,
+            mute: mute?,
+            solo: solo?,
+            effects: effects?,
+            sends: sends?,
+            automation: automation?,
+        })
+    }
+
+    pub fn sidechains(&self) -> Vec<&str> {
+        self.effects.iter().filter_map(Effect::sidechain).collect()
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("id", Value::str(&self.id));
+        o.float("gain_db", self.gain_db, 0.0);
+        o.float("pan", self.pan, 0.0);
+        o.bool("mute", self.mute, false);
+        o.bool("solo", self.solo, false);
         o.coll("effects", list(&self.effects, saved, Effect::dump));
         o.coll("sends", list(&self.sends, saved, Send::dump));
         o.coll("automation", list(&self.automation, saved, Lane::dump));
@@ -3129,6 +3197,7 @@ pub struct Project {
     pub samples: IndexMap<String, Sample>,
     pub patterns: IndexMap<String, Pattern>,
     pub tracks: Vec<Track>,
+    pub groups: Vec<Group>,
     pub returns: Vec<Return>,
     pub sections: Vec<Section>,
     pub master: Master,
@@ -3136,7 +3205,7 @@ pub struct Project {
 
 impl Project {
     const FIELDS: &'static [&'static str] = &[
-        "schema_version", "session", "samples", "patterns", "tracks", "returns", "sections", "master",
+        "schema_version", "session", "samples", "patterns", "tracks", "groups", "returns", "sections", "master",
     ];
 
     /// `Project.model_validate`: the whole tree, then the reference rules.
@@ -3164,6 +3233,7 @@ impl Project {
         let samples = f.opt(ctx, "samples", IndexMap::new(), |c, x| v::str_dict(c, x, Sample::validate));
         let patterns = f.opt(ctx, "patterns", IndexMap::new(), |c, x| v::str_dict(c, x, Pattern::validate));
         let tracks = f.opt(ctx, "tracks", Vec::new(), |c, x| v::list(c, x, 0, None, Track::validate));
+        let groups = f.opt(ctx, "groups", Vec::new(), |c, x| v::list(c, x, 0, None, Group::validate));
         let returns = f.opt(ctx, "returns", Vec::new(), |c, x| v::list(c, x, 0, None, Return::validate));
         let sections = f.opt(ctx, "sections", Vec::new(), |c, x| v::list(c, x, 0, None, Section::validate));
         let master = f.opt(ctx, "master", Master::default(), Master::validate);
@@ -3185,6 +3255,7 @@ impl Project {
             samples: samples?,
             patterns: patterns?,
             tracks,
+            groups: groups?,
             returns: returns?,
             sections: sections?,
             master: master?,
@@ -3210,6 +3281,7 @@ impl Project {
         o.coll("samples", str_map(&self.samples, saved, Sample::dump));
         o.coll("patterns", str_map(&self.patterns, saved, Pattern::dump));
         o.coll("tracks", list(&self.tracks, saved, Track::dump));
+        o.coll("groups", list(&self.groups, saved, Group::dump));
         o.coll("returns", list(&self.returns, saved, Return::dump));
         o.coll("sections", list(&self.sections, saved, Section::dump));
         let master = self.master.dump(saved);
@@ -3222,6 +3294,24 @@ impl Project {
 
     pub fn track(&self, id: &str) -> Option<&Track> {
         self.tracks.iter().find(|t| t.id == id)
+    }
+
+    pub fn group(&self, id: &str) -> Option<&Group> {
+        self.groups.iter().find(|g| g.id == id)
+    }
+
+    /// The tracks in a group, in document order.
+    pub fn members(&self, group_id: &str) -> Vec<&Track> {
+        self.tracks.iter().filter(|t| t.group.as_deref() == Some(group_id)).collect()
+    }
+
+    /// Groups with a send to `return_id`, in document order.
+    pub fn sending_groups(&self, return_id: &str) -> Vec<&str> {
+        self.groups
+            .iter()
+            .filter(|g| g.sends.iter().any(|s| s.to == return_id))
+            .map(|g| g.id.as_str())
+            .collect()
     }
 
     /// Tracks with sidechain sources first; otherwise document order.
@@ -3249,16 +3339,20 @@ impl Project {
             .collect()
     }
 
-    /// Every track whose audio feeds a track or return's detectors, directly or not.
+    /// Every track whose audio feeds a track's, group's or return's
+    /// detectors, directly or not.
     pub fn sidechain_sources(&self, channel_id: &str) -> Vec<String> {
         let direct: Vec<&str> = match self.track(channel_id) {
             Some(t) => t.sidechains(),
-            None => self
-                .returns
-                .iter()
-                .find(|r| r.id == channel_id)
-                .map(Return::sidechains)
-                .unwrap_or_default(),
+            None => match self.group(channel_id) {
+                Some(g) => g.sidechains(),
+                None => self
+                    .returns
+                    .iter()
+                    .find(|r| r.id == channel_id)
+                    .map(Return::sidechains)
+                    .unwrap_or_default(),
+            },
         };
         let mut found: Vec<String> = Vec::new();
         let mut stack: Vec<String> = direct.into_iter().map(str::to_string).collect();
@@ -3291,6 +3385,7 @@ impl Default for Project {
             samples: IndexMap::new(),
             patterns: IndexMap::new(),
             tracks: Vec::new(),
+            groups: Vec::new(),
             returns: Vec::new(),
             sections: Vec::new(),
             master: Master::default(),

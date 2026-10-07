@@ -50,6 +50,11 @@ tracks:
         modulation: [{source: macros.tone, target: filter.cutoff_hz, amount: 1}]
         effects: [{type: chorus}, {type: saturation}]
     automation: [{param: instrument.filter.cutoff_hz, points: [{at: 0, value: 900}]}]
+groups:
+  - id: g
+    effects: [{type: limiter}]
+    sends: [{to: r}]
+    automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
 returns: [{id: r}]
 sections: [{id: a, at: 0, length_beats: 4}]
 master: {}

@@ -10,7 +10,7 @@ import soundfile as sf
 from scipy.signal import butter, sosfilt
 from agent_daw.model import load, save, validate
 from agent_daw.perception import compare, listen
-from helpers import SR, cli, level_db, render, run_chain, stem
+from helpers import SR, cli, daw, level_db, render, run_chain, stem
 
 
 def impulse(seconds, amp=0.5):
@@ -253,7 +253,7 @@ def test_return_preview_is_wet_stem_and_track_preview_is_dry(mix, tmp_path):
     assert np.array_equal(
         stem(tmp_path / "snare", "snare"), stem(tmp_path / "full", "snare")
     )
-    with pytest.raises(ValueError, match="Unknown track or return"):
+    with pytest.raises(ValueError, match="Unknown track, group or return"):
         render(path, track_id="absent")
 
 
@@ -391,7 +391,7 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
     assert snare["sends"][0] == {"to": "plate", "gain_db": -6, "pre_fader": False}
     code, described = cli("describe", "effects", "--schema")
     assert {"delay", "reverb"} <= set(described["schema"])
-    assert set(described["routing"]) == {"send", "return"}
+    assert set(described["routing"]) == {"send", "group", "return"}
     assert "returns" in described["semantics"]
 
 
@@ -416,3 +416,56 @@ def test_compare_diffs_returns_present_in_both_renders(mix, tmp_path):
     )
     assert report["tracks"]["snare"]["actual_delta"]["rms_dbfs"] == 0
     assert set(report["musical_context_delta"]) == {"snare", "kick"}
+
+
+def test_a_group_sums_its_tracks_through_its_own_chain_and_has_a_stem(mix, tmp_path):
+    path, data = mix
+    base = render(path, tmp_path / "base")
+    data["groups"] = [{"id": "drums", "gain_db": -6, "sends": [{"to": "echo", "gain_db": -12}]}]
+    for track in data["tracks"]:
+        track["group"] = "drums"
+    save(data, path)
+    report = render(path, tmp_path / "grouped")
+    assert list(report["tracks"]) == ["snare", "kick", "drums", "plate", "echo"]
+    assert report["tracks"]["drums"]["kind"] == "group"
+    assert report["tracks"]["drums"]["tracks"] == ["snare", "kick"]
+    assert report["tracks"]["snare"]["group"] == "drums"
+    assert report["tracks"]["echo"]["senders"] == ["snare", "drums"]
+    assert report["stems_sum_to_mix"] is False
+    out = tmp_path / "grouped"
+    # The tracks' stems are before the group; the group's is their sum at its level.
+    gain = 10 ** (-6 / 20)
+    assert np.array_equal(stem(out, "snare"), stem(tmp_path / "base", "snare"))
+    expected = (stem(out, "snare") + stem(out, "kick")) * gain
+    assert np.max(abs(stem(out, "drums") - expected)) < 1e-6
+    # The ungrouped stems, the groups and the returns sum to the mix.
+    total = stem(out, "drums") + stem(out, "plate") + stem(out, "echo")
+    mixed = sf.read(out / "mix.wav", always_2d=True)[0]
+    assert np.max(abs(mixed - total)) < 2e-7
+    # The group's preview is its stem.
+    preview = render(path, tmp_path / "drums", track_id="drums")
+    assert list(preview["tracks"]) == ["drums"]
+    assert np.array_equal(stem(tmp_path / "drums", "drums"), stem(out, "drums"))
+    assert np.array_equal(stem(tmp_path / "base", "kick"), stem(tmp_path / "grouped", "kick"))
+    with pytest.raises(ValueError, match="Unknown track, group or return"):
+        render(path, track_id="absent")
+
+
+def test_a_group_is_made_and_described_from_the_command_line(mix, tmp_path):
+    path, data = mix
+    data["tracks"].insert(1, {"id": "pad", "pads": {"k": {"sample": "kick"}}})
+    save(data, path)
+    daw("group", "add", path, "drums", "--tracks", "snare,kick", "--gain-db", "-3")
+    song = load(path)
+    assert [t["id"] for t in song["tracks"]] == ["snare", "kick", "pad"]
+    assert [t.get("group") for t in song["tracks"]] == ["drums", "drums", None]
+    assert (song["groups"][0]["id"], song["groups"][0]["gain_db"]) == ("drums", -3.0)
+    daw("set", path, "tracks.pad.group", "drums")
+    assert daw("inspect", path)["groups"][0]["tracks"] == ["snare", "kick", "pad"]
+    daw("group", "remove", path, "drums")
+    assert load(path)["groups"] == []
+    fields = daw("describe", "project")["fields"]
+    assert fields["tracks[].group"] == "id or null, default null"
+    assert fields["groups[].solo"] == "true|false, default false"
+    assert "drum bus" in daw("describe", "project")["semantics"]["groups"]
+    assert "soloed group" in daw("describe", "effects")["semantics"]["groups"]

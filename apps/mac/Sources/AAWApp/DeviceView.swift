@@ -374,6 +374,7 @@ private struct ChainHeader: View {
     private var kind: String {
         switch chain.row {
         case .track: chain.track?.midi == true ? "MIDI track" : "Track"
+        case .group: "Group"
         case .bus: "Return"
         case .master: "Master"
         }

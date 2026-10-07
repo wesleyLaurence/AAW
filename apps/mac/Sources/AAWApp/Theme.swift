@@ -21,6 +21,9 @@ enum Theme {
     static let lane = gray(0.165)
     static let busLane = gray(0.135)
     static let header = gray(0.2)
+    /// A group's header and lane: a shade apart from its tracks'.
+    static let groupHeader = gray(0.235)
+    static let groupLane = gray(0.15)
     static let busHeader = gray(0.17)
     /// Over the header of the selected row.
     static let selectedRow = gray(1, 0.1)

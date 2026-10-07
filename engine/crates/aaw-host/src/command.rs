@@ -86,6 +86,26 @@ pub enum Command {
         id: String,
         index: usize,
     },
+    /// A group of the tracks named, which are moved together to where the
+    /// first of them is; a track in another group leaves it.
+    #[serde(rename = "group.add")]
+    GroupAdd {
+        id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+        #[serde(flatten)]
+        fields: Fields,
+    },
+    /// Removes a group; its tracks go to the master again.
+    #[serde(rename = "group.remove")]
+    GroupRemove { group: String },
+    /// Renames a group and the tracks' `group` naming it.
+    #[serde(rename = "group.rename")]
+    GroupRename { group: String, to: String },
+    #[serde(rename = "group.move")]
+    GroupMove { group: String, index: usize },
 
     // Clips
     #[serde(rename = "clip.add")]
@@ -384,6 +404,7 @@ pub enum Command {
     EffectBypass { effect: String, bypass: bool },
 
     // Sends
+    /// A send of a track or a group, which `track` names.
     #[serde(rename = "send.set")]
     SendSet {
         track: String,
@@ -1070,14 +1091,36 @@ impl<'a> Edit<'a> {
 
     /// Every track, return and the master, as locations.
     fn owners(&self) -> Vec<Loc> {
+        let mut out = self.senders();
+        for i in 0..self.root.get("returns").map_or(0, |n| n.items().len()) {
+            out.push(vec![Step::Key("returns".into()), Step::Index(i)]);
+        }
+        out.push(vec![Step::Key("master".into())]);
+        out
+    }
+
+    /// Every channel that sends: the tracks, then the groups.
+    fn senders(&self) -> Vec<Loc> {
         let mut out = Vec::new();
-        for key in ["tracks", "returns"] {
+        for key in ["tracks", "groups"] {
             for i in 0..self.root.get(key).map_or(0, |n| n.items().len()) {
                 out.push(vec![Step::Key(key.into()), Step::Index(i)]);
             }
         }
-        out.push(vec![Step::Key("master".into())]);
         out
+    }
+
+    /// The tracks in a group.
+    fn tracks_in(&self, group: &str) -> Vec<Loc> {
+        (0..self.root.get("tracks").map_or(0, |n| n.items().len()))
+            .map(|i| vec![Step::Key("tracks".into()), Step::Index(i)])
+            .filter(|loc| self.node(loc).field("group") == Some(group))
+            .collect()
+    }
+
+    /// A track or a group, by ID or handle: what a send belongs to.
+    fn sender(&self, id: &str) -> Result<Loc> {
+        self.track(id).or_else(|e| self.at(&format!("groups.{id}")).map_err(|_| e))
     }
 
     /// Removes the object at `loc`, with what refers to it where that is
@@ -1112,6 +1155,16 @@ impl<'a> Edit<'a> {
                             self.drop_sends(&id)?;
                         }
                     }
+                    "groups" => {
+                        // Its tracks go to the master again.
+                        if let Some(id) = item.node.field("id").map(str::to_string) {
+                            for track in self.tracks_in(&id) {
+                                if let Some(m) = self.node_mut(&track).map_mut() {
+                                    m.shift_remove("group");
+                                }
+                            }
+                        }
+                    }
                     "points" => {
                         // A lane needs a point; the last one takes the lane with it.
                         let lane = owner.clone();
@@ -1141,11 +1194,10 @@ impl<'a> Edit<'a> {
     }
 
     fn drop_sends(&mut self, return_id: &str) -> Result<()> {
-        for i in 0..self.root.get("tracks").map_or(0, |n| n.items().len()) {
-            let track = vec![Step::Key("tracks".into()), Step::Index(i)];
-            let sends = self.list(&track, "sends")?;
+        for sender in self.senders() {
+            let sends = self.list(&sender, "sends")?;
             if let Some(j) = sends.iter().position(|s| s.node.field("to") == Some(return_id)) {
-                let loc = [track.clone(), vec![Step::Key("sends".into()), Step::Index(j)]].concat();
+                let loc = [sender.clone(), vec![Step::Key("sends".into()), Step::Index(j)]].concat();
                 let what = self.remove_at(&loc)?;
                 self.also.push(format!("removed {what}"));
             }
@@ -1268,6 +1320,61 @@ impl<'a> Edit<'a> {
                 let loc = self.at(&format!("returns.{id}"))?;
                 out.label = format!("Remove {}", self.remove_at(&loc)?);
             }
+            GroupAdd { id, index, tracks: members, fields } => {
+                let mut f = Fields::new();
+                f.insert("id".into(), Json::String(id.clone()));
+                f.extend(fields.clone());
+                let node = with_empty(&f, &["effects", "sends", "automation"], &[])?;
+                out.made.push(self.insert(&[], "groups", *index, node)?);
+                // The tracks named join it, moved together to where the first
+                // of them is, in their order.
+                let mut places: Vec<usize> = Vec::new();
+                for t in members {
+                    let loc = self.track(t)?;
+                    let Some(Step::Index(i)) = loc.last() else { unreachable!() };
+                    places.push(*i);
+                }
+                places.sort_unstable();
+                places.dedup();
+                let mut names = Vec::new();
+                if let Some(&first) = places.first() {
+                    let list = self.list(&[], "tracks")?;
+                    let mut taken: Vec<Item> = places.iter().rev().map(|&i| list.remove(i)).collect();
+                    taken.reverse();
+                    for (k, mut item) in taken.into_iter().enumerate() {
+                        names.push(item.node.field("id").unwrap_or_default().to_string());
+                        if let Some(m) = item.node.map_mut() {
+                            m.insert("group".into(), Node::Leaf(Value::str(id)));
+                        }
+                        list.insert(first + k, item);
+                    }
+                }
+                out.label = if names.is_empty() {
+                    format!("Add group {id}")
+                } else {
+                    format!("Add group {id} of {}", names.join(", "))
+                };
+            }
+            GroupRemove { group } => {
+                let loc = self.at(&format!("groups.{group}"))?;
+                out.label = format!("Remove {}", self.remove_at(&loc)?);
+            }
+            GroupRename { group, to } => {
+                let loc = self.at(&format!("groups.{group}"))?;
+                let old = self.name(&loc);
+                self.set_leaf(&loc, "id", Value::str(to));
+                for track in self.tracks_in(&old) {
+                    self.set_leaf(&track, "group", Value::str(to));
+                }
+                out.label = format!("Rename group {old} to {to}");
+            }
+            GroupMove { group, index } => {
+                let loc = self.at(&format!("groups.{group}"))?;
+                let name = self.name(&loc);
+                let Some(Step::Index(from)) = loc.last().cloned() else { unreachable!() };
+                self.move_item(&[], "groups", from, *index)?;
+                out.label = format!("Move group {name} to position {index}");
+            }
             TrackRename { track, to } => {
                 let loc = self.track(track)?;
                 let old = self.node(&loc).field("id").unwrap_or_default().to_string();
@@ -1287,14 +1394,13 @@ impl<'a> Edit<'a> {
                 let id = &self.name(&loc);
                 self.set_leaf(&loc, "id", Value::str(to));
                 let (old_lane, new_lane) = (format!("sends.{id}.gain_db"), format!("sends.{to}.gain_db"));
-                for i in 0..self.root.get("tracks").map_or(0, |n| n.items().len()) {
-                    let track = vec![Step::Key("tracks".into()), Step::Index(i)];
-                    for s in self.list(&track, "sends")?.iter_mut() {
+                for sender in self.senders() {
+                    for s in self.list(&sender, "sends")?.iter_mut() {
                         if s.node.field("to") == Some(id.as_str()) {
                             *s.node.get_mut("to").expect("to") = Node::Leaf(Value::str(to));
                         }
                     }
-                    for l in self.list(&track, "automation")?.iter_mut() {
+                    for l in self.list(&sender, "automation")?.iter_mut() {
                         if l.node.field("param") == Some(old_lane.as_str()) {
                             *l.node.get_mut("param").expect("param") = Node::Leaf(Value::str(&new_lane));
                         }
@@ -2182,7 +2288,7 @@ impl<'a> Edit<'a> {
                 out.label = format!("{} effect {}", if *bypass { "Bypass" } else { "Enable" }, self.text(&loc));
             }
             SendSet { track, to, fields } => {
-                let loc = self.track(track)?;
+                let loc = self.sender(track)?;
                 let existing = self.list(&loc, "sends")?.iter().position(|s| s.node.field("to") == Some(to.as_str()));
                 match existing {
                     Some(i) => {
@@ -2199,8 +2305,10 @@ impl<'a> Edit<'a> {
                 out.label = format!("Set send {} → {to}", self.name(&loc));
             }
             SendRemove { track, to } => {
-                let name = self.name(&self.track(track)?);
-                let loc = self.at(&format!("tracks.{track}.sends.{to}"))?;
+                let sender = self.sender(track)?;
+                let name = self.name(&sender);
+                let loc = [sender.clone(), vec![Step::Key("sends".into())]].concat();
+                let loc = self.at(&format!("{}.{to}", self.text(&loc)))?;
                 self.remove_at(&loc)?;
                 out.label = format!("Remove send {name} → {to}");
             }
