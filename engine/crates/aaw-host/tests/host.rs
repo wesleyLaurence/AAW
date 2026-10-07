@@ -40,6 +40,11 @@ struct Running {
 
 impl Running {
     fn start() -> Running {
+        Running::start_with(host::PACE)
+    }
+
+    /// A host whose agent is hinted after `pace` of silence.
+    fn start_with(pace: Duration) -> Running {
         registry_dir();
         let dir = tempfile::tempdir().unwrap();
         let path = write_song(dir.path());
@@ -55,6 +60,7 @@ impl Running {
                     seconds: None,
                     feed: false,
                     prepare: false,
+                    pace,
                 },
                 s,
             )
@@ -155,6 +161,48 @@ fn the_host_applies_saves_undoes_and_logs() {
 }
 
 #[test]
+fn an_agent_that_fell_silent_is_hinted_on_its_next_edit() {
+    // No gap is long enough by default: a quick edit carries no hint.
+    let quick = Running::start();
+    let r = quick.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -1})).unwrap();
+    assert!(r.get("hint").is_none(), "{r}");
+    drop(quick);
+
+    let h = Running::start_with(Duration::from_millis(80));
+    // Nothing from the agent for longer than the pace: the edit's reply says so.
+    std::thread::sleep(Duration::from_millis(120));
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -2})).unwrap();
+    let hint = r["hint"].as_str().unwrap_or_default();
+    assert!(hint.contains("nothing reached the song for a minute") && hint.contains("one sound, part or clip a command"), "{r}");
+    // The edit landed as any other, and the hint is in no change.
+    assert_eq!(r["revision"], json!(1));
+    let log = h.send(json!({"op": "changes", "since": 0})).unwrap();
+    assert!(log["changes"][0].get("hint").is_none(), "{log}");
+    // An edit that follows at once has none: the silence is measured from the
+    // agent's last command of any kind, the read of the log included.
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -3})).unwrap();
+    assert!(r.get("hint").is_none(), "{r}");
+    // A read after silence is not hinted; the person waits for edits.
+    std::thread::sleep(Duration::from_millis(120));
+    let status = h.send(json!({"op": "status"})).unwrap();
+    assert!(status.get("hint").is_none(), "{status}");
+    // Nor is undo, nor the person's own edit from the app, however long it was.
+    std::thread::sleep(Duration::from_millis(120));
+    let r = h.send(json!({"op": "undo"})).unwrap();
+    assert!(r.get("hint").is_none(), "{r}");
+    std::thread::sleep(Duration::from_millis(120));
+    let r = request(&h.path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -4}), Origin::User).unwrap().unwrap();
+    assert!(r.get("hint").is_none(), "{r}");
+    // The person's edits do not reset the agent's silence.
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -5})).unwrap();
+    assert!(r.get("hint").is_some(), "{r}");
+    // Five minutes is the pace, and the hint says how long it was.
+    assert!(host::pace_hint(Duration::from_secs(299), host::PACE).is_none());
+    assert!(host::pace_hint(Duration::from_secs(300), host::PACE).unwrap().contains("for 5 minutes"));
+    assert!(host::pace_hint(Duration::from_secs(20 * 60 + 20), host::PACE).unwrap().contains("for 20 minutes"));
+}
+
+#[test]
 fn concurrent_clients_all_land_in_order() {
     let h = Running::start();
     let path = Arc::new(h.path.clone());
@@ -197,6 +245,7 @@ fn one_host_per_project_and_stale_sockets_are_cleared() {
             seconds: None,
             feed: false,
             prepare: false,
+            pace: host::PACE,
         },
         Arc::new(AtomicBool::new(true)),
     )
@@ -265,6 +314,7 @@ fn an_embedded_host_reports_what_changes() {
         seconds: None,
         feed: false,
         prepare: true,
+        pace: host::PACE,
     };
     let (tx, events) = std::sync::mpsc::channel();
     let running = host::spawn(&path, options(), move |e| {

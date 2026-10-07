@@ -632,6 +632,7 @@ fn start() -> Json {
         "semantics": texts(&[
             ("placeholders", "KICK_PATH and the other paths come from daw samples search. Everything else runs as written in an empty folder."),
             ("batch", "A batch file lists commands as objects: op is the command (set, track.add, clip.add, note.add, synth.add, effect.add and the others), and its other keys are the command's arguments and the fields of what it adds. A label names the step in the change log and for undo."),
+            ("pace", "With the app open (daw status says host: true), run each step as soon as it is decided, as they are listed here, so the person watches each sound, part and clip land on the timeline and in the activity as it is made and can say what they think before the next; do not plan the whole song and then run everything at once. A batch is one musical edit, as the chords here, not the whole song. A host whose agent sent nothing for five minutes says so in the next edit's reply, as hint."),
             ("next", "daw play song plays it, or open the folder in the app. daw map song shows where each track plays, bar by bar, daw inspect song summarizes it, daw get song PATH reads any part, and daw set song PATH VALUE changes any field. daw --help lists the commands, a command's --help what it takes, and daw describe the topics."),
         ]),
     })

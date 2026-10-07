@@ -180,6 +180,12 @@ log, handles and the transport need a host.
   (`--type limiter`), and a render that would clip names the loudest stems and
   the paths to lower. Output to a pipe that closes, as `| head` does, ends with
   status 141 and nothing on stderr.
+- **An agent that fell silent is hinted.** A host whose agent sent nothing for
+  five minutes (`host::PACE`, counted from its last command of any kind) adds
+  `hint` to the reply of the agent's next edit: work in steps the person can
+  watch, a sound, part or clip a command as soon as it is decided, a batch one
+  musical edit. Reads, undo and the person's edits carry none, and the hint is
+  in no change. See [the feature's file](../docs/features/watchable-steps.md).
 - **A batch builds on itself.** A track, return or pattern a batch adds can be
   added to by its later commands: a pad and a clip on a new track, steps and
   events in a new pattern, notes in a new note clip. A note clip or a note is

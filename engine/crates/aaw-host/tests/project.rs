@@ -60,6 +60,7 @@ fn start(path: &Path) -> (Arc<AtomicBool>, JoinHandle<Result<Json, String>>) {
                 seconds: None,
                 feed: false,
                 prepare: false,
+                pace: host::PACE,
             },
             s,
         )
@@ -281,6 +282,7 @@ fn a_copy_leaves_the_original_which_its_path_cannot_reach_until_released() {
         seconds: None,
         feed: false,
         prepare: false,
+        pace: host::PACE,
     };
     let refused = host::run(&old, options(), stop).unwrap_err();
     assert!(refused.contains("was saved as") && refused.contains("answers for it"), "{refused}");

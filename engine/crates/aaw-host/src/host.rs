@@ -31,6 +31,25 @@ type Result<T> = std::result::Result<T, String>;
 const SYNC_EVERY: Duration = Duration::from_millis(200);
 /// How long after a gesture's last edit the host saves.
 const SAVE_AFTER: Duration = Duration::from_millis(250);
+/// How long an agent may send nothing before its next edit's reply carries a
+/// hint to work in steps the person can watch.
+pub const PACE: Duration = Duration::from_secs(300);
+
+/// The hint an agent's edit carries when `gap` passed since its last command
+/// and that is at least `pace`: with a host running, the person waited.
+pub fn pace_hint(gap: Duration, pace: Duration) -> Option<String> {
+    if gap < pace {
+        return None;
+    }
+    let minutes = (gap.as_secs_f64() / 60.0).round().max(1.0) as u64;
+    let waited = if minutes == 1 { "a minute".to_string() } else { format!("{minutes} minutes") };
+    Some(format!(
+        "A host is running and nothing reached the song for {waited}: work in steps the person can watch, \
+         one sound, part or clip a command as soon as it is decided, so each appears on the timeline and in \
+         the activity as it is made, and plan the next while the last plays. A batch is one musical edit, \
+         not the whole song."
+    ))
+}
 
 const CLOSING: &str = "The host is closing";
 
@@ -62,6 +81,9 @@ pub struct Options {
     pub feed: bool,
     /// Compile each revision as it lands, so the first play starts at once.
     pub prepare: bool,
+    /// How long an agent may send nothing before its next edit's reply
+    /// carries a hint to work in smaller steps; `PACE` outside tests.
+    pub pace: Duration,
 }
 
 /// What a host tells the process that embeds it.
@@ -169,6 +191,8 @@ struct Host {
     stopped_at: Option<Instant>,
     closing: bool,
     from: BigRational,
+    /// When the agent's last command of any kind arrived.
+    agent_at: Option<Instant>,
 }
 
 fn beat(j: &Json) -> Result<BigRational> {
@@ -569,11 +593,16 @@ impl Host {
         if origin == Origin::External {
             return Err("external is the origin of edits made to the file".into());
         }
+        // How long the agent sent nothing, for the hint its next edit carries.
+        let silence = match origin {
+            Origin::Agent => self.agent_at.replace(Instant::now()).map(|at| at.elapsed()),
+            _ => None,
+        };
         match command.kind() {
             Kind::Edit | Kind::History => {
                 let _lock = lock(self.session.path())?;
                 self.sync();
-                let (reply, change) = match &command {
+                let (mut reply, change) = match &command {
                     Command::Undo => self.session.undo(origin, false).map(|(r, c)| (r, Some(c)))?,
                     Command::Redo => self.session.undo(origin, true).map(|(r, c)| (r, Some(c)))?,
                     _ => self.session.edit(&command, origin, expect.as_deref(), gesture.as_deref())?,
@@ -587,6 +616,11 @@ impl Host {
                 }
                 if let Some(c) = change {
                     self.changed(&c);
+                }
+                if let (Kind::Edit, Some(gap), Json::Object(fields)) = (command.kind(), silence, &mut reply) {
+                    if let Some(hint) = pace_hint(gap, self.opts.pace) {
+                        fields.insert("hint".into(), json!(hint));
+                    }
                 }
                 Ok(reply)
             }
@@ -827,6 +861,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         stopped_at: None,
         closing: false,
         from: BigRational::zero(),
+        agent_at: None,
     };
     host.listen_at(listener, claim);
     host.emit(json!({"host": {
