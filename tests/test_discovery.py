@@ -56,7 +56,7 @@ def test_a_closed_pipe_ends_quietly():
 
 def test_help_lists_what_a_command_takes():
     effect = run("effect", "add", "--help").stdout
-    for kind in ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation"]:
+    for kind in ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation", "utility"]:
         assert f"\n{kind}\n" in effect
     assert "--ceiling-db" in effect and "number -24..-0.1, default -1" in effect
     assert "--slope-db-per-octave      12|24|36|48, default 12" in effect

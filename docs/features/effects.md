@@ -64,6 +64,7 @@ render with and without it and use `daw compare`.
 | `reverb` | `decay_seconds` 0.1–12, `predelay_ms` 0–250, `damping_hz` 500–20000, `lowcut_hz` 20–2000, `width_percent`, `mix_percent`, `seed` |
 | `chorus` | `rate_hz` 0.05–10, `depth_ms` 0–20, `delay_ms` 1–40, `mix_percent` (50 unless given) |
 | `saturation` | `mode` soft/hard/tube, `drive_db` 0–36, `output_db` ±24, `mix_percent` |
+| `utility` | `gain_db` −96…24, `pan` ±1, `width_percent` 0–400, `mono`, `mono_below_hz` 20–1000 or left out, `invert` none/left/right/both ([utility.md](utility.md)) |
 
 ## Semantics
 
@@ -124,6 +125,14 @@ render with and without it and use `daw compare`.
   too, with its offset removed by a one-pole highpass at 10 Hz. `output_db`
   trims the result and `mix_percent` blends it under the dry signal. No
   oversampling: a hard clip high up aliases a little.
+- **utility**: the channel moves that need no other device, added October 7,
+  2026, in this order: `invert` flips the polarity of the left, the right or
+  both channels; `mono` sums the channels to their average; `mono_below_hz`
+  sums only what lies below it, through a fourth-order Linkwitz-Riley crossover
+  whose halves meet flat; `width_percent` scales the side signal, 0 mono and
+  100 as it came; `gain_db`; and `pan`, a balance as a stereo track's. At its
+  defaults it passes the signal through bit-identical. See
+  [utility.md](utility.md).
 - **mix_percent**: delay, reverb, chorus and saturation output `input × (1 −
   mix) + wet × mix`. The default is 100, fully wet, which is what a return
   needs, and 50 for the chorus. When using a delay or reverb as a track insert,

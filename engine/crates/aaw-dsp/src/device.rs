@@ -11,6 +11,7 @@ use crate::envelope::{Envelope, Knob, Param};
 use crate::reverb::{Kernel, Reverb, Shape};
 use crate::saturation::Saturation;
 use crate::svf::{self, Svf};
+use crate::utility::Utility;
 use crate::{Clock, Frame};
 use aaw_model::{frame, Effect, FilterMode};
 use std::collections::{BTreeMap, HashMap};
@@ -105,6 +106,9 @@ impl Plan {
             }
             Effect::Chorus(_) => hash("chorus"),
             Effect::Saturation(s) => hash(("saturation", s.mode)),
+            // A polarity flip or a sum to mono is a jump, so a change of either
+            // fades through rather than gliding.
+            Effect::Utility(u) => hash(("utility", u.invert, u.mono, u.mono_below_hz.map(f64::to_bits))),
         };
         Plan {
             effect: effect.clone(),
@@ -133,6 +137,7 @@ pub enum Device {
     Reverb(Reverb),
     Chorus(Chorus),
     Saturation(Saturation),
+    Utility(Utility),
 }
 
 /// A device in a chain.
@@ -236,6 +241,16 @@ impl Unit {
                 rate,
                 max_block,
             )),
+            Effect::Utility(u) => Device::Utility(Utility::new(
+                u.invert,
+                u.mono,
+                u.mono_below_hz,
+                knob("gain_db", u.gain_db),
+                knob("pan", u.pan),
+                knob("width_percent", u.width_percent),
+                rate,
+                max_block,
+            )),
         };
         Unit {
             device,
@@ -256,6 +271,7 @@ impl Unit {
             Device::Reverb(d) => d.process(x, clock),
             Device::Chorus(d) => d.process(x, clock),
             Device::Saturation(d) => d.process(x, clock),
+            Device::Utility(d) => d.process(x, clock),
         }
     }
 
@@ -273,6 +289,7 @@ impl Unit {
             (Device::Reverb(new), Device::Reverb(was)) => new.take_over(was),
             (Device::Chorus(new), Device::Chorus(was)) => new.take_over(was),
             (Device::Saturation(new), Device::Saturation(was)) => new.take_over(was),
+            (Device::Utility(new), Device::Utility(was)) => new.take_over(was),
             _ => {}
         }
     }

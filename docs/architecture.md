@@ -66,8 +66,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   warnings `daw check` gives of a valid song, each with a code (`check`); see
   [musical-checks.md](features/musical-checks.md).
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
-  compressor/sidechain, limiter, delay, reverb, chorus and saturation devices
-  with explicit block state, wavetables, and the Synth, a polyphonic
+  compressor/sidechain, limiter, delay, reverb, chorus, saturation and utility
+  devices with explicit block state, wavetables, and the Synth, a polyphonic
   synthesizer played from a patch; see
   [effects.md](features/effects.md), [automation.md](features/automation.md)
   and [synth.md](features/synth.md).
@@ -170,7 +170,8 @@ Muted or solo-muted tracks send nothing; returns are never solo-muted. No groups
 or return-to-return sends exist yet.
 
 Effects: `filter`, `eq`, `compressor` (optional `sidechain` track), `limiter`,
-`delay`, `reverb`, `chorus` and `saturation`, listed in order under
+`delay`, `reverb`, `chorus`, `saturation` and `utility` (gain, pan, width, mono
+below a frequency, polarity; see [utility.md](features/utility.md)), listed in order under
 `tracks[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
 patch, `tracks[].instrument.synth.effects`, each with an optional `id` unique
 within its chain. A patch's effects come before the track's inserts, which

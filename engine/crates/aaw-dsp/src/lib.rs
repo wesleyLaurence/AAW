@@ -1,4 +1,4 @@
-//! Devices: the resampler, automation envelopes, the eight effects and the
+//! Devices: the resampler, automation envelopes, the nine effects and the
 //! Synth, as block processors with explicit state. Output never depends on
 //! how the timeline is cut into blocks, and processing never allocates.
 
@@ -13,6 +13,7 @@ pub mod reverb;
 pub mod saturation;
 pub mod svf;
 pub mod synth;
+pub mod utility;
 pub mod wavetable;
 
 /// One stereo frame.
