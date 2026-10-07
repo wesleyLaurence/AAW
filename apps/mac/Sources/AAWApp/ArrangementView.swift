@@ -400,7 +400,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onWaveforms = { [weak self] in self?.takeWaveforms() }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
-            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
+            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
                 + (DeviceChain.kinds + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
@@ -1816,17 +1816,21 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return true
     }
 
-    /// The device being dragged from the browser: its kind, and for a
-    /// Synth patch the patch's name.
-    private func device(of sender: NSDraggingInfo) -> (kind: String, patch: String?)? {
+    /// The device being dragged from the browser: its kind, for a Synth
+    /// patch the patch's name, and for a rack (kind "rack") the rack's.
+    private func device(of sender: NSDraggingInfo) -> (kind: String, patch: String?, rack: String?)? {
         let board = sender.draggingPasteboard
         if board.types?.contains(NSPasteboard.PasteboardType(Browser.patchType)) == true {
             let name = board.data(forType: NSPasteboard.PasteboardType(Browser.patchType)).flatMap { String(data: $0, encoding: .utf8) }
-            return ("synth", name)
+            return ("synth", name, nil)
+        }
+        if board.types?.contains(NSPasteboard.PasteboardType(Browser.rackType)) == true {
+            let name = board.data(forType: NSPasteboard.PasteboardType(Browser.rackType)).flatMap { String(data: $0, encoding: .utf8) }
+            return ("rack", nil, name)
         }
         return (DeviceChain.kinds + Browser.instruments).first {
             board.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true
-        }.map { ($0, nil) }
+        }.map { ($0, nil, nil) }
     }
 
     private func deviceLanding(_ kind: String, at point: CGPoint) -> (valid: Bool, row: RowID?) {
@@ -1856,7 +1860,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if draggedEffect(of: sender) != nil {
             return effectLanding(at: convert(sender.draggingLocation, from: nil)) == nil ? [] : .copy
         }
-        if let (kind, _) = device(of: sender) {
+        if let (kind, _, _) = device(of: sender) {
             return deviceLanding(kind, at: convert(sender.draggingLocation, from: nil)).valid ? .copy : []
         }
         guard let file = sample(of: sender) else { return [] }
@@ -1882,10 +1886,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             model.copyEffect(effect, to: row)
             return true
         }
-        if let (kind, patch) = device(of: sender) {
+        if let (kind, patch, rack) = device(of: sender) {
             let landing = deviceLanding(kind, at: convert(sender.draggingLocation, from: nil))
             guard landing.valid else { return false }
-            model.addBrowserDevice(kind, to: landing.row, patch: patch)
+            model.addBrowserDevice(kind, to: landing.row, patch: patch, rack: rack)
             return true
         }
         defer {

@@ -191,7 +191,12 @@ within its chain. A patch's effects come before the track's inserts, which
 come before track gain and pan; a group's effects run on the sum of its tracks
 and precede its gain and pan; return effects precede return gain and pan;
 master effects follow `master_gain_db` and precede the end fade. See
-[effects.md](features/effects.md) for parameters and semantics.
+[effects.md](features/effects.md) for parameters and semantics. A rack is a
+chain as a YAML file in the workspace library, `~/Music/AAW/library/racks/`
+(or `AAW_WORKSPACE`), which `daw rack save` writes from any chain and `daw
+rack load` and the browser add to a chain in any song, an `id` the chain has
+numbered and a sidechain kept only where the song allows it; see
+[effect-racks.md](features/effect-racks.md).
 
 Automation: `tracks[].automation`, `groups[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` (tracks and groups),

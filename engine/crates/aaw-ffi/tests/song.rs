@@ -3030,3 +3030,46 @@ fn groups_are_rows_over_their_tracks() {
     assert!(u.touched.contains(&Touch { part: Part::Group, key: group.key, delta: Delta::Removed }));
     song.close();
 }
+
+#[test]
+fn the_browsers_racks_are_saved_from_a_chain_and_dropped_on_rows() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let a = song.arrangement();
+    let perc = a.tracks.iter().find(|t| t.id == "perc").unwrap().key;
+    let drums = a.tracks.iter().find(|t| t.id == "drums").unwrap().key;
+    let plate = a.returns[0].key;
+    let name = format!("Panel Rack {}", std::process::id());
+    // Save Rack… on perc's chain: a filter and a bypassed delay, listed in the browser.
+    song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: Some("From the panel".into()), tags: vec!["perc".into()], replace: false }, None).unwrap();
+    let mine: Vec<_> = aaw_ffi::library::library_racks("panel".into()).into_iter().filter(|r| r.name == name).collect();
+    assert_eq!(mine.len(), 1);
+    assert_eq!((mine[0].kinds.clone(), mine[0].description.as_str(), mine[0].tags.clone()), (vec!["filter".to_string(), "delay".to_string()], "From the panel", vec!["perc".to_string()]));
+    assert!(aaw_ffi::library::library_racks("delay".into()).iter().any(|r| r.name == name), "searched by kind");
+    assert!(aaw_ffi::library::library_racks("reverb".into()).iter().all(|r| r.name != name));
+    // Saved again under the name only with replace, which keeps the words; the song did not change.
+    assert!(song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: None, tags: vec![], replace: false }, None).is_err());
+    song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: None, tags: vec![], replace: true }, None).unwrap();
+    assert_eq!(aaw_ffi::library::library_racks(name.clone()).iter().find(|r| r.name == name).unwrap().description, "From the panel");
+    // An empty chain has nothing to save.
+    let e = song.edit(Edit::RackSave { row: Row::Track { key: drums }, name: "Nothing".into(), description: None, tags: vec![], replace: false }, None).unwrap_err();
+    assert!(e.to_string().contains("no effects to save"), "{e}");
+    // Dropped on the drums' header: the effects at the chain's end, one undo step.
+    song.edit(Edit::RackAdd { row: Row::Track { key: drums }, rack: name.clone(), index: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, format!("Add rack {name} to tracks.drums"));
+    let chain: Vec<_> = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().effects.iter().map(|e| (e.kind.clone(), e.bypass)).collect();
+    assert_eq!(chain, [("filter".to_string(), false), ("delay".to_string(), true)]);
+    // Dropped on an insertion strip of the return, in front of its reverb; an index past the end lands last.
+    song.edit(Edit::RackAdd { row: Row::Return { key: plate }, rack: name.clone(), index: Some(0) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.returns[0].effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["filter", "delay", "reverb"]);
+    song.edit(Edit::RackAdd { row: Row::Master, rack: name.clone(), index: Some(99) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.master.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["filter", "delay"]);
+    song.undo().unwrap();
+    assert!(update(&seen).arrangement.master.effects.is_empty());
+    let e = song.edit(Edit::RackAdd { row: Row::Master, rack: "no-such".into(), index: None }, None).unwrap_err();
+    assert!(e.to_string().contains("No rack named"), "{e}");
+    let _ = agent(&path, json!({"op": "status"}));
+}

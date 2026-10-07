@@ -243,6 +243,16 @@ struct DeviceView: View {
     let model: SongModel
     let chain: DeviceChain
 
+    /// What the panel takes: every effect kind and a rack, and on a MIDI
+    /// track the instruments and a Synth patch.
+    private var droppable: [String] {
+        let midi = chain.track?.midi == true
+        var types = (DeviceChain.kinds + (midi ? Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
+        types.append(Browser.rackType)
+        if midi { types.append(Browser.patchType) }
+        return types
+    }
+
     var body: some View {
         ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 8) {
@@ -264,9 +274,17 @@ struct DeviceView: View {
             }
             .padding(8)
         }
-        .onDrop(of: (DeviceChain.kinds + (chain.track?.midi == true ? Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
-                    + (chain.track?.midi == true ? [Browser.patchType] : []), isTargeted: nil) { providers in
+        .onDrop(of: droppable, isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
+            if provider.hasItemConformingToTypeIdentifier(Browser.rackType) {
+                // A rack: its effects at the end of the shown row's chain.
+                let row = chain.row
+                provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
+                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
+                    DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, rack: name) }
+                }
+                return true
+            }
             if provider.hasItemConformingToTypeIdentifier(Browser.patchType) {
                 // A Synth patch: loaded into the track's Synth, or a Synth attached with it.
                 guard model.canAddBrowserDevice("synth", to: chain.row) else { return false }
@@ -285,9 +303,9 @@ struct DeviceView: View {
     }
 }
 
-/// The strip between two devices: an effect from the browser dropped here
-/// goes in at this place, and so does a copy of an effect dragged by its
-/// title with Option held.
+/// The strip between two devices: an effect or a rack from the browser
+/// dropped here goes in at this place, and so does a copy of an effect
+/// dragged by its title with Option held.
 private struct DeviceInsertion: View {
     let model: SongModel
     let row: RowID
@@ -298,16 +316,16 @@ private struct DeviceInsertion: View {
         RoundedRectangle(cornerRadius: 2)
             .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
             .frame(width: 12, height: model.detailHeight - 54)
-            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [DeviceChain.effectType],
+            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [Browser.rackType, DeviceChain.effectType],
                     delegate: InsertionDrop(model: model, row: row, index: index, targeted: $targeted))
-            .help("Drop an effect here; with Option, a copy of one dragged from its title")
+            .help("Drop an effect or a rack here; with Option, a copy of one dragged from its title")
     }
 }
 
-/// What lands on an insertion strip: a kind from the browser, or with
-/// Option a copy of an effect dragged from the device panel. Without Option
-/// that drag is refused, so that the strip does not light up for a move
-/// nothing makes.
+/// What lands on an insertion strip: a kind or a rack from the browser, or
+/// with Option a copy of an effect dragged from the device panel. Without
+/// Option that drag is refused, so that the strip does not light up for a
+/// move nothing makes.
 private struct InsertionDrop: DropDelegate {
     let model: SongModel
     let row: RowID
@@ -318,16 +336,20 @@ private struct InsertionDrop: DropDelegate {
         DeviceChain.kinds.first { info.hasItemsConforming(to: [Browser.deviceType + "." + $0]) }
     }
 
+    private func isRack(_ info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [Browser.rackType])
+    }
+
     private var copying: Bool {
         NSEvent.modifierFlags.contains(.option)
     }
 
     private func accepts(_ info: DropInfo) -> Bool {
-        kind(of: info) != nil || (info.hasItemsConforming(to: [DeviceChain.effectType]) && copying)
+        kind(of: info) != nil || isRack(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && copying)
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        kind(of: info) != nil || info.hasItemsConforming(to: [DeviceChain.effectType])
+        kind(of: info) != nil || isRack(info) || info.hasItemsConforming(to: [DeviceChain.effectType])
     }
 
     func dropEntered(info: DropInfo) {
@@ -350,6 +372,14 @@ private struct InsertionDrop: DropDelegate {
             model.addBrowserDevice(kind, to: row, index: index)
             return true
         }
+        if let provider = info.itemProviders(for: [Browser.rackType]).first {
+            let (model, row, index) = (model, row, index)
+            provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
+                guard let data, let name = String(data: data, encoding: .utf8) else { return }
+                DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, index: index, rack: name) }
+            }
+            return true
+        }
         guard copying, let provider = info.itemProviders(for: [DeviceChain.effectType]).first else { return false }
         let (model, row, index) = (model, row, index)
         provider.loadDataRepresentation(forTypeIdentifier: DeviceChain.effectType) { data, _ in
@@ -366,10 +396,20 @@ func readable(_ name: String) -> String {
     return words.prefix(1).uppercased() + words.dropFirst()
 }
 
-/// The row's name, the menu that adds an effect, and a track's pads.
+/// The row's name, the menu that adds an effect, Save Rack…, and a track's
+/// pads.
 private struct ChainHeader: View {
     let model: SongModel
     let chain: DeviceChain
+    @State private var saving: RackSave?
+
+    /// What Save Rack… asks for.
+    struct RackSave: Identifiable {
+        var id = UUID()
+        var name = ""
+        var description = ""
+        var tags = ""
+    }
 
     private var kind: String {
         switch chain.row {
@@ -398,6 +438,15 @@ private struct ChainHeader: View {
             .menuStyle(.borderlessButton)
             .controlSize(.small)
             .fixedSize()
+            Button {
+                saving = RackSave(name: chain.row == .master ? "Master" : chain.name)
+            } label: {
+                Label("Save Rack…", systemImage: "square.and.arrow.down").font(.system(size: 11))
+            }
+            .buttonStyle(.borderless)
+            .controlSize(.small)
+            .disabled(chain.effects.isEmpty)
+            .help("Save this chain to the library as a rack, to drop on a track in any song")
             if !chain.pads.isEmpty, chain.track?.midi != true {
                 Divider()
                 Text("Pads").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
@@ -420,6 +469,55 @@ private struct ChainHeader: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
+        .sheet(item: $saving) { save in
+            RackSaveSheet(model: model, chain: chain, save: save) { saving = nil }
+        }
+    }
+}
+
+/// Save Rack…: a name, a description and tags for the rack, written to the
+/// library over a rack of the name only when asked.
+private struct RackSaveSheet: View {
+    let model: SongModel
+    let chain: DeviceChain
+    @State var save: ChainHeader.RackSave
+    let done: () -> Void
+    @State private var replace = false
+
+    private var taken: Bool {
+        let slug = save.name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: "-")
+        return model.browser.racks.contains { $0.slug == slug }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Save the effects of \(chain.name) as a rack").font(.headline)
+            Text("A rack is a file in the library, ~/Music/AAW/library/racks, whose effects are dropped on a track in any song: \(chain.effects.map { readable($0.kind) }.joined(separator: ", ")).")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Form {
+                TextField("Name", text: $save.name)
+                TextField("Description", text: $save.description)
+                TextField("Tags", text: $save.tags, prompt: Text("drums, bus"))
+                if taken {
+                    Toggle("Write over the rack saved under this name", isOn: $replace)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel) { done() }.keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    let tags = save.tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    model.saveRack(row: chain.row, name: save.name, description: save.description, tags: tags, replace: replace)
+                    done()
+                }
+                .keyboardShortcut(.defaultAction)
+                .disabled(save.name.trimmingCharacters(in: .whitespaces).isEmpty || (taken && !replace))
+            }
+        }
+        .padding(16)
+        .frame(width: 380)
     }
 }
 

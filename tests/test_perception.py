@@ -194,11 +194,10 @@ def test_mix_and_snapshot_tamper_rejected(rendered):
 
 
 def test_reports_from_earlier_engines_still_verify(rendered):
-    # Earlier engines hashed the full dump before points had a shape, before
-    # tracks had audio clips, before
-    # pads could stretch, before a sample recorded its source's hash, before
-    # automation, before sends and returns, and before effects existed. Their
-    # reports must keep verifying.
+    # Earlier engines hashed the full dump before groups, before points had a
+    # shape, before tracks had audio clips, before pads could stretch, before a
+    # sample recorded its source's hash, before automation, before sends and
+    # returns, and before effects existed. Their reports must keep verifying.
     _, p, full, _ = rendered
     report = full / "report.json"
     manifest = json.loads(report.read_text())
@@ -210,6 +209,10 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     dump = copy.deepcopy(p)
     track = dump["tracks"][0]
     forms = [copy.deepcopy(dump)]
+    del dump["groups"]
+    for each in dump["tracks"]:
+        del each["group"]
+    forms.append(copy.deepcopy(dump))
     for owner in [*dump["tracks"], *dump["returns"], dump["master"]]:
         for point in (point for lane in owner["automation"] for point in lane["points"]):
             del point["shape"]

@@ -158,6 +158,40 @@ pub fn library_patches(query: String) -> Vec<PatchInfo> {
         .collect()
 }
 
+/// An effect rack as the browser lists it: a chain saved in the workspace
+/// library.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct RackInfo {
+    pub name: String,
+    /// The file's stem, `drum-glue` for Drum Glue.
+    pub slug: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    /// The kinds of its effects, in order.
+    pub kinds: Vec<String>,
+    pub file: Option<String>,
+}
+
+/// The racks, by name, that have every word of `query` in their name, a tag
+/// or an effect's kind; all of them for an empty query. What `daw rack list`
+/// lists. Reads the library's folder.
+#[uniffi::export]
+pub fn library_racks(query: String) -> Vec<RackInfo> {
+    aaw_host::racks::list()
+        .racks
+        .iter()
+        .filter(|r| aaw_host::racks::matches(r, &query))
+        .map(|r| RackInfo {
+            name: r.name.clone(),
+            slug: r.slug.clone(),
+            description: r.description.clone(),
+            tags: r.tags.clone(),
+            kinds: r.kinds(),
+            file: r.file.as_ref().map(|f| f.to_string_lossy().into_owned()),
+        })
+        .collect()
+}
+
 /// The categories the browser offers.
 #[uniffi::export]
 pub fn library_categories() -> Vec<String> {

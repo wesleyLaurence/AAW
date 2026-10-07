@@ -308,6 +308,8 @@ enum Top {
     #[command(subcommand)]
     Patch(PatchCmd),
     #[command(subcommand)]
+    Rack(RackCmd),
+    #[command(subcommand)]
     Midi(MidiCmd),
     #[command(subcommand)]
     Pattern(PatternCmd),
@@ -698,6 +700,48 @@ enum PatchCmd {
     /// Load a patch into a MIDI track, in place of its whole synth; the
     /// notes stay. PATCH is a name from `daw patch list` or a .yaml file.
     Load { project: Song, track: String, patch: String },
+}
+
+/// Effect racks: a chain of effects as a YAML file, saved in the workspace
+/// library (~/Music/AAW/library/racks, or under AAW_WORKSPACE), added to a
+/// track, group, return, master or Synth patch in any song.
+#[derive(Subcommand)]
+enum RackCmd {
+    /// The saved racks, with their names, tags, effects and files; WORDS
+    /// keep those with every word in the name, a tag or an effect's kind.
+    List {
+        #[arg(trailing_var_arg = true)]
+        words: Vec<String>,
+    },
+    /// A rack as its file holds it.
+    Show { rack: String },
+    /// Save a chain as a rack named NAME: OWNER is tracks.T, groups.G,
+    /// returns.R, master or tracks.T.instrument.synth, as effect add takes
+    /// it. Over a rack already saved under that name only with --replace.
+    Save {
+        project: Song,
+        owner: String,
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        /// Words, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Add a rack's effects to a chain, at --index or its end, as one undo
+    /// step. RACK is a name from `daw rack list` or a .yaml file. An effect
+    /// whose id the chain has is given a number; a compressor's sidechain is
+    /// kept only where the song allows it and the track is there.
+    Load {
+        project: Song,
+        owner: String,
+        rack: String,
+        /// Where in the chain, 0 first; last unless given.
+        #[arg(long)]
+        index: Option<usize>,
+    },
 }
 
 /// Standard MIDI files of one part: its notes and velocities, as a note clip.
@@ -1156,6 +1200,20 @@ fn patch_json(p: &aaw_host::patches::Patch) -> Json {
         "file": p.file,
         "saved_by": p.saved_by,
         "saved_at": p.saved_at,
+    })
+}
+
+/// A rack as `daw rack list` prints it: everything but the effects' fields.
+fn rack_json(r: &aaw_host::racks::Rack) -> Json {
+    json!({
+        "name": r.name,
+        "slug": r.slug,
+        "description": r.description,
+        "tags": r.tags,
+        "kinds": r.kinds(),
+        "file": r.file,
+        "saved_by": r.saved_by,
+        "saved_at": r.saved_at,
     })
 }
 
@@ -1882,6 +1940,44 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Rack(r) => match r {
+            RackCmd::List { words } => {
+                let query = words.join(" ");
+                let listing = aaw_host::racks::list();
+                let mut out = json!({
+                    "directory": aaw_host::racks::dir(),
+                    "racks": listing.racks.iter().filter(|r| aaw_host::racks::matches(r, &query)).map(rack_json).collect::<Vec<_>>(),
+                });
+                if !listing.problems.is_empty() {
+                    out["problems"] = json!(listing.problems);
+                }
+                Ok(out)
+            }
+            RackCmd::Show { rack } => {
+                let r = aaw_host::racks::find(rack)?;
+                let mut out = rack_json(&r);
+                out["effects"] = value(r.effects.clone());
+                Ok(out)
+            }
+            RackCmd::Save { project, owner, name, description, tags, replace } => edit(
+                project,
+                C::RackSave {
+                    owner: owner.clone(),
+                    name: name.clone(),
+                    description: description.clone(),
+                    tags: tags.clone(),
+                    replace: *replace,
+                },
+            ),
+            RackCmd::Load { project, owner, rack, index } => edit(
+                project,
+                C::RackLoad {
+                    owner: owner.clone(),
+                    rack: rack.clone(),
+                    index: *index,
+                },
+            ),
+        },
         Top::Midi(m) => match m {
             MidiCmd::Import { project, file, track, at } => edit(
                 project,
@@ -2249,6 +2345,7 @@ fn name(top: &Top) -> String {
         Top::Instrument(_) => group("instrument", ""),
         Top::Synth(_) => group("synth", ""),
         Top::Patch(_) => group("patch", ""),
+        Top::Rack(_) => group("rack", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),
