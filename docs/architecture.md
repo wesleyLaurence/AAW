@@ -68,7 +68,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
   compressor/sidechain, limiter, delay, reverb, chorus, saturation and utility
   devices with explicit block state, the spectrum tap an equalizer's panel
-  draws from, the analyzer's ring and the meter that reads it (`meter`),
+  draws from, the analyzer's ring and the meter that reads it for its
+  levels, loudness, spectrum, stereo field, spectrogram and waveform (`meter`),
   wavetables, and the Synth, a polyphonic
   synthesizer played from a patch; see
   [effects.md](features/effects.md), [automation.md](features/automation.md),

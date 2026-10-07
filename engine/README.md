@@ -106,8 +106,10 @@ stream is cut into blocks, and processing never allocates.
   65 536 frames with a count of frames written (`meter::Ring`), kept the
   same way, and a `meter::Meter` fed from it off the audio thread works out
   the levels, the true peak, the BS.1770 loudness with its range and
-  history, the spectrum with its peaks held and the stereo field the app's
-  analyzer window draws (`aaw-ffi`'s `Song::analysis`). The K-weighting the
+  history, the spectrum with its peaks held, the stereo field and the
+  columns of a spectrogram and a waveform at fixed hops, blank for frames
+  the reader missed, that the app's analyzer window draws (`aaw-ffi`'s
+  `Song::analysis`). The K-weighting the
   audition's loudness uses is the same code (`measure`).
 - **The reverb** has the Python engine's impulse response except for its noise,
   which comes from a generator of its own (D40, D44), so a tail is statistically
@@ -180,7 +182,11 @@ socket registered under `~/Library/Application Support/AAW/hosts` (or
 `AAW_HOST_DIR`), outside the project because projects may be synced. With no
 host, commands run headless: load, apply, save, exit, under the project's
 `.daw.lock`. Edits behave the same either way; undo, redo, the change
-log, handles and the transport need a host.
+log, handles and the transport need a host. A host plays through the default
+output device, or through the output device whose name contains
+`AAW_OUTPUT_DEVICE` when that is set, which a scripted run that must not be
+heard points at a virtual device; a device that cannot play the song's rate
+in stereo is refused with its name.
 
 - **Commands** validate the whole resulting song before they apply and carry an
   origin, `agent` by default or `--origin user`. `--expect SHA` refuses an edit

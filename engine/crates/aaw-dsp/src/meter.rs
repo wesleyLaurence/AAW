@@ -1,6 +1,7 @@
 //! What an analyzer shows: the stereo ring the audio thread writes every
 //! frame it passes to, and the meter that reads the ring off the audio
-//! thread and works out levels, loudness, a spectrum and the stereo field.
+//! thread and works out levels, loudness, a spectrum, the stereo field,
+//! and the columns of a spectrogram and a scrolling waveform.
 //!
 //! The ring is `RING_FRAMES` frames, both channels packed into one atomic
 //! store a frame, with a count of frames written, so that a reader takes
@@ -231,6 +232,19 @@ pub struct Reading {
     /// The last `SCOPE_FRAMES` frames, left and right interleaved, oldest
     /// first, for a vectorscope.
     pub scope: Vec<f32>,
+    /// Spectrogram columns made since the meter began, `SPECTROGRAM_PER_SECOND`
+    /// a second, counting the blank ones for frames the watcher missed.
+    pub spectrogram_columns: u64,
+    /// The last `SPECTROGRAM_KEEP` columns at most, oldest first, each
+    /// `SPECTROGRAM_ROWS` levels in dB from the lowest band up; a watcher
+    /// takes the ones past its count.
+    pub spectrogram: Vec<f32>,
+    /// Waveform columns made since the meter began, `WAVEFORM_PER_SECOND` a
+    /// second, the blank ones counted.
+    pub waveform_columns: u64,
+    /// The last `WAVEFORM_KEEP` columns at most, oldest first, each the left
+    /// channel's lowest and highest sample in its hop then the right's.
+    pub waveform: Vec<f32>,
 }
 
 /// Frames a reading holds for the vectorscope.
@@ -238,6 +252,61 @@ pub const SCOPE_FRAMES: usize = 1024;
 
 /// Short-term loudness values a reading keeps: five minutes at ten a second.
 pub const HISTORY: usize = 3000;
+
+/// The spectrogram's rows: bands of equal width in pitch from
+/// `SPECTROGRAM_LOW_HZ` to `SPECTROGRAM_HIGH_HZ`, the range the spectrum is
+/// drawn over, each the loudest bin in it or the level between the bins
+/// either side where the bins are further apart than the rows.
+pub const SPECTROGRAM_ROWS: usize = 256;
+pub const SPECTROGRAM_LOW_HZ: f64 = 20.0;
+pub const SPECTROGRAM_HIGH_HZ: f64 = 20000.0;
+/// Columns a second: a spectrum of the last 4096 frames every 20 ms, and
+/// the waveform's lowest and highest sample every 10 ms.
+pub const SPECTROGRAM_PER_SECOND: u32 = 50;
+pub const WAVEFORM_PER_SECOND: u32 = 100;
+/// Columns a reading holds of each: well over the frame a watcher takes
+/// between readings, so one a few frames behind misses none.
+pub const SPECTROGRAM_KEEP: usize = 32;
+pub const WAVEFORM_KEEP: usize = 64;
+
+/// Each spectrogram row's reach in bins of a `TAP_FRAMES` analysis at the
+/// rate, as fractions, lowest band first.
+pub fn spectrogram_rows(rate: f64) -> Vec<(f64, f64)> {
+    let span = SPECTROGRAM_HIGH_HZ / SPECTROGRAM_LOW_HZ;
+    let bin = |hz: f64| hz / rate * TAP_FRAMES as f64;
+    (0..SPECTROGRAM_ROWS)
+        .map(|r| {
+            let f0 = SPECTROGRAM_LOW_HZ * span.powf(r as f64 / SPECTROGRAM_ROWS as f64);
+            let f1 = SPECTROGRAM_LOW_HZ * span.powf((r + 1) as f64 / SPECTROGRAM_ROWS as f64);
+            (bin(f0), bin(f1))
+        })
+        .collect()
+}
+
+/// A spectrum's level in each spectrogram row: the loudest bin of a row
+/// wider than a bin, or the level between the two bins around the row's
+/// middle; −200 above the analysis's top.
+pub fn spectrogram_column(spectrum: &[f32], rows: &[(f64, f64)]) -> Vec<f32> {
+    rows.iter()
+        .map(|&(b0, b1)| {
+            if b1 - b0 >= 1.0 {
+                let (lo, hi) = (b0.ceil() as usize, (b1.floor() as usize).min(spectrum.len().saturating_sub(1)));
+                if lo > hi {
+                    return -200.0;
+                }
+                spectrum[lo..=hi].iter().copied().fold(-200.0, f32::max)
+            } else {
+                let b = (b0 + b1) / 2.0;
+                let i = b.floor() as usize;
+                if i + 1 >= spectrum.len() {
+                    return -200.0;
+                }
+                let t = (b - i as f64) as f32;
+                spectrum[i] * (1.0 - t) + spectrum[i + 1] * t
+            }
+        })
+        .collect()
+}
 
 /// The measurements of a stream of frames, fed off the audio thread from a
 /// `Ring`, and read for each picture drawn. Integrated loudness, the
@@ -271,7 +340,25 @@ pub struct Meter {
     mono_at: usize,
     spectrum_hold: Vec<f32>,
     scope: VecDeque<Frame>,
+    /// The spectrogram: frames between columns, frames into the current
+    /// hop, each row's reach in bins, the last columns and the count.
+    spectrogram_hop: usize,
+    spectrogram_at: usize,
+    rows: Vec<(f64, f64)>,
+    spectrogram: VecDeque<Vec<f32>>,
+    spectrogram_columns: u64,
+    /// The waveform: frames between columns, frames into the current hop,
+    /// the lowest and highest sample of each channel so far in it, the last
+    /// columns and the count.
+    waveform_hop: usize,
+    waveform_at: usize,
+    waveform_column: [f64; 4],
+    waveform: VecDeque<[f32; 4]>,
+    waveform_columns: u64,
 }
+
+/// A waveform column before any frame: silence.
+const BLANK_WAVEFORM: [f64; 4] = [0.0; 4];
 
 impl Meter {
     pub fn new(rate: u32) -> Meter {
@@ -301,7 +388,69 @@ impl Meter {
             mono_at: 0,
             spectrum_hold: vec![-200.0; BINS],
             scope: VecDeque::with_capacity(SCOPE_FRAMES),
+            spectrogram_hop: (rate_f / SPECTROGRAM_PER_SECOND as f64).round().max(1.0) as usize,
+            spectrogram_at: 0,
+            rows: spectrogram_rows(rate_f),
+            spectrogram: VecDeque::with_capacity(SPECTROGRAM_KEEP + 1),
+            spectrogram_columns: 0,
+            waveform_hop: (rate_f / WAVEFORM_PER_SECOND as f64).round().max(1.0) as usize,
+            waveform_at: 0,
+            waveform_column: BLANK_WAVEFORM,
+            waveform: VecDeque::with_capacity(WAVEFORM_KEEP + 1),
+            waveform_columns: 0,
         }
+    }
+
+    /// Frames the watcher missed, before the frames that follow them: the
+    /// time passes as blank columns, so the spectrogram and the waveform
+    /// keep their pace across the gap.
+    pub fn skipped(&mut self, frames: u64) {
+        if frames == 0 {
+            return;
+        }
+        // Only the columns a reading holds need making; the rest are counted.
+        let at = self.spectrogram_at as u64 + frames;
+        let columns = at / self.spectrogram_hop as u64;
+        for _ in 0..columns.min(SPECTROGRAM_KEEP as u64) {
+            self.push_spectrogram(vec![-200.0; SPECTROGRAM_ROWS]);
+        }
+        self.spectrogram_columns += columns.saturating_sub(SPECTROGRAM_KEEP as u64);
+        self.spectrogram_at = (at % self.spectrogram_hop as u64) as usize;
+        let at = self.waveform_at as u64 + frames;
+        let columns = at / self.waveform_hop as u64;
+        for _ in 0..columns.min(WAVEFORM_KEEP as u64) {
+            self.push_waveform(BLANK_WAVEFORM);
+        }
+        self.waveform_columns += columns.saturating_sub(WAVEFORM_KEEP as u64);
+        if columns > 0 {
+            self.waveform_column = BLANK_WAVEFORM;
+        }
+        self.waveform_at = (at % self.waveform_hop as u64) as usize;
+    }
+
+    fn push_spectrogram(&mut self, column: Vec<f32>) {
+        if self.spectrogram.len() == SPECTROGRAM_KEEP {
+            self.spectrogram.pop_front();
+        }
+        self.spectrogram.push_back(column);
+        self.spectrogram_columns += 1;
+    }
+
+    fn push_waveform(&mut self, column: [f64; 4]) {
+        if self.waveform.len() == WAVEFORM_KEEP {
+            self.waveform.pop_front();
+        }
+        self.waveform.push_back(column.map(|v| v as f32));
+        self.waveform_columns += 1;
+    }
+
+    /// The spectrum of the last `TAP_FRAMES` frames as mono, oldest first.
+    fn spectrum(&mut self) -> Vec<f32> {
+        let mut frames = [0.0; TAP_FRAMES];
+        for (i, f) in frames.iter_mut().enumerate() {
+            *f = self.mono[(self.mono_at + i) & (TAP_FRAMES - 1)];
+        }
+        self.analyzer.analyze_frames(&frames)
     }
 
     /// Starts the integrated loudness, the loudness range, the history and
@@ -358,6 +507,25 @@ impl Meter {
                 self.scope.pop_front();
             }
             self.scope.push_back(*f);
+            // The waveform's column: the lowest and highest of each channel.
+            let w = &mut self.waveform_column;
+            w[0] = w[0].min(f[0]);
+            w[1] = w[1].max(f[0]);
+            w[2] = w[2].min(f[1]);
+            w[3] = w[3].max(f[1]);
+            self.waveform_at += 1;
+            if self.waveform_at == self.waveform_hop {
+                self.waveform_at = 0;
+                let column = std::mem::replace(&mut self.waveform_column, BLANK_WAVEFORM);
+                self.push_waveform(column);
+            }
+            self.spectrogram_at += 1;
+            if self.spectrogram_at == self.spectrogram_hop {
+                self.spectrogram_at = 0;
+                let spectrum = self.spectrum();
+                let column = spectrogram_column(&spectrum, &self.rows);
+                self.push_spectrogram(column);
+            }
             self.block.1 += 1;
             if self.block.1 == self.block_frames {
                 self.block_done();
@@ -415,12 +583,7 @@ impl Meter {
             0.0
         };
         let balance_db = if rms[0] > 1e-9 && rms[1] > 1e-9 { 20.0 * (rms[1] / rms[0]).log10() } else { 0.0 };
-        // The spectrum of the last window, oldest frame first.
-        let mut frames = [0.0; TAP_FRAMES];
-        for (i, f) in frames.iter_mut().enumerate() {
-            *f = self.mono[(self.mono_at + i) & (TAP_FRAMES - 1)];
-        }
-        let spectrum = self.analyzer.analyze_frames(&frames);
+        let spectrum = self.spectrum();
         for (hold, level) in self.spectrum_hold.iter_mut().zip(&spectrum) {
             if *level > *hold {
                 *hold = *level;
@@ -442,6 +605,10 @@ impl Meter {
             correlation: correlation as f32,
             balance_db: balance_db as f32,
             scope: self.scope.iter().flat_map(|f| [f[0] as f32, f[1] as f32]).collect(),
+            spectrogram_columns: self.spectrogram_columns,
+            spectrogram: self.spectrogram.iter().flatten().copied().collect(),
+            waveform_columns: self.waveform_columns,
+            waveform: self.waveform.iter().flatten().copied().collect(),
         };
         self.peak = [0.0; 2];
         self.true_peak = [0.0; 2];
@@ -581,6 +748,60 @@ mod tests {
         let r3 = meter.read();
         assert!(r3.peak_hold_db[0] <= -190.0 && r3.integrated_lufs.is_none() && r3.history.is_empty());
         assert_eq!(r3.spectrum_hold, r3.spectrum, "the hold starts again from this reading's spectrum");
+    }
+
+    #[test]
+    fn the_spectrogram_and_the_waveform_come_as_columns_at_their_pace() {
+        let rate = 48000.0;
+        let mut meter = Meter::new(48000);
+        meter.feed(&sine(997.0, 2.0, [0.8, 0.4], rate));
+        let r = meter.read();
+        // Fifty spectrogram columns and a hundred waveform columns a second;
+        // a reading holds the last of each.
+        assert_eq!((r.spectrogram_columns, r.waveform_columns), (100, 200));
+        assert_eq!(r.spectrogram.len(), SPECTROGRAM_KEEP * SPECTROGRAM_ROWS);
+        assert_eq!(r.waveform.len(), WAVEFORM_KEEP * 4);
+        // The last column's loudest row is the tone's band.
+        let last = &r.spectrogram[(SPECTROGRAM_KEEP - 1) * SPECTROGRAM_ROWS..];
+        let loudest = last.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
+        let rows = spectrogram_rows(rate);
+        let bin = 997.0 / rate * TAP_FRAMES as f64;
+        assert!(rows[loudest].0 <= bin && bin < rows[loudest].1, "row {loudest} spans bins {:?}, the tone is at {bin}", rows[loudest]);
+        assert!((last[loudest] - db(0.6)).abs() < 1.0, "the mono level of 0.8 and 0.4: {}", last[loudest]);
+        assert!(last[0] < -80.0 && last[SPECTROGRAM_ROWS - 1] < -80.0);
+        // The rows span 20 Hz to 20 kHz in equal steps of pitch: a tenth of
+        // the rows is a step of two octaves and a half, and no row is wider
+        // than a bin below the point where they start to be.
+        assert!((rows[0].0 - 20.0 / rate * TAP_FRAMES as f64).abs() < 1e-9);
+        assert!((rows[SPECTROGRAM_ROWS - 1].1 - 20000.0 / rate * TAP_FRAMES as f64).abs() < 1e-9);
+        assert!(rows[0].1 - rows[0].0 < 1.0 && rows[SPECTROGRAM_ROWS - 1].1 - rows[SPECTROGRAM_ROWS - 1].0 > 1.0);
+        // The waveform's last column: each channel's lowest and highest
+        // sample in its 10 ms, ten cycles of the tone.
+        let w = &r.waveform[(WAVEFORM_KEEP - 1) * 4..];
+        assert!((w[0] + 0.8).abs() < 0.01 && (w[1] - 0.8).abs() < 0.01, "{w:?}");
+        assert!((w[2] + 0.4).abs() < 0.01 && (w[3] - 0.4).abs() < 0.01, "{w:?}");
+        // Frames the watcher missed pass as blank columns, counted, and the
+        // columns go on from there without a step.
+        meter.skipped(48000);
+        meter.feed(&sine(997.0, 0.015, [0.5, 0.5], rate));
+        let r = meter.read();
+        assert_eq!((r.spectrogram_columns, r.waveform_columns), (150, 301));
+        let blank = &r.spectrogram[(SPECTROGRAM_KEEP - 2) * SPECTROGRAM_ROWS..(SPECTROGRAM_KEEP - 1) * SPECTROGRAM_ROWS];
+        assert!(blank.iter().all(|l| *l == -200.0), "a blank column");
+        assert_eq!(&r.waveform[(WAVEFORM_KEEP - 2) * 4..(WAVEFORM_KEEP - 1) * 4], &[0.0; 4], "a blank column");
+        let w = &r.waveform[(WAVEFORM_KEEP - 1) * 4..];
+        assert!((w[1] - 0.5).abs() < 0.01, "the column after the gap: {w:?}");
+        // A much longer gap is counted, not made.
+        meter.skipped(48000 * 60);
+        let r = meter.read();
+        assert_eq!((r.spectrogram_columns, r.waveform_columns), (150 + 3000, 301 + 6000));
+        assert_eq!(r.spectrogram.len(), SPECTROGRAM_KEEP * SPECTROGRAM_ROWS);
+        // Silence is a column of −200 and a waveform of nothing.
+        let mut silent = Meter::new(44100);
+        silent.feed(&vec![[0.0; 2]; 44100]);
+        let r = silent.read();
+        assert_eq!((r.spectrogram_columns, r.waveform_columns), (50, 100));
+        assert!(r.spectrogram.iter().all(|l| *l <= -190.0) && r.waveform.iter().all(|v| *v == 0.0));
     }
 
     #[test]

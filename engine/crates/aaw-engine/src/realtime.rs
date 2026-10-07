@@ -56,11 +56,22 @@ pub struct Transport {
 }
 
 impl Transport {
-    /// Opens the default output at the program's rate with a fixed buffer.
+    /// Opens the default output at the program's rate with a fixed buffer,
+    /// or the output device whose name contains `AAW_OUTPUT_DEVICE` when
+    /// that is set, as a scripted run that must not be heard sets it.
     pub fn open(program: Arc<Program>, buffer: u32) -> Result<Transport, String> {
         let text = |e: cpal::Error| e.to_string();
         let host = cpal::default_host();
-        let device = host.default_output_device().ok_or("No audio output device")?;
+        let device = match std::env::var("AAW_OUTPUT_DEVICE") {
+            Ok(wanted) if !wanted.trim().is_empty() => {
+                let lower = wanted.trim().to_lowercase();
+                host.output_devices()
+                    .map_err(text)?
+                    .find(|d| d.description().map(|d| d.name().to_lowercase().contains(&lower)).unwrap_or(false))
+                    .ok_or_else(|| format!("No audio output device named {} (AAW_OUTPUT_DEVICE)", wanted.trim()))?
+            }
+            _ => host.default_output_device().ok_or("No audio output device")?,
+        };
         let name = device
             .description()
             .map(|d| d.name().to_string())

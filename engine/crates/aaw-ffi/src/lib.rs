@@ -167,7 +167,10 @@ pub struct Spectrum {
 
 /// What an analyzer shows, measured from every frame that passed through it
 /// since the app began watching it. Levels are in dB relative to full
-/// scale, silence −200; loudness is BS.1770-4.
+/// scale, silence −200; loudness is BS.1770-4. The long lists cross as
+/// bytes, each value a little-endian 32-bit float, because the generated
+/// bindings decode a list a value at a time and bytes in one copy, and a
+/// reading is taken every frame drawn.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Analysis {
     pub sample_rate: u32,
@@ -196,19 +199,41 @@ pub struct Analysis {
     pub integrated_lufs: Option<f32>,
     pub range_lu: Option<f32>,
     /// The short-term loudness every 100 ms since the reset, oldest first,
-    /// the last five minutes.
-    pub history: Vec<f32>,
+    /// the last five minutes, as float bytes.
+    pub history: Vec<u8>,
     /// Each bin's level of the last 4096 frames as mono, 2049 bins from 0 Hz
     /// to half the sample rate, and the highest each has reached since the
-    /// reset.
-    pub spectrum: Vec<f32>,
-    pub spectrum_hold: Vec<f32>,
+    /// reset, as float bytes.
+    pub spectrum: Vec<u8>,
+    pub spectrum_hold: Vec<u8>,
     /// The correlation of the channels over the last 400 ms, −1 to +1, and
     /// the right channel's level over the left's in dB; both 0 for silence.
     pub correlation: f32,
     pub balance_db: f32,
-    /// The last 1024 frames, left and right interleaved, oldest first.
-    pub scope: Vec<f32>,
+    /// The last 1024 frames, left and right interleaved, oldest first, as
+    /// float bytes.
+    pub scope: Vec<u8>,
+    /// The spectrogram: its rows, bands of equal width in pitch from 20 Hz
+    /// to 20 kHz, lowest first; its columns a second; the columns made since
+    /// the app began watching, counting blank ones for frames it missed; and
+    /// the last columns, oldest first, each `spectrogram_rows` levels in dB,
+    /// as float bytes. A watcher keeps its count and takes the columns past it.
+    pub spectrogram_rows: u32,
+    pub spectrogram_per_second: u32,
+    pub spectrogram_columns: u64,
+    pub spectrogram: Vec<u8>,
+    /// The waveform: its columns a second, the columns made since the app
+    /// began watching, and the last columns, oldest first, each the left
+    /// channel's lowest and highest sample in its time then the right's, as
+    /// float bytes.
+    pub waveform_per_second: u32,
+    pub waveform_columns: u64,
+    pub waveform: Vec<u8>,
+}
+
+/// Floats as the bytes a reading carries them in.
+fn float_bytes(values: &[f32]) -> Vec<u8> {
+    values.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
 /// An analyzer the app is watching: its ring, how far it has been read,
@@ -482,6 +507,7 @@ impl Song {
         watch.frames.clear();
         let (next, lost) = watch.ring.read_since(watch.next, &mut watch.frames);
         watch.next = next;
+        watch.meter.skipped(lost);
         watch.meter.feed(&watch.frames);
         let r = watch.meter.read();
         Some(Analysis {
@@ -497,12 +523,19 @@ impl Song {
             short_term_lufs: r.short_term_lufs,
             integrated_lufs: r.integrated_lufs,
             range_lu: r.range_lu,
-            history: r.history,
-            spectrum: r.spectrum,
-            spectrum_hold: r.spectrum_hold,
+            history: float_bytes(&r.history),
+            spectrum: float_bytes(&r.spectrum),
+            spectrum_hold: float_bytes(&r.spectrum_hold),
             correlation: r.correlation,
             balance_db: r.balance_db,
-            scope: r.scope,
+            scope: float_bytes(&r.scope),
+            spectrogram_rows: aaw_dsp::meter::SPECTROGRAM_ROWS as u32,
+            spectrogram_per_second: aaw_dsp::meter::SPECTROGRAM_PER_SECOND,
+            spectrogram_columns: r.spectrogram_columns,
+            spectrogram: float_bytes(&r.spectrogram),
+            waveform_per_second: aaw_dsp::meter::WAVEFORM_PER_SECOND,
+            waveform_columns: r.waveform_columns,
+            waveform: float_bytes(&r.waveform),
         })
     }
 
