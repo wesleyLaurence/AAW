@@ -61,6 +61,7 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
+| [the live analyzer](features/analyzer.md) | Next |
 | [clips that loop](features/looping-clips.md) | Next |
 | [comparing with a reference](features/reference-comparison.md) | Next |
 | [sound descriptors](features/sound-descriptors.md) | Next |

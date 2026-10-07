@@ -144,6 +144,10 @@ Device panels are drawn from what each device says of itself, so a new device
 needs no panel built by hand. What the agent changes eases to its new place and
 lights up for a moment, and every change is listed with who made it.
 
+An analyzer opens from its device into a window of its own, which resizes,
+goes full screen and stays open whatever is selected, since a meter is watched
+while something else is worked on.
+
 ## A project on disk
 
 A project is a plain folder with a project file in it, as an Ableton project is a
@@ -367,6 +371,9 @@ address that stays valid as other edits land, and every error says how to fix it
 - **Effects:** filter, equalizer, compressor with sidechain, limiter, delay,
   reverb, saturation and a clipper, utility, chorus, phaser, gate, transient
   shaper, multiband compressor, pitch shift.
+- **An analyzer:** an effect that changes nothing and shows the sound as it
+  plays, wherever in a chain it is put: levels, loudness, spectrum,
+  spectrogram, stereo field and waveform.
 - **Routing:** sends and returns, groups, sidechains from any track or pad.
 - **Automation** of any continuous parameter.
 - **Time:** tempo and time signature changes, stretch at pitch, warp markers for
