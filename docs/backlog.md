@@ -19,99 +19,93 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Items 1–8 are the person's notes from using the app on October 6, 2026, and
+Items 1–7 are the person's notes from using the app on October 6, 2026, and
 come before everything else.
 
-1. **Finer timing that can be found.** Sixteenths, triplets and a kick a
-   little behind the beat, entered by hand. The piano roll and the pattern
-   editor have a grid menu down to a sixteenth of a beat with triplets, and ⌘
-   places a note off the grid, but the person did not find either; the
-   timeline's grid follows the zoom alone. Whether the grid is labeled in note
-   values everywhere, and how the timeline's is chosen.
-2. **The agent working in steps the person can watch.** One sound, part or
+1. **The agent working in steps the person can watch.** One sound, part or
    clip added through the running host at a time, so it appears on the
    timeline and in the activity as it is made, instead of twenty minutes of
    planning and then everything at once. Guidance in [music.md](music.md)
    and `daw describe start` first; perhaps a hint from the host when a long
    time passes with no command.
-3. **The time signature in the app.** A song in 3/4, 6/8 or 7/8 set in the
+2. **The time signature in the app.** A song in 3/4, 6/8 or 7/8 set in the
    transport bar and with `daw set session.time_signature`, the bars, grid,
    metronome and beat map following it. The model holds the field and only
    4/4 is accepted; changes of meter within a song stay in Later.
-4. **The Synth's width.** A Width or Spread for the patch, voices placed
+3. **The Synth's width.** A Width or Spread for the patch, voices placed
    across the stereo field as they play, beside the unison width each
    oscillator has.
-5. **A utility.** Gain, pan, width, mono (and mono below a frequency) and
+4. **A utility.** Gain, pan, width, mono (and mono below a frequency) and
    phase, as Ableton's Utility.
-6. **A parametric EQ.** Up to eight bands drawn as one curve over the
+5. **A parametric EQ.** Up to eight bands drawn as one curve over the
    playing spectrum: high and low pass with their slopes, shelves and bells,
    each a point dragged for frequency and gain with its width; the three-band
    EQ stays.
-7. **Groups that fold.** Tracks summed into a group with its own effects and
+6. **Groups that fold.** Tracks summed into a group with its own effects and
    level, a drum bus, and the group folded to one row on the timeline.
-8. **Effect racks saved and loaded anywhere.** A chain of effects saved under
+7. **Effect racks saved and loaded anywhere.** A chain of effects saved under
    a name and dropped from the browser onto a track in any song, as a Synth
    patch is.
-9. **Export in the app.** File › Export Audio…: a named WAV, AAC or MP3 of the
+8. **Export in the app.** File › Export Audio…: a named WAV, AAC or MP3 of the
    mix at a stated level, through `daw export`, with its measurements shown.
    The app's only export is a MIDI clip, so the person finishes a song through
    the agent or a terminal (D81).
    [features/export-in-app.md](features/export-in-app.md)
-10. **A time selection in the app.** A range of beats dragged across the
-    tracks and copied, inserted, deleted or cleared as `daw range` does it,
-    and a section dragged with its content; which gesture makes it is the
-    open question in [features/bar-ranges.md](features/bar-ranges.md).
-11. **A MIDI keyboard.** Notes played through the selected track, held and let
+9. **A time selection in the app.** A range of beats dragged across the
+   tracks and copied, inserted, deleted or cleared as `daw range` does it,
+   and a section dragged with its content; which gesture makes it is the
+   open question in [features/bar-ranges.md](features/bar-ranges.md).
+10. **A MIDI keyboard.** Notes played through the selected track, held and let
     go rather than a beat long, through a Synth and through a Sampler, whose
     pitch needs audio prepared on the way; recording into note clips; quantize.
     The person plays a riff and the agent builds around it.
-12. **Listening markers.** The person drops a marker at the playhead while the
+11. **Listening markers.** The person drops a marker at the playhead while the
     song plays, with a word if they want, and the agent reads them with `daw`:
     "this bar", without a timecode.
-13. **Sections and the song's length in the app.** A section made, named,
+12. **Sections and the song's length in the app.** A section made, named,
     moved and removed in the ruler, which only draws them today; the length,
     master gain and end fade typed in the transport bar, as the tempo is. The
     agent has `daw section` and `daw set session.FIELD`; the person has neither
     (D81).
-14. **A project made with `daw init` in the app's index,** so a song the agent
+13. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-15. **Turns and A/B.** An agent request's commands grouped, named for the
+14. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-16. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+15. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
     is built, a clipper that holds a ceiling as a limiter does without its
-    look-ahead is not. The utility is item 5.
-17. **Comparing with a reference.** A song the person names as a reference,
+    look-ahead is not. The utility is item 4.
+16. **Comparing with a reference.** A song the person names as a reference,
     analyzed once and compared with a mix section by section, so the agent has
     targets for the low end, the brightness and the loudness of each section.
     [features/reference-comparison.md](features/reference-comparison.md)
-18. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+17. **Sound descriptors.** Each sample measured for brightness, attack, decay,
     low end and noise, with search sorted by them and samples like a chosen
     one, so the agent chooses sounds by more than their names.
     [features/sound-descriptors.md](features/sound-descriptors.md)
-19. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+18. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-20. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+19. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-21. **Key and chord detection,** and swing detection, of samples and songs: a
+20. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-22. **Presets.** Pad setups and whole tracks saved as text and loaded into any
-    song. Effect chains are item 8.
-23. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+21. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+    song. Effect chains are item 7.
+22. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-24. **The workspace and the two levels.** The workspace folder with its managed
+23. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-25. **The agent panel.** A conversation in the window, per project, over the
+24. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-26. **Stem separation** of a song.
-27. **Generated audio.** A sound, a loop or a whole song from a description, with
+25. **Stem separation** of a song.
+26. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -122,6 +116,19 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The grid by hand:** the Grid menu opened in the transport bar and under
+  View, a size chosen and the lines seen to hold while the song is zoomed
+  out and in, Triplets turned on and a hat drawn in the piano roll on
+  1/16T, ⌘1 to ⌘4 pressed with the timeline, the piano roll and the pattern
+  editor each holding the keys, Snap to Grid turned off and a kick dragged a
+  little behind the beat without ⌘; whether the gray value reads as "follows
+  the zoom", whether `no snap` is the right word, whether every second line
+  of a fine grid reads right when it is zoomed out, and whether the beat
+  lines, now a shade brighter, help or clutter. Scripted keys made the
+  timeline's grid 1/16T with ⌘1 ⌘1 ⌘3 and a double-click landed a clip on a
+  sixth of a beat, ⌘4 landed one off the grid with `no snap` in the bar, and
+  ⌘3 in the piano roll set its Grid to 1/16T and a note on 53/6, each read
+  from the song and seen in a picture; the menus were never opened by hand.
 - **Where a sample lands, by hand:** a sample dragged from the browser and a
   file from the Finder into the headers' column under the tracks, with the
   outline read as the new track's header while it is dragged, and the Sampler

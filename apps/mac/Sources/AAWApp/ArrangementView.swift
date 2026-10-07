@@ -382,6 +382,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onZoom = { [weak self] zoom in self?.zoom(zoom) }
         model.onRefusal = { [weak self] in self?.revert() }
         model.onSelection = { [weak self] in self?.needsDisplay = true }
+        model.onGrid = { [weak self] in self?.gridChosen() }
+        gridChosen()
         model.onRename = { [weak self] row in self?.beginRename(row) }
         model.onShowLanes = { [weak self] row in self?.showLanes(of: row) }
         model.onFocus = { [weak self] in
@@ -420,6 +422,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         for area in trackingAreas { removeTrackingArea(area) }
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
                                        owner: self))
+    }
+
+    /// Takes the grid chosen in the Grid menu, or the zoom's again.
+    private func gridChosen() {
+        layout.fixedGrid = model.timelineGrid.flatMap(PianoRollLayout.beats)
+        needsDisplay = true
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -1039,7 +1047,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
             clipDown(hit.hit, rect: hit.rect, at: p, event)
         } else {
-            let free = event.modifierFlags.contains(.command)
+            let free = model.free(event.modifierFlags)
             // Clips are pasted on the track whose lane was clicked last.
             if let track = track(atLane: p) { model.cueTrack = track }
             if event.clickCount == 2, let track = track(atLane: p) {
@@ -1275,7 +1283,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         guard let near else {
             if event.clickCount == 2 {
                 let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
-                let at = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.command))
+                let at = layout.snapped(layout.beat(atX: p.x), free: model.free(event.modifierFlags))
                 model.edit(.pointAdd(lane: lane.key, at: at, value: scale.value(atY: p.y, in: rect))) { [weak self] made in
                     self?.model.select(points: Set(made))
                 }
@@ -1442,7 +1450,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .clips(var d):
             if !d.moved, hypot(p.x - d.start.x, p.y - d.start.y) < 3 { return }
             d.moved = true
-            d.by = layout.move(byX: p.x - d.start.x, free: event.modifierFlags.contains(.command), within: d.range)
+            d.by = layout.move(byX: p.x - d.start.x, free: model.free(event.modifierFlags), within: d.range)
             d.rows = min(max(trackIndex(atY: p.y) - trackIndex(atY: d.start.y), d.rowRange.lowerBound), d.rowRange.upperBound)
             let copying = event.modifierFlags.contains(.option)
             if copying != d.copy {
@@ -1467,7 +1475,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             drag = .clips(d)
         case .trim(var d):
-            let wanted = snappedBeat(atX: p.x, free: event.modifierFlags.contains(.command))
+            let wanted = snappedBeat(atX: p.x, free: model.free(event.modifierFlags))
             let beat = d.start ? d.layout.start(draggedTo: wanted) : d.layout.end(draggedTo: wanted)
             if beat != d.beat {
                 d.beat = beat
@@ -1481,7 +1489,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .noteTrim(var d):
             // On the grid or, with ⌘, off it; a grid step long at the
             // least, and inside the song. The notes stay where they are.
-            let free = event.modifierFlags.contains(.command)
+            let free = model.free(event.modifierFlags)
             let least = free ? 0.001 : layout.grid
             let (start, end) = (d.clip.at, d.clip.at + d.clip.lengthBeats)
             let wanted = snappedBeat(atX: p.x, free: free)
@@ -1516,7 +1524,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .points(var d):
             // The grabbed point goes to the grid line under the pointer, or
             // with ⌘ anywhere, and to the height of it; the others as far.
-            let wanted = layout.snapped(layout.beat(atX: p.x), free: event.modifierFlags.contains(.command))
+            let wanted = layout.snapped(layout.beat(atX: p.x), free: model.free(event.modifierFlags))
             let by = min(max(wanted - d.grabbed.at, d.range.lowerBound), d.range.upperBound)
             let reach = Double(d.rect.height - 2 * ValueScale.inset)
             let fraction = reach > 0 ? Double(d.rect.maxY - ValueScale.inset - p.y) / reach : d.grabbed.fraction
@@ -1564,7 +1572,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.setLoop(start: region.start, length: region.length)
             } else {
                 // A click in the loop strip sets the start position like any other.
-                model.locate(layout.target(atX: anchor, free: event.modifierFlags.contains(.command)))
+                model.locate(layout.target(atX: anchor, free: model.free(event.modifierFlags)))
             }
         case .slider(let s):
             model.endDrag()
@@ -1805,7 +1813,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         guard let file = sample(of: sender) else { return [] }
         let p = convert(sender.draggingLocation, from: nil)
-        let free = NSEvent.modifierFlags.contains(.command)
+        let free = model.free(NSEvent.modifierFlags)
         let target = Self.isMIDI(file.path) ? midiLanding(at: p, free: free) : landing(at: p, free: free)
         if target != dropTarget {
             dropTarget = target
@@ -2139,19 +2147,24 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         }
 
-        // Grid: every bar, and finer lines once they have room.
-        let grid = layout.grid
+        // Grid: every bar, each beat a shade lighter, and the finer lines of
+        // the grid once they have room.
+        let grid = layout.drawnGrid
         let bar = layout.beatsPerBar
+        let perBar = bar / grid
         let first = max(0, (layout.beat(atX: header) / grid).rounded(.down))
         let last = (layout.beat(atX: bounds.width) / grid).rounded(.up)
         if last >= first {
             for k in Int(first)...Int(last) {
                 let beat = Double(k) * grid
-                let onBar = beat.truncatingRemainder(dividingBy: bar) == 0
+                let onBar = perBar < 1 || k % Int(perBar.rounded()) == 0
+                let onBeat = abs(beat - beat.rounded()) < 1e-6
                 fill(CGRect(x: layout.x(beat).rounded(), y: ruler, width: 1, height: bounds.height - ruler),
-                     onBar ? Theme.barLine : Theme.gridLine)
+                     onBar ? Theme.barLine : onBeat ? Theme.beatLine : Theme.gridLine)
             }
         }
+        // The transport bar shows what the grid is while it follows the zoom.
+        if model.zoomGrid != layout.zoomGrid { model.zoomGrid = layout.zoomGrid }
         if let (region, active) = loopShown, active {
             fill(CGRect(x: layout.x(region.start), y: ruler,
                         width: CGFloat(region.length) * layout.pixelsPerBeat, height: bounds.height - ruler),

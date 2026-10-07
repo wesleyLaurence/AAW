@@ -24,7 +24,7 @@ public struct PianoRollLayout: Equatable {
     public static let minStep: CGFloat = 9
     /// The grids notes are drawn on, in beats as the song writes them, from a
     /// bar to a sixty-fourth note, each triplet after its note.
-    public static let grids = ["4", "2", "1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"]
+    public static let grids = Grid.values
     /// How near a note's end, or its start, a press stretches it, in points.
     public static let endGrip: CGFloat = 5
 
@@ -230,11 +230,15 @@ public struct PianoRollLayout: Equatable {
     }
 
     /// A length the song writes in beats, named as a note value is, a beat
-    /// being a quarter note: `1/4` is `1/16`, `1/3` is `1/8T` and `4` is
-    /// `1 Bar`. A length that is no such value keeps its beats.
+    /// being a quarter note: `1/4` is `1/16`, `1/3` is `1/8T`, `4` is
+    /// `1 Bar` and `8` is `2 Bars`. A length that is no such value keeps its
+    /// beats.
     public static func noteValue(_ text: String) -> String {
         guard let beats = beats(text), beats > 0 else { return text }
-        if abs(beats - 4) < 1e-9 { return "1 Bar" }
+        let bars = beats / 4
+        if bars >= 1, abs(bars - bars.rounded()) < 1e-9 {
+            return bars.rounded() == 1 ? "1 Bar" : "\(Int(bars.rounded())) Bars"
+        }
         // The length as a share of a whole note, 1/d.
         let d = 4 / beats
         let whole = d.rounded()

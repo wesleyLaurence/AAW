@@ -42,6 +42,18 @@ enum Detail {
     case devices, pattern
 }
 
+/// Which editor a Grid menu command is for: the one that has the keys. The
+/// timeline and the piano roll each have a grid of their own; the pattern
+/// editor's is its pattern's step, written in the song.
+enum GridPlace {
+    case timeline, notes, pattern
+}
+
+/// A step the Grid menu takes: ⌘1, ⌘2 and ⌘3.
+enum GridStep {
+    case finer, coarser, triplets
+}
+
 /// A clip on the timeline, a pattern clip, an audio clip or a note clip, with
 /// the place of its track among the tracks and the beats it covers. An audio
 /// clip's end is where its sound ends.
@@ -140,6 +152,17 @@ public final class SongModel {
     /// The steps the piano roll draws, adds and moves notes on, in beats as
     /// the song writes them.
     var noteGrid = "1/4"
+    /// The timeline's grid, chosen in the Grid menu, in beats as the song
+    /// writes them; nil follows the zoom.
+    var timelineGrid: String? {
+        didSet { if timelineGrid != oldValue { onGrid?() } }
+    }
+    /// The grid the timeline's zoom allows just now, in beats, which the
+    /// arrangement reports: what the timeline has while it follows the zoom.
+    var zoomGrid: Double = 1
+    /// Whether clicks and drags land on the grid. With it off they land
+    /// anywhere, and ⌘ snaps instead of freeing.
+    var snapsToGrid = true
     /// Whether the piano roll plays a note as it is drawn, clicked or moved
     /// to another pitch, and as its key is pressed.
     var notePreview = true
@@ -192,6 +215,8 @@ public final class SongModel {
     @ObservationIgnored var onShowLanes: ((RowID) -> Void)?
     /// Gives the keys back to the arrangement, after a value was typed.
     @ObservationIgnored var onFocus: (() -> Void)?
+    /// Called when the timeline's grid was chosen, for the arrangement to draw it.
+    @ObservationIgnored var onGrid: (() -> Void)?
     /// Called when the project was saved under another name, with the song
     /// file's path before.
     @ObservationIgnored var onMoved: ((URL) -> Void)?
@@ -1325,6 +1350,64 @@ public final class SongModel {
 
     func zoom(_ zoom: Zoom) {
         onZoom?(zoom)
+    }
+
+    // MARK: The grid
+
+    /// Whether a click or a drag with these keys held goes off the grid:
+    /// with ⌘, or with Snap to Grid off and no ⌘, which snaps again.
+    func free(_ flags: NSEvent.ModifierFlags) -> Bool {
+        flags.contains(.command) == snapsToGrid
+    }
+
+    /// The grid of an editor, in beats as the song writes them: the
+    /// timeline's chosen one or the zoom's, the piano roll's, or the
+    /// pattern's step.
+    func grid(in place: GridPlace) -> String {
+        switch place {
+        case .timeline: timelineGrid ?? Grid.text(zoomGrid)
+        case .notes: noteGrid
+        case .pattern: patternContext?.pattern.gridText ?? "1/4"
+        }
+    }
+
+    /// The values an editor's grid can be set to.
+    func gridValues(in place: GridPlace) -> [String] {
+        place == .pattern ? Grid.patternValues : Grid.values
+    }
+
+    /// Sets an editor's grid: the timeline's or the piano roll's in the
+    /// window, the pattern's step as an edit of the song.
+    func setGrid(_ value: String, in place: GridPlace) {
+        guard gridValues(in: place).contains(value) else { return }
+        switch place {
+        case .timeline: timelineGrid = value
+        case .notes: noteGrid = value
+        case .pattern:
+            guard let pattern = patternContext?.pattern, pattern.gridText != value else { return }
+            edit(.patternGrid(pattern: pattern.name, grid: value))
+        }
+    }
+
+    /// Chooses a size from the Grid menu, kept a triplet when the grid is one.
+    func chooseGrid(size: String, in place: GridPlace) {
+        setGrid(Grid.choose(size, keeping: grid(in: place), in: gridValues(in: place)), in: place)
+    }
+
+    /// The next finer or coarser grid, or the grid's triplet or straight
+    /// value; nil where the list has none.
+    func gridStep(_ step: GridStep, in place: GridPlace) -> String? {
+        let current = grid(in: place)
+        let values = gridValues(in: place)
+        switch step {
+        case .finer: return Grid.finer(current, in: values)
+        case .coarser: return Grid.coarser(current, in: values)
+        case .triplets: return Grid.triplets(current, !Grid.isTriplet(current), in: values)
+        }
+    }
+
+    func stepGrid(_ step: GridStep, in place: GridPlace) {
+        if let value = gridStep(step, in: place) { setGrid(value, in: place) }
     }
 
     /// Draws `frames` frames of scrolling and zooming and reports how long

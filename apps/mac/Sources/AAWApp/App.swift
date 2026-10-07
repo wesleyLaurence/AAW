@@ -548,10 +548,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Return to Start Position", #selector(SongWindowController.returnToStart(_:)), "\r", []),
             item("Loop", #selector(SongWindowController.toggleLoop(_:)), "l", []),
         ])
+        // The grid of the editor that has the keys, as Ableton's ⌘1 to ⌘4.
+        let grid = NSMenu(title: "Grid")
+        grid.addItem(item("Follow Zoom", #selector(SongWindowController.gridFollowsZoom(_:))))
+        grid.addItem(.separator())
+        for size in Grid.sizes {
+            let entry = item(Grid.name(size), #selector(SongWindowController.chooseGrid(_:)))
+            entry.representedObject = size
+            grid.addItem(entry)
+        }
+        grid.addItem(.separator())
+        grid.addItem(item("Finer", #selector(SongWindowController.gridFiner(_:)), "1"))
+        grid.addItem(item("Coarser", #selector(SongWindowController.gridCoarser(_:)), "2"))
+        grid.addItem(item("Triplets", #selector(SongWindowController.gridTriplets(_:)), "3"))
+        grid.addItem(.separator())
+        grid.addItem(item("Snap to Grid", #selector(SongWindowController.toggleSnap(_:)), "4"))
+        let gridHolder = NSMenuItem(title: "Grid", action: nil, keyEquivalent: "")
+        gridHolder.submenu = grid
         add("View", [
             item("Zoom In", #selector(SongWindowController.zoomIn(_:)), "="),
             item("Zoom Out", #selector(SongWindowController.zoomOut(_:)), "-"),
             item("Zoom to Fit", #selector(SongWindowController.zoomToFit(_:)), "0"),
+            .separator(),
+            gridHolder,
             .separator(),
             item("Browser", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
@@ -771,6 +790,25 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
 
     @objc func toggleDevices(_ sender: Any?) { toggle(.devices) }
     @objc func togglePattern(_ sender: Any?) { toggle(.pattern) }
+
+    /// The editor a Grid menu command is for: the piano roll or the pattern
+    /// editor while it has the keys, else the timeline.
+    private var gridPlace: GridPlace {
+        switch window?.firstResponder {
+        case is NoteEditor: .notes
+        case is PatternEditor: .pattern
+        default: .timeline
+        }
+    }
+
+    @objc func gridFollowsZoom(_ sender: Any?) { model.timelineGrid = nil }
+    @objc func chooseGrid(_ sender: NSMenuItem) {
+        if let size = sender.representedObject as? String { model.chooseGrid(size: size, in: gridPlace) }
+    }
+    @objc func gridFiner(_ sender: Any?) { model.stepGrid(.finer, in: gridPlace) }
+    @objc func gridCoarser(_ sender: Any?) { model.stepGrid(.coarser, in: gridPlace) }
+    @objc func gridTriplets(_ sender: Any?) { model.stepGrid(.triplets, in: gridPlace) }
+    @objc func toggleSnap(_ sender: Any?) { model.snapsToGrid.toggle() }
     @objc func undoEdit(_ sender: Any?) { model.undo() }
     @objc func redoEdit(_ sender: Any?) { model.redo() }
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
@@ -833,6 +871,21 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.title = DetailView.clipTitle(model)
             item.state = model.showsDetail && model.detail == .pattern ? .on : .off
         case #selector(toggleBrowser(_:)): item.state = model.showsBrowser ? .on : .off
+        case #selector(gridFollowsZoom(_:)):
+            item.state = gridPlace == .timeline && model.timelineGrid == nil ? .on : .off
+            return gridPlace == .timeline && !typing
+        case #selector(chooseGrid(_:)):
+            guard let size = item.representedObject as? String else { return false }
+            item.state = Grid.size(model.grid(in: gridPlace)) == size ? .on : .off
+            return model.gridValues(in: gridPlace).contains(size) && !typing
+        case #selector(gridTriplets(_:)):
+            item.state = Grid.isTriplet(model.grid(in: gridPlace)) ? .on : .off
+            return model.gridStep(.triplets, in: gridPlace) != nil && !typing
+        case #selector(gridFiner(_:)): return model.gridStep(.finer, in: gridPlace) != nil && !typing
+        case #selector(gridCoarser(_:)): return model.gridStep(.coarser, in: gridPlace) != nil && !typing
+        case #selector(toggleSnap(_:)):
+            item.state = model.snapsToGrid ? .on : .off
+            return !typing
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
         case #selector(togglePlay(_:)): return !typing
         case #selector(undoEdit(_:)):

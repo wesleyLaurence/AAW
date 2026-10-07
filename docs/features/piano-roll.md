@@ -32,9 +32,10 @@ removed. This file is what was added for writing parts by hand, as in Ableton.
   Option until Option became copy.
 - **Note values.** The piano roll's grid and the pattern's Step menu name
   their steps as note values, a beat being a quarter note: 1 Bar, 1/2, 1/4,
-  1/8, 1/8T, 1/16, 1/16T, 1/32, 1/32T and 1/64. The song still writes beats:
-  a grid of `1/4` beats is 1/16. A pattern step the menu does not list keeps
-  its beats.
+  1/8, 1/8T, 1/16, 1/16T, 1/32, 1/32T and 1/64, with 1/2T and 1/4T since
+  [the grid](grid.md) gave the timeline the same list. The song still writes
+  beats: a grid of `1/4` beats is 1/16. A pattern step the menu does not list
+  keeps its beats.
 
 ## How
 
