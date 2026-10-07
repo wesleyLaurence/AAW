@@ -1,7 +1,8 @@
 //! The sample library, for the app's browser. The index and what is known of
 //! each sample are Python's (`daw samples`), which this asks: a search of the
 //! index, and the copy of a chosen file into a song's project. The song then
-//! takes the copy as an edit like any other (`Edit::SampleAdd`).
+//! takes the copy as an edit like any other (`Edit::SamplerAdd`,
+//! `Edit::SampleClip`).
 
 use crate::SongError;
 use aaw_host::python;

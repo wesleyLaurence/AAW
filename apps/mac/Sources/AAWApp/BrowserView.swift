@@ -497,8 +497,7 @@ struct BrowserView: View {
                 }
             }
             Divider()
-            Text(target.map { "+ adds a pad to \($0.id). Drag onto the timeline for an audio clip, or onto a track's name for a pad." }
-                ?? "+ adds a new track with a pad. Drag onto the timeline for an audio clip, or onto a track's name for a pad.")
+            Text("\(model.sampleLanding) Drag onto the timeline for an audio clip, or onto a MIDI track's name for a Sampler.")
                 .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -523,13 +522,14 @@ struct BrowserView: View {
             }
             Spacer(minLength: 0)
             Button {
-                model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote, to: target?.key)
+                model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote)
             } label: {
                 Image(systemName: "plus").frame(width: 18, height: 18)
             }
             .buttonStyle(.borderless)
             .font(.system(size: 10))
-            .help(target.map { "Add as a pad of \($0.id)" } ?? "Add as a new track")
+            .help(target.map { $0.midi ? "Load into a Sampler on \($0.id)" : "Add to \($0.id) as an audio clip at the start position" }
+                ?? "Add as a new MIDI track with a Sampler")
         }
         .padding(.leading, 10)
         .padding(.trailing, 6)
@@ -541,7 +541,7 @@ struct BrowserView: View {
             : Color.clear)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote, to: target?.key)
+            model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote)
         }
         .onTapGesture {
             samplesHaveKeys = true

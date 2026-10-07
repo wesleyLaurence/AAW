@@ -11,8 +11,8 @@ audio clip, which is moved, trimmed, faded and split there. A MIDI track's note
 clips are made, moved, trimmed and copied, and their notes drawn and edited in a
 piano roll; a MIDI file dropped on the timeline is a note clip, and a note clip
 is exported as one. A browser finds
-samples in the library's index and adds them to the song as pads, tracks and
-audio clips. Save As… gives a project a
+samples in the library's index and adds them to the song as audio clips and as
+Samplers on MIDI tracks. Save As… gives a project a
 name and a place. The bundle holds `daw` and
 the libraries it needs, and a menu item puts `daw` on the PATH.
 
@@ -236,10 +236,10 @@ front first.
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
 | Click a sample | Plays it, as its file is, and gives the samples the keys; the speaker mark turns the playing off |
 | Up and Down, in the samples | Move to the sample before or after and play it, as in the Finder, until a click elsewhere takes the keys back. The selected sample is drawn in the accent color while the samples have the keys, gray when they do not |
-| Click + by a sample | Adds it as a pad of the selected track, or with no track selected as a new track |
+| Click + by a sample, or double-click it | Puts it where a drop on the selected row would: into a Sampler on the selected MIDI track, onto any other selected track as an audio clip at the start position, or with no track selected on a new MIDI track with a Sampler of it. The hint under the samples says which |
 | Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with ⌘, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
 | Drag a MIDI file from the Finder onto the timeline | A note clip of its notes at the grid line nearest the pointer (with ⌘, off the grid): on a MIDI track's lane, on that track, and anywhere else on a new MIDI track with no instrument, named after the file. The clip is outlined at its length while the file is dragged, and the song grows to hold it. The file is read where it is, and must be of one part, as `daw midi import` reads; one that is not is refused with the reason. Not in the headers |
-| Drag one onto the headers | On a track's header: a pad of that track. On a MIDI track's header: its instrument, a Sampler that plays the sample at every note's pitch, as it is at middle C (C4), in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. Under the tracks: a new track with a pad. A sample dropped on a MIDI track's lane goes to a new track as an audio clip |
+| Drag one onto the headers | On a MIDI track's header: its instrument, a Sampler that plays the sample at every note's pitch, as it is at middle C (C4), in place of the instrument it had; × in its device panel takes it off, and the notes stay as they are. On another track's header: an audio clip on it at the start position. Under the tracks: a new MIDI track named after the sample, with a Sampler of it, drawn as its header with the name and Sampler while the file is dragged. A sample dropped on a MIDI track's lane goes to a new track as an audio clip. Never a pad. A sample the browser measured a pitch of, shown as a note by it, starts Held; any other plays to its end |
 | Drag one onto the Sampler in the device panel | Loads it: the keys play it at every note's pitch, as it is at middle C. Over a sample the Sampler has, it takes its place and keeps the pad's mode, level, pan, transpose, attack, release and reverse; the start and the end go back to the whole file. A MIDI track with no instrument gets a Sampler of it. One undo step |
 | Drag a marker on the Sampler's waveform; type Start or End | Moves where in the file the keys play from or to, no further than the file or the other marker, heard when the drag ends. An empty End plays to the file's end |
 | Type in Root; click Measure | Sets the note the sample is at, as C4 or 60, so the keys play it from there; empty plays it as it is at middle C. Measure sets it to the pitch `daw samples analyze` finds, and says so when the file has no one pitch |
@@ -286,11 +286,12 @@ it, and they all light up when an agent changes it.
 
 A sample added to the song is copied into the project's `samples` folder first,
 as `daw samples import` copies it; the library is never changed. An `.m4a` or
-`.mp3` file dropped from the Finder is decoded to WAV there instead. A pad and a
-new track are named after the sample's category, or its file. A sample with a
-measured pitch brings it along as its root note, unless its name says it is a
-drum, an effect or a loop. The sample, the pad or the audio clip, a new track
-and a longer song are one undo step.
+`.mp3` file dropped from the Finder is decoded to WAV there instead. A Sampler's
+pad and a new track are named after the sample's category, or its file. A
+sample with a measured pitch, unless its name says it is a drum, an effect or a
+loop, starts Held in a Sampler; the pitch is not written as its root note. The
+sample, the Sampler or the audio clip, a new track and a longer song are one
+undo step.
 
 The browser has Samples, Instruments, Audio Effects and Folders, with search at
 its top. Add Folder… registers one or more directories for every project and the

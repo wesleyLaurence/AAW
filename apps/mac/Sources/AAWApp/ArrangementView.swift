@@ -129,14 +129,14 @@ private enum ClipHit {
     }
 }
 
-/// Where a dragged file would land: a sample in the headers as a pad, and
-/// on the timeline as an audio clip at a beat; a MIDI file on the timeline
-/// as a note clip.
+/// Where a dragged file would land: a sample on the timeline as an audio
+/// clip at a beat, and in the headers in a Sampler on a MIDI track; a MIDI
+/// file on the timeline as a note clip. Never a pad.
 private enum DropTarget: Equatable {
-    /// As a pad of this track.
-    case pad(UInt64)
-    /// As a pad of a new track after the others.
-    case newTrack
+    /// In a Sampler on this MIDI track, in place of its instrument.
+    case sampler(UInt64)
+    /// In a Sampler on a new MIDI track after the others.
+    case newSampler
     /// As a clip of this track.
     case clip(track: UInt64, at: Double)
     /// As a clip of a new track after the others.
@@ -1690,21 +1690,25 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         draggingUpdated(sender)
     }
 
-    /// Where a sample at a point would land: in the headers as a pad, and
-    /// on the timeline as an audio clip at the grid line nearest the point,
-    /// or with `free` off the grid.
+    /// Where a sample at a point would land: on the timeline as an audio
+    /// clip at the grid line nearest the point, or with `free` off the grid;
+    /// in the headers in a Sampler on a MIDI track, on another track's header
+    /// as an audio clip at the start position, and under the tracks in a
+    /// Sampler on a new MIDI track.
     private func landing(at p: CGPoint, free: Bool) -> DropTarget {
-        var track: UInt64?
-        if p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id { track = key }
+        var track: TrackView?
+        if p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id {
+            track = model.arrangement.tracks.first { $0.key == key }
+        }
         if p.x < TimelineLayout.headerWidth {
-            // In the headers it is a sound for patterns to play.
-            return track.map { .pad($0) } ?? .newTrack
+            guard let track else { return .newSampler }
+            return track.midi ? .sampler(track.key) : .clip(track: track.key, at: model.transport.cue)
         }
         let beat = snappedBeat(atX: p.x, free: free)
         // A MIDI track holds note clips only: an audio clip dropped on one
         // lands on a new track.
-        if let key = track, model.arrangement.tracks.first(where: { $0.key == key })?.midi == true { return .newClip(at: beat) }
-        return track.map { .clip(track: $0, at: beat) } ?? .newClip(at: beat)
+        guard let track, !track.midi else { return .newClip(at: beat) }
+        return .clip(track: track.key, at: beat)
     }
 
     /// Where a MIDI file at a point would land: on a MIDI track's lane as a
@@ -1728,13 +1732,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             switch target {
             case .clip(let track, let at): model.importMIDI(path: path, to: track, at: at)
             case .newClip(let at): model.importMIDI(path: path, to: nil, at: at)
-            case .pad, .newTrack: break
+            case .sampler, .newSampler: break
             }
             return
         }
         switch target {
-        case .pad(let track): model.addSample(path: path, name: name, note: note, to: track)
-        case .newTrack: model.addSample(path: path, name: name, note: note, to: nil)
+        case .sampler(let track): model.addSampler(path: path, name: name, note: note, to: track)
+        case .newSampler: model.addSampler(path: path, name: name, note: note, to: nil)
         case .clip(let track, let at): model.addClip(path: path, name: name, note: note, to: track, at: at)
         case .newClip(let at): model.addClip(path: path, name: name, note: note, to: nil, at: at)
         }
@@ -2024,17 +2028,25 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         fill(CGRect(x: header - 1, y: 0, width: 1, height: bounds.height), Theme.separator)
         fill(CGRect(x: 0, y: ruler - 1, width: bounds.width, height: 1), Theme.separator)
 
-        // Where a dragged file would land: in a track's header as a pad, on
-        // its lane as a clip, or under the tracks on a new track.
+        // Where a dragged file would land: in a MIDI track's header, in its
+        // Sampler; on a lane as a clip; or under the tracks on a new track,
+        // drawn as the header the new MIDI track would have, so that it is
+        // told from the line across the timeline that a new audio track is.
         let under = max(ruler, layout.y(tracksHeight))
         switch dropTarget {
-        case .pad(let key):
+        case .sampler(let key):
             if let frame = frame(of: .track(key)) {
                 let top = max(frame.top, ruler)
                 fill(CGRect(x: 0, y: top, width: header - 1, height: frame.top + frame.height - 1 - top), Theme.insertion.withAlphaComponent(0.3))
             }
-        case .newTrack:
+        case .newSampler:
+            let band = CGRect(x: 0, y: under, width: header - 1, height: TimelineLayout.trackHeight - 1)
+            fill(band, Theme.insertion.withAlphaComponent(0.3))
             fill(CGRect(x: 0, y: under - 1.5, width: header - 1, height: 2), Theme.insertion)
+            if let name = dropName {
+                text(name, in: CGRect(x: 12, y: under + 8, width: header - 24, height: 16), font: Self.nameFont, color: Theme.text)
+                text("Sampler", in: CGRect(x: 12, y: under + 26, width: header - 24, height: 14), font: Self.smallFont, color: Theme.faintText)
+            }
         case .clip(let key, let at):
             if let frame = frame(of: .track(key)) { drawDropped(at: at, top: frame.top) }
         case .newClip(let at):
@@ -2091,6 +2103,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             shape.lineWidth = 1.5
             shape.stroke()
         }
+    }
+
+    /// What the dragged file is called, as a new track would be named.
+    private var dropName: String? {
+        if let sample = model.browser.dragged { return Browser.padName(of: sample) }
+        return dropFile.map { URL(fileURLWithPath: $0.path).deletingPathExtension().lastPathComponent }
     }
 
     /// The beats the dragged file would cover: a MIDI file's clip, or an
