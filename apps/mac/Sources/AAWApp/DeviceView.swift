@@ -285,6 +285,9 @@ struct DeviceView: View {
     }
 }
 
+/// The strip between two devices: an effect from the browser dropped here
+/// goes in at this place, and so does a copy of an effect dragged by its
+/// title with Option held.
 private struct DeviceInsertion: View {
     let model: SongModel
     let row: RowID
@@ -295,13 +298,65 @@ private struct DeviceInsertion: View {
         RoundedRectangle(cornerRadius: 2)
             .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
             .frame(width: 12, height: model.detailHeight - 54)
-            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 }, isTargeted: $targeted) { providers in
-                guard let provider = providers.first,
-                      let kind = DeviceChain.kinds.first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }) else { return false }
-                model.addBrowserDevice(kind, to: row, index: index)
-                return true
-            }
-            .help("Drop an effect here")
+            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [DeviceChain.effectType],
+                    delegate: InsertionDrop(model: model, row: row, index: index, targeted: $targeted))
+            .help("Drop an effect here; with Option, a copy of one dragged from its title")
+    }
+}
+
+/// What lands on an insertion strip: a kind from the browser, or with
+/// Option a copy of an effect dragged from the device panel. Without Option
+/// that drag is refused, so that the strip does not light up for a move
+/// nothing makes.
+private struct InsertionDrop: DropDelegate {
+    let model: SongModel
+    let row: RowID
+    let index: UInt32
+    @Binding var targeted: Bool
+
+    private func kind(of info: DropInfo) -> String? {
+        DeviceChain.kinds.first { info.hasItemsConforming(to: [Browser.deviceType + "." + $0]) }
+    }
+
+    private var copying: Bool {
+        NSEvent.modifierFlags.contains(.option)
+    }
+
+    private func accepts(_ info: DropInfo) -> Bool {
+        kind(of: info) != nil || (info.hasItemsConforming(to: [DeviceChain.effectType]) && copying)
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        kind(of: info) != nil || info.hasItemsConforming(to: [DeviceChain.effectType])
+    }
+
+    func dropEntered(info: DropInfo) {
+        targeted = accepts(info)
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let ok = accepts(info)
+        if targeted != ok { targeted = ok }
+        return DropProposal(operation: ok ? .copy : .cancel)
+    }
+
+    func dropExited(info: DropInfo) {
+        targeted = false
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        targeted = false
+        if let kind = kind(of: info) {
+            model.addBrowserDevice(kind, to: row, index: index)
+            return true
+        }
+        guard copying, let provider = info.itemProviders(for: [DeviceChain.effectType]).first else { return false }
+        let (model, row, index) = (model, row, index)
+        provider.loadDataRepresentation(forTypeIdentifier: DeviceChain.effectType) { data, _ in
+            guard let data, let key = String(data: data, encoding: .utf8).flatMap(UInt64.init) else { return }
+            DispatchQueue.main.async { model.copyEffect(key, to: row, index: index) }
+        }
+        return true
     }
 }
 
@@ -464,7 +519,9 @@ private struct InstrumentPanel: View {
 }
 
 /// One effect: its name, the marks that bypass, move and remove it, and a
-/// control for each of its fields.
+/// control for each of its fields. A click on its title selects it, for
+/// Copy, Duplicate and Delete; a drag from the title with Option copies it
+/// onto a header or an insertion strip; a right click offers the same.
 private struct DevicePanel: View {
     let model: SongModel
     let chain: DeviceChain
@@ -474,6 +531,23 @@ private struct DevicePanel: View {
     private var title: String {
         let kind = readable(effect.kind)
         return effect.id.map { "\(kind) · \($0)" } ?? kind
+    }
+
+    private var selected: Bool {
+        model.selectedEffect == effect.key
+    }
+
+    /// Does what an item of the effect's menu says, to this effect.
+    private func act(_ action: ContextMenu.EffectAction) {
+        model.select(effect: effect.key)
+        switch action {
+        case .cut: model.cutSelection(in: .clips)
+        case .copy: model.copySelection(in: .clips)
+        case .paste: model.paste(in: .clips)
+        case .duplicate: model.duplicateSelection()
+        case .bypass: model.edit(.effectBypass(effect: effect.key, on: !effect.bypass))
+        case .delete: model.deleteSelection()
+        }
     }
 
     var body: some View {
@@ -521,7 +595,28 @@ private struct DevicePanel: View {
             .font(.system(size: 10))
             .padding(.horizontal, 7)
             .frame(height: 24)
-            .background(Color(nsColor: Theme.gray(0.24)))
+            .background(Color(nsColor: selected ? Theme.gray(0.3) : Theme.gray(0.24)))
+            .contentShape(Rectangle())
+            .onTapGesture { model.select(effect: effect.key) }
+            .onDrag {
+                let provider = NSItemProvider()
+                let key = effect.key
+                provider.registerDataRepresentation(forTypeIdentifier: DeviceChain.effectType, visibility: .ownProcess) { completion in
+                    completion(Data(String(key).utf8), nil)
+                    return nil
+                }
+                return provider
+            }
+            .contextMenu {
+                ForEach(Array(ContextMenu.effect(bypassed: effect.bypass, copied: model.copiedEffectKind.map(readable)).enumerated()), id: \.offset) { _, item in
+                    if let action = item.action {
+                        Button(item.title) { act(action) }.disabled(!item.enabled)
+                    } else {
+                        Divider()
+                    }
+                }
+            }
+            .help("Click to select the effect; drag with Option to copy it onto a header or between devices")
 
             Group {
                 if effect.kind == "eq" {
@@ -556,6 +651,7 @@ private struct DevicePanel: View {
         .frame(width: effect.kind == "eq" ? 376 : 216, height: model.detailHeight - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))
     }
 }
 

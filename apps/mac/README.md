@@ -206,6 +206,9 @@ front first.
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
 | Click a bar's number | Opens a field over it with the number selected, as the tempo's: type a value, in the bar's unit or without it (`880`, `2.5k`, `-6 dB`), and Return or a click elsewhere applies it, held to the bar's range; Escape cancels. Every bar has it: an effect's fields, the Synth's knobs, a Sampler's pad, an audio clip's gain, a pattern's swing and a note's or an event's velocity |
 | The marks in a device's title | Bypass, move earlier or later in the chain, remove; an equalizer also adds a band |
+| Click an effect's title | Selects the effect, outlined in the accent color, in place of the clips; the row stays selected. ⌘C, ⌘X, ⌘D and Delete then act on it while the devices show: a copy, a copy right after it with no id, or its removal. ⌘V pastes the copied effect on the selected row, or else the one whose devices show, after the selected effect of that row or last in its chain, and shows it. A copy has every field of the original, and its id where the chain has no effect of that name; a copy the host refuses, such as a compressor keyed from the track it lands on, is refused with the reason |
+| Drag an effect's title with Option | Copies the effect onto the header it lands on, any track, return or the master, at the end of that chain, or between two devices where the strip lights up. Without Option it lands nowhere; the ◂ ▸ marks move an effect in its chain |
+| Right-click or Control-click an effect's title | Selects it and offers Cut, Copy, Paste After, Duplicate, Bypass and Delete, each as the menus do them |
 | The diamond by a field | Adds a lane for the field, or removes it; filled while a lane moves the field |
 | ⌥⌘D, ⌥⌘P | Show the devices or the pattern in the detail panel, or hide the panel when it shows them already |
 | Click a step | Turns it on or off; a drag along the row takes the steps it passes with it. A drag up or down on a step that is on sets how hard it plays, 1 to 9 |
@@ -459,7 +462,10 @@ wave or an LFO and 56 for the filter or an envelope. A key pressed by
   list are read when they are shown and when the window comes to the front,
   not while a terminal saves one in front of them.
 - What Copy took is kept in the window, not on the system's clipboard, and is
-  pasted into the same song.
+  pasted into the same song. A copied effect comes without the lanes that
+  automated it, and an effect of a Synth's own chain is not copied, dragged
+  or duplicated; the patch's + menu adds one. An effect is not moved to
+  another row by dragging.
 - A row of notes shows the notes its events play with two more either side; a
   drag goes as far as that, and the arrow keys further.
 - A sample is played from its file by the system, not through the song's
