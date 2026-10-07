@@ -771,7 +771,8 @@
                 "limiter": "#/$defs/Limiter",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
-                "saturation": "#/$defs/Saturation"
+                "saturation": "#/$defs/Saturation",
+                "utility": "#/$defs/Utility"
               },
               "propertyName": "type"
             },
@@ -799,6 +800,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Utility"
               }
             ]
           },
@@ -886,7 +890,8 @@
                 "limiter": "#/$defs/Limiter",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
-                "saturation": "#/$defs/Saturation"
+                "saturation": "#/$defs/Saturation",
+                "utility": "#/$defs/Utility"
               },
               "propertyName": "type"
             },
@@ -914,6 +919,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Utility"
               }
             ]
           },
@@ -1548,7 +1556,8 @@
                 "limiter": "#/$defs/Limiter",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
-                "saturation": "#/$defs/Saturation"
+                "saturation": "#/$defs/Saturation",
+                "utility": "#/$defs/Utility"
               },
               "propertyName": "type"
             },
@@ -1576,6 +1585,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Utility"
               }
             ]
           },
@@ -2029,7 +2041,8 @@
                 "limiter": "#/$defs/Limiter",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
-                "saturation": "#/$defs/Saturation"
+                "saturation": "#/$defs/Saturation",
+                "utility": "#/$defs/Utility"
               },
               "propertyName": "type"
             },
@@ -2057,6 +2070,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Utility"
               }
             ]
           },
@@ -2236,7 +2252,8 @@
                 "limiter": "#/$defs/Limiter",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
-                "saturation": "#/$defs/Saturation"
+                "saturation": "#/$defs/Saturation",
+                "utility": "#/$defs/Utility"
               },
               "propertyName": "type"
             },
@@ -2264,6 +2281,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Utility"
               }
             ]
           },
@@ -2418,6 +2438,90 @@
         "type"
       ],
       "title": "Saturation",
+      "type": "object"
+    },
+    "Utility": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "utility",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "width_percent": {
+          "default": 100,
+          "maximum": 400,
+          "minimum": 0,
+          "title": "Width Percent",
+          "type": "number"
+        },
+        "mono": {
+          "default": false,
+          "title": "Mono",
+          "type": "boolean"
+        },
+        "mono_below_hz": {
+          "anyOf": [
+            {
+              "maximum": 1000,
+              "minimum": 20,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mono Below Hz"
+        },
+        "invert": {
+          "default": "none",
+          "enum": [
+            "none",
+            "left",
+            "right",
+            "both"
+          ],
+          "title": "Invert",
+          "type": "string"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Utility",
       "type": "object"
     }
   },

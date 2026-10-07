@@ -2104,6 +2104,42 @@ pub struct Saturation {
     pub bypass: bool,
 }
 
+/// Which channels a utility flips the polarity of.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Invert {
+    None,
+    Left,
+    Right,
+    Both,
+}
+
+impl Invert {
+    pub const NAMES: [&'static str; 4] = ["none", "left", "right", "both"];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Invert::None => "none",
+            Invert::Left => "left",
+            Invert::Right => "right",
+            Invert::Both => "both",
+        }
+    }
+}
+
+/// A utility: gain, pan, width, mono below a frequency or altogether, and
+/// polarity, the small channel moves that need no other device.
+#[derive(Clone, Debug)]
+pub struct Utility {
+    pub id: Option<String>,
+    pub gain_db: f64,
+    pub pan: f64,
+    pub width_percent: f64,
+    pub mono: bool,
+    pub mono_below_hz: Option<f64>,
+    pub invert: Invert,
+    pub bypass: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum Effect {
     Filter(Filter),
@@ -2114,9 +2150,10 @@ pub enum Effect {
     Reverb(Reverb),
     Chorus(Chorus),
     Saturation(Saturation),
+    Utility(Utility),
 }
 
-pub const EFFECT_TYPES: [&str; 8] = ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation"];
+pub const EFFECT_TYPES: [&str; 9] = ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation", "utility"];
 
 impl PartialEq for Effect {
     /// Two effects are equal when the song would write them the same.
@@ -2136,6 +2173,7 @@ impl Effect {
             Effect::Reverb(_) => "reverb",
             Effect::Chorus(_) => "chorus",
             Effect::Saturation(_) => "saturation",
+            Effect::Utility(_) => "utility",
         }
     }
 
@@ -2149,6 +2187,7 @@ impl Effect {
             Effect::Reverb(e) => e.id.as_deref(),
             Effect::Chorus(e) => e.id.as_deref(),
             Effect::Saturation(e) => e.id.as_deref(),
+            Effect::Utility(e) => e.id.as_deref(),
         }
     }
 
@@ -2162,6 +2201,7 @@ impl Effect {
             Effect::Reverb(e) => e.bypass,
             Effect::Chorus(e) => e.bypass,
             Effect::Saturation(e) => e.bypass,
+            Effect::Utility(e) => e.bypass,
         }
     }
 
@@ -2195,7 +2235,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb', 'chorus', 'saturation'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb', 'chorus', 'saturation', 'utility'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2221,6 +2261,7 @@ impl Effect {
             ],
             "chorus" => &["type", "id", "rate_hz", "depth_ms", "delay_ms", "mix_percent", "bypass"],
             "saturation" => &["type", "id", "mode", "drive_db", "output_db", "mix_percent", "bypass"],
+            "utility" => &["type", "id", "gain_db", "pan", "width_percent", "mono", "mono_below_hz", "invert", "bypass"],
             _ => &[
                 "type", "id", "decay_seconds", "predelay_ms", "damping_hz", "lowcut_hz",
                 "width_percent", "mix_percent", "seed", "bypass",
@@ -2370,6 +2411,36 @@ impl Effect {
                     }))
                 })()
             }
+            "utility" => {
+                let gain_db = float(ctx, "gain_db", 0.0, Bounds::ge_le("-96", "24"));
+                let pan = float(ctx, "pan", 0.0, Bounds::ge_le("-1", "1"));
+                let width_percent = float(ctx, "width_percent", 100.0, Bounds::ge_le("0", "400"));
+                let mono = f.opt(ctx, "mono", false, v::boolean);
+                let mono_below_hz = f.opt(ctx, "mono_below_hz", None, |c, x| {
+                    v::optional(c, x, |c, x| v::float(c, x, Bounds::ge_le("20", "1000")))
+                });
+                let invert = f.opt(ctx, "invert", Invert::None, |c, x| {
+                    v::literal_str(c, x, &Invert::NAMES).map(|m| match m {
+                        "left" => Invert::Left,
+                        "right" => Invert::Right,
+                        "both" => Invert::Both,
+                        _ => Invert::None,
+                    })
+                });
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    Some(Effect::Utility(Utility {
+                        id: id?,
+                        gain_db: gain_db?,
+                        pan: pan?,
+                        width_percent: width_percent?,
+                        mono: mono?,
+                        mono_below_hz: mono_below_hz?,
+                        invert: invert?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
             _ => {
                 let decay_seconds = float(ctx, "decay_seconds", 1.5, Bounds::ge_le("0.1", "12"));
                 let predelay_ms = float(ctx, "predelay_ms", 10.0, Bounds::ge_le("0", "250"));
@@ -2480,6 +2551,14 @@ impl Effect {
                 o.float("drive_db", e.drive_db, 12.0);
                 o.float("output_db", e.output_db, 0.0);
                 o.float("mix_percent", e.mix_percent, 100.0);
+            }
+            Effect::Utility(e) => {
+                o.float("gain_db", e.gain_db, 0.0);
+                o.float("pan", e.pan, 0.0);
+                o.float("width_percent", e.width_percent, 100.0);
+                o.bool("mono", e.mono, false);
+                o.opt("mono_below_hz", e.mono_below_hz.map(Value::Float));
+                o.str("invert", e.invert.as_str(), "none");
             }
         }
         o.bool("bypass", self.bypass(), false);

@@ -127,6 +127,29 @@ def test_bypass_is_identity(tmp_path):
     assert report == [{"type": "filter", "bypass": True}]
 
 
+def test_utility_moves_the_channels(tmp_path):
+    t = np.arange(SR) / SR
+    bass = 0.4 * np.sin(2 * np.pi * 60 * t)
+    high = 0.3 * np.sin(2 * np.pi * 2000 * t)
+    x = np.column_stack([bass + high, bass])
+    rest, report = run_chain(tmp_path / "rest", [{"type": "utility"}], x)
+    assert np.array_equal(rest, x.astype(np.float32))
+    assert report == [{"type": "utility", "latency_frames": 0}]
+    quiet, _ = run_chain(tmp_path / "quiet", [{"type": "utility", "gain_db": -6}], x)
+    assert abs(level_db(quiet) - level_db(x) + 6) < 0.01
+    mono, _ = run_chain(tmp_path / "mono", [{"type": "utility", "mono": True}], x)
+    assert np.allclose(mono[:, 0], mono[:, 1]) and np.allclose(mono[:, 0], x.mean(axis=1), atol=1e-6)
+    flipped, _ = run_chain(tmp_path / "flipped", [{"type": "utility", "invert": "left"}], x)
+    assert np.allclose(flipped[:, 0], -x[:, 0], atol=1e-6) and np.allclose(flipped[:, 1], x[:, 1], atol=1e-6)
+    # Below 200 Hz the bass is in both channels alike; the 2 kHz tone stays on the left.
+    below, _ = run_chain(tmp_path / "below", [{"type": "utility", "mono_below_hz": 200}], x)
+    tail = below[SR // 2 :]
+    assert np.allclose(np.sqrt(np.mean(tail**2, axis=0)), [0.3 / np.sqrt(2) * np.sqrt(1 + (0.4 / 0.3) ** 2), 0.4 / np.sqrt(2)], atol=0.01)
+    difference = tail[:, 0] - tail[:, 1]
+    assert abs(np.sqrt(np.mean(difference**2)) - 0.3 / np.sqrt(2)) < 0.005, "the difference is the high tone alone"
+    assert abs(np.corrcoef(difference, bass[SR // 2 :])[0, 1]) < 0.02, "no bass is left in it"
+
+
 @pytest.fixture
 def beat(tmp_path):
     t = np.arange(SR // 4) / SR

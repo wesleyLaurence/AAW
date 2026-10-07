@@ -195,6 +195,17 @@ const SATURATION: &[Field] = &[
     number("mix_percent", "Mix", 0.0, 100.0, 100.0, "%"),
 ];
 
+/// A utility's fields. `mono`, `mono_below_hz` and `invert` change the
+/// device's structure, so a playing song fades through them.
+const UTILITY: &[Field] = &[
+    number("gain_db", "Gain", -96.0, 24.0, 0.0, "dB"),
+    number("pan", "Pan", -1.0, 1.0, 0.0, ""),
+    number("width_percent", "Width", 0.0, 400.0, 100.0, "%"),
+    flag("mono", "Mono", false),
+    optional(structural(log(number("mono_below_hz", "Mono below", 20.0, 1000.0, 0.0, "Hz"))), 120.0),
+    choice("invert", "Invert", &crate::schema::Invert::NAMES, Initial::Text("none")),
+];
+
 /// The fields of a sampler's pad that the Sampler device sets, in the order
 /// the document writes them: what shapes how one sample plays on the keys.
 /// `start_seconds` and `end_seconds` go as far as the pad's file does, which
@@ -336,6 +347,7 @@ pub fn effect(kind: &str) -> &'static [Field] {
         "reverb" => REVERB,
         "chorus" => CHORUS,
         "saturation" => SATURATION,
+        "utility" => UTILITY,
         _ => &[],
     }
 }

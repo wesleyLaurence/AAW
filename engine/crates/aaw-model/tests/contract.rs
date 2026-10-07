@@ -30,6 +30,7 @@ tracks:
       - {type: reverb}
       - {type: chorus}
       - {type: saturation}
+      - {type: utility}
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
   - id: m
