@@ -779,6 +779,20 @@ struct BarSpec: Equatable {
 }
 
 extension BarSpec {
+    /// The value a person typed into the bar, held to its range and to whole
+    /// numbers where it has them; nil for text that is not a number.
+    func typed(_ text: String) -> Double? {
+        guard var value = ValueScale.parse(text, unit: unit) else { return nil }
+        if whole { value = value.rounded() }
+        return Swift.min(Swift.max(value, min), max)
+    }
+
+    /// A value as the field opened on the bar starts: the number alone, in
+    /// the bar's unit, so that what is shown can be typed back.
+    func typing(_ value: Double) -> String {
+        whole ? String(Int(value)) : ValueScale.plain(value)
+    }
+
     /// A numeric field of an effect.
     init(_ field: FieldView) {
         var value: Double?
@@ -810,8 +824,12 @@ struct KnobBar: NSViewRepresentable {
 /// sideways changes it, ten times finer with Shift; a double-click puts it
 /// back to its default. A value the song glides to is heard as it moves, each
 /// change an edit of one gesture; any other is sent when the drag ends, since
-/// each change would be a fade through silence.
-final class KnobBarView: NSView {
+/// each change would be a fade through silence. A click that does not move
+/// opens a field over the bar with the number selected, as the tempo's is:
+/// Return and a click elsewhere apply what was typed, held to the range, and
+/// Escape cancels. The bar keeps the second click of a double-click, so the
+/// field does not take the reset.
+final class KnobBarView: NSView, NSTextFieldDelegate {
     private let model: SongModel
     var edit: (Double) -> Edit
     var spec: BarSpec {
@@ -838,6 +856,9 @@ final class KnobBarView: NSView {
     /// The value shown ahead of the host.
     private var shown: Double?
     private var release = 0
+    /// The field a value is typed into, while it is open, and when it opened.
+    private var field: NSTextField?
+    private var opened: TimeInterval = 0
 
     init(model: SongModel, spec: BarSpec, edit: @escaping (Double) -> Edit) {
         self.model = model
@@ -869,8 +890,86 @@ final class KnobBarView: NSView {
         value ?? spec.initial ?? spec.min
     }
 
+    /// The bar's own box, 16 points high in the middle of its bounds.
+    private var box: CGRect {
+        bounds.insetBy(dx: 0, dy: (bounds.height - 16) / 2)
+    }
+
+    override func layout() {
+        super.layout()
+        field?.frame = box
+    }
+
+    /// While the field has just opened, the second click of a double-click is
+    /// the bar's, not the field's.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        if field != nil, ProcessInfo.processInfo.systemUptime - opened < NSEvent.doubleClickInterval,
+           bounds.contains(convert(point, from: superview)) {
+            return self
+        }
+        return super.hitTest(point)
+    }
+
+    /// Opens the field over the bar, with the value selected to be typed over.
+    private func beginTyping() {
+        guard field == nil, window != nil else { return }
+        let field = NSTextField(frame: box)
+        field.isBordered = false
+        field.drawsBackground = true
+        field.backgroundColor = Theme.control
+        field.textColor = Theme.text
+        field.font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+        field.alignment = .center
+        field.wantsLayer = true
+        field.layer?.cornerRadius = 3
+        field.layer?.masksToBounds = true
+        if let cell = field.cell as? NSTextFieldCell {
+            cell.usesSingleLineMode = true
+            cell.wraps = false
+            cell.isScrollable = true
+        }
+        field.stringValue = spec.typing(start)
+        field.delegate = self
+        addSubview(field)
+        self.field = field
+        opened = ProcessInfo.processInfo.systemUptime
+        field.selectText(nil)
+        needsDisplay = true
+    }
+
+    /// Closes the field: with `commit`, the typed value is set, held to the
+    /// range; `focus` gives the keys back to the arrangement.
+    private func endTyping(commit: Bool, focus: Bool) {
+        guard let field else { return }
+        self.field = nil
+        let typed = field.stringValue
+        field.abortEditing()
+        field.removeFromSuperview()
+        if commit, let value = spec.typed(typed), value != self.value {
+            shown = value
+            hold()
+            model.edit(edit(value))
+        }
+        needsDisplay = true
+        if focus { model.onFocus?() }
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        // Return gives the keys back; a click elsewhere has given them to
+        // what was clicked.
+        let movement = (notification.userInfo?["NSTextMovement"] as? Int).map { NSTextMovement(rawValue: $0) }
+        endTyping(commit: true, focus: movement == .return)
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        endTyping(commit: false, focus: true)
+        return true
+    }
+
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, let initial = spec.initial {
+            endTyping(commit: false, focus: true)
             drag = nil
             if value != initial {
                 shown = initial
@@ -904,7 +1003,11 @@ final class KnobBarView: NSView {
     override func mouseUp(with event: NSEvent) {
         guard let d = drag else { return }
         drag = nil
-        guard d.moved, let shown else { return }
+        if !d.moved {
+            beginTyping()
+            return
+        }
+        guard let shown else { return }
         if spec.live {
             model.endDrag()
         } else {
@@ -928,10 +1031,12 @@ final class KnobBarView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let box = bounds.insetBy(dx: 0, dy: (bounds.height - 16) / 2)
+        let box = box
         let shape = NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3)
         Theme.control.setFill()
         shape.fill()
+        // The field shows the value while it is open.
+        if field != nil { return }
         let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
         let style = NSMutableParagraphStyle()
         style.alignment = .center

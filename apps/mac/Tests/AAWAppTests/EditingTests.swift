@@ -238,4 +238,38 @@ final class EditingTests: XCTestCase {
         (off.value, off.initial, off.lane, off.live) = (.absent, .absent, nil, false)
         XCTAssertEqual(BarSpec(off), BarSpec(value: nil, min: 10, max: 20000, log: true, unit: "Hz", initial: nil, live: false, dimmed: false))
     }
+
+    func testATypedValueIsReadInTheControlsUnit() {
+        XCTAssertEqual(ValueScale.parse("800", unit: "Hz"), 800)
+        XCTAssertEqual(ValueScale.parse(" 800 Hz ", unit: "Hz"), 800)
+        XCTAssertEqual(ValueScale.parse("2.5k", unit: "Hz"), 2500)
+        XCTAssertEqual(ValueScale.parse("2.50 kHz", unit: "Hz"), 2500, "as the bar shows it")
+        XCTAssertEqual(ValueScale.parse("−6.0 dB", unit: "dB"), -6, "the minus a bar draws")
+        XCTAssertEqual(ValueScale.parse("-6", unit: "dB"), -6)
+        XCTAssertEqual(ValueScale.parse("50%", unit: "%"), 50)
+        XCTAssertEqual(ValueScale.parse("4:1", unit: ":1"), 4)
+        XCTAssertEqual(ValueScale.parse("0.25", unit: ""), 0.25)
+        XCTAssertNil(ValueScale.parse("", unit: "dB"))
+        XCTAssertNil(ValueScale.parse("loud", unit: "dB"))
+        XCTAssertNil(ValueScale.parse("inf", unit: "dB"))
+        XCTAssertNil(ValueScale.parse("12 Hz", unit: "dB"), "another unit")
+        XCTAssertNil(ValueScale.parse("2k", unit: "ms"), "thousands are for frequencies")
+    }
+
+    func testATypedValueIsHeldToTheBarsRange() {
+        let cutoff = BarSpec(value: 800, min: 10, max: 20000, log: true, unit: "Hz", initial: 1000)
+        XCTAssertEqual(cutoff.typed("2.5k"), 2500)
+        XCTAssertEqual(cutoff.typed("50000"), 20000)
+        XCTAssertEqual(cutoff.typed("0"), 10)
+        XCTAssertNil(cutoff.typed("x"))
+        XCTAssertEqual(cutoff.typing(800), "800")
+        XCTAssertEqual(cutoff.typing(180.5), "180.5")
+        let velocity = BarSpec(value: 100, min: 1, max: 127, initial: 100, whole: true)
+        XCTAssertEqual(velocity.typed("64.6"), 65)
+        XCTAssertEqual(velocity.typed("200"), 127)
+        XCTAssertEqual(velocity.typing(64), "64")
+        let gain = BarSpec(value: -3.25, min: -36, max: 24, unit: "dB", initial: 0)
+        XCTAssertEqual(gain.typed("−6 dB"), -6)
+        XCTAssertEqual(gain.typing(-3.25), "-3.25")
+    }
 }

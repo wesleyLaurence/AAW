@@ -204,6 +204,7 @@ front first.
 | Click × by a lane; + Lane | Removes the lane; offers the row's parameters that have none |
 | Add Effect, in the device panel | Adds an effect to the end of the chain, with a place to start |
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
+| Click a bar's number | Opens a field over it with the number selected, as the tempo's: type a value, in the bar's unit or without it (`880`, `2.5k`, `-6 dB`), and Return or a click elsewhere applies it, held to the bar's range; Escape cancels. Every bar has it: an effect's fields, the Synth's knobs, a Sampler's pad, an audio clip's gain, a pattern's swing and a note's or an event's velocity |
 | The marks in a device's title | Bypass, move earlier or later in the chain, remove; an equalizer also adds a band |
 | The diamond by a field | Adds a lane for the field, or removes it; filled while a lane moves the field |
 | ⌥⌘D, ⌥⌘P | Show the devices or the pattern in the detail panel, or hide the panel when it shows them already |
