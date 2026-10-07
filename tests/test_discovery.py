@@ -41,6 +41,8 @@ def test_describe_is_short_and_keeps_the_schema_for_the_asking():
     assert synth["fields"]["width_mode"] == "alternate|pitch|random, default alternate"
     assert "width_mode" in synth["semantics"]["width"]
     assert daw("describe", "effects")["fields"]["limiter.ceiling_db"] == "number -24..-0.1, default -1"
+    # The app's File > Export Audio... is the same export, and the topic says so.
+    assert "Export Audio" in daw("describe", "export")["semantics"]["app"]
 
 
 def test_a_closed_pipe_ends_quietly():

@@ -200,6 +200,10 @@ public final class SongModel {
     public private(set) var sessionChanged = false
     /// The host shut down, as after `daw close`.
     public private(set) var closed = false
+    /// The name of the file File › Export Audio… is writing, while it runs.
+    public private(set) var exporting: String?
+    /// What the last export made, or why it wrote nothing, until dismissed.
+    private(set) var exportOutcome: ExportOutcome?
     /// The position the transport bar shows.
     public var position: Double = 0
     public var showsActivity = true
@@ -270,6 +274,9 @@ public final class SongModel {
     /// Samples are copied into the project off the main thread, and off the
     /// queue of commands: a copy takes a moment, and a fader must not wait.
     @ObservationIgnored private let imports = DispatchQueue(label: "aaw.imports")
+    /// An export runs `daw export` as a process, off the main thread and off
+    /// the commands: a render takes a while, and the window stays usable.
+    @ObservationIgnored private let exports = DispatchQueue(label: "aaw.exports")
 
     /// A drag sends the host at most this many edits a second.
     static let dragRate = 30.0
@@ -1324,6 +1331,45 @@ public final class SongModel {
     /// Writes the notes of a note clip that play as a MIDI file.
     public func exportMIDI(clip: UInt64, to url: URL) throws {
         _ = try song.exportMidiClip(clip: clip, path: url.path)
+    }
+
+    /// The folder File › Export Audio… opens in: `exports/` beside the song
+    /// file, which a project with a name keeps its deliverables in.
+    var exportsFolder: URL {
+        url.deletingLastPathComponent().appendingPathComponent("exports", isDirectory: true)
+    }
+
+    /// Writes the mix as `file` with the bundle's `daw export`, off the main
+    /// thread, and shows what it measured, or why it wrote nothing, until
+    /// dismissed. The export is of the song as the host last saved it, which
+    /// is the song in the window, and changes nothing in it. `replace`
+    /// writes over a file that is there, which the panel asked about. One
+    /// export runs at a time.
+    func export(to file: URL, options: ExportOptions, replace: Bool, then: (@MainActor (ExportOutcome) -> Void)? = nil) {
+        let name = file.lastPathComponent
+        guard exporting == nil else {
+            refuse("\(exporting ?? "An export") is still being written; export again when it is done")
+            return
+        }
+        exporting = name
+        exportOutcome = nil
+        let arguments = options.arguments(project: url.path, to: file.path, replace: replace)
+        let daw = Exporter.daw
+        exports.async { [weak self] in
+            let outcome = Exporter.run(daw: daw, arguments: arguments, file: name)
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.exporting = nil
+                    self.exportOutcome = outcome
+                    then?(outcome)
+                }
+            }
+        }
+    }
+
+    func dismissExport() {
+        exportOutcome = nil
     }
 
     /// Copies a sample file into the project, off the main thread, and hands

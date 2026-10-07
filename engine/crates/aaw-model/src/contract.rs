@@ -180,6 +180,7 @@ const EXPORT: &[(&str, &str)] = &[
     ("result", "level reports the policy, gain_db, held_back_db and the loudness, peak and true peak of the file and of the render. warnings say when the ceiling held a gain back, and when a compressed file's true peak is above -1 dBTP."),
     ("record", "PATH.json beside the file records its hash, format, level and the render it came from."),
     ("where", "Deliverables go in a folder the person keeps, such as the project's exports folder. renders is a cache."),
+    ("app", "In the Mac app, File > Export Audio... (shift-cmd-R) runs this same export from a save panel that opens in the project's exports folder, with the format (WAV 24- or 16-bit, AAC, MP3), the level (as rendered, --peak, --lufs or --gain) and the ceiling beside the name, and shows the measurements and warnings in a banner. The song does not change."),
 ];
 
 fn texts(items: &[(&str, &str)]) -> Json {

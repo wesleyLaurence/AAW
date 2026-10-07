@@ -139,6 +139,7 @@ describes all of this; in short:
 | Launch | Opens a blank project called Untitled, 120 BPM and 32 bars, kept in `Untitled/` of the app's data folder until it has a name. There is no welcome window, and closing the last window quits |
 | File › New (⌘N) | Another Untitled project, in a window of its own |
 | File › Open… (⌘O), Open Recent | A project's folder or its `song.yaml`. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there |
+| File › Export Audio… (⇧⌘R) | Asks for a name and a place, with the format (WAV 24- or 16-bit, AAC, MP3), the level (as rendered, a true peak, a loudness or a gain) and the ceiling under the name, and writes the mix there with the bundle's `daw export`, rendering first when the song has changed; the panel opens in the project's `exports` folder with the song's title as the name, asks about a file that is there, and offers the last format and level next time. The transport bar says "Exporting NAME…" while it runs and the window stays usable; a banner then shows the length, loudness, true peak, gain and warnings with Show in Finder, or the command's reason when nothing was written. The song does not change ([export in the app](../../docs/features/export-in-app.md)) |
 | File › Export MIDI Clip… (⇧⌘E) | With one note clip selected, asks for a name and a place and writes the notes that play as a MIDI file, as `daw midi export` does |
 | File › Save As… (⇧⌘S) | Asks for a name and a place. An Untitled project moves there. A project that has a name is copied, and the window carries on in the copy. Undo, the selection and what is playing carry on, and `daw` commands sent to the old path still land in the window |
 | Closing an Untitled project | One that holds nothing is deleted. One that holds something asks: Save…, Delete or Cancel. Quitting asks about each in turn |
@@ -151,7 +152,7 @@ front first.
 
 | Part | Shows |
 |---|---|
-| Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, length in bars, the timeline's grid as a note value with its menu, and "Agent editing" while an agent's changes land |
+| Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, length in bars, the timeline's grid as a note value with its menu, "Exporting NAME…" while File › Export Audio… writes a file, and "Agent editing" while an agent's changes land |
 | Ruler | The loop brace, section markers and bar numbers, with the start position as an orange marker |
 | Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; then the returns and the master. The A mark is orange when the row has automation |
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track, or of a track in a muted group, are gray, and selected clips are outlined. A group's lane shows its tracks' clips small, a strip a track, folded or not |
@@ -375,6 +376,7 @@ between the last of them and the picture:
 | `--type TEXT` | Types, as into a name |
 | `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there. In the detail panel, while it shows the devices of a MIDI track with a Sampler or no instrument, the file loads the Sampler |
 | `--wait SECONDS` | Leaves time, such as for a `daw` command from a terminal |
+| `--export PATH [--export-level LEVEL]` | After the actions, writes the mix as PATH, as File › Export Audio… does when its panel closes: the format is the extension's (`.wav` 24-bit, `.m4a`, `.mp3`) and the level `peak=-1`, `lufs=-14`, `gain=-3` or `rendered`, as rendered unless given. What the command reported is printed, then the picture is taken if one was asked for, with the banner in it, and the run quits; a file that is there is refused as the command refuses it, and a failed export says why on stderr and ends with status 1 |
 
 Run `daw` commands against the song meanwhile to see them land in the picture.
 A key that plays is heard on the speakers. Headers are 212 points wide and rows
@@ -445,6 +447,8 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/BrowserView.swift` | The browser: shared folders, sample search, the device lists, the Synth's patches and the effect racks |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
+| `Sources/AAWApp/Export.swift` | File › Export Audio…: the panel's choices as the arguments of the bundle's `daw export`, the command's result as the banner reads it, and the process that runs it off the main thread, tested in `Tests` |
+| `Sources/AAWApp/ExportPanel.swift` | The format, level and ceiling under the name in the Export Audio panel |
 | `Sources/AAWApp/Projects.swift` | The index of the projects the app knows, and what closing a project does, tested in `Tests` |
 | `Sources/AAWApp/App.swift` | The app delegate, menus, windows, launch, Save As…, closing and the command line |
 | `Sources/AAW` | The executable's entry point |
@@ -503,4 +507,8 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 - Save As… does not replace a folder that is already there.
 - Which groups are folded is kept by the window, not saved with the project,
   and a group is not dragged into another: a group is not in a group.
-- The app has no icon, and the Python tools are not in its bundle.
+- The app has no icon, and the Python tools are not in its bundle, so Export
+  Audio… needs the Python the bundle's `daw` finds, and says so where there is
+  none. It exports the whole mix only, one file at a time, and the transport
+  bar cannot tell the render from the writing: it says "Exporting" through
+  both.

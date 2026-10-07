@@ -8,8 +8,9 @@ import UniformTypeIdentifiers
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
 /// held), `--key KEY`, `--type TEXT` and `--wait SECONDS`
-/// in the order to perform them, then `--measure JSON [--frames N]` and
-/// `--snapshot PNG`, with `--after SECONDS` and `--size WxH`.
+/// in the order to perform them, then `--export PATH [--export-level
+/// LEVEL]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
+/// `--after SECONDS` and `--size WxH`.
 struct Launch {
     /// Input to feed the first window as if a person made it. Points are in
     /// the window's content, from its top left.
@@ -81,6 +82,13 @@ struct Launch {
     /// Seconds between the last action and the picture.
     var after: Double = 1
     var size: CGSize?
+    /// Write the mix here after the actions, as File › Export Audio… does
+    /// when its panel closes, then the picture if one was asked for, and
+    /// quit. The format is the extension's.
+    var export: URL?
+    /// The level of that export: `peak=-1`, `lufs=-14`, `gain=-3` or
+    /// `rendered`.
+    var exportLevel: ExportOptions.Level?
 
     init(arguments: [String]) {
         var rest = arguments[...]
@@ -123,6 +131,10 @@ struct Launch {
             case "--size":
                 let parts = (rest.popFirst() ?? "").split(separator: "x").compactMap { Double($0) }
                 if parts.count == 2 { size = CGSize(width: parts[0], height: parts[1]) }
+            case "--export":
+                export = rest.popFirst().map { URL(fileURLWithPath: $0) }
+            case "--export-level":
+                exportLevel = rest.popFirst().flatMap(ExportOptions.Level.parse)
             case _ where argument.hasPrefix("-"):
                 // A default AppKit reads itself, such as -NSQuitAlwaysKeepsWindows NO.
                 if argument.hasPrefix("-NS") || argument.hasPrefix("-Apple") { _ = rest.popFirst() }
@@ -160,7 +172,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private weak var front: SongWindowController?
     private var recentMenu = NSMenu(title: "Open Recent")
     /// A scripted run asks nothing: nobody is there to answer.
-    private var scripted: Bool { launch.snapshot != nil || launch.measure != nil }
+    private var scripted: Bool { launch.snapshot != nil || launch.measure != nil || launch.export != nil }
+    /// A scripted export failed: the run ends with that status after the picture.
+    private var exportFailed = false
 
     /// How many projects Open Recent lists.
     static let recentLimit = 15
@@ -197,11 +211,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             previous = action
         }
         let end = delay - 0.5 + launch.after
-        if let measure = launch.measure {
+        if let export = launch.export {
+            later(end) { $0.export(to: export) }
+        } else if let measure = launch.measure {
             later(end) { $0.measure(to: measure) }
         } else if let snapshot = launch.snapshot {
             later(end) { $0.snapshot(to: snapshot) }
         }
+    }
+
+    /// Writes the first song's mix where `--export` said, prints what the
+    /// command reported, then takes the picture if one was asked for and
+    /// quits; a failed export says why on stderr and ends the run with
+    /// status 1.
+    private func export(to url: URL) {
+        guard let controller = songs.first else { exit(1) }
+        var options = ExportOptions()
+        options.format = ExportOptions.Format(fileExtension: url.pathExtension) ?? .wav24
+        if let level = launch.exportLevel { options.level = level }
+        controller.model.export(to: url, options: options, replace: false) { [weak self] outcome in
+            switch outcome {
+            case .done(let report):
+                print("Exported \(report.file): \(report.measurements)")
+                for warning in report.warnings { print("Warning: \(warning)") }
+            case .failed(_, let reason):
+                FileHandle.standardError.write(Data("\(reason)\n".utf8))
+                self?.exportFailed = true
+            }
+            guard let self else { return }
+            if let snapshot = launch.snapshot {
+                later(launch.after) { $0.snapshot(to: snapshot) }
+            } else {
+                finishRun()
+            }
+        }
+    }
+
+    /// Ends a scripted run: as a quit, unless its export failed.
+    private func finishRun() {
+        if exportFailed { exit(1) }
+        NSApp.terminate(nil)
     }
 
     private func later(_ seconds: Double, _ body: @escaping @MainActor (AppDelegate) -> Void) {
@@ -479,7 +528,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             FileHandle.standardError.write(Data("\(error.localizedDescription)\n".utf8))
             exit(1)
         }
-        NSApp.terminate(nil)
+        finishRun()
     }
 
     // MARK: Menus
@@ -518,6 +567,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator(),
             item("Save As…", #selector(SongWindowController.saveDocumentAs(_:)), "S"),
             .separator(),
+            item("Export Audio…", #selector(SongWindowController.exportAudio(_:)), "R"),
             item("Export MIDI Clip…", #selector(SongWindowController.exportMIDIClip(_:)), "E"),
             .separator(),
             item("Close", #selector(NSWindow.performClose(_:)), "w"),
@@ -711,6 +761,42 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
 
     func windowWillClose(_ notification: Notification) {
         onClose?(self, finish())
+    }
+
+    /// File › Export Audio…: asks for a name and a place, with the format
+    /// and the level beside them, and writes the mix there with `daw
+    /// export`. The panel opens in the project's `exports` folder, made if
+    /// it is not there, with the song's title as the name, and asks about a
+    /// file that is there already, as every Mac app does. The format and
+    /// level chosen are offered next time.
+    @objc func exportAudio(_ sender: Any?) {
+        let panel = NSSavePanel()
+        let choice = ExportChoice(options: ExportOptions(defaults: .standard))
+        panel.title = "Export Audio"
+        panel.prompt = "Export"
+        panel.nameFieldLabel = "Name:"
+        panel.canCreateDirectories = true
+        panel.message = "The mix as one file at the level chosen below, with a record of what was measured beside it."
+        panel.allowedContentTypes = [choice.options.format.contentType]
+        panel.nameFieldStringValue = choice.options.fileName(title: model.arrangement.title)
+        if !model.untitled {
+            let folder = model.exportsFolder
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            panel.directoryURL = folder
+        }
+        // The format chooses the extension: the name follows it.
+        choice.onFormat = { [weak panel] format in
+            guard let panel else { return }
+            panel.allowedContentTypes = [format.contentType]
+            let name = (panel.nameFieldStringValue as NSString).deletingPathExtension
+            panel.nameFieldStringValue = "\(name).\(format.fileExtension)"
+        }
+        panel.accessoryView = NSHostingView(rootView: ExportAccessory(choice: choice))
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        choice.options.remember(in: .standard)
+        // The panel asked about a file that is there.
+        let replace = FileManager.default.fileExists(atPath: url.path)
+        model.export(to: url, options: choice.options, replace: replace)
     }
 
     /// File › Export MIDI Clip…: writes the selected note clip's notes as a
@@ -915,6 +1001,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(ungroupSelection(_:)): return model.canUngroup && !typing
         case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
         case #selector(exportMIDIClip(_:)): return model.exportableClip != nil && !typing
+        case #selector(exportAudio(_:)): return model.exporting == nil && !typing
         default: break
         }
         return true

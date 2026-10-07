@@ -18,6 +18,9 @@ struct SongView: View {
                     detail: invalid
                 )
             }
+            if let outcome = model.exportOutcome {
+                ExportBanner(model: model, outcome: outcome)
+            }
             HStack(spacing: 0) {
                 if model.showsBrowser {
                     BrowserView(model: model)
@@ -113,6 +116,72 @@ final class DetailResizerView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         Theme.separator.setFill()
         CGRect(x: bounds.minX, y: bounds.midY.rounded() - 0.5, width: bounds.width, height: 1).fill()
+    }
+}
+
+/// What File › Export Audio… came to: the file with its length, loudness,
+/// true peak and gain, with the command's warnings and a button that shows
+/// it in the Finder; or why nothing was written. It stays until dismissed.
+struct ExportBanner: View {
+    let model: SongModel
+    let outcome: ExportOutcome
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            switch outcome {
+            case .done(let report):
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Exported \(report.name)")
+                    Text(report.measurements)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    ForEach(report.warnings, id: \.self) { warning in
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .lineLimit(3)
+                    }
+                }
+                Spacer(minLength: 0)
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: report.file)])
+                }
+                .controlSize(.small)
+            case .failed(let file, let reason):
+                Image(systemName: "xmark.octagon.fill").foregroundStyle(.red)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(file) was not exported")
+                    // Limited, not fixed: a text sized to fit here grows the
+                    // window with it.
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(4)
+                        .textSelection(.enabled)
+                }
+                Spacer(minLength: 0)
+            }
+            Button {
+                model.dismissExport()
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 10, weight: .semibold))
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss")
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(tint.opacity(0.14))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Export")
+    }
+
+    private var tint: Color {
+        if case .failed = outcome { return .red }
+        return .green
     }
 }
 
@@ -213,6 +282,13 @@ struct TransportBar: View {
                 Image(systemName: "info.circle")
                     .foregroundStyle(.secondary)
                     .help(model.warnings.joined(separator: "\n"))
+            }
+            if let exporting = model.exporting {
+                HStack(spacing: 6) {
+                    ProgressView().controlSize(.small)
+                    Text("Exporting \(exporting)…").font(.system(size: 12))
+                }
+                .help("daw export is rendering the song if it has changed, then writing the file. The window stays usable.")
             }
             HStack(spacing: 6) {
                 Circle().fill(Who.agent.color).frame(width: 8, height: 8)
