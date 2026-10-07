@@ -1,7 +1,7 @@
 //! Offline export: the mix, stems, snapshot and `report.json` a render leaves, in
 //! the formats renders have always had, which `daw listen` and `daw compare` read.
 
-use crate::program::{amplitude, compile_scoped, Cache, Scope};
+use crate::program::{amplitude, compile_scoped, Cache, Scope, StemKind};
 use crate::render::{DeviceReport, Frame, Renderer};
 use crate::{sndfile, stretch, wav};
 use aaw_dsp::resample::{pairwise_sum, Resampler};
@@ -107,14 +107,14 @@ fn write_text(path: &Path, text: &str) -> Result<(), String> {
 
 /// The error for a mix that would clip: its peak, the loudest stems with
 /// theirs, and what to change, as paths and a command.
-fn clipped(p: &Project, peak: f64, names: &[(&str, bool)], peaks: &[f64]) -> String {
-    let mut loudest: Vec<(&(&str, bool), f64)> = names.iter().zip(peaks.iter().copied()).collect();
+fn clipped(p: &Project, peak: f64, names: &[(&str, StemKind)], peaks: &[f64]) -> String {
+    let mut loudest: Vec<(&(&str, StemKind), f64)> = names.iter().zip(peaks.iter().copied()).collect();
     loudest.sort_by(|a, b| b.1.total_cmp(&a.1));
     loudest.truncate(3);
     let stems: Vec<String> = loudest.iter().map(|((name, _), peak)| format!("{name} {:+.1}", db(*peak))).collect();
     let mut fixes = Vec::new();
-    if let Some(((name, is_return), _)) = loudest.first() {
-        fixes.push(format!("`{}.{name}.gain_db`", if *is_return { "returns" } else { "tracks" }));
+    if let Some(((name, kind), _)) = loudest.first() {
+        fixes.push(format!("`{}.{name}.gain_db`", kind.list()));
     }
     fixes.push("`session.master_gain_db`".to_string());
     let limited = p.master.effects.iter().any(|e| e.kind() == "limiter");
@@ -127,8 +127,8 @@ fn clipped(p: &Project, peak: f64, names: &[(&str, bool)], peaks: &[f64]) -> Str
     format!("Unsafe PCM export: the mix peaks at {:+.2} dBFS{stems}; {fix}", db(peak))
 }
 
-/// Renders a project the way `daw render` does: the whole song, one track or
-/// return as its stem, or one section.
+/// Renders a project the way `daw render` does: the whole song, one track,
+/// group or return as its stem, or one section.
 pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     if opts.block_size == 0 {
         return Err("block_size must be positive".into());
@@ -138,8 +138,8 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     let rate = p.session.sample_rate;
     let tempo = p.session.tempo;
     if let Some(t) = &opts.track {
-        if p.track(t).is_none() && !p.returns.iter().any(|r| &r.id == t) {
-            return Err(format!("Unknown track or return: {t}"));
+        if p.track(t).is_none() && p.group(t).is_none() && !p.returns.iter().any(|r| &r.id == t) {
+            return Err(format!("Unknown track, group or return: {t}"));
         }
     }
     let region = match &opts.section {
@@ -167,8 +167,8 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         return Err("MVP render limit is 15 minutes".into());
     }
     let directory = path.parent().unwrap_or(Path::new("."));
-    // A track or return preview is its stem: it needs the tracks that key or
-    // feed it, and omits the master chain.
+    // A track, group or return preview is its stem: it needs the tracks that
+    // key or feed it, and omits the master chain.
     let scope = opts.track.as_deref().map_or(Scope::Song, Scope::Channel);
     let program = Arc::new(compile_scoped(&p, directory, &mut Cache::default(), scope)?);
     let (first, last) = region.map_or((0, total), |(a, b)| (a, b));
@@ -321,14 +321,14 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         )
     });
     written?;
-    let (track_effects, patch_effects, return_effects, master_effects) = renderer.report();
+    let reports = renderer.report();
     let effects = |chain: &[DeviceReport]| Value::List(chain.iter().map(device_report).collect());
     let params = |lanes: &[String]| Value::List(lanes.iter().map(|l| Value::str(l)).collect());
     let mut track_reports = Vec::new();
     let mut stem = |name: &str, fields: Vec<(&str, Value)>| -> Result<(), String> {
         let index = names.iter().position(|(n, _)| *n == name).expect("a stem for each heard channel");
         let mut entry = vec![
-            ("kind", Value::str(if names[index].1 { "return" } else { "track" })),
+            ("kind", Value::str(names[index].1.name())),
             ("audio_sha256", Value::str(&hashes[index].clone()?)),
             ("peak_dbfs", Value::Float(db(peaks[index]))),
         ];
@@ -336,7 +336,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         track_reports.push((name.to_string(), dict(entry)));
         Ok(())
     };
-    // Stems are reported in document order: tracks, then returns.
+    // Stems are reported in document order: tracks, groups, then returns.
     for t in &p.tracks {
         let Some(ti) = program.tracks.iter().position(|x| x.id == t.id && x.in_mix) else {
             continue;
@@ -345,20 +345,33 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         let events = track.synth.as_ref().map_or(track.voices.len(), |s| s.notes.len());
         let mut fields = vec![
             ("events", Value::int(events as i64)),
-            ("effects", effects(&track_effects[ti])),
+            ("effects", effects(&reports.tracks[ti])),
         ];
-        if !patch_effects[ti].is_empty() {
-            fields.push(("instrument_effects", effects(&patch_effects[ti])));
+        if !reports.patches[ti].is_empty() {
+            fields.push(("instrument_effects", effects(&reports.patches[ti])));
         }
         if !track.automation.is_empty() {
             fields.push(("automation", params(&track.automation)));
         }
+        if let Some(g) = track.group {
+            fields.push(("group", Value::str(&program.groups[g].id)));
+        }
         stem(&t.id, fields)?;
+    }
+    for (gi, g) in program.groups.iter().enumerate().filter(|(_, g)| g.in_mix) {
+        let mut fields = vec![
+            ("tracks", Value::List(g.members.iter().map(|s| Value::str(s)).collect())),
+            ("effects", effects(&reports.groups[gi])),
+        ];
+        if !g.automation.is_empty() {
+            fields.push(("automation", params(&g.automation)));
+        }
+        stem(&g.id, fields)?;
     }
     for (ri, r) in program.returns.iter().enumerate() {
         let mut fields = vec![
             ("senders", Value::List(r.senders.iter().map(|s| Value::str(s)).collect())),
-            ("effects", effects(&return_effects[ri])),
+            ("effects", effects(&reports.returns[ri])),
         ];
         if !r.automation.is_empty() {
             fields.push(("automation", params(&r.automation)));
@@ -366,7 +379,11 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         stem(&r.id, fields)?;
     }
     let track_reports: Vec<(&str, Value)> = track_reports.iter().map(|(name, v)| (name.as_str(), v.clone())).collect();
-    let stems_sum = program.master.chain.devices.is_empty();
+    // Every stem sums to the mix without master effects, unless a grouped
+    // track's stem would count twice beside its group's.
+    let grouped = program.tracks.iter().any(|t| t.in_mix && t.group.is_some_and(|g| program.groups[g].in_mix));
+    let stems_sum = program.master.chain.devices.is_empty() && !grouped;
+    let master_effects = reports.master;
     let region_value = match region {
         Some((a, b)) => Value::List(vec![Value::int(a), Value::int(b)]),
         None => Value::None,
@@ -400,8 +417,8 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         ("master_effects", effects(&master_effects)),
         ("master_automation", params(&program.master.automation)),
         ("stems_sum_to_mix", Value::Bool(stems_sum)),
-        ("stem_policy", Value::str("post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, each return has its own stem; float WAV, same start and length")),
-        ("send_policy", Value::str("post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks send nothing; returns are never solo-muted")),
+        ("stem_policy", Value::str("post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, a grouped track's before its group, each group and each return has its own stem; the ungrouped tracks, the groups and the returns sum to the mix; float WAV, same start and length")),
+        ("send_policy", Value::str("post-fader sends tap after track gain and pan, pre-fader after inserts; muted or solo-muted tracks and groups send nothing; a muted group silences its tracks; returns are never solo-muted")),
         ("sidechain_policy", Value::str("key is the source track after its inserts, before its gain, pan, mute and solo")),
         ("automation_policy", Value::str("lanes override static values for the whole song, holding the first value before the first point and the last after the last point; a lane whose points share one value renders exactly as that static value; gain, pan and send levels change per frame, compressor, delay and reverb parameters per frame, filter and eq coefficients every 64 frames; no smoothing")),
         (

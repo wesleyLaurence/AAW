@@ -294,6 +294,8 @@ enum Top {
     #[command(subcommand)]
     Return(ReturnCmd),
     #[command(subcommand)]
+    Group(GroupCmd),
+    #[command(subcommand)]
     Clip(ClipCmd),
     #[command(subcommand)]
     Audio(AudioCmd),
@@ -355,6 +357,29 @@ enum ReturnCmd {
     /// Rename a return, its sends and their lanes.
     Rename { project: Song, id: String, to: String },
     Move { project: Song, id: String, index: usize },
+}
+
+/// Groups: tracks summed through a chain, gain and pan of their own, as a
+/// drum bus. A track names its group with group; daw set tracks.T.group G
+/// moves one track, and daw remove tracks.T.group takes it out.
+#[derive(Subcommand)]
+enum GroupCmd {
+    /// Add a group; --tracks a,b puts those tracks in it, moved together.
+    #[command(after_help = group_help())]
+    Add {
+        project: Song,
+        id: String,
+        /// The tracks in the group, by ID, comma-separated.
+        #[arg(long, value_delimiter = ',')]
+        tracks: Vec<String>,
+        #[command(flatten)]
+        f: FieldArgs,
+    },
+    /// Remove a group; its tracks go to the master again.
+    Remove { project: Song, group: String },
+    /// Rename a group and the tracks' group naming it.
+    Rename { project: Song, group: String, to: String },
+    Move { project: Song, group: String, index: usize },
 }
 
 /// Audio clips: parts of a sample file on a track, addressed by reference: @N
@@ -793,13 +818,14 @@ enum EffectCmd {
     },
 }
 
-/// Sends from a track to a return.
+/// Sends from a track or a group to a return.
 #[derive(Subcommand)]
 enum SendCmd {
-    /// Add or change a send: --gain-db, --pre-fader.
+    /// Add or change a send of a track or a group: --gain-db, --pre-fader.
     #[command(after_help = fields_help("Send", &["to"]))]
     Set {
         project: Song,
+        /// The track or group that sends.
         track: String,
         to: String,
         #[command(flatten)]
@@ -951,6 +977,15 @@ fn track_help() -> String {
         flag_line("type", "midi makes a MIDI track, which holds note clips and an instrument"),
         flag_line("index", "where among the tracks, 0 first; last unless given"),
         takes("Track", &["id"])
+    )
+}
+
+fn group_help() -> String {
+    format!(
+        "Fields:\n{}{}{}",
+        flag_line("tracks", "the tracks in it, comma-separated; moved together to where the first of them is"),
+        flag_line("index", "where among the groups, 0 first; last unless given"),
+        takes("Group", &["id"])
     )
 }
 
@@ -1581,6 +1616,36 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Group(g) => match g {
+            GroupCmd::Add { project, id, tracks, f } => {
+                let mut fields = fields(f)?;
+                let index = take_index(&mut fields)?;
+                edit(
+                    project,
+                    C::GroupAdd {
+                        id: id.clone(),
+                        index,
+                        tracks: tracks.clone(),
+                        fields,
+                    },
+                )
+            }
+            GroupCmd::Remove { project, group } => edit(project, C::GroupRemove { group: group.clone() }),
+            GroupCmd::Rename { project, group, to } => edit(
+                project,
+                C::GroupRename {
+                    group: group.clone(),
+                    to: to.clone(),
+                },
+            ),
+            GroupCmd::Move { project, group, index } => edit(
+                project,
+                C::GroupMove {
+                    group: group.clone(),
+                    index: *index,
+                },
+            ),
+        },
         Top::Audio(a) => match a {
             AudioCmd::Add { project, track, sample, f } => {
                 let mut all = Fields::new();
@@ -2176,6 +2241,7 @@ fn name(top: &Top) -> String {
         Top::Batch { .. } => "batch".into(),
         Top::Track(_) => group("track", ""),
         Top::Return(_) => group("return", ""),
+        Top::Group(_) => group("group", ""),
         Top::Clip(_) => group("clip", ""),
         Top::Audio(_) => group("audio", ""),
         Top::Note(_) => group("note", ""),

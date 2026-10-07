@@ -56,7 +56,7 @@ project's folder or the song file in it. It implements:
 | `daw audio add\|move\|cut\|split\|trim\|crossfade` | Audio clips on a track: parts of a sample file placed on beats and moved to another beat or track, a range removed with the gap closed, and the fades of a join |
 | `daw model PATH...` | Canonical YAML and fingerprints, or validation errors |
 | `daw schedule PROJECT` | Every hit's start frame, track, pad and release frame |
-| `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read |
+| `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read; `--track` takes a track, a group or a return |
 | `daw host PROJECT` | Runs a session host until interrupted or `daw close` |
 | `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output; see below |
 | `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device, and a compile, a recompile, building a renderer and each track's waveform peaks |
@@ -65,6 +65,7 @@ project's folder or the song file in it. It implements:
 | `daw map PROJECT [--per bar\|beat\|BARS] [--from BEAT] [--to BEAT] [--track T,...] [--lanes]` | The song as a grid of tracks by bars: a letter where a clip plays, the same letter for the same music, `#` where two clips of a track sound at once, `:` where a clip holds and nothing starts; the bars and sections above, a row a lane with `--lanes`, a legend of each letter and a line a track. `map` is the text as a list of lines and `clips` each letter's clips by reference. See [the arrangement map](../docs/features/arrangement-map.md) |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
+| `daw group add PROJECT ID [--tracks a,b] [--gain-db G]`, `daw group remove\|rename\|move` | A group of tracks, a bus between them and the master with effects, gain, pan, mute, solo and sends of its own: made of the tracks named, which are moved together to where the first of them is; removed with its tracks going back to the master; renamed with their `group` following. `daw set PROJECT tracks.T.group G` puts one track in, beside the others, and `daw remove tracks.T.group` takes it out; `daw send set` takes a group as it takes a track. See [groups](../docs/features/groups.md) |
 | `daw range copy PROJECT START LENGTH --to AT [--insert] [--track T]…`, `daw range insert PROJECT AT LENGTH`, `daw range delete PROJECT START LENGTH`, `daw range clear PROJECT START LENGTH`, `daw section duplicate PROJECT SECTION [--to AT] [--id ID]`, `daw section move\|remove PROJECT SECTION … --with-content` | A range of beats across every track, or the tracks named: its pattern clips, note clips, audio clips, lanes and sections copied over what is at AT or into time opened for it, empty beats opened, beats removed with the gap closed and the clips that meet there made one again, or the range emptied; a clip across an edge is cut there, a pattern clip only between repeats; a section with what is under it duplicated after itself, moved over what is at AT, or deleted. One undo step each; the reply lists what was made, split, moved and removed. See [editing a range of bars](../docs/features/bar-ranges.md) and `daw describe edit` |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
 | `daw clip loop PROJECT CLIP BEATS\|off [--length BEATS]` | A note clip or an audio clip looped: its first so many beats play again and again until its end, which `clip resize` or `audio trim --end` sets, the last repetition cut off; `off` plays it once again. The schedule unrolls the loop, each audio repetition a copy with the clip's fades at the wrap; a looped clip is split only at a wrap. See [looping clips](../docs/features/looping-clips.md) |
@@ -75,12 +76,13 @@ project's folder or the song file in it. It implements:
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
-repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the eight effects on tracks, returns
+repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the nine effects on tracks, groups, returns
 and the master, sidechains, pre- and post-fader sends, automation lanes, track
-gain, pan, mute and solo, master gain and the end fade. `render` writes the
-mix, a stem for each track and return, the snapshot and `report.json` with what
-each effect did; `--track` renders a track or a return as its stem, with only
-the tracks that key or feed it.
+and group gain, pan, mute and solo, master gain and the end fade. `render` writes the
+mix, a stem for each track, group and return, the snapshot and `report.json` with what
+each effect did; `--track` renders a track, a group or a return as its stem, with only
+the tracks that key or feed it. A grouped track's stem is its sound before its
+group, so the ungrouped tracks, the groups and the returns sum to the mix.
 
 ## The engine
 
@@ -105,8 +107,11 @@ stream is cut into blocks, and processing never allocates.
   partitioned and adds no latency.
 - **Latency.** Only the limiter delays its input. A track keyed by a source
   with latency renders its voices that much later, tracks are delayed to the
-  slowest before their faders and sends, and the output trails the transport by
-  the total; `daw status` reports it as `latency_frames`. An offline render
+  slowest before their faders and sends, a grouped track early by its group's
+  latency so that the group's output lands with the rest, and the output
+  trails the transport by the total; `daw status` reports it as
+  `latency_frames`. A grouped track's sends are delayed by its group's
+  latency, so that they land with the group's output. An offline render
   runs that much longer and places every stem on the timeline.
 - **A compile redoes only what changed.** Each track's voices, prepared pad
   audio and reverb kernels are kept from the last compile, so after a level or
@@ -198,6 +203,7 @@ log, handles and the transport need a host.
   several replies with each one's path.
 - **References stay valid.** Renaming a track renames the sidechains naming it;
   renaming or removing a return updates or removes its sends and their lanes;
+  renaming a group renames its tracks' `group`, and removing one frees them;
   inserting, moving or removing an effect rewrites or removes the lanes that
   address effects by index; a lane's last point takes the lane with it. Removing
   something still referenced, such as a pad a pattern plays, is refused.

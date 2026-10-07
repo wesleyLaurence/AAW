@@ -336,7 +336,7 @@ fn the_person_edits_the_mixer_in_the_same_history() {
     assert_eq!((u.change.origin, u.arrangement.tracks[1].gain_db), (Who::User, -3.0));
 
     song.edit(Edit::Mute { row: drums.clone(), on: true }, None).unwrap();
-    song.edit(Edit::Solo { track: start.tracks[1].key, on: true }, None).unwrap();
+    song.edit(Edit::Solo { row: Row::Track { key: start.tracks[1].key }, on: true }, None).unwrap();
     update(&seen);
     let a = update(&seen).arrangement;
     assert_eq!((a.tracks[0].mute, a.tracks[1].solo), (true, true));
@@ -350,14 +350,14 @@ fn the_person_edits_the_mixer_in_the_same_history() {
     assert!(song.edit(Edit::Pan { row: Row::Master, pan: 0.5 }, None).is_err());
 
     // Sends: a level adds the send, and removing it takes it away.
-    let send = |to: &str, db: f64| Edit::Send { track: start.tracks[1].key, to: to.into(), db };
+    let send = |to: &str, db: f64| Edit::Send { row: Row::Track { key: start.tracks[1].key }, to: to.into(), db };
     song.edit(send("plate", -9.0), None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Set send perc → plate");
     assert_eq!(u.arrangement.tracks[1].sends, [SendView { to: "plate".into(), gain_db: -9.0 }]);
     song.edit(send("plate", -8.5), None).unwrap();
     assert_eq!(update(&seen).arrangement.tracks[1].sends[0].gain_db, -8.5);
-    song.edit(Edit::SendRemove { track: start.tracks[1].key, to: "plate".into() }, None).unwrap();
+    song.edit(Edit::SendRemove { row: Row::Track { key: start.tracks[1].key }, to: "plate".into() }, None).unwrap();
     assert_eq!(update(&seen).arrangement.tracks[1].sends, []);
     // A refused edit changes nothing and reports why.
     let e = song.edit(send("nowhere", -9.0), None).unwrap_err().to_string();
@@ -2639,6 +2639,7 @@ fn browser_instruments_are_atomic_and_effects_insert_at_the_drop() {
         let u = update(&seen);
         let effects = match row {
             Row::Track { .. } => &u.arrangement.tracks[0].effects,
+            Row::Group { .. } => &u.arrangement.groups[0].effects,
             Row::Return { .. } => &u.arrangement.returns[0].effects,
             Row::Master => &u.arrangement.master.effects,
         };
@@ -2972,4 +2973,60 @@ fn an_equalizer_s_spectrum_is_read_for_its_panel() {
     );
     song.undo().unwrap();
     assert_eq!(field(&find(&song.arrangement()), "bands.1.freq_hz").value, number(1000.0), "one undo step");
+}
+
+#[test]
+fn groups_are_rows_over_their_tracks() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let ids = |a: &aaw_ffi::Arrangement| -> Vec<String> { a.tracks.iter().map(|t| t.id.clone()).collect() };
+    let start = song.arrangement();
+    assert!(start.groups.is_empty() && start.tracks.iter().all(|t| t.group.is_none()));
+    // ⌘G on the two tracks: a group under a free name, holding them.
+    let made = song.edit(Edit::GroupAdd { tracks: vec![start.tracks[1].key, start.tracks[0].key] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Group perc, drums as group-1");
+    let a = &u.arrangement;
+    assert_eq!(a.groups.len(), 1);
+    let group = &a.groups[0];
+    assert_eq!((group.key, group.id.as_str()), (made[0], "group-1"));
+    assert_eq!(group.tracks, [a.tracks[0].key, a.tracks[1].key]);
+    assert_eq!(ids(a), ["drums", "perc"], "already next to each other, so they stay");
+    assert!(a.tracks.iter().all(|t| t.group == Some(group.key)));
+    assert!(u.touched.contains(&Touch { part: Part::Group, key: group.key, delta: Delta::Added }));
+    // The group's header does what a track's does, and sends.
+    let row = Row::Group { key: group.key };
+    song.edit(Edit::Gain { row: row.clone(), db: -4.0 }, None).unwrap();
+    song.edit(Edit::Solo { row: row.clone(), on: true }, None).unwrap();
+    song.edit(Edit::Send { row: row.clone(), to: "plate".into(), db: -9.0 }, None).unwrap();
+    update(&seen);
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set send group-1 → plate");
+    let g = &u.arrangement.groups[0];
+    assert_eq!((g.gain_db, g.solo), (-4.0, true));
+    assert_eq!(g.sends, [SendView { to: "plate".into(), gain_db: -9.0 }]);
+    assert!(g.lane_targets.iter().any(|t| t.param == "sends.plate.gain_db"));
+    song.edit(Edit::EffectAdd { row: row.clone(), kind: "compressor".into(), index: None }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.groups[0].effects[0].kind, "compressor");
+    assert!(song.edit(Edit::Solo { row: Row::Return { key: start.returns[0].key }, on: true }, None).is_err());
+    // Renamed, its tracks follow; a track taken out goes to the master.
+    song.edit(Edit::Rename { row: row.clone(), to: "kit".into() }, None).unwrap();
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.drums.group"})), json!("kit"));
+    update(&seen);
+    song.edit(Edit::TrackGroup { track: start.tracks[1].key, group: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Take perc out of its group");
+    assert_eq!(u.arrangement.tracks[1].group, None);
+    assert_eq!(u.arrangement.groups[0].tracks, [start.tracks[0].key]);
+    song.edit(Edit::TrackGroup { track: start.tracks[1].key, group: Some(group.key) }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.groups[0].tracks.len(), 2);
+    // Ungrouped, the tracks stay and the group goes.
+    song.edit(Edit::Ungroup { group: group.key }, None).unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.groups.is_empty());
+    assert_eq!(ids(&u.arrangement), ["drums", "perc"]);
+    assert!(u.arrangement.tracks.iter().all(|t| t.group.is_none()));
+    assert!(u.touched.contains(&Touch { part: Part::Group, key: group.key, delta: Delta::Removed }));
+    song.close();
 }

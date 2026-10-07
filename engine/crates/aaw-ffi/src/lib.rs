@@ -360,6 +360,7 @@ impl Song {
             let (owner, index) = match loc.as_slice() {
                 [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => match list.as_str() {
                     "tracks" => (p.tracks.get(*i)?.id.clone(), *j),
+                    "groups" => (p.groups.get(*i)?.id.clone(), *j),
                     "returns" => (p.returns.get(*i)?.id.clone(), *j),
                     _ => return None,
                 },

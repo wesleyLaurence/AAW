@@ -853,8 +853,10 @@ impl<'a> Edit<'a> {
     fn lane_owners(&self, scope: &Scope) -> Vec<Loc> {
         let mut out = scope.tracks.clone();
         if scope.all {
-            for i in 0..self.root.get("returns").map_or(0, |n| n.items().len()) {
-                out.push(vec![Step::Key("returns".into()), Step::Index(i)]);
+            for key in ["groups", "returns"] {
+                for i in 0..self.root.get(key).map_or(0, |n| n.items().len()) {
+                    out.push(vec![Step::Key(key.into()), Step::Index(i)]);
+                }
             }
             out.push(vec![Step::Key("master".into())]);
         }
@@ -864,6 +866,7 @@ impl<'a> Edit<'a> {
     fn lane_domain(project: &Project, owner: &[Step], param: &str) -> Domain {
         let owner = match owner {
             [Step::Key(k), Step::Index(i)] if k == "tracks" => Owner::Track(&project.tracks[*i]),
+            [Step::Key(k), Step::Index(i)] if k == "groups" => Owner::Group(&project.groups[*i]),
             [Step::Key(k), Step::Index(i)] if k == "returns" => Owner::Return(&project.returns[*i]),
             _ => Owner::Master(&project.master),
         };

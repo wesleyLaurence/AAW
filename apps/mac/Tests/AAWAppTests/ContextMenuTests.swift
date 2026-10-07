@@ -13,11 +13,12 @@ final class ContextMenuTests: XCTestCase {
     func testATracksMenuHasRenameTheSettingsTheAddsAndDelete() {
         let items = ContextMenu.row(kind: .track, muted: false, soloed: false, lanesShown: false)
         XCTAssertEqual(actions(items), [
-            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .delete,
+            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .group, nil, .delete,
         ])
         XCTAssertEqual(titles(items), [
-            "Rename", "Mute", "Solo", "Show Automation", "Add Track", "Add MIDI Track", "Delete",
+            "Rename", "Mute", "Solo", "Show Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
         ])
+        XCTAssertEqual(items.first { $0.action == .group }?.key, "g")
         XCTAssertTrue(items.allSatisfy(\.enabled))
         // The keys the main menu has for the same things, shown beside them.
         XCTAssertEqual(items.first { $0.action == .rename }?.key, "r")
@@ -28,8 +29,24 @@ final class ContextMenuTests: XCTestCase {
     func testTheTitlesFollowWhatTheRowIsSetTo() {
         let items = ContextMenu.row(kind: .track, muted: true, soloed: true, lanesShown: true)
         XCTAssertEqual(titles(items), [
-            "Rename", "Unmute", "Unsolo", "Hide Automation", "Add Track", "Add MIDI Track", "Delete",
+            "Rename", "Unmute", "Unsolo", "Hide Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
         ])
+    }
+
+    func testAGroupedTrackLeavesItsGroupAndAGroupUngroups() {
+        let grouped = ContextMenu.row(kind: .track, muted: false, soloed: false, lanesShown: false, grouped: true)
+        XCTAssertEqual(actions(grouped), [
+            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .leaveGroup, nil, .delete,
+        ])
+        XCTAssertEqual(grouped.first { $0.action == .leaveGroup }?.title, "Remove from Group")
+        let group = ContextMenu.row(kind: .group, muted: false, soloed: true, lanesShown: false)
+        XCTAssertEqual(actions(group), [
+            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .ungroup, nil, .delete,
+        ])
+        XCTAssertEqual(titles(group), [
+            "Rename", "Mute", "Unsolo", "Show Automation", "Add Track", "Add MIDI Track", "Ungroup", "Delete",
+        ])
+        XCTAssertEqual(group.first { $0.action == .ungroup }?.key, "G")
     }
 
     func testAReturnHasNoSoloAndAddsAReturn() {

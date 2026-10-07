@@ -329,6 +329,17 @@ struct TrackState {
     /// post-fader one. A send uses one of them, and glides between them when
     /// it changes from one to the other.
     sends: Vec<[Glide; 2]>,
+    /// A grouped track's send taps, pre-fader and post-fader, delayed by its
+    /// group's latency so that its sends land with the group's output.
+    send_delay: [DelayLine; 2],
+}
+
+/// A group: the sum of its tracks, through its chain and strip.
+struct GroupState {
+    chain: Chain,
+    bus: Vec<Frame>,
+    strip: Strip,
+    sends: Vec<[Glide; 2]>,
 }
 
 struct ReturnState {
@@ -336,6 +347,16 @@ struct ReturnState {
     bus: Vec<Frame>,
     align: DelayLine,
     strip: Strip,
+}
+
+/// What each channel's effects did, for the render report.
+pub struct Reports {
+    /// Tracks in render order, and the patch effects of each track's Synth.
+    pub tracks: Vec<Vec<DeviceReport>>,
+    pub patches: Vec<Vec<DeviceReport>>,
+    pub groups: Vec<Vec<DeviceReport>>,
+    pub returns: Vec<Vec<DeviceReport>>,
+    pub master: Vec<DeviceReport>,
 }
 
 /// What a device did, for the render report.
@@ -388,6 +409,7 @@ pub struct Renderer {
     /// Frames over which voices picked up by the last seek fade in.
     ramp: usize,
     tracks: Vec<TrackState>,
+    groups: Vec<GroupState>,
     returns: Vec<ReturnState>,
     master_chain: Chain,
     master_gain: Glide,
@@ -396,6 +418,9 @@ pub struct Renderer {
     dry: Vec<Frame>,
     work: Vec<Frame>,
     post: Vec<Frame>,
+    /// A grouped track's send taps, delayed.
+    tap_pre: Vec<Frame>,
+    tap_post: Vec<Frame>,
     key: Vec<Frame>,
     values: [Vec<f64>; 5],
     /// Notes previewed through Samplers, in slots that are kept, finished or
@@ -481,6 +506,68 @@ fn mute(heard: &mut Glide, silent: bool, post: &mut [Frame], offsets: &mut [f64]
     }
 }
 
+/// Adds a channel's sends to the returns' buses: each from the pre-fader tap
+/// or the post-fader one at its level, which is evaluated at `at`, plus what
+/// is left of a glide. A silent channel sends nothing.
+#[allow(clippy::too_many_arguments)]
+fn sends(
+    programs: &[crate::program::SendProgram],
+    glides: &mut [[Glide; 2]],
+    silent: bool,
+    tap_pre: &[Frame],
+    tap_post: &[Frame],
+    returns: &mut [ReturnState],
+    at: i64,
+    step: i64,
+    level: &mut [f64],
+    offsets: &mut [f64],
+) {
+    let n = tap_pre.len();
+    let heard = if silent { 0.0 } else { 1.0 };
+    for (ri, send) in programs.iter().enumerate() {
+        if let Some(gain) = &send.level {
+            decibels(gain, at, step, &mut level[..n]);
+        }
+        let bus = &mut returns[ri].bus[..n];
+        for (pre, glide) in [true, false].into_iter().zip(&mut glides[ri]) {
+            let tap: &[Frame] = if pre { tap_pre } else { tap_post };
+            let sent = send.level.is_some() && send.pre_fader == pre;
+            let (first, last) = if sent { (heard * level[0], heard * level[n - 1]) } else { (0.0, 0.0) };
+            let moving = glide.offsets(first, last, &mut offsets[..n]);
+            if sent && !silent {
+                for i in 0..n {
+                    bus[i][0] += tap[i][0] * level[i];
+                    bus[i][1] += tap[i][1] * level[i];
+                }
+            }
+            if moving {
+                for i in 0..n {
+                    bus[i][0] += tap[i][0] * offsets[i];
+                    bus[i][1] += tap[i][1] * offsets[i];
+                }
+            }
+        }
+    }
+}
+
+/// Continues a channel's send glides from the old renderer's, gliding where
+/// a send's level or tap changed, or the channel's muting did.
+fn send_take_over(
+    glides: &mut [[Glide; 2]],
+    old_glides: &[[Glide; 2]],
+    programs: &[crate::program::SendProgram],
+    old_programs: &[crate::program::SendProgram],
+    muting: bool,
+) {
+    for (r, (send, old_send)) in glides.iter_mut().zip(old_glides).enumerate() {
+        for (pre, (glide, old_glide)) in [true, false].into_iter().zip(send.iter_mut().zip(old_send)) {
+            let level = |s: &crate::program::SendProgram| s.level.clone().filter(|_| s.pre_fader == pre);
+            let changed = level(&programs[r]) != level(&old_programs[r]) || muting;
+            glide.take_over(old_glide, changed);
+        }
+    }
+}
+
 impl Renderer {
     /// A renderer with its transport at `from`, with voices that started
     /// earlier and are still sounding picked up mid-sample, and every effect
@@ -504,8 +591,22 @@ impl Renderer {
                 align: DelayLine::new(t.align),
                 strip: Strip::new(fade),
                 sends: t.sends.iter().map(|_| [Glide::new(fade), Glide::new(fade)]).collect(),
+                send_delay: {
+                    let lead = t.group.map_or(0, |g| program.groups[g].lead);
+                    [DelayLine::new(lead), DelayLine::new(lead)]
+                },
             })
             .collect();
+        let groups = program
+            .groups
+            .iter()
+            .map(|g| GroupState {
+                chain: Chain::new(&g.chain, max_block, fade, &mut reverbs),
+                bus: vec![SILENCE; max_block],
+                strip: Strip::new(fade),
+                sends: g.sends.iter().map(|_| [Glide::new(fade), Glide::new(fade)]).collect(),
+            })
+            .collect::<Vec<_>>();
         let returns = program
             .returns
             .iter()
@@ -522,6 +623,7 @@ impl Renderer {
             fade,
             ramp: 0,
             tracks,
+            groups,
             returns,
             master_chain: Chain::new(&program.master.chain, max_block, fade, &mut reverbs),
             master_gain: Glide::new(fade),
@@ -529,6 +631,8 @@ impl Renderer {
             dry: vec![SILENCE; max_block],
             work: vec![SILENCE; max_block],
             post: vec![SILENCE; max_block],
+            tap_pre: vec![SILENCE; max_block],
+            tap_post: vec![SILENCE; max_block],
             key: vec![SILENCE; max_block],
             values: [0; 5].map(|_| vec![0.0; max_block]),
             previews: (0..PREVIEWS).map(|_| None).collect(),
@@ -650,8 +754,9 @@ impl Renderer {
     /// this one took over from, while its voices ring out.
     ///
     /// `stem` receives each heard track's block, in render order, then each
-    /// return's: after gain, pan, mute and solo and before the master gain and
-    /// end fade, with the timeline frame of the block's first frame.
+    /// heard group's, then each return's: after gain, pan, mute and solo and
+    /// before the master gain and end fade, with the timeline frame of the
+    /// block's first frame. A grouped track's block is before its group.
     pub fn process(
         &mut self,
         mix: &mut [Frame],
@@ -669,8 +774,12 @@ impl Renderer {
         let total = program.total as i64;
         let cursor = self.cursor as i64;
         let clock = |frame: i64| Clock { frame, step, total };
-        // The timeline the faders, sends and return inputs share.
+        // The timeline the faders, sends, group outputs and return inputs
+        // share.
         let aligned = cursor - program.track_offset as i64;
+        for g in &mut self.groups {
+            g.bus[..n].fill(SILENCE);
+        }
         for r in &mut self.returns {
             r.bus[..n].fill(SILENCE);
         }
@@ -709,41 +818,66 @@ impl Renderer {
             x.copy_from_slice(out);
             state.align.process(x);
 
+            // A grouped track's fader runs ahead of the timeline by its
+            // group's latency, so that its output reaches the group's input.
+            let lead = t.group.map_or(0, |g| program.groups[g].lead) as i64;
             let [left, right, level, ..] = &mut self.values;
-            levels(&t.gain, &t.pan, aligned, step, &mut left[..n], &mut right[..n], &mut level[..n]);
+            levels(&t.gain, &t.pan, aligned + lead, step, &mut left[..n], &mut right[..n], &mut level[..n]);
             let post = &mut self.post[..n];
             fade_strip(&mut state.strip, &*x, post, &mut self.values);
 
             // Sends tap after the inserts (pre-fader) or after gain and pan
-            // (post-fader). A muted or solo-muted track sends nothing.
+            // (post-fader), a grouped track's delayed to the timeline. A
+            // muted or solo-muted track sends nothing.
+            let (tap_pre, tap_post): (&[Frame], &[Frame]) = if lead > 0 {
+                let (pre, after) = (&mut self.tap_pre[..n], &mut self.tap_post[..n]);
+                pre.copy_from_slice(x);
+                after.copy_from_slice(post);
+                state.send_delay[0].process(pre);
+                state.send_delay[1].process(after);
+                (pre, after)
+            } else {
+                (x, post)
+            };
             let [level, offsets, ..] = &mut self.values;
-            let heard = if t.silent { 0.0 } else { 1.0 };
-            for (ri, send) in t.sends.iter().enumerate() {
-                if let Some(gain) = &send.level {
-                    decibels(gain, aligned, step, &mut level[..n]);
+            sends(&t.sends, &mut state.sends, t.silent, tap_pre, tap_post, &mut self.returns, aligned, step, level, offsets);
+            mute(&mut state.strip.heard, t.silent, post, &mut offsets[..n]);
+            if let Some(g) = t.group {
+                for (b, p) in self.groups[g].bus[..n].iter_mut().zip(post.iter()) {
+                    b[0] += p[0];
+                    b[1] += p[1];
                 }
-                let bus = &mut self.returns[ri].bus[..n];
-                for (pre, glide) in [true, false].into_iter().zip(&mut state.sends[ri]) {
-                    let tap: &[Frame] = if pre { &*x } else { &*post };
-                    let sent = send.level.is_some() && send.pre_fader == pre;
-                    let (first, last) = if sent { (heard * level[0], heard * level[n - 1]) } else { (0.0, 0.0) };
-                    let moving = glide.offsets(first, last, &mut offsets[..n]);
-                    if sent && !t.silent {
-                        for i in 0..n {
-                            bus[i][0] += tap[i][0] * level[i];
-                            bus[i][1] += tap[i][1] * level[i];
-                        }
-                    }
-                    if moving {
-                        for i in 0..n {
-                            bus[i][0] += tap[i][0] * offsets[i];
-                            bus[i][1] += tap[i][1] * offsets[i];
-                        }
-                    }
+            } else if t.in_mix {
+                for (d, p) in self.dry[..n].iter_mut().zip(post.iter()) {
+                    d[0] += p[0];
+                    d[1] += p[1];
                 }
             }
-            mute(&mut state.strip.heard, t.silent, post, &mut offsets[..n]);
             if t.in_mix {
+                stem(stems, post, aligned + lead);
+                stems += 1;
+            }
+        }
+
+        // Groups: each one's chain on the sum of its tracks, whose output
+        // lands on the timeline, then its strip, sends and the sum.
+        for (gi, g) in program.groups.iter().enumerate() {
+            let state = &mut self.groups[gi];
+            let x = &mut state.bus[..n];
+            if !state.chain.slots.is_empty() {
+                state.chain.process(x, clock(aligned + g.lead as i64), &self.tracks, &mut self.key);
+                if rolling {
+                    gate(x, aligned, step, total);
+                }
+            }
+            let [left, right, level, ..] = &mut self.values;
+            levels(&g.gain, &g.pan, aligned, step, &mut left[..n], &mut right[..n], &mut level[..n]);
+            let post = &mut self.post[..n];
+            fade_strip(&mut state.strip, &*x, post, &mut self.values);
+            let [level, offsets, ..] = &mut self.values;
+            sends(&g.sends, &mut state.sends, g.silent, x, post, &mut self.returns, aligned, step, level, offsets);
+            mute(&mut state.strip.heard, g.silent, post, &mut offsets[..n]);
+            if g.in_mix {
                 for (d, p) in self.dry[..n].iter_mut().zip(post.iter()) {
                     d[0] += p[0];
                     d[1] += p[1];
@@ -882,17 +1016,19 @@ impl Renderer {
             state.patch_chain.take_over(&mut was.patch_chain);
             state.chain.take_over(&mut was.chain);
             state.align.take_over(&mut was.align);
+            state.send_delay[0].take_over(&mut was.send_delay[0]);
+            state.send_delay[1].take_over(&mut was.send_delay[1]);
             state.strip.take_over(&was.strip, t.gain != o.gain || t.pan != o.pan, t.silent != o.silent);
-            for (r, (send, old_send)) in state.sends.iter_mut().zip(&was.sends).enumerate() {
-                for (pre, (glide, old_glide)) in [true, false].into_iter().zip(send.iter_mut().zip(old_send)) {
-                    let level = |s: &crate::program::SendProgram| s.level.clone().filter(|_| s.pre_fader == pre);
-                    let changed = level(&t.sends[r]) != level(&o.sends[r]) || t.silent != o.silent;
-                    glide.take_over(old_glide, changed);
-                }
-            }
+            send_take_over(&mut state.sends, &was.sends, &t.sends, &o.sends, t.silent != o.silent);
         }
         if same_time && old.ramp != 0 {
             self.ramp = old.ramp;
+        }
+        for (i, (state, was)) in self.groups.iter_mut().zip(old.groups.iter_mut()).enumerate() {
+            let (g, o) = (&program.groups[i], &old.program.groups[i]);
+            state.chain.take_over(&mut was.chain);
+            state.strip.take_over(&was.strip, g.gain != o.gain || g.pan != o.pan, g.silent != o.silent);
+            send_take_over(&mut state.sends, &was.sends, &g.sends, &o.sends, g.silent != o.silent);
         }
         for (i, (state, was)) in self.returns.iter_mut().zip(old.returns.iter_mut()).enumerate() {
             let (r, o) = (&program.returns[i], &old.program.returns[i]);
@@ -934,6 +1070,11 @@ impl Renderer {
                 }
             }
         }
+        for (state, g) in self.groups.iter_mut().zip(&program.groups) {
+            if let Some(i) = old.program.groups.iter().position(|o| o.id == g.id) {
+                state.chain.take_over(&mut old.groups[i].chain);
+            }
+        }
         for (state, r) in self.returns.iter_mut().zip(&program.returns) {
             if let Some(i) = old.program.returns.iter().position(|o| o.id == r.id) {
                 state.chain.take_over(&mut old.returns[i].chain);
@@ -956,9 +1097,8 @@ impl Renderer {
     }
 
     /// What each channel's effects did: tracks in render order, the patch
-    /// effects of each track's Synth, returns, then the master.
-    #[allow(clippy::type_complexity)]
-    pub fn report(&self) -> (Vec<Vec<DeviceReport>>, Vec<Vec<DeviceReport>>, Vec<Vec<DeviceReport>>, Vec<DeviceReport>) {
+    /// effects of each track's Synth, groups, returns, then the master.
+    pub fn report(&self) -> Reports {
         let chain = |program: &ChainProgram, chain: &Chain| {
             program
                 .effects
@@ -981,17 +1121,19 @@ impl Renderer {
                 })
                 .collect()
         };
-        (
-            self.program.tracks.iter().zip(&self.tracks).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
-            self.program
+        Reports {
+            tracks: self.program.tracks.iter().zip(&self.tracks).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
+            patches: self
+                .program
                 .tracks
                 .iter()
                 .zip(&self.tracks)
                 .map(|(p, s)| p.synth.as_ref().map_or_else(Vec::new, |synth| chain(&synth.chain, &s.patch_chain)))
                 .collect(),
-            self.program.returns.iter().zip(&self.returns).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
-            chain(&self.program.master.chain, &self.master_chain),
-        )
+            groups: self.program.groups.iter().zip(&self.groups).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
+            returns: self.program.returns.iter().zip(&self.returns).map(|(p, s)| chain(&p.chain, &s.chain)).collect(),
+            master: chain(&self.program.master.chain, &self.master_chain),
+        }
     }
 }
 

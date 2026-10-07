@@ -50,7 +50,8 @@ private struct Glow {
 private enum Slider: Hashable {
     case gain(RowID)
     case pan(RowID)
-    case send(track: UInt64, to: String)
+    /// A send of a track or a group.
+    case send(row: RowID, to: String)
 }
 
 /// A level shown ahead of the host: while it is dragged, and after the drag
@@ -84,6 +85,10 @@ private struct RowVisual {
     var sends: [String: Animated] = [:]
     var alpha: Animated
     var removing = false
+    /// A track in a group, drawn in from the edge.
+    var grouped = false
+    /// A group whose tracks are folded away.
+    var collapsed = false
 }
 
 private struct ClipVisual {
@@ -353,6 +358,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var held: [Slider: Held] = [:]
     /// The tracks whose sends are shown.
     private var unfolded: Set<UInt64> = []
+    /// The groups whose tracks are folded away under them.
+    private var foldedGroups: Set<UInt64> = []
     /// The rows whose automation lanes are shown.
     private var lanesShown: Set<RowID> = []
     private var heldPoints: [UInt64: HeldPoint] = [:]
@@ -499,7 +506,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
         func place(_ id: RowID, name: String, detail: String, color: NSColor?, mute: Bool, solo: Bool,
                    gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = [],
-                   lanes: Int) {
+                   lanes: Int, grouped: Bool = false, collapsed: Bool = false) {
             liveRows.insert(id)
             var row: RowVisual
             if let old = rows[id], !old.removing {
@@ -519,26 +526,49 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             row.mute = mute
             row.solo = solo
             row.automated = lanes > 0
+            row.grouped = grouped
+            row.collapsed = collapsed
             row.gain = level(.gain(id), from: row.gain, to: gain)
             row.pan = level(.pan(id), from: row.pan, to: pan)
-            if case .track(let key) = id {
+            if id.strip {
                 var levels: [String: Animated] = [:]
                 for send in sends {
                     // A new send rises from the bottom of its bar.
                     let shown = row.sends[send.to] ?? Animated(Fader.send.lowerBound)
-                    levels[send.to] = level(.send(track: key, to: send.to), from: shown, to: send.gainDb)
+                    levels[send.to] = level(.send(row: id, to: send.to), from: shown, to: send.gainDb)
                 }
                 // A send the person is dragging into being.
                 for (slider, hold) in held {
-                    if case .send(track: key, to: let to) = slider, levels[to] == nil { levels[to] = Animated(hold.value) }
+                    if case .send(row: id, to: let to) = slider, levels[to] == nil { levels[to] = Animated(hold.value) }
                 }
                 row.sends = levels
             }
             rows[id] = row
         }
 
+        // A group's row sits above the first of its tracks, with a track's
+        // header; folded, it hides them. A group with no tracks yet sits
+        // under the tracks.
+        var placedGroups = Set<UInt64>()
+        func placeGroup(_ group: GroupView) {
+            placedGroups.insert(group.key)
+            let sends = unfolded.contains(group.key) ? a.returns.count : 0
+            let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
+                + lanesHeight(.group(group.key), group.lanes)
+            place(.group(group.key), name: group.id, detail: Self.chain(group.effects), color: model.color(of: group.key),
+                  mute: group.mute, solo: group.solo, gain: group.gainDb, pan: group.pan,
+                  kind: .group, height: height, sends: group.sends, lanes: group.lanes.count,
+                  collapsed: foldedGroups.contains(group.key))
+            y += height
+        }
+
         for track in a.tracks {
+            let group = track.group.flatMap { key in a.groups.first { $0.key == key } }
+            if let group, !placedGroups.contains(group.key) { placeGroup(group) }
+            if let group, foldedGroups.contains(group.key) { continue }
             let color = model.color(of: track.key)
+            // A track in a muted group is as good as muted.
+            let muted = track.mute || group?.mute == true
             let sends = unfolded.contains(track.key) ? a.returns.count : 0
             let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
                 + lanesHeight(.track(track.key), track.lanes)
@@ -547,14 +577,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 : Self.chain(track.effects)
             place(.track(track.key), name: track.id, detail: chain, color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
-                  kind: .track, height: height, sends: track.sends, lanes: track.lanes.count)
+                  kind: .track, height: height, sends: track.sends, lanes: track.lanes.count, grouped: group != nil)
             for clip in track.clips {
                 liveClips.insert(clip.key)
                 let length = clip.patternBeats * Double(clip.repeats)
                 if var v = clips[clip.key], !v.removing {
                     v.pattern = clip.pattern
                     v.color = color
-                    v.muted = track.mute
+                    v.muted = muted
                     if !dragged.contains(clip.key) {
                         v.repeats = Int(clip.repeats)
                         v.at.move(to: clip.at, at: now, over: time)
@@ -566,7 +596,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.pattern, repeats: Int(clip.repeats), color: color, muted: track.mute,
+                        pattern: clip.pattern, repeats: Int(clip.repeats), color: color, muted: muted,
                         at: Animated(clip.at), length: Animated(length), y: Animated(y), alpha: alpha
                     )
                 }
@@ -576,7 +606,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 if var v = clips[clip.key], !v.removing {
                     v.pattern = clip.id
                     v.color = color
-                    v.muted = track.mute
+                    v.muted = muted
                     v.notes = clip
                     v.loop = clip.loopBeats
                     if !dragged.contains(clip.key) {
@@ -590,7 +620,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.id, repeats: 1, loop: clip.loopBeats, color: color, muted: track.mute,
+                        pattern: clip.id, repeats: 1, loop: clip.loopBeats, color: color, muted: muted,
                         at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), alpha: alpha,
                         notes: clip, anchor: Animated(clip.at)
                     )
@@ -602,7 +632,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 if var v = clips[clip.key], !v.removing {
                     v.pattern = clip.sample
                     v.color = color
-                    v.muted = track.mute
+                    v.muted = muted
                     v.loop = clip.loopBeats
                     if !dragged.contains(clip.key) {
                         v.audio = clip
@@ -616,7 +646,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.sample, repeats: 1, loop: clip.loopBeats, color: color, muted: track.mute,
+                        pattern: clip.sample, repeats: 1, loop: clip.loopBeats, color: color, muted: muted,
                         at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), alpha: alpha,
                         audio: clip, anchor: Animated(shape.fileStart)
                     )
@@ -624,6 +654,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             y += height
         }
+        for group in a.groups where !placedGroups.contains(group.key) { placeGroup(group) }
         y += TimelineLayout.busGap
         for bus in a.returns {
             let height = TimelineLayout.busHeight + lanesHeight(.bus(bus.key), bus.lanes)
@@ -669,6 +700,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             for touch in update.touched {
                 switch touch.part {
                 case .track: glows[.row(.track(touch.key))] = glow
+                case .group: glows[.row(.group(touch.key))] = glow
                 case .return: glows[.row(.bus(touch.key))] = glow
                 case .master: glows[.row(.master)] = glow
                 case .clip: glows[.clip(touch.key)] = glow
@@ -865,9 +897,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private func header(_ id: RowID, _ row: RowVisual, top: CGFloat) -> HeaderLayout {
         let returns = model.arrangement.returns.count
         var sends = 0
-        if case .track(let key) = id, unfolded.contains(key) { sends = returns }
-        return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: row.kind == .track && returns > 0,
-                            lanes: lanesShown.contains(id) ? model.lanes(of: id).count : nil)
+        if id.strip, let key = id.key, unfolded.contains(key) { sends = returns }
+        return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: id.strip && returns > 0,
+                            lanes: lanesShown.contains(id) ? model.lanes(of: id).count : nil,
+                            collapsed: row.collapsed, grouped: row.grouped)
     }
 
     /// The lanes shown under a row whose top is at `top`, each with its
@@ -1018,10 +1051,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         rect.width >= 16 && p.x <= rect.minX + Self.resizeEdge
     }
 
-    /// The rows of a row's kind in their order: the tracks, or the returns.
+    /// The rows of a row's kind in their order: the tracks, the groups or
+    /// the returns.
     private func siblings(of row: RowID) -> [RowID] {
         switch row {
         case .track: model.arrangement.tracks.map { .track($0.key) }
+        case .group: model.arrangement.groups.map { .group($0.key) }
         case .bus: model.arrangement.returns.map { .bus($0.key) }
         case .master: []
         }
@@ -1098,14 +1133,20 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             rows[id]?.mute.toggle()
             model.edit(.mute(row: id.row, on: !row.mute))
         case .solo:
-            guard case .track(let key) = id else { return }
+            guard id.strip else { return }
             rows[id]?.solo.toggle()
-            model.edit(.solo(track: key, on: !row.solo))
+            model.edit(.solo(row: id.row, on: !row.solo))
         case .fold:
-            guard case .track(let key) = id else { return }
-            // With Option, every track follows.
-            let keys = event.modifierFlags.contains(.option) ? model.arrangement.tracks.map(\.key) : [key]
+            guard id.strip, let key = id.key else { return }
+            // With Option, every track and group follows.
+            let keys = event.modifierFlags.contains(.option) ? model.arrangement.tracks.map(\.key) + model.arrangement.groups.map(\.key) : [key]
             if unfolded.contains(key) { unfolded.subtract(keys) } else { unfolded.formUnion(keys) }
+            show(model.arrangement, animated: true)
+        case .members:
+            guard case .group(let key) = id else { return }
+            // With Option, every group follows.
+            let keys = event.modifierFlags.contains(.option) ? model.arrangement.groups.map(\.key) : [key]
+            if foldedGroups.contains(key) { foldedGroups.subtract(keys) } else { foldedGroups.formUnion(keys) }
             show(model.arrangement, animated: true)
         case .volume:
             beginSlider(.gain(id), from: row.gain.to, range: Fader.gain, perPoint: 0.25, step: 0.1,
@@ -1114,15 +1155,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             beginSlider(.pan(id), from: row.pan.to, range: Fader.pan, perPoint: 0.01, step: 0.01,
                         resetTo: twice ? 0 : nil, at: p) { .pan(row: id.row, pan: $0) }
         case .send(let index):
-            guard case .track(let key) = id, model.arrangement.returns.indices.contains(index) else { return }
+            guard id.strip, model.arrangement.returns.indices.contains(index) else { return }
             let to = model.arrangement.returns[index].id
             if twice {
                 // Back to no send.
-                if row.sends[to] != nil { model.edit(.sendRemove(track: key, to: to)) }
+                if row.sends[to] != nil { model.edit(.sendRemove(row: id.row, to: to)) }
                 return
             }
-            beginSlider(.send(track: key, to: to), from: row.sends[to]?.to ?? Fader.send.lowerBound, range: Fader.send,
-                        perPoint: 0.5, step: 0.1, resetTo: nil, at: p) { .send(track: key, to: to, db: $0) }
+            beginSlider(.send(row: id, to: to), from: row.sends[to]?.to ?? Fader.send.lowerBound, range: Fader.send,
+                        perPoint: 0.5, step: 0.1, resetTo: nil, at: p) { .send(row: id.row, to: to, db: $0) }
         case .name, .body:
             model.select(row: id)
             if twice {
@@ -1157,7 +1198,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         switch slider {
         case .gain(let id): rows[id]?.gain = Animated(value)
         case .pan(let id): rows[id]?.pan = Animated(value)
-        case .send(let track, let to): rows[.track(track)]?.sends[to] = Animated(value)
+        case .send(let row, let to): rows[row]?.sends[to] = Animated(value)
         }
     }
 
@@ -1202,7 +1243,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             model.select(row: id)
             needsDisplay = true
-            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, lanesShown: lanesShown.contains(id))
+            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, lanesShown: lanesShown.contains(id), grouped: row.grouped)
             return menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
         }
         guard let hit = clip(at: p) else { return nil }
@@ -1242,7 +1283,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .rename: beginRename(id)
         case .mute: model.edit(.mute(row: id.row, on: !row.mute))
         case .solo:
-            if case .track(let key) = id { model.edit(.solo(track: key, on: !row.solo)) }
+            if id.strip { model.edit(.solo(row: id.row, on: !row.solo)) }
+        case .group: model.groupSelection()
+        case .ungroup: model.ungroupSelection()
+        case .leaveGroup:
+            if case .track(let key) = id { model.leaveGroup(track: key) }
         case .automation:
             if lanesShown.contains(id) { lanesShown.remove(id) } else { lanesShown.insert(id) }
             show(model.arrangement, animated: true)
@@ -1669,9 +1714,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     // MARK: Dropped samples
 
-    /// The height of the tracks, among the rows: where a new track would go.
+    /// The height of the tracks and groups, among the rows: where a new
+    /// track would go.
     private var tracksHeight: CGFloat {
-        model.arrangement.tracks.last.flatMap { rows[.track($0.key)] }.map { CGFloat($0.y.to + $0.height.to) } ?? 0
+        let ids = model.arrangement.tracks.map { RowID.track($0.key) } + model.arrangement.groups.map { RowID.group($0.key) }
+        return ids.compactMap { rows[$0] }.filter { !$0.removing }.map { CGFloat($0.y.to + $0.height.to) }.max() ?? 0
     }
 
     /// The file a drag carries: a sample from the browser, or an audio or
@@ -2135,8 +2182,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         for (_, row) in order {
             let y = layout.y(CGFloat(row.y.value(at: now)))
             let alpha = CGFloat(row.alpha.value(at: now))
-            fill(CGRect(x: header, y: y, width: width, height: CGFloat(row.height.value(at: now)) - 1),
-                 (row.kind == .track ? Theme.lane : Theme.busLane).withAlphaComponent(alpha))
+            let color: NSColor = switch row.kind {
+            case .track: Theme.lane
+            case .group: Theme.groupLane
+            case .bus, .master: Theme.busLane
+            }
+            fill(CGRect(x: header, y: y, width: width, height: CGFloat(row.height.value(at: now)) - 1), color.withAlphaComponent(alpha))
         }
         // Automation lanes are a shade darker than the row they belong to.
         var lanes: [(lane: LaneView, rect: CGRect, alpha: CGFloat)] = []
@@ -2172,6 +2223,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                  Theme.gray(1, 0.035))
         }
 
+        // A group's lane shows its tracks' clips small, a strip a track.
+        for (id, row) in order {
+            guard case .group(let key) = id, let group = model.arrangement.groups.first(where: { $0.key == key }) else { continue }
+            let top = layout.y(CGFloat(row.y.value(at: now)))
+            drawOverview(of: group, in: CGRect(x: header, y: top + 2, width: width, height: TimelineLayout.trackHeight - 5),
+                         alpha: CGFloat(row.alpha.value(at: now)))
+        }
+
         // Selected clips over the others, as a dragged clip should be, and
         // newer clips over older.
         let selected = model.selectedClips
@@ -2189,6 +2248,30 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         fill(CGRect(x: layout.x(model.transport.cue).rounded(), y: ruler, width: 1, height: bounds.height - ruler),
              Theme.cue.withAlphaComponent(0.85))
+    }
+
+    /// A group's tracks' clips drawn small in the group's lane, in their
+    /// tracks' colors, so that a folded group still shows what it holds.
+    private func drawOverview(of group: GroupView, in rect: CGRect, alpha: CGFloat) {
+        let members = model.arrangement.tracks.filter { $0.group == group.key }
+        guard !members.isEmpty else { return }
+        let strip = rect.height / CGFloat(members.count)
+        for (index, track) in members.enumerated() {
+            let color = (track.mute || group.mute ? Theme.gray(0.45) : model.color(of: track.key)).withAlphaComponent(0.55 * alpha)
+            let y = rect.minY + CGFloat(index) * strip
+            var spans: [(at: Double, length: Double)] = track.clips.map { ($0.at, $0.patternBeats * Double($0.repeats)) }
+            spans += track.noteClips.map { ($0.at, $0.lengthBeats) }
+            spans += track.audio.map { clip in
+                let shape = audioLayout(clip)
+                return (shape.start, shape.length)
+            }
+            for span in spans {
+                let x = layout.x(span.at)
+                let w = max(2, CGFloat(span.length) * layout.pixelsPerBeat - 1)
+                guard x + w >= rect.minX, x <= rect.maxX else { continue }
+                fill(CGRect(x: x, y: y + 1, width: w, height: max(1, strip - 2)), color)
+            }
+        }
     }
 
     private func drawClip(_ key: UInt64, _ clip: ClipVisual, selected: Bool, at now: CFTimeInterval) {
@@ -2510,13 +2593,23 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let alpha = CGFloat(row.alpha.value(at: now))
         let rect = CGRect(x: 0, y: top, width: HeaderLayout.width, height: CGFloat(row.height.value(at: now)) - 1)
         guard rect.maxY >= TimelineLayout.rulerHeight, rect.minY <= bounds.height else { return }
-        fill(rect, (row.kind == .track ? Theme.header : Theme.busHeader).withAlphaComponent(alpha))
+        let background: NSColor = switch row.kind {
+        case .track: Theme.header
+        case .group: Theme.groupHeader
+        case .bus, .master: Theme.busHeader
+        }
+        fill(rect, background.withAlphaComponent(alpha))
         if model.selectedRow == id { fill(rect, Theme.selectedRow) }
         if let (level, tint) = glow(.row(id), at: now) {
             fill(rect, tint.withAlphaComponent(0.35 * level))
         }
         if let color = row.color {
             fill(CGRect(x: 0, y: top, width: 5, height: rect.height), (row.mute ? Theme.gray(0.45) : color).withAlphaComponent(alpha))
+        }
+        // A track in a group is set in from the edge, under a band in the
+        // group's shade.
+        if row.grouped {
+            fill(CGRect(x: 5, y: top, width: HeaderLayout.indent - 5, height: rect.height), Theme.groupHeader.withAlphaComponent(alpha))
         }
         let header = header(id, row, top: top)
         let gain = row.gain.value(at: now)
@@ -2539,7 +2632,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
 
             lanesBadge(row, in: header.auto, shown: header.lanes != nil, alpha: alpha)
-            guard row.kind == .track else {
+            guard header.strip else {
                 // Returns and the master: one line, with the volume as a value to drag.
                 fill(rounded: header.volume, Theme.control.withAlphaComponent(0.28 * alpha))
                 text(Fader.text(db: gain), in: header.volumeText, font: Self.numberFont, color: dim, align: .right)
@@ -2549,6 +2642,24 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
             badge("M", on: row.mute, color: Theme.mute, in: header.mute, alpha: alpha)
             badge("S", on: row.solo, color: Theme.solo, in: header.solo, alpha: alpha)
+            if row.kind == .group {
+                // A mark that points down while the group's tracks are shown,
+                // and right while they are folded away.
+                let box = header.members.insetBy(dx: 2, dy: 2)
+                let mark = NSBezierPath()
+                if header.collapsed {
+                    mark.move(to: CGPoint(x: box.minX + 1, y: box.minY))
+                    mark.line(to: CGPoint(x: box.minX + 1, y: box.maxY))
+                    mark.line(to: CGPoint(x: box.maxX, y: box.midY))
+                } else {
+                    mark.move(to: CGPoint(x: box.minX, y: box.minY + 1))
+                    mark.line(to: CGPoint(x: box.maxX, y: box.minY + 1))
+                    mark.line(to: CGPoint(x: box.midX, y: box.maxY))
+                }
+                mark.close()
+                Theme.text.withAlphaComponent(alpha).setFill()
+                mark.fill()
+            }
             if header.folds {
                 // A mark that points down while the sends are shown.
                 let box = header.fold.insetBy(dx: 2.5, dy: 2.5)

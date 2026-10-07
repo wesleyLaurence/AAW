@@ -20,6 +20,7 @@ use std::path::Path;
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum Row {
     Track { key: u64 },
+    Group { key: u64 },
     Return { key: u64 },
     Master,
 }
@@ -69,14 +70,24 @@ pub enum Edit {
     /// The song's time signature as written, `3/4`; the host refuses one
     /// the model does not read.
     TimeSignature { text: String },
-    /// Volume in dB: of a track, a return or, for the master, the song.
+    /// Volume in dB: of a track, a group, a return or, for the master, the song.
     Gain { row: Row, db: f64 },
     Pan { row: Row, pan: f64 },
     Mute { row: Row, on: bool },
-    Solo { track: u64, on: bool },
-    /// A send's level in dB; the send is added if the track has none there.
-    Send { track: u64, to: String, db: f64 },
-    SendRemove { track: u64, to: String },
+    /// Solo of a track or a group.
+    Solo { row: Row, on: bool },
+    /// A send's level in dB, of a track or a group; the send is added if the
+    /// row has none there.
+    Send { row: Row, to: String, db: f64 },
+    SendRemove { row: Row, to: String },
+    /// Groups tracks, as ⌘G does: a new group under a free name holding the
+    /// tracks, which are moved together to where the first of them is. The
+    /// group is what the edit makes.
+    GroupAdd { tracks: Vec<u64> },
+    /// Takes a group away, as ⇧⌘G does; its tracks go to the master again.
+    Ungroup { group: u64 },
+    /// Puts a track in a group, or with none takes it out of its group.
+    TrackGroup { track: u64, group: Option<u64> },
     /// Moves clips later by `by` beats and down by `rows` tracks: pattern
     /// clips and audio clips alike. The song grows to hold an audio clip
     /// that would end past its end, here and in the edits below.
@@ -280,7 +291,8 @@ pub enum Edit {
     ReturnAdd { index: u32 },
     Rename { row: Row, to: String },
     Remove { row: Row },
-    /// Moves a track among the tracks, or a return among the returns.
+    /// Moves a track among the tracks, a group among the groups or a return
+    /// among the returns.
     Move { row: Row, index: u32 },
     /// Adds an effect of a type to a row's chain, at `index` or last, with
     /// its required fields at a place to start. The effect is what the edit
@@ -451,10 +463,25 @@ fn number(x: f64) -> Json {
 fn path(row: &Row, field: &str) -> Result<String> {
     match row {
         Row::Track { key } => Ok(format!("tracks.{}.{field}", handle_text(*key))),
+        Row::Group { key } => Ok(format!("groups.{}.{field}", handle_text(*key))),
         Row::Return { key } => Ok(format!("returns.{}.{field}", handle_text(*key))),
         Row::Master if field == "gain_db" => Ok("session.master_gain_db".into()),
         Row::Master => Err(format!("The master has no {field}")),
     }
+}
+
+/// The handle of a row that sends: a track or a group.
+fn sender(row: &Row) -> Result<u64> {
+    match row {
+        Row::Track { key } | Row::Group { key } => Ok(*key),
+        Row::Return { .. } => Err("A return has no sends".into()),
+        Row::Master => Err("The master has no sends".into()),
+    }
+}
+
+/// Whether a track, group or return has the name.
+fn taken(project: &Project, name: &str) -> bool {
+    project.tracks.iter().any(|t| t.id == name) || project.groups.iter().any(|g| g.id == name) || project.returns.iter().any(|r| r.id == name)
 }
 
 fn set(row: &Row, field: &str, value: Json) -> Result<Vec<Json>> {
@@ -671,6 +698,7 @@ fn beat_at(x: f64) -> Result<Json> {
 fn owner_path(row: &Row) -> String {
     match row {
         Row::Track { key } => format!("tracks.{}", handle_text(*key)),
+        Row::Group { key } => format!("groups.{}", handle_text(*key)),
         Row::Return { key } => format!("returns.{}", handle_text(*key)),
         Row::Master => "master".into(),
     }
@@ -681,6 +709,7 @@ fn owner<'a>(project: &'a Project, tree: &Node, row: &Row) -> Result<Owner<'a>> 
     let place = |list: &str, key: u64| items(tree, list).iter().position(|i| i.handle == key);
     match row {
         Row::Track { key } => place("tracks", *key).map(|i| Owner::Track(&project.tracks[i])),
+        Row::Group { key } => place("groups", *key).map(|i| Owner::Group(&project.groups[i])),
         Row::Return { key } => place("returns", *key).map(|i| Owner::Return(&project.returns[i])),
         Row::Master => Some(Owner::Master(&project.master)),
     }
@@ -692,6 +721,7 @@ fn owner_of<'a>(project: &'a Project, loc: &[Step], list: &str) -> Option<(Owner
     match loc {
         [Step::Key(k), Step::Index(i), Step::Key(l), Step::Index(j), ..] if l == list => match k.as_str() {
             "tracks" => Some((Owner::Track(project.tracks.get(*i)?), *j)),
+            "groups" => Some((Owner::Group(project.groups.get(*i)?), *j)),
             "returns" => Some((Owner::Return(project.returns.get(*i)?), *j)),
             _ => None,
         },
@@ -762,10 +792,9 @@ fn static_value(project: &Project, owner: Owner, param: &str) -> Result<f64> {
     }
 }
 
-/// The first of `track-1`, `track-2`, … that no track or return has.
+/// The first of `track-1`, `track-2`, … that no track, group or return has.
 fn free_name(project: &Project, stem: &str) -> String {
-    let taken = |name: &str| project.tracks.iter().any(|t| t.id == name) || project.returns.iter().any(|r| r.id == name);
-    (1..).map(|n| format!("{stem}-{n}")).find(|name| !taken(name)).expect("a free name")
+    (1..).map(|n| format!("{stem}-{n}")).find(|name| !taken(project, name)).expect("a free name")
 }
 
 fn pattern<'a>(project: &'a Project, name: &str) -> Result<&'a aaw_model::Pattern> {
@@ -1024,11 +1053,42 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         Edit::Gain { row, db } => set(row, "gain_db", number(*db)),
         Edit::Pan { row, pan } => set(row, "pan", number(*pan)),
         Edit::Mute { row, on } => set(row, "mute", json!(on)),
-        Edit::Solo { track, on } => set(&Row::Track { key: *track }, "solo", json!(on)),
-        Edit::Send { track, to, db } => Ok(vec![json!({
-            "op": "send.set", "track": handle_text(*track), "to": to, "gain_db": number(*db),
+        Edit::Solo { row, on } => match row {
+            Row::Track { .. } | Row::Group { .. } => set(row, "solo", json!(on)),
+            Row::Return { .. } => Err("A return has no solo".into()),
+            Row::Master => Err("The master has no solo".into()),
+        },
+        Edit::Send { row, to, db } => Ok(vec![json!({
+            "op": "send.set", "track": handle_text(sender(row)?), "to": to, "gain_db": number(*db),
         })]),
-        Edit::SendRemove { track, to } => Ok(vec![json!({"op": "send.remove", "track": handle_text(*track), "to": to})]),
+        Edit::SendRemove { row, to } => Ok(vec![json!({"op": "send.remove", "track": handle_text(sender(row)?), "to": to})]),
+        Edit::GroupAdd { tracks } => {
+            let tree = doc.tree();
+            let names: Vec<&str> = tracks
+                .iter()
+                .map(|key| items(&tree, "tracks").iter().find(|i| i.handle == *key).and_then(|i| i.node.field("id")).ok_or_else(|| "A track is no longer in the song".to_string()))
+                .collect::<Result<_>>()?;
+            let id = free_name(project, "group");
+            let handles: Vec<String> = tracks.iter().map(|k| handle_text(*k)).collect();
+            Ok(batch(
+                vec![json!({"op": "group.add", "id": id, "tracks": handles})],
+                format!("Group {} as {id}", names.join(", ")),
+            ))
+        }
+        Edit::Ungroup { group } => Ok(vec![json!({"op": "group.remove", "group": handle_text(*group)})]),
+        Edit::TrackGroup { track, group } => {
+            let tree = doc.tree();
+            let name = |list: &str, key: u64| items(&tree, list).iter().find(|i| i.handle == key).and_then(|i| i.node.field("id").map(str::to_string));
+            let track_name = name("tracks", *track).ok_or("The track is no longer in the song")?;
+            let path = format!("tracks.{}.group", handle_text(*track));
+            match group {
+                Some(key) => {
+                    let id = name("groups", *key).ok_or("The group is no longer in the song")?;
+                    Ok(batch(vec![json!({"op": "set", "path": path, "value": id})], format!("Put {track_name} in group {id}")))
+                }
+                None => Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Take {track_name} out of its group"))),
+            }
+        }
         Edit::ClipsMove { clips, by, rows } => {
             if *by == 0.0 && *rows == 0 {
                 return Ok(Vec::new());
@@ -1414,7 +1474,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     )
                 }
                 (None, Some(p)) => {
-                    let taken = |name: &str| project.tracks.iter().any(|t| t.id == name) || project.returns.iter().any(|r| r.id == name);
+                    let taken = |name: &str| taken(project, name);
                     let id = unique(&ident(&p.name, "synth"), taken);
                     batch(
                         vec![json!({"op": "synth.add", "track": id, "patch": p.name})],
@@ -1796,16 +1856,19 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         })]),
         Edit::Rename { row, to } => match row {
             Row::Track { key } => Ok(vec![json!({"op": "track.rename", "track": handle_text(*key), "to": to})]),
+            Row::Group { key } => Ok(vec![json!({"op": "group.rename", "group": handle_text(*key), "to": to})]),
             Row::Return { key } => Ok(vec![json!({"op": "return.rename", "return": handle_text(*key), "to": to})]),
             Row::Master => Err("The master cannot be renamed".into()),
         },
         Edit::Remove { row } => match row {
             Row::Track { key } => Ok(vec![json!({"op": "track.remove", "track": handle_text(*key)})]),
+            Row::Group { key } => Ok(vec![json!({"op": "group.remove", "group": handle_text(*key)})]),
             Row::Return { key } => Ok(vec![json!({"op": "return.remove", "return": handle_text(*key)})]),
             Row::Master => Err("The master cannot be removed".into()),
         },
         Edit::Move { row, index } => match row {
             Row::Track { key } => Ok(vec![json!({"op": "track.move", "track": handle_text(*key), "index": index})]),
+            Row::Group { key } => Ok(vec![json!({"op": "group.move", "group": handle_text(*key), "index": index})]),
             Row::Return { key } => Ok(vec![json!({"op": "return.move", "return": handle_text(*key), "index": index})]),
             Row::Master => Err("The master cannot be moved".into()),
         },
@@ -2305,7 +2368,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     }
                 }
                 None => {
-                    let taken = |n: &str| project.tracks.iter().any(|t| t.id == n) || project.returns.iter().any(|r| r.id == n);
+                    let taken = |n: &str| taken(project, n);
                     let id = unique(&stem, taken);
                     commands.push(json!({
                         "op": "track.add", "id": id, "type": "midi", "instrument": instrument,
@@ -2337,7 +2400,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     format!("Add audio clip of {sample} to {}", t.id)
                 }
                 None => {
-                    let taken = |n: &str| project.tracks.iter().any(|t| t.id == n) || project.returns.iter().any(|r| r.id == n);
+                    let taken = |n: &str| taken(project, n);
                     let id = unique(&stem, taken);
                     commands.push(json!({"op": "track.add", "id": id, "index": (*index as usize).min(project.tracks.len())}));
                     commands.push(add(json!(id)));
@@ -2375,6 +2438,7 @@ fn effect_taken(tree: &Node, effect: u64) -> Result<(Json, Row, usize)> {
             let key = items(tree, list).get(*i).ok_or_else(elsewhere)?.handle;
             let row = match list.as_str() {
                 "tracks" => Row::Track { key },
+                "groups" => Row::Group { key },
                 "returns" => Row::Return { key },
                 _ => return Err(elsewhere()),
             };
@@ -2407,7 +2471,7 @@ fn effect_copy(project: &Project, tree: &Node, mut fields: Json, row: &Row, inde
     }
     let place = match row {
         Row::Master => "master".to_string(),
-        Row::Track { key } | Row::Return { key } => tree::path_text(tree, &tree::find(tree, *key).ok_or("The row is no longer in the song")?),
+        Row::Track { key } | Row::Group { key } | Row::Return { key } => tree::path_text(tree, &tree::find(tree, *key).ok_or("The row is no longer in the song")?),
     };
     let on = if verb == "Copy" { "to" } else { "on" };
     Ok(batch(vec![fields], format!("{verb} {kind} {on} {place}")))

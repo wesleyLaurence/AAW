@@ -74,6 +74,8 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
     track.automation.clear();
     track.mute = false;
     track.solo = false;
+    // The audition is the track alone, outside any group.
+    track.group = None;
     if !opts.track_chain {
         track.effects.clear();
     }
@@ -82,6 +84,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         samples: p.samples.clone(),
         patterns: Default::default(),
         tracks: vec![track],
+        groups: Vec::new(),
         returns: Vec::new(),
         sections: Vec::new(),
         master: Default::default(),

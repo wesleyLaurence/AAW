@@ -3,9 +3,10 @@ import AppKit
 import Observation
 import QuartzCore
 
-/// A row of the arrangement: a track, a return or the master.
+/// A row of the arrangement: a track, a group, a return or the master.
 enum RowID: Hashable {
     case track(UInt64)
+    case group(UInt64)
     case bus(UInt64)
     case master
 
@@ -13,8 +14,25 @@ enum RowID: Hashable {
     var row: Row {
         switch self {
         case .track(let key): .track(key: key)
+        case .group(let key): .group(key: key)
         case .bus(let key): .return(key: key)
         case .master: .master
+        }
+    }
+
+    /// Whether the row has a track's header: a volume bar, solo and sends.
+    var strip: Bool {
+        switch self {
+        case .track, .group: true
+        case .bus, .master: false
+        }
+    }
+
+    /// The row's handle; the master has none.
+    var key: UInt64? {
+        switch self {
+        case .track(let key), .group(let key), .bus(let key): key
+        case .master: nil
         }
     }
 }
@@ -610,7 +628,8 @@ public final class SongModel {
 
     /// Every automation point, by its key, with its lane.
     func pointLanes() -> [UInt64: LaneView] {
-        let lanes = arrangement.tracks.flatMap(\.lanes) + arrangement.returns.flatMap(\.lanes) + arrangement.master.lanes
+        let lanes = arrangement.tracks.flatMap(\.lanes) + arrangement.groups.flatMap(\.lanes)
+            + arrangement.returns.flatMap(\.lanes) + arrangement.master.lanes
         return Dictionary(lanes.flatMap { lane in lane.points.map { ($0.key, lane) } }, uniquingKeysWith: { first, _ in first })
     }
 
@@ -680,6 +699,9 @@ public final class SongModel {
         case .track(let key):
             return arrangement.tracks.first { $0.key == key }
                 .map { DeviceChain(row: .track(key), name: $0.id, effects: $0.effects, pads: $0.pads, track: $0) }
+        case .group(let key):
+            return arrangement.groups.first { $0.key == key }
+                .map { DeviceChain(row: .group(key), name: $0.id, effects: $0.effects, pads: []) }
         case .bus(let key):
             return arrangement.returns.first { $0.key == key }
                 .map { DeviceChain(row: .bus(key), name: $0.id, effects: $0.effects, pads: []) }
@@ -694,6 +716,7 @@ public final class SongModel {
     func lanes(of row: RowID) -> [LaneView] {
         switch row {
         case .track(let key): arrangement.tracks.first { $0.key == key }?.lanes ?? []
+        case .group(let key): arrangement.groups.first { $0.key == key }?.lanes ?? []
         case .bus(let key): arrangement.returns.first { $0.key == key }?.lanes ?? []
         case .master: arrangement.master.lanes
         }
@@ -703,6 +726,7 @@ public final class SongModel {
     func laneTargets(of row: RowID) -> [LaneTarget] {
         switch row {
         case .track(let key): arrangement.tracks.first { $0.key == key }?.laneTargets ?? []
+        case .group(let key): arrangement.groups.first { $0.key == key }?.laneTargets ?? []
         case .bus(let key): arrangement.returns.first { $0.key == key }?.laneTargets ?? []
         case .master: arrangement.master.laneTargets
         }
@@ -736,7 +760,7 @@ public final class SongModel {
     private func sendSelection() {
         var keys = Array(selectedClips).sorted()
         switch selectedRow {
-        case .track(let key), .bus(let key): keys.append(key)
+        case .track(let key), .group(let key), .bus(let key): keys.append(key)
         case .master, nil: break
         }
         keys += selectedEvents.sorted()
@@ -752,6 +776,7 @@ public final class SongModel {
         var row = selectedRow
         switch row {
         case .track(let key): if !arrangement.tracks.contains(where: { $0.key == key }) { row = nil }
+        case .group(let key): if !arrangement.groups.contains(where: { $0.key == key }) { row = nil }
         case .bus(let key): if !arrangement.returns.contains(where: { $0.key == key }) { row = nil }
         case .master, nil: break
         }
@@ -765,6 +790,7 @@ public final class SongModel {
         }
         switch deviceRow {
         case .track(let key): if !arrangement.tracks.contains(where: { $0.key == key }) { deviceRow = nil }
+        case .group(let key): if !arrangement.groups.contains(where: { $0.key == key }) { deviceRow = nil }
         case .bus(let key): if !arrangement.returns.contains(where: { $0.key == key }) { deviceRow = nil }
         case .master, nil: break
         }
@@ -1064,6 +1090,55 @@ public final class SongModel {
 
     public func addReturn() {
         add(.returnAdd(index: UInt32(arrangement.returns.count))) { .bus($0) }
+    }
+
+    /// The tracks Group Tracks would group: the selected track, or the
+    /// tracks of the selected clips, in their order.
+    private var tracksToGroup: [TrackView] {
+        if case .track(let key) = selectedRow {
+            return arrangement.tracks.filter { $0.key == key }
+        }
+        var places: [Int] = []
+        for clip in placedClips() where selectedClips.contains(clip.key) && !places.contains(clip.track) {
+            places.append(clip.track)
+        }
+        return places.sorted().map { arrangement.tracks[$0] }
+    }
+
+    /// Whether Group Tracks has tracks to group: ones in no group yet, since
+    /// a group is not in a group.
+    public var canGroup: Bool {
+        let tracks = tracksToGroup
+        return !tracks.isEmpty && tracks.allSatisfy { $0.group == nil }
+    }
+
+    /// Groups the selected track, or the tracks of the selected clips, as
+    /// ⌘G does, and selects the group under its first name to rename.
+    public func groupSelection() {
+        guard canGroup else { return }
+        add(.groupAdd(tracks: tracksToGroup.map(\.key))) { .group($0) }
+    }
+
+    /// The group Ungroup would take away: the selected group, or the group
+    /// of the selected track.
+    private var groupToUngroup: UInt64? {
+        switch selectedRow {
+        case .group(let key): key
+        case .track(let key): arrangement.tracks.first { $0.key == key }?.group
+        default: nil
+        }
+    }
+
+    public var canUngroup: Bool { groupToUngroup != nil }
+
+    /// Takes the selected group away, as ⇧⌘G does; its tracks stay.
+    public func ungroupSelection() {
+        if let group = groupToUngroup { edit(.ungroup(group: group)) }
+    }
+
+    /// Takes a track out of its group.
+    func leaveGroup(track: UInt64) {
+        edit(.trackGroup(track: track, group: nil))
     }
 
     private func add(_ edit: Edit, row: @escaping @MainActor (UInt64) -> RowID) {

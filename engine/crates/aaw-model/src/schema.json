@@ -600,6 +600,112 @@
       "title": "Filter",
       "type": "object"
     },
+    "Group": {
+      "additionalProperties": false,
+      "description": "A group: the tracks that name it summed through its own chain, gain and pan, then to the master and to the returns it sends to, as a drum bus.",
+      "properties": {
+        "id": {
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "gain_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -96,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0,
+          "maximum": 1,
+          "minimum": -1,
+          "title": "Pan",
+          "type": "number"
+        },
+        "mute": {
+          "default": false,
+          "title": "Mute",
+          "type": "boolean"
+        },
+        "solo": {
+          "default": false,
+          "title": "Solo",
+          "type": "boolean"
+        },
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation",
+                "utility": "#/$defs/Utility"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Utility"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array"
+        },
+        "sends": {
+          "items": {
+            "$ref": "#/$defs/Send"
+          },
+          "maxItems": 16,
+          "title": "Sends",
+          "type": "array"
+        },
+        "automation": {
+          "items": {
+            "$ref": "#/$defs/Lane"
+          },
+          "maxItems": 64,
+          "title": "Automation",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Group",
+      "type": "object"
+    },
     "Instrument": {
       "additionalProperties": false,
       "description": "A sampler or the Synth: exactly one of the two.",
@@ -871,6 +977,20 @@
           "default": false,
           "title": "Solo",
           "type": "boolean"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The group the track's output goes into instead of the master sum, one of groups[]; its tracks are next to each other.",
+          "title": "Group"
         },
         "instrument": {
           "anyOf": [
@@ -2233,6 +2353,20 @@
           "title": "Solo",
           "type": "boolean"
         },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The group the track's output goes into instead of the master sum, one of groups[]; its tracks are next to each other.",
+          "title": "Group"
+        },
         "pads": {
           "additionalProperties": {
             "$ref": "#/$defs/Pad"
@@ -2578,6 +2712,13 @@
         ]
       },
       "title": "Tracks",
+      "type": "array"
+    },
+    "groups": {
+      "items": {
+        "$ref": "#/$defs/Group"
+      },
+      "title": "Groups",
       "type": "array"
     },
     "returns": {
