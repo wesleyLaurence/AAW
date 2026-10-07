@@ -55,13 +55,13 @@ Built:
 | [time signature](features/time-signature.md) | One time signature for the song, `3/4` or `6/8`, typed in the transport bar or set with `daw`; positions stay quarter-note beats while the bars, grid, rulers, position, metronome, map, MIDI files and beat map count the meter |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 | [editing a range of bars](features/bar-ranges.md) | `daw range copy\|insert\|delete\|clear` across the tracks with the clips, audio, lanes and sections in a range, and a section duplicated, moved or removed with its content |
+| [export in the app](features/export-in-app.md) | File › Export Audio…: the mix as a named WAV, AAC or MP3 at a stated level through the bundle's `daw export`, with its measurements in a banner |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
 | [clips that loop](features/looping-clips.md) | Next |
-| [export in the app](features/export-in-app.md) | Next |
 | [comparing with a reference](features/reference-comparison.md) | Next |
 | [sound descriptors](features/sound-descriptors.md) | Next |
 | [the agent panel](features/agent-panel.md) | Next |

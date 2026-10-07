@@ -101,6 +101,8 @@ Python, in `src/agent_daw`:
   snapshot-derived musical context, render comparisons and PNG summaries.
 - `export.py`: a named deliverable from a render, as WAV, AAC or MP3, with one gain
   for the level and a record of the render beside it; see [export.md](features/export.md).
+  The Mac app's File › Export Audio… runs it through the bundle's `daw`, so there
+  is one export; see [export-in-app.md](features/export-in-app.md).
 - `joins.py`: checks of a rendered edit of a song: each join's beat, splice and
   level, the file's length, and an excerpt of each join; see
   [join-checks.md](features/join-checks.md).
