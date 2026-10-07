@@ -136,6 +136,34 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(TimelineLayout.position(50, beatsPerBar: 4), "13.3.1")
         XCTAssertEqual(TimelineLayout.position(5.75, beatsPerBar: 4), "2.2.4")
         XCTAssertEqual(TimelineLayout.position(53.25, beatsPerBar: 4), "14.2.2")
+        // The beat is the one the time signature counts: a quarter in 3/4,
+        // an eighth in 6/8 and 7/8.
+        XCTAssertEqual(TimelineLayout.position(5, beatsPerBar: 3), "2.3.1")
+        XCTAssertEqual(TimelineLayout.position(3.75, beatsPerBar: 3, beatUnit: 0.5), "2.2.2")
+        XCTAssertEqual(TimelineLayout.position(7, beatsPerBar: 3.5, beatUnit: 0.5), "3.1.1")
+        XCTAssertEqual(TimelineLayout.position(6.5, beatsPerBar: 3.5, beatUnit: 0.5), "2.7.1")
+    }
+
+    func testTheZoomsGridCountsTheMetersBeats() {
+        var l = layout()
+        l.beatsPerBar = 3
+        l.beatUnit = 0.5
+        l.pixelsPerBeat = 30
+        XCTAssertEqual(l.zoomGrid, 0.5, "in 6/8 the beat is an eighth")
+        l.pixelsPerBeat = 60
+        XCTAssertEqual(l.zoomGrid, 0.25)
+        l.pixelsPerBeat = 10
+        XCTAssertEqual(l.zoomGrid, 3, "a bar of three beats")
+        l.pixelsPerBeat = 3
+        XCTAssertEqual(l.zoomGrid, 6, "two bars")
+        l.beatsPerBar = 3.5
+        l.pixelsPerBeat = 10
+        XCTAssertEqual(l.zoomGrid, 3.5, "a bar of 7/8")
+        l.fixedGrid = 1
+        XCTAssertEqual(l.drawnGrid, 3.5, "a beat does not fall on the bars of 7/8, so the zoom's lines are drawn")
+        l.fixedGrid = 0.5
+        l.pixelsPerBeat = 40
+        XCTAssertEqual(l.drawnGrid, 0.5)
     }
 
     func testPointsMoveTogetherNoFurtherThanThePointsThatStay() {

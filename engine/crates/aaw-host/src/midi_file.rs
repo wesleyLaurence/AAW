@@ -64,9 +64,9 @@ impl Part {
     }
 
     /// The length of the clip the part makes: from the file's beat 0 to the
-    /// end of its last note, in whole bars of four beats.
-    pub fn length(&self) -> BigRational {
-        let bar = BigRational::from_integer(4.into());
+    /// end of its last note, in whole bars of the song's `meter`.
+    pub fn length(&self, meter: aaw_model::Meter) -> BigRational {
+        let bar = meter.bar();
         (self.end() / &bar).ceil().max(BigRational::from_integer(1.into())) * bar
     }
 
@@ -369,8 +369,8 @@ fn ticks(beat: &BigRational) -> (u64, bool) {
 }
 
 /// Writes notes as a type 0 file of one track named `name`, on channel 1,
-/// with a tempo and a time signature of four beats to a bar.
-pub fn write(notes: &[FileNote], name: &str, tempo: f64) -> Written {
+/// with the song's tempo and time signature.
+pub fn write(notes: &[FileNote], name: &str, tempo: f64, meter: aaw_model::Meter) -> Written {
     let mut written = Written::default();
     // (tick, off before on, pitch, bytes)
     let mut events: Vec<(u64, u8, u8, [u8; 3])> = Vec::new();
@@ -404,7 +404,8 @@ pub fn write(notes: &[FileNote], name: &str, tempo: f64) -> Written {
     meta(&mut body, 0x03, name.as_bytes());
     let micros = (60_000_000.0 / tempo).round() as u32;
     meta(&mut body, 0x51, &micros.to_be_bytes()[1..]);
-    meta(&mut body, 0x58, &[4, 2, 24, 8]);
+    // The denominator as a power of two, as the file writes it.
+    meta(&mut body, 0x58, &[meter.beats as u8, meter.unit.trailing_zeros() as u8, 24, 8]);
     let mut last = 0u64;
     for (tick, _, _, bytes) in &events {
         var(&mut body, (tick - last) as u32);
@@ -464,7 +465,7 @@ mod tests {
             note(72, "1/3", "1/3", 127),
             note(74, "2/3", "1/3", 100),
         ];
-        let written = write(&notes, "keys", 120.0);
+        let written = write(&notes, "keys", 120.0, aaw_model::Meter::COMMON);
         assert!(written.rounded.is_empty());
         let part = read(&written.bytes).unwrap();
         let mut expected = notes.clone();
@@ -478,21 +479,21 @@ mod tests {
     #[test]
     fn overlapping_notes_of_one_pitch_stay_overlapping() {
         let notes = vec![note(60, "0", "2", 100), note(60, "1", "2", 90), note(60, "3", "1", 80)];
-        let part = read(&write(&notes, "x", 100.0).bytes).unwrap();
+        let part = read(&write(&notes, "x", 100.0, aaw_model::Meter::COMMON).bytes).unwrap();
         assert_eq!(part.notes, notes);
     }
 
     #[test]
     fn a_note_inside_another_of_its_pitch_is_counted() {
         let notes = vec![note(62, "0", "1", 100), note(62, "1/2", "1/4", 90), note(62, "1/2", "1", 80)];
-        assert_eq!(write(&notes, "x", 100.0).nested, 1);
-        assert_eq!(write(&notes[..1], "x", 100.0).nested, 0);
+        assert_eq!(write(&notes, "x", 100.0, aaw_model::Meter::COMMON).nested, 1);
+        assert_eq!(write(&notes[..1], "x", 100.0, aaw_model::Meter::COMMON).nested, 0);
     }
 
     #[test]
     fn a_position_off_the_ticks_is_rounded_and_named() {
         let notes = vec![note(60, "0", "1", 100), note(61, "1/7", "1", 100)];
-        let written = write(&notes, "x", 100.0);
+        let written = write(&notes, "x", 100.0, aaw_model::Meter::COMMON);
         assert_eq!(written.rounded, vec![1]);
         let part = read(&written.bytes).unwrap();
         assert_eq!(part.notes[1].at, b("137/960"));

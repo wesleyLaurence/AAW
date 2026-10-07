@@ -124,13 +124,13 @@ def test_the_command_keeps_the_map_beside_the_song(tmp_path):
     assert code == 0 and not moved["cached"]
     assert moved["first_downbeat_seconds"] == pytest.approx(truth[2], abs=0.0001)
     code, kept = cli(*args)
-    assert kept["cached"] and kept["requested"] == {"bpm": None, "downbeat": 1.1}
+    assert kept["cached"] and kept["requested"] == {"bpm": None, "downbeat": 1.1, "meter": None}
     assert kept["first_downbeat_seconds"] == moved["first_downbeat_seconds"]
     code, slower = cli(*args, "--bpm", 60)
-    assert slower["requested"] == {"bpm": 60.0, "downbeat": 1.1}
+    assert slower["requested"] == {"bpm": 60.0, "downbeat": 1.1, "meter": None}
     assert slower["tempo"]["bpm"] == pytest.approx(60, abs=0.002)
     code, fresh = cli(*args, "--refresh")
-    assert fresh["requested"] == {"bpm": None, "downbeat": None}
+    assert fresh["requested"] == {"bpm": None, "downbeat": None, "meter": None}
     assert {k: fresh[k] for k in report} == report
 
     # A changed file is measured again.
@@ -199,3 +199,27 @@ def test_a_decoded_song_keeps_its_grid(tmp_path):
     assert len(times) == len(truth) and np.abs(times - truth).max() < 0.001
     # The map is in the project, beside the decoded copy.
     assert report["map"] == str((project.parent / asset["path"]).resolve().with_suffix("")) + ".beats.json"
+
+
+def test_a_meter_counts_the_bars_and_is_kept_with_the_map(tmp_path):
+    # The song's accents are in four, so the meter is a counting of the map's
+    # beats, not a measurement: three a bar from the chosen downbeat.
+    truth = song(tmp_path / "song.wav", bars=12)
+    report = beats.measure(tmp_path / "song.wav", downbeat=truth[0], meter="3/4")
+    assert (report["meter"], report["beats_per_bar"]) == ("3/4", 3)
+    assert [(b["bar"], b["beat"]) for b in report["beats"][:7]] == [(1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (2, 3), (3, 1)]
+    assert len(report["downbeat"]["candidates"]) == 3
+    assert report["assumes"].startswith("3 beats a bar")
+    with pytest.raises(ValueError):
+        beats.measure(tmp_path / "song.wav", meter="waltz")
+    # Through the command the meter is a correction, kept until measured again.
+    args = ("samples", "--db", tmp_path / "index.sqlite", "beats", tmp_path / "song.wav")
+    code, report = cli(*args, "--meter", "3/4", "--all")
+    assert code == 0, report
+    assert report["beats_per_bar"] == 3 and report["requested"]["meter"] == "3/4"
+    code, again = cli(*args)
+    assert code == 0 and again["cached"] and again["beats_per_bar"] == 3
+    code, fresh = cli(*args, "--refresh")
+    assert code == 0 and fresh["beats_per_bar"] == 4 and fresh["meter"] == "4/4"
+    code, err = cli(*args, "--meter", "x")
+    assert code != 0

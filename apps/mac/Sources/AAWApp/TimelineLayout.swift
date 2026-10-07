@@ -19,7 +19,11 @@ public struct TimelineLayout: Equatable {
     public var pixelsPerBeat: CGFloat = 16
     public var scroll: CGPoint = .zero
     public var size: CGSize = .zero
+    /// A bar in beats as the song writes them: 3 in 3/4 and 6/8, 3.5 in 7/8.
     public var beatsPerBar: Double = 4
+    /// The note the time signature counts, in those beats: 1 in 3/4, 0.5 in
+    /// 6/8. The zoom's grid and the brighter lines are at its multiples.
+    public var beatUnit: Double = 1
     public var lengthBeats: Double = 16
     /// The height of all rows.
     public var contentHeight: CGFloat = 0
@@ -57,11 +61,11 @@ public struct TimelineLayout: Equatable {
     /// The least distance between grid lines, in points.
     public static let gridSpacing: CGFloat = 14
 
-    /// The grid the zoom allows, in beats: the finest of sixteenths, eighths,
-    /// beats, bars and multiples of bars whose lines are at least
-    /// `gridSpacing` apart.
+    /// The grid the zoom allows, in beats: the finest of a quarter of the
+    /// meter's beat, half of it, the beat, bars and multiples of bars whose
+    /// lines are at least `gridSpacing` apart.
     public var zoomGrid: Double {
-        for step in [0.25, 0.5, 1.0] where step < beatsPerBar && CGFloat(step) * pixelsPerBeat >= Self.gridSpacing {
+        for step in [beatUnit / 4, beatUnit / 2, beatUnit] where step < beatsPerBar && CGFloat(step) * pixelsPerBeat >= Self.gridSpacing {
             return step
         }
         var step = beatsPerBar
@@ -218,13 +222,14 @@ public struct TimelineLayout: Equatable {
         }
     }
 
-    /// A position as bars, beats and sixteenths, each counted from one.
-    public static func position(_ beat: Double, beatsPerBar: Double) -> String {
+    /// A position as bars, beats and sixteenths, each counted from one: the
+    /// beat as the time signature counts it, `beatUnit` quarter notes long.
+    public static func position(_ beat: Double, beatsPerBar: Double, beatUnit: Double = 1) -> String {
         let b = max(0, beat) + 1e-9
         let bar = Int(b / beatsPerBar)
         let inBar = b - Double(bar) * beatsPerBar
-        let whole = Int(inBar)
-        let sixteenth = Int((inBar - Double(whole)) * 4)
+        let whole = Int(inBar / beatUnit)
+        let sixteenth = Int((inBar - Double(whole) * beatUnit) * 4)
         return "\(bar + 1).\(whole + 1).\(sixteenth + 1)"
     }
 }

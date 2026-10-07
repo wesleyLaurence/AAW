@@ -111,8 +111,12 @@ enum Top {
         directory: PathBuf,
         #[arg(long, default_value_t = 144.0)]
         tempo: f64,
+        /// How many bars long, in the time signature.
         #[arg(long, default_value_t = 16)]
         bars: i64,
+        /// The song's time signature, such as 3/4 or 6/8; 4/4 unless given.
+        #[arg(long, value_name = "N/D")]
+        time_signature: Option<String>,
     },
     /// The projects open in the app or another host, with each one's title
     /// and whether its window is in front.
@@ -1312,8 +1316,8 @@ fn run(cli: &Cli) -> Result<Json> {
     use Command as C;
     let edit = |project: &Song, c: Command| route(cli, project, c, None);
     match &cli.command {
-        Top::Init { directory, tempo, bars } => {
-            let path = project::create(directory, *tempo, *bars, None)?;
+        Top::Init { directory, tempo, bars, time_signature } => {
+            let path = project::create(directory, *tempo, *bars, None, time_signature.as_deref())?;
             Ok(json!({"project": std::fs::canonicalize(&path).map_err(text)?}))
         }
         Top::Projects { all } => projects(*all),

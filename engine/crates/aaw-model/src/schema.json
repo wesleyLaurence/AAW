@@ -1852,8 +1852,9 @@
           "type": "number"
         },
         "time_signature": {
-          "const": "4/4",
           "default": "4/4",
+          "description": "Beats to a bar over the note that is one beat, 1 to 32 over 1, 2, 4, 8 or 16; one for the whole song. Positions stay quarter-note beats: a bar of 3/4 is 3 beats, of 6/8 3 and of 7/8 3.5.",
+          "pattern": "^([1-9]|[12][0-9]|3[0-2])/(1|2|4|8|16)$",
           "title": "Time Signature",
           "type": "string"
         },

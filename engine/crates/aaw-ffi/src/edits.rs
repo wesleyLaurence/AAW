@@ -66,6 +66,9 @@ pub struct SynthFieldValue {
 pub enum Edit {
     /// The session tempo in quarter notes per minute.
     Tempo { bpm: f64 },
+    /// The song's time signature as written, `3/4`; the host refuses one
+    /// the model does not read.
+    TimeSignature { text: String },
     /// Volume in dB: of a track, a return or, for the master, the song.
     Gain { row: Row, db: f64 },
     Pan { row: Row, pan: f64 },
@@ -1013,6 +1016,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
     let clip = |key: &u64| handle_text(*key);
     match edit {
         Edit::Tempo { bpm } => Ok(vec![json!({"op": "set", "path": "session.tempo", "value": number(*bpm)})]),
+        Edit::TimeSignature { text } => Ok(vec![json!({"op": "set", "path": "session.time_signature", "value": text.trim()})]),
         Edit::Gain { row, db } => set(row, "gain_db", number(*db)),
         Edit::Pan { row, pan } => set(row, "pan", number(*pan)),
         Edit::Mute { row, on } => set(row, "mute", json!(on)),

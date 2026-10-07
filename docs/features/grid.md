@@ -51,5 +51,5 @@ goes off it.
 ## Limits
 
 - The choice is the window's and is not saved with the song.
-- The grid is in 4/4; a time signature is a Next item.
+- The list's `1 Bar` is the song's bar, from its [time signature](time-signature.md); a grid chosen as a bar keeps its beats when the meter changes.
 - 1/64T is not listed.

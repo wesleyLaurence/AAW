@@ -792,13 +792,14 @@ impl Session {
     /// bars, `bar` or `beat`), from beat `from` until beat `to`, of the
     /// tracks named, with a row a lane when `lanes`.
     pub fn map(&self, per: Option<&Json>, from: Option<&Json>, to: Option<&Json>, tracks: &[String], lanes: bool) -> Result<Json> {
+        let bar = self.project().session.meter().bar_f64();
         let per = match per {
-            None => 4.0,
-            Some(Json::String(s)) if s == "bar" => 4.0,
+            None => bar,
+            Some(Json::String(s)) if s == "bar" => bar,
             Some(Json::String(s)) if s == "beat" => 1.0,
             Some(j) => {
                 let bars = beat_arg(j).map_err(|_| format!("--per takes a number of bars, bar or beat, not {j}"))?;
-                num_traits::ToPrimitive::to_f64(&bars).unwrap_or(f64::NAN) * 4.0
+                num_traits::ToPrimitive::to_f64(&bars).unwrap_or(f64::NAN) * bar
             }
         };
         let beat = |j: Option<&Json>| -> Result<Option<f64>> {
@@ -875,7 +876,7 @@ impl Session {
         }
         notes.sort_by(|(_, a), (_, b)| a.at.cmp(&b.at).then(a.pitch.cmp(&b.pitch)));
         let file_notes: Vec<_> = notes.iter().map(|(_, n)| n.clone()).collect();
-        let written = crate::midi_file::write(&file_notes, &track.id, p.session.tempo);
+        let written = crate::midi_file::write(&file_notes, &track.id, p.session.tempo, p.session.meter());
         std::fs::write(file, &written.bytes).map_err(|e| format!("{file}: {e}"))?;
         let mut left_out = Map::new();
         if outside > 0 {

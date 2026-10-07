@@ -29,6 +29,9 @@ public struct PianoRollLayout: Equatable {
     public static let endGrip: CGFloat = 5
 
     public var size: CGSize = .zero
+    /// The song's bar and the beat its time signature counts, in beats.
+    public var beatsPerBar: Double = 4
+    public var beatUnit: Double = 1
     /// The clip's length in beats.
     public var lengthBeats: Double = 4
     /// The beats shown: from the first, which is 0 or a note's before the
@@ -230,12 +233,12 @@ public struct PianoRollLayout: Equatable {
     }
 
     /// A length the song writes in beats, named as a note value is, a beat
-    /// being a quarter note: `1/4` is `1/16`, `1/3` is `1/8T`, `4` is
-    /// `1 Bar` and `8` is `2 Bars`. A length that is no such value keeps its
-    /// beats.
-    public static func noteValue(_ text: String) -> String {
+    /// being a quarter note: `1/4` is `1/16`, `1/3` is `1/8T`, and a bar of
+    /// `bar` beats is `1 Bar`, two of them `2 Bars`. A length that is no such
+    /// value keeps its beats.
+    public static func noteValue(_ text: String, bar: Double = 4) -> String {
         guard let beats = beats(text), beats > 0 else { return text }
-        let bars = beats / 4
+        let bars = beats / bar
         if bars >= 1, abs(bars - bars.rounded()) < 1e-9 {
             return bars.rounded() == 1 ? "1 Bar" : "\(Int(bars.rounded())) Bars"
         }

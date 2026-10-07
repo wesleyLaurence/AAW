@@ -116,6 +116,8 @@ final class PatternEditor: NSView {
     private func relayout() {
         guard let context else { return }
         layout.size = bounds.size
+        layout.beatsPerBar = model.arrangement.barBeats
+        layout.beatUnit = model.arrangement.beatUnit
         layout.lengthBeats = context.pattern.lengthBeats
         layout.grid = context.pattern.grid
         layout.setPads(context.track.pads.map { pad in
@@ -556,8 +558,8 @@ final class PatternEditor: NSView {
         guard last >= first else { return }
         for step in first...last {
             let beat = Double(step) * beatsPerStep
-            let onBeat = abs(beat - beat.rounded()) < 1e-9
-            let onBar = onBeat && Int(beat.rounded()) % 4 == 0
+            let onBeat = abs(beat / layout.beatUnit - (beat / layout.beatUnit).rounded()) < 1e-9
+            let onBar = abs(beat / layout.beatsPerBar - (beat / layout.beatsPerBar).rounded()) < 1e-9
             guard onBar || (onBeat && layout.pixelsPerBeat >= 6) || stepWidth >= 6 else { continue }
             fill(CGRect(x: layout.x(beat).rounded(), y: top, width: 1, height: bounds.height - top),
                  onBar ? Theme.gray(1, 0.2) : onBeat ? Theme.gray(1, 0.1) : Theme.gridLine)
@@ -671,22 +673,25 @@ final class PatternEditor: NSView {
         }
     }
 
-    /// Beats from the pattern's start, as bars and beats counted from one.
+    /// Beats from the pattern's start, as bars and beats counted from one,
+    /// the beat as the time signature counts it.
     private func drawRuler() {
         let gutter = PatternLayout.gutter
         let ruler = PatternLayout.rulerHeight
         fill(CGRect(x: gutter, y: 0, width: bounds.width - gutter, height: ruler), Theme.ruler)
+        let unit = layout.beatUnit
+        let perBar = max(1, Int((layout.beatsPerBar / unit).rounded()))
         var every = 1
-        while CGFloat(every) * layout.pixelsPerBeat < 26 { every *= 2 }
-        let first = max(0, Int(layout.beat(atX: gutter).rounded(.down)))
-        let last = min(Int(layout.lengthBeats.rounded(.up)), Int(layout.beat(atX: bounds.width).rounded(.up)))
+        while CGFloat(Double(every) * unit) * layout.pixelsPerBeat < 26 { every *= 2 }
+        let first = max(0, Int((layout.beat(atX: gutter) / unit).rounded(.down)))
+        let last = min(Int((layout.lengthBeats / unit).rounded(.up)), Int((layout.beat(atX: bounds.width) / unit).rounded(.up)))
         guard last >= first else { return }
-        for beat in first...last where beat % every == 0 {
-            let x = layout.x(Double(beat)).rounded()
-            let onBar = beat % 4 == 0
+        for k in first...last where k % every == 0 {
+            let x = layout.x(Double(k) * unit).rounded()
+            let onBar = k % perBar == 0
             fill(CGRect(x: x, y: onBar ? 2 : ruler - 5, width: 1, height: onBar ? ruler - 2 : 5), Theme.gray(1, onBar ? 0.3 : 0.16))
-            guard beat < Int(layout.lengthBeats.rounded(.up)) else { continue }
-            let label = onBar ? "\(beat / 4 + 1)" : "\(beat / 4 + 1).\(beat % 4 + 1)"
+            guard Double(k) * unit < layout.lengthBeats else { continue }
+            let label = onBar ? "\(k / perBar + 1)" : "\(k / perBar + 1).\(k % perBar + 1)"
             text(label, in: CGRect(x: x + 3, y: 2, width: 40, height: 12), font: Self.numberFont, color: onBar ? Theme.dimText : Theme.faintText)
         }
     }

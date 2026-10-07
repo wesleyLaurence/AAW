@@ -187,7 +187,7 @@ struct TransportBar: View {
             .accessibilityValue(model.transport.metronome ? "On" : "Off")
             .help("Metronome: \(model.transport.metronome ? "on" : "off"). Clicks at the session BPM during playback.")
 
-            Text(TimelineLayout.position(model.position, beatsPerBar: Double(a.beatsPerBar)))
+            Text(TimelineLayout.position(model.position, beatsPerBar: a.barBeats, beatUnit: a.beatUnit))
                 .font(.system(size: 15, weight: .medium).monospacedDigit())
                 .frame(minWidth: 74, alignment: .leading)
                 .help("Bar, beat and sixteenth")
@@ -196,8 +196,8 @@ struct TransportBar: View {
 
             HStack(spacing: 10) {
                 TempoField(model: model)
-                Text("\(a.beatsPerBar)/4").foregroundStyle(.secondary)
-                Text("\(Int((a.lengthBeats / Double(a.beatsPerBar)).rounded(.up))) bars").foregroundStyle(.secondary)
+                MeterField(model: model)
+                Text("\(Int((a.lengthBeats / a.barBeats).rounded(.up))) bars").foregroundStyle(.secondary)
             }
             .font(.system(size: 12).monospacedDigit())
             .foregroundStyle(model.sessionChanged ? Who.agent.color : Color.primary)
@@ -244,11 +244,12 @@ private struct GridControl: View {
 
     var body: some View {
         let grid = model.grid(in: .timeline)
+        let bar = model.barBeats
         Menu {
             Toggle("Follow Zoom", isOn: Binding(get: { model.timelineGrid == nil }, set: { if $0 { model.timelineGrid = nil } }))
             Divider()
-            ForEach(Grid.sizes, id: \.self) { size in
-                Toggle(Grid.name(size), isOn: Binding(get: { Grid.size(grid) == size }, set: { if $0 { model.chooseGrid(size: size, in: .timeline) } }))
+            ForEach(Grid.sizes(bar: bar), id: \.self) { size in
+                Toggle(Grid.name(size, bar: bar), isOn: Binding(get: { Grid.size(grid, bar: bar) == size }, set: { if $0 { model.chooseGrid(size: size, in: .timeline) } }))
             }
             Divider()
             Button("Finer") { model.stepGrid(.finer, in: .timeline) }
@@ -262,7 +263,7 @@ private struct GridControl: View {
         } label: {
             // One Text: a menu's label shows its first text alone.
             (Text("Grid ").foregroundColor(.secondary)
-                + Text(model.snapsToGrid ? Grid.name(grid) : "\(Grid.name(grid)), no snap")
+                + Text(model.snapsToGrid ? Grid.name(grid, bar: bar) : "\(Grid.name(grid, bar: bar)), no snap")
                     .foregroundColor(model.timelineGrid == nil ? .secondary : .primary))
                 .font(.system(size: 12).monospacedDigit())
         }
@@ -378,5 +379,39 @@ private struct TempoField: View {
                 typed = current
             }
         }
+    }
+}
+
+/// The time signature in the transport bar, typed as `3/4` or `6/8`.
+private struct MeterField: View {
+    let model: SongModel
+    @State private var typed = ""
+    @FocusState private var focused: Bool
+
+    private var current: String { model.arrangement.timeSignature }
+
+    var body: some View {
+        TextField("4/4", text: $typed)
+            .textFieldStyle(.plain)
+            .multilineTextAlignment(.center)
+            .frame(width: 36)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 3)
+            .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 3))
+            .focused($focused)
+            .accessibilityLabel("Time signature")
+            .help("Time signature: 1 to 32 beats over 1, 2, 4, 8 or 16, such as 3/4 or 6/8. Return applies; Escape cancels.")
+            .onSubmit { focused = false; model.onFocus?() }
+            .onExitCommand { typed = current; focused = false; model.onFocus?() }
+            .onAppear { typed = current }
+            .onChange(of: model.arrangement.timeSignature) {
+                if !focused { typed = current }
+            }
+            .onChange(of: focused) {
+                if !focused {
+                    model.setTimeSignature(typed)
+                    typed = current
+                }
+            }
     }
 }

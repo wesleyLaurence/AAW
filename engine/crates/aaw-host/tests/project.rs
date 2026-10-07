@@ -133,7 +133,7 @@ fn registered(under: &Path) -> Vec<(PathBuf, Option<PathBuf>)> {
 fn a_project_is_named_by_its_folder_or_its_song_file() {
     let dir = tempfile::tempdir().unwrap();
     let folder = dir.path().join("beat");
-    let song = project::create(&folder, 100.0, 4, None).unwrap();
+    let song = project::create(&folder, 100.0, 4, None, None).unwrap();
     assert_eq!(song, folder.join("song.yaml"));
     assert_eq!(project::song_file(&folder), song);
     assert_eq!(project::song_file(&song), song);
@@ -143,8 +143,15 @@ fn a_project_is_named_by_its_folder_or_its_song_file() {
     assert_eq!(project::shown(&song), folder);
     assert_eq!(project::shown(&folder.join("other.yaml")), folder.join("other.yaml"));
     // A second project in the folder is refused.
-    assert!(project::create(&folder, 100.0, 4, None).unwrap_err().contains("already exists"));
-    assert!(project::create(&dir.path().join("none"), 100.0, 0, None).unwrap_err().contains("bars"));
+    assert!(project::create(&folder, 100.0, 4, None, None).unwrap_err().contains("already exists"));
+    assert!(project::create(&dir.path().join("none"), 100.0, 0, None, None).unwrap_err().contains("bars"));
+    // A song in another meter is so many of its bars long and says its meter.
+    let waltz = project::blank(100.0, 12, None, Some("3/4")).unwrap();
+    assert_eq!((waltz.session.time_signature.as_str(), waltz.session.length_exact()), ("3/4", num_rational::BigRational::from_integer(36.into())));
+    let seven = project::blank(100.0, 4, None, Some("7/8")).unwrap();
+    assert_eq!(seven.session.length_exact(), num_rational::BigRational::new(28.into(), 2.into()));
+    assert!(project::blank(100.0, 4, None, Some("5/3")).unwrap_err().contains("such as 4/4"));
+    assert_eq!(aaw_model::to_yaml(&project::blank(100.0, 4, None, Some("4/4")).unwrap()), aaw_model::to_yaml(&project::blank(100.0, 4, None, None).unwrap()));
     // A path that is gone resolves through the folders that are there.
     let canonical = std::fs::canonicalize(dir.path()).unwrap();
     assert_eq!(project::resolved(&dir.path().join("gone/song.yaml")).unwrap(), canonical.join("gone/song.yaml"));
@@ -183,7 +190,7 @@ fn untitled_projects_take_the_lowest_free_name_and_blank_ones_are_swept() {
 
     // Only an Untitled project is deleted this way.
     let dir = tempfile::tempdir().unwrap();
-    let named = project::create(&dir.path().join("beat"), 120.0, 4, None).unwrap();
+    let named = project::create(&dir.path().join("beat"), 120.0, 4, None, None).unwrap();
     assert!(project::delete_untitled(&named).unwrap_err().contains("not an Untitled project"));
     assert!(named.exists());
     project::delete_untitled(&third).unwrap();

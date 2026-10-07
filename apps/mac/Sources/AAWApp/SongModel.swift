@@ -387,6 +387,23 @@ public final class SongModel {
         if bpm != arrangement.tempo { edit(.tempo(bpm: bpm)) }
     }
 
+    /// Sets the song's time signature from the transport bar's field, `3/4`
+    /// or `6/8`; the model's rule is checked here first so the refusal is
+    /// one sentence.
+    func setTimeSignature(_ text: String) {
+        let parts = text.split(separator: "/", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard parts.count == 2, let beats = Int(parts[0]), let unit = Int(parts[1]),
+              (1...32).contains(beats), [1, 2, 4, 8, 16].contains(unit) else {
+            refuse("Enter a time signature such as 3/4 or 6/8: 1 to 32 beats over 1, 2, 4, 8 or 16.")
+            return
+        }
+        let value = "\(beats)/\(unit)"
+        if value != arrangement.timeSignature { edit(.timeSignature(text: value)) }
+    }
+
+    /// A bar in beats, from the song's time signature.
+    var barBeats: Double { arrangement.barBeats }
+
     // MARK: Editing
 
     /// Makes an edit. `then` is called with the keys of what the edit made,
@@ -1317,7 +1334,7 @@ public final class SongModel {
            s.at + s.lengthBeats <= arrangement.lengthBeats {
             return LoopRegion(start: s.at, length: s.lengthBeats)
         }
-        let bar = Double(arrangement.beatsPerBar)
+        let bar = arrangement.barBeats
         let start = (cue / bar).rounded(.down) * bar
         return LoopRegion(start: start, length: min(bar, arrangement.lengthBeats - start))
     }
@@ -1371,9 +1388,9 @@ public final class SongModel {
         }
     }
 
-    /// The values an editor's grid can be set to.
+    /// The values an editor's grid can be set to: the song's bar among them.
     func gridValues(in place: GridPlace) -> [String] {
-        place == .pattern ? Grid.patternValues : Grid.values
+        place == .pattern ? Grid.patternValues : Grid.list(bar: barBeats)
     }
 
     /// Sets an editor's grid: the timeline's or the piano roll's in the
@@ -1391,7 +1408,7 @@ public final class SongModel {
 
     /// Chooses a size from the Grid menu, kept a triplet when the grid is one.
     func chooseGrid(size: String, in place: GridPlace) {
-        setGrid(Grid.choose(size, keeping: grid(in: place), in: gridValues(in: place)), in: place)
+        setGrid(Grid.choose(size, keeping: grid(in: place), in: gridValues(in: place), bar: barBeats), in: place)
     }
 
     /// The next finer or coarser grid, or the grid's triplet or straight
@@ -1402,7 +1419,7 @@ public final class SongModel {
         switch step {
         case .finer: return Grid.finer(current, in: values)
         case .coarser: return Grid.coarser(current, in: values)
-        case .triplets: return Grid.triplets(current, !Grid.isTriplet(current), in: values)
+        case .triplets: return Grid.triplets(current, !Grid.isTriplet(current), in: values, bar: barBeats)
         }
     }
 

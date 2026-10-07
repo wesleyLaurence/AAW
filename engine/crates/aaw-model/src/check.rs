@@ -19,8 +19,6 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 /// How far apart two beats may be and still be the same: an audio clip's end
 /// comes from seconds.
 const EPS: f64 = 1e-6;
-/// 4/4 is the only time signature.
-const BAR: f64 = 4.0;
 /// C3: the notes below it are the low register `register-crowded` watches.
 const LOW: i64 = 48;
 /// How far a sample is repitched before it sounds artificial.
@@ -756,6 +754,8 @@ fn pitched(p: &Project, t: &Track) -> Vec<(f64, f64, i64)> {
 /// `register-crowded`: two tracks in one octave below C3 in the same bars,
 /// a warning a pair of tracks and an octave. Muted tracks are left out.
 fn crowded(p: &Project, out: &mut Vec<Warning>) {
+    let meter = p.session.meter();
+    let bar = meter.bar_f64();
     // Each track's low octaves, and the bars each sounds in.
     let low: Vec<(&Track, BTreeMap<i64, BTreeSet<i64>>)> = p
         .tracks
@@ -768,7 +768,7 @@ fn crowded(p: &Project, out: &mut Vec<Warning>) {
                     continue;
                 }
                 let bars = octaves.entry(pitch.div_euclid(12)).or_default();
-                let (first, last) = ((start / BAR + EPS).floor() as i64, ((end / BAR) - EPS).ceil() as i64 - 1);
+                let (first, last) = ((start / bar + EPS).floor() as i64, ((end / bar) - EPS).ceil() as i64 - 1);
                 bars.extend(first..=last.max(first));
             }
             (t, octaves)
@@ -795,7 +795,7 @@ fn crowded(p: &Project, out: &mut Vec<Warning>) {
                         ),
                         vec![format!("tracks.{}", a.id), format!("tracks.{}", b.id)],
                     )
-                    .at(BigRational::from_integer((first * 4).into())),
+                    .at(meter.bar() * BigRational::from_integer(first.into())),
                 );
             }
         }

@@ -24,4 +24,5 @@ refused, and the app builds and shows the control on a scratch project.
 
 ## Open questions
 
-None. Tempo maps and time signature changes remain separate backlog work.
+None. Tempo maps remain backlog work; the time signature has a field of its own
+beside this one ([time signature](time-signature.md)).

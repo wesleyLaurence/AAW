@@ -61,6 +61,9 @@ public struct PatternLayout: Equatable {
     }
 
     public var size: CGSize = .zero
+    /// The song's bar and the beat its time signature counts, in beats.
+    public var beatsPerBar: Double = 4
+    public var beatUnit: Double = 1
     public var lengthBeats: Double = 4
     /// The length of a step, in beats.
     public var grid: Double = 0.25

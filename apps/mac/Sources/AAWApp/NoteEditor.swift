@@ -116,6 +116,8 @@ final class NoteEditor: NSView {
     private func relayout() {
         guard let context else { return }
         layout.size = bounds.size
+        layout.beatsPerBar = model.arrangement.barBeats
+        layout.beatUnit = model.arrangement.beatUnit
         layout.grid = PianoRollLayout.beats(model.noteGrid) ?? 0.25
         layout.setSpan(length: context.clip.lengthBeats, notes: notes().map { ($0.at, $0.at + $0.duration) })
         if fitted != context.clip.key, layout.lanesWidth > 0, layout.lanesHeight > 0 {
@@ -620,8 +622,8 @@ final class NoteEditor: NSView {
         guard last >= first else { return }
         for step in first...last {
             let beat = Double(step) * grid
-            let onBeat = abs(beat - beat.rounded()) < 1e-9
-            let onBar = onBeat && Int(beat.rounded()) % 4 == 0
+            let onBeat = whole(beat / layout.beatUnit)
+            let onBar = whole(beat / layout.beatsPerBar)
             guard onBar || (onBeat && layout.pixelsPerBeat >= 6) || stepWidth >= 6 else { continue }
             fill(CGRect(x: layout.x(beat).rounded(), y: top, width: 1, height: bottom - top),
                  onBar ? Theme.gray(1, 0.2) : onBeat ? Theme.gray(1, 0.1) : Theme.gridLine)
@@ -754,25 +756,31 @@ final class NoteEditor: NSView {
         }
     }
 
-    /// Beats from the clip's start, as bars and beats counted from one.
+    /// Beats from the clip's start, as bars and beats counted from one, the
+    /// beat as the time signature counts it.
     private func drawRuler() {
         let gutter = PianoRollLayout.gutter
         let ruler = PianoRollLayout.rulerHeight
         fill(CGRect(x: gutter, y: 0, width: bounds.width - gutter, height: ruler), Theme.ruler)
+        let unit = layout.beatUnit
+        let perBar = max(1, Int((layout.beatsPerBar / unit).rounded()))
         var every = 1
-        while CGFloat(every) * layout.pixelsPerBeat < 26 { every *= 2 }
-        let first = Int(max(layout.first, layout.beat(atX: gutter)).rounded(.down))
-        let last = Int(min(layout.last, layout.beat(atX: bounds.width)).rounded(.up))
+        while CGFloat(Double(every) * unit) * layout.pixelsPerBeat < 26 { every *= 2 }
+        let first = Int((max(layout.first, layout.beat(atX: gutter)) / unit).rounded(.down))
+        let last = Int((min(layout.last, layout.beat(atX: bounds.width)) / unit).rounded(.up))
         guard last >= first else { return }
-        for beat in first...last where beat % every == 0 {
-            let x = layout.x(Double(beat)).rounded()
-            let onBar = beat % 4 == 0
+        for k in first...last where k % every == 0 {
+            let x = layout.x(Double(k) * unit).rounded()
+            let bar = Int((Double(k) / Double(perBar)).rounded(.down))
+            let onBar = k - bar * perBar == 0
             fill(CGRect(x: x, y: onBar ? 2 : ruler - 5, width: 1, height: onBar ? ruler - 2 : 5), Theme.gray(1, onBar ? 0.3 : 0.16))
-            let bar = Int((Double(beat) / 4).rounded(.down))
-            let label = onBar ? "\(bar + 1)" : "\(bar + 1).\(beat - bar * 4 + 1)"
+            let label = onBar ? "\(bar + 1)" : "\(bar + 1).\(k - bar * perBar + 1)"
             text(label, in: CGRect(x: x + 3, y: 2, width: 40, height: 12), font: Self.numberFont, color: onBar ? Theme.dimText : Theme.faintText)
         }
     }
+
+    /// Whether `x` is a whole number, within a hair.
+    private func whole(_ x: Double) -> Bool { abs(x - x.rounded()) < 1e-9 }
 }
 
 /// The piano roll in SwiftUI.
@@ -820,6 +828,13 @@ struct NoteClipHeader: View {
         }
     }
 
+        /// The grids the piano roll lists: the song's, with the current one kept
+    /// when the meter's list lacks it.
+    private var noteGrids: [String] {
+        let grids = Grid.list(bar: model.arrangement.barBeats)
+        return grids.contains(model.noteGrid) ? grids : grids + [model.noteGrid]
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             VStack(alignment: .leading, spacing: 1) {
@@ -843,7 +858,7 @@ struct NoteClipHeader: View {
             }
             row("Grid") {
                 Picker("", selection: Binding(get: { model.noteGrid }, set: { model.noteGrid = $0 })) {
-                    ForEach(PianoRollLayout.grids, id: \.self) { Text(PianoRollLayout.noteValue($0)).tag($0) }
+                    ForEach(noteGrids, id: \.self) { Text(Grid.name($0, bar: model.arrangement.barBeats)).tag($0) }
                 }
                 .labelsHidden()
                 .controlSize(.mini)

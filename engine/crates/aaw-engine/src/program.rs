@@ -214,6 +214,11 @@ pub struct Program {
     pub rate: u32,
     /// Beats per minute, to carry a playhead across a tempo change.
     pub tempo: f64,
+    /// The note the time signature counts, in quarter-note beats: what the
+    /// metronome clicks on, 1/2 in 6/8.
+    pub click_beats: f64,
+    /// Clicks to a bar: the time signature's beats, the first accented.
+    pub beats_per_bar: u32,
     /// The session length in frames.
     pub total: usize,
     /// Tracks in render order: sidechain sources first.
@@ -1131,6 +1136,8 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     Ok(Program {
         rate: rate as u32,
         tempo: p.session.tempo,
+        click_beats: p.session.meter().beat_f64(),
+        beats_per_bar: p.session.meter().beats,
         total,
         tracks,
         returns: buses,

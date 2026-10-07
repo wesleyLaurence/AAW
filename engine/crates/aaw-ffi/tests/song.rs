@@ -152,7 +152,7 @@ fn touch(part: Part, key: u64, delta: Delta) -> Touch {
 fn the_arrangement_is_what_the_app_draws() {
     let (_dir, _path, song, _seen) = open();
     let a = song.arrangement();
-    assert_eq!((a.revision, a.title.as_str(), a.tempo, a.beats_per_bar, a.length_beats), (0, "Demo", 120.0, 4, 32.0));
+    assert_eq!((a.revision, a.title.as_str(), a.tempo, a.time_signature.as_str(), a.bar_beats, a.beat_unit, a.length_beats), (0, "Demo", 120.0, "4/4", 4.0, 1.0, 32.0));
     assert_eq!(a.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["drums", "perc"]);
     let drums = &a.tracks[0];
     assert_eq!(drums.sends, [SendView { to: "plate".into(), gain_db: -12.0 }]);
@@ -2901,4 +2901,19 @@ fn the_patchs_effects_unison_and_tables_are_drawn_and_edited() {
     assert!(lead.lanes.is_empty(), "the lane went with the effect");
     let left = agent(&path, json!({"op": "get", "path": "tracks.lead.instrument.synth.effects"}));
     assert_eq!((left[0]["type"].clone(), left[0]["mix_percent"].clone(), left.as_array().unwrap().len()), (json!("reverb"), json!(25.0), 1));
+}
+
+#[test]
+fn the_transport_bars_meter_field_sets_the_time_signature() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    assert!(song.edit(Edit::TimeSignature { text: " 6/8 ".into() }, None).unwrap().is_empty());
+    let u = update(&seen);
+    assert_eq!(u.change.label.as_str(), "Set session.time_signature: \"4/4\" → \"6/8\"");
+    let a = song.arrangement();
+    assert_eq!((a.time_signature.as_str(), a.bar_beats, a.beat_unit), ("6/8", 3.0, 0.5));
+    let refused = song.edit(Edit::TimeSignature { text: "5/3".into() }, None).unwrap_err();
+    assert!(refused.to_string().contains("such as 4/4"), "{refused}");
+    song.undo().unwrap();
+    assert_eq!(song.arrangement().time_signature, "4/4");
 }
