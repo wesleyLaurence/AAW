@@ -201,3 +201,41 @@ fn a_preview_is_the_channel_s_stem() {
     }
     assert!(compile_scoped(&p, dir.path(), &mut Cache::default(), Scope::Channel("nope")).is_err());
 }
+
+#[test]
+fn an_equalizer_s_output_is_tapped_for_the_spectrum() {
+    use aaw_dsp::spectrum::{Analyzer, Taps, TAP_FRAMES};
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_mix_song(dir.path());
+    let p = aaw_model::load(&path, true).unwrap();
+    let taps = Arc::new(Taps::default());
+    let program = Arc::new(compile_cached(&p, dir.path(), &mut Cache::with_taps(taps.clone())).unwrap());
+    // The bass's equalizer has a tap; its filter and the hats' do not.
+    let tap = taps.find("bass", 0).expect("an equalizer is tapped");
+    assert!(taps.find("bass", 2).is_none() && taps.find("hats", 0).is_none());
+    assert_eq!(tap.written(), 0);
+    // The song to beat 9 of 16 through the renderer, where a bass note
+    // sounds: the ring holds its last frames.
+    let mut r = Renderer::new(program.clone(), 0, 4096);
+    let mut block = vec![[0.0; 2]; 512];
+    let played = program.total * 9 / 16 / 512 * 512;
+    for _ in 0..played / 512 {
+        r.render(&mut block, |_, _, _| {});
+    }
+    assert_eq!(tap.written() as usize, played);
+    let mut frames = [0.0; TAP_FRAMES];
+    tap.read(&mut frames);
+    assert!(frames.iter().any(|x| x.abs() > 1e-6), "the bass has sounded");
+    let levels = Analyzer::default().analyze(&tap);
+    let loudest = levels.iter().cloned().fold(f32::MIN, f32::max);
+    assert!(loudest > -60.0, "{loudest} dB at the loudest bin");
+    // A compile that drops the equalizer drops its tap, and one that keeps
+    // it keeps the same ring.
+    let mut cache = Cache::with_taps(taps.clone());
+    compile_cached(&p, dir.path(), &mut cache).unwrap();
+    assert!(Arc::ptr_eq(&tap, &taps.find("bass", 0).unwrap()));
+    let mut without = p.clone();
+    without.tracks[1].effects.remove(0);
+    compile_cached(&without, dir.path(), &mut cache).unwrap();
+    assert!(taps.find("bass", 0).is_none());
+}

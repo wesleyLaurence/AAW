@@ -16,6 +16,8 @@ use aaw_host::command::{Command, Origin};
 use aaw_host::host::{self, Clock, Event, Options, Running};
 use aaw_host::project;
 use aaw_host::session::{Change, Doc};
+use aaw_host::tree::{self, Step};
+use aaw_dsp::spectrum::{Analyzer, Taps};
 pub use edits::{Edit, EventCopy, NoteCopy, PointPlace, Row, SynthFieldValue};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
@@ -147,6 +149,20 @@ pub struct Playhead {
     pub beat: f64,
 }
 
+/// The spectrum of what an equalizer puts out, from the last 4096 frames
+/// the audio thread passed through it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct Spectrum {
+    /// Frames a second: bin `k` is at `k * sample_rate / 4096` Hz.
+    pub sample_rate: u32,
+    /// Frames the equalizer has put out so far; the same twice means
+    /// nothing has played since.
+    pub written: u64,
+    /// Each bin's level in dB relative to full scale, from 0 Hz to half
+    /// the sample rate, 2049 of them.
+    pub levels: Vec<f32>,
+}
+
 /// What the app is told as it happens. Calls arrive on the host's thread, in
 /// order, and must return promptly.
 #[uniffi::export(with_foreign)]
@@ -183,6 +199,9 @@ pub struct Song {
     path: Arc<Mutex<PathBuf>>,
     /// The files the song's audio clips play.
     files: Arc<files::Files>,
+    /// The equalizers' taps, and the analysis of one of them.
+    taps: Arc<Taps>,
+    analyzer: Mutex<Analyzer>,
 }
 
 /// The folder a song file is in, which its samples' paths are relative to.
@@ -259,6 +278,8 @@ impl Song {
         })?;
         Ok(Arc::new(Song {
             clock: running.clock().clone(),
+            taps: running.taps().clone(),
+            analyzer: Mutex::new(Analyzer::default()),
             running: RwLock::new(Some(running)),
             latest,
             doc,
@@ -323,6 +344,37 @@ impl Song {
     /// to read every frame. None until the first play has opened the output.
     pub fn playhead(&self) -> Option<Playhead> {
         self.clock.now().map(|(playing, beat)| Playhead { playing, beat })
+    }
+
+    /// The spectrum of what the equalizer `effect` has put out lately, for
+    /// the curve its panel draws; None for an effect that is not an
+    /// equalizer on a track, a return or the master, or is bypassed. Silence
+    /// reads −200 dB in every bin. Cheap enough to read every frame drawn.
+    pub fn spectrum(&self, effect: u64) -> Option<Spectrum> {
+        let (owner, index, sample_rate) = {
+            let doc = locked(&self.doc);
+            let doc = doc.as_ref()?;
+            let tree = doc.tree();
+            let loc = tree::find(&tree, effect)?;
+            let p = &doc.project;
+            let (owner, index) = match loc.as_slice() {
+                [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => match list.as_str() {
+                    "tracks" => (p.tracks.get(*i)?.id.clone(), *j),
+                    "returns" => (p.returns.get(*i)?.id.clone(), *j),
+                    _ => return None,
+                },
+                [Step::Key(m), Step::Key(l), Step::Index(j)] if m == "master" && l == "effects" => ("master".to_string(), *j),
+                _ => return None,
+            };
+            (owner, index, p.session.sample_rate as u32)
+        };
+        let tap = self.taps.find(&owner, index)?;
+        let mut analyzer = locked(&self.analyzer);
+        Some(Spectrum {
+            sample_rate,
+            written: tap.written(),
+            levels: analyzer.analyze(&tap),
+        })
     }
 
     /// Makes an edit as the person, as one undo step, and returns the keys of

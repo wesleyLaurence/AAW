@@ -1934,47 +1934,70 @@ pub struct Filter {
     pub bypass: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The shape of an equalizer band: a bell or a shelf with a gain, or a
+/// highpass or lowpass with a slope, which has no gain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum BandShape {
     Bell,
     LowShelf,
     HighShelf,
+    Highpass,
+    Lowpass,
 }
 
 impl BandShape {
+    pub const NAMES: [&'static str; 5] = ["bell", "low_shelf", "high_shelf", "highpass", "lowpass"];
+
     pub fn as_str(self) -> &'static str {
         match self {
             BandShape::Bell => "bell",
             BandShape::LowShelf => "low_shelf",
             BandShape::HighShelf => "high_shelf",
+            BandShape::Highpass => "highpass",
+            BandShape::Lowpass => "lowpass",
         }
+    }
+
+    /// Whether the band cuts past a frequency rather than raising or
+    /// lowering a region: its `slope_db_per_octave` counts and its
+    /// `gain_db` does not.
+    pub fn is_pass(self) -> bool {
+        matches!(self, BandShape::Highpass | BandShape::Lowpass)
     }
 }
 
+/// One band of an equalizer. A bell or a shelf has a gain at its frequency,
+/// with `q` its width or its slope; a highpass or a lowpass cuts past its
+/// frequency at `slope_db_per_octave`, with `q` the resonance at its corner,
+/// 0.71 being flat. The field a shape has no use for is kept and ignored.
 #[derive(Clone, Debug)]
 pub struct EqBand {
     pub shape: BandShape,
     pub freq_hz: f64,
     pub gain_db: f64,
     pub q: f64,
+    pub slope_db_per_octave: i64,
 }
 
 impl EqBand {
-    const FIELDS: &'static [&'static str] = &["shape", "freq_hz", "gain_db", "q"];
+    const FIELDS: &'static [&'static str] = &["shape", "freq_hz", "gain_db", "q", "slope_db_per_octave"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<EqBand> {
         let f = Fields::of(ctx, x, "EqBand", Self::FIELDS)?;
         let before = ctx.count();
         let shape = f.req(ctx, "shape", |c, x| {
-            v::literal_str(c, x, &["bell", "low_shelf", "high_shelf"]).map(|s| match s {
+            v::literal_str(c, x, &BandShape::NAMES).map(|s| match s {
                 "bell" => BandShape::Bell,
                 "low_shelf" => BandShape::LowShelf,
-                _ => BandShape::HighShelf,
+                "high_shelf" => BandShape::HighShelf,
+                "highpass" => BandShape::Highpass,
+                _ => BandShape::Lowpass,
             })
         });
         let freq_hz = f.req(ctx, "freq_hz", |c, x| v::float(c, x, Bounds::ge_le("20", "20000")));
-        let gain_db = f.req(ctx, "gain_db", |c, x| v::float(c, x, Bounds::ge_le("-24", "24")));
+        let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-24", "24")));
         let q = f.opt(ctx, "q", 0.71, |c, x| v::float(c, x, Bounds::ge_le("0.1", "18")));
+        let slope = f.opt(ctx, "slope_db_per_octave", 12, |c, x| v::literal_int(c, x, &[12, 24, 36, 48]));
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -1984,15 +2007,29 @@ impl EqBand {
             freq_hz: freq_hz?,
             gain_db: gain_db?,
             q: q?,
+            slope_db_per_octave: slope?,
         })
+    }
+
+    /// The second-order sections the band runs as: one for a bell or a
+    /// shelf, and the slope's order halved for a highpass or a lowpass.
+    pub fn sections(&self) -> usize {
+        if self.shape.is_pass() {
+            (self.slope_db_per_octave / 12) as usize
+        } else {
+            1
+        }
     }
 
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         o.req("shape", Value::str(self.shape.as_str()));
         o.req("freq_hz", Value::Float(self.freq_hz));
+        // Always written, as it was while it was required, so that a saved
+        // song does not change.
         o.req("gain_db", Value::Float(self.gain_db));
         o.float("q", self.q, 0.71);
+        o.int("slope_db_per_octave", self.slope_db_per_octave, 12);
         o.done()
     }
 }

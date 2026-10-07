@@ -71,7 +71,7 @@ in the chain shifts indexes but not ids. EQ fields are addressed per band, e.g.
 | Effect | Automatable fields | Interpolation |
 |---|---|---|
 | `filter` | `cutoff_hz` | log |
-| `eq` | `bands.N.freq_hz`, `bands.N.q` / `bands.N.gain_db` | log / linear |
+| `eq` | `bands.N.freq_hz`, `bands.N.q` / `bands.N.gain_db` (nothing on a pass band, which ignores its gain) | log / linear |
 | `compressor` | `threshold_db`, `makeup_db` | linear |
 | `delay` | `feedback_percent`, `mix_percent` | linear |
 | `reverb` | `mix_percent` | linear |

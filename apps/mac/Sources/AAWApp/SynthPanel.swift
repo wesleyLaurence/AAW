@@ -267,7 +267,7 @@ private struct SynthEffectColumn: View {
             Spacer(minLength: 0)
             if effect.kind == "eq" {
                 Button {
-                    model.edit(.bandAdd(effect: effect.key))
+                    model.edit(.bandAdd(effect: effect.key, freqHz: nil, gainDb: nil))
                 } label: {
                     Image(systemName: "plus")
                 }

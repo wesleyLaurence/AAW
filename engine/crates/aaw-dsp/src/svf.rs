@@ -11,7 +11,7 @@
 use crate::envelope::Param;
 use crate::{Clock, Frame};
 use aaw_model::BandShape;
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 /// Frames per coefficient update.
 pub const CONTROL: i64 = 64;
@@ -20,8 +20,10 @@ pub const CONTROL: i64 = 64;
 pub enum Shape {
     /// A Butterworth filter of `order`, whose cutoff is the one parameter.
     Filter { highpass: bool, order: usize },
-    /// Bands with three parameters each: frequency, gain and q.
-    Eq { bands: Vec<BandShape> },
+    /// Bands with three parameters each, frequency, gain and q, and the
+    /// sections each runs as: one for a bell or a shelf, and the slope's
+    /// order halved for a pass band.
+    Eq { bands: Vec<(BandShape, usize)> },
 }
 
 /// State-variable parameters (g, k, m0, m1, m2) of one section.
@@ -88,7 +90,7 @@ impl Svf {
     pub fn new(shape: Shape, params: Vec<Param>, rate: f64) -> Svf {
         let count = match &shape {
             Shape::Filter { order, .. } => order / 2,
-            Shape::Eq { bands } => bands.len(),
+            Shape::Eq { bands } => bands.iter().map(|(_, sections)| sections).sum(),
         };
         let section = Section {
             tuning: [0.0; 5],
@@ -119,26 +121,36 @@ impl Svf {
                 }
             }
             Shape::Eq { bands } => {
-                for (j, (shape, t)) in bands.iter().zip(self.pending.iter_mut()).enumerate() {
+                let mut pending = self.pending.iter_mut();
+                for (j, (shape, sections)) in bands.iter().enumerate() {
                     let f = self.params[3 * j].at(tick);
                     let gain = self.params[3 * j + 1].at(tick);
                     let q = self.params[3 * j + 2].at(tick);
                     let a = 10f64.powf(gain / 40.0);
                     let tan = (PI * f / self.rate).tan();
-                    *t = match shape {
+                    match shape {
                         BandShape::Bell => {
                             let k = 1.0 / (q * a);
-                            [tan, k, 1.0, k * (a * a - 1.0), 0.0]
+                            *pending.next().expect("a section a band") = [tan, k, 1.0, k * (a * a - 1.0), 0.0];
                         }
                         BandShape::LowShelf => {
                             let k = 1.0 / q;
-                            [tan / a.sqrt(), k, 1.0, k * (a - 1.0), a * a - 1.0]
+                            *pending.next().expect("a section a band") = [tan / a.sqrt(), k, 1.0, k * (a - 1.0), a * a - 1.0];
                         }
                         BandShape::HighShelf => {
                             let k = 1.0 / q;
-                            [tan * a.sqrt(), k, a * a, k * (1.0 - a) * a, 1.0 - a * a]
+                            *pending.next().expect("a section a band") = [tan * a.sqrt(), k, a * a, k * (1.0 - a) * a, 1.0 - a * a];
                         }
-                    };
+                        // The Butterworth sections of the slope, the last at
+                        // the band's resonance, as `biquad::pass_q` lays them out.
+                        BandShape::Highpass | BandShape::Lowpass => {
+                            for (i, bq) in crate::biquad::butterworth_q(2 * sections).enumerate() {
+                                let k = if i + 1 == *sections { FRAC_1_SQRT_2 / (bq * q) } else { 1.0 / bq };
+                                *pending.next().expect("a section each 12 dB") =
+                                    if *shape == BandShape::Highpass { [tan, k, 1.0, -k, -1.0] } else { [tan, k, 0.0, 0.0, 1.0] };
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -204,7 +216,7 @@ impl Svf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::biquad::{band, butter, Cascade};
+    use crate::biquad::{butter, Cascade};
     use crate::envelope::Envelope;
     use aaw_model::rules::Domain;
     use aaw_model::{Beat, Curve, EqBand, Lane, Point};
@@ -263,31 +275,32 @@ mod tests {
 
     #[test]
     fn still_bands_match_the_cookbook() {
+        // Shape, frequency, gain, q and slope: the passes at 24 and 36 dB.
         let bands = [
-            (BandShape::Bell, 400.0, -6.0, 1.2),
-            (BandShape::LowShelf, 150.0, 5.0, 0.71),
-            (BandShape::HighShelf, 6000.0, -4.0, 0.9),
+            (BandShape::Highpass, 60.0, 0.0, 1.4, 24),
+            (BandShape::Bell, 400.0, -6.0, 1.2, 12),
+            (BandShape::LowShelf, 150.0, 5.0, 0.71, 12),
+            (BandShape::HighShelf, 6000.0, -4.0, 0.9, 12),
+            (BandShape::Lowpass, 9000.0, 0.0, 0.71, 36),
         ];
         let x = noise(6000);
         let mut expected = x.clone();
-        let sections = bands
+        let specs: Vec<EqBand> = bands
             .iter()
-            .map(|(shape, freq_hz, gain_db, q)| {
-                let b = EqBand {
-                    shape: *shape,
-                    freq_hz: *freq_hz,
-                    gain_db: *gain_db,
-                    q: *q,
-                };
-                band(&b, 48000.0)
+            .map(|(shape, freq_hz, gain_db, q, slope)| EqBand {
+                shape: *shape,
+                freq_hz: *freq_hz,
+                gain_db: *gain_db,
+                q: *q,
+                slope_db_per_octave: *slope,
             })
             .collect();
-        Cascade::new(sections).process(&mut expected);
+        Cascade::new(specs.iter().flat_map(|b| crate::biquad::sections(b, 48000.0)).collect()).process(&mut expected);
         let params = bands.iter().flat_map(|b| [Param::fixed(b.1), Param::fixed(b.2), Param::fixed(b.3)]).collect();
         let mut got = x.clone();
         Svf::new(
             Shape::Eq {
-                bands: bands.iter().map(|b| b.0).collect(),
+                bands: specs.iter().map(|b| (b.shape, b.sections())).collect(),
             },
             params,
             48000.0,

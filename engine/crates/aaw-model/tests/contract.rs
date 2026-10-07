@@ -23,7 +23,7 @@ tracks:
     audio: [{sample: s}]
     effects:
       - {type: filter, mode: lowpass, cutoff_hz: 1000}
-      - {type: eq, bands: [{shape: bell, freq_hz: 1000, gain_db: 0}]}
+      - {type: eq, bands: [{shape: bell, freq_hz: 1000}]}
       - {type: compressor, threshold_db: -20}
       - {type: limiter}
       - {type: delay, time_beats: 1}

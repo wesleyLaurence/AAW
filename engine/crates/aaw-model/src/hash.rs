@@ -3,7 +3,7 @@
 
 use crate::pyfmt::json_dumps;
 use crate::schema::Project;
-use crate::value::{dict, py_eq, Dict, Value};
+use crate::value::{py_eq, Dict, Value};
 use sha2::{Digest, Sha256};
 
 fn sha(v: &Value) -> String {
@@ -16,29 +16,50 @@ pub fn project_hash(project: &Project) -> String {
     sha(&project.dump(true))
 }
 
+/// A field a schema change added, at its default; dropped from the full
+/// dump to give the form an earlier engine wrote. One whose key another
+/// model shares names a sibling key, `beside`, and is dropped only from a
+/// mapping that holds it.
+struct Added {
+    key: &'static str,
+    default: Value,
+    beside: Option<&'static str>,
+}
+
+fn added(key: &'static str, default: Value) -> Added {
+    Added { key, default, beside: None }
+}
+
 /// Newest first: the fields each schema change added, at
 /// their defaults. A field added to any model needs a new first entry here.
-fn legacy_fields() -> Vec<Value> {
+fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // An equalizer band's slope; the filter has the key too, so only a
+        // mapping with a band's shape loses it.
+        vec![Added { key: "slope_db_per_octave", default: Value::int(12), beside: Some("shape") }],
         // An equalizer band's shape is a word, so only a point's is dropped.
-        dict(vec![("shape", Value::Float(0.0))]),
-        dict(vec![("audio", Value::List(vec![]))]),
-        dict(vec![("stretch", Value::str("repitch")), ("stretcher", Value::str("signalsmith"))]),
-        dict(vec![("source_sha256", Value::None)]),
-        dict(vec![("automation", Value::List(vec![])), ("id", Value::None)]),
-        dict(vec![("sends", Value::List(vec![])), ("returns", Value::List(vec![]))]),
-        dict(vec![("effects", Value::List(vec![])), ("master", Value::Dict(Dict::new()))]),
+        vec![added("shape", Value::Float(0.0))],
+        vec![added("audio", Value::List(vec![]))],
+        vec![added("stretch", Value::str("repitch")), added("stretcher", Value::str("signalsmith"))],
+        vec![added("source_sha256", Value::None)],
+        vec![added("automation", Value::List(vec![])), added("id", Value::None)],
+        vec![added("sends", Value::List(vec![])), added("returns", Value::List(vec![]))],
+        vec![added("effects", Value::List(vec![])), added("master", Value::Dict(Dict::new()))],
     ]
 }
 
 /// Drops, anywhere in the dump, keys equal to those defaults.
-fn without(data: &Value, fields: &Dict) -> Value {
+fn without(data: &Value, fields: &[Added]) -> Value {
     match data {
         Value::List(items) => Value::List(items.iter().map(|x| without(x, fields)).collect()),
         Value::Dict(d) => Value::Dict(
             d.iter()
                 .map(|(k, v)| (k.clone(), without(v, fields)))
-                .filter(|(k, v)| !fields.get(k).is_some_and(|default| py_eq(v, default)))
+                .filter(|(k, v)| {
+                    !fields.iter().any(|f| {
+                        k.as_str() == Some(f.key) && py_eq(v, &f.default) && f.beside.is_none_or(|sibling| d.get(&crate::value::Key::str(sibling)).is_some())
+                    })
+                })
                 .collect(),
         ),
         other => other.clone(),
@@ -50,12 +71,10 @@ fn without(data: &Value, fields: &Dict) -> Value {
 pub fn fingerprints(project: &Project) -> Vec<String> {
     let mut forms = vec![project_hash(project)];
     let full = project.dump(false);
-    let mut fields = Dict::new();
+    let mut fields: Vec<Added> = Vec::new();
     forms.push(sha(&without(&full, &fields)));
     for added in legacy_fields() {
-        if let Value::Dict(d) = added {
-            fields.extend(d);
-        }
+        fields.extend(added);
         forms.push(sha(&without(&full, &fields)));
     }
     forms

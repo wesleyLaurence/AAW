@@ -421,7 +421,9 @@
           "enum": [
             "bell",
             "low_shelf",
-            "high_shelf"
+            "high_shelf",
+            "highpass",
+            "lowpass"
           ],
           "title": "Shape",
           "type": "string"
@@ -433,6 +435,7 @@
           "type": "number"
         },
         "gain_db": {
+          "default": 0,
           "maximum": 24,
           "minimum": -24,
           "title": "Gain Db",
@@ -444,12 +447,22 @@
           "minimum": 0.1,
           "title": "Q",
           "type": "number"
+        },
+        "slope_db_per_octave": {
+          "default": 12,
+          "enum": [
+            12,
+            24,
+            36,
+            48
+          ],
+          "title": "Slope Db Per Octave",
+          "type": "integer"
         }
       },
       "required": [
         "shape",
-        "freq_hz",
-        "gain_db"
+        "freq_hz"
       ],
       "title": "EqBand",
       "type": "object"

@@ -92,9 +92,13 @@ stream is cut into blocks, and processing never allocates.
 
 - **Devices** (`aaw-dsp`) were ported from the Python engine operation for operation:
   Butterworth filters designed as `scipy.signal.butter` designs them, RBJ
-  equalizer bands, the state-variable filter that automation moves, the
+  equalizer bands (a pass band the Butterworth sections of its slope with the
+  band's q on the last), the state-variable filter that automation moves, the
   compressor, the look-ahead limiter and the tempo-synced delay. A lane whose
-  points share one value is that static value.
+  points share one value is that static value. An equalizer on a track, a
+  return or the master writes its output into a ring the app reads for the
+  spectrum under its curve (`spectrum`), kept beside the program cache so
+  that an edit leaves it where it was.
 - **The reverb** has the Python engine's impulse response except for its noise,
   which comes from a generator of its own (D40, D44), so a tail is statistically
   the same and not sample-identical. Its convolution is non-uniformly
