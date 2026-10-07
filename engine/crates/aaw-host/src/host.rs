@@ -9,6 +9,7 @@ use crate::command::{beat_value, json_value, Command, Kind, Origin};
 use crate::registry;
 use crate::session::{Change, Doc, History, Session};
 use aaw_engine::player::Shared;
+use aaw_engine::program::Taps;
 use aaw_engine::program::{compile_cached, Cache, Program};
 use aaw_engine::realtime::Transport;
 use aaw_model::Beat;
@@ -831,7 +832,7 @@ struct Serving {
 }
 
 /// Claims the project, loads it and starts listening on its socket.
-fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Clock>) -> Result<(Host, Serving, Inbox)> {
+fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Clock>, taps: Arc<Taps>) -> Result<(Host, Serving, Inbox)> {
     let entry = registry::entry(project)?;
     let (listener, claim) = registry::claim(&entry)?;
     let session = Session::open(project, true)?;
@@ -847,7 +848,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         observer,
         clock,
         reported_transport: None,
-        cache: Cache::default(),
+        cache: Cache::with_taps(taps),
         program: None,
         transport: None,
         metronome: false,
@@ -954,7 +955,7 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
 /// request arrives or, with `exit_on_stop`, playback stops. Returns a summary,
 /// with the audio report when the song played.
 pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Result<Json> {
-    let (host, serving, _) = open(project, opts, None, Arc::new(Clock::default()))?;
+    let (host, serving, _) = open(project, opts, None, Arc::new(Clock::default()), Arc::default())?;
     serve(host, serving, interrupted)
 }
 
@@ -963,6 +964,8 @@ pub fn run(project: &Path, opts: Options, interrupted: Arc<AtomicBool>) -> Resul
 pub struct Running {
     requests: Inbox,
     clock: Arc<Clock>,
+    /// The equalizers' taps, for the app's spectrum.
+    taps: Arc<Taps>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<Result<Json>>>,
 }
@@ -972,12 +975,13 @@ pub struct Running {
 pub fn spawn(project: &Path, opts: Options, observer: impl FnMut(Event) + Send + 'static) -> Result<Running> {
     let stop = Arc::new(AtomicBool::new(false));
     let clock = Arc::new(Clock::default());
+    let taps = Arc::new(Taps::default());
     let (ready_tx, ready_rx) = mpsc::channel::<Result<Inbox>>();
     let thread = {
-        let (project, stop, clock) = (project.to_path_buf(), stop.clone(), clock.clone());
+        let (project, stop, clock, taps) = (project.to_path_buf(), stop.clone(), clock.clone(), taps.clone());
         std::thread::Builder::new()
             .name("aaw-host".into())
-            .spawn(move || match open(&project, opts, Some(Box::new(observer)), clock) {
+            .spawn(move || match open(&project, opts, Some(Box::new(observer)), clock, taps) {
                 Ok((host, serving, requests)) => {
                     let _ = ready_tx.send(Ok(requests));
                     serve(host, serving, stop)
@@ -993,6 +997,7 @@ pub fn spawn(project: &Path, opts: Options, observer: impl FnMut(Event) + Send +
     Ok(Running {
         requests,
         clock,
+        taps,
         stop,
         thread: Some(thread),
     })
@@ -1013,6 +1018,12 @@ impl Running {
 
     pub fn clock(&self) -> &Arc<Clock> {
         &self.clock
+    }
+
+    /// The equalizers' taps, where the audio thread leaves what each puts
+    /// out, for the app's spectrum.
+    pub fn taps(&self) -> &Arc<Taps> {
+        &self.taps
     }
 
     fn join(&mut self) -> Result<Json> {

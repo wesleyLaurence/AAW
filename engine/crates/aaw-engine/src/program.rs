@@ -13,6 +13,7 @@
 use crate::sndfile;
 use crate::stretch::{self, MARGIN_SECONDS};
 use aaw_dsp::device::{Kernels, Plan};
+pub use aaw_dsp::spectrum::Taps;
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
 use aaw_dsp::synth::{track_seed, Patch};
@@ -315,12 +316,25 @@ pub struct Cache {
     /// Wavetables read from samples, by the file and its stamp.
     tables: HashMap<(PathBuf, Stamp), (u64, Arc<Wavetable>)>,
     kernels: Kernels,
+    /// The equalizers' taps for the app's spectrum, shared with whoever
+    /// reads them.
+    taps: Arc<Taps>,
 }
 
 impl Cache {
+    /// A cache whose equalizer taps are `taps`, so that the app can find
+    /// them while the song is played.
+    pub fn with_taps(taps: Arc<Taps>) -> Cache {
+        Cache {
+            taps,
+            ..Cache::default()
+        }
+    }
+
     fn begin(&mut self) {
         self.generation += 1;
         self.kernels.begin();
+        self.taps.begin();
     }
 
     fn finish(&mut self) {
@@ -331,6 +345,7 @@ impl Cache {
         self.notes.retain(|_, e| e.0 == g);
         self.tables.retain(|_, e| e.0 == g);
         self.kernels.finish();
+        self.taps.finish();
     }
 
     /// The wavetable of a sample's file, one cycle, from the cache when the
@@ -891,11 +906,13 @@ impl Lanes {
 /// A chain without its sidechain routing, which needs every chain's latency.
 /// `lanes(i)` gives the lanes on the chain's effect `i` by field; `upstream`
 /// is the latency of what comes before the chain, counted into its own.
+/// `taps` names the row for the equalizers' taps; a patch's chain has none.
 fn chain(
     effects: &[Effect],
     mut lanes: impl FnMut(usize) -> BTreeMap<String, Arc<Envelope>>,
     p: &Project,
-    kernels: &mut Kernels,
+    cache: &mut Cache,
+    taps: Option<&str>,
     upstream: usize,
 ) -> ChainProgram {
     let mut out = ChainProgram {
@@ -907,7 +924,10 @@ fn chain(
             out.effects.push((effect.kind(), None));
             continue;
         }
-        let plan = Plan::new(effect, lanes(i), p.session.sample_rate, p.session.tempo, kernels);
+        let mut plan = Plan::new(effect, lanes(i), p.session.sample_rate, p.session.tempo, &mut cache.kernels);
+        if let (Some(owner), Effect::Eq(_)) = (taps, effect) {
+            plan.tap = Some(cache.taps.get(owner, i));
+        }
         out.effects.push((effect.kind(), Some(out.devices.len())));
         let upstream = out.latency;
         out.latency += plan.latency;
@@ -1030,14 +1050,14 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             synth = Some(SynthProgram {
                 notes: cache.synth_notes(p, t, midi),
                 patch: Arc::new(Patch::new(spec, &lanes.instrument, rate as f64, p.session.tempo, track_seed(&t.id), &tables)),
-                chain: chain(&spec.effects, |i| patch_effect_lanes(&lanes.instrument, i), p, &mut cache.kernels, 0),
+                chain: chain(&spec.effects, |i| patch_effect_lanes(&lanes.instrument, i), p, cache, None, 0),
             });
         }
         // The inserts follow the patch's effects, so their latency counts
         // the patch chain's.
         let patch_latency = synth.as_ref().map_or(0, |s| s.chain.latency);
         let mut effect_lanes = std::mem::take(&mut lanes.effects);
-        let mut chain = chain(&t.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, &mut cache.kernels, patch_latency);
+        let mut chain = chain(&t.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some(&t.id), patch_latency);
         // The track waits for the slowest of its keys.
         let delay = chain
             .devices
@@ -1085,7 +1105,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     for r in returns {
         let mut lanes = Lanes::new(Owner::Return(r), &r.automation, p);
         let mut effect_lanes = std::mem::take(&mut lanes.effects);
-        let mut chain = chain(&r.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, &mut cache.kernels, 0);
+        let mut chain = chain(&r.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some(&r.id), 0);
         route(&mut chain, &tracks, |source| track_offset - (source.delay + source.chain.latency));
         buses.push(ReturnProgram {
             id: r.id.clone(),
@@ -1108,7 +1128,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     let mut effect_lanes = std::mem::take(&mut lanes.effects);
     let master = MasterProgram {
         gain: lanes.channel("gain_db", p.session.master_gain_db),
-        chain: chain(master_effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, &mut cache.kernels, 0),
+        chain: chain(master_effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some("master"), 0),
         automation: lanes.params,
     };
     cache.finish();

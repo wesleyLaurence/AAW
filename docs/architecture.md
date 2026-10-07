@@ -67,7 +67,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   [musical-checks.md](features/musical-checks.md).
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
   compressor/sidechain, limiter, delay, reverb, chorus, saturation and utility
-  devices with explicit block state, wavetables, and the Synth, a polyphonic
+  devices with explicit block state, the spectrum tap an equalizer's panel
+  draws from, wavetables, and the Synth, a polyphonic
   synthesizer played from a patch; see
   [effects.md](features/effects.md), [automation.md](features/automation.md)
   and [synth.md](features/synth.md).
@@ -169,7 +170,9 @@ Post-fader sends tap after track gain and pan, pre-fader sends after the inserts
 Muted or solo-muted tracks send nothing; returns are never solo-muted. No groups
 or return-to-return sends exist yet.
 
-Effects: `filter`, `eq`, `compressor` (optional `sidechain` track), `limiter`,
+Effects: `filter`, `eq` (the parametric EQ: bells, shelves and passes with
+their slopes, drawn in the app as one curve over the playing spectrum; see
+[parametric-eq.md](features/parametric-eq.md)), `compressor` (optional `sidechain` track), `limiter`,
 `delay`, `reverb`, `chorus`, `saturation` and `utility` (gain, pan, width, mono
 below a frequency, polarity; see [utility.md](features/utility.md)), listed in order under
 `tracks[].effects`, `returns[].effects`, `master.effects` or, inside a Synth

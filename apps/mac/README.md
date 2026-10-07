@@ -157,7 +157,7 @@ front first.
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track are gray, and selected clips are outlined |
 | Automation | Under a row whose A mark is on: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
 | Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
-| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a header naming its patch, a column for its own fields and an octave of keys, one for each oscillator with its wave or its table's cycle drawn, the filter with its response, each envelope drawn with its handles, each LFO with its shape, the macros, the matrix's entries with their amounts, a line under each control an entry moves, and one for each of the patch's own effects; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
+| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, and for a track its pads; an equalizer as one curve of its bands over the spectrum of what it puts out while the song plays, a numbered point for each band, and under the curve the selected band's fields. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a header naming its patch, a column for its own fields and an octave of keys, one for each oscillator with its wave or its table's cycle drawn, the filter with its response, each envelope drawn with its handles, each LFO with its shape, the macros, the matrix's entries with their amounts, a line under each control an entry moves, and one for each of the patch's own effects; a sampler of several pads as a list of the pads and the notes that play each; or No instrument |
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
 | Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note, or the velocity of several. While the clip plays, a line shows where |
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play, and past the end of a looped clip's loop, which is shaded with a mark at the wrap. Under the notes, a lane of each note's velocity as a stalk at its start. Beside it the clip's ID, its length, its loop in beats or off, the grid, Preview, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
@@ -209,6 +209,8 @@ front first.
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
 | Click a bar's number | Opens a field over it with the number selected, as the tempo's: type a value, in the bar's unit or without it (`880`, `2.5k`, `-6 dB`), and Return or a click elsewhere applies it, held to the bar's range; Escape cancels. Every bar has it: an effect's fields, the Synth's knobs, a Sampler's pad, an audio clip's gain, a pattern's swing and a note's or an event's velocity |
 | The marks in a device's title | Bypass, move earlier or later in the chain, remove; an equalizer also adds a band |
+| Drag a point on an equalizer's curve | Moves the band's frequency across and its gain up and down, or for a highpass or lowpass band, whose point sits at its corner, its resonance; heard as it moves, one undo step. With Option, up narrows the band and down widens it, q doubling each 40 points. A click on a point or on a number under the curve selects the band, whose shape, frequency, q and gain or slope show there ([parametric EQ](../../docs/features/parametric-eq.md)) |
+| Double-click an equalizer's curve | In the clear, adds a bell band at that frequency and gain, up to 16; on a point, removes its band, unless it is the last. The spectrum under the curve is the equalizer's output, read from the audio thread while the song plays and falling away once it stops |
 | Click an effect's title | Selects the effect, outlined in the accent color, in place of the clips; the row stays selected. ⌘C, ⌘X, ⌘D and Delete then act on it while the devices show: a copy, a copy right after it with no id, or its removal. ⌘V pastes the copied effect on the selected row, or else the one whose devices show, after the selected effect of that row or last in its chain, and shows it. A copy has every field of the original, and its id where the chain has no effect of that name; a copy the host refuses, such as a compressor keyed from the track it lands on, is refused with the reason |
 | Drag an effect's title with Option | Copies the effect onto the header it lands on, any track, return or the master, at the end of that chain, or between two devices where the strip lights up. Without Option it lands nowhere; the ◂ ▸ marks move an effect in its chain |
 | Right-click or Control-click an effect's title | Selects it and offers Cut, Copy, Paste After, Duplicate, Bypass and Delete, each as the menus do them |
@@ -266,7 +268,8 @@ off it. [docs/features/grid.md](../../docs/features/grid.md) has the menu.
 
 A device panel is drawn from what the host says of the effect: each field's
 label, unit, range, default and choices. No panel is made by hand for an
-effect type, so a new field or effect in the engine shows up here by itself.
+effect type, so a new field or effect in the engine shows up here by itself;
+the equalizer alone has a drawing of its own, its curve, over the same fields.
 
 A pattern clip's waveform is what its track's sampler plays over the clip's
 span, before the track's effects and fader, so a level or an effect does not
@@ -403,7 +406,13 @@ starts at x = 220 too, its header 24 points high; its first column holds the
 keys under six fields, from about y = 258 into the panel at its least
 height, and a column's drawing is right under its title, 34 points high for a
 wave or an LFO and 56 for the filter or an envelope. A key pressed by
-`--click` plays through the speakers.
+`--click` plays through the speakers. An equalizer's panel is 400 points
+wide; its curve starts 6 points in and 6 under its title strip and runs to
+43 points above the panel's foot, 20 Hz at its left edge and 20 kHz at its
+right in equal ratios, +30 dB at its top and −30 at its foot, so at the least
+height a band's point at 1 kHz and 0 dB on the first device is about
+(464, 483), and at +6 dB (464, 472): read a picture to find a point before
+dragging it. A `--drag` from a point sets its band, as a person's drag does.
 
 ## Layout
 
@@ -419,7 +428,8 @@ wave or an LFO and 56 for the filter or an envelope. A key pressed by
 | `Sources/AAWApp/Grid.swift` | The grid values, their names as note values and the steps the Grid menu takes through them, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
 | `Sources/AAWApp/ContextMenus.swift` | What a right click on a header or a clip offers, as lists the arrangement makes menus from, tested in `Tests` |
-| `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, a MIDI track's instrument, and the bar a number is dragged with |
+| `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, the equalizer's curve as an AppKit view where its points are dragged and its spectrum read, a MIDI track's instrument, and the bar a number is dragged with |
+| `Sources/AAWApp/EqLayout.swift` | Where the equalizer's panel puts its points and what a drag means: each band's response as the engine's sections give it, the curve they make, a point's band and what a point dragged to a place sets, and the spectrum's columns, tested in `Tests` |
 | `Sources/AAWApp/SamplerPanel.swift` | The Sampler device: its waveform with the markers for the part the keys play, an AppKit view, the root note and Measure, the pad's fields, and what a drop on it loads |
 | `Sources/AAWApp/SamplerLayout.swift` | Where the Sampler's markers are on its waveform, which one a point takes hold of and how far a drag goes, tested in `Tests` |
 | `Sources/AAWApp/SynthPanel.swift` | The Synth: its header with the patch and the menu that saves and loads, a column of controls for each part of the patch drawn from its fields, the wave, filter, envelope and LFO drawings as AppKit views where they are dragged, the keys, the matrix's entries, the source tabs and their drops, and the lane mark beside a field |

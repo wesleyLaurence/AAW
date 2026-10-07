@@ -901,13 +901,20 @@ fn equalizer_bands_come_and_go_with_their_lanes() {
     let eq = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "eq".into(), index: None }, None).unwrap()[0];
     let u = update(&seen);
     let e = &u.arrangement.tracks[0].effects[0];
-    assert_eq!((e.bands, e.fields.len()), (1, 4));
+    assert_eq!((e.bands, e.fields.len()), (1, 5));
     assert_eq!(e.fields.iter().map(|f| (f.name.as_str(), f.band)).collect::<Vec<_>>()[..2], [("bands.0.shape", Some(0)), ("bands.0.freq_hz", Some(0))]);
     assert_eq!((field(e, "bands.0.gain_db").value.clone(), field(e, "bands.0.q").value.clone()), (number(0.0), number(0.71)));
     for _ in 0..2 {
-        song.edit(Edit::BandAdd { effect: eq }, None).unwrap();
+        song.edit(Edit::BandAdd { effect: eq, freq_hz: None, gain_db: None }, None).unwrap();
         assert_eq!(update(&seen).change.label, "Add a band to an equalizer");
     }
+    // A band added where the curve was double-clicked lands there, as a bell.
+    song.edit(Edit::BandAdd { effect: eq, freq_hz: Some(2500.0), gain_db: Some(-4.5) }, None).unwrap();
+    let added = &update(&seen).arrangement.tracks[0].effects[0];
+    assert_eq!(added.bands, 4);
+    assert_eq!((field(added, "bands.3.shape").value.clone(), field(added, "bands.3.freq_hz").value.clone(), field(added, "bands.3.gain_db").value.clone()), (text("bell"), number(2500.0), number(-4.5)));
+    song.edit(Edit::BandRemove { effect: eq, band: 3 }, None).unwrap();
+    update(&seen);
     for (band, hz) in [(0, 200.0), (1, 1200.0), (2, 5000.0)] {
         song.edit(Edit::EffectSet { effect: eq, field: format!("bands.{band}.freq_hz"), value: number(hz) }, None).unwrap();
         update(&seen);
@@ -2925,4 +2932,44 @@ fn the_transport_bars_meter_field_sets_the_time_signature() {
     assert!(refused.to_string().contains("such as 4/4"), "{refused}");
     song.undo().unwrap();
     assert_eq!(song.arrangement().time_signature, "4/4");
+}
+
+#[test]
+fn an_equalizer_s_spectrum_is_read_for_its_panel() {
+    let (_dir, _path, song, _seen) = open();
+    let start = song.arrangement();
+    assert_eq!(start.sample_rate, 48000);
+    let drums = Row::Track { key: start.tracks[0].key };
+    let eq = song.edit(Edit::EffectAdd { row: drums, kind: "eq".into(), index: None }, None).unwrap()[0];
+    // Nothing has played: every bin is silent, and the frames count is 0.
+    let spectrum = song.spectrum(eq).expect("an equalizer on a track has a spectrum");
+    assert_eq!((spectrum.sample_rate, spectrum.written, spectrum.levels.len()), (48000, 0, 2049));
+    assert!(spectrum.levels.iter().all(|l| *l <= -199.0));
+    // Other effects, and anything that is not an effect, have none.
+    let bass = &start.tracks[1];
+    let filter = bass.effects.iter().find(|e| e.kind == "filter").unwrap();
+    assert!(song.spectrum(filter.key).is_none());
+    assert!(song.spectrum(bass.key).is_none());
+    // A pass band is drawn from the same fields as the others, with its
+    // slope, and keeps the gain it had, which the pass ignores.
+    song.edit(Edit::EffectSet { effect: eq, field: "bands.0.gain_db".into(), value: number(-3.0) }, None).unwrap();
+    song.edit(Edit::EffectSet { effect: eq, field: "bands.0.shape".into(), value: text("highpass") }, None).unwrap();
+    song.edit(Edit::EffectSet { effect: eq, field: "bands.0.slope_db_per_octave".into(), value: number(24.0) }, None).unwrap();
+    let find = |a: &aaw_ffi::Arrangement| a.tracks[0].effects.iter().find(|e| e.kind == "eq").unwrap().clone();
+    let e = find(&song.arrangement());
+    assert_eq!(field(&e, "bands.0.shape").value, text("highpass"));
+    let slope = field(&e, "bands.0.slope_db_per_octave");
+    assert_eq!((slope.value.clone(), slope.choices.clone(), slope.live, slope.param.clone()), (number(24.0), vec!["12".to_string(), "24".into(), "36".into(), "48".into()], false, None));
+    assert_eq!(field(&e, "bands.0.gain_db").value, number(-3.0));
+    assert!(song.spectrum(eq).is_some(), "the tap follows the edit");
+    // A point dragged sets its band's frequency, gain and q as one step.
+    song.edit(Edit::BandAdd { effect: eq, freq_hz: None, gain_db: None }, None).unwrap();
+    song.edit(Edit::BandSet { effect: eq, band: 1, freq_hz: 6500.0, gain_db: 3.5, q: 0.9 }, None).unwrap();
+    let e = find(&song.arrangement());
+    assert_eq!(
+        (field(&e, "bands.1.freq_hz").value.clone(), field(&e, "bands.1.gain_db").value.clone(), field(&e, "bands.1.q").value.clone()),
+        (number(6500.0), number(3.5), number(0.9))
+    );
+    song.undo().unwrap();
+    assert_eq!(field(&find(&song.arrangement()), "bands.1.freq_hz").value, number(1000.0), "one undo step");
 }

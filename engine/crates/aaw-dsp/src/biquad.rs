@@ -4,7 +4,7 @@
 use crate::Frame;
 use aaw_model::{BandShape, EqBand};
 use realfft::num_complex::Complex64;
-use std::f64::consts::PI;
+use std::f64::consts::{FRAC_1_SQRT_2, PI};
 
 /// One section, normalized to a0 = 1.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -106,16 +106,33 @@ pub fn butter(order: usize, cutoff_hz: f64, highpass: bool, rate: f64) -> Vec<Se
     sections
 }
 
-/// The RBJ audio EQ cookbook biquad for a band.
-pub fn band(band: &EqBand, rate: f64) -> Section {
+/// The Q of each second-order section of a Butterworth filter of `order`,
+/// least resonant first, as `butter` lays them out.
+pub fn butterworth_q(order: usize) -> impl Iterator<Item = f64> {
+    (0..order / 2).map(move |i| 1.0 / (2.0 * (PI * (2 * i + 1) as f64 / (2 * order) as f64).sin()))
+}
+
+/// The Q of each section of a pass band: the Butterworth Qs of its slope's
+/// order, the last scaled by the band's `q` over 1/√2, so that 0.71 is flat
+/// at every slope and a higher `q` lifts the corner as it does at 12 dB.
+pub fn pass_q(band: &EqBand) -> impl Iterator<Item = f64> {
+    let n = band.sections();
+    butterworth_q(2 * n).enumerate().map(move |(i, q)| if i + 1 == n { q * band.q / FRAC_1_SQRT_2 } else { q })
+}
+
+/// The RBJ audio EQ cookbook biquad for a band, or for one section of a
+/// pass band at `q`.
+fn section(band: &EqBand, q: f64, rate: f64) -> Section {
     let a = 10f64.powf(band.gain_db / 40.0);
     let w = 2.0 * PI * band.freq_hz / rate;
-    let (cos, alpha) = (w.cos(), w.sin() / (2.0 * band.q));
+    let (cos, alpha) = (w.cos(), w.sin() / (2.0 * q));
     let (b, d) = match band.shape {
         BandShape::Bell => (
             [1.0 + alpha * a, -2.0 * cos, 1.0 - alpha * a],
             [1.0 + alpha / a, -2.0 * cos, 1.0 - alpha / a],
         ),
+        BandShape::Highpass => ([(1.0 + cos) / 2.0, -(1.0 + cos), (1.0 + cos) / 2.0], [1.0 + alpha, -2.0 * cos, 1.0 - alpha]),
+        BandShape::Lowpass => ([(1.0 - cos) / 2.0, 1.0 - cos, (1.0 - cos) / 2.0], [1.0 + alpha, -2.0 * cos, 1.0 - alpha]),
         shelf => {
             let root = 2.0 * a.sqrt() * alpha;
             let sign = if shelf == BandShape::LowShelf { 1.0 } else { -1.0 };
@@ -139,6 +156,22 @@ pub fn band(band: &EqBand, rate: f64) -> Section {
         b2: b[2] / d[0],
         a1: d[1] / d[0],
         a2: d[2] / d[0],
+    }
+}
+
+/// The RBJ audio EQ cookbook biquad for a bell or a shelf, or the one
+/// section of a pass band at 12 dB an octave.
+pub fn band(band: &EqBand, rate: f64) -> Section {
+    section(band, band.q, rate)
+}
+
+/// A band's sections: one for a bell or a shelf, and for a pass band one
+/// for each 12 dB of its slope, with `pass_q`'s resonances.
+pub fn sections(band: &EqBand, rate: f64) -> Vec<Section> {
+    if band.shape.is_pass() {
+        pass_q(band).map(|q| section(band, q, rate)).collect()
+    } else {
+        vec![section(band, band.q, rate)]
     }
 }
 
@@ -353,30 +386,59 @@ mod tests {
         close(&s[2], [1.0, -2.0, 1.0, -1.997953903566973, 0.9979693091461493], 1e-13);
     }
 
+    fn eq_band(shape: BandShape, freq_hz: f64, gain_db: f64, q: f64) -> EqBand {
+        EqBand {
+            shape,
+            freq_hz,
+            gain_db,
+            q,
+            slope_db_per_octave: 12,
+        }
+    }
+
     // Values from effects.band_sos.
     #[test]
     fn bands_match_the_cookbook() {
-        let bell = EqBand {
-            shape: BandShape::Bell,
-            freq_hz: 400.0,
-            gain_db: -3.0,
-            q: 1.2,
-        };
+        let bell = eq_band(BandShape::Bell, 400.0, -3.0, 1.2);
         close(&band(&bell, 48000.0), [0.992621975907652, -1.9468032816944603, 0.9568529934791812, -1.9468032816944603, 0.9494749693868333], 1e-15);
-        let shelf = EqBand {
-            shape: BandShape::HighShelf,
-            freq_hz: 8000.0,
-            gain_db: 2.0,
-            q: 0.71,
-        };
+        let shelf = eq_band(BandShape::HighShelf, 8000.0, 2.0, 0.71);
         close(&band(&shelf, 48000.0), [1.1628491712894642, -0.7917469324803136, 0.29815254270866065, -0.5600835370584608, 0.2293383185762718], 1e-15);
-        let low = EqBand {
-            shape: BandShape::LowShelf,
-            freq_hz: 120.0,
-            gain_db: 4.5,
-            q: 0.9,
-        };
+        let low = eq_band(BandShape::LowShelf, 120.0, 4.5, 0.9);
         close(&band(&low, 44100.0), [1.0024848277007015, -1.9831499757511235, 0.9810407543756617, -1.9832259116793358, 0.9834496461481514], 1e-15);
+    }
+
+    /// A pass band at q = 1/√2 is the Butterworth filter of its slope, at
+    /// every slope, and a higher q lifts the corner by 20·log10(q/(1/√2)).
+    #[test]
+    fn pass_bands_are_butterworth_when_flat_and_resonate_above() {
+        for (shape, highpass) in [(BandShape::Highpass, true), (BandShape::Lowpass, false)] {
+            for slope in [12, 24, 36, 48] {
+                let mut flat = eq_band(shape, 300.0, 0.0, FRAC_1_SQRT_2);
+                flat.slope_db_per_octave = slope;
+                let x = sine(100.0, 9600).iter().zip(sine(2400.0, 9600)).map(|(a, b)| [a[0] + b[0], a[1] + b[1]]).collect::<Vec<_>>();
+                let mut expected = x.clone();
+                Cascade::new(butter(slope as usize / 6, 300.0, highpass, 48000.0)).process(&mut expected);
+                let mut got = x.clone();
+                Cascade::new(sections(&flat, 48000.0)).process(&mut got);
+                let worst = expected.iter().zip(&got).fold(0.0f64, |m, (a, b)| m.max((a[0] - b[0]).abs()));
+                assert!(worst < 1e-9, "{shape:?} {slope}: {worst}");
+                assert_eq!(sections(&flat, 48000.0).len(), slope as usize / 12);
+                // The gain of a pass band is ignored: the sections are the same.
+                let mut gained = flat.clone();
+                gained.gain_db = 12.0;
+                assert_eq!(sections(&gained, 48000.0), sections(&flat, 48000.0));
+                // A tone at the corner comes through at the product of the
+                // sections' Qs, which is where each section's gain sits: q
+                // itself at 12 dB, since the one Butterworth Q is 1/√2.
+                let mut resonant = flat.clone();
+                resonant.q = 2.0;
+                let mut corner = sine(300.0, 48000);
+                Cascade::new(sections(&resonant, 48000.0)).process(&mut corner);
+                let expected = 20.0 * (2.0 / FRAC_1_SQRT_2 * butterworth_q(slope as usize / 6).product::<f64>()).log10();
+                let db = level(&corner[24000..]);
+                assert!((db - expected).abs() < 0.05, "{shape:?} {slope}: {db} dB at the corner, not {expected}");
+            }
+        }
     }
 
     fn sine(hz: f64, n: usize) -> Vec<Frame> {

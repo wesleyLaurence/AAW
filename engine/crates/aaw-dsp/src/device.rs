@@ -3,13 +3,14 @@
 //! A constant lane becomes the spec's static value, so the device renders
 //! exactly as the static spec would; only moving lanes take the automated path.
 
-use crate::biquad::{band, butter, Cascade};
+use crate::biquad::{butter, sections, Cascade};
 use crate::chorus::Chorus;
 use crate::delay::Delay;
 use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reduction};
 use crate::envelope::{Envelope, Knob, Param};
 use crate::reverb::{Kernel, Reverb, Shape};
 use crate::saturation::Saturation;
+use crate::spectrum::Tap;
 use crate::svf::{self, Svf};
 use crate::utility::Utility;
 use crate::{Clock, Frame};
@@ -69,6 +70,9 @@ pub struct Plan {
     /// What decides whether another device's state fits this one: the type
     /// and whatever shapes the state. Levels and knobs are not part of it.
     pub signature: u64,
+    /// Where an equalizer's output is tapped for the app's spectrum, when
+    /// something wants to draw it.
+    pub tap: Option<Arc<Tap>>,
 }
 
 impl Plan {
@@ -80,7 +84,7 @@ impl Plan {
             Effect::Filter(f) => hash(("filter", moves("cutoff_hz"), f.mode == FilterMode::Highpass, f.slope_db_per_octave)),
             Effect::Eq(e) => {
                 let moving = (0..e.bands.len()).any(|j| ["freq_hz", "gain_db", "q"].iter().any(|f| moves(&format!("bands.{j}.{f}"))));
-                hash(("eq", moving, e.bands.iter().map(|b| b.shape.as_str()).collect::<Vec<_>>()))
+                hash(("eq", moving, e.bands.iter().map(|b| (b.shape, b.sections())).collect::<Vec<_>>()))
             }
             Effect::Compressor(_) => hash(("compressor", effect.sidechain().is_some())),
             Effect::Limiter(l) => {
@@ -118,6 +122,7 @@ impl Plan {
             tempo,
             latency,
             signature,
+            tap: None,
         }
     }
 }
@@ -145,6 +150,8 @@ pub struct Unit {
     pub device: Device,
     pub latency: usize,
     pub signature: u64,
+    /// The ring the device's output is written to for the app's spectrum.
+    tap: Option<Arc<Tap>>,
 }
 
 impl Unit {
@@ -178,17 +185,17 @@ impl Unit {
                     })
                     .collect();
                 if params.iter().any(Param::moves) {
-                    let bands = e.bands.iter().map(|band| band.shape).collect();
+                    let bands = e.bands.iter().map(|band| (band.shape, band.sections())).collect();
                     Device::Moving(Svf::new(svf::Shape::Eq { bands }, params, rate))
                 } else {
                     let sections = e
                         .bands
                         .iter()
                         .zip(params.chunks(3))
-                        .map(|(spec, p)| {
+                        .flat_map(|(spec, p)| {
                             let mut still = spec.clone();
                             (still.freq_hz, still.gain_db, still.q) = (p[0].value(), p[1].value(), p[2].value());
-                            band(&still, rate)
+                            sections(&still, rate)
                         })
                         .collect();
                     Device::Sections(Cascade::with_glide(sections, glide))
@@ -256,6 +263,7 @@ impl Unit {
             device,
             latency: plan.latency,
             signature: plan.signature,
+            tap: plan.tap.clone(),
         }
     }
 
@@ -272,6 +280,9 @@ impl Unit {
             Device::Chorus(d) => d.process(x, clock),
             Device::Saturation(d) => d.process(x, clock),
             Device::Utility(d) => d.process(x, clock),
+        }
+        if let Some(tap) = &self.tap {
+            tap.write(x);
         }
     }
 

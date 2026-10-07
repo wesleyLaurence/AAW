@@ -305,11 +305,15 @@ pub enum Edit {
     EffectBypass { effect: u64, on: bool },
     /// Sets a field of an effect, named as its `FieldView` names it.
     EffectSet { effect: u64, field: String, value: FieldValue },
-    /// Adds a band to an equalizer.
-    BandAdd { effect: u64 },
+    /// Adds a band to an equalizer: a bell at `freq_hz` and `gain_db`, or
+    /// at the place to start when they are left out.
+    BandAdd { effect: u64, freq_hz: Option<f64>, gain_db: Option<f64> },
     /// Removes an equalizer's band, with the lanes that move it; lanes on
     /// later bands follow them down.
     BandRemove { effect: u64, band: u32 },
+    /// Sets an equalizer band's frequency, gain and q together, as a drag
+    /// of its point does.
+    BandSet { effect: u64, band: u32, freq_hz: f64, gain_db: f64, q: f64 },
     /// Gives a parameter a lane: one point at the start with the value the
     /// parameter has, which changes nothing until more are added.
     LaneAdd { row: Row, param: String },
@@ -1849,16 +1853,27 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         Edit::EffectSet { effect, field, value } => Ok(vec![json!({
             "op": "set", "path": format!("{}.{field}", handle_text(*effect)), "value": field_json(value),
         })]),
-        Edit::BandAdd { effect } => {
+        Edit::BandAdd { effect, freq_hz, gain_db } => {
             let tree = doc.tree();
             let loc = tree::find(&tree, *effect).ok_or("The effect is no longer in the song")?;
             let mut bands = match tree::get(&tree, &loc).get("bands") {
                 Some(bands) => aaw_host::command::node_json(bands),
                 None => return Err("Only an equalizer has bands".into()),
             };
-            bands.as_array_mut().ok_or("Only an equalizer has bands")?.push(Json::Object(start(describe::BAND)));
+            let mut band = start(describe::BAND);
+            if let Some(hz) = freq_hz {
+                band.insert("freq_hz".into(), number(*hz));
+            }
+            if let Some(db) = gain_db {
+                band.insert("gain_db".into(), number(*db));
+            }
+            bands.as_array_mut().ok_or("Only an equalizer has bands")?.push(Json::Object(band));
             Ok(vec![json!({"op": "set", "path": format!("{}.bands", handle_text(*effect)), "value": bands})])
         }
+        Edit::BandSet { effect, band, freq_hz, gain_db, q } => Ok([("freq_hz", freq_hz), ("gain_db", gain_db), ("q", q)]
+            .iter()
+            .map(|(field, value)| json!({"op": "set", "path": format!("{}.bands.{band}.{field}", handle_text(*effect)), "value": number(**value)}))
+            .collect()),
         Edit::BandRemove { effect, band } => {
             let tree = doc.tree();
             let loc = tree::find(&tree, *effect).ok_or("The effect is no longer in the song")?;
@@ -2437,6 +2452,7 @@ pub fn label(edit: &Edit, count: usize) -> Option<String> {
     let verb = match edit {
         Edit::BandAdd { .. } => return Some("Add a band to an equalizer".into()),
         Edit::BandRemove { band, .. } => return Some(format!("Remove band {} of an equalizer", band + 1)),
+        Edit::BandSet { band, .. } => return Some(format!("Move band {} of an equalizer", band + 1)),
         _ if count < 2 => return None,
         Edit::ClipsMove { .. } => "Move",
         Edit::ClipsDuplicate { .. } => "Duplicate",

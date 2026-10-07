@@ -11,6 +11,7 @@ pub mod envelope;
 pub mod resample;
 pub mod reverb;
 pub mod saturation;
+pub mod spectrum;
 pub mod svf;
 pub mod synth;
 pub mod utility;

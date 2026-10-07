@@ -57,7 +57,7 @@ render with and without it and use `daw compare`.
 | Effect | Parameters |
 |---|---|
 | `filter` | `mode` highpass/lowpass, `cutoff_hz` 10–20000, `slope_db_per_octave` 12/24/36/48 |
-| `eq` | `bands` (1–16) of `shape` bell/low_shelf/high_shelf, `freq_hz`, `gain_db` ±24, `q` |
+| `eq` | `bands` (1–16) of `shape` bell/low_shelf/high_shelf/highpass/lowpass, `freq_hz`, `gain_db` ±24 (0 unless given), `q`, `slope_db_per_octave` 12/24/36/48 for a pass ([parametric-eq.md](parametric-eq.md)) |
 | `compressor` | `threshold_db`, `ratio` 1–20, `attack_ms`, `release_ms`, `knee_db`, `makeup_db`, `sidechain` |
 | `limiter` | `ceiling_db` −24…−0.1, `release_ms`, `lookahead_ms` 0.5–20 |
 | `delay` | `time_beats` (0–16, fractions allowed), `feedback_percent` 0–95, `lowcut_hz`, `highcut_hz`, `ping_pong`, `mix_percent` |
@@ -70,8 +70,14 @@ render with and without it and use `daw compare`.
 
 - **filter**: Butterworth. The slope is the filter order times 6 dB per octave.
   There is no resonance control.
-- **eq**: RBJ cookbook biquads in series. For `bell`, `q` sets bandwidth; for
-  shelves it sets the shelf slope, and 0.71 is maximally flat.
+- **eq**: the parametric EQ, RBJ cookbook biquads in series. For `bell`, `q`
+  sets bandwidth; for shelves it sets the shelf slope, and 0.71 is maximally
+  flat. A `highpass` or `lowpass` band, added October 7, 2026, cuts past
+  `freq_hz` at `slope_db_per_octave`, the Butterworth sections of that order
+  with `q` the resonance at the corner, 0.71 flat; it ignores `gain_db`, as a
+  bell or a shelf ignores the slope. The app draws the bands as one curve over
+  the spectrum of the equalizer's output, each a point dragged; see
+  [parametric-eq.md](parametric-eq.md).
 - **compressor**: stereo-linked sample-peak detector with a soft knee of `knee_db`
   centred on the threshold. Required reduction is held and decays with
   `release_ms`, the time for the reduction to fall by a factor of e. A one-pole
@@ -197,8 +203,11 @@ Effects live in `engine/crates/aaw-dsp` as block-processing devices with explici
 state, and `aaw-engine` runs each chain on the timeline. Output does not depend
 on the block size, and processing never allocates, so the same devices run in the
 audio callback and in a render. Filters are Butterworth sections designed as
-`scipy.signal.butter` designs them and EQ bands are RBJ biquads; their state
-carries across blocks. The compressor's and limiter's release hold is a recurrence
+`scipy.signal.butter` designs them and EQ bands are RBJ biquads, a pass band
+the Butterworth sections of its slope with its q on the last; their state
+carries across blocks. An equalizer on a track, a return or the master also
+writes what it puts out, as mono, into a ring of 4096 frames the app reads for
+the spectrum under its curve, one atomic store a frame. The compressor's and limiter's release hold is a recurrence
 on the required reduction, and the limiter's smoothing sums in fixed point, so
 partitioning cannot change its rounding. The delay reads a line as long as its
 time and feeds back through its filters. The reverb's convolution is
@@ -238,4 +247,5 @@ plays at 128-frame buffers using about 0.1 ms of each 2.67 ms callback.
 
 Not yet implemented: a clipper, a phaser and other modulation effects, groups,
 return-to-return sends, sidechain filtering, RMS detection, true-peak limiting,
-loudness-target export and impulse-response samples for the reverb.
+loudness-target export, impulse-response samples for the reverb, and a notch or
+a mid/side mode in the equalizer.

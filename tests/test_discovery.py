@@ -60,6 +60,8 @@ def test_help_lists_what_a_command_takes():
         assert f"\n{kind}\n" in effect
     assert "--ceiling-db" in effect and "number -24..-0.1, default -1" in effect
     assert "--slope-db-per-octave      12|24|36|48, default 12" in effect
+    assert "shape: bell|low_shelf|high_shelf|highpass|lowpass, required" in effect
+    assert "slope_db_per_octave: 12|24|36|48, default 12" in effect and "gain_db: number -24..24, default 0" in effect
     assert "session.tempo              number 20..400, default 144" in run("set", "--help").stdout
     lanes = run("lane", "set", "--help").stdout
     assert "filter: cutoff_hz" in lanes and "sends.RETURN.gain_db" in lanes

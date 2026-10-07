@@ -38,6 +38,40 @@ def test_highpass_attenuates_below_cutoff(tmp_path, slope):
     assert abs(loss_high) < 0.1
 
 
+@pytest.mark.parametrize("slope", [12, 24, 48])
+def test_eq_pass_bands_cut_at_their_slope(tmp_path, slope):
+    """A highpass band is the filter of its slope; its gain is ignored and its
+    q lifts the corner; a lowpass band without gain_db loads."""
+
+    def gain(name, spec, freq):
+        out, _ = run_chain(tmp_path / name, [spec], tone(freq))
+        return level_db(out[SR // 2 :]) - level_db(tone(freq))
+
+    def eq(*bands):
+        return {"type": "eq", "bands": list(bands)}
+
+    low = {"shape": "highpass", "freq_hz": 400, "slope_db_per_octave": slope}
+    assert gain("low", eq(low), 100) < -2 * slope + 1
+    assert abs(gain("high", eq(low), 4000)) < 0.1
+    assert abs(gain("corner", eq(low), 400) + 3) < 0.1
+    # A pass band's gain changes nothing; its q is the resonance at the corner.
+    with_gain, _ = run_chain(tmp_path / "with_gain", [eq({**low, "gain_db": 12})], tone(400))
+    plain, _ = run_chain(tmp_path / "plain", [eq(low)], tone(400))
+    assert np.array_equal(with_gain, plain)
+    # A tone at the corner, quiet enough not to clip, comes through 9 dB
+    # above the flat band's: q 2 over the Butterworth's 1/√2.
+    def corner(name, spec):
+        out, _ = run_chain(tmp_path / name, [spec], tone(400, amp=0.1))
+        return level_db(out[SR // 2 :])
+
+    assert abs(corner("resonant", eq({**low, "q": 2})) - corner("resonant_flat", eq(low)) - 9.03) < 0.15
+    cut = eq({"shape": "lowpass", "freq_hz": 1000, "slope_db_per_octave": slope})
+    assert gain("lowpass", cut, 8000) < -2.5 * slope
+    # The bands are written as they came: the gain only when given, the slope only when it counts.
+    text = (tmp_path / "lowpass" / "song.yaml").read_text()
+    assert "slope_db_per_octave: %d" % slope in text if slope != 12 else "slope_db_per_octave" not in text
+
+
 def test_lowpass_and_eq_bands(tmp_path):
     def gain(name, spec, freq):
         out, _ = run_chain(tmp_path / name, [spec], tone(freq))

@@ -116,12 +116,20 @@ const FILTER: &[Field] = &[
     },
 ];
 
-/// An equalizer's fields are its bands'.
+/// An equalizer's fields are its bands'. A bell or a shelf uses `gain_db`
+/// and `q`; a highpass or a lowpass uses `slope_db_per_octave` and `q` as
+/// the resonance at its corner, and ignores `gain_db`.
 pub const BAND: &[Field] = &[
-    required(choice("shape", "Shape", &["bell", "low_shelf", "high_shelf"], Initial::Required), Initial::Text("bell")),
+    required(choice("shape", "Shape", &crate::schema::BandShape::NAMES, Initial::Required), Initial::Text("bell")),
     required(log(number("freq_hz", "Frequency", 20.0, 20000.0, 0.0, "Hz")), Initial::Number(1000.0)),
-    required(number("gain_db", "Gain", -24.0, 24.0, 0.0, "dB"), Initial::Number(0.0)),
+    number("gain_db", "Gain", -24.0, 24.0, 0.0, "dB"),
     log(number("q", "Q", 0.1, 18.0, 0.71, "")),
+    Field {
+        kind: Kind::Integer,
+        choices: &["12", "24", "36", "48"],
+        structural: true,
+        ..number("slope_db_per_octave", "Slope", 12.0, 48.0, 12.0, "dB/oct")
+    },
 ];
 
 const COMPRESSOR: &[Field] = &[

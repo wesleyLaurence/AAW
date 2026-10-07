@@ -27,6 +27,8 @@ pub struct Arrangement {
     /// The note the time signature counts, in those beats: 1 in 3/4, 0.5 in 6/8.
     pub beat_unit: f64,
     pub length_beats: f64,
+    /// Frames a second, which an equalizer's curve is drawn against.
+    pub sample_rate: u32,
     pub tracks: Vec<TrackView>,
     pub returns: Vec<ReturnView>,
     pub master: MasterView,
@@ -1356,6 +1358,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         bar_beats: p.session.meter().bar_f64(),
         beat_unit: p.session.meter().beat_f64(),
         length_beats: float(p.session.length_exact()),
+        sample_rate: p.session.sample_rate as u32,
         tracks,
         returns,
         master: MasterView {

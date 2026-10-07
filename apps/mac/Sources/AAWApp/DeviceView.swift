@@ -563,11 +563,11 @@ private struct DevicePanel: View {
                 Spacer(minLength: 2)
                 if effect.kind == "eq" {
                     Button {
-                        model.edit(.bandAdd(effect: effect.key))
+                        model.edit(.bandAdd(effect: effect.key, freqHz: nil, gainDb: nil))
                     } label: {
                         Image(systemName: "plus")
                     }
-                    .help("Add a band")
+                    .help("Add a band; a double-click on the curve adds one where it is")
                     .disabled(effect.bands >= 16)
                 }
                 Button {
@@ -620,14 +620,7 @@ private struct DevicePanel: View {
 
             Group {
                 if effect.kind == "eq" {
-                    ScrollView {
-                        VStack(spacing: 3) {
-                            ForEach(0..<Int(effect.bands), id: \.self) { band in
-                                BandRow(model: model, row: chain.row, effect: effect, band: band)
-                            }
-                        }
-                        .padding(6)
-                    }
+                    EqPanel(model: model, chain: chain, effect: effect)
                 } else {
                     VStack(spacing: 3) {
                         ForEach(effect.fields, id: \.name) { field in
@@ -648,45 +641,338 @@ private struct DevicePanel: View {
             .opacity(effect.bypass ? 0.5 : 1)
             Spacer(minLength: 0)
         }
-        .frame(width: effect.kind == "eq" ? 376 : 216, height: model.detailHeight - 16, alignment: .top)
+        .frame(width: effect.kind == "eq" ? EqPanel.width : 216, height: model.detailHeight - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))
     }
 }
 
-/// An equalizer's band: its shape, frequency, gain and q on one line.
-private struct BandRow: View {
+/// The parametric equalizer: its bands as one curve over the playing
+/// spectrum, each a point dragged for its frequency and gain, and under the
+/// curve the selected band's fields, a bell's or a shelf's gain and q or a
+/// pass's slope and resonance, with the marks that automate them.
+private struct EqPanel: View {
     let model: SongModel
-    let row: RowID
+    let chain: DeviceChain
     let effect: EffectView
-    let band: Int
+    @State private var selected = 0
 
-    private func field(_ name: String) -> FieldView? {
+    static let width: CGFloat = 400
+
+    private func field(_ band: Int, _ name: String) -> FieldView? {
         effect.fields.first { $0.name == "bands.\(band).\(name)" }
     }
 
     var body: some View {
-        HStack(spacing: 3) {
-            ForEach(["shape", "freq_hz", "gain_db", "q"], id: \.self) { name in
-                if let field = field(name) {
-                    FieldControl(model: model, effect: effect.key, field: field)
-                        .frame(width: name == "shape" ? 88 : name == "q" ? 50 : 76)
-                        .help(field.label)
-                    if name != "shape" { LaneMark(model: model, row: row, field: field) }
+        let count = Int(effect.bands)
+        let band = min(selected, max(count - 1, 0))
+        let bands = EqLayout.Band.bands(of: effect.fields)
+        let pass = bands.indices.contains(band) && bands[band].isPass
+        VStack(spacing: 4) {
+            EqCurve(model: model, effect: effect, sampleRate: Double(model.arrangement.sampleRate), selected: band) { selected = $0 }
+                .frame(maxHeight: .infinity)
+            HStack(spacing: 3) {
+                ForEach(0..<count, id: \.self) { i in
+                    Button("\(i + 1)") { selected = i }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 9, weight: i == band ? .bold : .regular).monospacedDigit())
+                        .foregroundStyle(i == band ? Color.primary : Color.secondary)
+                        .frame(width: 16, height: 14)
+                        .background(RoundedRectangle(cornerRadius: 3).fill(Color.white.opacity(i == band ? 0.16 : 0.05)))
+                        .help("Band \(i + 1)")
                 }
+                Spacer(minLength: 0)
+                Button {
+                    model.edit(.bandRemove(effect: effect.key, band: UInt32(band)))
+                } label: {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.borderless)
+                .font(.system(size: 10))
+                .help("Remove band \(band + 1); a double-click on its point does too")
+                .disabled(count <= 1)
             }
-            Button {
-                model.edit(.bandRemove(effect: effect.key, band: UInt32(band)))
-            } label: {
-                Image(systemName: "minus.circle")
+            .frame(height: 16)
+            if let shape = field(band, "shape"), let freq = field(band, "freq_hz"), let gain = field(band, "gain_db"),
+               let q = field(band, "q"), let slope = field(band, "slope_db_per_octave") {
+                HStack(spacing: 3) {
+                    FieldControl(model: model, effect: effect.key, field: shape).frame(width: 84).help("Shape")
+                    FieldControl(model: model, effect: effect.key, field: freq).frame(width: 70).help("Frequency")
+                    LaneMark(model: model, row: chain.row, field: freq)
+                    if pass {
+                        FieldControl(model: model, effect: effect.key, field: slope).frame(width: 70).help("Slope")
+                        Color.clear.frame(width: 12, height: 1)
+                    } else {
+                        FieldControl(model: model, effect: effect.key, field: gain).frame(width: 70).help("Gain")
+                        LaneMark(model: model, row: chain.row, field: gain)
+                    }
+                    FieldControl(model: model, effect: effect.key, field: q).frame(width: 50)
+                        .help(pass ? "Resonance at the corner: 0.71 is flat" : "Q: how narrow the band is")
+                    LaneMark(model: model, row: chain.row, field: q)
+                }
+                .frame(height: 19)
             }
-            .buttonStyle(.borderless)
-            .font(.system(size: 10))
-            .help("Remove the band")
-            .disabled(effect.bands <= 1)
         }
-        .frame(height: 19)
+        .padding(6)
+    }
+}
+
+/// The equalizer's curve in SwiftUI.
+private struct EqCurve: NSViewRepresentable {
+    let model: SongModel
+    let effect: EffectView
+    let sampleRate: Double
+    let selected: Int
+    let onSelect: (Int) -> Void
+
+    func makeNSView(context: Context) -> EqCurveView {
+        EqCurveView(model: model, effect: effect.key, fields: effect.fields, sampleRate: sampleRate, selected: selected, onSelect: onSelect)
+    }
+
+    func updateNSView(_ view: EqCurveView, context: Context) {
+        view.effect = effect.key
+        view.sampleRate = sampleRate
+        view.selected = selected
+        view.onSelect = onSelect
+        view.fields = effect.fields
+    }
+}
+
+/// The bands' response together over 20 Hz to 20 kHz, with a point for
+/// each band, over the spectrum of what the equalizer puts out while the
+/// song plays. A press on a point selects its band and takes hold of it:
+/// dragging across moves the frequency and up and down the gain, or for a
+/// pass the resonance at its corner; with Option, up and down narrow and
+/// widen the band instead. Each is heard as it moves, as one undo step. A
+/// double-click in the clear adds a bell there, and on a point removes its
+/// band. The spectrum is read from the audio thread each frame drawn and
+/// falls away once nothing plays.
+final class EqCurveView: NSView {
+    private let model: SongModel
+    var effect: UInt64
+    var sampleRate: Double
+    var selected: Int {
+        didSet { if selected != oldValue { needsDisplay = true } }
+    }
+
+    var onSelect: (Int) -> Void
+    var fields: [FieldView] {
+        didSet {
+            let bands = EqLayout.Band.bands(of: fields)
+            if let shown, drag == nil, bands.indices.contains(shown.band), bands[shown.band] == shown.value {
+                self.shown = nil
+            }
+            needsDisplay = true
+        }
+    }
+
+    private struct Drag {
+        var gesture: String
+        var band: Int
+        /// Whether Option was down at the press: the drag sets the q.
+        var widens: Bool
+        var startQ: Double
+        var startY: CGFloat
+        var moved = false
+    }
+
+    private var drag: Drag?
+    /// A band as dragged, ahead of the host.
+    private var shown: (band: Int, value: EqLayout.Band)?
+    private var release = 0
+    private var link: CADisplayLink?
+    /// The spectrum's top at each column, and the count it was read at.
+    private var columns: [CGFloat] = []
+    private var written: UInt64?
+    private var idle = 0
+
+    init(model: SongModel, effect: UInt64, fields: [FieldView], sampleRate: Double, selected: Int, onSelect: @escaping (Int) -> Void) {
+        self.model = model
+        self.effect = effect
+        self.fields = fields
+        self.sampleRate = sampleRate
+        self.selected = selected
+        self.onSelect = onSelect
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("not used")
+    }
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        link?.invalidate()
+        link = nil
+        guard window != nil else { return }
+        let link = displayLink(target: self, selector: #selector(tick(_:)))
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    private var box: CGRect { bounds.insetBy(dx: 4, dy: 4) }
+
+    private var bands: [EqLayout.Band] {
+        var bands = EqLayout.Band.bands(of: fields)
+        if let shown, bands.indices.contains(shown.band) { bands[shown.band] = shown.value }
+        return bands
+    }
+
+    /// Reads the spectrum when the equalizer has put out new frames, and
+    /// lets the drawn one fall once it has not: 1.5 dB a frame.
+    @objc private func tick(_ link: CADisplayLink) {
+        let box = self.box
+        guard box.width >= 1 else { return }
+        // Nothing has played for a while: look less often.
+        idle += 1
+        if idle > 120, idle % 10 != 0 { return }
+        if let spectrum = model.spectrum(effect: effect), spectrum.written != written {
+            written = spectrum.written
+            idle = 0
+            columns = EqLayout.spectrumColumns(levels: spectrum.levels, sampleRate: Double(spectrum.sampleRate), in: box)
+            needsDisplay = true
+        } else if columns.contains(where: { $0 < box.maxY }) {
+            let step = box.height * 1.5 / CGFloat(-EqLayout.spectrumFloorDb)
+            columns = columns.map { min($0 + step, box.maxY) }
+            needsDisplay = true
+        }
+    }
+
+    private func set(_ band: Int, _ value: EqLayout.Band, gesture: String) {
+        shown = (band, value)
+        model.drag(.bandSet(effect: effect, band: UInt32(band), freqHz: value.freqHz, gainDb: value.gainDb, q: value.q), gesture: gesture)
+        needsDisplay = true
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        let p = convert(event.locationInWindow, from: nil)
+        let bands = self.bands
+        let held = EqLayout.grab(at: p, bands: bands, in: box)
+        if event.clickCount == 2 {
+            drag = nil
+            if let held {
+                if bands.count > 1 { model.edit(.bandRemove(effect: effect, band: UInt32(held))) }
+            } else if bands.count < 16 {
+                let (hz, db) = (EqLayout.hz(x: p.x, in: box), EqLayout.db(y: p.y, in: box))
+                model.edit(.bandAdd(effect: effect, freqHz: (hz * 10).rounded() / 10, gainDb: min(max((db * 10).rounded() / 10, -24), 24)))
+                onSelect(bands.count)
+            }
+            return
+        }
+        guard let held else { return }
+        onSelect(held)
+        drag = Drag(gesture: model.newGesture(), band: held, widens: event.modifierFlags.contains(.option), startQ: bands[held].q, startY: p.y)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard var d = drag else { return }
+        let p = convert(event.locationInWindow, from: nil)
+        let bands = self.bands
+        guard bands.indices.contains(d.band) else { return }
+        let was = bands[d.band]
+        var next = was
+        if d.widens {
+            next.q = EqLayout.widened(q: d.startQ, by: p.y - d.startY)
+        } else {
+            next = EqLayout.dragged(was, to: p, in: box)
+        }
+        if next != was {
+            d.moved = true
+            set(d.band, next, gesture: d.gesture)
+        }
+        drag = d
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard let d = drag else { return }
+        drag = nil
+        guard d.moved else { return }
+        model.endDrag()
+        hold()
+    }
+
+    /// Keeps the band as dragged until the host's song has it, or a second
+    /// passes.
+    private func hold() {
+        release += 1
+        let mine = release
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.release == mine, self.drag == nil else { return }
+                self.shown = nil
+                self.needsDisplay = true
+            }
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        let shape = NSBezierPath(roundedRect: bounds, xRadius: 3, yRadius: 3)
+        Theme.control.setFill()
+        shape.fill()
+        let box = self.box
+        NSGraphicsContext.saveGraphicsState()
+        shape.addClip()
+        // Decades and every 12 dB, with 0 dB brighter.
+        context.setLineWidth(1)
+        for hz in [50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0] {
+            let x = EqLayout.x(hz: hz, in: box).rounded() + 0.5
+            context.setStrokeColor((hz == 100 || hz == 1000 || hz == 10000 ? Theme.beatLine : Theme.gridLine).cgColor)
+            context.move(to: CGPoint(x: x, y: box.minY))
+            context.addLine(to: CGPoint(x: x, y: box.maxY))
+            context.strokePath()
+        }
+        for db in [-24.0, -12.0, 0.0, 12.0, 24.0] {
+            let y = EqLayout.y(db: db, in: box).rounded() + 0.5
+            context.setStrokeColor((db == 0 ? Theme.barLine : Theme.gridLine).cgColor)
+            context.move(to: CGPoint(x: box.minX, y: y))
+            context.addLine(to: CGPoint(x: box.maxX, y: y))
+            context.strokePath()
+        }
+        // The spectrum, filled to the floor.
+        if columns.contains(where: { $0 < box.maxY }) {
+            let path = CGMutablePath()
+            path.move(to: CGPoint(x: box.minX, y: box.maxY))
+            for (i, y) in columns.enumerated() {
+                path.addLine(to: CGPoint(x: box.minX + CGFloat(i), y: y))
+            }
+            path.addLine(to: CGPoint(x: box.minX + CGFloat(columns.count), y: box.maxY))
+            path.closeSubpath()
+            context.setFillColor(Theme.modulation.withAlphaComponent(0.22).cgColor)
+            context.addPath(path)
+            context.fillPath()
+        }
+        // The curve.
+        let bands = self.bands
+        let path = CGMutablePath()
+        let n = Int(box.width)
+        for i in 0...n {
+            let x = box.minX + CGFloat(i)
+            let db = EqLayout.curveDb(bands, hz: EqLayout.hz(x: x, in: box), rate: sampleRate)
+            let point = CGPoint(x: x, y: EqLayout.y(db: db, in: box))
+            if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
+        }
+        context.setStrokeColor(Theme.knob.withAlphaComponent(0.95).cgColor)
+        context.setLineWidth(1.5)
+        context.addPath(path)
+        context.strokePath()
+        // The points, the selected band's in the cue color, each numbered.
+        let font = NSFont.systemFont(ofSize: 8, weight: .semibold)
+        for (i, band) in bands.enumerated() {
+            let p = EqLayout.point(band, in: box)
+            context.setFillColor((i == selected ? Theme.cue : Theme.knob).cgColor)
+            context.fillEllipse(in: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8))
+            context.setStrokeColor(Theme.text.withAlphaComponent(0.7).cgColor)
+            context.setLineWidth(1)
+            context.strokeEllipse(in: CGRect(x: p.x - 4, y: p.y - 4, width: 8, height: 8))
+            ("\(i + 1)" as NSString).draw(at: CGPoint(x: p.x + 5, y: p.y - 11), withAttributes: [.font: font, .foregroundColor: Theme.dimText])
+        }
+        NSGraphicsContext.restoreGraphicsState()
     }
 }
 

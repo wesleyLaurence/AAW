@@ -1267,6 +1267,12 @@ public final class SongModel {
         song.playhead()
     }
 
+    /// The spectrum of what an equalizer puts out, from the audio thread's
+    /// last frames through it, for the curve its panel draws.
+    func spectrum(effect: UInt64) -> Spectrum? {
+        song.spectrum(effect: effect)
+    }
+
     public func toggleMetronome() {
         let enabled = !transport.metronome
         send { try $0.setMetronome(enabled: enabled) }
