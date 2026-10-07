@@ -15,7 +15,8 @@ the chosen category holds.
 - **Instruments:** Sampler and Synth, and under Synth its patches, Factory
   and Mine ([the Synth](synth.md)).
 - **Audio Effects:** filter, equalizer, compressor, limiter, delay and reverb,
-  and the effects that come after them.
+  and the effects that come after them; under them the person's racks, saved
+  chains ([effect racks](effect-racks.md), October 7, 2026).
 
 Anything in it is dragged to where it should go, or added to the selected row
 with a double-click or the + by its name.
@@ -141,8 +142,9 @@ sample too.
   MIDI Effects and Plug-ins. Clips would hold MIDI files and
   saved clips. Folders already registers sample directories.
 - **The person's own presets.** The concept puts the person's devices in
-  `devices/` in the workspace. Whether an effect saved with its settings shows
-  in the browser beside the built-in ones belongs with the workspace.
+  `devices/` in the workspace. A chain saved with its settings is a rack,
+  listed under Audio Effects since October 7, 2026 ([effect
+  racks](effect-racks.md)); a single effect saved alone is a rack of one.
 - **A drop on an audio track.** Ableton turns an instrument dropped on an audio
   track into a new MIDI track next to it. Refusing it is simpler; whether the
   person expects Ableton's behavior is to be asked.

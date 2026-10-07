@@ -29,6 +29,8 @@ final class Browser {
     static let deviceType = "org.aaw.browser-device"
     /// A Synth patch dragged out of the browser; the data is its name.
     static let patchType = "org.aaw.browser-patch"
+    /// An effect rack dragged out of the browser; the data is its name.
+    static let rackType = "org.aaw.browser-rack"
     /// The instruments the browser offers, by kind.
     static let instruments = ["sampler", "synth"]
 
@@ -40,10 +42,27 @@ final class Browser {
         patches = libraryPatches(query: "")
     }
 
+    /// The person's effect racks, as `daw rack list` lists them; read again
+    /// when the browser is shown.
+    private(set) var racks: [RackInfo] = []
+
+    func refreshRacks() {
+        racks = libraryRacks(query: "")
+    }
+
     /// Whether every word of `query` is in the patch's name or a tag.
     nonisolated static func matches(_ patch: PatchInfo, _ query: String) -> Bool {
         query.split(separator: " ").allSatisfy { word in
             patch.name.localizedCaseInsensitiveContains(word) || patch.tags.contains { $0.localizedCaseInsensitiveContains(word) }
+        }
+    }
+
+    /// Whether every word of `query` is in the rack's name, a tag or the
+    /// kind of one of its effects.
+    nonisolated static func matches(_ rack: RackInfo, _ query: String) -> Bool {
+        query.split(separator: " ").allSatisfy { word in
+            rack.name.localizedCaseInsensitiveContains(word) || rack.tags.contains { $0.localizedCaseInsensitiveContains(word) }
+                || rack.kinds.contains { $0.localizedCaseInsensitiveContains(word) }
         }
     }
 
@@ -313,20 +332,23 @@ struct BrowserView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches() }
+        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks() }
         .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
-            // A patch saved from the terminal shows when the window comes back.
+            // A patch or a rack saved from the terminal shows when the window comes back.
             if browser.section == "Instruments" { browser.refreshPatches() }
+            if browser.section == "Audio Effects" { browser.refreshRacks() }
         }
         .onChange(of: browser.section) { _, section in
             if section == "Instruments" { browser.refreshPatches() }
+            if section == "Audio Effects" { browser.refreshRacks() }
         }
     }
 
     /// Instruments, or audio effects, each with + and dragged by its name;
-    /// under the Synth its patches, Factory and the person's own, searched
-    /// by name and tag along with the devices.
+    /// under the Synth its patches, Factory and the person's own, and under
+    /// the effects the person's racks, searched by name and tag along with
+    /// the devices.
     private var devices: some View {
         let instruments = browser.section == "Instruments"
         let kinds = (instruments ? Browser.instruments : DeviceChain.kinds)
@@ -334,6 +356,7 @@ struct BrowserView: View {
         let patches = instruments ? browser.patches.filter { Browser.matches($0, browser.query) } : []
         let factory = patches.filter(\.factory)
         let mine = patches.filter { !$0.factory }
+        let racks = instruments ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
         return ScrollView {
             VStack(spacing: 0) {
                 ForEach(kinds, id: \.self) { kind in
@@ -356,7 +379,60 @@ struct BrowserView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(10)
                 }
+                if !instruments && !racks.isEmpty {
+                    heading("Racks")
+                    ForEach(racks, id: \.slug) { rack in row(rack) }
+                }
+                if !instruments && browser.query.isEmpty && browser.racks.isEmpty {
+                    Text("A chain of effects saved with Save Rack… in the device panel, or daw rack save, is listed here under Racks and dropped on any track.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                }
             }
+        }
+    }
+
+    /// A rack: its name and the kinds of its effects, + to add it to the
+    /// selected row's chain, and dragged by its name.
+    private func row(_ rack: RackInfo) -> some View {
+        let kinds = rack.kinds.map(readable).joined(separator: " · ")
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(rack.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(kinds)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                model.addBrowserDevice("rack", to: model.selectedRow, rack: rack.name)
+            } label: {
+                Image(systemName: "plus").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .disabled(!model.canAddBrowserDevice("rack", to: model.selectedRow))
+            .help("Add the effects of \(rack.name) to the selected row's chain")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 6)
+        .frame(height: 34)
+        .contentShape(Rectangle())
+        .help(rack.description.isEmpty ? kinds : rack.description)
+        .onTapGesture(count: 2) { model.addBrowserDevice("rack", to: model.selectedRow, rack: rack.name) }
+        .onDrag {
+            browser.dragged = nil
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(forTypeIdentifier: Browser.rackType, visibility: .all) { completion in
+                completion(Data(rack.name.utf8), nil)
+                return nil
+            }
+            return provider
         }
     }
 

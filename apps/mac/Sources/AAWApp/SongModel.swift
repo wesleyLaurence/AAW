@@ -1058,9 +1058,11 @@ public final class SongModel {
         add(.trackAdd(index: UInt32(index), midi: midi)) { .track($0) }
     }
 
-    /// Whether a device from the browser can go on a row: an effect on any
-    /// row, an instrument on a MIDI track or, with no row, on a new track.
+    /// Whether a device from the browser can go on a row: an effect or a
+    /// rack (`kind` "rack") on any row, an instrument on a MIDI track or,
+    /// with no row, on a new track.
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
+        if kind == "rack" { return row != nil }
         if !Browser.instruments.contains(kind) { return DeviceChain.kinds.contains(kind) && row != nil }
         guard let row else { return true }
         guard case .track(let key) = row else { return false }
@@ -1068,9 +1070,10 @@ public final class SongModel {
     }
 
     /// Adds a device from the browser: an effect at `index` of the row's
-    /// chain or its end; an empty Sampler, or a Synth with the plain saw or
-    /// the patch named, as the MIDI track's instrument or on a new track.
-    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil, patch: String? = nil) {
+    /// chain or its end, or with `kind` "rack" the effects of the rack
+    /// named; an empty Sampler, or a Synth with the plain saw or the patch
+    /// named, as the MIDI track's instrument or on a new track.
+    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil, patch: String? = nil, rack: String? = nil) {
         guard canAddBrowserDevice(kind, to: row) else { return }
         if Browser.instruments.contains(kind) {
             let track: UInt64?
@@ -1082,9 +1085,23 @@ public final class SongModel {
                 self.detail = .devices
             }
         } else if let row {
-            edit(.effectAdd(row: row.row, kind: kind, index: index))
+            if kind == "rack" {
+                guard let rack else { return }
+                edit(.rackAdd(row: row.row, rack: rack, index: index))
+            } else {
+                edit(.effectAdd(row: row.row, kind: kind, index: index))
+            }
             select(row: row)
             detail = .devices
+        }
+    }
+
+    /// Saves a row's chain to the library as a rack, as `daw rack save`
+    /// does; over a rack already saved under the name only with `replace`.
+    /// The browser's list then shows it.
+    func saveRack(row: RowID, name: String, description: String?, tags: [String], replace: Bool) {
+        edit(.rackSave(row: row.row, name: name, description: description, tags: tags, replace: replace)) { [weak self] _ in
+            self?.browser.refreshRacks()
         }
     }
 

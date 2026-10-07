@@ -402,6 +402,32 @@ pub enum Command {
     EffectMove { effect: String, index: usize },
     #[serde(rename = "effect.bypass")]
     EffectBypass { effect: String, bypass: bool },
+    /// Adds the effects of a rack to a chain, at `index` or its end, as one
+    /// step: each keeps its ID unless the chain has it, when a number is
+    /// added; a compressor's sidechain is kept when the chain is a track's,
+    /// a group's or a return's and it names another track of the song, and
+    /// dropped otherwise. `rack` is a rack's name or slug, or a `.yaml` file.
+    #[serde(rename = "rack.load")]
+    RackLoad {
+        owner: String,
+        rack: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+    },
+    /// Saves a chain to the library as a rack named `name`, with a
+    /// description and tags. Over a rack already saved under that name only
+    /// with `replace`. The song does not change.
+    #[serde(rename = "rack.save")]
+    RackSave {
+        owner: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tags: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replace: bool,
+    },
 
     // Sends
     /// A send of a track or a group, which `track` names.
@@ -2286,6 +2312,85 @@ impl<'a> Edit<'a> {
                 let loc = [owner, vec![Step::Key("effects".into()), Step::Index(i)]].concat();
                 self.set_leaf(&loc, "bypass", Value::Bool(*bypass));
                 out.label = format!("{} effect {}", if *bypass { "Bypass" } else { "Enable" }, self.text(&loc));
+            }
+            RackLoad { owner, rack, index } => {
+                let loc = self.owner(owner)?;
+                let r = crate::racks::find(rack)?;
+                let name = self.text(&loc);
+                let mut ids: Vec<String> =
+                    self.node(&loc).get("effects").map(|e| e.items().iter().filter_map(|i| i.node.field("id")).map(str::to_string).collect()).unwrap_or_default();
+                let count = self.node(&loc).get("effects").map_or(0, |e| e.items().len());
+                let at = index.unwrap_or(count);
+                if at > count {
+                    return Err(format!("effects index {at} is past the end ({count} items)"));
+                }
+                // A sidechain is kept where the song allows one and it names
+                // another track that is there.
+                let keyed = matches!(&loc[..], [Step::Key(list), Step::Index(_)] if list == "tracks" || list == "groups" || list == "returns");
+                let own_id = self.node(&loc).field("id").map(str::to_string);
+                let tracks: Vec<String> =
+                    self.root.get("tracks").map(|t| t.items().iter().filter_map(|i| i.node.field("id")).map(str::to_string).collect()).unwrap_or_default();
+                let effects = match &r.effects {
+                    Value::List(items) => items.clone(),
+                    _ => Vec::new(),
+                };
+                let mut notes = Vec::new();
+                for (k, effect) in effects.iter().enumerate() {
+                    let mut fields = to_json(effect);
+                    let map = fields.as_object_mut().ok_or("an effect is a mapping")?;
+                    if let Some(id) = map.get("id").and_then(Json::as_str).map(str::to_string) {
+                        if ids.contains(&id) {
+                            let mut n = 2;
+                            while ids.contains(&format!("{id}-{n}")) {
+                                n += 1;
+                            }
+                            let fresh = format!("{id}-{n}");
+                            notes.push(format!("{name}: effect {id} of the rack is {fresh} here, since the chain has {id}"));
+                            map.insert("id".into(), Json::String(fresh.clone()));
+                            ids.push(fresh);
+                        } else {
+                            ids.push(id);
+                        }
+                    }
+                    if let Some(side) = map.get("sidechain").and_then(Json::as_str).map(str::to_string) {
+                        let allowed = keyed && tracks.contains(&side) && own_id.as_deref() != Some(side.as_str());
+                        if !allowed {
+                            map.remove("sidechain");
+                            notes.push(format!("{name}: the rack's compressor was keyed by {side}, which this chain cannot be; set its sidechain"));
+                        }
+                    }
+                    out.made.push(self.insert(&loc, "effects", Some(at + k), Node::new(&json_value(&fields)?))?);
+                }
+                let n = effects.len();
+                self.remap_lanes(&loc, |j| Some(if j >= at { j + n } else { j }), None)?;
+                self.also.extend(notes);
+                out.label = format!("Add rack {} to {name}", r.name);
+                out.report.insert("rack".into(), json!(r.name));
+                out.report.insert("effects".into(), json!(r.kinds()));
+            }
+            RackSave { owner, name, description, tags, replace } => {
+                let loc = self.owner(owner)?;
+                let effects = self.node(&loc).get("effects").map(node_json).unwrap_or(Json::Array(Vec::new()));
+                let chain = crate::racks::validate(&json_value(&effects)?)?;
+                if chain.is_empty() {
+                    return Err(format!("{} has no effects to save", self.text(&loc)));
+                }
+                // Written over, a rack keeps its description and tags unless new ones are given.
+                let before = if *replace { crate::racks::find(name).ok() } else { None };
+                let description = match (description, &before) {
+                    (Some(d), _) => d.clone(),
+                    (None, Some(b)) => b.description.clone(),
+                    (None, None) => String::new(),
+                };
+                let tags = match (tags.is_empty(), &before) {
+                    (true, Some(b)) => b.tags.clone(),
+                    _ => tags.clone(),
+                };
+                let r = crate::racks::save(name, &description, &tags, &chain, self.origin.as_str(), *replace)?;
+                out.label = format!("Save rack {} from {}", r.name, self.text(&loc));
+                out.report.insert("rack".into(), json!(r.name));
+                out.report.insert("file".into(), json!(r.file.clone().unwrap_or_default()));
+                out.report.insert("effects".into(), json!(r.kinds()));
             }
             SendSet { track, to, fields } => {
                 let loc = self.sender(track)?;

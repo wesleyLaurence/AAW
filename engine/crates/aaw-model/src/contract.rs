@@ -105,6 +105,7 @@ const EFFECT: &[(&str, &str)] = &[
     ("report", "Render reports list each effect with latency_frames; dynamics add max and mean gain reduction and the fraction of frames reduced over 1 dB. Groups appear under tracks with kind: group and their tracks, returns with kind: return and their senders; a grouped track names its group."),
     ("automation", "Effect parameters can change over time with automation lanes; see daw describe automation. Give an effect an id to address it by name."),
     ("synth", "A Synth patch carries a chain of these kinds of its own, tracks[].instrument.synth.effects, run before the track's inserts; see daw describe synth."),
+    ("racks", "A rack is a chain of effects as a YAML file, with name, description, tags, saved_by and saved_at around its effects list, so a chain built on one track is added to a track in any song. daw rack save SONG OWNER NAME [--description TEXT] [--tags a,b] [--replace] writes a chain there, OWNER being tracks.T, groups.G, returns.R, master or tracks.T.instrument.synth, as effect add takes it; the song does not change. Racks live in the workspace library, ~/Music/AAW/library/racks/ or under AAW_WORKSPACE, each a file named by the slug of its name (drum-glue.yaml); there are no factory racks. daw rack list [WORDS] lists them, WORDS keeping those with every word in the name, a tag or an effect's kind, and daw rack show NAME prints one. daw rack load SONG OWNER NAME [--index N] adds the rack's effects to the chain at N or its end, in one undo step; an effect whose id the chain has is given a number (glue-2), and a compressor's sidechain is kept only on a track, group or return when it names another track of the song, and dropped otherwise, said under also. In the app a rack is dragged from the browser's Audio Effects onto a header or the device panel, and Save Rack… in the device panel saves a chain."),
     ("limits", "No clipper, phaser, groups in groups, return-to-return sends or impulse-response samples yet."),
 ];
 
@@ -318,7 +319,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("sampler", "Pads, samples and pattern events: pitch, gate, choke, stretch, and the app's Sampler."),
     ("synth", "The Synth: oscillators, filter, envelopes, LFOs, the modulation matrix, macros, patches and recipes."),
     ("midi", "MIDI tracks: note clips, notes, instruments, drum maps and MIDI files."),
-    ("effects", "Insert effects and what each takes, sends and returns."),
+    ("effects", "Insert effects and what each takes, sends, returns, groups and racks."),
     ("automation", "Lanes and points: what a lane can move and how values move between points."),
     ("edit", "Editing a finished song from audio clips: cuts, joins, crossfades, speed; and ranges of beats across the tracks: copy, insert, delete, clear, a section with what is under it."),
     ("check", "daw check: warnings about the song, each with a code: stacked clips, notes struck twice, crowded low registers."),

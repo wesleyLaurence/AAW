@@ -2250,6 +2250,24 @@ impl Effect {
         }
     }
 
+    /// A chain of effects from a list on its own, as a song's `effects` is
+    /// validated, its IDs unique within it: for an effect rack read from a
+    /// file before any song holds it.
+    pub fn parse_chain(x: &Value) -> Result<Vec<Effect>, crate::validate::ValidationError> {
+        let mut ctx = Ctx::default();
+        let chain = ctx.at(Loc::Key("effects".into()), |c| v::list(c, x, 0, Some(32), Effect::validate));
+        if let Some(chain) = &chain {
+            let ids: Vec<&str> = chain.iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
+            if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
+                ctx.at(Loc::Key("effects".into()), |c| c.error("value_error", "effect IDs must be unique"));
+            }
+        }
+        match chain {
+            Some(chain) if ctx.errors.is_empty() => Ok(chain),
+            _ => Err(crate::validate::ValidationError { errors: ctx.errors }),
+        }
+    }
+
     /// The discriminated union on `type`.
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Effect> {
         let Value::Dict(d) = x else {

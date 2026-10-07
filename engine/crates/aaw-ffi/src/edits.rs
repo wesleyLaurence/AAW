@@ -311,6 +311,21 @@ pub enum Edit {
     /// as `EffectCopy` does; it works after the effect is changed or gone.
     /// The effect is what the edit makes.
     EffectPaste { copied: String, row: Row, index: Option<u32> },
+    /// Adds the effects of a saved rack to a row's chain, at `index` or its
+    /// end, as `daw rack load` does: what a rack dragged from the browser
+    /// does when dropped. The effects are what the edit makes.
+    RackAdd { row: Row, rack: String, index: Option<u32> },
+    /// Saves a row's chain to the library as a rack named `name`, as `daw
+    /// rack save` does; over a rack already saved under that name only with
+    /// `replace`, which keeps the file's description and tags unless new
+    /// ones are given. The song does not change.
+    RackSave {
+        row: Row,
+        name: String,
+        description: Option<String>,
+        tags: Vec<String>,
+        replace: bool,
+    },
     EffectRemove { effect: u64 },
     /// Moves an effect within its chain.
     EffectMove { effect: u64, index: u32 },
@@ -1909,6 +1924,26 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 return Err("Nothing was copied".into());
             }
             effect_copy(project, &tree, fields, row, *index, "Paste")
+        }
+        Edit::RackAdd { row, rack, index } => {
+            let tree = doc.tree();
+            let chain = owner(project, &tree, row)?.effects();
+            let mut command = json!({"op": "rack.load", "owner": owner_path(row), "rack": rack});
+            if let Some(i) = index {
+                command["index"] = json!((*i).min(chain.len() as u32));
+            }
+            Ok(vec![command])
+        }
+        Edit::RackSave { row, name, description, tags, replace } => {
+            let tree = doc.tree();
+            if owner(project, &tree, row)?.effects().is_empty() {
+                return Err("The chain has no effects to save".into());
+            }
+            let mut command = json!({"op": "rack.save", "owner": owner_path(row), "name": name, "tags": tags, "replace": replace});
+            if let Some(d) = description {
+                command["description"] = json!(d);
+            }
+            Ok(vec![command])
         }
         Edit::EffectRemove { effect } => Ok(vec![json!({"op": "effect.remove", "effect": handle_text(*effect)})]),
         Edit::EffectMove { effect, index } => Ok(vec![json!({"op": "effect.move", "effect": handle_text(*effect), "index": index})]),

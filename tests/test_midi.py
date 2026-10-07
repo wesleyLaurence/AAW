@@ -256,3 +256,38 @@ def test_a_clip_loops_its_first_beats_and_the_notes_past_the_loop_are_named(tmp_
     daw("clip", "loop", path, "tracks.drums.audio.0", 2, "--length", 7)
     found = regions(load(path), path.parent)["drums"]
     assert [(r.start, round(r.length, 3)) for r in found] == [(0.0, 1.008), (1.0, 1.008), (2.0, 1.008), (3.0, 0.508)]
+
+
+def test_racks_are_saved_from_a_chain_listed_and_added_to_a_chain_in_another_song(tmp_path, monkeypatch):
+    monkeypatch.setenv("AAW_WORKSPACE", str(tmp_path / "ws"))
+    listed = daw("rack", "list")
+    assert listed == {"directory": str(tmp_path / "ws" / "library" / "racks"), "racks": []}
+    path = phrase(tmp_path)
+    daw("effect", "add", path, "tracks.keys", "--type", "utility", "--id", "trim", "--gain-db", -3)
+    daw("effect", "add", path, "tracks.keys", "--type", "eq", "--bands", '[{"shape": "highpass", "freq_hz": 80}]')
+    daw("effect", "add", path, "tracks.keys", "--type", "limiter", "--ceiling-db", -1)
+    saved = daw("rack", "save", path, "tracks.keys", "Keys Chain", "--description", "Trim, a highpass and a lid", "--tags", "keys,bus")
+    assert saved["label"] == "Save rack Keys Chain from tracks.keys" and saved["changed"] is False
+    file = tmp_path / "ws" / "library" / "racks" / "keys-chain.yaml"
+    assert saved["file"] == str(file) and file.is_file()
+    assert saved["effects"] == ["utility", "eq", "limiter"]
+    racks = daw("rack", "list")["racks"]
+    assert [(r["name"], r["slug"], r["kinds"], r["tags"], r["saved_by"]) for r in racks] == [("Keys Chain", "keys-chain", ["utility", "eq", "limiter"], ["keys", "bus"], "agent")]
+    assert [r["name"] for r in daw("rack", "list", "limiter")["racks"]] == ["Keys Chain"]
+    assert daw("rack", "list", "reverb")["racks"] == []
+    shown = daw("rack", "show", "keys-chain")
+    assert shown["effects"][0] == {"type": "utility", "id": "trim", "gain_db": -3} and shown["description"] == "Trim, a highpass and a lid"
+    with pytest.raises(ValueError, match="--replace"):
+        daw("rack", "save", path, "tracks.keys", "Keys Chain")
+    # Added to another song's master, in one undo step, with the same effects.
+    other = tmp_path / "other"
+    daw("init", other, "--tempo", 100, "--bars", 4)
+    added = daw("rack", "load", other, "master", "Keys Chain")
+    assert added["label"] == "Add rack Keys Chain to master" and added["effects"] == ["utility", "eq", "limiter"]
+    assert [e["type"] for e in load(other / "song.yaml")["master"]["effects"]] == ["utility", "eq", "limiter"]
+    assert load(other / "song.yaml")["master"]["effects"][0]["id"] == "trim"
+    # Added again where the id is taken, the effect is numbered.
+    again = daw("rack", "load", other, "master", "Keys Chain", "--index", 0)
+    assert again["also"] == ["master: effect trim of the rack is trim-2 here, since the chain has trim"]
+    assert [e.get("id") for e in load(other / "song.yaml")["master"]["effects"]] == ["trim-2", None, None, "trim", None, None]
+    assert "racks" in daw("describe", "effects")["semantics"]
