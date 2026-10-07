@@ -218,6 +218,7 @@ impl Song {
             seconds: None,
             feed: false,
             prepare: true,
+            pace: host::PACE,
         };
         let running = host::spawn(&file, options, move |event| match event {
             Event::Opened(doc) => {

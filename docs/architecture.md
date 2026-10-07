@@ -281,6 +281,10 @@ written in the document is never smoothed, and a render reads only the saved val
 so playback from the start and a render are the same audio. With no host, the same
 commands edit the file. [../engine/README.md](../engine/README.md) lists the commands
 and describes the host; decisions D36 to D38, D41 and D44 record the choices.
+The agent is asked to work in steps the person can watch, a part a command as
+soon as it is decided, and a host whose agent sent nothing for five minutes
+says so in the reply of its next edit, as `hint`
+([watchable-steps.md](features/watchable-steps.md), D87).
 
 `note.preview` is a transport command too: a note of a pitch, velocity and
 length played now through a MIDI track's instrument, a Synth or a Sampler,

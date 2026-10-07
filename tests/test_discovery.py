@@ -166,6 +166,8 @@ def test_the_first_song_recipe_runs_as_written(tmp_path, monkeypatch):
     assert daw("samples", "scan", library)["indexed"] == 1
 
     start = daw("describe", "start")
+    # The recipe says to run each step as it is decided, with the app open.
+    assert "run each step as soon as it is decided" in start["semantics"]["pace"]
     work = tmp_path / "work"
     work.mkdir()
     batch = start["batch"]

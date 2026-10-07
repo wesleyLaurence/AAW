@@ -29,6 +29,16 @@ Without a host the commands edit the file, but undo/history require a host.
 Read `daw changes PROJECT --since REV` for changes since a known host revision.
 Give `daw batch PROJECT FILE` a `--label` describing the musical edit.
 
+With a host running, work in steps the person can watch. Make the song a part
+at a time: a sound found and imported, a track added, a clip and its notes,
+each a command as soon as it is decided, so it appears on the timeline and in
+the activity as it is made and the person can say what they think before the
+next. Read the song once, then start placing; plan the next part while the
+last one plays. Do not plan the whole song and then run everything at once. A
+batch is one musical edit, a phrase with its variations, not the song held
+back until it is finished. A host whose agent sent nothing for five minutes
+says so in the next edit's reply, as `hint`.
+
 `inspect` returns `project_sha256`; use it with `daw apply PROJECT PATCH --expect SHA`
 when a merge patch is needed. Objects merge, arrays replace, and null removes a
 field. Raw file changes are possible, but a host records them as external edits.
