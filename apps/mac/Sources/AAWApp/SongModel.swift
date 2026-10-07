@@ -194,6 +194,11 @@ public final class SongModel {
     @ObservationIgnored private(set) var clipboard: Clipboard?
     /// The track whose lane was last clicked, where clips are pasted.
     @ObservationIgnored var cueTrack: UInt64?
+    /// The analyzers' windows, by the effect each shows.
+    @ObservationIgnored private var analyzerWindows: [UInt64: AnalyzerWindowController] = [:]
+    /// The last reading of each analyzer and when it was taken, so that its
+    /// strip and its window drawn in one frame share one reading.
+    @ObservationIgnored private var analysisCache: [UInt64: (at: CFTimeInterval, reading: Analysis)] = [:]
     /// True for a moment after each change by the agent.
     public private(set) var agentWorking = false
     /// True for a moment after the tempo, title or length changed.
@@ -310,6 +315,7 @@ public final class SongModel {
             activity.insert(update.change, at: 0)
         }
         dropMissingSelection()
+        closeAnalyzersGone()
         if activity.count > Self.activityLimit {
             activity.removeLast(activity.count - Self.activityLimit)
         }
@@ -359,6 +365,7 @@ public final class SongModel {
 
     fileprivate func hostClosed() {
         closed = true
+        closeAnalyzers()
         onClosed?()
     }
 
@@ -1613,8 +1620,94 @@ public final class SongModel {
     /// Saves and stops hosting the song; `daw` commands then run headless.
     public func close() {
         endDrag()
+        closeAnalyzers()
         // After queued commands, so none is sent to a closed host.
         commands.sync { song.close() }
+    }
+
+    // MARK: Analyzers
+
+    /// What an analyzer has measured lately, for its strip and its window:
+    /// read from the host once a frame, however many views draw it, so that
+    /// the peaks since the last reading are not split between them. None
+    /// for an effect that is not an analyzer or is bypassed.
+    func analysis(effect: UInt64) -> Analysis? {
+        let now = CACurrentMediaTime()
+        if let cached = analysisCache[effect], now - cached.at < 0.004 { return cached.reading }
+        guard let reading = song.analysis(effect: effect) else {
+            analysisCache[effect] = nil
+            return nil
+        }
+        analysisCache[effect] = (now, reading)
+        return reading
+    }
+
+    /// Starts an analyzer's held peaks, integrated loudness, range and
+    /// history again, as a click on its levels does.
+    func resetAnalysis(effect: UInt64) {
+        song.resetAnalysis(effect: effect)
+    }
+
+    /// The analyzer's name for its window's title: the row it is on and
+    /// its id, `Analyzer · master` or `Analyzer · drums · kit`; nil when the
+    /// song no longer has it.
+    func analyzerName(effect: UInt64) -> String? {
+        func name(_ row: String, _ effects: [EffectView]) -> String? {
+            effects.first { $0.key == effect }.map { e in "Analyzer · \(row)" + (e.id.map { " · \($0)" } ?? "") }
+        }
+        for t in arrangement.tracks { if let n = name(t.id, t.effects) { return n } }
+        for g in arrangement.groups { if let n = name(g.id, g.effects) { return n } }
+        for r in arrangement.returns { if let n = name(r.id, r.effects) { return n } }
+        return name("master", arrangement.master.effects)
+    }
+
+    /// Opens the analyzer's window, or brings it to the front.
+    func openAnalyzer(effect: UInt64) {
+        if let open = analyzerWindows[effect] {
+            open.showWindow(nil)
+            open.window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        let controller = AnalyzerWindowController(model: self, effect: effect)
+        controller.onClose = { [weak self] closed in
+            self?.analyzerWindows[closed.effect] = nil
+            self?.song.forgetAnalysis(effect: closed.effect)
+        }
+        analyzerWindows[effect] = controller
+        controller.showWindow(nil)
+    }
+
+    /// Opens the window of the analyzer the person means: the selected
+    /// effect when it is one, or else the first analyzer of the row whose
+    /// devices show. Whether there is one.
+    @discardableResult
+    func openShownAnalyzer() -> Bool {
+        guard let analyzer = shownAnalyzer else { return false }
+        openAnalyzer(effect: analyzer)
+        return true
+    }
+
+    /// The analyzer View › Analyzer Window would open.
+    var shownAnalyzer: UInt64? {
+        if let selected = selectedEffectView, selected.kind == "analyzer" { return selected.key }
+        return deviceChain?.effects.first { $0.kind == "analyzer" }?.key
+    }
+
+    /// The analyzers' windows that are open, oldest first.
+    var openAnalyzerWindows: [AnalyzerWindowController] {
+        analyzerWindows.values.sorted { $0.window?.windowNumber ?? 0 < $1.window?.windowNumber ?? 0 }
+    }
+
+    /// Closes the windows of analyzers the song no longer has.
+    private func closeAnalyzersGone() {
+        for (effect, controller) in analyzerWindows where analyzerName(effect: effect) == nil {
+            controller.close()
+        }
+    }
+
+    private func closeAnalyzers() {
+        for controller in analyzerWindows.values { controller.close() }
+        analyzerWindows = [:]
     }
 }
 

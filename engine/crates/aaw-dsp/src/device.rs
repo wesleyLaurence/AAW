@@ -8,6 +8,7 @@ use crate::chorus::Chorus;
 use crate::delay::Delay;
 use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reduction};
 use crate::envelope::{Envelope, Knob, Param};
+use crate::meter::Ring;
 use crate::reverb::{Kernel, Reverb, Shape};
 use crate::saturation::Saturation;
 use crate::spectrum::Tap;
@@ -73,6 +74,8 @@ pub struct Plan {
     /// Where an equalizer's output is tapped for the app's spectrum, when
     /// something wants to draw it.
     pub tap: Option<Arc<Tap>>,
+    /// Where an analyzer's output goes, every frame, for the app's meters.
+    pub ring: Option<Arc<Ring>>,
 }
 
 impl Plan {
@@ -113,6 +116,7 @@ impl Plan {
             // A polarity flip or a sum to mono is a jump, so a change of either
             // fades through rather than gliding.
             Effect::Utility(u) => hash(("utility", u.invert, u.mono, u.mono_below_hz.map(f64::to_bits))),
+            Effect::Analyzer(_) => hash("analyzer"),
         };
         Plan {
             effect: effect.clone(),
@@ -123,6 +127,7 @@ impl Plan {
             latency,
             signature,
             tap: None,
+            ring: None,
         }
     }
 }
@@ -143,6 +148,9 @@ pub enum Device {
     Chorus(Chorus),
     Saturation(Saturation),
     Utility(Utility),
+    /// An analyzer, which changes nothing: what it shows is read from the
+    /// unit's ring.
+    Analyzer,
 }
 
 /// A device in a chain.
@@ -152,6 +160,8 @@ pub struct Unit {
     pub signature: u64,
     /// The ring the device's output is written to for the app's spectrum.
     tap: Option<Arc<Tap>>,
+    /// The ring an analyzer's output is written to for the app's meters.
+    ring: Option<Arc<Ring>>,
 }
 
 impl Unit {
@@ -258,12 +268,14 @@ impl Unit {
                 rate,
                 max_block,
             )),
+            Effect::Analyzer(_) => Device::Analyzer,
         };
         Unit {
             device,
             latency: plan.latency,
             signature: plan.signature,
             tap: plan.tap.clone(),
+            ring: plan.ring.clone(),
         }
     }
 
@@ -280,9 +292,13 @@ impl Unit {
             Device::Chorus(d) => d.process(x, clock),
             Device::Saturation(d) => d.process(x, clock),
             Device::Utility(d) => d.process(x, clock),
+            Device::Analyzer => {}
         }
         if let Some(tap) = &self.tap {
             tap.write(x);
+        }
+        if let Some(ring) = &self.ring {
+            ring.write(x);
         }
     }
 

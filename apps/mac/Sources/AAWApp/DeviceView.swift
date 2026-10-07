@@ -720,6 +720,8 @@ private struct DevicePanel: View {
             Group {
                 if effect.kind == "eq" {
                     EqPanel(model: model, chain: chain, effect: effect)
+                } else if effect.kind == "analyzer" {
+                    AnalyzerStrip(model: model, effect: effect)
                 } else {
                     VStack(spacing: 3) {
                         ForEach(effect.fields, id: \.name) { field in

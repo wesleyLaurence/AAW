@@ -19,13 +19,12 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **A live analyzer.** An effect on a track, a group, a return or the
-   master that passes the sound unchanged and draws it as it plays: levels,
-   loudness with its history, a spectrum, a spectrogram, the stereo field
-   with its correlation and a scrolling waveform, as iZotope Insight shows
-   them; a strip in the device panel, opened into a window of its own that
-   resizes, goes full screen and stays open whatever is selected (D95).
-   [features/analyzer.md](features/analyzer.md)
+1. **The analyzer's spectrogram and waveform.** The two panes of the
+   analyzer's design that are not built: frequency up, time across and level
+   as color, scrolling, and the last seconds of each channel scrolling, each
+   drawn into a texture rather than as paths so `--measure` holds them to the
+   display's rate; the panes' menu and arrangement take them as they take the
+   four that are there (D96). [features/analyzer.md](features/analyzer.md)
 2. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
@@ -91,6 +90,33 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The analyzer by eye and by ear:** an analyzer added to the master after
+  the limiter with Add Effect and the strip watched while the song plays,
+  Open Window pressed and the window moved to a second display or made full
+  screen with the green button, a drum track clicked in the song's window and
+  the master's analyzer seen to stay; a kick's true peak against its sample
+  peak, a limiter's ceiling against the held peak, the integrated loudness
+  against `daw listen` of a render of the same bars, and whether the
+  short-term line reads as the song's dynamics; the low end of a wide pad
+  with a utility's Mono below switched on, watched in the vectorscope and the
+  correlation; the dividers dragged, a pane filled and given back, panes
+  hidden from the menu, and whether the arrangement is the one wanted when a
+  second project opens; two analyzers' windows side by side; whether −60 to
+  +6 dB and −60 to 0 LUFS are the right scales, whether the peaks should fall
+  faster or slower than 20 dB a second, and whether a click on the levels is
+  the right way to reset. Scripted runs on a generated song of two Synths at
+  −24 dB showed the strip in the device panel and, after ⌥⌘L, the window with
+  its four panes while a track was selected in the song's window, the
+  spectrum filling it after a scripted click on its mark, and the dividers
+  dragged by script, each in a picture; `--measure` with the window open drew
+  it in 3 ms a frame at the display's 16.7 ms; the ring handing every frame
+  over once, the pass-through byte for byte, the meter's loudness and true
+  peak against a render's report, a sine's level and bin, the correlation of
+  mono, inverted and unrelated signals and the K-weighting's table are held
+  by Rust tests, the analysis call and the patch's refusal by an FFI test,
+  the pass-through and `describe` through `daw` in Python, and the panes'
+  geometry by Swift tests. Nothing heard, nothing dragged by hand, no menu
+  opened.
 - **Export Audio… by hand and by ear:** ⇧⌘R on a song of a few minutes, the
   panel seen to open in the project's `exports` folder with the title as the
   name, the Format menu changing the name's extension, True peak at −1 and

@@ -3073,3 +3073,38 @@ fn the_browsers_racks_are_saved_from_a_chain_and_dropped_on_rows() {
     assert!(e.to_string().contains("No rack named"), "{e}");
     let _ = agent(&path, json!({"op": "status"}));
 }
+
+#[test]
+fn an_analyzer_s_measurements_are_read_for_its_window() {
+    let (_dir, _path, song, _seen) = open();
+    let start = song.arrangement();
+    let drums = Row::Track { key: start.tracks[0].key };
+    let analyzer = song.edit(Edit::EffectAdd { row: drums, kind: "analyzer".into(), index: None }, None).unwrap()[0];
+    let e = song.arrangement().tracks[0].effects.iter().find(|e| e.kind == "analyzer").cloned().unwrap();
+    assert!(e.fields.is_empty() && e.bands == 0, "nothing to set: {:?}", e.fields);
+    // Nothing has played: silence everywhere, and the frames count is 0.
+    let a = song.analysis(analyzer).expect("an analyzer on a track is measured");
+    assert_eq!((a.sample_rate, a.written, a.lost, a.spectrum.len(), a.scope.len()), (48000, 0, 0, 2049, 0));
+    assert!(a.peak_db == vec![-200.0, -200.0] && a.integrated_lufs.is_none() && a.history.is_empty());
+    assert_eq!((a.correlation, a.balance_db), (0.0, 0.0));
+    // Other effects, and anything that is not an effect, have none; an
+    // equalizer's spectrum is not an analysis and the other way round.
+    let bass = &start.tracks[1];
+    let filter = bass.effects.iter().find(|e| e.kind == "filter").unwrap();
+    assert!(song.analysis(filter.key).is_none() && song.analysis(bass.key).is_none());
+    assert!(song.spectrum(analyzer).is_none());
+    // The ring follows an edit elsewhere, and a bypass takes it away.
+    song.edit(Edit::EffectSet { effect: filter.key, field: "cutoff_hz".into(), value: number(500.0) }, None).unwrap();
+    assert!(song.analysis(analyzer).is_some());
+    song.edit(Edit::EffectBypass { effect: analyzer, on: true }, None).unwrap();
+    assert!(song.analysis(analyzer).is_none(), "bypassed, it measures nothing");
+    song.edit(Edit::EffectBypass { effect: analyzer, on: false }, None).unwrap();
+    assert!(song.analysis(analyzer).is_some());
+    song.reset_analysis(analyzer);
+    song.forget_analysis(analyzer);
+    assert!(song.analysis(analyzer).is_some(), "watched again from now");
+    // A patch's chain does not take one.
+    let keys = song.edit(Edit::SynthAdd { track: None, patch: None }, None).unwrap()[0];
+    let refused = song.edit(Edit::SynthEffectAdd { track: keys, kind: "analyzer".into(), index: None }, None).unwrap_err();
+    assert!(refused.to_string().contains("not offered inside a patch"), "{refused}");
+}

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from agent_daw.model import load, save, validate
-from helpers import SR, cli, level_db, render, run_chain, stem, tone
+from helpers import SR, cli, daw, level_db, render, run_chain, stem, tone
 
 
 def highpass(cutoff, slope=12, **kw):
@@ -350,3 +350,20 @@ def test_effects_round_trip_and_cli(beat, tmp_path):
     assert bass["effects"] == ["filter", "compressor"]
     assert bass["sidechain"] == ["kick"]
     assert inspected["master_effects"] == ["limiter"]
+
+
+def test_an_analyzer_changes_nothing(tmp_path):
+    """An analyzer's output is its input, bit for bit, with no latency; it
+    is refused inside a Synth's patch."""
+    t = np.arange(SR) / SR
+    x = np.column_stack([0.4 * np.sin(2 * np.pi * 60 * t), 0.3 * np.sin(2 * np.pi * 2000 * t)])
+    out, report = run_chain(tmp_path / "watched", [{"type": "analyzer", "id": "meter"}, {"type": "limiter"}, {"type": "analyzer"}], x)
+    plain, _ = run_chain(tmp_path / "plain", [{"type": "limiter"}], x)
+    assert np.array_equal(out, plain)
+    assert report[0] == {"type": "analyzer", "latency_frames": 0} and report[2] == {"type": "analyzer", "latency_frames": 0}
+    song = daw("init", tmp_path / "song", "--bars", 4)["project"]
+    daw("synth", "add", song, "keys")
+    with pytest.raises(ValueError, match="not offered inside a patch"):
+        daw("effect", "add", song, "tracks.keys.instrument.synth", "--type", "analyzer")
+    daw("effect", "add", song, "tracks.keys", "--type", "analyzer")
+    assert [e["type"] for e in load(song)["tracks"][0]["effects"]] == ["analyzer"]

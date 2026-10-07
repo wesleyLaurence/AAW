@@ -68,10 +68,11 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
   compressor/sidechain, limiter, delay, reverb, chorus, saturation and utility
   devices with explicit block state, the spectrum tap an equalizer's panel
-  draws from, wavetables, and the Synth, a polyphonic
+  draws from, the analyzer's ring and the meter that reads it (`meter`),
+  wavetables, and the Synth, a polyphonic
   synthesizer played from a patch; see
-  [effects.md](features/effects.md), [automation.md](features/automation.md)
-  and [synth.md](features/synth.md).
+  [effects.md](features/effects.md), [automation.md](features/automation.md),
+  [analyzer.md](features/analyzer.md) and [synth.md](features/synth.md).
 - `aaw-engine`: compiles a song into a program of voices, chains, groups,
   routing and latency-aligning delays, and runs it as one stream for real-time
   playback and for WAV/stem export.
@@ -185,8 +186,11 @@ return-to-return sends exist yet.
 Effects: `filter`, `eq` (the parametric EQ: bells, shelves and passes with
 their slopes, drawn in the app as one curve over the playing spectrum; see
 [parametric-eq.md](features/parametric-eq.md)), `compressor` (optional `sidechain` track), `limiter`,
-`delay`, `reverb`, `chorus`, `saturation` and `utility` (gain, pan, width, mono
-below a frequency, polarity; see [utility.md](features/utility.md)), listed in order under
+`delay`, `reverb`, `chorus`, `saturation`, `utility` (gain, pan, width, mono
+below a frequency, polarity; see [utility.md](features/utility.md)) and
+`analyzer` (changes nothing; the app shows the sound through it, in the
+device panel and in a window of its own; see
+[analyzer.md](features/analyzer.md); not inside a Synth patch), listed in order under
 `tracks[].effects`, `groups[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
 patch, `tracks[].instrument.synth.effects`, each with an optional `id` unique
 within its chain. A patch's effects come before the track's inserts, which

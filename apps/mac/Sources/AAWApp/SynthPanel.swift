@@ -114,7 +114,8 @@ struct SynthPanel: View {
                             Button("Add Macro") { model.edit(.synthPartAdd(track: track.key, part: "macros")) }
                                 .disabled(synth.macros.count >= 8)
                             Menu("Add Effect") {
-                                ForEach(DeviceChain.kinds, id: \.self) { kind in
+                                // An analyzer is not offered inside a patch: the track's chain takes it.
+                                ForEach(DeviceChain.kinds.filter { $0 != "analyzer" }, id: \.self) { kind in
                                     Button(readable(kind)) { model.edit(.synthEffectAdd(track: track.key, kind: kind, index: nil)) }
                                 }
                             }

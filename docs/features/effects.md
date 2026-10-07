@@ -65,6 +65,7 @@ render with and without it and use `daw compare`.
 | `chorus` | `rate_hz` 0.05–10, `depth_ms` 0–20, `delay_ms` 1–40, `mix_percent` (50 unless given) |
 | `saturation` | `mode` soft/hard/tube, `drive_db` 0–36, `output_db` ±24, `mix_percent` |
 | `utility` | `gain_db` −96…24, `pan` ±1, `width_percent` 0–400, `mono`, `mono_below_hz` 20–1000 or left out, `invert` none/left/right/both ([utility.md](utility.md)) |
+| `analyzer` | No fields: changes nothing, and the app shows the sound through it ([analyzer.md](analyzer.md)); not inside a Synth patch |
 
 ## Semantics
 
@@ -139,6 +140,12 @@ render with and without it and use `daw compare`.
   100 as it came; `gain_db`; and `pan`, a balance as a stereo track's. At its
   defaults it passes the signal through bit-identical. See
   [utility.md](utility.md).
+- **analyzer**: an effect that changes nothing, added October 7, 2026: its
+  output is its input bit for bit, with no latency, and the audio thread
+  writes every frame of it into a ring the app's analyzer window reads for
+  the levels, the loudness, the spectrum and the stereo field. Bypassed, it
+  measures nothing. Not offered inside a Synth's patch. See
+  [analyzer.md](analyzer.md).
 - **mix_percent**: delay, reverb, chorus and saturation output `input × (1 −
   mix) + wet × mix`. The default is 100, fully wet, which is what a return
   needs, and 50 for the chorus. When using a delay or reverb as a track insert,

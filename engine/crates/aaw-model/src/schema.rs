@@ -1742,6 +1742,9 @@ impl Synth {
                     e.sidechain().unwrap_or_default()
                 ));
             }
+            if synth.effects.iter().any(|e| matches!(e, Effect::Analyzer(_))) {
+                return Err("An analyzer is not offered inside a patch: put it on the track's own chain, where the app draws it".into());
+            }
             let ids: Vec<&str> = synth.effects.iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
             if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
                 return Err("The patch's effect IDs must be unique".into());
@@ -2177,6 +2180,14 @@ pub struct Utility {
     pub bypass: bool,
 }
 
+/// An analyzer: an effect that changes nothing and shows the sound passing
+/// through it in the app. It has no fields of its own.
+#[derive(Clone, Debug)]
+pub struct Analyzer {
+    pub id: Option<String>,
+    pub bypass: bool,
+}
+
 #[derive(Clone, Debug)]
 pub enum Effect {
     Filter(Filter),
@@ -2188,9 +2199,10 @@ pub enum Effect {
     Chorus(Chorus),
     Saturation(Saturation),
     Utility(Utility),
+    Analyzer(Analyzer),
 }
 
-pub const EFFECT_TYPES: [&str; 9] = ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation", "utility"];
+pub const EFFECT_TYPES: [&str; 10] = ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation", "utility", "analyzer"];
 
 impl PartialEq for Effect {
     /// Two effects are equal when the song would write them the same.
@@ -2211,6 +2223,7 @@ impl Effect {
             Effect::Chorus(_) => "chorus",
             Effect::Saturation(_) => "saturation",
             Effect::Utility(_) => "utility",
+            Effect::Analyzer(_) => "analyzer",
         }
     }
 
@@ -2225,6 +2238,7 @@ impl Effect {
             Effect::Chorus(e) => e.id.as_deref(),
             Effect::Saturation(e) => e.id.as_deref(),
             Effect::Utility(e) => e.id.as_deref(),
+            Effect::Analyzer(e) => e.id.as_deref(),
         }
     }
 
@@ -2239,6 +2253,7 @@ impl Effect {
             Effect::Chorus(e) => e.bypass,
             Effect::Saturation(e) => e.bypass,
             Effect::Utility(e) => e.bypass,
+            Effect::Analyzer(e) => e.bypass,
         }
     }
 
@@ -2290,7 +2305,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb', 'chorus', 'saturation', 'utility'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb', 'chorus', 'saturation', 'utility', 'analyzer'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2317,6 +2332,7 @@ impl Effect {
             "chorus" => &["type", "id", "rate_hz", "depth_ms", "delay_ms", "mix_percent", "bypass"],
             "saturation" => &["type", "id", "mode", "drive_db", "output_db", "mix_percent", "bypass"],
             "utility" => &["type", "id", "gain_db", "pan", "width_percent", "mono", "mono_below_hz", "invert", "bypass"],
+            "analyzer" => &["type", "id", "bypass"],
             _ => &[
                 "type", "id", "decay_seconds", "predelay_ms", "damping_hz", "lowcut_hz",
                 "width_percent", "mix_percent", "seed", "bypass",
@@ -2496,6 +2512,10 @@ impl Effect {
                     }))
                 })()
             }
+            "analyzer" => {
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| Some(Effect::Analyzer(Analyzer { id: id?, bypass: bypass? })))()
+            }
             _ => {
                 let decay_seconds = float(ctx, "decay_seconds", 1.5, Bounds::ge_le("0.1", "12"));
                 let predelay_ms = float(ctx, "predelay_ms", 10.0, Bounds::ge_le("0", "250"));
@@ -2615,6 +2635,7 @@ impl Effect {
                 o.opt("mono_below_hz", e.mono_below_hz.map(Value::Float));
                 o.str("invert", e.invert.as_str(), "none");
             }
+            Effect::Analyzer(_) => {}
         }
         o.bool("bypass", self.bypass(), false);
         o.done()

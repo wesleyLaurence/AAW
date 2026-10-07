@@ -17,9 +17,11 @@ use aaw_host::host::{self, Clock, Event, Options, Running};
 use aaw_host::project;
 use aaw_host::session::{Change, Doc};
 use aaw_host::tree::{self, Step};
+use aaw_dsp::meter::{Meter, Ring};
 use aaw_dsp::spectrum::{Analyzer, Taps};
 pub use edits::{Edit, EventCopy, NoteCopy, PointPlace, Row, SynthFieldValue};
 use serde_json::{json, Value as Json};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 pub use view::{Arrangement, Touch};
@@ -163,6 +165,62 @@ pub struct Spectrum {
     pub levels: Vec<f32>,
 }
 
+/// What an analyzer shows, measured from every frame that passed through it
+/// since the app began watching it. Levels are in dB relative to full
+/// scale, silence −200; loudness is BS.1770-4.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct Analysis {
+    pub sample_rate: u32,
+    /// Frames the analyzer has put out so far; the same twice means
+    /// nothing has played since.
+    pub written: u64,
+    /// Frames the watcher missed since it last read, when it stayed away
+    /// longer than the ring holds, about a second.
+    pub lost: u64,
+    /// Each channel's highest sample since the last reading, left then right.
+    pub peak_db: Vec<f32>,
+    /// Each channel's highest sample since the song was played from a stop
+    /// or the meter was reset.
+    pub peak_hold_db: Vec<f32>,
+    /// Each channel's RMS over the last 400 ms.
+    pub rms_db: Vec<f32>,
+    /// Each channel's highest estimated true peak since the last reading,
+    /// four times oversampled, in dBTP, and the highest since the reset.
+    pub true_peak_db: Vec<f32>,
+    pub true_peak_hold_db: Vec<f32>,
+    /// The loudness of the last 400 ms and of the last 3 s.
+    pub momentary_lufs: f32,
+    pub short_term_lufs: f32,
+    /// The gated loudness since the reset, once 400 ms above the gate
+    /// have played, and the loudness range in LU once enough has.
+    pub integrated_lufs: Option<f32>,
+    pub range_lu: Option<f32>,
+    /// The short-term loudness every 100 ms since the reset, oldest first,
+    /// the last five minutes.
+    pub history: Vec<f32>,
+    /// Each bin's level of the last 4096 frames as mono, 2049 bins from 0 Hz
+    /// to half the sample rate, and the highest each has reached since the
+    /// reset.
+    pub spectrum: Vec<f32>,
+    pub spectrum_hold: Vec<f32>,
+    /// The correlation of the channels over the last 400 ms, −1 to +1, and
+    /// the right channel's level over the left's in dB; both 0 for silence.
+    pub correlation: f32,
+    pub balance_db: f32,
+    /// The last 1024 frames, left and right interleaved, oldest first.
+    pub scope: Vec<f32>,
+}
+
+/// An analyzer the app is watching: its ring, how far it has been read,
+/// and the meter fed from it.
+struct Watch {
+    ring: Arc<Ring>,
+    next: u64,
+    meter: Meter,
+    playing: bool,
+    frames: Vec<aaw_dsp::Frame>,
+}
+
 /// What the app is told as it happens. Calls arrive on the host's thread, in
 /// order, and must return promptly.
 #[uniffi::export(with_foreign)]
@@ -199,9 +257,12 @@ pub struct Song {
     path: Arc<Mutex<PathBuf>>,
     /// The files the song's audio clips play.
     files: Arc<files::Files>,
-    /// The equalizers' taps, and the analysis of one of them.
+    /// The equalizers' taps and the analyzers' rings, the analysis of one
+    /// equalizer at a time, and the meters of the analyzers being watched,
+    /// by the effect's handle.
     taps: Arc<Taps>,
     analyzer: Mutex<Analyzer>,
+    meters: Mutex<HashMap<u64, Watch>>,
 }
 
 /// The folder a song file is in, which its samples' paths are relative to.
@@ -211,6 +272,30 @@ fn folder(file: &Path) -> PathBuf {
 
 fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl Song {
+    /// Where an effect sits for the taps: the row that owns its chain, its
+    /// index in it and the song's sample rate; None for an effect of a
+    /// Synth's patch or anything that is not an effect.
+    fn chain_place(&self, effect: u64) -> Option<(String, usize, u32)> {
+        let doc = locked(&self.doc);
+        let doc = doc.as_ref()?;
+        let tree = doc.tree();
+        let loc = tree::find(&tree, effect)?;
+        let p = &doc.project;
+        let (owner, index) = match loc.as_slice() {
+            [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => match list.as_str() {
+                "tracks" => (p.tracks.get(*i)?.id.clone(), *j),
+                "groups" => (p.groups.get(*i)?.id.clone(), *j),
+                "returns" => (p.returns.get(*i)?.id.clone(), *j),
+                _ => return None,
+            },
+            [Step::Key(m), Step::Key(l), Step::Index(j)] if m == "master" && l == "effects" => ("master".to_string(), *j),
+            _ => return None,
+        };
+        Some((owner, index, p.session.sample_rate as u32))
+    }
 }
 
 #[uniffi::export]
@@ -280,6 +365,7 @@ impl Song {
             clock: running.clock().clone(),
             taps: running.taps().clone(),
             analyzer: Mutex::new(Analyzer::default()),
+            meters: Mutex::new(HashMap::new()),
             running: RwLock::new(Some(running)),
             latest,
             doc,
@@ -351,24 +437,7 @@ impl Song {
     /// equalizer on a track, a return or the master, or is bypassed. Silence
     /// reads −200 dB in every bin. Cheap enough to read every frame drawn.
     pub fn spectrum(&self, effect: u64) -> Option<Spectrum> {
-        let (owner, index, sample_rate) = {
-            let doc = locked(&self.doc);
-            let doc = doc.as_ref()?;
-            let tree = doc.tree();
-            let loc = tree::find(&tree, effect)?;
-            let p = &doc.project;
-            let (owner, index) = match loc.as_slice() {
-                [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => match list.as_str() {
-                    "tracks" => (p.tracks.get(*i)?.id.clone(), *j),
-                    "groups" => (p.groups.get(*i)?.id.clone(), *j),
-                    "returns" => (p.returns.get(*i)?.id.clone(), *j),
-                    _ => return None,
-                },
-                [Step::Key(m), Step::Key(l), Step::Index(j)] if m == "master" && l == "effects" => ("master".to_string(), *j),
-                _ => return None,
-            };
-            (owner, index, p.session.sample_rate as u32)
-        };
+        let (owner, index, sample_rate) = self.chain_place(effect)?;
         let tap = self.taps.find(&owner, index)?;
         let mut analyzer = locked(&self.analyzer);
         Some(Spectrum {
@@ -376,6 +445,78 @@ impl Song {
             written: tap.written(),
             levels: analyzer.analyze(&tap),
         })
+    }
+
+    /// What the analyzer `effect` has measured of the frames through it
+    /// since the app began watching it, for its strip and its window; None
+    /// for an effect that is not an analyzer on a track, a group, a return
+    /// or the master, or is bypassed. The first call starts watching from
+    /// now; each call feeds the meter what has played since the last and
+    /// reads it. The held peaks, the integrated loudness, the range and the
+    /// history start again when the song is played from a stop. Cheap
+    /// enough to read every frame drawn.
+    pub fn analysis(&self, effect: u64) -> Option<Analysis> {
+        let (owner, index, sample_rate) = self.chain_place(effect)?;
+        let ring = self.taps.find_ring(&owner, index)?;
+        let playing = self.clock.now().is_some_and(|(playing, _)| playing);
+        let mut meters = locked(&self.meters);
+        let watch = match meters.entry(effect) {
+            std::collections::hash_map::Entry::Occupied(e) if Arc::ptr_eq(&e.get().ring, &ring) => e.into_mut(),
+            e => {
+                // A new ring: the analyzer was moved, or watched for the first time.
+                let next = ring.written();
+                e.insert_entry(Watch {
+                    ring,
+                    next,
+                    meter: Meter::new(sample_rate),
+                    playing,
+                    frames: Vec::new(),
+                })
+                .into_mut()
+            }
+        };
+        if playing && !watch.playing {
+            watch.meter.reset();
+        }
+        watch.playing = playing;
+        watch.frames.clear();
+        let (next, lost) = watch.ring.read_since(watch.next, &mut watch.frames);
+        watch.next = next;
+        watch.meter.feed(&watch.frames);
+        let r = watch.meter.read();
+        Some(Analysis {
+            sample_rate,
+            written: next,
+            lost,
+            peak_db: r.peak_db.to_vec(),
+            peak_hold_db: r.peak_hold_db.to_vec(),
+            rms_db: r.rms_db.to_vec(),
+            true_peak_db: r.true_peak_db.to_vec(),
+            true_peak_hold_db: r.true_peak_hold_db.to_vec(),
+            momentary_lufs: r.momentary_lufs,
+            short_term_lufs: r.short_term_lufs,
+            integrated_lufs: r.integrated_lufs,
+            range_lu: r.range_lu,
+            history: r.history,
+            spectrum: r.spectrum,
+            spectrum_hold: r.spectrum_hold,
+            correlation: r.correlation,
+            balance_db: r.balance_db,
+            scope: r.scope,
+        })
+    }
+
+    /// Starts the analyzer's held peaks, integrated loudness, range and
+    /// history again, as a click on its view does.
+    pub fn reset_analysis(&self, effect: u64) {
+        if let Some(watch) = locked(&self.meters).get_mut(&effect) {
+            watch.meter.reset();
+        }
+    }
+
+    /// Stops watching an analyzer, as when its window and strip are gone.
+    pub fn forget_analysis(&self, effect: u64) {
+        locked(&self.meters).remove(&effect);
     }
 
     /// Makes an edit as the person, as one undo step, and returns the keys of

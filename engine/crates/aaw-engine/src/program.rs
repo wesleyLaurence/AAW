@@ -963,7 +963,8 @@ impl Lanes {
 /// A chain without its sidechain routing, which needs every chain's latency.
 /// `lanes(i)` gives the lanes on the chain's effect `i` by field; `upstream`
 /// is the latency of what comes before the chain, counted into its own.
-/// `taps` names the row for the equalizers' taps; a patch's chain has none.
+/// `taps` names the row for the equalizers' taps and the analyzers' rings; a
+/// patch's chain has none.
 fn chain(
     effects: &[Effect],
     mut lanes: impl FnMut(usize) -> BTreeMap<String, Arc<Envelope>>,
@@ -982,8 +983,10 @@ fn chain(
             continue;
         }
         let mut plan = Plan::new(effect, lanes(i), p.session.sample_rate, p.session.tempo, &mut cache.kernels);
-        if let (Some(owner), Effect::Eq(_)) = (taps, effect) {
-            plan.tap = Some(cache.taps.get(owner, i));
+        match (taps, effect) {
+            (Some(owner), Effect::Eq(_)) => plan.tap = Some(cache.taps.get(owner, i)),
+            (Some(owner), Effect::Analyzer(_)) => plan.ring = Some(cache.taps.ring(owner, i)),
+            _ => {}
         }
         out.effects.push((effect.kind(), Some(out.devices.len())));
         let upstream = out.latency;
