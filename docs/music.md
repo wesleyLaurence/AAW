@@ -74,6 +74,11 @@ Run `daw check PROJECT` before rendering and read each warning's code
 track render. Full mixes point from `renders/latest.json`; previews use
 `renders/latest-preview.json`. `daw listen` and `daw compare` measure audio;
 do not claim listening when only numerical analysis was performed.
+When the person names a song as what the mix should sound like, keep it with
+`daw reference add FILE --name NAME` and read `daw compare RENDER --reference
+NAME` for how the mix differs from it, by section (`daw describe reference`);
+its lines are differences, not faults, so say what was found before changing
+the mix toward it.
 For finished-song edits, check rendered joins with `daw joins` before export;
 read `daw describe export` when delivering a named file.
 

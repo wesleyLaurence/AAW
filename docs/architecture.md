@@ -34,9 +34,9 @@ rendering and technical inspection. There is no embedded autonomous composer.
   ┌──────── engine (Rust) ─────────┐     song.yaml, samples/, renders/
   │ scheduler · sampler · devices  │
   │ automation · routing · mixer   │     Python: samples scan/search/
-  │ real-time driver (CoreAudio)   │     analyze/beats/import, listen,
-  │ offline driver (WAV, stems)    │     compare, check, timeline,
-  └────────────────────────────────┘     joins, export
+  │ real-time driver (CoreAudio)   │     analyze/beats/import, reference,
+  │ offline driver (WAV, stems)    │     listen, compare, check,
+  └────────────────────────────────┘     timeline, joins, export
 ```
 
 With no app or `daw host` running for a project, `daw` applies a command to the
@@ -101,6 +101,12 @@ Python, in `src/agent_daw`:
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
+- `reference.py`: a song the person names as a reference, measured once with
+  its beat map's phrases as sections and kept as numbers in the workspace
+  library, `~/Music/AAW/library/references/` (or `AAW_WORKSPACE`), with the
+  file's path and hash and no audio; and a render compared with one, whole and
+  section by section, with the differences in words; see
+  [reference-comparison.md](features/reference-comparison.md).
 - `export.py`: a named deliverable from a render, as WAV, AAC or MP3, with one gain
   for the level and a record of the render beside it; see [export.md](features/export.md).
   The Mac app's File › Export Audio… runs it through the bundle's `daw`, so there
@@ -111,10 +117,10 @@ Python, in `src/agent_daw`:
 - `timeline.py`: a song's places in beats and seconds, where each track's sound is,
   the start of a sound that ends on a beat, and fitting the session's length; see
   [timeline.md](features/timeline.md).
-- `cli.py`: `samples`, `listen`, `compare`, `check`, `timeline`, `joins` and
-  `export`. `check` is `inspect` with measured root notes and the model's
-  warnings, as objects with a code.
-  Every other command is passed to the Rust `daw`, which passes these seven back, so
+- `cli.py`: `samples`, `reference`, `listen`, `compare`, `check`, `timeline`,
+  `joins` and `export`. `check` is `inspect` with measured root notes and the
+  model's warnings, as objects with a code.
+  Every other command is passed to the Rust `daw`, which passes these eight back, so
   there is one command either way. A
   sample import copies the file, or decodes a compressed one, and adds it to the
   song with `daw apply`, so a running host takes it as an undoable edit.
@@ -366,6 +372,10 @@ cover envelope semantics, constant lanes rendering exactly as static values, swe
 latency-compensated timing, block-partition invariance and validation.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
+Reference tests use a generated song of a quiet and a loud half: its phrases as
+sections, a mix with its sub 6 dB up reported by section, sections matched by
+ID and by loudness, a file compared whole, a band one side lacks, and an AAC
+file of which nothing is kept.
 
 ## What is not built
 

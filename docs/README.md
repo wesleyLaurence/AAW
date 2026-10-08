@@ -58,12 +58,12 @@ Built:
 | [export in the app](features/export-in-app.md) | File › Export Audio…: the mix as a named WAV, AAC or MP3 at a stated level through the bundle's `daw export`, with its measurements in a banner |
 | [clips that loop](features/looping-clips.md) | A note clip or an audio clip whose content repeats until the clip ends, and `daw clip loop` |
 | [the live analyzer](features/analyzer.md) | An effect that changes nothing and shows the sound passing through it: a strip in the device panel and a window with levels, loudness, spectrum, stereo field, spectrogram and waveform |
+| [comparing with a reference](features/reference-comparison.md) | `daw reference`: a song kept as what good sounds like, as measurements in the workspace library; `daw compare RENDER --reference NAME`: the mix against it, whole and section by section, with the differences in words |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [comparing with a reference](features/reference-comparison.md) | Next |
 | [masking between stems](features/masking.md) | Next |
 | [a finer spectrum in numbers](features/spectrum-detail.md) | Next |
 | [translation checks](features/translation-checks.md) | Next |

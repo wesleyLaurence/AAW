@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import importlib.metadata
 import json
+import threading
 import warnings
+from concurrent.futures import ThreadPoolExecutor
 from itertools import pairwise
 from pathlib import Path
 
@@ -36,27 +38,31 @@ def delta(a, b):
     return float(b - a) if a is not None and b is not None else None
 
 
+# Silencing warnings changes what every thread sees, so one loudness is worked
+# out at a time.
+QUIETLY = threading.Lock()
+
+
 def integrated(x, rate):
     if len(x) < round(0.4 * rate):
         return None
-    with warnings.catch_warnings():
+    with QUIETLY, warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         value = pyln.Meter(rate).integrated_loudness(x)
     return float(value) if np.isfinite(value) else None
 
 
-def measure(x, rate):
-    """dBFS uses mean-square power across channels, with a unit peak reference."""
-    peak = float(np.max(np.abs(x)))
-    power = float(np.mean(x * x))
-    n = min(len(x), 8192)
-    freq, psd = welch(x, rate, nperseg=n, axis=0)
-    spectrum = psd.mean(axis=1) * rate / n
-    band_power = {
-        name: float(spectrum[(freq >= lo) & (freq < hi)].sum())
-        for name, (lo, hi) in BANDS.items()
-    }
-    total = sum(band_power.values())
+# A measurement's spectrum, oversampled peak and stereo figures are worked out
+# beside its loudness, which together are most of a long file's time.
+BESIDE = ThreadPoolExecutor(6)
+
+
+def oversampled_peak(channel):
+    return float(np.max(np.abs(resample_poly(channel, 4, 1))))
+
+
+def stereo(x):
+    """Channel correlation and the side's share of the energy; None where undefined."""
     correlation = side_fraction = None
     if x.shape[1] == 2:
         centered = x - x.mean(axis=0)
@@ -76,14 +82,42 @@ def measure(x, rate):
         ss = float(np.mean(side * side))
         if ms + ss > 0:
             side_fraction = ss / (ms + ss)
+    return correlation, side_fraction
+
+
+def measure(x, rate, true_peak=True):
+    """dBFS uses mean-square power across channels, with a unit peak reference.
+    Without `true_peak` the oversampled peak, a third of the work, is left out."""
+    n = min(len(x), 8192)
+    spectrum = BESIDE.submit(welch, x, rate, nperseg=n, axis=0)
+    over = [
+        BESIDE.submit(oversampled_peak, np.ascontiguousarray(x[:, c]))
+        for c in range(x.shape[1] if true_peak else 0)
+    ]
+    field = BESIDE.submit(stereo, x)
+    loudness = integrated(x, rate)
+    peak = float(np.max(np.abs(x)))
+    power = float(np.mean(x * x))
+    freq, psd = spectrum.result()
+    spectrum = psd.mean(axis=1) * rate / n
+    band_power = {
+        name: float(spectrum[(freq >= lo) & (freq < hi)].sum())
+        for name, (lo, hi) in BANDS.items()
+    }
+    total = sum(band_power.values())
+    correlation, side_fraction = field.result()
     peak_db = db(peak * peak)
     rms_db = db(power)
-    over = resample_poly(x, 4, 1, axis=0)
+    estimate = (
+        {"estimated_true_peak_dbtp": db(max(o.result() for o in over) ** 2)}
+        if true_peak
+        else {}
+    )
     return {
         "duration_seconds": len(x) / rate,
-        "integrated_lufs": integrated(x, rate),
+        "integrated_lufs": loudness,
         "peak_dbfs": peak_db,
-        "estimated_true_peak_dbtp": db(float(np.max(np.abs(over))) ** 2),
+        **estimate,
         "rms_dbfs": rms_db,
         "crest_db": delta(rms_db, peak_db),
         "band_dbfs": {k: db(v) for k, v in band_power.items()},
@@ -95,6 +129,12 @@ def measure(x, rate):
         "silent": peak <= 1e-6,
         "over_range_samples": int(np.count_nonzero(np.abs(x) >= 1)),
     }
+
+
+def measure_each(parts, rate, true_peak=True):
+    """`measure` of each of several stretches of audio, several at a time."""
+    with ThreadPoolExecutor(3) as pool:
+        return list(pool.map(lambda x: measure(x, rate, true_peak), parts))
 
 
 def read_audio(path):

@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, perception, `check`, `timeline`, `joins` and `export`.
+"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins` and `export`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-COMMANDS = ("samples", "listen", "compare", "check", "timeline", "joins", "export")
+COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export")
 
 
 def engine() -> Path:
@@ -61,7 +61,7 @@ def parser():
 
     p = argparse.ArgumentParser(
         prog="daw",
-        description="The sample library, perception, check, timeline, joins and export. Run daw --help for every command.",
+        description="The sample library, references, perception, check, timeline, joins and export. Run daw --help for every command.",
     )
     sub = p.add_subparsers(dest="command", required=True)
     samples = sub.add_parser("samples")
@@ -157,11 +157,50 @@ def parser():
     listen.add_argument("source", type=Path)
     listen.add_argument("--no-images", action="store_true")
     compare = sub.add_parser(
-        "compare", help="Compare two renders: actual and loudness-matched deltas"
+        "compare",
+        help="Compare two renders: actual and loudness-matched deltas; or one "
+        "render with a reference, section by section (daw describe reference)",
     )
-    compare.add_argument("before", type=Path)
-    compare.add_argument("after", type=Path)
+    compare.add_argument("before", type=Path, help="A render, or with --reference the mix")
+    compare.add_argument("after", type=Path, nargs="?")
+    compare.add_argument(
+        "--reference", metavar="NAME", help="A song saved with daw reference add, in place of AFTER"
+    )
     compare.add_argument("--no-images", action="store_true")
+    reference = sub.add_parser(
+        "reference",
+        help="Songs kept as what good sounds like, for daw compare --reference",
+    )
+    rs = reference.add_subparsers(dest="action", required=True)
+    add = rs.add_parser(
+        "add", help="Analyze a song, .m4a and .mp3 too, and keep its measurements under NAME"
+    )
+    add.add_argument("file", type=Path)
+    add.add_argument("--name", help="Letters, digits and -; the file's name unless given")
+    add.add_argument("--bpm", type=float, help="The song's tempo, to settle half or double time")
+    add.add_argument("--downbeat", help="A time whose nearest beat is a downbeat")
+    add.add_argument("--meter", help="The song's time signature, such as 3/4; 4/4 unless given")
+    add.add_argument("--replace", action="store_true", help="Write over a reference of this name")
+    rs.add_parser("list", help="The saved references")
+    show = rs.add_parser("show", help="A reference's measurements, whole and by section")
+    show.add_argument("name")
+    named = rs.add_parser(
+        "sections",
+        help="A reference's sections; with JSON, names them by hand",
+    )
+    named.add_argument("name")
+    named.add_argument(
+        "sections",
+        nargs="?",
+        help='Such as \'[{"id": "verse", "at": 32}, {"id": "drop", "seconds": "1:02"}]\': '
+        "at in the reference's beats from its first downbeat, or seconds; each runs "
+        "to the next",
+    )
+    named.add_argument(
+        "--measured", action="store_true", help="Go back to the sections it measured"
+    )
+    remove = rs.add_parser("remove", help="Forget a reference; the song's file is left")
+    remove.add_argument("name")
     timeline = sub.add_parser(
         "timeline",
         help="The song in beats and seconds: where its sounds are, conversions, and its length",
@@ -217,7 +256,17 @@ def execute(a):
 
         if a.command == "listen":
             return perception.listen(a.source, images=not a.no_images)
+        if (a.after is None) == (a.reference is None):
+            raise ValueError(
+                "compare takes two renders, or one render and --reference NAME"
+            )
+        if a.reference is not None:
+            from . import reference
+
+            return reference.compare(a.before, a.reference)
         return perception.compare(a.before, a.after, images=not a.no_images)
+    if a.command == "reference":
+        return reference_command(a)
     if a.command == "check":
         return check(a.project)
     if a.command == "timeline":
@@ -305,6 +354,32 @@ def execute(a):
             raise ValueError("seconds must be >0 and <=60")
         return library.audition(source, a.output, a.seconds)
     return import_sample(a, source)
+
+
+def reference_command(a):
+    """`daw reference`: add, list, show, sections and remove."""
+    from . import beats, reference
+
+    if a.action == "add":
+        if a.bpm is not None and not beats.MIN_BPM <= a.bpm <= beats.MAX_BPM:
+            raise ValueError(f"bpm must be {beats.MIN_BPM:g}–{beats.MAX_BPM:g}")
+        downbeat = None if a.downbeat is None else beats.seconds(a.downbeat)
+        return reference.add(a.file, a.name, a.bpm, downbeat, a.meter, a.replace)
+    if a.action == "list":
+        return reference.listing()
+    if a.action == "show":
+        return reference.shown(reference.load(a.name))
+    if a.action == "remove":
+        return reference.remove(a.name)
+    if a.sections is not None and a.measured:
+        raise ValueError("sections takes JSON or --measured, not both")
+    try:
+        spec = None if a.sections is None else json.loads(a.sections)
+    except ValueError:
+        raise ValueError(
+            'Sections are a JSON list such as [{"id": "verse", "at": 32}]'
+        ) from None
+    return reference.sections(a.name, spec, a.measured)
 
 
 def beat_map(a, source):

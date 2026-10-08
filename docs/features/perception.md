@@ -126,7 +126,9 @@ when durations differ. `timeline_aligned` requires matching sample rate, frame
 count, start seconds and tempo; only then are energy-bin deltas and the comparison
 chart produced. Named sections must have both the same ID and the same absolute
 start/end seconds. Unmatched/moved sections and added/removed tracks are listed
-explicitly. This is not automatic reference-song alignment or tempo warping.
+explicitly. This is not automatic reference-song alignment or tempo warping:
+a mix against another song is `daw compare RENDER --reference NAME`, in
+[reference-comparison.md](reference-comparison.md).
 `musical_context_delta` provides trigger count/density changes and before/after
 pattern occurrence maps for aligned regions.
 
@@ -135,7 +137,10 @@ pattern occurrence maps for aligned regions.
 This first version does not infer taste, key, tempo, transients or masking. It does
 not introduce effects or change rendering semantics. Analysis currently rereads
 and measures the saved audio each time; there is no incremental analysis cache.
-Long songs and many stems take longer than a section preview.
+Long songs and many stems take longer than a section preview. One measurement's
+spectrum, each channel's oversampled peak and the stereo figures are worked out
+on threads beside its loudness, about 1.7 s for three minutes of stereo where
+it was 3.5 s, with the same numbers.
 
 Tests cover known 1 kHz loudness, +6 dB gain and matching, band changes, silence,
 stereo polarity, one-sided stereo, short files, 44.1/48 kHz, localized arrangement

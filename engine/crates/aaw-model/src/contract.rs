@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export"];
+pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export", "reference"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -161,6 +161,18 @@ const BEATS: &[(&str, &str)] = &[
     ("phrases", "phrases are downbeats where the arrangement changes, with change from 0 to 1 against the song's largest. They are hints and can be a bar off."),
     ("click", "--click OUT.wav writes --seconds (20) of the song around --near, or from the first downbeat, with a click on each beat and a higher one on each downbeat. It is for a person to hear; it is not something you heard."),
     ("limits", "Estimates from audio. A song that changes tempo outright or is not in 4/4 is not handled."),
+];
+
+const REFERENCE: &[(&str, &str)] = &[
+    ("command", "daw reference add FILE --name NAME analyzes a song the person points to as what good sounds like, .m4a and .mp3 too, and keeps its measurements in the workspace library, library/references/NAME/; the file's path and hash are kept and its audio is not copied, so nothing of it leaves the Mac. daw reference list names the saved ones, daw reference show NAME prints one, daw reference remove NAME forgets one. daw compare RENDER --reference NAME then compares a render, or any audio file, with it: the whole of each, and section by section. Which song is a reference is the person's choice: add the one they name."),
+    ("sections", "A reference's sections are measured from its beat map: each phrase from its start to the next, named bar-N for the bar it starts on, with at and length_beats in the reference's own beats, 0 on its first downbeat. --bpm, --downbeat and --meter on add correct the map as daw samples beats takes them. daw reference sections NAME '[{\"id\": \"verse\", \"at\": 32}, {\"id\": \"drop\", \"seconds\": \"1:02\"}]' names them by hand, each from its start, in beats or as seconds or m:ss, to the next one's start and the last to the end of the sound; it reads the person's file again, which must be where it was. --measured goes back to the phrases. A reference with no beat that can be found has no measured sections and is compared whole, or by sections given in seconds."),
+    ("section", "Each section holds start_seconds and end_seconds, audio with what daw listen measures of it but the true peak, relative_lu, its integrated loudness minus the whole file's, and label: high, mid or low by where its loudness sits between the reference's quietest and loudest sections, in thirds at least 1 LU wide."),
+    ("matching", "matching.sections says how the song's sections were paired with the reference's. id: the two share section IDs, and each shared ID is a pair; give the reference's sections the song's IDs to choose the pairs. loudness: no ID is shared, so each side's sections are put in order of integrated loudness and the song's loudest is compared with the reference's loudest, its quietest with the quietest and those between spread evenly. none: a side has no sections, and only whole is compared. unmatched_sections lists what was left out on each side."),
+    ("fields", "Every delta is mix minus reference. whole and each entry of sections hold mix, reference and delta. integrated_lufs, crest_db, stereo_correlation, side_energy_fraction and band_fraction are daw listen's; whole also has estimated_true_peak_dbtp, and a section relative_lu and the reference section's label. delta.band_fraction is the change in each band's share of the power."),
+    ("band_db", "delta.band_db is the mix's tonal balance against the reference's: each band's level, mix minus reference, with the median of the seven differences taken out. A mix that is louder or quieter all over reads as 0 in every band; a mix whose sub alone is 6 dB up reads sub 6 and the rest 0, which is the gain an equalizer or a fader would take. It is null where a side holds under -70 dB of its power in the band."),
+    ("contour", "relative_lu is how far a section sits above or below its own file's loudness, so delta.relative_lu says whether the drop lifts as far over the song as the reference's does. contour.mix_span_lu and reference_span_lu are how far apart each side's quietest and loudest sections are."),
+    ("observations", "observations are the differences past a threshold, in words, the largest first: 1 LU of loudness, 1 dB of true peak, 3 dB of a band, 2 dB of crest, 5 points of side energy, 1.5 LU of a section's relative loudness and 2 LU of span. They say which way and by how much, over the whole mix and by section. They are measured, not judged: a mix can differ from its reference on purpose, so say what was found and let the person choose what to follow."),
+    ("limits", "A reference has no stems, so tracks are not compared. Keys, notes and arrangement are not compared, and sections are compared whole, not bar by bar. The seven bands are daw listen's. The thresholds were not tuned on real songs. The report is written in the render's analysis folder, or beside a file that is not a render, as reference-NAME.json; no picture is made."),
 ];
 
 const JOINS: &[(&str, &str)] = &[
@@ -328,6 +340,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("beats", "daw samples beats: a song's tempo, beats, downbeats and phrases."),
     ("joins", "daw joins: checking a render's joins and length."),
     ("export", "daw export: a named WAV, AAC or MP3 file at a stated level."),
+    ("reference", "daw reference and daw compare --reference: a song kept as what good sounds like, and a mix measured against it section by section."),
 ];
 
 /// The topic that describes each model, for a field list that meets a
@@ -721,6 +734,7 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         "beats" => json!({"semantics": texts(BEATS)}),
         "joins" => json!({"semantics": texts(JOINS)}),
         "export" => json!({"semantics": texts(EXPORT)}),
+        "reference" => json!({"semantics": texts(REFERENCE)}),
         _ => return None,
     })
 }
