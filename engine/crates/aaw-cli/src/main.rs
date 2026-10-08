@@ -4,8 +4,9 @@
 //! running (`daw host`, or `daw play` while it plays), so the change is heard and
 //! recorded in its history. Otherwise they run headless: load, apply, save, exit.
 //!
-//! The sample library and the perception tools are Python: `samples`, `listen`,
-//! `compare` and `check` run there, with this process's arguments and output.
+//! The sample library and the perception tools are Python: `samples`,
+//! `reference`, `listen`, `compare` and `check` run there, with this process's
+//! arguments and output.
 //!
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
 //! with exit status 1.
@@ -102,6 +103,7 @@ enum Topic {
     Beats,
     Joins,
     Export,
+    Reference,
 }
 
 #[derive(Subcommand)]
@@ -144,10 +146,15 @@ enum Top {
     /// The sample library: scan, search, analyze, inspect, audition, import.
     #[command(disable_help_flag = true)]
     Samples(Forwarded),
+    /// Songs kept as what good sounds like: add, list, show, sections, remove
+    /// (daw describe reference).
+    #[command(disable_help_flag = true)]
+    Reference(Forwarded),
     /// Measure a saved render or WAV; writes analysis JSON and images.
     #[command(disable_help_flag = true)]
     Listen(Forwarded),
-    /// Compare two renders: actual and loudness-matched differences.
+    /// Compare two renders: actual and loudness-matched differences; or a
+    /// render with a reference, section by section: RENDER --reference NAME.
     #[command(disable_help_flag = true)]
     Compare(Forwarded),
     /// `inspect`, plus each sample's root note against its measured pitch and
@@ -1426,6 +1433,7 @@ fn run(cli: &Cli) -> Result<Json> {
             described(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
         }
         Top::Samples(_)
+        | Top::Reference(_)
         | Top::Listen(_)
         | Top::Compare(_)
         | Top::Check(_)
@@ -2307,6 +2315,7 @@ fn name(top: &Top) -> String {
         Top::Copy { .. } => "copy".into(),
         Top::Describe { .. } => "describe".into(),
         Top::Samples(_) => "samples".into(),
+        Top::Reference(_) => "reference".into(),
         Top::Listen(_) => "listen".into(),
         Top::Compare(_) => "compare".into(),
         Top::Check(_) => "check".into(),
@@ -2380,6 +2389,7 @@ fn forward(command: &str, args: &[String]) -> Result<ExitCode> {
 fn main() -> ExitCode {
     let cli = Cli::parse();
     if let Top::Samples(f)
+    | Top::Reference(f)
     | Top::Listen(f)
     | Top::Compare(f)
     | Top::Check(f)

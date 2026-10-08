@@ -20,81 +20,77 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **Comparing with a reference.** A song the person names as a reference,
-   analyzed once and compared with a mix section by section, so the agent has
-   targets for the low end, the brightness and the loudness of each section.
-   [features/reference-comparison.md](features/reference-comparison.md)
-2. **Masking between stems.** Where two stems put their energy in the same
+1. **Masking between stems.** Where two stems put their energy in the same
    band at the same moments: the pair, the band, how much of the time and the
    bars where it is worst, in `daw listen`, and what an edit did to it in
    `daw compare`. [features/masking.md](features/masking.md)
-3. **A finer spectrum in numbers.** The mix and each stem in third octaves
+2. **A finer spectrum in numbers.** The mix and each stem in third octaves
    with a tilt, where `daw listen` has seven bands, and each stem's
    resonances as a frequency, a height and a width, so an equalizer's band is
    set from a number. [features/spectrum-detail.md](features/spectrum-detail.md)
-4. **Translation checks.** The mix measured as summed to mono and through a
+3. **Translation checks.** The mix measured as summed to mono and through a
    small speaker's band: what each band and each stem loses, and the two
    files written for the person to hear.
    [features/translation-checks.md](features/translation-checks.md)
-5. **Dynamics in detail.** A render's loudness range and its loudest three
+4. **Dynamics in detail.** A render's loudness range and its loudest three
    seconds, how hard each drum hits at its stem and through the mix, and each
    compressor's and limiter's reduction by section.
    [features/dynamics-detail.md](features/dynamics-detail.md)
-6. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+5. **Sound descriptors.** Each sample measured for brightness, attack, decay,
    low end and noise, with search sorted by them and samples like a chosen
    one, so the agent chooses sounds by more than their names.
    [features/sound-descriptors.md](features/sound-descriptors.md)
-7. **Listening markers.** The person drops a marker at the playhead while the
+6. **Listening markers.** The person drops a marker at the playhead while the
    song plays, with a word if they want, and the agent reads them with `daw`:
    "this bar", without a timecode.
-8. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+7. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
    is built, a clipper that holds a ceiling as a limiter does without its
    look-ahead is not. The utility is built ([utility](features/utility.md)).
-9. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
+8. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
    master's true peak can pass its ceiling and the agent leaves a margin by
    guess; a switch on the limiter that measures the peaks between the
    samples, so a ceiling of −1 dBTP is one.
-10. **A time selection in the app.** A range of beats dragged across the
-    tracks and copied, inserted, deleted or cleared as `daw range` does it,
-    and a section dragged with its content; which gesture makes it is the
-    open question in [features/bar-ranges.md](features/bar-ranges.md).
-11. **A MIDI keyboard.** Notes played through the selected track, held and let
+9. **A time selection in the app.** A range of beats dragged across the
+   tracks and copied, inserted, deleted or cleared as `daw range` does it,
+   and a section dragged with its content; which gesture makes it is the
+   open question in [features/bar-ranges.md](features/bar-ranges.md).
+10. **A MIDI keyboard.** Notes played through the selected track, held and let
     go rather than a beat long, through a Synth and through a Sampler, whose
     pitch needs audio prepared on the way; recording into note clips; quantize.
     The person plays a riff and the agent builds around it.
-12. **Sections and the song's length in the app.** A section made, named,
+11. **Sections and the song's length in the app.** A section made, named,
     moved and removed in the ruler, which only draws them today; the length,
     master gain and end fade typed in the transport bar, as the tempo is. The
     agent has `daw section` and `daw set session.FIELD`; the person has neither
     (D81).
-13. **A project made with `daw init` in the app's index,** so a song the agent
+12. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-14. **Turns and A/B.** An agent request's commands grouped, named for the
+13. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-15. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+14. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-16. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+15. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-17. **Key and chord detection,** and swing detection, of samples and songs: a
+16. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-18. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+17. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-19. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+18. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-20. **The workspace and the two levels.** The workspace folder with its managed
+19. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-21. **The agent panel.** A conversation in the window, per project, over the
+20. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-22. **Stem separation** of a song.
-23. **Generated audio.** A sound, a loop or a whole song from a description, with
+21. **Stem separation** of a song.
+22. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -105,6 +101,23 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A reference on real songs, in a session:** two or three songs the
+  person would mix toward added with `daw reference add`, an `.m4a` bought
+  from a store among them, and a mix of the person's own compared with each;
+  whether the phrases found are the sections a person would name and how
+  often a bar off, whether matching by loudness pairs a drop with a drop or
+  wants the sections named every time, whether `band_db` with the median
+  taken out reads as what is heard when the two are played at one level, and
+  whether 3 dB of a band, 2 dB of crest and 1.5 LU of contour are the right
+  least differences or bury what matters in lines; a reference with no drums,
+  whose beat map means little; a fresh agent session told "make it sit like
+  this song", and whether it reads `daw describe reference`, names the
+  sections and says what it found before changing the mix. Generated songs
+  only: a song of a quiet and a loud half as WAV and AAC, its phrases found
+  as sections, a mix with its sub 6 dB up reading 6.0 dB by section, the
+  matching by ID and by loudness and the refusals held by Python tests; a
+  three-minute AAC added in 6 s and a three-minute render of six sections
+  compared in 4 s. No real song was added, and no agent session has used it.
 - **The spectrogram and the waveform by eye:** the analyzer's window
   watched while a song of a few minutes plays, whether the spectrogram's
   colors read as the mix, a kick as a column at the foot and a hat as one at
@@ -604,6 +617,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 ### Library and perception
 
 - The person's own tags and notes on a sample.
+- References: several for one song, side by side; one attached to a project,
+  so every `daw compare` uses it without being told; a clip of one written
+  at the mix's loudness for the person to play beside it; sections paired by
+  more than loudness when no IDs are shared; a reference's stems, once a song
+  can be separated.
 - Search by description with an audio-text model, only if a labeled test shows
   it beats names and measurements.
 - What the person declares about their right to use a sound, carried with it.

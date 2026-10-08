@@ -136,8 +136,8 @@ Intel build on Apple silicon, add its Rust target first: `rustup target add
 x86_64-apple-darwin`.
 
 `daw` is one command. `uv run daw` and `engine/target/release/daw` each pass the
-other the commands it does not own (`samples`, `listen`, `compare`, `check`,
-`timeline`, `joins` and `export` run in Python), so either works for everything. `uv run daw` runs the release build, or
+other the commands it does not own (`samples`, `reference`, `listen`, `compare`,
+`check`, `timeline`, `joins` and `export` run in Python), so either works for everything. `uv run daw` runs the release build, or
 the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
 or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`; its
 bundle holds a copy of the binary, which **Install Command Line Tool…** in the app's
@@ -342,6 +342,14 @@ render pointers, `report.json`, or standalone audio. Add `--no-images` for JSON 
 Outputs live under `analysis/` inside the render directory or beside standalone
 audio. Reports use the saved project snapshot and do not change the song or audio.
 See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
+
+`daw reference add <song> --name <name>` measures a song you point to as what
+good sounds like, an `.m4a` or `.mp3` too, and keeps the numbers in the workspace
+library; the audio stays where it is. `daw compare <render> --reference <name>`
+then reports how the mix differs from it, whole and section by section: loudness,
+tonal balance by band, crest, width, and how far each section sits over the
+song's loudness. See
+[docs/features/reference-comparison.md](docs/features/reference-comparison.md).
 
 `docs/concept.md` describes the broader product vision. What is implemented is
 deliberately narrower; `docs/architecture.md` is authoritative for the current build,
