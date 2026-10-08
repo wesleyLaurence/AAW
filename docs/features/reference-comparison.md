@@ -82,6 +82,9 @@ differ from its reference on purpose.
 
 ## Open questions
 
+- The bands compared: `daw listen`'s seven until
+  [a finer spectrum](spectrum-detail.md) is built, then third octaves and the
+  tilt.
 - Whether a reference should keep a copy of its decoded audio, so that it
   survives the original being moved, at the cost of space.
 - Several references for one song, averaged or reported side by side.
