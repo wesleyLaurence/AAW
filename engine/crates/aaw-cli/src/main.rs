@@ -103,6 +103,7 @@ enum Topic {
     Beats,
     Joins,
     Export,
+    Listen,
     Reference,
 }
 
@@ -150,7 +151,8 @@ enum Top {
     /// (daw describe reference).
     #[command(disable_help_flag = true)]
     Reference(Forwarded),
-    /// Measure a saved render or WAV; writes analysis JSON and images.
+    /// Measure a saved render or WAV; writes analysis JSON and images. With
+    /// --overlap A B, two of its stems by band and section (daw describe listen).
     #[command(disable_help_flag = true)]
     Listen(Forwarded),
     /// Compare two renders: actual and loudness-matched differences; or a

@@ -156,6 +156,13 @@ def parser():
     )
     listen.add_argument("source", type=Path)
     listen.add_argument("--no-images", action="store_true")
+    listen.add_argument(
+        "--overlap",
+        nargs=2,
+        metavar=("A", "B"),
+        help="Two of a render's stems, by band and by section, in place of the report "
+        "(daw describe listen)",
+    )
     compare = sub.add_parser(
         "compare",
         help="Compare two renders: actual and loudness-matched deltas; or one "
@@ -255,6 +262,8 @@ def execute(a):
         from . import perception
 
         if a.command == "listen":
+            if a.overlap:
+                return perception.overlap_of(a.source, *a.overlap, images=not a.no_images)
             return perception.listen(a.source, images=not a.no_images)
         if (a.after is None) == (a.reference is None):
             raise ValueError(

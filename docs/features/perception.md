@@ -3,13 +3,16 @@
 The perception layer measures saved audio and reads the arrangement snapshot that
 produced it. Reports are diagnostics for an agent and a person to use while revising
 music. They do not establish musical quality, diagnose masking, or constitute a
-listening audition. All computation is local.
+listening audition: where two stems overlap is measured, as
+[overlap](masking.md), and is not masking as an ear does it. All computation is
+local.
 
 ## Commands
 
 ```sh
 uv run daw listen projects/my-beat/renders/latest.json
 uv run daw listen projects/my-beat/renders/latest-preview.json --no-images
+uv run daw listen projects/my-beat/renders/latest.json --overlap kick bass
 uv run daw compare projects/my-beat/revisions/before-render.json projects/my-beat/renders/latest.json
 ```
 
@@ -32,6 +35,12 @@ analysis directory; aligned timelines also produce `comparison.png`. Paths are
 returned in `report_path` and `images`. Use `--no-images` to omit PNG generation.
 These commands never modify the audio, project, render report or latest pointers.
 Analysis reports record dependencies, analyzer code hash and source hashes.
+
+A render of two stems or more also has `overlap`: the pairs of stems that put
+their energy in the same band at the same moments, with the band, how much of
+the time and where. `daw listen RENDER --overlap A B` prints one pair by band
+and by section in place of the report, with a picture, and `daw compare` has
+each pair's change. The fields and the method are in [masking.md](masking.md).
 
 ## Measurements
 
@@ -134,7 +143,8 @@ pattern occurrence maps for aligned regions.
 
 ## Boundaries and verification
 
-This first version does not infer taste, key, tempo, transients or masking. It does
+It does not infer taste, key, tempo or transients, and overlap between stems
+is not masking as an ear does it. It does
 not introduce effects or change rendering semantics. Analysis currently rereads
 and measures the saved audio each time; there is no incremental analysis cache.
 Long songs and many stems take longer than a section preview. One measurement's
@@ -145,4 +155,5 @@ it was 3.5 s, with the same numbers.
 Tests cover known 1 kHz loudness, +6 dB gain and matching, band changes, silence,
 stereo polarity, one-sided stereo, short files, 44.1/48 kHz, localized arrangement
 changes, preview alignment, snapshot independence, artifact tampering, legacy
-manifests and CLI JSON/PNG output.
+manifests and CLI JSON/PNG output. Overlap has tests of its own, on generated
+songs whose contests are known.
