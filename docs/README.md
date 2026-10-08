@@ -56,14 +56,18 @@ Built:
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 | [editing a range of bars](features/bar-ranges.md) | `daw range copy\|insert\|delete\|clear` across the tracks with the clips, audio, lanes and sections in a range, and a section duplicated, moved or removed with its content |
 | [export in the app](features/export-in-app.md) | File › Export Audio…: the mix as a named WAV, AAC or MP3 at a stated level through the bundle's `daw export`, with its measurements in a banner |
+| [clips that loop](features/looping-clips.md) | A note clip or an audio clip whose content repeats until the clip ends, and `daw clip loop` |
+| [the live analyzer](features/analyzer.md) | An effect that changes nothing and shows the sound passing through it: a strip in the device panel and a window with levels, loudness, spectrum, stereo field, spectrogram and waveform |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [the live analyzer](features/analyzer.md) | Next |
-| [clips that loop](features/looping-clips.md) | Next |
 | [comparing with a reference](features/reference-comparison.md) | Next |
+| [masking between stems](features/masking.md) | Next |
+| [a finer spectrum in numbers](features/spectrum-detail.md) | Next |
+| [translation checks](features/translation-checks.md) | Next |
+| [dynamics in detail](features/dynamics-detail.md) | Next |
 | [sound descriptors](features/sound-descriptors.md) | Next |
 | [the agent panel](features/agent-panel.md) | Next |
 | [generated audio](features/generated-audio.md) | Next |

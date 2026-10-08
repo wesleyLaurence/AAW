@@ -339,7 +339,7 @@ a shell and describes itself. It is not the ceiling.
 | Queries | Answering a question without loading the song: which bars the bass plays in, every snare off the backbeat |
 | Views | An arrangement map of tracks by bars in a few hundred tokens; a text piano roll of one clip |
 | Checks | A linter for music: a note cut off by its clip's end, two tracks in one register, a root note that disagrees with the audio |
-| Perception | Measuring what an edit did: loudness, spectrum, stereo, energy by section, what changed between two renders, images on a bar grid |
+| Perception | Measuring what an edit did: loudness, spectrum, stereo, energy by section, where stems overlap, what a mix loses in mono, what changed between two renders, images on a bar grid |
 
 The document should keep musical structure where it helps: a notation for each
 kind of material (steps for drums, notes for melody, chord symbols), named motifs,
@@ -411,7 +411,11 @@ writing the file. A tool worth reusing moves to the workspace's `skills/` or
   sounds like", analyzed once and compared against every mix.
 - **Perception reports** keep measurement apart from judgment: "kick and bass
   overlap heavily from 60 to 120 Hz" is an observation, and the agent proposes a
-  reversible change to compare instead of optimizing a number.
+  reversible change to compare instead of optimizing a number. They cover what
+  a person mixing listens for: where two stems contest a band, a resonance and
+  its frequency, what the mix loses in mono and on a small speaker, how hard a
+  drum hits through the mix, and what each compressor and limiter takes off in
+  each section (D98).
 - **An audio-capable model as a critic** is optional, beside the numbers, and
   needs its own consent.
 
