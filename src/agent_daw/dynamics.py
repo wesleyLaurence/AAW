@@ -2,7 +2,7 @@
 
 How far its loudness ranges and where it is loudest, how hard each hit lands
 at its own stem, through its group and through the mix, and what each
-compressor and limiter took off, a section at a time. A person sets a
+compressor, limiter and clipper took off, a section at a time. A person sets a
 threshold, an attack and a ceiling by listening for these; here they are read
 from the render and from what the engine reported as it made it.
 These are measurements: a kick that sits under a pad may be meant to.
@@ -150,11 +150,11 @@ class Punch:
         return out
 
 
-DEVICES = ("compressor", "limiter")
+DEVICES = ("compressor", "limiter", "clipper")
 
 
 def effects(manifest, project) -> dict:
-    """`effects` of a listen report: every compressor and limiter of the
+    """`effects` of a listen report: every compressor, limiter and clipper of the
     render, by channel, with what it took off over the song and in each
     section, as the engine measured while it rendered. `path` is where the
     device is in the song; the ID and the key are read from the snapshot."""
@@ -265,7 +265,7 @@ def hits_between(a, b, sections) -> dict | None:
 
 
 def effects_between(a, b, sections) -> dict | None:
-    """`effects` in `daw compare`: each compressor and limiter both renders
+    """`effects` in `daw compare`: each compressor, limiter and clipper both renders
     have, by its ID, or by its place among its channel's devices of its type
     when it has none, with what it took off before and after, the largest
     change first, and the paths of those only one render has."""
@@ -330,7 +330,7 @@ METHOD = (
     f"{FLOOR_DB:g}; punch_db, punch_in_group_db and punch_in_mix_db are the median over a "
     "track's hits of the same frames read at its stem, at its group's stem and in the mix, "
     "and a hit whose attack peaks under -80 dBFS at its stem is not counted. effects are the "
-    "render report's: each compressor's and limiter's gain reduction as the engine measured "
+    "render report's: each compressor's, limiter's and clipper's gain reduction as the engine measured "
     "it on the frames inside the song, over the whole and over each section; measured, not "
     "judged"
 )

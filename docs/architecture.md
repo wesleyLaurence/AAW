@@ -66,8 +66,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   warnings `daw check` gives of a valid song, each with a code (`check`); see
   [musical-checks.md](features/musical-checks.md).
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
-  compressor/sidechain, limiter, delay, reverb, chorus, saturation and utility
-  devices with explicit block state, the spectrum tap an equalizer's panel
+  compressor/sidechain, limiter, clipper, delay, reverb, chorus, saturation
+  and utility devices with explicit block state, the spectrum tap an
+  equalizer's panel
   draws from, the analyzer's ring and the meter that reads it for its
   levels, loudness, spectrum, stereo field, spectrogram and waveform (`meter`),
   the loudness the meter and `daw listen` both read, gated, its range and its
@@ -137,7 +138,8 @@ Python, in `src/agent_daw`:
   400 ms of a mix and its sections, from the analyzer's meter run over the
   saved audio (`aaw_dsp::loudness`, through `aaw_py.loudness`); how hard each
   track's scheduled hits land at its stem, at its group's and in the mix; and
-  each compressor's and limiter's reduction over the song and by section,
+  each compressor's, limiter's and clipper's reduction over the song and by
+  section,
   which the engine measures as it renders and writes in the render's report;
   their change in `daw compare`; see
   [dynamics-detail.md](features/dynamics-detail.md).
@@ -233,6 +235,8 @@ return-to-return sends exist yet.
 Effects: `filter`, `eq` (the parametric EQ: bells, shelves and passes with
 their slopes, drawn in the app as one curve over the playing spectrum; see
 [parametric-eq.md](features/parametric-eq.md)), `compressor` (optional `sidechain` track), `limiter`,
+`clipper` (a ceiling no sample passes, with a knee and oversampling; see
+[clipper.md](features/clipper.md)),
 `delay`, `reverb`, `chorus`, `saturation`, `utility` (gain, pan, width, mono
 below a frequency, polarity; see [utility.md](features/utility.md)) and
 `analyzer` (changes nothing; the app shows the sound through it, in the
@@ -413,7 +417,8 @@ choke groups, swing, gate release, block-size invariance, stems reconstruction,
 clipping rejection, copied-asset portability/tamper detection, incremental index
 updates, stable formatting, stale-edit rejection, section equivalence and track previews.
 Effect tests cover filter and EQ responses, compressor curves, limiter ceilings and
-latency, delay echo timing, reverb decay and seeding, block-partition invariance,
+latency, the clipper's ceiling, knee and latency, delay echo timing, reverb
+decay and seeding, block-partition invariance,
 sidechain ducking and preview/stem equivalence. Routing tests cover pre/post-fader
 sends, mute/solo, return stems and previews and section tails. Automation tests
 cover envelope semantics, constant lanes rendering exactly as static values, sweeps and ramps,

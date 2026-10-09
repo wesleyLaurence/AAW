@@ -154,6 +154,20 @@ const LIMITER: &[Field] = &[
     structural(number("lookahead_ms", "Look-ahead", 0.5, 20.0, 3.0, "ms")),
 ];
 
+/// A clipper's fields. `oversample` sets its latency, so a playing song
+/// fades through a change of it.
+const CLIPPER: &[Field] = &[
+    number("ceiling_db", "Ceiling", -60.0, 24.0, -1.0, "dB"),
+    number("drive_db", "Drive", 0.0, 36.0, 0.0, "dB"),
+    number("knee_db", "Knee", 0.0, 24.0, 0.0, "dB"),
+    Field {
+        kind: Kind::Integer,
+        choices: &["1", "2", "4"],
+        structural: true,
+        ..number("oversample", "Oversample", 1.0, 4.0, 4.0, "x")
+    },
+];
+
 const DELAY: &[Field] = &[
     Field {
         kind: Kind::Beats,
@@ -351,6 +365,7 @@ pub fn effect(kind: &str) -> &'static [Field] {
         "filter" => FILTER,
         "compressor" => COMPRESSOR,
         "limiter" => LIMITER,
+        "clipper" => CLIPPER,
         "delay" => DELAY,
         "reverb" => REVERB,
         "chorus" => CHORUS,

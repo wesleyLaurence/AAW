@@ -3,8 +3,8 @@
 //! between them and the delays that align their latencies. Compiled off the
 //! audio thread; a `Renderer` plays it.
 //!
-//! Latency. Only the limiter delays its input, by its look-ahead. Every other
-//! path is delayed to match:
+//! Latency. The limiter delays its input by its look-ahead and an
+//! oversampled clipper by its filters. Every other path is delayed to match:
 //! a track keyed by a source with latency renders its voices that much later,
 //! tracks are delayed to the slowest track before their faders and sends,
 //! returns to the slowest return, and the output trails a voice by `latency`

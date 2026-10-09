@@ -363,7 +363,7 @@ def measured(source):
     """A source's listen report and its audio, with its overlap grid and its
     stems' resonances, if it has stems, and its translation checks. The mix
     and its sections have their loudness range and maxima, a render's tracks
-    their hits, and `effects` what its compressors and limiters took off."""
+    their hits, and `effects` what its compressors, limiters and clippers took off."""
     audio_path, folder = resolve(source)
     x, rate = read_audio(audio_path)
     project, manifest, offset, sections = context(folder, x, rate)
@@ -560,7 +560,7 @@ def printed(report):
 def section_of(source, section, images=True):
     """`daw listen RENDER --section ID`: one section of the mix and of each stem,
     with its third octaves, the stem's resonances and hits there, and what
-    each compressor and limiter took off in it."""
+    each compressor, limiter and clipper took off in it."""
     report = listen(source, images)
     if section not in report["sections"]:
         known = ", ".join(report["sections"]) or "none"

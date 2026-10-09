@@ -87,9 +87,9 @@ decay, noisiness, loudness and punch, each a number with a word. Search sorts
 and filters by them and finds the samples nearest a chosen one.
 
 Tracks, returns and the master bus take insert effects: filter, EQ, compressor
-with sidechain, look-ahead limiter, tempo-synced delay and a seeded convolution
-reverb. Tracks send pre- or post-fader to return buses, which render as their own
-stems. See [docs/features/effects.md](docs/features/effects.md).
+with sidechain, look-ahead limiter, clipper, tempo-synced delay and a seeded
+convolution reverb. Tracks send pre- or post-fader to return buses, which
+render as their own stems. See [docs/features/effects.md](docs/features/effects.md).
 
 Automation lanes move track, return and master levels, pans, send levels and
 effect parameters over time, such as a filter sweep into a drop or a quieter
@@ -367,8 +367,8 @@ summed to mono and through the band a small speaker plays, and
 [docs/features/translation-checks.md](docs/features/translation-checks.md).
 The mix and each section have their loudness range and their loudest 3 s and
 400 ms, each track's `hits` say how hard its hits land at its stem, through its
-group and in the mix, and `effects` lists what each compressor and limiter took
-off, over the song and in each section. See
+group and in the mix, and `effects` lists what each compressor, limiter and
+clipper took off, over the song and in each section. See
 [docs/features/dynamics-detail.md](docs/features/dynamics-detail.md).
 See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
 

@@ -252,6 +252,22 @@ def loud_in_the_second_half(directory, ceiling=-6.0, more=()):
     )
 
 
+def test_a_clipper_is_listed_with_what_it_cut_in_the_section_that_is_loud(tmp_path):
+    clipper = {"type": "clipper", "id": "clip", "ceiling_db": -12}
+    report = listen(loud_in_the_second_half(tmp_path / "cut", more=[clipper]), images=False)
+    (device,) = report["effects"]["tracks"]["line"]
+    assert (device["path"], device["type"], device["id"]) == ("tracks.line.effects.clip", "clipper", "clip")
+    # 0.25 is under a ceiling of -12 and 0.9 is 11.1 dB over it, a sine more
+    # than 1 dB over for 0.8 of the time, for six of the second half's eight seconds.
+    assert device["sections"]["first"] == {key: 0 for key in dynamics.REDUCTION}
+    second = device["sections"]["second"]
+    assert second["max_gain_reduction_db"] == device["max_gain_reduction_db"] == pytest.approx(11.08, abs=0.02)
+    assert second["fraction_over_1db_reduction"] == pytest.approx(0.598, abs=0.005)
+    # The master's limiter is left with nothing over its own ceiling.
+    (limiter,) = report["effects"]["master"]
+    assert limiter["max_gain_reduction_db"] == 0
+
+
 def test_a_limiter_reports_its_reduction_in_the_section_that_is_loud(tmp_path):
     folder = loud_in_the_second_half(tmp_path / "six")
     written = json.loads((folder / "report.json").read_text())

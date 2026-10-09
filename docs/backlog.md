@@ -20,54 +20,51 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
-   is built, a clipper that holds a ceiling as a limiter does without its
-   look-ahead is not. The utility is built ([utility](features/utility.md)).
-2. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
+1. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
    master's true peak can pass its ceiling and the agent leaves a margin by
    guess; a switch on the limiter that measures the peaks between the
    samples, so a ceiling of −1 dBTP is one.
-3. **A time selection in the app.** A range of beats dragged across the
+2. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-4. **A MIDI keyboard.** Notes played through the selected track, held and let
+3. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-5. **Sections and the song's length in the app.** A section made, named,
+4. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-6. **A project made with `daw init` in the app's index,** so a song the agent
+5. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-7. **Turns and A/B.** An agent request's commands grouped, named for the
+6. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-8. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+7. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-9. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+8. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
    that replays it.
-10. **Key and chord detection,** and swing detection, of samples and songs: a
-    loop matched to the song's key before it is placed.
-11. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+9. **Key and chord detection,** and swing detection, of samples and songs: a
+   loop matched to the song's key before it is placed.
+10. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-12. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+11. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-13. **The workspace and the two levels.** The workspace folder with its managed
+12. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-14. **The agent panel.** A conversation in the window, per project, over the
+13. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-15. **Stem separation** of a song.
-16. **Generated audio.** A sound, a loop or a whole song from a description, with
+14. **Stem separation** of a song.
+15. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -78,6 +75,35 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The clipper, with the person listening:** a drum group of the person's
+  own with a `clipper` whose ceiling is 2, 4 and 8 dB under the group's
+  `peak_dbfs`, each heard against the group without it, and where the kick
+  and the snare start to sound cut; the same with `knee_db` at 3 and 6, and
+  whether a knee is heard as softer or only as quieter; `oversample` 1
+  against 4 on a hat and on a bright synth clipped 6 dB, and whether what
+  folds back at 1 is heard and what the last clip leaves at 4 is; a master
+  with a clipper before its limiter, the clipper's ceiling 3 dB under the
+  peaks that reach it, against the limiter alone at the same loudness, and
+  whether the mix ducks less at the hits; the master pushed until the
+  clipper is heard, and the `fraction_over_1db_reduction` it reads there,
+  which the guidance says should stay near zero without anyone having heard
+  where it stops being so; `drive_db` and the ceiling dragged in the panel
+  while the song plays, and Add Effect › clipper; a fresh agent session
+  asked to make a mix louder, and whether it reads `daw describe effects`,
+  sets the clipper's ceiling from the limiter's reduction and the stems'
+  peaks rather than leaving it at −1, and reads back what each took off.
+  Generated audio only: tones clipped hard and with a knee as the
+  arithmetic says, the ceiling held at every oversampling, a signal under
+  it bit for bit and its 16 frames made up for, a lane moving the ceiling,
+  a crest between the samples cut at 4 and left at 1, and what folds back
+  measured on tones, a 1 kHz tone 6 dB over the ceiling 47 dB under the
+  signal at 1 and 59 at 4, held by Rust and Python tests. On a copy of one
+  local song, a clipper put before the master's limiter 3 dB under the
+  peaks reaching it took at most 3.0 dB, for under a thousandth of the
+  time, and the limiter's most fell from 5.7 dB to 2.7, read from the
+  render's report and `daw compare`; nobody heard either render. The panel
+  seen in a scripted picture, and a scripted drag on its ceiling read from
+  the song.
 - **Listening markers, by hand and with an agent:** a song of a few minutes
   played and M pressed where something is heard, several times, with ⇧M and a
   few words typed while it plays on; whether the flag lands where the ear
@@ -721,9 +747,12 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   bandlimited triangle; a locate that carries a chased voice's oscillator
   phases and filter state as a render has them.
 - Glide and a sustain loop on the sampler.
-- More effects: phaser, gate, transient shaper, multiband
-  compressor, pitch shift. An effect dragged from the browser into a Synth's
-  patch, as the + menu adds one.
+- More effects: phaser, gate, transient shaper, multiband compressor, pitch
+  shift. What a clipper is taking off shown in its panel while the song plays,
+  which only a render's report says today; and, if its last clip is heard, a
+  switch to leave it out before a limiter, or more passes of the oversampled
+  stage ([clipper](features/clipper.md)). An effect dragged from the browser
+  into a Synth's patch, as the + menu adds one.
 - Sends from a return to a return.
 - Tempo and time signature changes within a song. One tempo and one meter
   hold throughout, the beat map included; the song's one time signature is

@@ -229,7 +229,7 @@ def parser():
         "--section",
         metavar="ID",
         help="One section of the mix and of each stem, with its third octaves, "
-        "resonances, hits and what each compressor and limiter took off, in place of "
+        "resonances, hits and what each compressor, limiter and clipper took off, in place of "
         "the report (daw describe listen)",
     )
     listen.add_argument(
