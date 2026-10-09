@@ -34,6 +34,8 @@ pub struct Arrangement {
     pub returns: Vec<ReturnView>,
     pub master: MasterView,
     pub sections: Vec<SectionView>,
+    /// The person's markers, in time order.
+    pub markers: Vec<MarkerView>,
     pub patterns: Vec<PatternView>,
     /// The files the tracks' audio clips play.
     pub files: Vec<FileView>,
@@ -487,6 +489,15 @@ pub struct SectionView {
     pub length_beats: f64,
 }
 
+/// A note the person left at a beat while listening.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct MarkerView {
+    pub key: u64,
+    pub id: String,
+    pub at: f64,
+    pub text: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, uniffi::Enum)]
 pub enum Part {
     /// Title, tempo or length.
@@ -497,6 +508,7 @@ pub enum Part {
     Return,
     Master,
     Section,
+    Marker,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -1402,6 +1414,20 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             length_beats: float(s.length_exact()),
         })
         .collect();
+    let marker_items = items(&tree, "markers");
+    let mut markers: Vec<MarkerView> = p
+        .markers
+        .iter()
+        .enumerate()
+        .map(|(i, m)| MarkerView {
+            key: handle(marker_items, i),
+            id: m.id.clone(),
+            at: float(m.at_exact()),
+            text: m.text.clone(),
+        })
+        .collect();
+    // A song edited as a file may list them in any order.
+    markers.sort_by(|a, b| a.at.total_cmp(&b.at));
     // A master compressor cannot be keyed.
     let (master_effects, master_lanes, master_targets, _) = channel(Owner::Master(&p.master), tree.get("master"), &[], &[], p, directory);
     Arrangement {
@@ -1424,6 +1450,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             lane_targets: master_targets,
         },
         sections,
+        markers,
         patterns: patterns(p, &tree),
         files: used,
     }
@@ -1545,5 +1572,19 @@ pub fn touched(old: &Doc, new: &Doc) -> Vec<Touch> {
     list_delta(Part::Group, items(&a, "groups"), items(&b, "groups"), differs, &mut out);
     list_delta(Part::Return, items(&a, "returns"), items(&b, "returns"), differs, &mut out);
     list_delta(Part::Section, items(&a, "sections"), items(&b, "sections"), differs, &mut out);
+    // A marker is touched when it is new, moved or reworded, not when another
+    // lands before it in the list.
+    let (old_markers, new_markers) = (items(&a, "markers"), items(&b, "markers"));
+    for m in new_markers {
+        let delta = match old_markers.iter().find(|o| o.handle == m.handle) {
+            None => Delta::Added,
+            Some(o) if differs(o, m) => Delta::Changed,
+            Some(_) => continue,
+        };
+        out.push(Touch { part: Part::Marker, key: m.handle, delta });
+    }
+    for o in old_markers.iter().filter(|o| !new_markers.iter().any(|m| m.handle == o.handle)) {
+        out.push(Touch { part: Part::Marker, key: o.handle, delta: Delta::Removed });
+    }
     out
 }

@@ -52,6 +52,37 @@ pub fn pace_hint(gap: Duration, pace: Duration) -> Option<String> {
     ))
 }
 
+/// What an agent's edit is told of the markers the person left since its
+/// last command, each `(id, where and what)`: None when there are none.
+pub fn marker_news(fresh: &[(String, String)]) -> Option<String> {
+    const LISTED: usize = 5;
+    let (first, _) = fresh.split_first()?;
+    let list: Vec<String> = fresh.iter().take(LISTED).map(|(id, place)| format!("{id} {place}")).collect();
+    let more = if fresh.len() > LISTED { format!(", and {} more", fresh.len() - LISTED) } else { String::new() };
+    Some(if fresh.len() == 1 {
+        format!(
+            "The person left a marker since your last command: {} {}. daw marker list reads it with what plays there.",
+            first.0, first.1
+        )
+    } else {
+        format!(
+            "The person left {} markers since your last command: {}{more}. daw marker list reads them with what plays there.",
+            fresh.len(),
+            list.join("; ")
+        )
+    })
+}
+
+/// A revision's markers, each with its handle.
+fn marker_handles(doc: &Doc) -> Vec<(u64, aaw_model::Marker)> {
+    if doc.project.markers.is_empty() {
+        return Vec::new();
+    }
+    let tree = doc.tree();
+    let items = tree.get("markers").map_or(&[][..], crate::tree::Node::items);
+    items.iter().map(|i| i.handle).zip(doc.project.markers.iter().cloned()).collect()
+}
+
 const CLOSING: &str = "The host is closing";
 
 /// Holds the project's advisory lock, which every writer without a host takes.
@@ -194,6 +225,9 @@ struct Host {
     from: BigRational,
     /// When the agent's last command of any kind arrived.
     agent_at: Option<Instant>,
+    /// The markers the person left or reworded that the agent has not been
+    /// told of, by handle.
+    fresh_markers: Vec<u64>,
 }
 
 fn beat(j: &Json) -> Result<BigRational> {
@@ -238,6 +272,57 @@ impl Host {
             return Err(format!("{what} {} is at or after the session end", aaw_model::fraction_str(beats)));
         }
         Ok(())
+    }
+
+    /// Where a marker dropped now lands: the beat being heard while the song
+    /// plays, to a thousandth, and else the start position; never past the
+    /// song's end.
+    fn marker_beat(&self) -> Json {
+        let heard = match self.clock.now() {
+            Some((true, beat)) => aaw_model::beat(&Beat::Float((beat * 1000.0).round() / 1000.0)).ok(),
+            _ => None,
+        };
+        let length = self.session.project().session.length_exact();
+        let beat = heard.unwrap_or_else(|| self.cue.clone()).min(length);
+        crate::session::value_json(&beat_value(&beat))
+    }
+
+    /// Notes the markers a change by the person added or reworded, for the
+    /// agent's next edit to be told of. `before` is the song before it.
+    fn note_markers(&mut self, before: &Doc) {
+        let now = self.session.doc();
+        let said = |d: &Doc| -> Vec<(String, String)> { d.project.markers.iter().map(|m| (m.id.clone(), m.text.clone())).collect() };
+        if said(before) == said(now) {
+            return;
+        }
+        // By handle, since an ID is given again once its marker is gone.
+        let old = marker_handles(before);
+        for (handle, m) in marker_handles(now) {
+            let known = old.iter().any(|(h, o)| *h == handle && o.text == m.text);
+            if !known && !self.fresh_markers.contains(&handle) {
+                self.fresh_markers.push(handle);
+            }
+        }
+    }
+
+    /// The markers the agent has not been told of, which it now is: those
+    /// still in the song, each with where it is and what it says.
+    fn take_marker_news(&mut self) -> Option<String> {
+        if self.fresh_markers.is_empty() {
+            return None;
+        }
+        let doc = self.session.doc().clone();
+        let meter = doc.project.session.meter();
+        let now = marker_handles(&doc);
+        let fresh: Vec<(String, String)> = std::mem::take(&mut self.fresh_markers)
+            .into_iter()
+            .filter_map(|handle| {
+                let (_, m) = now.iter().find(|(h, _)| *h == handle)?;
+                let place = crate::map::marker_place(m.at_exact().to_f64().unwrap_or(0.0), meter);
+                Some((m.id.clone(), if m.text.is_empty() { format!("in {place}") } else { format!("in {place}: {}", m.text) }))
+            })
+            .collect();
+        marker_news(&fresh)
     }
 
     /// The program for the current revision, compiling it if needed. A compile
@@ -586,13 +671,17 @@ impl Host {
 
     fn handle(&mut self, request: Request) -> Result<Json> {
         let Request {
-            command,
+            mut command,
             origin,
             expect,
             gesture,
         } = request;
         if origin == Origin::External {
             return Err("external is the origin of edits made to the file".into());
+        }
+        // A marker dropped without a beat lands where the song is playing.
+        if let Command::MarkerAdd { at: at @ None, .. } = &mut command {
+            *at = Some(self.marker_beat());
         }
         // How long the agent sent nothing, for the hint its next edit carries.
         let silence = match origin {
@@ -603,6 +692,7 @@ impl Host {
             Kind::Edit | Kind::History => {
                 let _lock = lock(self.session.path())?;
                 self.sync();
+                let before = (origin == Origin::User).then(|| self.session.doc().clone());
                 let (mut reply, change) = match &command {
                     Command::Undo => self.session.undo(origin, false).map(|(r, c)| (r, Some(c)))?,
                     Command::Redo => self.session.undo(origin, true).map(|(r, c)| (r, Some(c)))?,
@@ -618,9 +708,19 @@ impl Host {
                 if let Some(c) = change {
                     self.changed(&c);
                 }
+                if let Some(before) = before {
+                    self.note_markers(&before);
+                }
                 if let (Kind::Edit, Some(gap), Json::Object(fields)) = (command.kind(), silence, &mut reply) {
                     if let Some(hint) = pace_hint(gap, self.opts.pace) {
                         fields.insert("hint".into(), json!(hint));
+                    }
+                }
+                // The agent's edit is told of the markers the person left
+                // since it last sent anything.
+                if let (Kind::Edit, Origin::Agent, Json::Object(fields)) = (command.kind(), origin, &mut reply) {
+                    if let Some(news) = self.take_marker_news() {
+                        fields.insert("new_markers".into(), json!(news));
                     }
                 }
                 Ok(reply)
@@ -639,6 +739,13 @@ impl Host {
                     Command::Notes { path, from, to } => self.session.notes(&path, from.as_ref(), to.as_ref()),
                     Command::Map { per, from, to, tracks, lanes } => {
                         self.session.map(per.as_ref(), from.as_ref(), to.as_ref(), &tracks, lanes)
+                    }
+                    Command::Markers => {
+                        // An agent that reads the markers has been told of them.
+                        if origin == Origin::Agent {
+                            self.fresh_markers.clear();
+                        }
+                        Ok(self.session.markers())
                     }
                     Command::MidiExport { clip, file } => self.session.export_midi(&clip, &file),
                     _ => unreachable!("not a read"),
@@ -863,6 +970,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         closing: false,
         from: BigRational::zero(),
         agent_at: None,
+        fresh_markers: Vec::new(),
     };
     host.listen_at(listener, claim);
     host.emit(json!({"host": {

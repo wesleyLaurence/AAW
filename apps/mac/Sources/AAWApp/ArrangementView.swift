@@ -39,6 +39,7 @@ private enum GlowKey: Hashable {
     case row(RowID)
     case clip(UInt64)
     case section(UInt64)
+    case marker(UInt64)
 }
 
 private struct Glow {
@@ -282,6 +283,37 @@ private struct PointsDrag {
     var collapse: UInt64?
 }
 
+/// A marker dragged along the ruler.
+private struct MarkerDrag {
+    var key: UInt64
+    var startX: CGFloat
+    /// Where it was when the press began, and where it is shown now.
+    var origin: Double
+    var at: Double
+    var gesture: String
+    var moved = false
+}
+
+/// A marker shown ahead of the host, as a dragged point is.
+private struct HeldMarker {
+    var at: Double
+    var until: CFTimeInterval?
+}
+
+/// An item chosen from the marker strip's menu, with the marker it was on
+/// or the beat that was clicked.
+private final class MarkerChoice: NSObject {
+    let action: ContextMenu.MarkerAction
+    let marker: UInt64?
+    let beat: Double
+
+    init(action: ContextMenu.MarkerAction, marker: UInt64?, beat: Double) {
+        self.action = action
+        self.marker = marker
+        self.beat = beat
+    }
+}
+
 private enum Drag {
     /// A loop being dragged out in the ruler.
     case loop(anchor: CGFloat, region: (start: Double, length: Double)?)
@@ -293,6 +325,7 @@ private enum Drag {
     case fade(FadeDrag)
     case reorder(ReorderDrag)
     case points(PointsDrag)
+    case marker(MarkerDrag)
     /// A rectangle that selects what it touches: clips, or the points of
     /// the lanes shown; with those selected before it when Shift was held.
     case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>, points: Bool)
@@ -329,7 +362,8 @@ private final class LaneChoice: NSObject {
     }
 }
 
-/// The arrangement: a ruler with the loop brace, sections and bars; a header
+/// The arrangement: a ruler with the loop brace, sections, the person's
+/// markers and bars; a header
 /// for each track, return and the master; and the tracks' clips on a timeline.
 /// It draws the host's arrangement and eases to each new revision, lighting
 /// up what an agent's or an external change touched. The person edits here:
@@ -364,6 +398,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var lanesShown: Set<RowID> = []
     private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
+    /// The marker whose text is being typed, in a field at its flag.
+    private var noting: (marker: UInt64, field: NSTextField)?
+    private var heldMarkers: [UInt64: HeldMarker] = [:]
     /// When AppKit last asked for a context menu, so that a Control-click it
     /// handled is not handled again.
     private var contextMenuEvent: TimeInterval?
@@ -392,6 +429,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onGrid = { [weak self] in self?.gridChosen() }
         gridChosen()
         model.onRename = { [weak self] row in self?.beginRename(row) }
+        model.onMarkerText = { [weak self] marker in self?.beginMarkerText(marker) }
         model.onShowLanes = { [weak self] row in self?.showLanes(of: row) }
         model.onFocus = { [weak self] in
             guard let self else { return }
@@ -496,6 +534,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                    abs(hold.at - point.at) < 1e-9, abs(hold.value - point.value) < 1e-9 {
                     heldPoints[point.key] = nil
                 }
+            }
+        }
+
+        for marker in a.markers {
+            if let hold = heldMarkers[marker.key], hold.until != nil, abs(hold.at - marker.at) < 1e-9 {
+                heldMarkers[marker.key] = nil
             }
         }
 
@@ -705,6 +749,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 case .master: glows[.row(.master)] = glow
                 case .clip: glows[.clip(touch.key)] = glow
                 case .section: glows[.section(touch.key)] = glow
+                case .marker: glows[.marker(touch.key)] = glow
                 case .session: break
                 }
             }
@@ -727,8 +772,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private func revert() {
         held.removeAll()
         heldPoints.removeAll()
+        heldMarkers.removeAll()
         switch drag {
-        case .slider, .points, .trim, .noteTrim, .fade: drag = nil
+        case .slider, .points, .trim, .noteTrim, .fade, .marker: drag = nil
         default: break
         }
         show(model.arrangement, animated: true)
@@ -772,8 +818,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             heldPoints = heldPoints.filter { $0.value.until.map { now <= $0 } ?? true }
             needsDisplay = true
         }
+        if heldMarkers.values.contains(where: { $0.until.map { now > $0 } ?? false }) {
+            heldMarkers = heldMarkers.filter { $0.value.until.map { now <= $0 } ?? true }
+            needsDisplay = true
+        }
         var busy = stepMeasure(at: now) || !glows.isEmpty || held.values.contains { $0.until != nil }
-            || heldPoints.values.contains { $0.until != nil }
+            || heldPoints.values.contains { $0.until != nil } || heldMarkers.values.contains { $0.until != nil }
             || rows.values.contains {
                 $0.y.isRunning(at: now) || $0.height.isRunning(at: now) || $0.gain.isRunning(at: now)
                     || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now)
@@ -851,7 +901,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     private func placePlayhead(at beat: Double) {
         let x = layout.x(beat)
-        let top = TimelineLayout.loopStrip + TimelineLayout.sectionStrip
+        let top = TimelineLayout.rulerHeight - TimelineLayout.barStrip
         playheadView.isHidden = x < TimelineLayout.headerWidth || x > bounds.width
         playheadView.frame = CGRect(
             x: x.rounded() - PlayheadView.halfWidth, y: top,
@@ -1078,6 +1128,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             if p.y >= TimelineLayout.rulerHeight { headerDown(at: p, event) }
         } else if p.y < TimelineLayout.loopStrip {
             drag = .loop(anchor: p.x, region: nil)
+        } else if inMarkerStrip(p), markerDown(at: p, event) {
+            // A marker took the press, or one was left there.
         } else if p.y >= TimelineLayout.rulerHeight, let hit = lane(at: p) {
             laneDown(hit.lane, rect: hit.rect, at: p, event)
         } else if p.y >= TimelineLayout.rulerHeight, let hit = clip(at: p) {
@@ -1098,9 +1150,112 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             // A press in the clear selects nothing, and a drag from it the
             // clips a rectangle touches; with Shift, as well as those selected.
             let shift = event.modifierFlags.contains(.shift)
-            if !shift { model.select(clips: []) }
+            if !shift {
+                model.select(clips: [])
+                model.select(marker: nil)
+            }
             drag = .marquee(origin: p, now: p, base: shift ? model.selectedClips : [], points: false)
         }
+    }
+
+    // MARK: Markers
+
+    private static let markerFont = NSFont.systemFont(ofSize: 9.5, weight: .semibold)
+    /// What each marker's text takes in its flag, measured once.
+    private var markerWidths: [String: CGFloat] = [:]
+
+    private func inMarkerStrip(_ p: CGPoint) -> Bool {
+        p.x >= TimelineLayout.headerWidth && p.y >= TimelineLayout.markerTop && p.y < TimelineLayout.markerTop + TimelineLayout.markerStrip
+    }
+
+    /// Each marker's flag in the ruler's marker strip, in time order: the
+    /// host's markers, each where the person holds it while it is dragged.
+    private func markerFlags() -> [(marker: MarkerView, at: Double, rect: CGRect)] {
+        let shown = model.arrangement.markers.map { (marker: $0, at: heldMarkers[$0.key]?.at ?? $0.at) }.sorted { $0.at < $1.at }
+        if markerWidths.count > 512 { markerWidths.removeAll() }
+        let widths: [CGFloat] = shown.map { item in
+            let text = item.marker.text
+            if text.isEmpty { return 0 }
+            if let known = markerWidths[text] { return known }
+            let width = ceil((text as NSString).size(withAttributes: [.font: Self.markerFont]).width)
+            markerWidths[text] = width
+            return width
+        }
+        let spans = TimelineLayout.markerSpans(xs: shown.map { layout.x($0.at).rounded() }, textWidths: widths)
+        return zip(shown, spans).map { item, span in
+            (item.marker, item.at, CGRect(x: span.lowerBound, y: TimelineLayout.markerTop + 2,
+                                          width: span.upperBound - span.lowerBound, height: TimelineLayout.markerStrip - 3))
+        }
+    }
+
+    private func marker(at p: CGPoint) -> (marker: MarkerView, at: Double, rect: CGRect)? {
+        guard inMarkerStrip(p) else { return nil }
+        let flags = markerFlags()
+        return TimelineLayout.marker(atX: p.x, spans: flags.map { $0.rect.minX...$0.rect.maxX }).map { flags[$0] }
+    }
+
+    /// A press in the marker strip. On a marker it selects it, and a drag
+    /// from there moves it; twice lets the person type what it says. Twice in
+    /// the clear leaves a marker there, on the grid, and asks what it says.
+    /// False for one press in the clear, which sets the start position as it
+    /// does anywhere in the ruler.
+    private func markerDown(at p: CGPoint, _ event: NSEvent) -> Bool {
+        if let hit = marker(at: p) {
+            model.select(marker: hit.marker.key)
+            if event.clickCount == 2 {
+                beginMarkerText(hit.marker.key)
+            } else {
+                drag = .marker(MarkerDrag(key: hit.marker.key, startX: p.x, origin: hit.at, at: hit.at, gesture: model.newGesture()))
+            }
+            needsDisplay = true
+            return true
+        }
+        guard event.clickCount == 2 else { return false }
+        model.addMarker(ask: true, at: layout.snapped(layout.beat(atX: p.x), free: model.free(event.modifierFlags)))
+        return true
+    }
+
+    /// Lets the person type what a marker says, in a field at its flag. The
+    /// song plays on under it, and the field follows the marker as the
+    /// timeline scrolls.
+    private func beginMarkerText(_ key: UInt64) {
+        endRename(commit: true)
+        guard let marker = model.arrangement.markers.first(where: { $0.key == key }) else { return }
+        let field = NSTextField(string: marker.text)
+        field.placeholderString = "What you hear"
+        field.font = Self.smallFont
+        field.isBordered = false
+        field.focusRingType = .none
+        field.drawsBackground = true
+        field.backgroundColor = Theme.gray(0.08)
+        field.textColor = Theme.text
+        field.cell?.isScrollable = true
+        field.cell?.wraps = false
+        field.delegate = self
+        addSubview(field)
+        noting = (key, field)
+        placeMarkerField()
+        window?.makeFirstResponder(field)
+    }
+
+    /// Keeps the field a marker's text is typed in at the marker's flag.
+    private func placeMarkerField() {
+        guard let (key, field) = noting else { return }
+        guard let marker = model.arrangement.markers.first(where: { $0.key == key }) else {
+            // The marker went while its text was typed.
+            endRename(commit: false)
+            return
+        }
+        // At the flag, and inside the timeline where the flag is near an edge.
+        let width: CGFloat = 180
+        let x = max(TimelineLayout.headerWidth, min(layout.x(heldMarkers[key]?.at ?? marker.at).rounded(), bounds.width - width))
+        let frame = CGRect(x: x, y: TimelineLayout.markerTop, width: width, height: TimelineLayout.markerStrip)
+        if field.frame != frame { field.frame = frame }
+    }
+
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        placeMarkerField()
     }
 
     /// The track whose strip of clips is at a point of the timeline.
@@ -1234,6 +1389,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(self)
         contextMenuEvent = event.timestamp
         let p = convert(event.locationInWindow, from: nil)
+        if inMarkerStrip(p) {
+            // On a marker, which it selects, or in the clear of the strip.
+            let hit = marker(at: p)
+            if let hit { model.select(marker: hit.marker.key) }
+            needsDisplay = true
+            let beat = layout.snapped(layout.beat(atX: p.x), free: model.free(event.modifierFlags))
+            let items = ContextMenu.marker(onMarker: hit != nil, count: model.arrangement.markers.count)
+            return menu(of: items, #selector(markerMenuAction(_:))) { MarkerChoice(action: $0, marker: hit?.marker.key, beat: beat) }
+        }
         guard p.y >= TimelineLayout.rulerHeight else { return nil }
         if p.x < TimelineLayout.headerWidth {
             guard let (id, header) = row(atY: p.y), let row = rows[id] else { return nil }
@@ -1274,6 +1438,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             menu.addItem(entry)
         }
         return menu
+    }
+
+    @objc private func markerMenuAction(_ sender: NSMenuItem) {
+        guard let choice = sender.representedObject as? MarkerChoice else { return }
+        switch choice.action {
+        case .add: model.addMarker(ask: true, at: choice.beat)
+        case .rename:
+            if let marker = choice.marker { beginMarkerText(marker) }
+        case .delete:
+            if let marker = choice.marker { model.edit(.markersRemove(markers: [marker])) }
+        case .deleteAll: model.removeAllMarkers()
+        }
     }
 
     @objc private func rowMenuAction(_ sender: NSMenuItem) {
@@ -1589,6 +1765,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.drag(.pointsSet(points: places), gesture: d.gesture)
             }
             drag = .points(d)
+        case .marker(var d):
+            // The marker goes to the grid line under the pointer, or with ⌘
+            // anywhere, as a point does.
+            if !d.moved, abs(p.x - d.startX) < 3 { return }
+            let at = layout.snapped(d.origin + Double((p.x - d.startX) / layout.pixelsPerBeat), free: model.free(event.modifierFlags))
+            if at != d.at {
+                d.at = at
+                d.moved = true
+                heldMarkers[d.key] = HeldMarker(at: at, until: nil)
+                model.drag(.markerMove(marker: d.key, at: at), gesture: d.gesture)
+            }
+            drag = .marker(d)
         case .marquee(let origin, _, let base, let points):
             drag = .marquee(origin: origin, now: p, base: base, points: points)
             let box = CGRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x - origin.x), height: abs(p.y - origin.y))
@@ -1657,6 +1845,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             } else if let key = d.collapse {
                 model.select(points: [key])
             }
+        case .marker(let d):
+            model.endDrag()
+            if d.moved {
+                // The marker stays as dragged until the host's song has it.
+                heldMarkers[d.key]?.until = CACurrentMediaTime() + 1
+            } else {
+                // A click on a marker: play starts from it.
+                model.locate(min(d.origin, max(0, layout.lengthBeats - 0.001)))
+            }
         case .marquee:
             break
         case .reorder(let r):
@@ -1707,7 +1904,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             drag = nil
             show(model.arrangement, animated: true)
             return true
-        case .slider, .points, nil:
+        case .slider, .points, .marker, nil:
             return false
         }
     }
@@ -1922,10 +2119,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             switch event.charactersIgnoringModifiers {
             case " ": model.togglePlay()
             case "l": model.toggleLoop()
+            // A marker where the song is playing; with Shift, one to name.
+            case "m": model.addMarker()
+            case "M": model.addMarker(ask: true)
             case "\u{1b}":
                 if !cancelDrag() {
                     model.select(clips: [])
                     model.select(points: [])
+                    model.select(marker: nil)
                 }
             default: super.keyDown(with: event)
             }
@@ -1975,6 +2176,16 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     private func endRename(commit: Bool) {
+        if let (marker, field) = noting {
+            // What a marker says, typed at its flag.
+            noting = nil
+            let text = field.stringValue
+            field.delegate = nil
+            field.removeFromSuperview()
+            if window?.firstResponder !== self { window?.makeFirstResponder(self) }
+            if commit { model.setMarkerText(marker, to: text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            needsDisplay = true
+        }
         guard let (row, field) = renaming else { return }
         renaming = nil
         let name = field.stringValue.trimmingCharacters(in: .whitespaces)
@@ -2249,6 +2460,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if end < bounds.width {
             fill(CGRect(x: end, y: ruler, width: bounds.width - end, height: bounds.height - ruler), Theme.pastEnd)
             fill(CGRect(x: end.rounded(), y: ruler, width: 1, height: bounds.height - ruler), Theme.gray(1, 0.25))
+        }
+        // A faint line under each marker, so what it marks is found below it.
+        for flag in markerFlags() where flag.rect.minX >= header && flag.rect.minX <= bounds.width {
+            let chosen = model.selectedMarker == flag.marker.key
+            fill(CGRect(x: flag.rect.minX, y: ruler, width: 1, height: bounds.height - ruler),
+                 Theme.marker.withAlphaComponent(chosen ? 0.5 : 0.22))
         }
         fill(CGRect(x: layout.x(model.transport.cue).rounded(), y: ruler, width: 1, height: bounds.height - ruler),
              Theme.cue.withAlphaComponent(0.85))
@@ -2722,7 +2939,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let header = TimelineLayout.headerWidth
         let loopStrip = TimelineLayout.loopStrip
         let sectionTop = loopStrip
-        let barTop = loopStrip + TimelineLayout.sectionStrip
+        let barTop = TimelineLayout.rulerHeight - TimelineLayout.barStrip
         let ruler = TimelineLayout.rulerHeight
         fill(CGRect(x: header, y: 0, width: bounds.width - header, height: ruler), Theme.ruler)
         fill(CGRect(x: header, y: 0, width: bounds.width - header, height: loopStrip), Theme.gray(0, 0.22))
@@ -2751,6 +2968,34 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 let x = max(rect.minX, header) + 4
                 text(section.id, in: CGRect(x: x, y: rect.minY, width: rect.maxX - x - 2, height: 13),
                      font: Self.smallFont, color: Theme.text)
+            }
+        }
+
+        // The person's markers: a flag on a line to the foot of the ruler,
+        // with what it says in it, as far as the next marker leaves room.
+        for flag in markerFlags() where flag.rect.maxX >= header && flag.rect.minX <= bounds.width {
+            let chosen = model.selectedMarker == flag.marker.key
+            let color = chosen ? Theme.marker.blended(withFraction: 0.45, of: .white) ?? Theme.marker : Theme.marker
+            fill(CGRect(x: flag.rect.minX, y: flag.rect.minY, width: 1, height: ruler - flag.rect.minY), color)
+            let body = NSBezierPath()
+            body.move(to: CGPoint(x: flag.rect.minX, y: flag.rect.minY))
+            body.line(to: CGPoint(x: flag.rect.maxX - 2, y: flag.rect.minY))
+            body.curve(to: CGPoint(x: flag.rect.maxX, y: flag.rect.minY + 2), controlPoint1: CGPoint(x: flag.rect.maxX, y: flag.rect.minY),
+                       controlPoint2: CGPoint(x: flag.rect.maxX, y: flag.rect.minY))
+            body.line(to: CGPoint(x: flag.rect.maxX, y: flag.rect.maxY - 2))
+            body.curve(to: CGPoint(x: flag.rect.maxX - 2, y: flag.rect.maxY), controlPoint1: CGPoint(x: flag.rect.maxX, y: flag.rect.maxY),
+                       controlPoint2: CGPoint(x: flag.rect.maxX, y: flag.rect.maxY))
+            body.line(to: CGPoint(x: flag.rect.minX, y: flag.rect.maxY))
+            body.close()
+            color.setFill()
+            body.fill()
+            if let (level, tint) = glow(.marker(flag.marker.key), at: now) {
+                tint.withAlphaComponent(0.85 * level).setFill()
+                body.fill()
+            }
+            if !flag.marker.text.isEmpty, noting?.marker != flag.marker.key {
+                text(flag.marker.text, in: CGRect(x: flag.rect.minX + TimelineLayout.markerPad, y: flag.rect.minY, width: flag.rect.width - TimelineLayout.markerPad - 2, height: 12),
+                     font: Self.markerFont, color: Theme.markerText)
             }
         }
 

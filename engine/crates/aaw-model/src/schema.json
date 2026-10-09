@@ -880,6 +880,45 @@
       "title": "Limiter",
       "type": "object"
     },
+    "Marker": {
+      "additionalProperties": false,
+      "description": "A note the person left at a beat while listening. It plays nothing.",
+      "properties": {
+        "id": {
+          "description": "Unique among the song's markers. Left out, the next free mN is given when the song is validated.",
+          "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "at": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "description": "The song beat the marker is at, from 0 to the song's end.",
+          "title": "At"
+        },
+        "text": {
+          "default": "",
+          "description": "What the person said of that place, in a few words; may be empty.",
+          "maxLength": 200,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "at"
+      ],
+      "title": "Marker",
+      "type": "object"
+    },
     "Master": {
       "additionalProperties": false,
       "properties": {
@@ -2786,6 +2825,13 @@
         "$ref": "#/$defs/Section"
       },
       "title": "Sections",
+      "type": "array"
+    },
+    "markers": {
+      "items": {
+        "$ref": "#/$defs/Marker"
+      },
+      "title": "Markers",
       "type": "array"
     },
     "master": {

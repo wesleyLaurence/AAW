@@ -119,6 +119,7 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
             "master_effects": types(song["master"]),
             "master_automation": params(song["master"]),
             "sections": song["sections"],
+            "markers": song["markers"],
         }
 
 

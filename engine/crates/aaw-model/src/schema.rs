@@ -3128,6 +3128,59 @@ impl Section {
     }
 }
 
+/// A note the person left at a beat while listening: "too busy", "love
+/// this". It plays nothing; the agent reads it with `daw marker list`.
+#[derive(Clone, Debug)]
+pub struct Marker {
+    /// Unique among the song's markers. A marker written without one is
+    /// given the next free `mN` when the song is validated.
+    pub id: String,
+    pub at: Beat,
+    pub text: String,
+}
+
+impl Marker {
+    const FIELDS: &'static [&'static str] = &["id", "at", "text"];
+    /// The most characters a marker's text holds.
+    pub const TEXT_LIMIT: usize = 200;
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Marker> {
+        let f = Fields::of(ctx, x, "Marker", Self::FIELDS)?;
+        let before = ctx.count();
+        let id = f.opt(ctx, "id", String::new(), id_field);
+        let at = f.req(ctx, "at", beat_field);
+        let text = f.opt(ctx, "text", String::new(), |c, x| {
+            let text = v::string(c, x)?;
+            if text.chars().count() > Self::TEXT_LIMIT {
+                c.error("string_too_long", format!("String should have at most {} characters", Self::TEXT_LIMIT));
+                return None;
+            }
+            Some(text)
+        });
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(Marker {
+            id: id?,
+            at: at?,
+            text: text?,
+        })
+    }
+
+    pub fn at_exact(&self) -> BigRational {
+        exact(&self.at)
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("id", Value::str(&self.id));
+        o.req("at", self.at.to_value());
+        o.str("text", &self.text, "");
+        o.done()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Session {
     pub title: String,
@@ -3239,12 +3292,14 @@ pub struct Project {
     pub groups: Vec<Group>,
     pub returns: Vec<Return>,
     pub sections: Vec<Section>,
+    pub markers: Vec<Marker>,
     pub master: Master,
 }
 
 impl Project {
     const FIELDS: &'static [&'static str] = &[
-        "schema_version", "session", "samples", "patterns", "tracks", "groups", "returns", "sections", "master",
+        "schema_version", "session", "samples", "patterns", "tracks", "groups", "returns", "sections", "markers",
+        "master",
     ];
 
     /// `Project.model_validate`: the whole tree, then the reference rules.
@@ -3275,6 +3330,7 @@ impl Project {
         let groups = f.opt(ctx, "groups", Vec::new(), |c, x| v::list(c, x, 0, None, Group::validate));
         let returns = f.opt(ctx, "returns", Vec::new(), |c, x| v::list(c, x, 0, None, Return::validate));
         let sections = f.opt(ctx, "sections", Vec::new(), |c, x| v::list(c, x, 0, None, Section::validate));
+        let markers = f.opt(ctx, "markers", Vec::new(), |c, x| v::list(c, x, 0, None, Marker::validate));
         let master = f.opt(ctx, "master", Master::default(), Master::validate);
         f.finish(ctx);
         if ctx.count() > before {
@@ -3289,6 +3345,13 @@ impl Project {
             return None;
         }
         assign_ids(tracks.iter_mut().filter_map(|t| t.midi.as_mut()).flat_map(|m| &mut m.clips).map(|c| &mut c.id), "clip");
+        let mut markers = markers?;
+        let mut seen = std::collections::HashSet::new();
+        if let Some(m) = markers.iter().find(|m| !m.id.is_empty() && !seen.insert(m.id.as_str())) {
+            ctx.value_error(format!("Two markers have the ID {}", m.id));
+            return None;
+        }
+        assign_ids(markers.iter_mut().map(|m| &mut m.id), "m");
         Some(Project {
             session: session?,
             samples: samples?,
@@ -3297,6 +3360,7 @@ impl Project {
             groups: groups?,
             returns: returns?,
             sections: sections?,
+            markers,
             master: master?,
         })
     }
@@ -3323,6 +3387,7 @@ impl Project {
         o.coll("groups", list(&self.groups, saved, Group::dump));
         o.coll("returns", list(&self.returns, saved, Return::dump));
         o.coll("sections", list(&self.sections, saved, Section::dump));
+        o.coll("markers", list(&self.markers, saved, Marker::dump));
         let master = self.master.dump(saved);
         let default_master = self.master.effects.is_empty() && self.master.automation.is_empty();
         if !(saved && default_master) {
@@ -3427,6 +3492,7 @@ impl Default for Project {
             groups: Vec::new(),
             returns: Vec::new(),
             sections: Vec::new(),
+            markers: Vec::new(),
             master: Master::default(),
         }
     }

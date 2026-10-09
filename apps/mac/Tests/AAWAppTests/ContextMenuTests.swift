@@ -90,4 +90,17 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(titles(copied), ["Cut", "Copy", "Paste Compressor After", "Duplicate", "Enable", "Delete"])
         XCTAssertEqual(copied.first { $0.action == .paste }?.enabled, true)
     }
+
+    func testTheMarkerStripsMenuActsOnAMarkerOrAddsOneInTheClear() {
+        let on = ContextMenu.marker(onMarker: true, count: 3)
+        XCTAssertEqual(on.map(\.action), [.rename, .delete, nil, .deleteAll])
+        XCTAssertEqual(on.first { $0.action == .rename }?.key, "r")
+        XCTAssertEqual(on.first { $0.action == .delete }?.command, false)
+        let clear = ContextMenu.marker(onMarker: false, count: 0)
+        XCTAssertEqual(clear.map(\.action), [.add, nil, .deleteAll])
+        XCTAssertEqual(clear.first?.title, "Add Marker Here")
+        // Nothing to delete in a song without markers.
+        XCTAssertEqual(clear.last?.enabled, false)
+        XCTAssertEqual(on.last?.enabled, true)
+    }
 }

@@ -799,11 +799,48 @@ impl Session {
             "master_effects": types(&p.master.effects),
             "master_automation": params(&p.master.automation),
             "sections": p.sections.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
+            "markers": p.markers.iter().map(|m| value_json(&m.dump(false))).collect::<Vec<_>>(),
         });
         if self.hosted {
             out["host"] = json!({"session": self.id, "revision": self.revision});
         }
         out
+    }
+
+    /// `daw marker list`: the person's markers in time order, each with the
+    /// bar it is in and the beat of that bar, the section over it, and the
+    /// clips sounding there, a track each.
+    pub fn markers(&self) -> Json {
+        let p = &self.doc.project;
+        let root = self.doc.tree();
+        let meter = p.session.meter();
+        let float = |x: &num_rational::BigRational| num_traits::ToPrimitive::to_f64(x).unwrap_or(f64::NAN);
+        let mut order: Vec<&aaw_model::Marker> = p.markers.iter().collect();
+        order.sort_by(|a, b| a.at_exact().cmp(&b.at_exact()));
+        let markers: Vec<Json> = order
+            .iter()
+            .map(|m| {
+                let at = m.at_exact();
+                let (bar, beat) = meter.bar_beat(float(&at));
+                // The shortest section over it, where sections overlap.
+                let section = p
+                    .sections
+                    .iter()
+                    .filter(|s| s.at_exact() <= at && at < s.at_exact() + s.length_exact())
+                    .min_by_key(|s| s.length_exact())
+                    .map(|s| s.id.as_str());
+                json!({
+                    "id": m.id,
+                    "at": value_json(&m.at.to_value()),
+                    "bar": bar,
+                    "beat": beat,
+                    "section": section,
+                    "text": m.text,
+                    "playing": crate::map::sounding(p, self.dir(), float(&at), &|loc| self.reference(&root, loc)),
+                })
+            })
+            .collect();
+        json!({"markers": markers})
     }
 
     /// `daw map`: the song as a grid of tracks by cells of `per` (a number of

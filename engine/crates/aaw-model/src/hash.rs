@@ -34,6 +34,8 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // Markers: the person's notes at beats.
+        vec![added("markers", Value::List(vec![]))],
         // Groups: the list, and a track's group.
         vec![added("groups", Value::List(vec![])), added("group", Value::None)],
         // An equalizer band's slope; the filter has the key too, so only a

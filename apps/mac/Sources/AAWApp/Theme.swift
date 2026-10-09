@@ -48,6 +48,10 @@ enum Theme {
     static let mute = rgb(0xf2b134)
     static let solo = rgb(0x4aa8ff)
     static let section = rgb(0x4c525d)
+    /// A marker's flag in the ruler and its line down the lanes.
+    static let marker = rgb(0xe6d25c)
+    /// The text in a marker's flag.
+    static let markerText = gray(0.1)
     /// An automation lane's line and points, and the mark of what has one.
     static let automation = rgb(0xf0884a)
     static let automationLane = gray(0.125)

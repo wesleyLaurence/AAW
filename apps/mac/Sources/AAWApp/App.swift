@@ -645,6 +645,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Play or Stop", #selector(SongWindowController.togglePlay(_:)), " ", []),
             item("Return to Start Position", #selector(SongWindowController.returnToStart(_:)), "\r", []),
             item("Loop", #selector(SongWindowController.toggleLoop(_:)), "l", []),
+            .separator(),
+            // A note left where the song is playing, for the agent to read.
+            item("Add Marker", #selector(SongWindowController.addMarker(_:)), "m", []),
+            item("Add Marker and Name It", #selector(SongWindowController.addNamedMarker(_:)), "M", []),
+            item("Delete All Markers", #selector(SongWindowController.deleteAllMarkers(_:))),
         ])
         // The grid of the editor that has the keys, as Ableton's ⌘1 to ⌘4.
         let grid = NSMenu(title: "Grid")
@@ -908,6 +913,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func togglePlay(_ sender: Any?) { model.togglePlay() }
     @objc func returnToStart(_ sender: Any?) { model.returnToStart() }
     @objc func toggleLoop(_ sender: Any?) { model.toggleLoop() }
+    @objc func addMarker(_ sender: Any?) { model.addMarker() }
+    @objc func addNamedMarker(_ sender: Any?) { model.addMarker(ask: true) }
+    @objc func deleteAllMarkers(_ sender: Any?) { model.removeAllMarkers() }
     @objc func zoomIn(_ sender: Any?) { model.zoom(.in) }
     @objc func zoomOut(_ sender: Any?) { model.zoom(.out) }
     @objc func zoomToFit(_ sender: Any?) { model.zoom(.fit) }
@@ -1032,6 +1040,8 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(toggleSnap(_:)):
             item.state = model.snapsToGrid ? .on : .off
             return !typing
+        case #selector(addMarker(_:)), #selector(addNamedMarker(_:)): return !typing
+        case #selector(deleteAllMarkers(_:)): return !model.arrangement.markers.isEmpty && !typing
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
         case #selector(togglePlay(_:)): return !typing
         case #selector(undoEdit(_:)):

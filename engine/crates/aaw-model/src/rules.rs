@@ -876,6 +876,11 @@ pub fn references(p: &Project) -> Result<(), String> {
             return Err(format!("Section {} exceeds session", s.id));
         }
     }
+    for m in &p.markers {
+        if m.at_exact() > length {
+            return Err(format!("Marker {} is past the session's end", m.id));
+        }
+    }
     for t in &p.tracks {
         for pad in t.pads.values() {
             if !p.samples.contains_key(&pad.sample) {
