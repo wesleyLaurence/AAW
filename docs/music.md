@@ -82,7 +82,11 @@ choosing what gives way. `spectrum_db` is the mix and each stem in third
 octaves, and a stem's `resonances` are its peaks that stay while the notes
 move, each with the `freq_hz`, `prominence_db` and `q` an `eq`'s bell takes;
 read `could_be_note` before cutting one, and `daw compare` afterwards for how
-far it fell.
+far it fell. `translation` is what the mix and each stem lose in mono and on a
+small speaker, with the largest in `observations`: a low end that cancels, a
+bass a phone will not play. `daw listen RENDER --write-translation` writes
+`mono.wav` and `small-speaker.wav` for the person to play; a loss can be
+meant, so say what was found before narrowing or driving anything.
 When the person names a song as what the mix should sound like, keep it with
 `daw reference add FILE --name NAME` and read `daw compare RENDER --reference
 NAME` for how the mix differs from it, by section (`daw describe reference`);

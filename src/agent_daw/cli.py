@@ -169,6 +169,12 @@ def parser():
         help="Two of a render's stems, by band and by section, in place of the report "
         "(daw describe listen)",
     )
+    listen.add_argument(
+        "--write-translation",
+        action="store_true",
+        help="Write mono.wav and small-speaker.wav beside the analysis: the mix as "
+        "translation measures it, for a person to hear (daw describe listen)",
+    )
     compare = sub.add_parser(
         "compare",
         help="Compare two renders: actual and loudness-matched deltas; or one "
@@ -270,11 +276,17 @@ def execute(a):
         if a.command == "listen":
             if a.overlap and a.section:
                 raise ValueError("listen takes --overlap A B or --section ID, not both")
+            if a.write_translation and (a.overlap or a.section):
+                raise ValueError(
+                    "--write-translation goes with the whole report, not --overlap or --section"
+                )
             if a.overlap:
                 return perception.overlap_of(a.source, *a.overlap, images=not a.no_images)
             if a.section:
                 return perception.section_of(a.source, a.section, images=not a.no_images)
-            return perception.printed(perception.listen(a.source, images=not a.no_images))
+            return perception.printed(
+                perception.listen(a.source, not a.no_images, a.write_translation)
+            )
         if (a.after is None) == (a.reference is None):
             raise ValueError(
                 "compare takes two renders, or one render and --reference NAME"

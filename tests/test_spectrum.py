@@ -217,7 +217,7 @@ def test_what_the_song_says_decides_whether_a_peak_could_be_a_note(tmp_path):
         groups=[{"id": "kit"}],
         returns=[{"id": "room", "effects": [{"type": "delay", "time_beats": "1/16", "feedback_percent": 0}]}],
     )
-    report, _, _, rings = measured(folder)
+    report, _, _, rings, _ = measured(folder)
 
     def first(name):
         return report["tracks"][name]["audio"]["resonances"][0]

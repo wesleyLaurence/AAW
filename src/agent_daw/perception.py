@@ -16,7 +16,7 @@ import pyloudnorm as pyln
 import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
-from . import overlap, spectrum
+from . import overlap, spectrum, translation
 from .model import atomic_text, beat, digest, frame, hash_matches, load, schedule
 
 VERSION = 1
@@ -346,21 +346,22 @@ def grid_of(folder, manifest, project, x, rate, offset, sections):
 
 
 def code_hash():
-    """One hash of the code that measures: this file, the overlap's and the spectrum's."""
+    """One hash of the code that measures: this file, the overlap's, the
+    spectrum's and the translation checks'."""
     both = hashlib.sha256()
-    for path in (Path(__file__), Path(overlap.__file__), Path(spectrum.__file__)):
+    for path in (Path(__file__), Path(overlap.__file__), Path(spectrum.__file__), Path(translation.__file__)):
         both.update(digest(path).encode())
     return both.hexdigest()
 
 
 def analyze(source):
-    report, x, _, _ = measured(source)
+    report, x, *_ = measured(source)
     return report, x
 
 
 def measured(source):
     """A source's listen report and its audio, with its overlap grid and its
-    stems' resonances, if it has stems."""
+    stems' resonances, if it has stems, and its translation checks."""
     audio_path, folder = resolve(source)
     x, rate = read_audio(audio_path)
     project, manifest, offset, sections = context(folder, x, rate)
@@ -368,6 +369,7 @@ def measured(source):
     rings = (
         spectrum.Resonances(len(x), rate, project, manifest, offset, sections) if folder else None
     )
+    checks = translation.Checks(x, rate, BANDS, integrated)
     report = {
         "schema_version": VERSION,
         "kind": "listen",
@@ -393,6 +395,7 @@ def measured(source):
             "null": "undefined or insufficient signal/duration; never a zero measurement",
             "overlap": overlap.METHOD,
             **spectrum.METHOD,
+            "translation": translation.METHOD,
             "interpretation": "diagnostics only; no musical quality score, and overlap is not a masking diagnosis",
         },
         "dependencies": {
@@ -413,8 +416,11 @@ def measured(source):
             "end_seconds": (offset + b) / rate,
             "audio": measure(x[a:b], rate),
         }
+        checks.section(sec["id"], a, b, x[a:b], report["sections"][sec["id"]]["audio"]["integrated_lufs"])
     if folder:
         for track, stem, actual_hash, verified in stems(folder, manifest, x, rate):
+            # What the stem loses in translation is read beside its measurements.
+            losses = BESIDE.submit(checks.add, track, stem, manifest["tracks"][track])
             rings.add(track, stem)
             report["tracks"][track] = {
                 "kind": manifest["tracks"][track].get("kind", "track"),
@@ -429,8 +435,10 @@ def measured(source):
             }
             if grid:
                 grid.add(track, stem)
+            losses.result()
     report["overlap"] = grid.summary() if grid else None
-    return report, x, grid, rings
+    report["translation"] = checks.summary(report["mix"]["integrated_lufs"])
+    return report, x, grid, rings, checks
 
 
 def plot_listen(report, x, output):
@@ -515,8 +523,8 @@ def plot_listen(report, x, output):
     return str(path.resolve())
 
 
-def listen(source, images=True):
-    return heard(source, images)[0]
+def listen(source, images=True, write_translation=False):
+    return heard(source, images, write_translation)[0]
 
 
 # What a section's measurements hold in the written report and not in the
@@ -553,6 +561,10 @@ def section_of(source, section, images=True):
         **{k: report["sections"][section][k] for k in ("start_seconds", "end_seconds")},
         "third_octave_hz": spectrum.CENTERS,
         "mix": report["sections"][section]["audio"],
+        "translation": {
+            "mono": report["translation"]["mono"] and report["translation"]["mono"]["sections"][section],
+            "small_speaker": report["translation"]["small_speaker"]["sections"][section],
+        },
         "tracks": {
             name: {"kind": track["kind"], "audio": track["sections"][section]}
             for name, track in report["tracks"].items()
@@ -561,10 +573,11 @@ def section_of(source, section, images=True):
     }
 
 
-def heard(source, images=True):
+def heard(source, images=True, write_translation=False):
     """`daw listen`: the report, written beside the audio, with the overlap
-    grid and the stems' resonances."""
-    report, audio, grid, rings = measured(source)
+    grid and the stems' resonances. `write_translation` writes the mix in mono
+    and through the small speaker beside it, for a person to hear."""
+    report, audio, grid, rings, checks = measured(source)
     audio_path, folder = resolve(source)
     root = folder or audio_path.parent
     identity = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()[
@@ -576,6 +589,9 @@ def heard(source, images=True):
         [plot_listen(report, audio, output), spectrum.plot(report, output / "spectrum.png")]
         if images
         else []
+    )
+    report["translation_audio"] = (
+        checks.write(audio, output, sf.info(audio_path).subtype) if write_translation else {}
     )
     report["report_path"] = str((output / "listen.json").resolve())
     atomic_text(
@@ -754,6 +770,7 @@ def compare(before, after, images=True):
     report["overlap"] = overlap.between(
         grid_a, grid_b, a, b, sorted(aligned) if same_timeline else []
     )
+    report["translation"] = translation.between(a["translation"], b["translation"], sorted(aligned))
     report["musical_context_delta"] = {}
     if a["musical_context"] and b["musical_context"]:
         # Returns have stems but schedule no triggers, so they have no context.

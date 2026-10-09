@@ -14,6 +14,7 @@ uv run daw listen projects/my-beat/renders/latest.json
 uv run daw listen projects/my-beat/renders/latest-preview.json --no-images
 uv run daw listen projects/my-beat/renders/latest.json --overlap kick bass
 uv run daw listen projects/my-beat/renders/latest.json --section drop
+uv run daw listen projects/my-beat/renders/latest.json --write-translation
 uv run daw compare projects/my-beat/revisions/before-render.json projects/my-beat/renders/latest.json
 ```
 
@@ -36,6 +37,7 @@ inside the render directory (beside the audio for standalone files). It generate
 analysis directory; aligned timelines also produce `comparison.png`. Paths are
 returned in `report_path` and `images`. Use `--no-images` to omit PNG generation.
 These commands never modify the audio, project, render report or latest pointers.
+`--write-translation` adds two files of its own beside the report and changes none.
 Analysis reports record dependencies, analyzer code hash and source hashes.
 
 A render of two stems or more also has `overlap`: the pairs of stems that put
@@ -51,6 +53,14 @@ that stay where they are while the notes move, each a frequency, a height and a
 `daw listen RENDER --section ID` prints one section's in place of the report.
 `daw compare` has their change. The fields and the method are in
 [spectrum-detail.md](spectrum-detail.md).
+
+The report also has `translation`: what the mix, each of its sections and each
+stem loses summed to mono, over all frequencies and in each of the seven
+bands, and through the band a small speaker plays, with the largest losses in
+words. `daw listen RENDER --write-translation` writes `mono.wav` and
+`small-speaker.wav` beside the report, the one audio these commands write, and
+`daw compare` has each loss before and after. The fields and the method are in
+[translation-checks.md](translation-checks.md).
 
 ## Measurements
 
@@ -157,8 +167,9 @@ pattern occurrence maps for aligned regions.
 ## Boundaries and verification
 
 It does not infer taste, key, tempo or transients, overlap between stems
-is not masking as an ear does it, and a resonance is a measured peak, not a
-fault. It does
+is not masking as an ear does it, a resonance is a measured peak, not a
+fault, and the small speaker is a filter that stands in for a phone, not a
+model of one. It does
 not introduce effects or change rendering semantics. Analysis currently rereads
 and measures the saved audio each time; there is no incremental analysis cache.
 Long songs and many stems take longer than a section preview. One measurement's
@@ -171,4 +182,5 @@ stereo polarity, one-sided stereo, short files, 44.1/48 kHz, localized arrangeme
 changes, preview alignment, snapshot independence, artifact tampering, legacy
 manifests and CLI JSON/PNG output. Overlap has tests of its own, on generated
 songs whose contests are known, and so has the finer spectrum, on noise, a tone
-and a Synth's line through a bell.
+and a Synth's line through a bell, and translation, on channels that are the
+same, unrelated and turned over, and on a sine bass.

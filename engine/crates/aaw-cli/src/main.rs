@@ -153,7 +153,9 @@ enum Top {
     Reference(Forwarded),
     /// Measure a saved render or WAV; writes analysis JSON and images. With
     /// --section ID, one section with its third octaves and resonances; with
-    /// --overlap A B, two of its stems by band and section (daw describe listen).
+    /// --overlap A B, two of its stems by band and section; with
+    /// --write-translation, the mix in mono and through a small speaker's
+    /// band as two files to hear (daw describe listen).
     #[command(disable_help_flag = true)]
     Listen(Forwarded),
     /// Compare two renders: actual and loudness-matched differences; or a
