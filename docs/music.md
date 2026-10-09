@@ -78,7 +78,7 @@ the operation needs. A refused edit names the field it meant and the fix.
 | Effects, groups or return buses | `daw describe effects`; a drum bus is `daw group add PROJECT drums --tracks kick,snare,hats`, with effects, a level and sends of its own; a chain worth keeping is `daw rack save PROJECT tracks.T NAME`, and `daw rack load` adds it to a chain in any song (`daw rack list`); track stems include inserts but exclude return contributions and master effects; groups and returns have separate stems, and a grouped track's stem is before its group |
 | Automation | `daw describe automation`; give automated effects an `id` and ramp levels over a few milliseconds |
 | Repeat, insert, remove or empty whole bars across the tracks | `daw range copy\|insert\|delete\|clear` and `daw section duplicate\|move\|remove --with-content`; `daw describe edit` under `ranges` |
-| Finished-song edits from timecodes | Follow [song-edit](../.claude/skills/song-edit/SKILL.md); load its CLI topics before the relevant step |
+| Finished-song edits from timecodes | `daw describe edit`, `beats`, `joins` and `export`, each before its step; follow the person's own skill for the kind of edit when one is listed |
 
 ## Check and hand off
 

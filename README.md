@@ -218,10 +218,9 @@ play is refused; see "Format" in [docs/architecture.md](docs/architecture.md).
 `daw samples beats` maps a whole song: its tempo, every beat, the downbeats with
 their alternatives, where the arrangement changes, the beats near a timecode and a
 click audition to check the grid by ear. See [docs/features/beat-map.md](docs/features/beat-map.md).
-To edit a finished song from timecodes, the `song-edit` skill in `.claude/skills/`
-says what to do, and `daw describe edit`, `beats`, `joins` and `export` say how.
-Personal skills and the sounds they reuse stay out of Git; see
-[docs/features/skills.md](docs/features/skills.md).
+To edit a finished song from timecodes, `daw describe edit`, `beats`, `joins` and
+`export` say how. A skill for a kind of edit is personal and stays out of Git, with
+the sounds it reuses; see [docs/features/skills.md](docs/features/skills.md).
 A track's `audio` lists audio clips, parts of a sample file placed on beats, and
 `daw audio` adds, moves, cuts, splits, trims and crossfades them: an edit of a song is one
 clip with ranges cut out. See [docs/features/audio-clips.md](docs/features/audio-clips.md).

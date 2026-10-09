@@ -41,7 +41,7 @@ Built:
 | [timeline](features/timeline.md) | `daw timeline`: beats and seconds, end alignment, fitting the length |
 | [join checks](features/join-checks.md) | `daw joins`: each join of an edited song, and the file's length |
 | [export](features/export.md) | `daw export`: a named WAV, AAC or MP3 file from a render |
-| [skills](features/skills.md) | Where a personal skill and its sounds live, and the tracked `song-edit` skill |
+| [skills](features/skills.md) | Where a skill and its sounds live, out of Git, and what goes in one |
 | [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
 | [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
 | [the browser](features/browser.md) | Samples, instruments, effects and shared folders at the window's left |

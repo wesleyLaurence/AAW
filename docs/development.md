@@ -66,11 +66,11 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
 - Keep personal music out of this repository: arrangements, samples, source manifests,
   creative briefs, handoff notes, revisions, renders, exports, and song-specific scripts.
 - Store creative work under ignored `projects/` or `content/`, or outside the repository.
-- A personal skill is personal content like a song: who asks, which sounds, the
-  limits, the file names. Keep it in ignored `.claude/skills/NAME/` or `.agents/skills/NAME/`, or
-  in your own skills folder. Only named generic skills are allowed into Git. A skill
-  names `daw` commands and paths under `projects/` or `content/`, never an absolute
-  library path. See [skills](features/skills.md).
+- A skill is personal content like a song: who asks, which sounds, the limits, the
+  file names. Keep it in ignored `.claude/skills/NAME/` or `.agents/skills/NAME/`, or
+  in your own skills folder; this repository tracks none. A skill names `daw`
+  commands and paths under `projects/` or `content/`, never an absolute library
+  path. See [skills](features/skills.md).
 - Put song-specific automation inside its ignored project directory. Never force-add
   ignored content or embed personal compositions in tooling, tests, or documentation.
 - Generic examples and test fixtures must be independent of personal songs and private
