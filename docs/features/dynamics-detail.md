@@ -3,8 +3,8 @@
 Status: implemented (D103). `daw listen` says three things about how a mix
 moves: how far its loudness ranges and where it is loudest, how hard each
 track's hits land at its own stem, through its group and through the mix, and
-how much each compressor and limiter takes off in each section. It adds to
-[perception](perception.md) and to the render's report.
+how much each compressor, limiter and clipper takes off in each section. It
+adds to [perception](perception.md) and to the render's report.
 
 ```sh
 daw render projects/demo                                     # each device's reduction by section, in the reply
@@ -105,8 +105,9 @@ with a note, which repitches a sample, names no pad.
 
 ## Reduction by section
 
-The engine's render keeps each compressor's and limiter's reduction between
-the edges of the song's sections as well as over the whole of it. Each such
+The engine's render keeps each compressor's, limiter's and clipper's
+reduction between the edges of the song's sections as well as over the whole
+of it. Each such
 device's entry in `report.json`, under a track's, group's or return's
 `effects`, a Synth track's `instrument_effects` or `master_effects`, gains
 `sections`, with `max_gain_reduction_db`, `mean_gain_reduction_db` and
@@ -116,8 +117,9 @@ it in its entry. A song without sections has the whole-song fields only.
 Sections may overlap: the timeline is cut at every section's edges, and a
 section's reduction is put together from the pieces inside it.
 
-`daw listen` copies the compressors and limiters into `effects`, so one report
-holds the levels and what the devices did to them: the master's under `master`
+`daw listen` copies the compressors, limiters and clippers into `effects`, so
+one report holds the levels and what the devices did to them: the master's
+under `master`
 and the others under `tracks`, by track, group or return, in the chain's order
 with a Synth patch's devices first.
 
@@ -149,8 +151,9 @@ reads 0 in the first half and 5.7 dB, 76% of the time over 1 dB, in the second.
   both have. A slower attack shows as `punch_db` rising, and a duck on the bass
   as the kick's `punch_in_mix_db` rising. It is `null` when either render
   schedules nothing on the track;
-- `effects` has `devices`, each compressor and limiter both renders have, with
-  each reduction before and after, whole and by section, the largest change
+- `effects` has `devices`, each compressor, limiter and clipper both renders
+  have, with each reduction before and after, whole and by section, the
+  largest change
   first; and `added` and `removed`, the paths of those only one render has. A
   device is matched by its `id`, or by its place among its channel's devices
   of its type when it has none, so a device that moved in its chain is still

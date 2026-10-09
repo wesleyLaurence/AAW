@@ -2066,6 +2066,19 @@ pub struct Limiter {
     pub bypass: bool,
 }
 
+/// A clipper: the signal driven by `drive_db` into a ceiling no sample
+/// passes, with no look-ahead, the curve bending from `knee_db` under it and
+/// applied at `oversample` times the song's rate.
+#[derive(Clone, Debug)]
+pub struct Clipper {
+    pub id: Option<String>,
+    pub ceiling_db: f64,
+    pub drive_db: f64,
+    pub knee_db: f64,
+    pub oversample: i64,
+    pub bypass: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct Delay {
     pub id: Option<String>,
@@ -2194,6 +2207,7 @@ pub enum Effect {
     Eq(Eq),
     Compressor(Compressor),
     Limiter(Limiter),
+    Clipper(Clipper),
     Delay(Delay),
     Reverb(Reverb),
     Chorus(Chorus),
@@ -2202,7 +2216,7 @@ pub enum Effect {
     Analyzer(Analyzer),
 }
 
-pub const EFFECT_TYPES: [&str; 10] = ["filter", "eq", "compressor", "limiter", "delay", "reverb", "chorus", "saturation", "utility", "analyzer"];
+pub const EFFECT_TYPES: [&str; 11] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "utility", "analyzer"];
 
 impl PartialEq for Effect {
     /// Two effects are equal when the song would write them the same.
@@ -2218,6 +2232,7 @@ impl Effect {
             Effect::Eq(_) => "eq",
             Effect::Compressor(_) => "compressor",
             Effect::Limiter(_) => "limiter",
+            Effect::Clipper(_) => "clipper",
             Effect::Delay(_) => "delay",
             Effect::Reverb(_) => "reverb",
             Effect::Chorus(_) => "chorus",
@@ -2233,6 +2248,7 @@ impl Effect {
             Effect::Eq(e) => e.id.as_deref(),
             Effect::Compressor(e) => e.id.as_deref(),
             Effect::Limiter(e) => e.id.as_deref(),
+            Effect::Clipper(e) => e.id.as_deref(),
             Effect::Delay(e) => e.id.as_deref(),
             Effect::Reverb(e) => e.id.as_deref(),
             Effect::Chorus(e) => e.id.as_deref(),
@@ -2248,6 +2264,7 @@ impl Effect {
             Effect::Eq(e) => e.bypass,
             Effect::Compressor(e) => e.bypass,
             Effect::Limiter(e) => e.bypass,
+            Effect::Clipper(e) => e.bypass,
             Effect::Delay(e) => e.bypass,
             Effect::Reverb(e) => e.bypass,
             Effect::Chorus(e) => e.bypass,
@@ -2305,7 +2322,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'delay', 'reverb', 'chorus', 'saturation', 'utility', 'analyzer'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'utility', 'analyzer'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2325,6 +2342,7 @@ impl Effect {
                 "makeup_db", "sidechain", "bypass",
             ],
             "limiter" => &["type", "id", "ceiling_db", "release_ms", "lookahead_ms", "bypass"],
+            "clipper" => &["type", "id", "ceiling_db", "drive_db", "knee_db", "oversample", "bypass"],
             "delay" => &[
                 "type", "id", "time_beats", "feedback_percent", "lowcut_hz", "highcut_hz",
                 "ping_pong", "mix_percent", "bypass",
@@ -2412,6 +2430,23 @@ impl Effect {
                         ceiling_db: ceiling_db?,
                         release_ms: release_ms?,
                         lookahead_ms: lookahead_ms?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+            "clipper" => {
+                let ceiling_db = float(ctx, "ceiling_db", -1.0, Bounds::ge_le("-60", "24"));
+                let drive_db = float(ctx, "drive_db", 0.0, Bounds::ge_le("0", "36"));
+                let knee_db = float(ctx, "knee_db", 0.0, Bounds::ge_le("0", "24"));
+                let oversample = f.opt(ctx, "oversample", 4, |c, x| v::literal_int(c, x, &[1, 2, 4]));
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    Some(Effect::Clipper(Clipper {
+                        id: id?,
+                        ceiling_db: ceiling_db?,
+                        drive_db: drive_db?,
+                        knee_db: knee_db?,
+                        oversample: oversample?,
                         bypass: bypass?,
                     }))
                 })()
@@ -2597,6 +2632,12 @@ impl Effect {
                 o.float("ceiling_db", e.ceiling_db, -1.0);
                 o.float("release_ms", e.release_ms, 60.0);
                 o.float("lookahead_ms", e.lookahead_ms, 3.0);
+            }
+            Effect::Clipper(e) => {
+                o.float("ceiling_db", e.ceiling_db, -1.0);
+                o.float("drive_db", e.drive_db, 0.0);
+                o.float("knee_db", e.knee_db, 0.0);
+                o.int("oversample", e.oversample, 4);
             }
             Effect::Delay(e) => {
                 o.req("time_beats", e.time_beats.to_value());

@@ -10,7 +10,7 @@ reads songs through `aaw-py`.
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule and what each track plays, the schema `daw describe` prints, the warnings `daw check` gives |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the ten effects, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the eleven effects, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
@@ -52,11 +52,11 @@ project's folder or the song file in it. It implements:
 | `daw describe [start\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|check\|samples\|beats\|joins\|export\|listen\|reference] [--schema]` | The authoring contract: without a topic, the topics a line each; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file. `--schema` adds the topic's JSON Schema, and with no topic prints the whole song's |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |
-| `daw samples ...`, `daw reference ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, with each sample measured for what it sounds like, a search sorted and filtered by that and the samples nearest a chosen one (`daw samples search --sort punch`, `daw samples like SAMPLE`; `daw describe samples`), the references a mix is compared with (`daw compare RENDER --reference NAME`), perception, with third octaves, each stem's resonances (`daw listen RENDER --section ID` for one section's) where two stems overlap (`daw listen RENDER --overlap A B` for one pair), what the mix loses in mono and on a small speaker (`--write-translation` for the two as files), and the loudness range, how hard each track's hits land and what each compressor and limiter took off by section (`daw describe listen`), `inspect` with measured root notes and the model's warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
+| `daw samples ...`, `daw reference ...`, `daw listen`, `daw compare`, `daw check`, `daw timeline`, `daw joins`, `daw export` | Run in Python, with the same arguments and output: the sample library, with each sample measured for what it sounds like, a search sorted and filtered by that and the samples nearest a chosen one (`daw samples search --sort punch`, `daw samples like SAMPLE`; `daw describe samples`), the references a mix is compared with (`daw compare RENDER --reference NAME`), perception, with third octaves, each stem's resonances (`daw listen RENDER --section ID` for one section's) where two stems overlap (`daw listen RENDER --overlap A B` for one pair), what the mix loses in mono and on a small speaker (`--write-translation` for the two as files), and the loudness range, how hard each track's hits land and what each compressor, limiter and clipper took off by section (`daw describe listen`), `inspect` with measured root notes and the model's warnings, the timeline in beats and seconds, the checks of an edit's joins, and a named deliverable from a render. The binary uses the checkout's `.venv/bin/python`, or `AAW_PYTHON` |
 | `daw audio add\|move\|cut\|split\|trim\|crossfade` | Audio clips on a track: parts of a sample file placed on beats and moved to another beat or track, a range removed with the gap closed, and the fades of a join |
 | `daw model PATH...` | Canonical YAML and fingerprints, or validation errors |
 | `daw schedule PROJECT` | Every hit's start frame, track, pad and release frame |
-| `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read, with each compressor's and limiter's reduction over the song and in each section; `--track` takes a track, a group or a return |
+| `daw render PROJECT [--output DIR] [--track T] [--section S]` | Mix, stems, snapshot and `report.json`, which `daw listen` and `daw compare` read, with each compressor's, limiter's and clipper's reduction over the song and in each section; `--track` takes a track, a group or a return |
 | `daw host PROJECT` | Runs a session host until interrupted or `daw close` |
 | `daw play PROJECT [--from BEAT] [--seconds S] [--buffer FRAMES]` | Plays through the default output; see below |
 | `daw play PROJECT --benchmark` | Times the playback path in buffer-sized blocks without a device, and a compile, a recompile, building a renderer and each track's waveform peaks |
@@ -78,7 +78,7 @@ project's folder or the song file in it. It implements:
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
-repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the ten effects on tracks, groups, returns
+repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the eleven effects on tracks, groups, returns
 and the master, sidechains, pre- and post-fader sends, automation lanes, track
 and group gain, pan, mute and solo, master gain and the end fade. `render` writes the
 mix, a stem for each track, group and return, the snapshot and `report.json` with what
@@ -98,7 +98,9 @@ stream is cut into blocks, and processing never allocates.
   Butterworth filters designed as `scipy.signal.butter` designs them, RBJ
   equalizer bands (a pass band the Butterworth sections of its slope with the
   band's q on the last), the state-variable filter that automation moves, the
-  compressor, the look-ahead limiter and the tempo-synced delay. A lane whose
+  compressor, the look-ahead limiter and the tempo-synced delay. The clipper
+  (`clipper.rs`) is the engine's own: a curve under a ceiling, run at up to
+  four times the rate with only what it takes off lowpassed back. A lane whose
   points share one value is that static value. An equalizer on a track, a
   group, a return or the master writes its output into a ring the app reads
   for the spectrum under its curve (`spectrum`), kept beside the program
@@ -116,7 +118,8 @@ stream is cut into blocks, and processing never allocates.
   which comes from a generator of its own (D40, D44), so a tail is statistically
   the same and not sample-identical. Its convolution is non-uniformly
   partitioned and adds no latency.
-- **Latency.** Only the limiter delays its input. A track keyed by a source
+- **Latency.** The limiter delays its input by its look-ahead and an
+  oversampled clipper by its filters' 16 frames. A track keyed by a source
   with latency renders its voices that much later, tracks are delayed to the
   slowest before their faders and sends, a grouped track early by its group's
   latency so that the group's output lands with the rest, and the output

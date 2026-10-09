@@ -1,4 +1,4 @@
-"""Filter, eq, compressor and limiter, tested with generated audio.
+"""Filter, eq, compressor, limiter and clipper, tested with generated audio.
 
 An effect chain is run on its own by rendering a song that plays the test signal
 once on a track with those effects; the track's stem is the chain's output.
@@ -136,12 +136,74 @@ def test_limiter_ceiling_latency_and_transparency(tmp_path):
     assert np.array_equal(y, quiet.astype(np.float32))
 
 
+def test_clipper_ceiling_knee_oversampling_and_transparency(tmp_path):
+    ceiling = 10 ** (-1 / 20)
+    x = tone(100, amp=2.0)
+    hard = {"type": "clipper", "ceiling_db": -1, "oversample": 1}
+    y, report = run_chain(tmp_path / "hard", [hard], x)
+    # Each sample over the ceiling is the ceiling, and the rest as they came.
+    assert np.allclose(y, np.clip(x, -ceiling, ceiling), atol=1e-7)
+    # What it took off each sample: 6.02 dBFS is cut 7.02 dB, and a sine of
+    # twice full scale is 1 dB over this ceiling, at full scale, for two thirds of the time.
+    taken = np.maximum(20 * np.log10(np.maximum(abs(x[:, 0]), 1e-9) / ceiling), 0)
+    assert report == [
+        {
+            "type": "clipper",
+            "latency_frames": 0,
+            "max_gain_reduction_db": pytest.approx(7.02, abs=0.01),
+            "mean_gain_reduction_db": pytest.approx(taken.mean(), abs=0.001),
+            "fraction_over_1db_reduction": pytest.approx(2 / 3, abs=0.001),
+        }
+    ]
+    # The drive is a gain into the ceiling.
+    driven, _ = run_chain(tmp_path / "driven", [hard | {"drive_db": 12}], x / 10 ** (12 / 20))
+    assert np.allclose(driven, y, atol=1e-6)
+    # With a knee the curve leaves the line 6 dB under the ceiling and bends towards it.
+    soft, _ = run_chain(tmp_path / "soft", [hard | {"knee_db": 6}], x)
+    start = ceiling * 10 ** (-6 / 20)
+    over = np.maximum(abs(x) - start, 0)
+    bent = np.sign(x) * np.where(abs(x) <= start, abs(x), start + (ceiling - start) * np.tanh(over / (ceiling - start)))
+    assert np.allclose(soft, bent, atol=1e-6)
+    # Oversampled, which it is unless told otherwise, it is 16 frames late,
+    # holds the ceiling all the same and renders alike in any block size.
+    spec = {"type": "clipper", "ceiling_db": -1}
+    y, report = run_chain(tmp_path / "over", [spec], x, block_size=127)
+    assert report[0]["latency_frames"] == 16 and report[0]["max_gain_reduction_db"] == pytest.approx(7.02, abs=0.01)
+    assert np.max(abs(y)) <= np.float32(ceiling) and np.max(abs(y)) > 0.99 * ceiling
+    assert np.array_equal(y, run_chain(tmp_path / "over-b", [spec], x, block_size=4096)[0])
+    # Under the ceiling the signal is the signal, its latency made up for.
+    quiet = tone(100, amp=0.3)
+    y, report = run_chain(tmp_path / "quiet", [spec], quiet)
+    assert np.array_equal(y, quiet.astype(np.float32))
+    assert report[0]["max_gain_reduction_db"] == 0
+    # A lane moves the ceiling: the second half is held 6 dB lower.
+    y, _ = run_chain(tmp_path / "lane", [hard], x, {0: {"ceiling_db": [(0, -1), (1, -1, "hold"), (1, -7)]}})
+    assert np.max(abs(y[: SR // 2])) == pytest.approx(ceiling, abs=1e-6)
+    assert np.max(abs(y[SR // 2 :])) == pytest.approx(10 ** (-7 / 20), abs=1e-6)
+
+
+def test_master_clipper_allows_hot_mix(beat, tmp_path):
+    path, data = beat
+    data["session"]["master_gain_db"] = 12
+    data["master"] = {"effects": [{"type": "clipper", "ceiling_db": -1}]}
+    save(data, path)
+    report = render(path, tmp_path / "clipped")
+    assert report["mix"]["peak_dbfs"] <= -1 + 1e-4
+    assert report["master_effects"][0]["max_gain_reduction_db"] > 3
+    # What follows a clipper is not held: the refusal names it.
+    data["master"]["effects"].append({"type": "utility", "gain_db": 6})
+    save(data, path)
+    with pytest.raises(ValueError, match="what follows the master clipper"):
+        render(path, tmp_path / "hot")
+
+
 def test_chain_block_partition_invariance(tmp_path):
     specs = [
         highpass(80, 24),
         {"type": "eq", "bands": [{"shape": "bell", "freq_hz": 300, "gain_db": -4}]},
         {"type": "limiter", "ceiling_db": -3, "lookahead_ms": 2},
         {"type": "compressor", "threshold_db": -18, "sidechain": "kick"},
+        {"type": "clipper", "ceiling_db": -5, "knee_db": 3, "drive_db": 2},
         {"type": "limiter", "ceiling_db": -6},
     ]
     rng = np.random.default_rng(3)

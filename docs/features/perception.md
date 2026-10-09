@@ -65,8 +65,8 @@ words. `daw listen RENDER --write-translation` writes `mono.wav` and
 The mix and each section also have `loudness_range_lu`, `max_short_term_lufs`
 and `max_momentary_lufs`, read by the analyzer's meter; each track has `hits`,
 how hard the hits the song schedules on it land at its stem, at its group's
-and in the mix; and `effects` lists each compressor and limiter with what it
-took off over the song and in each section, from the render's report.
+and in the mix; and `effects` lists each compressor, limiter and clipper with
+what it took off over the song and in each section, from the render's report.
 `daw compare` has each of them before and after. The fields and the method
 are in [dynamics-detail.md](dynamics-detail.md).
 

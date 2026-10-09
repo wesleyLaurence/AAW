@@ -642,6 +642,7 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
@@ -662,6 +663,9 @@
               },
               {
                 "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
               },
               {
                 "$ref": "#/$defs/Delay"
@@ -931,6 +935,7 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
@@ -951,6 +956,9 @@
               },
               {
                 "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
               },
               {
                 "$ref": "#/$defs/Delay"
@@ -1068,6 +1076,7 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
@@ -1088,6 +1097,9 @@
               },
               {
                 "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
               },
               {
                 "$ref": "#/$defs/Delay"
@@ -1738,6 +1750,7 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
@@ -1758,6 +1771,9 @@
               },
               {
                 "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
               },
               {
                 "$ref": "#/$defs/Delay"
@@ -2227,6 +2243,7 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
@@ -2246,6 +2263,9 @@
               },
               {
                 "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
               },
               {
                 "$ref": "#/$defs/Delay"
@@ -2452,6 +2472,7 @@
                 "eq": "#/$defs/Eq",
                 "filter": "#/$defs/Filter",
                 "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
@@ -2472,6 +2493,9 @@
               },
               {
                 "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
               },
               {
                 "$ref": "#/$defs/Delay"
@@ -2761,6 +2785,70 @@
         "type"
       ],
       "title": "Analyzer",
+      "type": "object"
+    },
+    "Clipper": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "clipper",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "ceiling_db": {
+          "default": -1,
+          "maximum": 24,
+          "minimum": -60,
+          "title": "Ceiling Db",
+          "type": "number"
+        },
+        "drive_db": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": 0,
+          "title": "Drive Db",
+          "type": "number"
+        },
+        "knee_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": 0,
+          "title": "Knee Db",
+          "type": "number"
+        },
+        "oversample": {
+          "default": 4,
+          "enum": [
+            1,
+            2,
+            4
+          ],
+          "title": "Oversample",
+          "type": "integer"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Clipper",
       "type": "object"
     }
   },

@@ -5,6 +5,7 @@
 
 use crate::biquad::{butter, sections, Cascade};
 use crate::chorus::Chorus;
+use crate::clipper::Clipper;
 use crate::delay::Delay;
 use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reductions};
 use crate::envelope::{Envelope, Knob, Param};
@@ -94,6 +95,10 @@ impl Plan {
                 latency = Limiter::latency(l.lookahead_ms, rate as f64);
                 hash(("limiter", latency))
             }
+            Effect::Clipper(c) => {
+                latency = Clipper::latency(c.oversample);
+                hash(("clipper", c.oversample))
+            }
             Effect::Delay(d) => {
                 let cut = |hz: Option<f64>| hz.is_some_and(|hz| hz != 0.0);
                 hash(("delay", delay_frames(d, tempo, rate), cut(d.lowcut_hz), cut(d.highcut_hz), d.ping_pong))
@@ -143,6 +148,7 @@ pub enum Device {
     Moving(Svf),
     Compressor(Compressor),
     Limiter(Limiter),
+    Clipper(Clipper),
     Delay(Delay),
     Reverb(Reverb),
     Chorus(Chorus),
@@ -227,6 +233,13 @@ impl Unit {
                 ))
             }
             Effect::Limiter(l) => Device::Limiter(Limiter::new(l.ceiling_db, l.release_ms, l.lookahead_ms, rate)),
+            Effect::Clipper(c) => Device::Clipper(Clipper::new(
+                c.oversample,
+                knob("ceiling_db", c.ceiling_db),
+                knob("drive_db", c.drive_db),
+                knob("knee_db", c.knee_db),
+                max_block,
+            )),
             Effect::Delay(d) => Device::Delay(Delay::new(
                 delay_frames(d, plan.tempo, plan.rate),
                 d.lowcut_hz,
@@ -287,6 +300,7 @@ impl Unit {
             Device::Moving(d) => d.process(x, clock),
             Device::Compressor(d) => d.process(x, key, clock),
             Device::Limiter(d) => d.process(x, clock),
+            Device::Clipper(d) => d.process(x, clock),
             Device::Delay(d) => d.process(x, clock),
             Device::Reverb(d) => d.process(x, clock),
             Device::Chorus(d) => d.process(x, clock),
@@ -312,6 +326,7 @@ impl Unit {
             (Device::Moving(new), Device::Moving(was)) => new.take_over(was),
             (Device::Compressor(new), Device::Compressor(was)) => new.take_over(was),
             (Device::Limiter(new), Device::Limiter(was)) => new.take_over(was),
+            (Device::Clipper(new), Device::Clipper(was)) => new.take_over(was),
             (Device::Delay(new), Device::Delay(was)) => new.take_over(was),
             (Device::Reverb(new), Device::Reverb(was)) => new.take_over(was),
             (Device::Chorus(new), Device::Chorus(was)) => new.take_over(was),
@@ -321,21 +336,23 @@ impl Unit {
         }
     }
 
-    /// Gain reduction so far, for a compressor or limiter.
+    /// Gain reduction so far, for a compressor, a limiter or a clipper.
     pub fn reduction(&self) -> Option<&Reductions> {
         match &self.device {
             Device::Compressor(d) => Some(&d.reduction),
             Device::Limiter(d) => Some(&d.reduction),
+            Device::Clipper(d) => Some(&d.reduction),
             _ => None,
         }
     }
 
-    /// Has a compressor or limiter measure its reduction between these
+    /// Has a compressor, a limiter or a clipper measure its reduction between these
     /// timeline frames apart, for a render's sections.
     pub fn split_reduction(&mut self, edges: &[i64]) {
         match &mut self.device {
             Device::Compressor(d) => d.reduction.split(edges),
             Device::Limiter(d) => d.reduction.split(edges),
+            Device::Clipper(d) => d.reduction.split(edges),
             _ => {}
         }
     }

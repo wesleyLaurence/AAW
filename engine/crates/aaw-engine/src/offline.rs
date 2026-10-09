@@ -85,7 +85,7 @@ fn engine_hash() -> Result<String, String> {
     Ok(hex(&Sha256::digest(&bytes)))
 }
 
-/// A compressor's or limiter's reduction over some frames, as the report
+/// A compressor's, limiter's or clipper's reduction over some frames, as the report
 /// names it.
 fn reduction(r: &Reduction) -> Vec<(&'static str, Value)> {
     vec![
@@ -96,7 +96,7 @@ fn reduction(r: &Reduction) -> Vec<(&'static str, Value)> {
 }
 
 /// A device's entry in the report, as `Device.report`: its ID if the song
-/// gives it one, and a compressor's or limiter's reduction over the song and
+/// gives it one, and a compressor's, limiter's or clipper's reduction over the song and
 /// over each of its `sections` that holds a frame.
 fn device_report(d: &DeviceReport, effect: &Effect, sections: &[&str]) -> Value {
     let mut out = vec![("type", Value::str(d.kind))];
@@ -138,9 +138,15 @@ fn clipped(p: &Project, peak: f64, names: &[(&str, StemKind)], peaks: &[f64]) ->
         fixes.push(format!("`{}.{name}.gain_db`", kind.list()));
     }
     fixes.push("`session.master_gain_db`".to_string());
-    let limited = p.master.effects.iter().any(|e| e.kind() == "limiter");
-    let fix = if limited {
-        format!("lower {}, or what follows the master limiter", fixes.join(" or "))
+    // A limiter, or a clipper with its ceiling under full scale, holds the
+    // mix under it, so what clips comes after it.
+    let held = p.master.effects.iter().rev().find(|e| match e {
+        Effect::Limiter(l) => !l.bypass,
+        Effect::Clipper(c) => !c.bypass && c.ceiling_db < 0.0,
+        _ => false,
+    });
+    let fix = if let Some(held) = held {
+        format!("lower {}, or what follows the master {}", fixes.join(" or "), held.kind())
     } else {
         format!("lower {}, or add a limiter: daw effect add PROJECT master --type limiter", fixes.join(" or "))
     };
@@ -196,7 +202,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     let frames = (last - first).max(0) as usize;
     let names = program.stems();
     let mut renderer = Renderer::new(program.clone(), 0, opts.block_size);
-    // Each compressor and limiter says what it took off in each section.
+    // Each compressor, limiter and clipper says what it took off in each section.
     let spans: Vec<(i64, i64)> = p
         .sections
         .iter()

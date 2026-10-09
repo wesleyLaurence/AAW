@@ -60,6 +60,7 @@ render with and without it and use `daw compare`.
 | `eq` | `bands` (1–16) of `shape` bell/low_shelf/high_shelf/highpass/lowpass, `freq_hz`, `gain_db` ±24 (0 unless given), `q`, `slope_db_per_octave` 12/24/36/48 for a pass ([parametric-eq.md](parametric-eq.md)) |
 | `compressor` | `threshold_db`, `ratio` 1–20, `attack_ms`, `release_ms`, `knee_db`, `makeup_db`, `sidechain` |
 | `limiter` | `ceiling_db` −24…−0.1, `release_ms`, `lookahead_ms` 0.5–20 |
+| `clipper` | `ceiling_db` −60…24, `drive_db` 0–36, `knee_db` 0–24, `oversample` 1/2/4 ([clipper.md](clipper.md)) |
 | `delay` | `time_beats` (0–16, fractions allowed), `feedback_percent` 0–95, `lowcut_hz`, `highcut_hz`, `ping_pong`, `mix_percent` |
 | `reverb` | `decay_seconds` 0.1–12, `predelay_ms` 0–250, `damping_hz` 500–20000, `lowcut_hz` 20–2000, `width_percent`, `mix_percent`, `seed` |
 | `chorus` | `rate_hz` 0.05–10, `depth_ms` 0–20, `delay_ms` 1–40, `mix_percent` (50 unless given) |
@@ -97,6 +98,17 @@ render with and without it and use `daw compare`.
   declared latency that the renderer compensates exactly: material below the
   ceiling passes through bit-identical. The estimated true peak in the report can
   still exceed the ceiling slightly. Leave some margin below 0 dBFS.
+- **clipper**: the signal driven by `drive_db` into a ceiling, added October
+  9, 2026: no output sample exceeds `ceiling_db`, each channel and each
+  sample cut by its own level, with no look-ahead and no release. `knee_db`
+  is how far under the ceiling the curve starts to bend, 0 a hard clip.
+  `oversample`, 4 unless given, runs the curve at that many times the song's
+  rate and lowpasses what it took off, so that less folds back under half
+  the rate; the signal itself goes through no filter, and under the knee it
+  passes bit-identical. Oversampled it is 16 frames late, which the renderer
+  compensates as it does the limiter's look-ahead, and a last clip at the
+  song's rate holds the ceiling. Its ceiling goes over full scale, since it
+  is set against the level that reaches it. See [clipper.md](clipper.md).
 - **delay**: feedback delay synced to the session tempo. `time_beats` is the
   spacing of the echoes in quarter-note beats (`3/4` is a dotted eighth) and must
   come to between 1 ms and 10 s at the session tempo. Each repeat is
@@ -198,8 +210,8 @@ that started before the section are kept.
 Each report entry under `tracks` has a `kind`: `track` or `return`. Tracks list
 their `events`; returns list their `senders`. Each entry has an `effects` list and
 the report has `master_effects`. Each effect entry gives the effect `type` and
-its `latency_frames`, and its `id` if the song gives it one. Compressors and
-limiters add `max_gain_reduction_db`, `mean_gain_reduction_db` and
+its `latency_frames`, and its `id` if the song gives it one. Compressors,
+limiters and clippers add `max_gain_reduction_db`, `mean_gain_reduction_db` and
 `fraction_over_1db_reduction` over the rendered timeline, and the same three
 under `sections` for each of the song's sections
 ([dynamics in detail](dynamics-detail.md)). Bypassed effects show `bypass: true`. These describe what the processor
@@ -226,10 +238,10 @@ least its own length in, with the larger blocks' work spread over the block that
 follows; nothing waits for a block, so there is no latency, and the reverb counts
 its own input, so the caller's blocks never change its arithmetic.
 
-Only the limiter has latency. The engine aligns it by delay: tracks are delayed
-to the slowest before their faders and sends, a track keyed by a source with
-latency renders its voices that much later, and a render runs that many frames
-longer and places every stem on the timeline.
+Only the limiter and an oversampled clipper have latency. The engine aligns it
+by delay: tracks are delayed to the slowest before their faders and sends, a
+track keyed by a source with latency renders its voices that much later, and a
+render runs that many frames longer and places every stem on the timeline.
 
 The devices were ported from the Python engine operation for operation and held
 to it until it was retired (decisions D34, D40 and D44): over generated songs
@@ -238,13 +250,15 @@ was 4e-9, and reverb tails agreed in decay time, octave levels and energy.
 
 Tests use generated audio. In Rust they cover each device: filter designs
 against scipy's, the cookbook bands, the compressor's curve, a keyed compressor,
-the limiter's ceiling and look-ahead, exact echo frames and feedback gains,
+the limiter's ceiling and look-ahead, the clipper's ceiling, knee, latency
+and what folds back at each oversampling, exact echo frames and feedback gains,
 ping-pong and darkening repeats, the reverb's decay, damping, predelay, energy,
 seeding, width, low cut, equality with direct convolution and steady-noise level,
 and block-partition invariance of each. Through `daw render` the Python suite
 covers filter attenuation at each slope, bell and shelf gains, the compressor's
 steady-state curve and reduction report, below-threshold transparency, limiter
-ceiling and latency compensation, bypass, sidechain ducking, pre-fader keys,
+ceiling and latency compensation, the clipper's ceiling, knee, drive, lane and
+latency compensation, bypass, sidechain ducking, pre-fader keys,
 preview/stem equivalence, hot mixes rescued by a master limiter, validation
 errors and round-trip formatting; pre- and post-fader sends, mute and solo,
 return stems summing with track stems to the mix, return previews, section
@@ -254,7 +268,7 @@ A 179-second local song with 12 tracks, 3 returns, 32 effects and 10 lanes
 renders in about 9 seconds on an M2, where the Python engine took over 30, and
 plays at 128-frame buffers using about 0.1 ms of each 2.67 ms callback.
 
-Not yet implemented: a clipper, a phaser and other modulation effects, groups,
+Not yet implemented: a phaser and other modulation effects, groups,
 return-to-return sends, sidechain filtering, RMS detection, true-peak limiting,
 loudness-target export, impulse-response samples for the reverb, and a notch or
 a mid/side mode in the equalizer.

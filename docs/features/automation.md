@@ -73,6 +73,7 @@ in the chain shifts indexes but not ids. EQ fields are addressed per band, e.g.
 | `filter` | `cutoff_hz` | log |
 | `eq` | `bands.N.freq_hz`, `bands.N.q` / `bands.N.gain_db` (nothing on a pass band, which ignores its gain) | log / linear |
 | `compressor` | `threshold_db`, `makeup_db` | linear |
+| `clipper` | `ceiling_db`, `drive_db`, `knee_db` | linear |
 | `delay` | `feedback_percent`, `mix_percent` | linear |
 | `reverb` | `mix_percent` | linear |
 | `chorus` | `rate_hz` / `depth_ms`, `delay_ms`, `mix_percent` | log / linear |
@@ -80,9 +81,10 @@ in the chain shifts indexes but not ids. EQ fields are addressed per band, e.g.
 | `utility` | `gain_db`, `pan`, `width_percent` | linear |
 
 Everything else is rejected: switches such as `mode`, `slope_db_per_octave`,
-`ping_pong` and `bypass`, and parameters whose change would rebuild a device's
-state, such as `time_beats`, `decay_seconds`, `lookahead_ms` and the limiter's
-ceiling. Values must lie within the limits the static parameter accepts.
+`ping_pong`, `oversample` and `bypass`, and parameters whose change would
+rebuild a device's state, such as `time_beats`, `decay_seconds`,
+`lookahead_ms` and the limiter's ceiling. Values must lie within the limits
+the static parameter accepts.
 
 ## Semantics
 

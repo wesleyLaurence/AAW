@@ -271,7 +271,7 @@ impl Chain {
         }
     }
 
-    /// Has each compressor and limiter measure its reduction between these
+    /// Has each compressor, limiter and clipper measure its reduction between these
     /// timeline frames apart.
     fn split_reduction(&mut self, edges: &[i64]) {
         for slot in &mut self.slots {
@@ -374,7 +374,7 @@ pub struct DeviceReport {
     pub latency: usize,
     /// The names of every lane on the effect, constant ones included, sorted.
     pub automated: Vec<String>,
-    /// Gain reduction over the session, for a compressor or limiter, and
+    /// Gain reduction over the session, for a compressor, limiter or clipper, and
     /// over each span given to `Renderer::measure_spans`, in their order.
     pub reduction: Option<Reduction>,
     pub spans: Vec<Reduction>,
@@ -1109,7 +1109,7 @@ impl Renderer {
         }
     }
 
-    /// Has every compressor and limiter measure its reduction over each of
+    /// Has every compressor, limiter and clipper measure its reduction over each of
     /// these stretches of the timeline, as (first frame, frame past the
     /// last), as well as over the session: a song's sections, which `report`
     /// then gives in this order. For a render, before it starts: it

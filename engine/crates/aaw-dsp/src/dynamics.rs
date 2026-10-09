@@ -73,7 +73,7 @@ impl Reductions {
     }
 
     #[inline]
-    fn record(&mut self, db: f64, output_frame: i64, clock: &Clock) {
+    pub(crate) fn record(&mut self, db: f64, output_frame: i64, clock: &Clock) {
         if clock.step == 1 && output_frame >= 0 && output_frame < clock.total {
             self.whole.add(db);
             if !self.parts.is_empty() {

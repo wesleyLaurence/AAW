@@ -26,6 +26,7 @@ tracks:
       - {type: eq, bands: [{shape: bell, freq_hz: 1000}]}
       - {type: compressor, threshold_db: -20}
       - {type: limiter}
+      - {type: clipper}
       - {type: delay, time_beats: 1}
       - {type: reverb}
       - {type: chorus}
