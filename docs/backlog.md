@@ -678,8 +678,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - **The beat map on a clip,** on a real song measured with `daw samples beats`:
   whether the ticks sit on the hits, and how they read in a song at another
   tempo.
-- **The song-edit path on a real song:** a purchased file decoded and beat-mapped,
-  an edit made with the `song-edit` skill, its joins heard, the export played. The
+- **A finished-song edit on a real song:** a purchased file decoded and beat-mapped,
+  an edit made from `daw describe edit`, its joins heard, the export played. The
   beat tracker's thresholds were tuned on generated audio and five local renders.
 - **An `.m4a` or `.mp3` dropped on the app's window.**
 - **Browser folders and device drags:** use Add Folder with multiple directories, reopen another project, search across selected folders, refresh and remove a source; drag effects onto track, return and master headers and between devices, and Sampler onto a MIDI track and below the rows. Automated tests and scripted snapshots passed; the native picker and actual mouse drags have not been tried by hand.
@@ -721,7 +721,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   each error's hint is the fix. The recipe runs in a test with a generated kick,
   and the hints, help and clipping message are held by tests; no agent session
   has used them.
-- **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads and song-edit is discoverable. Links, ignore rules and the shared skill path were checked locally; fresh sessions have not been tried.
+- **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads. Links and ignore rules were checked locally; fresh sessions have not been tried.
 - **Install Command Line Tool:** its alerts and the request for an administrator's
   password.
 - **Signing with a Developer ID and notarizing,** and the app on another Mac

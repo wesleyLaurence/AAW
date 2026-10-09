@@ -34,6 +34,5 @@ in `docs/backlog.md`; do not create a separate notes or plan file.
   this repository. Import selected audio; never modify the source library.
 - Commit reusable code, tests, docs and generic examples only. Personal skills
   stay ignored or in a personal skills folder; never force-add personal content.
-- Skills describe repeatable workflows. For a finished-song edit from timecodes,
-  follow [song-edit](.claude/skills/song-edit/SKILL.md); read it only for that task.
-  [Skill conventions](docs/features/skills.md) apply when adding or changing skills.
+- A skill describes a repeatable workflow and is personal: this repository ships
+  none. [Skill conventions](docs/features/skills.md) apply when adding or changing one.
