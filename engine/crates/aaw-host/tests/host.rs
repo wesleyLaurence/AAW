@@ -203,6 +203,53 @@ fn an_agent_that_fell_silent_is_hinted_on_its_next_edit() {
 }
 
 #[test]
+fn a_marker_lands_where_the_song_is_and_the_agent_is_told_of_the_persons() {
+    let h = Running::start();
+    let person = |j: Json| request(&h.path, j, Origin::User).unwrap().unwrap();
+    // Stopped, a marker without a beat is at the start position.
+    h.send(json!({"op": "locate", "at": 13})).unwrap();
+    let r = person(json!({"op": "marker.add", "text": "too busy"}));
+    assert_eq!(r["label"], json!("Add marker m1 in bar 4: too busy"));
+    assert_eq!(h.send(json!({"op": "get", "path": "markers.m1.at"})).unwrap(), json!(13));
+    // The log has the beat it was given, under the person's name.
+    let log = h.send(json!({"op": "changes", "since": 0})).unwrap();
+    assert_eq!((&log["changes"][0]["origin"], &log["changes"][0]["command"]["at"]), (&json!("user"), &json!(13)));
+    person(json!({"op": "marker.add", "at": 20}));
+
+    // The agent's next edit is told of both, once.
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -1})).unwrap();
+    let news = r["new_markers"].as_str().unwrap_or_default();
+    assert!(news.contains("left 2 markers") && news.contains("m1 in bar 4, beat 2: too busy; m2 in bar 6") && news.contains("daw marker list"), "{r}");
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -2})).unwrap();
+    assert!(r.get("new_markers").is_none(), "{r}");
+    // A marker reworded is news again; one the person took back is not, and
+    // neither is the agent's own.
+    person(json!({"op": "marker.text", "marker": "m2", "text": "love this"}));
+    person(json!({"op": "marker.add", "at": 24}));
+    person(json!({"op": "undo"}));
+    let r = h.send(json!({"op": "marker.add", "at": 28, "text": "listen here"})).unwrap();
+    let news = r["new_markers"].as_str().unwrap_or_default();
+    assert!(news.starts_with("The person left a marker since your last command: m2 in bar 6: love this."), "{r}");
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -3})).unwrap();
+    assert!(r.get("new_markers").is_none(), "{r}");
+    // Reading the markers is being told: the next edit carries nothing.
+    person(json!({"op": "marker.add", "at": 30}));
+    let read = h.send(json!({"op": "markers"})).unwrap();
+    assert_eq!(read["markers"].as_array().unwrap().len(), 4);
+    let r = h.send(json!({"op": "set", "path": "tracks.drums.gain_db", "value": -4})).unwrap();
+    assert!(r.get("new_markers").is_none(), "{r}");
+    // A person's own read does not tell the agent.
+    person(json!({"op": "marker.add", "at": 31}));
+    person(json!({"op": "markers"}));
+    let r = h.send(json!({"op": "marker.remove", "markers": ["m1"]})).unwrap();
+    assert!(r["new_markers"].as_str().unwrap_or_default().contains("m5 in bar 8, beat 4"), "{r}");
+
+    assert!(host::marker_news(&[]).is_none());
+    let many: Vec<(String, String)> = (1..=7).map(|n| (format!("m{n}"), format!("in bar {n}"))).collect();
+    assert!(host::marker_news(&many).unwrap().contains("m5 in bar 5, and 2 more."));
+}
+
+#[test]
 fn concurrent_clients_all_land_in_order() {
     let h = Running::start();
     let path = Arc::new(h.path.clone());

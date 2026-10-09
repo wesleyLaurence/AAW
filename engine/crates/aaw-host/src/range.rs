@@ -1,6 +1,9 @@
 //! Ranges of beats across tracks: a range copied, inserted, deleted or cleared
 //! with the clips, audio, automation and sections in it, and a section
-//! duplicated, moved or removed with what is under it.
+//! duplicated, moved or removed with what is under it. The person's markers
+//! keep to the beats they mark: they move when time is opened or closed and
+//! with a section's beats, and go with beats that are deleted; a copy
+//! leaves them where they are.
 //!
 //! A range is `[start, start + length)`. A clip that crosses an edge is cut
 //! there first, so that the range holds exactly what plays in it: a note clip
@@ -994,6 +997,53 @@ impl<'a> Edit<'a> {
         Ok(ids)
     }
 
+    /// The markers, each as its index and beat.
+    fn marker_beats(&self) -> Vec<(usize, BigRational)> {
+        self.markers().iter().enumerate().map(|(i, m)| (i, exact(m.node.get("at")).unwrap_or_default())).collect()
+    }
+
+    fn set_marker(&mut self, i: usize, at: &BigRational) {
+        self.set_leaf(&[Step::Key("markers".into()), Step::Index(i)], "at", beat_value(at));
+    }
+
+    /// Opens `len` beats at `at` under the markers: those at or after it
+    /// move later, as what they mark does.
+    fn markers_insert(&mut self, at: &BigRational, len: &BigRational) {
+        for (i, a) in self.marker_beats() {
+            if a >= *at {
+                self.set_marker(i, &(&a + len));
+            }
+        }
+    }
+
+    /// Takes the beats from `s` to `e` out from under the markers: those
+    /// inside go with what they marked, and those after move earlier.
+    fn markers_delete(&mut self, s: &BigRational, e: &BigRational, report: &mut Report) -> Result<()> {
+        let len = e - s;
+        for (i, a) in self.marker_beats().into_iter().rev() {
+            if a >= *e {
+                self.set_marker(i, &(&a - &len));
+            } else if a >= *s {
+                let loc = vec![Step::Key("markers".into()), Step::Index(i)];
+                report.removed.push(self.text(&loc));
+                self.take(&[], "markers", i)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Moves the markers inside `[s, e)` by `by` beats, with the beats they
+    /// mark, and keeps the list in time order.
+    fn markers_move(&mut self, s: &BigRational, e: &BigRational, by: &BigRational) -> Result<()> {
+        for (i, a) in self.marker_beats() {
+            if a >= *s && a < *e {
+                self.set_marker(i, &(&a + by));
+            }
+        }
+        self.list(&[], "markers")?.sort_by_key(|m| exact(m.node.get("at")).unwrap_or_default());
+        Ok(())
+    }
+
     /// Grows the song to the end of the bar that holds the last clip, when
     /// an edit moved one past its end.
     fn fit_length(&mut self) -> Result<()> {
@@ -1068,6 +1118,7 @@ impl<'a> Edit<'a> {
             self.shift_scope(&scope, to, length, &mut report)?;
             if scope.all {
                 self.sections_insert(to, length);
+                self.markers_insert(to, length);
                 let song = self.song_length() + length;
                 self.set_song_length(&song);
             }
@@ -1113,6 +1164,7 @@ impl<'a> Edit<'a> {
         self.edit_lanes(&scope, &project, |items, domain, next| lane_insert(items, at, length, domain, next))?;
         if scope.all {
             self.sections_insert(at, length);
+            self.markers_insert(at, length);
             self.set_song_length(&(song + length));
         } else {
             self.fit_length()?;
@@ -1136,6 +1188,7 @@ impl<'a> Edit<'a> {
         self.edit_lanes(&scope, &project, |items, domain, next| lane_delete(items, start, &end, domain, next))?;
         if scope.all {
             self.sections_delete(start, &end, &mut report)?;
+            self.markers_delete(start, &end, &mut report)?;
             self.set_song_length(&(song - length));
         }
         out.label = format!("Delete {}{}", beats(start, &end), scope.suffix());
@@ -1207,6 +1260,7 @@ impl<'a> Edit<'a> {
         // The label moves with its beats; its index may have changed.
         let (index, _, _) = self.section(section)?;
         self.set_section(index, to, &dest_end);
+        self.markers_move(&start, &end, &by)?;
         self.fit_length()?;
         out.label = format!("Move section {section} to {} with its content", beat_text(to));
         self.finish(out, report)

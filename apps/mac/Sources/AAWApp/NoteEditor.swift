@@ -471,6 +471,8 @@ final class NoteEditor: NSView {
             switch event.charactersIgnoringModifiers {
             case " ": model.togglePlay()
             case "l": model.toggleLoop()
+            case "m": model.addMarker()
+            case "M": model.addMarker(ask: true)
             case "\u{1b}": model.select(notes: [])
             default: super.keyDown(with: event)
             }

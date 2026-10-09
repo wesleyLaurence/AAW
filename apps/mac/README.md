@@ -7,7 +7,8 @@ each clip plays as a waveform, plays it with its effects and automation, shows
 each change as it lands, whoever makes it, and lets the person edit the mixer,
 the clips, the tracks and returns, each row's effects and its automation lanes,
 and each pattern's steps and events. An audio file dropped on the timeline is an
-audio clip, which is moved, trimmed, faded and split there. A MIDI track's note
+audio clip, which is moved, trimmed, faded and split there. A key leaves a
+marker where the song is playing, for the agent to read. A MIDI track's note
 clips are made, moved, trimmed and copied, and their notes drawn and edited in a
 piano roll; a MIDI file dropped on the timeline is a note clip, and a note clip
 is exported as one. A browser finds
@@ -153,7 +154,7 @@ front first.
 | Part | Shows |
 |---|---|
 | Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, length in bars, the timeline's grid as a note value with its menu, "Exporting NAME…" while File › Export Audio… writes a file, and "Agent editing" while an agent's changes land |
-| Ruler | The loop brace, section markers and bar numbers, with the start position as an orange marker |
+| Ruler | Four strips: the loop brace, the sections, the person's markers, each a yellow flag at its beat with what it says in it as far as the next marker leaves room, and the bar numbers, with the start position as an orange flag. A marker has a faint line down the lanes under it |
 | Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; then the returns and the master. The A mark is orange when the row has automation |
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track, or of a track in a muted group, are gray, and selected clips are outlined. A group's lane shows its tracks' clips small, a strip a track, folded or not |
 | Automation | Under a row whose A mark is on: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
@@ -176,6 +177,12 @@ front first.
 | Return | Jumps back to the start position while playing |
 | Drag in the ruler's top strip | Sets the loop |
 | L | Loops the selected clips; with none selected, turns the loop off, or on again |
+| M, or Transport › Add Marker | Leaves a marker where the song is heard, to a thousandth of a beat, or at the start position while it is stopped, for the agent to read with `daw marker list`. The song plays on and the selection stays. In the arrangement, the pattern editor and the piano roll alike ([listening markers](../../docs/features/listening-markers.md)) |
+| ⇧M, or Transport › Add Marker and Name It | The same, and opens a field at the marker's flag to type what it says, "too busy": Return or a click elsewhere keeps it, Escape leaves the marker without text. The marker is where the song was when the key went down |
+| Double-click in the clear of the marker strip | Leaves a marker there, on the grid or with ⌘ off it, and asks what it says |
+| Click a marker; drag it | Selects it, in place of the clips, rows and points, and sets the start position to it; moves it to the grid line under the pointer, or with ⌘ anywhere, one undo step. Delete removes the selected marker |
+| Double-click a marker, or ⌘R with one selected | Types what it says, where it is shown |
+| Right-click or Control-click in the marker strip | On a marker, which it selects: Rename and Delete. In the clear: Add Marker Here. Delete All Markers either way, as Transport › Delete All Markers |
 | Scroll, pinch, Command-scroll, ⌘=, ⌘-, ⌘0 | Scroll and zoom; ⌘0 fits the song |
 | The Grid menu in the transport bar, or View › Grid | Chooses the grid of the editor that has the keys, the timeline's from the transport bar: Follow Zoom, a size from 1 Bar to 1/64, ⌘1 finer, ⌘2 coarser, ⌘3 triplets, ⌘4 Snap to Grid. A chosen grid holds whatever the zoom; the transport bar names it, gray while it follows the zoom, `no snap` while snapping is off, when every click and drag lands where the pointer is and ⌘ snaps instead |
 | Drag a volume, pan or send sideways | Changes it, heard as it moves; with Shift, ten times finer. Double-click sets volume to 0 dB and pan to center, and removes a send |
@@ -200,7 +207,7 @@ front first.
 | ⌘G, ⇧⌘G | Groups the selected track, or the tracks of the selected clips, into a new group above them and asks for its name; takes the selected group, or the selected track's, away, leaving its tracks |
 | Double-click a header | Selects the row and shows its devices in the detail panel, shown if it was hidden |
 | Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Show Automation, Add Track, Add MIDI Track, Add Return, Group Tracks or Remove from Group on a track, Ungroup on a group, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
-| Rename in that menu, or ⌘R | Renames the track, group or return where its name is: Return keeps the name, Escape drops it |
+| Rename in that menu, or ⌘R | Renames the track, group or return where its name is: Return keeps the name, Escape drops it. With a marker selected, ⌘R types what the marker says |
 | ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, a MIDI track with no instrument, or a return, and asks for its name |
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
 | Click A in a header | Shows or hides the row's automation lanes; with Option, every row's |
@@ -386,8 +393,12 @@ between the last of them and the picture:
 | `--export PATH [--export-level LEVEL]` | After the actions, writes the mix as PATH, as File › Export Audio… does when its panel closes: the format is the extension's (`.wav` 24-bit, `.m4a`, `.mp3`) and the level `peak=-1`, `lufs=-14`, `gain=-3` or `rendered`, as rendered unless given. What the command reported is printed, then the picture is taken if one was asked for, with the banner in it, and the run quits; a file that is there is refused as the command refuses it, and a failed export says why on stderr and ends with status 1 |
 
 Run `daw` commands against the song meanwhile to see them land in the picture.
+A click is queued and a key is sent at once, so a click that follows a typed
+name or marker can land after the key that follows it: leave `--wait 1`
+after such a click.
 A key that plays is heard on the speakers. Headers are 212 points wide and rows
-start 93 points down: 46 for each track, more while its sends or lanes show
+start 109 points down, under a ruler whose marker strip is from 75 to 91 points
+down: 46 for each track, more while its sends or lanes show
 (46 for each lane). The detail panel is the bottom 214 points until the line
 above it is dragged (`--drag 700,384,700,204` on a window 600 high makes it
 394), its devices from x = 212. The pattern editor's rows start 16 points down the panel and 96 points
@@ -437,10 +448,10 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/AudioClipLayout.swift` | An audio clip as it is drawn and dragged: its parts under the pointer, how far an edge or a fade goes, and the curve of a shaped automation segment, tested in `Tests` |
 | `Sources/AAWApp/Waveform.swift` | The peaks the host sends for each track and each file, and the columns a clip draws from them, tested in `Tests` |
 | `Sources/AAWApp/TextLines.swift` | Lines of text laid out once and drawn many times |
-| `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid and what a click or drag means, tested in `Tests` |
+| `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid, the ruler's strips, a marker's flag and what a click or drag means, tested in `Tests` |
 | `Sources/AAWApp/Grid.swift` | The grid values, their names as note values and the steps the Grid menu takes through them, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
-| `Sources/AAWApp/ContextMenus.swift` | What a right click on a header or a clip offers, as lists the arrangement makes menus from, tested in `Tests` |
+| `Sources/AAWApp/ContextMenus.swift` | What a right click on a header, a clip, an effect or the marker strip offers, as lists the views make menus from, tested in `Tests` |
 | `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, the equalizer's curve as an AppKit view where its points are dragged and its spectrum read, a MIDI track's instrument, and the bar a number is dragged with |
 | `Sources/AAWApp/AnalyzerWindow.swift` | An analyzer's window and its panes, an AppKit view drawn at the display's rate, with the dividers, the fill marks and the menu of panes; the analyzer's strip in the device panel |
 | `Sources/AAWApp/AnalyzerLayout.swift` | The arrangement of an analyzer's panes in three columns, kept in the app's defaults, the rects it gives them, what a drag on a divider means, the scales the meters, the history and the vectorscope are drawn on, and how the spectrogram's and the waveform's textures scroll and take a reading's new columns, tested in `Tests` |
@@ -514,6 +525,9 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 - An effect's ID is set with `daw set`; the panel shows it.
 - An effect added, removed, bypassed or moved while the song plays is heard
   after a 10 ms dip, and so is a change to a field that reshapes a device.
+- A marker is a point with a few words: it has no length, color or kind, and
+  several are not selected, moved or copied together. The marker strip is
+  there whether or not the song has markers.
 - Save As… does not replace a folder that is already there.
 - Which groups are folded is kept by the window, not saved with the project,
   and a group is not dragged into another: a group is not in a group.

@@ -62,6 +62,16 @@ impl Meter {
         self.bar().to_f64().unwrap_or(f64::NAN)
     }
 
+    /// The bar a song beat is in and the beat of that bar, each from 1, the
+    /// beat as the time signature counts it and to a hundredth: where a
+    /// marker is, wherever in the bar it fell.
+    pub fn bar_beat(&self, beat: f64) -> (i64, f64) {
+        const EPS: f64 = 1e-6;
+        let bar = (beat / self.bar_f64() + EPS).floor();
+        let rest = (beat - bar * self.bar_f64()).max(0.0);
+        (bar as i64 + 1, (rest / self.beat_f64() * 100.0).round() / 100.0 + 1.0)
+    }
+
     /// A song beat as a DAW counts it: the bar, then the beat of the bar and
     /// the sixteenth of the beat when it is not on the bar, each from 1; a
     /// beat off the sixteenths is written as the beat commands take it.
@@ -138,5 +148,9 @@ mod tests {
         let seven_eight = Meter { beats: 7, unit: 8 };
         assert_eq!(seven_eight.place(3.5), "2");
         assert_eq!(seven_eight.place(6.5), "2.7");
+        assert_eq!(Meter::COMMON.bar_beat(0.0), (1, 1.0));
+        assert_eq!(Meter::COMMON.bar_beat(34.417), (9, 3.42));
+        assert_eq!(six_eight.bar_beat(3.75), (2, 2.5));
+        assert_eq!(seven_eight.bar_beat(3.5), (2, 1.0));
     }
 }

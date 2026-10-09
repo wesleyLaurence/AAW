@@ -82,8 +82,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It also makes a blank project, moves or copies a project's folder,
-  reads and writes Standard MIDI files of one part (`midi_file`), and draws the
-  song as a grid of tracks by bars for `daw map` (`map`).
+  reads and writes Standard MIDI files of one part (`midi_file`), draws the
+  song as a grid of tracks by bars for `daw map` (`map`), and tells an agent's
+  next edit of the markers the person left since its last command.
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see
@@ -172,7 +173,7 @@ processing never allocates, so it runs in the audio callback. No second engine e
 ## Format
 
 Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
-`groups`, `returns`, `sections` and `master`. `schema_version` is 2 in a song with a MIDI
+`groups`, `returns`, `sections`, `markers` and `master`. `schema_version` is 2 in a song with a MIDI
 track and 1 in any other, which saves byte for byte as it did before MIDI
 tracks; either is read (D63). Unknown fields are rejected, and an edit that
 names one is told the nearest field. Run `daw describe TOPIC` for each field's
@@ -305,6 +306,14 @@ retain their exact times. Explicit events: `at`, `pad`, `velocity` (1…127), op
 Clip: `pattern`, `at`, positive integer `repeats`, `velocity_scale`. Repetitions
 use the pattern's declared length. Clips must fit the session, but sample tails may
 cross pattern boundaries. Sections have unique `id`, `at`, `length_beats`.
+
+Marker: `id` (unique among the markers; left out, the next free `mN`), `at` from
+0 to the song's end, and `text`, up to 200 characters. A marker is a note the
+person left at a beat while listening, with M in the app; it plays nothing and
+is in no render, and the agent reads the markers with `daw marker list`, each
+with the bar it is in, the section over it and the clips sounding there. An
+empty list is not written, so a song without markers saves and fingerprints as
+it did. See [listening-markers.md](features/listening-markers.md).
 
 ## Timing and audio semantics
 

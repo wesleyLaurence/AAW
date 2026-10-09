@@ -40,6 +40,19 @@ batch is one musical edit, a phrase with its variations, not the song held
 back until it is finished. A host whose agent sent nothing for five minutes
 says so in the next edit's reply, as `hint`.
 
+The person leaves markers while they listen: M in the app drops one where the
+song is playing, with a few words if they want, "too busy" or "love this". Run
+`uv run daw marker list PROJECT` when they say "here", "this bar" or "my
+markers", and when an edit's reply carries `new_markers`: each marker comes
+with the bar it is in, the section over it and the clips sounding there, and
+`daw map` shows them as a row. A marker dropped while the song played is a
+moment after what was heard, so read what led into it too, and ask when it
+could mean either. Answer a marker by changing the music or by saying why not,
+and remove it in the same batch as the edit that answers it (`{"op":
+"marker.remove", "markers": ["m1"]}`), so that one undo brings both back;
+leave one that asks for nothing and keep what it marks. `daw marker add
+PROJECT AT --text TEXT` leaves one of your own, to point the person at a bar.
+
 `inspect` returns `project_sha256`; use it with `daw apply PROJECT PATCH --expect SHA`
 when a merge patch is needed. Objects merge, arrays replace, and null removes a
 field. Raw file changes are possible, but a host records them as external edits.

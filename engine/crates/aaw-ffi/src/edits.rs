@@ -358,6 +358,14 @@ pub enum Edit {
     PointsSet { points: Vec<PointPlace> },
     /// Removes points; a lane's last point takes the lane with it.
     PointsRemove { points: Vec<u64> },
+    /// Leaves a marker at a beat, to a thousandth, with what it says, which
+    /// may be nothing. The marker is what the edit makes.
+    MarkerAdd { at: f64, text: String },
+    /// Moves a marker to a beat, as a drag in the ruler does.
+    MarkerMove { marker: u64, at: f64 },
+    /// Changes what a marker says.
+    MarkerText { marker: u64, text: String },
+    MarkersRemove { markers: Vec<u64> },
     /// Sets steps of a pad's row in a pattern to a level: 0 for none, 1 to 9
     /// for the row's digits and 10 for an `x`. A pad gets a row with its
     /// first step, and a row left without steps goes.
@@ -708,6 +716,13 @@ fn beat(x: &BigRational) -> Json {
 /// or a short decimal.
 fn beat_at(x: f64) -> Result<Json> {
     Ok(beat(&aaw_model::beat(&Beat::Float(x.max(0.0)))?))
+}
+
+/// What a marker says, as typed: on one line, without the space around
+/// it, and no longer than a marker holds.
+fn marker_text(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    line.chars().take(aaw_model::Marker::TEXT_LIMIT).collect()
 }
 
 fn owner_path(row: &Row) -> String {
@@ -2092,6 +2107,21 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 }
             };
             Ok(written.into_iter().collect())
+        }
+        Edit::MarkerAdd { at, text } => {
+            let at = (at.max(0.0) * 1000.0).round() / 1000.0;
+            Ok(vec![json!({"op": "marker.add", "at": beat_at(at)?, "text": marker_text(text)})])
+        }
+        Edit::MarkerMove { marker, at } => Ok(vec![json!({"op": "marker.move", "marker": handle_text(*marker), "at": beat_at(*at)?})]),
+        Edit::MarkerText { marker, text } => {
+            Ok(vec![json!({"op": "marker.text", "marker": handle_text(*marker), "text": marker_text(text)})])
+        }
+        Edit::MarkersRemove { markers } => {
+            if markers.is_empty() {
+                return Ok(Vec::new());
+            }
+            let names: Vec<String> = markers.iter().map(|k| handle_text(*k)).collect();
+            Ok(vec![json!({"op": "marker.remove", "markers": names})])
         }
         Edit::EventAdd { pattern: name, pad, at, free, pitch, steps } => {
             let p = pattern(project, name)?;

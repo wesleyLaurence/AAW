@@ -20,57 +20,54 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **Listening markers.** The person drops a marker at the playhead while the
-   song plays, with a word if they want, and the agent reads them with `daw`:
-   "this bar", without a timecode.
-2. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+1. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
    is built, a clipper that holds a ceiling as a limiter does without its
    look-ahead is not. The utility is built ([utility](features/utility.md)).
-3. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
+2. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
    master's true peak can pass its ceiling and the agent leaves a margin by
    guess; a switch on the limiter that measures the peaks between the
    samples, so a ceiling of −1 dBTP is one.
-4. **A time selection in the app.** A range of beats dragged across the
+3. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-5. **A MIDI keyboard.** Notes played through the selected track, held and let
+4. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-6. **Sections and the song's length in the app.** A section made, named,
+5. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-7. **A project made with `daw init` in the app's index,** so a song the agent
+6. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-8. **Turns and A/B.** An agent request's commands grouped, named for the
+7. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-9. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+8. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-10. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
-    that replays it.
-11. **Key and chord detection,** and swing detection, of samples and songs: a
+9. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+   that replays it.
+10. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-12. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+11. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-13. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+12. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-14. **The workspace and the two levels.** The workspace folder with its managed
+13. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-15. **The agent panel.** A conversation in the window, per project, over the
+14. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-16. **Stem separation** of a song.
-17. **Generated audio.** A sound, a loop or a whole song from a description, with
+15. **Stem separation** of a song.
+16. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -81,6 +78,33 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Listening markers, by hand and with an agent:** a song of a few minutes
+  played and M pressed where something is heard, several times, with ⇧M and a
+  few words typed while it plays on; whether the flag lands where the ear
+  was or a beat late, and whether the host should move a marker dropped
+  while playing earlier by a reaction's time; whether M is under the hand,
+  and whether a marker wants a range, a color or "done"; a flag clicked,
+  dragged, double-clicked and renamed, Delete, the strip's menu and Delete
+  All Markers; three markers in one bar, whose text is cut to the flag;
+  whether sixteen points more of ruler is worth a strip that is there with
+  no markers; a fresh agent session told "fix my markers", and whether it
+  runs `daw marker list`, reads the bar and what led into it, says what it
+  changed for each, removes the ones it answered in the batch that answers
+  them and leaves "love this" alone; the same with the agent already at
+  work when a marker is dropped, and whether it acts on `new_markers` in
+  its next edit's reply. Scripted runs on a generated song of two Synths
+  showed the strip and its flags in pictures; M and ⇧M with a word typed,
+  while the song played into a virtual output device nobody hears, left
+  markers at beats 4.9 and 8.65, read from the song, and a `daw marker add`
+  with no beat from a terminal one at 8.51; a click and Delete, a drag to
+  bar 8, ⌘R and a double-click in the clear with its field open were each
+  read from the song or seen in a picture, and the agent's next `set`
+  carried `new_markers`. The commands, the order, the refusals, what plays
+  at a marker, the map's row, the range edits and the news are held by host
+  tests, the model by its own, the app's edits by an FFI test, the flags'
+  layout and the menu by Swift tests and `daw marker` by Python tests.
+  Nothing pressed by hand, no menu opened, nothing heard, and no agent
+  session has read a marker.
 - **Sound descriptors, with the person listening:** `daw samples analyze
   --all` run on the person's own library, which was measured only through a
   copy of its index and still holds 31 measurements from before; kicks listed
@@ -663,6 +687,12 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 - Variations and versions: `daw version save`, and versions the person flips
   through on the loop.
+- Markers further: a marker over a range of beats; "done" on one the agent
+  answered, drawn dim until the person removes it; who left it, kept with
+  it; a marker dropped while playing moved earlier by a reaction's time, if
+  listening shows it lands late; several selected, moved and copied
+  together; a marker's text among the mentions in the agent panel
+  ([listening markers](features/listening-markers.md)).
 - Locks the host enforces: "don't touch the drums".
 - How much the agent may do: Ask, Edit, Propose, Background.
 - The undo history kept across closing a project.

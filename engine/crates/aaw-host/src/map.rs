@@ -358,6 +358,58 @@ fn sections(p: &Project, grid: &Grid) -> Option<String> {
     any.then(|| row.into_iter().collect::<String>().trim_end().to_string())
 }
 
+/// The markers over the grid: `!` in a cell that holds one, the count where
+/// it holds several, and `+` past nine.
+fn markers(p: &Project, grid: &Grid) -> Option<String> {
+    let mut counts = vec![0usize; grid.len()];
+    for m in &p.markers {
+        let at = f(&m.at_exact());
+        if at < grid.from - EPS || at > grid.to + EPS {
+            continue;
+        }
+        let cell = (((at - grid.from) / grid.per + EPS).floor() as usize).min(grid.len() - 1);
+        counts[cell] += 1;
+    }
+    counts.iter().any(|&n| n > 0).then(|| {
+        let row: String = counts
+            .iter()
+            .map(|&n| match n {
+                0 => ' ',
+                1 => '!',
+                2..=9 => char::from_digit(n as u32, 10).unwrap_or('+'),
+                _ => '+',
+            })
+            .collect();
+        row.trim_end().to_string()
+    })
+}
+
+/// Where a marker is, in words: "bar 9", or "bar 9, beat 3.42" off the bar.
+pub fn marker_place(at: f64, meter: Meter) -> String {
+    let (bar, beat) = meter.bar_beat(at);
+    if (beat - 1.0).abs() < 0.005 {
+        format!("bar {bar}")
+    } else {
+        format!("bar {bar}, beat {}", number(beat))
+    }
+}
+
+/// The clips sounding at a beat, a track each: the track, the clip as
+/// `refer` names it and what the map's legend says of it.
+pub fn sounding(p: &Project, dir: &Path, at: f64, refer: &dyn Fn(&[Step]) -> String) -> Vec<Json> {
+    let mut out = Vec::new();
+    for (ti, t) in p.tracks.iter().enumerate() {
+        for c in placed(p, dir, ti).iter().filter(|c| c.start <= at + EPS && c.end > at + EPS) {
+            let mut entry = json!({"track": t.id, "clip": refer(&c.loc), "what": c.what});
+            if t.mute {
+                entry["muted"] = json!(true);
+            }
+            out.push(entry);
+        }
+    }
+    out
+}
+
 /// The arrangement map of a song, `refer` naming a clip at a location as
 /// commands do.
 pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -> String) -> Result<Json> {
@@ -399,6 +451,9 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
     let mut rows: Vec<(String, String)> = vec![("bar".into(), ruler(&grid, meter))];
     if let Some(s) = sections(p, &grid) {
         rows.push(("sections".into(), s));
+    }
+    if let Some(m) = markers(p, &grid) {
+        rows.push(("markers".into(), m));
     }
     let mut details = Vec::new();
     for (k, &ti) in shown.iter().enumerate() {
@@ -533,7 +588,21 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
     if grid.to > song_end + EPS {
         text.push(format!("The song ends where bar {} begins; nothing after it is heard.", place(song_end, meter)));
     }
-    for part in [lines, details] {
+    // The person's markers in the range, a line each.
+    let mut notes: Vec<&aaw_model::Marker> = p.markers.iter().filter(|m| (grid.from - EPS..=grid.to + EPS).contains(&f(&m.at_exact()))).collect();
+    notes.sort_by(|a, b| f(&a.at_exact()).total_cmp(&f(&b.at_exact())));
+    let notes: Vec<String> = notes
+        .iter()
+        .map(|m| {
+            let place = marker_place(f(&m.at_exact()), meter);
+            if m.text.is_empty() {
+                format!("!  {} at {place}", m.id)
+            } else {
+                format!("!  {} at {place}: {}", m.id, m.text)
+            }
+        })
+        .collect();
+    for part in [lines, details, notes] {
         if !part.is_empty() {
             text.push(String::new());
             text.extend(part);

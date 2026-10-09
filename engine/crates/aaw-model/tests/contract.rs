@@ -58,6 +58,7 @@ groups:
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
 returns: [{id: r}]
 sections: [{id: a, at: 0, length_beats: 4}]
+markers: [{at: 0}]
 master: {}
 "#;
 

@@ -153,6 +153,9 @@ public final class SongModel {
     private(set) var selectedClips: Set<UInt64> = []
     private(set) var selectedRow: RowID?
     private(set) var selectedPoints: Set<UInt64> = []
+    /// The selected marker, clicked in the ruler, in place of the clips,
+    /// rows and points: what Delete and Rename act on.
+    private(set) var selectedMarker: UInt64?
     /// The row whose devices the detail panel shows: the last one selected.
     private(set) var deviceRow: RowID?
     /// The selected effect of that row, clicked by its title in the device
@@ -241,6 +244,8 @@ public final class SongModel {
     @ObservationIgnored var onSelection: (() -> Void)?
     /// Asks the view to let the person type a row's name.
     @ObservationIgnored var onRename: ((RowID) -> Void)?
+    /// Asks the view to let the person type what a marker says.
+    @ObservationIgnored var onMarkerText: ((UInt64) -> Void)?
     /// Asks the view to unfold a row's automation lanes.
     @ObservationIgnored var onShowLanes: ((RowID) -> Void)?
     /// Gives the keys back to the arrangement, after a value was typed.
@@ -636,9 +641,26 @@ public final class SongModel {
         if !points.isEmpty {
             setSelection(clips: [], row: nil)
             select(events: [])
+            selectedMarker = nil
         }
         guard points != selectedPoints else { return }
         selectedPoints = points
+        onSelection?()
+        sendSelection()
+    }
+
+    /// Selects a marker in the ruler, in place of the clips, rows, points,
+    /// events, notes and effect. Nil selects none.
+    func select(marker: UInt64?) {
+        if marker != nil {
+            setSelection(clips: [], row: nil)
+            select(events: [])
+            select(notes: [])
+            selectedPoints = []
+            selectedEffect = nil
+        }
+        guard marker != selectedMarker else { return }
+        selectedMarker = marker
         onSelection?()
         sendSelection()
     }
@@ -661,9 +683,10 @@ public final class SongModel {
     func select(effect: UInt64?) {
         guard effect != selectedEffect else { return }
         selectedEffect = effect
-        if effect != nil, !selectedClips.isEmpty || !selectedPoints.isEmpty {
+        if effect != nil, !selectedClips.isEmpty || !selectedPoints.isEmpty || selectedMarker != nil {
             selectedClips = []
             selectedPoints = []
+            selectedMarker = nil
             onSelection?()
         }
         sendSelection()
@@ -760,7 +783,10 @@ public final class SongModel {
         selectedEvents = []
         selectedNotes = []
         selectedEffect = nil
-        if !clips.isEmpty || row != nil { selectedPoints = [] }
+        if !clips.isEmpty || row != nil {
+            selectedPoints = []
+            selectedMarker = nil
+        }
         // The detail panel follows the selection, and stays on the last row.
         if let row {
             deviceRow = row
@@ -784,6 +810,7 @@ public final class SongModel {
         keys += selectedNotes.sorted()
         keys += selectedPoints.sorted()
         if let effect = selectedEffect { keys.append(effect) }
+        if let marker = selectedMarker { keys.append(marker) }
         commands.async { [song, keys] in try? song.select(keys: keys) }
     }
 
@@ -813,6 +840,10 @@ public final class SongModel {
         }
         if deviceRow == nil { deviceRow = arrangement.tracks.first.map { .track($0.key) } }
         if selectedEffect != nil, selectedEffectView == nil { selectedEffect = nil }
+        if let marker = selectedMarker, !arrangement.markers.contains(where: { $0.key == marker }) {
+            selectedMarker = nil
+            onSelection?()
+        }
         if patternClip != nil, patternContext == nil, audioContext == nil, noteContext == nil { patternClip = nil }
         if !selectedEvents.isEmpty {
             let events = selectedEvents.intersection(patternContext?.pattern.events.map(\.key) ?? [])
@@ -825,7 +856,7 @@ public final class SongModel {
     }
 
     public var canDelete: Bool {
-        effectInHand || !selectedEvents.isEmpty || !selectedNotes.isEmpty || !selectedClips.isEmpty || !selectedPoints.isEmpty
+        selectedMarker != nil || effectInHand || !selectedEvents.isEmpty || !selectedNotes.isEmpty || !selectedClips.isEmpty || !selectedPoints.isEmpty
             || (selectedRow != nil && selectedRow != .master)
     }
 
@@ -841,11 +872,13 @@ public final class SongModel {
         !selectedEvents.isEmpty && detail == .pattern && showsDetail
     }
 
-    /// Removes the selected effect, the selected events or notes of the clip
-    /// being edited, or else the selected clips, automation points, track or
-    /// return.
+    /// Removes the selected marker, the selected effect, the selected events
+    /// or notes of the clip being edited, or else the selected clips,
+    /// automation points, track or return.
     public func deleteSelection() {
-        if effectInHand, let effect = selectedEffect {
+        if let marker = selectedMarker {
+            edit(.markersRemove(markers: [marker]))
+        } else if effectInHand, let effect = selectedEffect {
             edit(.effectRemove(effect: effect))
         } else if eventsInHand {
             edit(.eventsRemove(events: selectedEvents.sorted()))
@@ -1400,12 +1433,47 @@ public final class SongModel {
         }
     }
 
-    public var canRename: Bool {
-        selectedRow != nil && selectedRow != .master
+    // MARK: Markers
+
+    /// Where a marker dropped now lands: where the song is heard while it
+    /// plays, and else the start position.
+    var markerBeat: Double {
+        if let playhead = playhead(), playhead.playing { return min(max(0, playhead.beat), arrangement.lengthBeats) }
+        return transport.cue
     }
 
+    /// Leaves a marker where the song is playing, or at `beat`, without
+    /// stopping it or changing what is selected; with `ask`, lets the person
+    /// type what it says, which the song goes on playing through.
+    public func addMarker(ask: Bool = false, at beat: Double? = nil) {
+        edit(.markerAdd(at: beat ?? markerBeat, text: "")) { [weak self] made in
+            guard ask, let key = made.first else { return }
+            self?.onMarkerText?(key)
+        }
+    }
+
+    /// Sets what a marker says, when that is not what it says already.
+    func setMarkerText(_ marker: UInt64, to text: String) {
+        guard let now = arrangement.markers.first(where: { $0.key == marker }), now.text != text else { return }
+        edit(.markerText(marker: marker, text: text))
+    }
+
+    public func removeAllMarkers() {
+        edit(.markersRemove(markers: arrangement.markers.map(\.key)))
+    }
+
+    public var canRename: Bool {
+        selectedMarker != nil || (selectedRow != nil && selectedRow != .master)
+    }
+
+    /// Lets the person type the selected marker's text, or else the selected
+    /// row's name.
     public func renameSelection() {
-        if let row = selectedRow, row != .master { onRename?(row) }
+        if let marker = selectedMarker {
+            onMarkerText?(marker)
+        } else if let row = selectedRow, row != .master {
+            onRename?(row)
+        }
     }
 
     // MARK: Transport

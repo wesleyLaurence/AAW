@@ -340,6 +340,8 @@ enum Top {
     #[command(subcommand)]
     Section(SectionCmd),
     #[command(subcommand)]
+    Marker(MarkerCmd),
+    #[command(subcommand)]
     Range(RangeCmd),
 }
 
@@ -964,6 +966,39 @@ enum SectionCmd {
     },
 }
 
+/// Markers: the notes the person leaves at beats while listening, with M in
+/// the app. `list` reads them with what plays at each.
+#[derive(Subcommand)]
+enum MarkerCmd {
+    /// The markers in time order: each one's id, beat, the bar it is in and
+    /// the beat of that bar, the section over it, its text and the clips
+    /// sounding there.
+    List { project: Song },
+    /// Leave a marker at beat AT; without AT, where a running host is
+    /// playing, or at its start position while it is stopped.
+    Add {
+        project: Song,
+        at: Option<String>,
+        /// What it says of that place, in a few words.
+        #[arg(long)]
+        text: Option<String>,
+        /// Its ID; the next free mN unless given.
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Move a marker to beat AT.
+    Move { project: Song, marker: String, at: String },
+    /// Change what a marker says; "" clears it.
+    Text { project: Song, marker: String, text: String },
+    /// Remove the markers named, or with --all every one.
+    Remove {
+        project: Song,
+        markers: Vec<String>,
+        #[arg(long)]
+        all: bool,
+    },
+}
+
 /// Ranges of beats across every track, or those named with --track: the
 /// clips, audio, automation and sections in them. A clip across an edge is
 /// cut there; a pattern clip only between repeats. Positions are beats.
@@ -1276,6 +1311,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
                 Command::Get { path } => s.get(&path),
                 Command::Notes { path, from, to } => s.notes(&path, from.as_ref(), to.as_ref()),
                 Command::Map { per, from, to, tracks, lanes } => s.map(per.as_ref(), from.as_ref(), to.as_ref(), &tracks, lanes),
+                Command::Markers => Ok(s.markers()),
                 Command::MidiExport { clip, file } => s.export_midi(&clip, &file),
                 Command::Status => {
                     let mut m = s.status();
@@ -2276,6 +2312,38 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Marker(m) => match m {
+            MarkerCmd::List { project } => edit(project, C::Markers),
+            MarkerCmd::Add { project, at, text, id } => edit(
+                project,
+                C::MarkerAdd {
+                    at: at.as_deref().map(parse_value),
+                    text: text.clone().unwrap_or_default(),
+                    id: id.clone(),
+                },
+            ),
+            MarkerCmd::Move { project, marker, at } => edit(
+                project,
+                C::MarkerMove {
+                    marker: marker.clone(),
+                    at: parse_value(at),
+                },
+            ),
+            MarkerCmd::Text { project, marker, text } => edit(
+                project,
+                C::MarkerText {
+                    marker: marker.clone(),
+                    text: text.clone(),
+                },
+            ),
+            MarkerCmd::Remove { project, markers, all } => edit(
+                project,
+                C::MarkerRemove {
+                    markers: markers.clone(),
+                    all: *all,
+                },
+            ),
+        },
         Top::Range(r) => match r {
             RangeCmd::Copy { project, start, length, to, insert, tracks } => edit(
                 project,
@@ -2370,6 +2438,7 @@ fn name(top: &Top) -> String {
         Top::Send(_) => group("send", ""),
         Top::Lane(_) => group("lane", ""),
         Top::Section(_) => group("section", ""),
+        Top::Marker(_) => group("marker", ""),
         Top::Range(_) => group("range", ""),
     }
     .trim()

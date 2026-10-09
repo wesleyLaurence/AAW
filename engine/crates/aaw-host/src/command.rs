@@ -536,6 +536,32 @@ pub enum Command {
         id: Option<String>,
     },
 
+    // Markers
+    /// A note at a beat, the person's as they listen: "too busy". Without
+    /// `at` it lands where the song is playing, which a host fills in.
+    #[serde(rename = "marker.add")]
+    MarkerAdd {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<Json>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        text: String,
+        /// Without one it is given the next free `mN`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
+    #[serde(rename = "marker.move")]
+    MarkerMove { marker: String, at: Json },
+    #[serde(rename = "marker.text")]
+    MarkerText { marker: String, text: String },
+    /// Removes the markers named, or with `all` every one.
+    #[serde(rename = "marker.remove")]
+    MarkerRemove {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        markers: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        all: bool,
+    },
+
     // Whole-document edits
     #[serde(rename = "apply")]
     Apply {
@@ -637,6 +663,10 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         lanes: bool,
     },
+    /// The markers, each with the bar it is in, the section over it and the
+    /// clips sounding there.
+    #[serde(rename = "markers")]
+    Markers,
     /// Writes the notes of a note clip that play as a MIDI file at `file`.
     #[serde(rename = "midi.export")]
     MidiExport { clip: String, file: String },
@@ -688,7 +718,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } => Kind::Transport,
-            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | MidiExport { .. } => Kind::Read,
+            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }
@@ -2513,6 +2543,63 @@ impl<'a> Edit<'a> {
                 let to = to.as_ref().map(beat_at).transpose()?;
                 self.section_duplicate(&mut out, section, to.as_ref(), id.as_deref())?;
             }
+            MarkerAdd { at, text, id } => {
+                let at = at.as_ref().ok_or("A marker needs a beat where no host is playing the song: daw marker add PROJECT AT")?;
+                let beat = beat_at(at)?;
+                let id = match id {
+                    Some(id) => id.clone(),
+                    None => {
+                        let ids: Vec<&str> = self.markers().iter().filter_map(|m| m.node.field("id")).collect();
+                        next_id(&ids, "m")
+                    }
+                };
+                let mut f = Fields::new();
+                f.insert("id".into(), json!(id));
+                f.insert("at".into(), to_json(&beat_value(&beat)));
+                f.insert("text".into(), json!(text));
+                let slot = Self::point_slot(self.markers(), Some(&beat));
+                out.made.push(self.insert(&[], "markers", Some(slot), map_node(&f)?)?);
+                out.report.insert("marker".into(), json!(id));
+                out.label = format!("Add marker {id} {}", self.marker_place(&beat, text));
+            }
+            MarkerMove { marker, at } => {
+                let i = self.marker(marker)?;
+                let beat = beat_at(at)?;
+                let mut item = self.take(&[], "markers", i)?;
+                set(&mut item.node, "at", beat_value(&beat));
+                let (id, text) = (item.node.field("id").unwrap_or("?").to_string(), item.node.field("text").unwrap_or_default().to_string());
+                let slot = Self::point_slot(self.markers(), Some(&beat));
+                self.list(&[], "markers")?.insert(slot, item);
+                out.label = format!("Move marker {id} to {}", self.marker_place(&beat, &text).trim_start_matches("in "));
+            }
+            MarkerText { marker, text } => {
+                let i = self.marker(marker)?;
+                let loc = vec![Step::Key("markers".into()), Step::Index(i)];
+                let id = self.name(&loc);
+                self.set_leaf(&loc, "text", Value::str(text));
+                out.label = if text.is_empty() { format!("Clear marker {id}'s text") } else { format!("Marker {id}: {text}") };
+            }
+            MarkerRemove { markers, all } => {
+                let mut places: Vec<usize> = if *all {
+                    (0..self.markers().len()).collect()
+                } else if markers.is_empty() {
+                    return Err("Name the markers to remove, or all of them".into());
+                } else {
+                    markers.iter().map(|m| self.marker(m)).collect::<Result<_>>()?
+                };
+                places.sort_unstable();
+                places.dedup();
+                let mut ids = Vec::new();
+                for &i in places.iter().rev() {
+                    ids.push(self.take(&[], "markers", i)?.node.field("id").unwrap_or("?").to_string());
+                }
+                ids.reverse();
+                out.label = match ids.as_slice() {
+                    [id] => format!("Remove marker {id}"),
+                    ids => format!("Remove {}", count(ids.len(), "marker")),
+                };
+                out.report.insert("removed".into(), json!(ids));
+            }
             RangeCopy { start, length, to, insert, tracks } => {
                 self.range_copy(&mut out, &beat_at(start)?, &beat_at(length)?, &beat_at(to)?, *insert, tracks, None)?;
             }
@@ -2551,6 +2638,39 @@ impl<'a> Edit<'a> {
         // What this command noted itself, after what the commands it ran noted.
         out.also.extend(std::mem::take(&mut self.also));
         Ok(out)
+    }
+
+    /// The song's markers, in time order.
+    pub(crate) fn markers(&self) -> &[Item] {
+        self.root.get("markers").map_or(&[][..], Node::items)
+    }
+
+    /// The place among the markers of the one a command names: by its ID,
+    /// its handle or its path.
+    fn marker(&self, name: &str) -> Result<usize> {
+        let path = if name.starts_with('@') || name.starts_with("markers.") { name.to_string() } else { format!("markers.{name}") };
+        let known = || {
+            let ids: Vec<&str> = self.markers().iter().filter_map(|m| m.node.field("id")).collect();
+            if ids.is_empty() {
+                format!("{name} is not a marker; the song has none")
+            } else {
+                format!("{name} is not a marker; the markers are {}", ids.join(", "))
+            }
+        };
+        match self.at(&path).map_err(|_| known())?.as_slice() {
+            [Step::Key(k), Step::Index(i)] if k == "markers" => Ok(*i),
+            _ => Err(known()),
+        }
+    }
+
+    /// Where a marker is, for a label: "in bar 9", and its text after it.
+    fn marker_place(&self, beat: &BigRational, text: &str) -> String {
+        let (bar, _) = self.meter().bar_beat(num_traits::ToPrimitive::to_f64(beat).unwrap_or(0.0));
+        if text.is_empty() {
+            format!("in bar {bar}")
+        } else {
+            format!("in bar {bar}: {text}")
+        }
     }
 
     /// The ID of the track or return at `loc`, for labels.

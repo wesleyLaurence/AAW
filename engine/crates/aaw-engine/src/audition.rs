@@ -87,6 +87,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         groups: Vec::new(),
         returns: Vec::new(),
         sections: Vec::new(),
+        markers: Vec::new(),
         master: Default::default(),
     };
     song.session.length_beats = Beat::Float((total * 1000.0).ceil() / 1000.0);

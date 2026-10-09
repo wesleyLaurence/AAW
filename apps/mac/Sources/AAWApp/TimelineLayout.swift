@@ -4,11 +4,19 @@ import CoreGraphics
 /// grid a click snaps to. Geometry only; the song itself lives in the host.
 public struct TimelineLayout: Equatable {
     public static let headerWidth: CGFloat = 212
-    /// The ruler's three strips: loop brace, section markers, bar numbers.
+    /// The ruler's four strips: the loop brace, the sections, the person's
+    /// markers and the bar numbers.
     public static let loopStrip: CGFloat = 16
     public static let sectionStrip: CGFloat = 18
+    public static let markerStrip: CGFloat = 16
     public static let barStrip: CGFloat = 18
-    public static let rulerHeight: CGFloat = loopStrip + sectionStrip + barStrip
+    public static let rulerHeight: CGFloat = loopStrip + sectionStrip + markerStrip + barStrip
+    /// Where the marker strip starts, from the ruler's top.
+    public static let markerTop: CGFloat = loopStrip + sectionStrip
+    /// A marker's flag, which it has with or without text, and the space
+    /// either side of the text in it.
+    public static let markerFlag: CGFloat = 9
+    public static let markerPad: CGFloat = 4
     public static let trackHeight: CGFloat = 46
     /// Returns and the master.
     public static let busHeight: CGFloat = 32
@@ -129,6 +137,24 @@ public struct TimelineLayout: Equatable {
         let g = grid
         let on = free ? (beat * 1000).rounded() / 1000 : (beat / g).rounded() * g
         return min(max(on, 0), lengthBeats)
+    }
+
+    /// Where each marker's flag is drawn and pressed, from its line: as wide
+    /// as its text with the space around it, no further than the next
+    /// marker's line, and never less than the flag. `xs` are the markers'
+    /// lines in time order and `textWidths` what each one's text takes.
+    public static func markerSpans(xs: [CGFloat], textWidths: [CGFloat]) -> [ClosedRange<CGFloat>] {
+        xs.indices.map { i in
+            let wanted = textWidths[i] > 0 ? textWidths[i] + 2 * markerPad : markerFlag
+            let room = i + 1 < xs.count ? xs[i + 1] - xs[i] - 1 : .infinity
+            return xs[i]...(xs[i] + max(markerFlag, min(wanted, room)))
+        }
+    }
+
+    /// The marker a press at `x` takes hold of: the one whose flag holds it,
+    /// the later of two that share a place, so that each can be reached.
+    public static func marker(atX x: CGFloat, spans: [ClosedRange<CGFloat>]) -> Int? {
+        spans.lastIndex { $0.contains(x) }
     }
 
     /// A loop over the dragged span: on the grid, at least one grid step long

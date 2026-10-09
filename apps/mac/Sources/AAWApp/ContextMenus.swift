@@ -24,6 +24,12 @@ public enum ContextMenu {
         case cut, copy, paste, duplicate, bypass, delete
     }
 
+    /// What an item of the marker strip's menu does: to the marker that was
+    /// clicked, or at the place clicked in the clear.
+    public enum MarkerAction: Equatable {
+        case add, rename, delete, deleteAll
+    }
+
     /// One line of a menu: a separator when it has no action.
     public struct Item<Action: Equatable>: Equatable {
         public var title: String
@@ -98,6 +104,22 @@ public enum ContextMenu {
             .separator,
             Item(title: "Delete", action: .delete, key: "\u{8}", command: false),
         ]
+    }
+
+    /// The marker strip's menu. On a marker: Rename, which lets the person
+    /// type what it says, and Delete; in the clear: Add Marker Here. Delete
+    /// All Markers either way, while the song has any (`count`).
+    public static func marker(onMarker: Bool, count: Int) -> [Item<MarkerAction>] {
+        var items: [Item<MarkerAction>] = []
+        if onMarker {
+            items.append(Item(title: "Rename", action: .rename, key: "r"))
+            items.append(Item(title: "Delete", action: .delete, key: "\u{8}", command: false))
+        } else {
+            items.append(Item(title: "Add Marker Here", action: .add))
+        }
+        items.append(.separator)
+        items.append(Item(title: "Delete All Markers", action: .deleteAll, enabled: count > 0))
+        return items
     }
 
     /// An effect's menu, on its title in the device panel: what the Edit menu

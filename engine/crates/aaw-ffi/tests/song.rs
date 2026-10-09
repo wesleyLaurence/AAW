@@ -2564,6 +2564,67 @@ fn tempo_edits_are_saved_validated_and_undoable() {
 }
 
 #[test]
+fn the_person_leaves_moves_rewords_and_removes_markers() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    assert!(song.arrangement().markers.is_empty());
+    // A marker at the beat the app read from the playhead, to a thousandth,
+    // with what was typed on one line. The marker is what the edit makes.
+    let made = song.edit(Edit::MarkerAdd { at: 9.41739, text: "  too\n busy ".into() }, None).unwrap();
+    let u = update(&seen);
+    let marker = &u.arrangement.markers[0];
+    assert_eq!(made, [marker.key]);
+    assert_eq!((marker.id.as_str(), marker.at, marker.text.as_str()), ("m1", 9.417, "too busy"));
+    assert_eq!(u.touched, [touch(Part::Marker, marker.key, Delta::Added)]);
+    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Add marker m1 in bar 3: too busy"));
+    let first = marker.key;
+    // One before it touches the new one alone, and the list is in time order.
+    let made = song.edit(Edit::MarkerAdd { at: 2.0, text: String::new() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.touched, [touch(Part::Marker, made[0], Delta::Added)]);
+    assert_eq!(u.arrangement.markers.iter().map(|m| m.key).collect::<Vec<_>>(), [made[0], first]);
+    // A drag is one step, however many edits it sends.
+    for at in [10.0, 11.0, 12.0] {
+        song.edit(Edit::MarkerMove { marker: first, at }, Some("drag".into())).unwrap();
+        assert_eq!(update(&seen).touched, [touch(Part::Marker, first, Delta::Changed)]);
+    }
+    song.edit(Edit::MarkerText { marker: first, text: "love this".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!((u.arrangement.markers[1].at, u.arrangement.markers[1].text.as_str()), (12.0, "love this"));
+    // The agent reads them as the person left them, and is told of them.
+    let read = agent(&path, json!({"op": "markers"}));
+    assert_eq!(read["markers"][1]["text"], json!("love this"));
+    assert_eq!(read["markers"][1]["bar"], json!(4));
+    // The agent's marker shows in the window as its own change.
+    agent(&path, json!({"op": "marker.add", "at": 20, "text": "listen here"}));
+    let u = update(&seen);
+    assert_eq!(u.change.origin, Who::Agent);
+    assert_eq!(u.arrangement.markers.len(), 3);
+    let theirs = u.arrangement.markers[2].key;
+    song.edit(Edit::MarkersRemove { markers: vec![first, theirs] }, None).unwrap();
+    let u = update(&seen);
+    let mut touched = u.touched.clone();
+    touched.sort_by_key(|t| t.key);
+    assert_eq!(touched, [touch(Part::Marker, first, Delta::Removed), touch(Part::Marker, theirs, Delta::Removed)]);
+    assert_eq!(u.change.label, "Remove 2 markers");
+    // Undo puts both back; the text, the move and the drag are a step each.
+    song.undo().unwrap();
+    assert_eq!(update(&seen).arrangement.markers.len(), 3);
+    song.undo().unwrap(); // the agent's marker
+    song.undo().unwrap(); // the text
+    song.undo().unwrap(); // the drag
+    update(&seen);
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!((u.arrangement.markers[1].at, u.arrangement.markers[1].text.as_str()), (9.417, "too busy"));
+    // Nothing to remove is no edit, and a marker past the end is refused.
+    assert!(song.edit(Edit::MarkersRemove { markers: vec![] }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::MarkerAdd { at: 400.0, text: String::new() }, None).unwrap_err().to_string().contains("past the session's end"));
+    assert!(std::fs::read_to_string(&path).unwrap().contains("markers:"));
+    song.close();
+}
+
+#[test]
 fn metronome_is_shared_transport_state_without_a_song_edit() {
     let (_dir, path, song, seen) = open();
     assert!(!transport(&seen).metronome);

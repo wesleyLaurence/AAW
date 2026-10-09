@@ -183,4 +183,35 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(TimelineLayout.liftRange([0, 1]), 0...0)
         XCTAssertEqual(TimelineLayout.liftRange([]), 0...0)
     }
+
+    func testTheRulerHasAStripForMarkersOverTheBars() {
+        XCTAssertEqual(TimelineLayout.rulerHeight, 68)
+        XCTAssertEqual(TimelineLayout.markerTop, 34)
+        XCTAssertEqual(TimelineLayout.markerTop + TimelineLayout.markerStrip, TimelineLayout.rulerHeight - TimelineLayout.barStrip)
+    }
+
+    func testAMarkersFlagHoldsItsTextAsFarAsTheNextMarker() {
+        // Three markers: one with room for its text, one cut short by the
+        // next, and one without text, which is its flag alone.
+        let spans = TimelineLayout.markerSpans(xs: [300, 400, 430], textWidths: [40, 60, 0])
+        XCTAssertEqual(spans, [300...348, 400...429, 430...439])
+        // Two on one beat each keep a flag.
+        let stacked = TimelineLayout.markerSpans(xs: [300, 300], textWidths: [40, 40])
+        XCTAssertEqual(stacked, [300...309, 300...348])
+        XCTAssertEqual(TimelineLayout.markerSpans(xs: [], textWidths: []), [])
+    }
+
+    func testAPressTakesTheMarkerWhoseFlagItIsOn() {
+        let spans = TimelineLayout.markerSpans(xs: [300, 400, 430], textWidths: [40, 60, 0])
+        XCTAssertEqual(TimelineLayout.marker(atX: 300, spans: spans), 0)
+        XCTAssertEqual(TimelineLayout.marker(atX: 348, spans: spans), 0)
+        XCTAssertNil(TimelineLayout.marker(atX: 349, spans: spans))
+        XCTAssertNil(TimelineLayout.marker(atX: 299, spans: spans), "left of its line")
+        XCTAssertEqual(TimelineLayout.marker(atX: 415, spans: spans), 1)
+        XCTAssertEqual(TimelineLayout.marker(atX: 432, spans: spans), 2)
+        // Of two on one beat, the later takes the press, and its text the rest.
+        let stacked = TimelineLayout.markerSpans(xs: [300, 300], textWidths: [40, 40])
+        XCTAssertEqual(TimelineLayout.marker(atX: 304, spans: stacked), 1)
+        XCTAssertEqual(TimelineLayout.marker(atX: 340, spans: stacked), 1)
+    }
 }

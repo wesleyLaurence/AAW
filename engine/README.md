@@ -14,7 +14,7 @@ reads songs through `aaw-py`.
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
-| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, devices, lanes, patterns, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
+| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, markers, devices, lanes, patterns, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
 | `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module, with the meter's loudness of saved audio |
 
 ## Build and test
@@ -67,6 +67,7 @@ project's folder or the song file in it. It implements:
 | `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs |
 | `daw group add PROJECT ID [--tracks a,b] [--gain-db G]`, `daw group remove\|rename\|move` | A group of tracks, a bus between them and the master with effects, gain, pan, mute, solo and sends of its own: made of the tracks named, which are moved together to where the first of them is; removed with its tracks going back to the master; renamed with their `group` following. `daw set PROJECT tracks.T.group G` puts one track in, beside the others, and `daw remove tracks.T.group` takes it out; `daw send set` takes a group as it takes a track. See [groups](../docs/features/groups.md) |
 | `daw range copy PROJECT START LENGTH --to AT [--insert] [--track T]…`, `daw range insert PROJECT AT LENGTH`, `daw range delete PROJECT START LENGTH`, `daw range clear PROJECT START LENGTH`, `daw section duplicate PROJECT SECTION [--to AT] [--id ID]`, `daw section move\|remove PROJECT SECTION … --with-content` | A range of beats across every track, or the tracks named: its pattern clips, note clips, audio clips, lanes and sections copied over what is at AT or into time opened for it, empty beats opened, beats removed with the gap closed and the clips that meet there made one again, or the range emptied; a clip across an edge is cut there, a pattern clip only between repeats; a section with what is under it duplicated after itself, moved over what is at AT, or deleted. One undo step each; the reply lists what was made, split, moved and removed. See [editing a range of bars](../docs/features/bar-ranges.md) and `daw describe edit` |
+| `daw marker list PROJECT`, `daw marker add PROJECT [AT] [--text TEXT] [--id ID]`, `daw marker move PROJECT MARKER AT`, `daw marker text PROJECT MARKER TEXT`, `daw marker remove PROJECT MARKER... \| --all` | Markers: the notes a person leaves at beats while listening, with M in the app. `list` reads them in time order, each with the bar it is in and the beat of that bar, the section over it, its text and the clips sounding there, a track each; `add` leaves one at AT, or without AT where a running host is playing; `move` and `text` change one and `remove` takes away those named or all. One undo step each. `daw map` has a row of them, and the range commands move them with their beats. See [listening markers](../docs/features/listening-markers.md) |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
 | `daw clip loop PROJECT CLIP BEATS\|off [--length BEATS]` | A note clip or an audio clip looped: its first so many beats play again and again until its end, which `clip resize` or `audio trim --end` sets, the last repetition cut off; `off` plays it once again. The schedule unrolls the loop, each audio repetition a copy with the clip's fades at the wrap; a looped clip is split only at a wrap. See [looping clips](../docs/features/looping-clips.md) |
 | `daw clip join PROJECT CLIP CLIP...` | One clip of two or more clips of one track that plays what they played, the first kept with its ID and reference: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a loop laid out as notes; pattern clips and audio clips (`tracks.T.audio.N`) only where they meet and are one music, the same pattern with the repeats summed, or the same file played on from where the one before leaves, as `audio split` left them; else refused with the reason |
@@ -216,6 +217,16 @@ in stereo is refused with its name.
   watch, a sound, part or clip a command as soon as it is decided, a batch one
   musical edit. Reads, undo and the person's edits carry none, and the hint is
   in no change. See [the feature's file](../docs/features/watchable-steps.md).
+- **The person's markers reach the agent.** A `marker.add` without a beat
+  lands where the song is heard, to a thousandth of a beat, or at the start
+  position while the transport stands still; the host fills the beat in, so
+  the change log has it. The host keeps the markers the person left or
+  reworded since the agent last sent anything, by handle, and the agent's
+  next edit carries them once as `new_markers`, a sentence naming each with
+  its bar and text (`host::marker_news`); a `markers` read by the agent
+  counts as being told. A marker the person took back, a moved one and the
+  agent's own are not news. See
+  [the feature's file](../docs/features/listening-markers.md).
 - **A batch builds on itself.** A track, return or pattern a batch adds can be
   added to by its later commands: a pad and a clip on a new track, steps and
   events in a new pattern, notes in a new note clip. A note clip or a note is
@@ -378,7 +389,8 @@ sine's pitch and level, the envelope, a glide, stealing and a take-over.
 scale and holds a patch saved from one song and loaded into another to the
 same audition byte for byte.
 `crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
-the selection, external edits, concurrent clients, an embedded host, a project
+the selection, markers with what plays at each and through the range edits,
+the news of them in an agent's edit, external edits, concurrent clients, an embedded host, a project
 moved and copied under a running host with its old path still answering,
 Untitled projects, and a
 real-time stress run: random edits compiled and
@@ -390,7 +402,7 @@ including a sample import that reaches the song through the host.
 `daw move` and `daw copy`.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,
 what each kind of change touches, the person's edits and their place in the
-shared history, the fields a device panel is drawn from, edits of effects,
+shared history, markers left, dragged, reworded and removed, the fields a device panel is drawn from, edits of effects,
 equalizer bands, lanes and points, the transport shared with an agent, the
 waveforms that follow each kind of edit, patterns as the editor draws them,
 edits of steps, events, lengths and grids, a sample added as a pad or a track,
