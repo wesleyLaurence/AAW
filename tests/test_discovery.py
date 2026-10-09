@@ -40,7 +40,10 @@ def test_describe_is_short_and_keeps_the_schema_for_the_asking():
     assert synth["modulation"]["targets"]["width_percent"] == "points"
     assert synth["fields"]["width_mode"] == "alternate|pitch|random, default alternate"
     assert "width_mode" in synth["semantics"]["width"]
-    assert daw("describe", "effects")["fields"]["limiter.ceiling_db"] == "number -24..-0.1, default -1"
+    effects = daw("describe", "effects")
+    assert effects["fields"]["limiter.ceiling_db"] == "number -24..-0.1, default -1"
+    assert effects["fields"]["limiter.true_peak"] == "true|false, default false"
+    assert "true_peak: true" in effects["semantics"]["limiter"]
     # The app's File > Export Audio... is the same export, and the topic says so.
     assert "Export Audio" in daw("describe", "export")["semantics"]["app"]
 

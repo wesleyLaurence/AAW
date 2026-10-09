@@ -59,7 +59,7 @@ render with and without it and use `daw compare`.
 | `filter` | `mode` highpass/lowpass, `cutoff_hz` 10–20000, `slope_db_per_octave` 12/24/36/48 |
 | `eq` | `bands` (1–16) of `shape` bell/low_shelf/high_shelf/highpass/lowpass, `freq_hz`, `gain_db` ±24 (0 unless given), `q`, `slope_db_per_octave` 12/24/36/48 for a pass ([parametric-eq.md](parametric-eq.md)) |
 | `compressor` | `threshold_db`, `ratio` 1–20, `attack_ms`, `release_ms`, `knee_db`, `makeup_db`, `sidechain` |
-| `limiter` | `ceiling_db` −24…−0.1, `release_ms`, `lookahead_ms` 0.5–20 |
+| `limiter` | `ceiling_db` −24…−0.1, `release_ms`, `lookahead_ms` 0.5–20, `true_peak` ([true-peak-limiter.md](true-peak-limiter.md)) |
 | `clipper` | `ceiling_db` −60…24, `drive_db` 0–36, `knee_db` 0–24, `oversample` 1/2/4 ([clipper.md](clipper.md)) |
 | `delay` | `time_beats` (0–16, fractions allowed), `feedback_percent` 0–95, `lowcut_hz`, `highcut_hz`, `ping_pong`, `mix_percent` |
 | `reverb` | `decay_seconds` 0.1–12, `predelay_ms` 0–250, `damping_hz` 500–20000, `lowcut_hz` 20–2000, `width_percent`, `mix_percent`, `seed` |
@@ -92,12 +92,17 @@ render with and without it and use `daw compare`.
   A return's compressor may use a track as its key, for example to duck an echo
   under the kick. Sidechains cannot name a return. Master compressors cannot use
   a sidechain. Tracks render in dependency order, then returns.
-- **limiter**: look-ahead brickwall limiter on sample peaks. Required reduction is
+- **limiter**: look-ahead brickwall limiter. Required reduction is
   maximized over the look-ahead window, held with the release and averaged over
   the same window, so no output sample exceeds `ceiling_db`. The look-ahead is a
   declared latency that the renderer compensates exactly: material below the
-  ceiling passes through bit-identical. The estimated true peak in the report can
-  still exceed the ceiling slightly. Leave some margin below 0 dBFS.
+  ceiling passes through bit-identical. Without `true_peak` it holds the
+  samples alone, and the estimated true peak in the report passes the ceiling,
+  by tenths of a decibel on most mixes. With `true_peak: true`, added October
+  9, 2026, it reads the level between the samples as the report estimates it
+  and holds that too, 0.01 dB under the ceiling, so `ceiling_db: -1` is
+  −1 dBTP; it is then 19 frames later than its look-ahead. Set it on the
+  master's last limiter. See [true-peak-limiter.md](true-peak-limiter.md).
 - **clipper**: the signal driven by `drive_db` into a ceiling, added October
   9, 2026: no output sample exceeds `ceiling_db`, each channel and each
   sample cut by its own level, with no look-ahead and no release. `knee_db`
@@ -250,14 +255,16 @@ was 4e-9, and reverb tails agreed in decay time, octave levels and energy.
 
 Tests use generated audio. In Rust they cover each device: filter designs
 against scipy's, the cookbook bands, the compressor's curve, a keyed compressor,
-the limiter's ceiling and look-ahead, the clipper's ceiling, knee, latency
+the limiter's ceiling and look-ahead, and on a true peak the level between
+the samples of tones and noise, the clipper's ceiling, knee, latency
 and what folds back at each oversampling, exact echo frames and feedback gains,
 ping-pong and darkening repeats, the reverb's decay, damping, predelay, energy,
 seeding, width, low cut, equality with direct convolution and steady-noise level,
 and block-partition invariance of each. Through `daw render` the Python suite
 covers filter attenuation at each slope, bell and shelf gains, the compressor's
 steady-state curve and reduction report, below-threshold transparency, limiter
-ceiling and latency compensation, the clipper's ceiling, knee, drive, lane and
+ceiling and latency compensation, the report's true peak held by a limiter on
+a true peak, the clipper's ceiling, knee, drive, lane and
 latency compensation, bypass, sidechain ducking, pre-fader keys,
 preview/stem equivalence, hot mixes rescued by a master limiter, validation
 errors and round-trip formatting; pre- and post-fader sends, mute and solo,

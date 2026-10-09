@@ -17,6 +17,7 @@ pub mod saturation;
 pub mod spectrum;
 pub mod svf;
 pub mod synth;
+pub mod truepeak;
 pub mod utility;
 pub mod wavetable;
 

@@ -11,9 +11,9 @@
 
 use crate::loudness::{lufs, Loudness};
 use crate::spectrum::{Analyzer, BINS, TAP_FRAMES};
+use crate::truepeak::Between;
 use crate::Frame;
 use std::collections::VecDeque;
-use std::f64::consts::PI;
 use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
 
 /// Frames the ring keeps: 1.37 s at 48 kHz, 1.49 s at 44.1 kHz.
@@ -75,22 +75,6 @@ impl Ring {
         }
         (end, lost)
     }
-}
-
-/// Taps of the interpolating filter a true peak is estimated with: four
-/// phases of twelve, a windowed sinc at a quarter of the oversampled rate.
-const TRUE_PEAK_TAPS: usize = 48;
-
-fn true_peak_filter() -> [f64; TRUE_PEAK_TAPS] {
-    let center = (TRUE_PEAK_TAPS as f64 - 1.0) / 2.0;
-    let mut taps = [0.0; TRUE_PEAK_TAPS];
-    for (n, tap) in taps.iter_mut().enumerate() {
-        let t = (n as f64 - center) / 4.0;
-        let sinc = if t.abs() < 1e-12 { 1.0 } else { (PI * t).sin() / (PI * t) };
-        let window = 0.5 - 0.5 * (2.0 * PI * (n as f64 + 0.5) / TRUE_PEAK_TAPS as f64).cos();
-        *tap = sinc * window;
-    }
-    taps
 }
 
 /// A sample's level in dB relative to full scale; silence reads −200.
@@ -264,9 +248,8 @@ pub struct Meter {
     peak_hold: [f64; 2],
     true_peak: [f64; 2],
     true_peak_hold: [f64; 2],
-    /// The last twelve samples of each channel, for the interpolation.
-    recent: [[f64; 12]; 2],
-    taps: [f64; TRUE_PEAK_TAPS],
+    /// The level between the samples, as a render's report estimates it.
+    between: Between,
     squares: [Window; 2],
     product: Window,
     /// The loudness since the reset, which `daw listen` reads from a render
@@ -313,8 +296,7 @@ impl Meter {
             peak_hold: [0.0; 2],
             true_peak: [0.0; 2],
             true_peak_hold: [0.0; 2],
-            recent: [[0.0; 12]; 2],
-            taps: true_peak_filter(),
+            between: Between::new(),
             squares: [Window::new(window), Window::new(window)],
             product: Window::new(window),
             loudness: Loudness::new(rate),
@@ -414,22 +396,15 @@ impl Meter {
                 if a > self.peak[c] {
                     self.peak[c] = a;
                 }
-                // The true peak: the four samples between this one and the
-                // last, from the filter's phases over the recent samples.
-                let recent = &mut self.recent[c];
-                recent.copy_within(1.., 0);
-                recent[11] = v;
-                for phase in 0..4 {
-                    let mut y = 0.0;
-                    for (k, r) in recent.iter().enumerate() {
-                        y += r * self.taps[phase + 4 * (11 - k)];
-                    }
-                    let a = y.abs();
-                    if a > self.true_peak[c] {
-                        self.true_peak[c] = a;
-                    }
-                }
                 self.squares[c].push(v * v);
+            }
+            // The true peak: the sample ten frames back and the three
+            // points between it and the next.
+            let between = self.between.peaks(*f);
+            for c in 0..2 {
+                if between[c] > self.true_peak[c] {
+                    self.true_peak[c] = between[c];
+                }
             }
             let (power, block) = self.loudness.feed(f);
             self.weighted.push(power);
@@ -534,6 +509,7 @@ impl Meter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f64::consts::PI;
 
     fn sine(hz: f64, seconds: f64, level: [f64; 2], rate: f64) -> Vec<Frame> {
         (0..(rate * seconds) as usize)

@@ -181,7 +181,8 @@ def export(
     if kind != ".wav" and level["estimated_true_peak_dbtp"] > -0.99:
         warnings.append(
             f"True peak {level['estimated_true_peak_dbtp']:.2f} dBTP before encoding: a decoder "
-            "can clip what a lossy encoder overshoots; --peak -1 leaves room"
+            "can clip what a lossy encoder overshoots; --peak -1 leaves room by turning the file "
+            "down, and a master limiter with true_peak: true and ceiling_db: -1 holds it in the song"
         )
     if level["held_back_db"] > 0.05:
         warnings.append(

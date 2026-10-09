@@ -38,7 +38,10 @@ names what to install.
 A render refuses to clip, and a mastered song is already at full scale, so an edit
 with a one-shot over it needs room: a lower `master_gain_db`, or a master
 `limiter`, which keeps the song at its level and takes only the overlaps down.
-That is the song's work. The export changes the level by one gain for the whole
+That is the song's work, and so is a true peak: a master limiter with
+`true_peak: true` holds it at its `ceiling_db`
+([true-peak-limiter.md](true-peak-limiter.md)), where `--peak` turns the
+whole file down to reach one. The export changes the level by one gain for the whole
 file, or not at all:
 
 - No option: as rendered.

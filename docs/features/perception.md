@@ -80,7 +80,8 @@ The `mix`, each section's `audio`, and each track's `audio` and `sections` conta
   across channels, and peak minus RMS. The dBFS reference is unit sample amplitude;
   a unit-peak sine has RMS around -3.01 dBFS.
 - `estimated_true_peak_dbtp`: 4× polyphase oversampling estimate, not a certified
-  true-peak measurement.
+  true-peak measurement. A master limiter with `true_peak: true` holds it at
+  its ceiling ([true-peak-limiter.md](true-peak-limiter.md)).
 - `band_dbfs`: Welch spectral power integrated in the ranges below. It uses Hann
   windows of up to 8192 frames with 50% overlap, averaging channel powers rather
   than downmixing the audio. Resolution degrades for very short audio. Welch's

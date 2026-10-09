@@ -148,10 +148,13 @@ const COMPRESSOR: &[Field] = &[
     },
 ];
 
+/// A limiter's fields. `true_peak` adds to its latency, as `lookahead_ms`
+/// sets it, so a playing song fades through a change of either.
 const LIMITER: &[Field] = &[
     number("ceiling_db", "Ceiling", -24.0, -0.1, -1.0, "dB"),
     log(number("release_ms", "Release", 1.0, 2000.0, 60.0, "ms")),
     structural(number("lookahead_ms", "Look-ahead", 0.5, 20.0, 3.0, "ms")),
+    flag("true_peak", "True peak", false),
 ];
 
 /// A clipper's fields. `oversample` sets its latency, so a playing song

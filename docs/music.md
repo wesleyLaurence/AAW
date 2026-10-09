@@ -112,6 +112,11 @@ under the peaks that reach it, cuts those peaks off instead and leaves the
 limiter less to do (`daw describe effects`). It distorts what it cuts, so read
 its `fraction_over_1db_reduction`, which should stay near zero, and have the
 person hear it.
+A limiter holds the samples, and the mix's `estimated_true_peak_dbtp` passes
+its ceiling. For a file that is to be encoded or streamed, set `true_peak:
+true` on the master's last limiter with `ceiling_db` the true peak wanted,
+−1 as a rule, instead of lowering the ceiling by guess or the whole export
+with `--peak`; the render's report then reads at or under it.
 When the person names a song as what the mix should sound like, keep it with
 `daw reference add FILE --name NAME` and read `daw compare RENDER --reference
 NAME` for how the mix differs from it, by section (`daw describe reference`);

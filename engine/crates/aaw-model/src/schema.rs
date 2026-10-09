@@ -2063,6 +2063,9 @@ pub struct Limiter {
     pub ceiling_db: f64,
     pub release_ms: f64,
     pub lookahead_ms: f64,
+    /// Whether the ceiling holds the level between the samples, as a
+    /// render's report estimates it, and not the samples alone.
+    pub true_peak: bool,
     pub bypass: bool,
 }
 
@@ -2341,7 +2344,7 @@ impl Effect {
                 "type", "id", "threshold_db", "ratio", "attack_ms", "release_ms", "knee_db",
                 "makeup_db", "sidechain", "bypass",
             ],
-            "limiter" => &["type", "id", "ceiling_db", "release_ms", "lookahead_ms", "bypass"],
+            "limiter" => &["type", "id", "ceiling_db", "release_ms", "lookahead_ms", "true_peak", "bypass"],
             "clipper" => &["type", "id", "ceiling_db", "drive_db", "knee_db", "oversample", "bypass"],
             "delay" => &[
                 "type", "id", "time_beats", "feedback_percent", "lowcut_hz", "highcut_hz",
@@ -2423,6 +2426,7 @@ impl Effect {
                 let ceiling_db = float(ctx, "ceiling_db", -1.0, Bounds::ge_le("-24", "-0.1"));
                 let release_ms = float(ctx, "release_ms", 60.0, Bounds::ge_le("1", "2000"));
                 let lookahead_ms = float(ctx, "lookahead_ms", 3.0, Bounds::ge_le("0.5", "20"));
+                let true_peak = f.opt(ctx, "true_peak", false, v::boolean);
                 let bypass = f.opt(ctx, "bypass", false, v::boolean);
                 (|| {
                     Some(Effect::Limiter(Limiter {
@@ -2430,6 +2434,7 @@ impl Effect {
                         ceiling_db: ceiling_db?,
                         release_ms: release_ms?,
                         lookahead_ms: lookahead_ms?,
+                        true_peak: true_peak?,
                         bypass: bypass?,
                     }))
                 })()
@@ -2632,6 +2637,7 @@ impl Effect {
                 o.float("ceiling_db", e.ceiling_db, -1.0);
                 o.float("release_ms", e.release_ms, 60.0);
                 o.float("lookahead_ms", e.lookahead_ms, 3.0);
+                o.bool("true_peak", e.true_peak, false);
             }
             Effect::Clipper(e) => {
                 o.float("ceiling_db", e.ceiling_db, -1.0);

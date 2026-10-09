@@ -1,10 +1,17 @@
 //! The compressor and the limiter.
 
 use crate::envelope::Knob;
+use crate::truepeak::{Between, REACH};
 use crate::{Clock, Frame};
 
 /// Limiter smoothing sums fixed-point dB, so sums do not depend on blocks.
 const FIXED: f64 = (1u64 << 24) as f64;
+
+/// How far under its ceiling a limiter on a true peak aims. Where the gain
+/// moves across the samples a point between them is read from, the point
+/// comes out a little off the gain times what it was: on noise far over the
+/// ceiling by up to 0.001 dB with a look-ahead of 3 ms and 0.004 with 1 ms.
+pub const TRUE_PEAK_MARGIN_DB: f64 = 0.01;
 
 /// The louder channel in dB; negative infinity for silence.
 #[inline]
@@ -206,19 +213,34 @@ impl Compressor {
     }
 }
 
-/// Look-ahead brickwall limiter on sample peaks.
+/// Look-ahead brickwall limiter, on sample peaks or on the level between
+/// the samples.
 ///
 /// Required reduction is maximized over the look-ahead window, held with the
 /// release, then averaged over the same window in fixed point. Every average
 /// therefore covers the peak it protects, so no output sample exceeds the
 /// ceiling. The look-ahead is the device's latency.
+///
+/// On a true peak, a frame's level is the highest of the sample and the
+/// three points up to the next, as a render's report estimates them. Those
+/// points read the samples from `REACH - 1` before to `REACH` after, so the
+/// window is that much longer either way and the audio that much later:
+/// each average over those samples then covers the peak, the gain is the
+/// same across them when the peak stands alone, and the points come out at
+/// the ceiling.
 #[derive(Clone, Debug)]
 pub struct Limiter {
     ceiling: f64,
     lookahead: usize,
+    /// Frames the audio is late by, and frames before the last over which
+    /// required reduction is maximized: the look-ahead, and what a true
+    /// peak's points take.
+    delay: usize,
+    between: Option<Between>,
     hold: ReleaseHold,
-    /// The last `lookahead` input frames.
+    /// The last `delay` input frames.
     audio: Vec<Frame>,
+    at: usize,
     /// Candidates for the window's maximum: required reduction and the input
     /// frame it came at, in falling order of reduction.
     window: Vec<(f64, u64)>,
@@ -227,35 +249,40 @@ pub struct Limiter {
     /// The last `lookahead + 1` held reductions in fixed point, and their sum.
     held: Vec<i64>,
     sum: i64,
-    position: usize,
+    slot: usize,
     frames: u64,
     pub reduction: Reductions,
 }
 
 impl Limiter {
-    pub fn latency(lookahead_ms: f64, rate: f64) -> usize {
-        ((lookahead_ms * rate / 1000.0).round_ties_even() as usize).max(1)
+    pub fn latency(lookahead_ms: f64, rate: f64, true_peak: bool) -> usize {
+        let lookahead = ((lookahead_ms * rate / 1000.0).round_ties_even() as usize).max(1);
+        lookahead + if true_peak { 2 * REACH - 1 } else { 0 }
     }
 
-    pub fn new(ceiling_db: f64, release_ms: f64, lookahead_ms: f64, rate: f64) -> Limiter {
-        let n = Limiter::latency(lookahead_ms, rate);
+    pub fn new(ceiling_db: f64, release_ms: f64, lookahead_ms: f64, true_peak: bool, rate: f64) -> Limiter {
+        let n = Limiter::latency(lookahead_ms, rate, false);
+        let delay = Limiter::latency(lookahead_ms, rate, true_peak);
         Limiter {
-            ceiling: ceiling_db,
+            ceiling: ceiling_db - if true_peak { TRUE_PEAK_MARGIN_DB } else { 0.0 },
             lookahead: n,
+            delay,
+            between: true_peak.then(Between::new),
             hold: ReleaseHold::new(release_ms * rate / 1000.0),
-            audio: vec![[0.0; 2]; n],
-            window: vec![(0.0, 0); n + 2],
+            audio: vec![[0.0; 2]; delay],
+            at: 0,
+            window: vec![(0.0, 0); delay + 2],
             head: 0,
             count: 0,
             held: vec![0; n + 1],
             sum: 0,
-            position: 0,
+            slot: 0,
             frames: 0,
             reduction: Reductions::default(),
         }
     }
 
-    /// The largest required reduction among the last `lookahead + 1` frames.
+    /// The largest required reduction among the last `delay + 1` frames.
     #[inline]
     fn window_max(&mut self, required: f64) -> f64 {
         let size = self.window.len();
@@ -264,7 +291,7 @@ impl Limiter {
         }
         self.window[(self.head + self.count) % size] = (required, self.frames);
         self.count += 1;
-        if self.window[self.head].1 + (self.lookahead as u64) < self.frames {
+        if self.window[self.head].1 + (self.delay as u64) < self.frames {
             self.head = (self.head + 1) % size;
             self.count -= 1;
         }
@@ -274,34 +301,43 @@ impl Limiter {
     pub fn process(&mut self, x: &mut [Frame], clock: Clock) {
         let n = self.lookahead;
         for (i, frame) in x.iter_mut().enumerate() {
-            let required = (peak_db(*frame) - self.ceiling).max(0.0);
+            let level = match &mut self.between {
+                Some(between) => 20.0 * between.tick(*frame).log10(),
+                None => peak_db(*frame),
+            };
+            let required = (level - self.ceiling).max(0.0);
             let needed = self.window_max(required);
             let held = (self.hold.tick(needed) * FIXED).ceil() as i64;
-            let slot = self.position % (n + 1);
-            self.sum += held - self.held[slot];
-            self.held[slot] = held;
+            self.sum += held - self.held[self.slot];
+            self.held[self.slot] = held;
+            self.slot = (self.slot + 1) % (n + 1);
             let reduction = self.sum as f64 / (n + 1) as f64 / FIXED;
-            let delayed = std::mem::replace(&mut self.audio[self.position % n], *frame);
-            self.position = (self.position + 1) % (n * (n + 1));
+            let delayed = std::mem::replace(&mut self.audio[self.at], *frame);
+            self.at = (self.at + 1) % self.delay;
             self.frames += 1;
-            self.reduction.record(reduction, clock.frame + i as i64 * clock.step - n as i64, &clock);
+            self.reduction.record(reduction, clock.frame + i as i64 * clock.step - self.delay as i64, &clock);
             let gain = 10f64.powf(-reduction / 20.0);
             *frame = [delayed[0] * gain, delayed[1] * gain];
         }
     }
 
-    /// Continues from `old`'s state, when its look-ahead is the same.
+    /// Continues from `old`'s state, when it is as late and reads the same
+    /// peaks.
     pub fn take_over(&mut self, old: &mut Limiter) {
-        if old.lookahead != self.lookahead {
+        if old.lookahead != self.lookahead || old.between.is_some() != self.between.is_some() {
             return;
         }
         std::mem::swap(&mut self.audio, &mut old.audio);
         std::mem::swap(&mut self.window, &mut old.window);
         std::mem::swap(&mut self.held, &mut old.held);
+        if let (Some(new), Some(was)) = (&mut self.between, &old.between) {
+            new.take_over(was);
+        }
+        self.at = old.at;
         self.head = old.head;
         self.count = old.count;
         self.sum = old.sum;
-        self.position = old.position;
+        self.slot = old.slot;
         self.frames = old.frames;
         self.hold.held = old.hold.held;
     }
@@ -344,6 +380,10 @@ mod tests {
         x.iter().fold(0.0, |m, f| m.max(f[0].abs()).max(f[1].abs()))
     }
 
+    fn amplitude(db: f64) -> f64 {
+        10f64.powf(db / 20.0)
+    }
+
     #[test]
     fn the_compressor_follows_its_curve() {
         // A -6 dBFS sine over a -18 dB threshold at 4:1: 12 dB over, 9 dB off.
@@ -377,7 +417,7 @@ mod tests {
     fn the_limiter_holds_its_ceiling_and_delays_by_its_lookahead() {
         let ceiling = 10f64.powf(-1.0 / 20.0);
         let mut loud = sine(1.6, 48000);
-        let mut l = Limiter::new(-1.0, 60.0, 3.0, 48000.0);
+        let mut l = Limiter::new(-1.0, 60.0, 3.0, false, 48000.0);
         for chunk in loud.chunks_mut(500) {
             l.process(chunk, clock());
         }
@@ -386,8 +426,8 @@ mod tests {
         // Below the ceiling the input passes delayed and unchanged.
         let quiet = sine(0.3, 2000);
         let mut out = quiet.clone();
-        Limiter::new(-1.0, 60.0, 3.0, 48000.0).process(&mut out, clock());
-        assert_eq!(Limiter::latency(3.0, 48000.0), 144);
+        Limiter::new(-1.0, 60.0, 3.0, false, 48000.0).process(&mut out, clock());
+        assert_eq!(Limiter::latency(3.0, 48000.0, false), 144);
         assert!(out[..144].iter().all(|f| *f == [0.0; 2]));
         assert_eq!(&out[144..], &quiet[..2000 - 144]);
     }
@@ -401,7 +441,7 @@ mod tests {
         let mut x = sine(0.25, n);
         x.extend(sine(1.0, n));
         x.extend(sine(0.25, n));
-        let mut l = Limiter::new(-6.0, 20.0, 2.0, 48000.0);
+        let mut l = Limiter::new(-6.0, 20.0, 2.0, false, 48000.0);
         let total = x.len() as i64;
         let n = n as i64;
         l.reduction.split(&[2 * n, 0, n, n, 3 * n, n + n / 2, 2 * n, 4 * n]);
@@ -437,25 +477,112 @@ mod tests {
         assert_eq!((again.within(0, 10).frames, again.within(10, 20).frames), (3, 3));
     }
 
+    /// The highest level between the samples of `x` as it goes on, in dB:
+    /// the report's estimate without the cut a file's end is.
+    fn between_db(x: &[Frame]) -> f64 {
+        let mut between = Between::new();
+        20.0 * x.iter().map(|f| between.tick(*f)).fold(0.0f64, f64::max).log10()
+    }
+
+    fn noise(seed: u64, level: f64, n: usize) -> Vec<Frame> {
+        let mut seed = seed;
+        let mut next = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 11) as f64 / (1u64 << 52) as f64 - 1.0) * level
+        };
+        (0..n).map(|_| [next(), next()]).collect()
+    }
+
+    fn limited(x: &[Frame], ceiling: f64, release: f64, lookahead: f64, true_peak: bool, rate: f64) -> Vec<Frame> {
+        let mut y = x.to_vec();
+        let mut l = Limiter::new(ceiling, release, lookahead, true_peak, rate);
+        for chunk in y.chunks_mut(4096) {
+            l.process(chunk, clock());
+        }
+        y
+    }
+
+    #[test]
+    fn on_a_true_peak_the_limiter_holds_the_level_between_the_samples() {
+        // A tone at a quarter of the rate whose samples lie at 0.707 of its
+        // crests, swelling: the samples are held to the ceiling and the
+        // crests pass it by 3 dB, or the crests are held.
+        let tone: Vec<Frame> = (0..48000).map(|i| [2.0 * (PI * (i as f64 / 2.0 + 0.25)).sin() * (1.0 + (i as f64 / 3000.0).sin()) / 2.0; 2]).collect();
+        let plain = limited(&tone, -1.0, 60.0, 3.0, false, 48000.0);
+        assert!(peak(&plain) <= amplitude(-1.0) * (1.0 + 1e-9) && between_db(&plain) > 1.9, "{}", between_db(&plain));
+        let held = limited(&tone, -1.0, 60.0, 3.0, true, 48000.0);
+        let most = between_db(&held);
+        assert!(most <= -1.0 && most > -1.0 - 2.0 * TRUE_PEAK_MARGIN_DB, "{most}");
+        assert!((20.0 * peak(&held).log10() + 4.0).abs() < 0.05, "the samples are 3 dB under their crests");
+        // It is later by what the points between the samples read.
+        assert_eq!((Limiter::latency(3.0, 48000.0, false), Limiter::latency(3.0, 48000.0, true)), (144, 163));
+        let quiet = sine(0.3, 2000);
+        let out = limited(&quiet, -1.0, 60.0, 3.0, true, 48000.0);
+        assert!(out[..163].iter().all(|f| *f == [0.0; 2]));
+        assert_eq!(&out[163..], &quiet[..2000 - 163]);
+        // Noise, whose peaks are between the samples as often as not and
+        // which keeps the gain moving, from 3 to 36 dB over the ceiling.
+        for over in [3.0, 12.0, 36.0] {
+            let x = noise(99, amplitude(over - 1.0), 480000);
+            let plain = between_db(&limited(&x, -1.0, 60.0, 3.0, false, 48000.0));
+            assert!(plain > 0.5, "{plain}");
+            for (lookahead, release, rate) in [(1.0, 60.0, 48000.0), (3.0, 60.0, 48000.0), (3.0, 5.0, 44100.0), (20.0, 200.0, 48000.0)] {
+                let y = limited(&x, -1.0, release, lookahead, true, rate);
+                assert!(between_db(&y) <= -1.0, "{over} dB over, {lookahead} ms: {}", between_db(&y));
+                assert!(peak(&y) <= amplitude(-1.0));
+            }
+            // With the shortest look-ahead the gain moves fastest across a
+            // point's samples, and the estimate passes by hundredths.
+            let y = limited(&x, -1.0, 1.0, 0.5, true, 44100.0);
+            assert!(between_db(&y) < -1.0 + 0.03, "{over} dB over: {}", between_db(&y));
+        }
+        // A lone peak between two samples comes out at the ceiling less the
+        // margin: the gain is the same across the samples its estimate reads.
+        let mut click = vec![[0.0; 2]; 4000];
+        (click[2000], click[2001]) = ([1.5, 0.0], [1.5, 0.0]);
+        let y = limited(&click, -1.0, 60.0, 3.0, true, 48000.0);
+        assert!((between_db(&y) + 1.0 + TRUE_PEAK_MARGIN_DB).abs() < 1e-6, "{}", between_db(&y));
+    }
+
     #[test]
     fn dynamics_do_not_depend_on_blocks() {
         let x: Vec<Frame> = sine(1.3, 30000).iter().enumerate().map(|(i, f)| [f[0] * (1.0 + (i % 7000) as f64 / 7000.0) / 2.0, f[1]]).collect();
+        let devices = || (compressor(-20.0, 6.0, 8.0, 3.0), Limiter::new(-3.0, 40.0, 1.5, false, 48000.0), Limiter::new(-6.0, 40.0, 1.5, true, 48000.0));
         let mut whole = x.clone();
-        let (mut c, mut l) = (compressor(-20.0, 6.0, 8.0, 3.0), Limiter::new(-3.0, 40.0, 1.5, 48000.0));
+        let (mut c, mut l, mut t) = devices();
         for chunk in whole.chunks_mut(4096) {
             c.process(chunk, None, clock());
             l.process(chunk, clock());
+            t.process(chunk, clock());
         }
         let mut pieces = x.clone();
-        let (mut c, mut l) = (compressor(-20.0, 6.0, 8.0, 3.0), Limiter::new(-3.0, 40.0, 1.5, 48000.0));
+        let (mut c, mut l, mut t) = devices();
         let (mut at, mut size) = (0, 1);
         while at < pieces.len() {
             let n = size.min(pieces.len() - at);
             c.process(&mut pieces[at..at + n], None, clock());
             l.process(&mut pieces[at..at + n], clock());
+            t.process(&mut pieces[at..at + n], clock());
             at += n;
             size = size * 5 % 997 + 1;
         }
         assert_eq!(whole, pieces);
+        // Limiters that take over from others go on as those would have.
+        let mut halves = x.clone();
+        let (mut c, mut l, mut t) = devices();
+        for chunk in halves[..12288].chunks_mut(4096) {
+            c.process(chunk, None, clock());
+            l.process(chunk, clock());
+            t.process(chunk, clock());
+        }
+        let (_, mut l2, mut t2) = devices();
+        l2.take_over(&mut l);
+        t2.take_over(&mut t);
+        for chunk in halves[12288..].chunks_mut(4096) {
+            c.process(chunk, None, clock());
+            l2.process(chunk, clock());
+            t2.process(chunk, clock());
+        }
+        assert_eq!(whole, halves);
     }
 }

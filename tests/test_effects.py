@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 import soundfile as sf
 from agent_daw.model import load, save, validate
+from agent_daw.perception import oversampled_peak
 from helpers import SR, cli, daw, level_db, render, run_chain, stem, tone
 
 
@@ -134,6 +135,64 @@ def test_limiter_ceiling_latency_and_transparency(tmp_path):
     # Below the ceiling, the look-ahead delay is compensated exactly.
     y, _ = run_chain(tmp_path / "quiet", [spec], quiet)
     assert np.array_equal(y, quiet.astype(np.float32))
+
+
+def true_peak_db(y):
+    """The level between the samples as a render's report estimates it."""
+    return 20 * np.log10(max(oversampled_peak(np.ascontiguousarray(y[:, c], dtype=float)) for c in range(2)))
+
+
+def test_limiter_on_a_true_peak_holds_the_level_between_the_samples(tmp_path):
+    # A tone at a quarter of the rate whose samples lie at 0.707 of its
+    # crests, swelling to 6 dB over full scale and dying away.
+    t = np.arange(SR)
+    crest = 2 * np.sin(np.pi * t / SR) ** 2 * np.sin(np.pi * (t / 2 + 0.25))
+    x = np.column_stack([crest, crest])
+    plain, _ = run_chain(tmp_path / "plain", [{"type": "limiter", "ceiling_db": -1}], x)
+    assert 20 * np.log10(np.max(abs(plain))) <= -1 + 1e-6
+    assert true_peak_db(plain) > 1.9
+    # On a true peak it is the crests that are held, 0.01 dB under the
+    # ceiling, and the samples lie 3 dB under them.
+    spec = {"type": "limiter", "ceiling_db": -1, "true_peak": True}
+    held, report = run_chain(tmp_path / "held", [spec], x)
+    assert -1.02 < true_peak_db(held) <= -1
+    assert 20 * np.log10(np.max(abs(held))) == pytest.approx(-4.02, abs=0.03)
+    # It is 19 frames later than its look-ahead, which is made up for.
+    assert report[0]["latency_frames"] == 163
+    assert report[0]["max_gain_reduction_db"] == pytest.approx(7.03, abs=0.03)
+    quiet = tone(100, amp=0.3)
+    y, _ = run_chain(tmp_path / "quiet", [spec], quiet)
+    assert np.array_equal(y, quiet.astype(np.float32))
+    # Noise 12 dB over the ceiling, which keeps the gain moving.
+    rng = np.random.default_rng(5)
+    noise = rng.uniform(-4, 4, (SR, 2)) * np.sin(np.pi * t / SR)[:, None]
+    for name, lookahead in [("short", 1), ("long", 3)]:
+        y, _ = run_chain(tmp_path / name, [{**spec, "lookahead_ms": lookahead}], noise)
+        assert true_peak_db(y) <= -1
+    y, _ = run_chain(tmp_path / "samples", [{"type": "limiter", "ceiling_db": -1}], noise)
+    assert true_peak_db(y) > 0
+
+
+def test_master_limiter_on_a_true_peak_holds_the_reports_estimate(beat, tmp_path):
+    path, data = beat
+    data["session"]["master_gain_db"] = 12
+    data["master"] = {"effects": [{"type": "limiter", "ceiling_db": -1}]}
+    save(data, path)
+    plain = render(path, tmp_path / "plain")
+    assert plain["mix"]["peak_dbfs"] <= -1 + 1e-4
+    assert plain["mix"]["estimated_true_peak_dbtp"] > -1
+    assert daw("set", path, "master.effects.0.true_peak", "true")["changed"]
+    a = render(path, tmp_path / "held", 127)
+    b = render(path, tmp_path / "held-b", 4096)
+    assert a["audio_sha256"] == b["audio_sha256"]
+    assert -1.02 < a["mix"]["estimated_true_peak_dbtp"] <= -1
+    assert a["master_effects"][0]["latency_frames"] == 163
+    assert a["master_effects"][0]["max_gain_reduction_db"] >= plain["master_effects"][0]["max_gain_reduction_db"]
+    # daw listen and daw export read the same estimate from the file.
+    assert daw("listen", tmp_path / "held", "--no-images")["mix"]["estimated_true_peak_dbtp"] == pytest.approx(
+        a["mix"]["estimated_true_peak_dbtp"], abs=1e-3
+    )
+    assert "true_peak: true" in path.read_text()
 
 
 def test_clipper_ceiling_knee_oversampling_and_transparency(tmp_path):

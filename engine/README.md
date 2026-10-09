@@ -100,7 +100,11 @@ stream is cut into blocks, and processing never allocates.
   band's q on the last), the state-variable filter that automation moves, the
   compressor, the look-ahead limiter and the tempo-synced delay. The clipper
   (`clipper.rs`) is the engine's own: a curve under a ceiling, run at up to
-  four times the rate with only what it takes off lowpassed back. A lane whose
+  four times the rate with only what it takes off lowpassed back. So is the
+  limiter's `true_peak` (`truepeak.rs`): the level between the samples as a
+  render's report estimates it, through the filter of `resample_poly(x, 4,
+  1)` a frame at a time, with the limiter's window 19 frames longer so that
+  its gain is the same across the samples a point is read from. A lane whose
   points share one value is that static value. An equalizer on a track, a
   group, a return or the master writes its output into a ring the app reads
   for the spectrum under its curve (`spectrum`), kept beside the program
@@ -118,8 +122,9 @@ stream is cut into blocks, and processing never allocates.
   which comes from a generator of its own (D40, D44), so a tail is statistically
   the same and not sample-identical. Its convolution is non-uniformly
   partitioned and adds no latency.
-- **Latency.** The limiter delays its input by its look-ahead and an
-  oversampled clipper by its filters' 16 frames. A track keyed by a source
+- **Latency.** The limiter delays its input by its look-ahead, and by 19
+  frames more on a true peak, and an oversampled clipper by its filters' 16
+  frames. A track keyed by a source
   with latency renders its voices that much later, tracks are delayed to the
   slowest before their faders and sends, a grouped track early by its group's
   latency so that the group's output lands with the rest, and the output
