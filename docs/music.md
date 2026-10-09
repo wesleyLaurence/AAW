@@ -57,7 +57,7 @@ the operation needs. A refused edit names the field it meant and the fix.
 
 | Task | Read or do |
 |---|---|
-| Find sounds | `daw samples scan`, then `samples search`; filenames are hints, not measurements |
+| Find sounds | `daw describe samples`: `daw samples search` by name, sorted and filtered by what a sample measures as (`--sort punch`, `--short --bright`, `--max-decay 300`), and `daw samples like SAMPLE` for the nearest to one chosen; `daw samples analyze --all` measures the library once; filenames are hints, and a measurement is not a listen |
 | Use a sound | `daw samples import` copies it into the project; import compressed audio before measuring it |
 | Pitched or gated samples | `daw describe sampler`; confirm root octave with `samples analyze` or import `--root-note auto`; resolve `daw check` root warnings |
 | MIDI notes and instruments | `daw describe midi` |

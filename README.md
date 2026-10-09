@@ -82,7 +82,9 @@ lists what is open in it. See
 [engine/README.md](engine/README.md) and [apps/mac/README.md](apps/mac/README.md).
 
 Samples can be measured from their audio for pitch (with octave), loop tempo and
-one-shot/loop kind.
+one-shot/loop kind, and for what they sound like: brightness, low end, attack,
+decay, noisiness, loudness and punch, each a number with a word. Search sorts
+and filters by them and finds the samples nearest a chosen one.
 
 Tracks, returns and the master bus take insert effects: filter, EQ, compressor
 with sidechain, look-ahead limiter, tempo-synced delay and a seeded convolution
@@ -152,6 +154,9 @@ uv run daw samples search 'bell' --bpm 160 --key 'A#m'
 uv run daw samples inspect SAMPLE_ID
 uv run daw samples analyze --all
 uv run daw samples search --pitched --note-range C1-B1
+uv run daw samples search kick --sort punch --limit 5
+uv run daw samples search snare --short --bright
+uv run daw samples like SAMPLE_ID --limit 5
 uv run daw samples analyze SAMPLE_ID
 uv run daw samples audition SAMPLE_ID --output /tmp/candidate.wav
 uv run daw samples beats SONG.wav --near 0:41
@@ -199,6 +204,14 @@ do not establish an octave. `daw samples analyze` measures pitch with octave and
 cents, onsets, loop tempo and one-shot/loop kind from the audio. `--root-note auto`
 uses the measured note, and `daw check` warns when a declared root disagrees with
 the audio. See [docs/features/sample-analysis.md](docs/features/sample-analysis.md).
+It also measures what the sample sounds like in seven numbers, with words such
+as bright, short and noisy that say where it lies among samples of its
+category; `daw samples search --sort punch`, `--short --bright` and
+`--max-decay 300` choose by them, and `daw samples like SAMPLE` lists the
+nearest to one. A sample named for no category is found under the one it
+measures as, a hat or a kick. See
+[docs/features/sound-descriptors.md](docs/features/sound-descriptors.md) and
+`daw describe samples`.
 `daw samples import` takes a file's path as well as an index ID. An `.m4a` or
 `.mp3` file is decoded once into the project as WAV, and a file the engine cannot
 play is refused; see "Format" in [docs/architecture.md](docs/architecture.md).

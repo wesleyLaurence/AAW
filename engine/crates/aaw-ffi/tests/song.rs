@@ -1903,9 +1903,13 @@ fn the_library_is_searched_and_a_sample_copied_in() {
         found.into_iter().map(|s| (s.name, s.category, s.kind, s.bpm, s.key)).collect::<Vec<_>>()
     };
     let hit = |name: &str| (name.to_string(), "kick".to_string(), "one-shot".to_string(), None, None);
-    assert_eq!(search("", Some("kick"), None), [hit("deep_kick_01.wav"), hit("soft_kick_02.wav"), hit("tuned_kick_03.wav")]);
+    // A category lists the samples named for it and, once the library is
+    // measured, those named for none that measure as it: the file named as
+    // a loop here is the same hit, a short low thud.
+    let unnamed = ("drum_loop_120_Am.wav".to_string(), "other".to_string(), "loop".to_string(), Some(120), Some("Am".to_string()));
+    assert_eq!(search("", Some("kick"), None), [hit("deep_kick_01.wav"), unnamed.clone(), hit("soft_kick_02.wav"), hit("tuned_kick_03.wav")]);
     assert_eq!(search("deep kick", None, None), [hit("deep_kick_01.wav")]);
-    assert_eq!(search("", None, Some("loop")), [("drum_loop_120_Am.wav".to_string(), "other".to_string(), "loop".to_string(), Some(120), Some("Am".to_string()))]);
+    assert_eq!(search("", None, Some("loop")), [unnamed]);
     assert_eq!(search("", None, None).len(), 5);
     // A measured pitch is the root note to add a sample with, unless its name says it is a drum.
     let notes = |query: &str| {

@@ -33,6 +33,7 @@ Built:
 | [automation](features/automation.md) | Lanes for levels, pans, sends and effect parameters |
 | [perception](features/perception.md) | `daw listen` and `daw compare` |
 | [sample analysis](features/sample-analysis.md) | `daw samples analyze`, measured search filters, root-note warnings |
+| [sound descriptors](features/sound-descriptors.md) | What a sample sounds like in seven numbers and five words, `daw samples search` sorted and filtered by them, `daw samples like`, and a category from the audio |
 | [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
 | [audio clips in the app](features/audio-clips-in-app.md) | A file dropped on the timeline, a clip moved, trimmed, faded and split there, the song growing to hold it, and the beat map on its waveform |
@@ -68,7 +69,6 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [sound descriptors](features/sound-descriptors.md) | Next |
 | [the agent panel](features/agent-panel.md) | Next |
 | [generated audio](features/generated-audio.md) | Next |
 

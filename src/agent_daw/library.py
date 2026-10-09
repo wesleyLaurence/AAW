@@ -8,11 +8,14 @@ import re
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
+import time
 import json
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import numpy as np
 import soundfile as sf
-from . import analysis
+from . import analysis, descriptors
 from .model import digest
 
 EXTENSIONS = {".wav", ".aif", ".aiff", ".flac"}
@@ -192,6 +195,51 @@ def scan(root: Path, db: Path):
 
 
 MEASURED_KINDS = ["one_shot", "loop", "uncertain"]
+# What a search sorts by beside the name, most first: a sample's length, or
+# one of its measurements under a short name.
+SORTS = {"duration": "duration", **{f.rsplit("_", 1)[0]: f for f in descriptors.FIELDS}}
+WORDS = {word: field for field, names in descriptors.WORDS.items() for word in names}
+
+ROWS = """SELECT s.id,s.name,s.pack,s.duration,s.channels,s.category,s.kind,
+  s.bpm_hint,s.key_hint,s.path,a.id AS measured_id,a.pitched,a.note,a.cents,
+  a.confidence,a.kind AS measured_kind,a.bpm AS measured_bpm,
+  json_extract(a.report, '$.sound') AS sound,
+  json_extract(a.report, '$.measured_category') AS measured_category
+  FROM samples s LEFT JOIN analysis a ON a.id = s.id AND a.bytes = s.bytes
+  AND a.mtime_ns = s.mtime_ns AND a.analyzer = ?"""
+# A sample named for no category is of the one it measures as.
+OF_CATEGORY = (
+    "(s.category = ? OR (s.category = 'other' AND "
+    "json_extract(a.report, '$.measured_category') = ?))"
+)
+
+
+def listed(r) -> dict:
+    """A sample as a search lists it: what its name says, and under `measured`
+    what its audio does, or null for a sample that was not analyzed."""
+    row = dict(r)
+    measured = {
+        "pitched": bool(row.pop("pitched")),
+        "note": row.pop("note"),
+        "cents": row.pop("cents"),
+        "confidence": row.pop("confidence"),
+        "kind": row.pop("measured_kind"),
+        "bpm": row.pop("measured_bpm"),
+        "category": row.pop("measured_category"),
+    }
+    sound = row.pop("sound")
+    if row.pop("measured_id") is None:
+        row["measured"] = None
+        return row
+    sound = json.loads(sound) if sound else dict.fromkeys(descriptors.FIELDS)
+    among = row["category"] if row["category"] != "other" else measured["category"]
+    row["measured"] = {
+        **measured,
+        **sound,
+        "words": descriptors.words(sound, among),
+        "words_among": among or "any",
+    }
+    return row
 
 
 def search(
@@ -207,9 +255,22 @@ def search(
     measured_kind=None,
     measured_bpm=None,
     roots=None,
+    sort="name",
+    reverse=False,
+    words=(),
+    ranges=None,
+    measure=0,
+    notes=None,
 ):
-    """Filename search. Measured filters match only samples with a current analysis."""
-    con = connect(db)
+    """Filename search. Measured filters match only samples with a current analysis.
+
+    `sort` is `name` or one of SORTS, which lists the most first; `reverse`
+    turns either around. `words` keeps the samples each word is true of, and
+    `ranges` those whose field lies between a least and a most, either of
+    which may be None. A sort or filter by a measurement leaves out what was
+    not measured, says how many in `notes`, and refuses when that is all of
+    them; `measure` measures that many of them first.
+    """
     clauses, args = [], [analysis.ANALYZER]
     if roots:
         # Prefixes include a separator: /drums must never also match /drums-old.
@@ -226,8 +287,10 @@ def search(
             + token.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             + "%"
         )
+    if category is not None:
+        clauses.append(OF_CATEGORY)
+        args.extend([category, category])
     for col, value in [
-        ("s.category", category),
         ("s.kind", kind),
         ("s.key_hint", key),
         ("s.bpm_hint", bpm),
@@ -245,41 +308,161 @@ def search(
     if measured_bpm is not None:
         clauses.append("ABS(a.bpm - ?) <= 1")
         args.append(measured_bpm)
-    sql = """SELECT s.id,s.name,s.pack,s.duration,s.channels,s.category,s.kind,
-      s.bpm_hint,s.key_hint,s.path,a.id AS measured_id,a.pitched,a.note,a.cents,
-      a.confidence,a.kind AS measured_kind,a.bpm AS measured_bpm
-      FROM samples s LEFT JOIN analysis a ON a.id = s.id AND a.bytes = s.bytes
-      AND a.mtime_ns = s.mtime_ns AND a.analyzer = ?"""
-    if clauses:
-        sql += " WHERE " + " AND ".join(clauses)
-    sql += " ORDER BY s.name,s.path LIMIT ?"
-    args.append(limit)
+    sql = ROWS + (" WHERE " + " AND ".join(clauses) if clauses else "")
+    sql += " ORDER BY s.name,s.path"
+    field = SORTS.get(sort)
+    ranges = {f: r for f, r in (ranges or {}).items() if r != (None, None)}
+    by_sound = bool(words) or field in descriptors.FIELDS or any(f != "duration" for f in ranges)
+    if not (by_sound or ranges or field or measure):
+        # By name alone, the index does all of it.
+        con = connect(db)
+        try:
+            if reverse:
+                sql = sql.replace("s.name,s.path", "s.name DESC,s.path DESC")
+            return [listed(r) for r in con.execute(sql + " LIMIT ?", [*args, limit])]
+        finally:
+            con.close()
+
+    def found():
+        con = connect(db)
+        try:
+            return [listed(r) for r in con.execute(sql, args)]
+        finally:
+            con.close()
+
+    rows = found()
+    waiting = [r["path"] for r in rows if r["measured"] is None]
+    if measure and waiting:
+        measure_files(db, waiting[:measure], "search")
+        rows = found()
+        waiting = [r["path"] for r in rows if r["measured"] is None]
+    if by_sound:
+        if waiting and len(waiting) == len(rows):
+            raise ValueError(
+                f"None of the {len(rows)} matching samples is measured, and this search "
+                "sorts or filters by a measurement: run `daw samples analyze --all` once "
+                "for the library, or add --measure N to measure the first N of them here"
+            )
+        if waiting and notes is not None:
+            notes.append(
+                f"{len(waiting)} of the {len(rows)} matching samples are not measured and "
+                "were left out: `daw samples analyze --all` measures the library, and "
+                "--measure N the first N of these"
+            )
+        rows = [r for r in rows if r["measured"] is not None]
+
+    def value(row, name):
+        return row["duration"] if name == "duration" else row["measured"][name]
+
+    for name, (least, most) in ranges.items():
+        rows = [
+            r
+            for r in rows
+            if value(r, name) is not None
+            and (least is None or value(r, name) >= least)
+            and (most is None or value(r, name) <= most)
+        ]
+    for word in words:
+        rows = [r for r in rows if r["measured"]["words"].get(WORDS[word]) == word]
+    if field:
+        rows = [r for r in rows if value(r, field) is not None]
+        # The rows are by name, which a sort that keeps their order leaves ties in.
+        rows.sort(key=lambda r: value(r, field), reverse=not reverse)
+    elif reverse:
+        rows.reverse()
+    return rows[:limit]
+
+
+def like(db: Path, path: Path, limit=10, category=None, roots=None, measure=0):
+    """The measured samples nearest a chosen one in sound, nearest first.
+
+    They are those of its category: the one given, the one its name says, or
+    the one it measures as, and every sample where it has none. A loop is
+    held against loops and a single sound against single sounds. Each has
+    its `distance` in steps (descriptors.STEPS).
+    """
+    report = analyze(db, path)
+    con = connect(db)
     try:
-        rows = []
-        for r in con.execute(sql, args):
-            row = dict(r)
-            measured = {
-                k: row.pop(k)
-                for k in [
-                    "pitched",
-                    "note",
-                    "cents",
-                    "confidence",
-                    "measured_kind",
-                    "measured_bpm",
-                ]
-            }
-            if row.pop("measured_id") is None:
-                row["measured"] = None
-            else:
-                measured["pitched"] = bool(measured["pitched"])
-                measured["kind"] = measured.pop("measured_kind")
-                measured["bpm"] = measured.pop("measured_bpm")
-                row["measured"] = measured
-            rows.append(row)
-        return rows
+        own = con.execute(
+            "SELECT category FROM samples WHERE path=?", (str(path.resolve()),)
+        ).fetchone()
     finally:
         con.close()
+    named = own["category"] if own else hints(path)[0]
+    among = category or (named if named != "other" else report["measured_category"])
+    if among == "any":
+        among = None
+
+    if all(value is None for value in report["sound"].values()):
+        raise ValueError(f"{path.name} is silent, so nothing is like it")
+
+    def found():
+        rows = search(db, category=among, roots=roots, limit=10**9)
+        return [r for r in rows if Path(r["path"]) != path.resolve()]
+
+    rows = found()
+    waiting = [r["path"] for r in rows if r["measured"] is None]
+    if measure and waiting:
+        measure_files(db, waiting[:measure], "like")
+        rows = found()
+        waiting = [r["path"] for r in rows if r["measured"] is None]
+    loop = report["rhythm"]["kind"] == "loop"
+    near = []
+    for row in rows:
+        if row["measured"] is None or (row["measured"]["kind"] == "loop") != loop:
+            continue
+        distance = descriptors.distance(report["sound"], row["measured"])
+        if distance is not None:
+            near.append({**row, "distance": round(distance, 2)})
+    if not near and waiting:
+        raise ValueError(
+            f"None of the {len(waiting)} samples to compare with is measured: run "
+            "`daw samples analyze --all` once for the library, or add --measure N to "
+            "measure the first N of them here"
+        )
+    near.sort(key=lambda r: r["distance"])
+    return {
+        "sample": {
+            "path": str(path.resolve()),
+            "category": named,
+            "measured": {
+                "kind": report["rhythm"]["kind"],
+                "category": report["measured_category"],
+                **report["sound"],
+                "words": descriptors.words(report["sound"], among),
+                "words_among": among or "any",
+            },
+        },
+        "among": among or "any",
+        "compared": len(near),
+        "not_measured": len(waiting),
+        "like": near[:limit],
+    }
+
+
+def keep(con, sample, size, mtime_ns, report):
+    """Saves the measurements of the file of that size and time beside its
+    index entry."""
+    pitch, rhythm = report["pitch"], report["rhythm"]
+    con.execute(
+        "INSERT OR REPLACE INTO analysis VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            sample,
+            size,
+            mtime_ns,
+            analysis.ANALYZER,
+            int(pitch["pitched"]),
+            pitch["midi"],
+            pitch["note"],
+            pitch["cents"],
+            pitch["confidence"],
+            rhythm["kind"],
+            rhythm["tempo"]["bpm"] if rhythm["tempo"] else None,
+            json.dumps(report),
+        ),
+    )
+    con.commit()
 
 
 def analyze(db: Path, path: Path, refresh=False):
@@ -301,28 +484,67 @@ def analyze(db: Path, path: Path, refresh=False):
         hint = row["bpm_hint"] if row else hints(path)[2]
         report = analysis.analyze(path, hint)
         if row and row["bytes"] == stat.st_size and row["mtime_ns"] == stat.st_mtime_ns:
-            pitch, rhythm = report["pitch"], report["rhythm"]
-            con.execute(
-                "INSERT OR REPLACE INTO analysis VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                (
-                    row["id"],
-                    stat.st_size,
-                    stat.st_mtime_ns,
-                    analysis.ANALYZER,
-                    int(pitch["pitched"]),
-                    pitch["midi"],
-                    pitch["note"],
-                    pitch["cents"],
-                    pitch["confidence"],
-                    rhythm["kind"],
-                    rhythm["tempo"]["bpm"] if rhythm["tempo"] else None,
-                    json.dumps(report),
-                ),
-            )
-            con.commit()
+            keep(con, row["id"], stat.st_size, stat.st_mtime_ns, report)
         return {**report, "cached": False, "indexed": bool(row)}
     finally:
         con.close()
+
+
+def measured(job):
+    """One indexed file's measurements, or why it has none, in a worker."""
+    path, hint = job
+    try:
+        stat = Path(path).stat()
+        return path, (stat.st_size, stat.st_mtime_ns), analysis.analyze(Path(path), hint), None
+    except (RuntimeError, ValueError, OSError) as e:
+        return path, None, None, str(e)
+
+
+# Fewer files than this are measured one after another: a worker takes
+# longer to start than they take to measure.
+TOGETHER = 16
+
+
+def measure_files(db: Path, paths, said="analyze"):
+    """Measures indexed files, several at a time, keeping each as it is done,
+    so a run that is stopped keeps what it had measured and the next one goes
+    on from there. Says how far it is on stderr every two seconds. Returns
+    the files that could not be measured."""
+    con = connect(db)
+    errors, done, last = [], 0, time.monotonic()
+    try:
+        rows = {}
+        for first in range(0, len(paths), 500):
+            some = paths[first : first + 500]
+            marks = ",".join("?" * len(some))
+            for row in con.execute(
+                f"SELECT id,path,bytes,mtime_ns,bpm_hint FROM samples WHERE path IN ({marks})", some
+            ):
+                rows[row["path"]] = row
+        jobs = [(path, rows[path]["bpm_hint"]) for path in paths if path in rows]
+        workers = min(8, os.cpu_count() or 1)
+        pool = ProcessPoolExecutor(workers) if len(jobs) >= TOGETHER and workers > 1 else None
+        try:
+            if pool:
+                results = (f.result() for f in as_completed([pool.submit(measured, j) for j in jobs]))
+            else:
+                results = map(measured, jobs)
+            for path, stat, report, error in results:
+                row = rows[path]
+                if error:
+                    errors.append({"path": path, "error": error})
+                elif (row["bytes"], row["mtime_ns"]) == stat:
+                    keep(con, row["id"], *stat, report)
+                done += 1
+                if time.monotonic() - last >= 2 and done < len(jobs):
+                    last = time.monotonic()
+                    print(f"{said}: {done} of {len(jobs)}", file=sys.stderr, flush=True)
+        finally:
+            if pool:
+                pool.shutdown(cancel_futures=True)
+    finally:
+        con.close()
+    return sorted(errors, key=lambda e: e["path"])
 
 
 def analyze_all(db: Path, refresh=False):
@@ -338,16 +560,13 @@ def analyze_all(db: Path, refresh=False):
         total = con.execute("SELECT COUNT(*) FROM samples").fetchone()[0]
     finally:
         con.close()
-    errors = []
-    for row in rows:
-        try:
-            analyze(db, Path(row["path"]), refresh=True)
-        except (RuntimeError, ValueError, OSError) as e:
-            errors.append({"path": row["path"], "error": str(e)})
+    started = time.monotonic()
+    errors = measure_files(db, [row["path"] for row in rows])
     return {
         "analyzed": len(rows) - len(errors),
         "unchanged": total - len(rows),
         "errors": errors,
+        "seconds": round(time.monotonic() - started, 1),
         "analyzer": analysis.ANALYZER,
         "database": str(db),
     }

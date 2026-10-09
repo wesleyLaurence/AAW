@@ -57,7 +57,7 @@ def run_engine(*args):
 
 
 def parser():
-    from . import library
+    from . import descriptors, library
 
     p = argparse.ArgumentParser(
         prog="daw",
@@ -75,11 +75,23 @@ def parser():
     search = ss.add_parser("search")
     search.add_argument("query", nargs="?", default="")
     search.add_argument("--folder", type=Path, action="append", help="Search within this folder; repeat for multiple sources")
-    search.add_argument("--category")
+    search.add_argument(
+        "--category",
+        help="The category in a sample's name, or the one a sample named for none measures as",
+    )
     search.add_argument("--type", dest="kind", choices=["one-shot", "loop", "unknown"])
     search.add_argument("--key")
     search.add_argument("--bpm", type=int)
     search.add_argument("--limit", type=int, default=20)
+    search.add_argument(
+        "--sort",
+        choices=["name", *library.SORTS],
+        default="name",
+        help="By name, or by length or a measurement with the most first: the "
+        "longest, brightest (centroid), most low end (low), slowest attack, longest "
+        "decay, noisiest, loudest, hardest hit (punch)",
+    )
+    search.add_argument("--reverse", action="store_true", help="Turn the order around")
     measured = search.add_argument_group(
         "measured filters", "match only samples analyzed with daw samples analyze"
     )
@@ -89,12 +101,69 @@ def parser():
     measured.add_argument("--note-range", help="Measured root range, e.g. C1-B1")
     measured.add_argument("--measured-type", choices=library.MEASURED_KINDS)
     measured.add_argument("--measured-bpm", type=float, help="Within ±1 BPM")
+    measured.add_argument(
+        "--measure",
+        type=int,
+        default=0,
+        metavar="N",
+        help="First measure N of the matches that are not measured, and keep what was measured",
+    )
+    sound = search.add_argument_group(
+        "sound",
+        "what a measured sample is like (daw describe samples). A word keeps the samples "
+        "it is true of among their category: "
+        + "; ".join(
+            " ".join(f"--{word}" for word in names) + f" ({field})"
+            for field, names in descriptors.WORDS.items()
+        )
+        + ". A number keeps those from --min-FIELD to --max-FIELD, FIELD being duration, "
+        + ", ".join(
+            short if short == field else f"{short} ({field})"
+            for short, field in library.SORTS.items()
+            if short != "duration"
+        )
+        + ": --max-decay 300",
+    )
+    for word in library.WORDS:
+        sound.add_argument(
+            f"--{word}", dest="words", action="append_const", const=word, help=argparse.SUPPRESS
+        )
+    for short in library.SORTS:
+        for end in ("min", "max"):
+            sound.add_argument(
+                f"--{end}-{short}", type=float, metavar="X", help=argparse.SUPPRESS
+            )
+    like = ss.add_parser(
+        "like",
+        help="The measured samples nearest a chosen one in sound (daw describe samples)",
+    )
+    like.add_argument("sample", help="A sample's ID or a file, one in a project too")
+    like.add_argument("--limit", type=int, default=10)
+    like.add_argument(
+        "--category",
+        help="Compare with this category's samples, or any for every sample; its own unless given",
+    )
+    like.add_argument("--folder", type=Path, action="append", help="Compare within this folder; repeat for several")
+    like.add_argument(
+        "--measure",
+        type=int,
+        default=0,
+        metavar="N",
+        help="First measure N of the samples to compare with that are not measured",
+    )
     analyze = ss.add_parser(
-        "analyze", help="Measure pitch, onsets, tempo and loop/one-shot from audio"
+        "analyze",
+        help="Measure pitch, onsets, tempo, loop/one-shot and what the sound is like "
+        "from audio (daw describe samples)",
     )
     target = analyze.add_mutually_exclusive_group(required=True)
     target.add_argument("sample", nargs="?")
-    target.add_argument("--all", action="store_true", help="Every indexed sample")
+    target.add_argument(
+        "--all",
+        action="store_true",
+        help="Every indexed sample not yet measured, several at a time; says how far "
+        "it is on stderr, and a run that is stopped goes on from there",
+    )
     analyze.add_argument("--refresh", action="store_true", help="Ignore the cache")
     beats = ss.add_parser(
         "beats",
@@ -358,7 +427,10 @@ def execute(a):
             note_range = (midi(low), midi(high))
             if note_range[0] > note_range[1]:
                 raise ValueError("note-range low note exceeds high note")
-        return library.search(
+        if a.measure < 0:
+            raise ValueError("measure must be 0 or more")
+        notes = []
+        found = library.search(
             a.db,
             a.query,
             a.category,
@@ -371,7 +443,24 @@ def execute(a):
             measured_kind=a.measured_type,
             measured_bpm=a.measured_bpm,
             roots=a.folder,
+            sort=a.sort,
+            reverse=a.reverse,
+            words=a.words or (),
+            ranges={
+                field: (getattr(a, f"min_{short}"), getattr(a, f"max_{short}"))
+                for short, field in library.SORTS.items()
+            },
+            measure=a.measure,
+            notes=notes,
         )
+        for note in notes:
+            print(json.dumps({"note": note}), file=sys.stderr)
+        return found
+    if a.action == "like":
+        if not 1 <= a.limit <= 1000 or a.measure < 0:
+            raise ValueError("limit must be 1–1000, and measure 0 or more")
+        source = library.resolve(a.db, a.sample)
+        return library.like(a.db, source, a.limit, a.category, a.folder, a.measure)
     if a.action == "analyze" and a.all:
         return library.analyze_all(a.db, a.refresh)
     source = library.resolve(a.db, a.sample)
