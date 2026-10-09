@@ -348,6 +348,10 @@ The mix and each stem are also measured in third octaves with a tilt, and each
 stem's resonances are listed as a frequency, a height and a `q`, the numbers an
 equalizer's bell takes; `daw listen <render> --section <id>` prints one
 section's. See [docs/features/spectrum-detail.md](docs/features/spectrum-detail.md).
+The report's `translation` says what the mix, each band and each stem loses
+summed to mono and through the band a small speaker plays, and
+`daw listen <render> --write-translation` writes the two as files to hear. See
+[docs/features/translation-checks.md](docs/features/translation-checks.md).
 See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
 
 `daw reference add <song> --name <name>` measures a song you point to as what

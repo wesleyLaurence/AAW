@@ -113,6 +113,13 @@ Python, in `src/agent_daw`:
   (`aaw_model::schedule::sounded`, through `aaw_py`); their change in
   `daw compare` and the picture of the mix's third octaves over its stems'; see
   [spectrum-detail.md](features/spectrum-detail.md).
+- `translation.py`: what a mix, its sections and its stems lose summed to mono,
+  over all frequencies and in each of the seven bands, and through a small
+  speaker's band, a highpass at 200 Hz and a lowpass at 8 kHz, from one
+  spectrum of the channels and of their mid; the largest losses in words,
+  their change in `daw compare`, and the two files `--write-translation`
+  writes for a person to hear; see
+  [translation-checks.md](features/translation-checks.md).
 - `reference.py`: a song the person names as a reference, measured once with
   its beat map's phrases as sections and kept as numbers in the workspace
   library, `~/Music/AAW/library/references/` (or `AAW_WORKSPACE`), with the

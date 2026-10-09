@@ -61,12 +61,12 @@ Built:
 | [comparing with a reference](features/reference-comparison.md) | `daw reference`: a song kept as what good sounds like, as measurements in the workspace library; `daw compare RENDER --reference NAME`: the mix against it, whole and section by section, with the differences in words |
 | [overlap between stems](features/masking.md) | `overlap` in `daw listen`: the pairs of stems with energy in the same band at the same moments, the band, how much of the time and where; `--overlap A B` for one pair by band and section, with a picture; each pair's change in `daw compare` |
 | [a finer spectrum in numbers](features/spectrum-detail.md) | `spectrum_db`, the mix and each stem in 31 third octaves, and `tilt_db_per_octave` in `daw listen`; each stem's `resonances`, the peaks that stay while the notes move, as a frequency, a height and a `q`; `--section ID` for one section's; their change in `daw compare`, and the balance against a reference in third octaves |
+| [translation checks](features/translation-checks.md) | `translation` in `daw listen`: what the mix, each band and each stem loses summed to mono and through a small speaker's band, 200 Hz to 8 kHz, with the largest in words; `--write-translation` for `mono.wav` and `small-speaker.wav` to hear; each loss before and after in `daw compare` |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [translation checks](features/translation-checks.md) | Next |
 | [dynamics in detail](features/dynamics-detail.md) | Next |
 | [sound descriptors](features/sound-descriptors.md) | Next |
 | [the agent panel](features/agent-panel.md) | Next |
