@@ -20,51 +20,47 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
-   master's true peak can pass its ceiling and the agent leaves a margin by
-   guess; a switch on the limiter that measures the peaks between the
-   samples, so a ceiling of −1 dBTP is one.
-2. **A time selection in the app.** A range of beats dragged across the
+1. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-3. **A MIDI keyboard.** Notes played through the selected track, held and let
+2. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-4. **Sections and the song's length in the app.** A section made, named,
+3. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-5. **A project made with `daw init` in the app's index,** so a song the agent
+4. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-6. **Turns and A/B.** An agent request's commands grouped, named for the
+5. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-7. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+6. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-8. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+7. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
    that replays it.
-9. **Key and chord detection,** and swing detection, of samples and songs: a
+8. **Key and chord detection,** and swing detection, of samples and songs: a
    loop matched to the song's key before it is placed.
-10. **Presets.** Pad setups and whole tracks saved as text and loaded into any
-    song. Effect chains are built ([effect racks](features/effect-racks.md)).
-11. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+9. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+   song. Effect chains are built ([effect racks](features/effect-racks.md)).
+10. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-12. **The workspace and the two levels.** The workspace folder with its managed
+11. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-13. **The agent panel.** A conversation in the window, per project, over the
+12. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-14. **Stem separation** of a song.
-15. **Generated audio.** A sound, a loop or a whole song from a description, with
+13. **Stem separation** of a song.
+14. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -75,6 +71,30 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The limiter on a true peak, with the person listening:** a master of
+  the person's own with its last limiter's True peak switched on in the
+  panel while the song plays, and the fade through the switch heard; the
+  render's `estimated_true_peak_dbtp` read against the ceiling, and against
+  another true-peak meter if the person has one, on a bright mix above all,
+  where four points a sample read up to a few tenths under a finer meter;
+  the two renders played against each other at one level, and whether the
+  limiter on a true peak is heard to duck more at the hats and the snare,
+  where it has the most more to take; an AAC and an MP3 exported from a
+  master held at −1 dBTP, decoded, and whether they stay under full scale;
+  the analyzer after the limiter, whose true peak should read at the
+  ceiling; a fresh agent session asked for a master for streaming, and
+  whether it reads `daw describe effects`, sets `true_peak: true` with the
+  ceiling at −1 rather than lowering the ceiling or the export by guess,
+  and reads the estimate back. Generated audio only: the estimate a frame
+  at a time held to the report's resampler; a tone between its crests,
+  noise from 3 to 36 dB over the ceiling and a lone peak between two
+  samples at or under the ceiling, where the plain limiter leaves them up
+  to 5 dB over, held by Rust and Python tests. On a copy of one local song
+  a master limiter at −1.6 left the estimate at −1.36, 0.24 dB over, and
+  with the switch at −1.61, the loudness 0.04 LU lower and the limiter's
+  most 5.71 dB where it was 5.69, read from the render's report and `daw
+  listen`; nobody heard either render. The switch seen in a scripted
+  picture of the panel, and a scripted click on it read from the song.
 - **The clipper, with the person listening:** a drum group of the person's
   own with a `clipper` whose ceiling is 2, 4 and 8 dB under the group's
   `peak_dbfs`, each heard against the group without it, and where the kick
@@ -753,6 +773,12 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   switch to leave it out before a limiter, or more passes of the oversampled
   stage ([clipper](features/clipper.md)). An effect dragged from the browser
   into a Synth's patch, as the + menu adds one.
+- The limiter on a true peak further: a second stage that takes off what
+  the first leaves where its gain is moving, so that a look-ahead under
+  1 ms holds too; the estimate a section preview gives without its cut
+  edges, which read as peaks of their own; the 0.01 dB it aims under said
+  in the report ([a limiter that holds a true
+  peak](features/true-peak-limiter.md)).
 - Sends from a return to a return.
 - Tempo and time signature changes within a song. One tempo and one meter
   hold throughout, the beat map included; the song's one time signature is
@@ -846,7 +872,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   the report holds third octaves and resonances for every stem.
 - An audio-capable model as an optional critic, with its own consent.
 - A certified true-peak measurement; the engine's 4× oversampled peak is an
-  estimate.
+  estimate, which a limiter on a true peak holds and would have to read as
+  the measurement does.
 - Render caching per track.
 
 ### Export

@@ -872,6 +872,11 @@
           "title": "Lookahead Ms",
           "type": "number"
         },
+        "true_peak": {
+          "default": false,
+          "title": "True Peak",
+          "type": "boolean"
+        },
         "bypass": {
           "default": false,
           "title": "Bypass",

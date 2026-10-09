@@ -92,8 +92,8 @@ impl Plan {
             }
             Effect::Compressor(_) => hash(("compressor", effect.sidechain().is_some())),
             Effect::Limiter(l) => {
-                latency = Limiter::latency(l.lookahead_ms, rate as f64);
-                hash(("limiter", latency))
+                latency = Limiter::latency(l.lookahead_ms, rate as f64, l.true_peak);
+                hash(("limiter", latency, l.true_peak))
             }
             Effect::Clipper(c) => {
                 latency = Clipper::latency(c.oversample);
@@ -232,7 +232,7 @@ impl Unit {
                     max_block,
                 ))
             }
-            Effect::Limiter(l) => Device::Limiter(Limiter::new(l.ceiling_db, l.release_ms, l.lookahead_ms, rate)),
+            Effect::Limiter(l) => Device::Limiter(Limiter::new(l.ceiling_db, l.release_ms, l.lookahead_ms, l.true_peak, rate)),
             Effect::Clipper(c) => Device::Clipper(Clipper::new(
                 c.oversample,
                 knob("ceiling_db", c.ceiling_db),

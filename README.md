@@ -87,7 +87,7 @@ decay, noisiness, loudness and punch, each a number with a word. Search sorts
 and filters by them and finds the samples nearest a chosen one.
 
 Tracks, returns and the master bus take insert effects: filter, EQ, compressor
-with sidechain, look-ahead limiter, clipper, tempo-synced delay and a seeded
+with sidechain, look-ahead limiter that can hold a true peak, clipper, tempo-synced delay and a seeded
 convolution reverb. Tracks send pre- or post-fader to return buses, which
 render as their own stems. See [docs/features/effects.md](docs/features/effects.md).
 

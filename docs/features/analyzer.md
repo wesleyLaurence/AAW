@@ -74,7 +74,7 @@ show the same analyzer.
 
 | View | Shows |
 |---|---|
-| Levels | Each channel's peak as a bar that falls at 20 dB a second, its RMS over 400 ms as a brighter bar inside it, the highest peak as a line held, and the held peak and true peak (four times oversampled, a 48-tap windowed sinc) as numbers |
+| Levels | Each channel's peak as a bar that falls at 20 dB a second, its RMS over 400 ms as a brighter bar inside it, the highest peak as a line held, and the held peak and true peak (four times oversampled, as a render's report and a limiter on a true peak read it) as numbers |
 | Loudness | Momentary (400 ms), short-term (3 s) and integrated LUFS and the loudness range, by BS.1770-4 and EBU Tech 3342 as `daw listen` measures a render: the integrated loudness gated at −70 LUFS and 10 LU under the mean, the range the 10th to the 95th percentile of the short-term values gated at −70 and 20 LU under their mean; under the numbers the short-term loudness as a line over the last minute, with −14 LUFS marked and the integrated loudness as a line |
 | Spectrum | The level in each bin of the last 4096 frames as mono, as under an equalizer's curve, filled to the floor, with the highest level of each bin held as a line over it |
 | Stereo field | A vectorscope of the last 1024 frames, the left channel up the left diagonal and the right up the right so mono is a vertical line, drawn at the size of its loudest frame so the shape is seen at any level; the correlation over 400 ms from −1 to +1 and the balance of the channels' RMS in dB, each on a bar |
