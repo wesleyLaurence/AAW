@@ -106,6 +106,13 @@ Python, in `src/agent_daw`:
   note against the stems' sum: the pairs in `daw listen`, one pair by band and
   section with a picture, and each pair's change in `daw compare`; see
   [masking.md](features/masking.md).
+- `spectrum.py`: the finer spectrum of a measurement, its power in 31 third
+  octaves and the slope of a line through them, and each stem's resonances,
+  the peaks that stand over the median of the two octaves about them in at
+  least half the bars, read against what the song says each track plays
+  (`aaw_model::schedule::sounded`, through `aaw_py`); their change in
+  `daw compare` and the picture of the mix's third octaves over its stems'; see
+  [spectrum-detail.md](features/spectrum-detail.md).
 - `reference.py`: a song the person names as a reference, measured once with
   its beat map's phrases as sections and kept as numbers in the workspace
   library, `~/Music/AAW/library/references/` (or `AAW_WORKSPACE`), with the

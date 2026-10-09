@@ -344,6 +344,10 @@ audio. Reports use the saved project snapshot and do not change the song or audi
 A render's report also names the pairs of stems that overlap: the band, how much
 of the time and where, with `daw listen <render> --overlap <a> <b>` for one pair
 by band and section. See [docs/features/masking.md](docs/features/masking.md).
+The mix and each stem are also measured in third octaves with a tilt, and each
+stem's resonances are listed as a frequency, a height and a `q`, the numbers an
+equalizer's bell takes; `daw listen <render> --section <id>` prints one
+section's. See [docs/features/spectrum-detail.md](docs/features/spectrum-detail.md).
 See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
 
 `daw reference add <song> --name <name>` measures a song you point to as what

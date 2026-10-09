@@ -78,7 +78,11 @@ do not claim listening when only numerical analysis was performed
 their energy in the same band at the same moments; `daw listen RENDER --overlap
 A B` reads one pair by band and section, and `daw compare` says what an edit did
 to it. A pair is an observation, not a fault: say which pair and band before
-choosing what gives way.
+choosing what gives way. `spectrum_db` is the mix and each stem in third
+octaves, and a stem's `resonances` are its peaks that stay while the notes
+move, each with the `freq_hz`, `prominence_db` and `q` an `eq`'s bell takes;
+read `could_be_note` before cutting one, and `daw compare` afterwards for how
+far it fell.
 When the person names a song as what the mix should sound like, keep it with
 `daw reference add FILE --name NAME` and read `daw compare RENDER --reference
 NAME` for how the mix differs from it, by section (`daw describe reference`);

@@ -97,7 +97,7 @@ measured. Nothing else is written, and the render is not changed.
   from a phone.
 - A bass is heard on a small speaker through its harmonics. Energy over 200 Hz
   says they are there, not how loud the note seems.
-- The loss in mono by third octave once
-  [a finer spectrum](spectrum-detail.md) is built.
+- The loss in mono by third octave, now that `daw listen` has them
+  ([a finer spectrum](spectrum-detail.md)).
 - Whether a mono loss belongs in `daw check` as a warning with a code, read
   from the last render.

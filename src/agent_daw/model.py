@@ -95,6 +95,13 @@ def schedule(project) -> list[Trigger]:
     return [Trigger(*t) for t in aaw_py.schedule(project)]
 
 
+def sounded(project) -> list[tuple]:
+    """What each track plays, as (track, start beat, end beat, pitch, hit): a
+    note's pitch as it sounds, a MIDI number, or None with the pad and transpose
+    of a hit that plays its sample as it is. Audio clips are not listed."""
+    return aaw_py.sounded(project)
+
+
 def warnings(project, seconds=None) -> list[dict]:
     """What daw check warns about in a valid song: objects with a code, a
     level, a message, the paths of what each is about and, with a place in

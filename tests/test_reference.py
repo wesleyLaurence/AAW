@@ -159,18 +159,62 @@ def test_a_sub_six_db_heavier_is_reported_by_section(tmp_path, club):
     # Each side's drop is as far over its own file: the contour is the reference's.
     assert drop["delta"]["relative_lu"] == pytest.approx(0, abs=0.3)
     assert report["contour"]["delta"] == pytest.approx(0, abs=0.5)
-    sub = [line for line in report["observations"] if line.startswith("sub (20–60 Hz)")]
-    assert sub == [
-        "sub (20–60 Hz): 6.0 dB above the reference's balance over the whole mix; "
-        "by section, drop +6.0 dB, verse +6.0 dB."
+    # Over the whole mix the balance is in third octaves: the tone at 45 Hz is
+    # in the 50 Hz band, and its skirt is all there is in the bands beside it.
+    thirds = report["whole"]["delta"]["spectrum_db"]
+    assert len(thirds) == 31 and thirds[4] == pytest.approx(6.02, abs=0.2)
+    assert all(abs(v) < 0.7 for v in thirds[6:])
+    assert "spectrum_db" not in drop["delta"]
+    assert report["methods"]["third_octave_hz"][4] == 50
+    # The tilt is from 50 Hz up, where one band of twenty-four rose.
+    assert report["whole"]["delta"]["tilt_db_per_octave"] == pytest.approx(-0.3, abs=0.15)
+    assert drop["delta"]["tilt_db_per_octave"] == pytest.approx(-0.2, abs=0.15)
+    said = [line for line in report["observations"] if "balance" in line or line.startswith("sub")]
+    assert said == [
+        "sub (20–60 Hz): by section, drop +6.0 dB, verse +6.0 dB.",
+        "17.8–70.8 Hz: 4.5 dB above the reference's balance over the whole mix, 6.0 dB at 50 Hz.",
     ]
-    assert not any(line.startswith(("low", "mid", "high", "air")) for line in report["observations"])
+    assert not any(line.startswith(("low", "mid", "high", "air", "tilt")) for line in report["observations"])
     # The report is kept in the render's analysis folder, and nowhere else.
     path = Path(report["report_path"])
     assert path.name == "reference-club-ref.json"
     assert path.parents[2] == Path(report["mix"]["audio_path"]).parent
     assert json.loads(path.read_text())["observations"] == report["observations"]
     json.dumps(report, allow_nan=False)
+
+
+def test_a_reference_from_before_third_octaves_is_compared_in_seven_bands(tmp_path, workspace, club):
+    saved = workspace / "library" / "references" / "club-ref" / "reference.json"
+    earlier = json.loads(saved.read_text())
+    for audio in (earlier["mix"], *(s["audio"] for s in earlier["phrases"])):
+        del audio["spectrum_db"], audio["tilt_db_per_octave"]
+    saved.write_text(json.dumps(earlier))
+    report = reference.compare(mix(tmp_path, sub=2.0), "club-ref")
+    assert report["whole"]["delta"]["spectrum_db"] is None
+    assert report["whole"]["delta"]["tilt_db_per_octave"] is None
+    assert report["whole"]["reference"]["tilt_db_per_octave"] is None
+    assert "--replace" in report["methods"]["spectrum_db"]
+    # The whole mix is then said in the seven bands, as the sections are.
+    (sub,) = [line for line in report["observations"] if line.startswith("sub (20–60 Hz)")]
+    assert sub.startswith("sub (20–60 Hz): 6.0 dB above the reference's balance over the whole mix; by section, ")
+    assert not any("17.8" in line for line in report["observations"])
+
+
+def test_a_brighter_mix_is_said_as_its_tilt(tmp_path, club):
+    # The same song through a first-order highpass at 400 Hz: 6 dB an octave less under it.
+    x = song()
+    lifted = np.fft.rfft(x, axis=0)
+    hz = np.fft.rfftfreq(len(x), 1 / RATE)
+    lifted *= (hz / np.hypot(hz, 400))[:, None]
+    bright = write(tmp_path / "bright.wav", np.fft.irfft(lifted, len(x), axis=0))
+    report = reference.compare(bright, "club-ref")
+    change = report["whole"]["delta"]["tilt_db_per_octave"]
+    assert change > 1
+    (tilt,) = [line for line in report["observations"] if line.startswith("tilt")]
+    assert tilt == f"tilt: {change:.1f} dB an octave brighter than the reference over the whole mix."
+    # The balance has the median taken out: the low bands read under it and the high over.
+    thirds = report["whole"]["delta"]["spectrum_db"]
+    assert thirds[4] < -6 and thirds[25] > 0
 
 
 def test_without_shared_ids_sections_are_matched_by_loudness(tmp_path, club):

@@ -151,6 +151,15 @@ fn schedule(data: &Bound<'_, PyAny>) -> PyResult<Vec<(i64, String, String, Optio
     Ok(triggers.into_iter().map(|t| (t.start, t.track_id, t.pad, t.cutoff)).collect())
 }
 
+/// What each track plays, as (track, start beat, end beat, pitch, hit): the
+/// pitch a note sounds at as a MIDI number, or None with the pad and transpose
+/// of a hit that has no note. Audio clips are not listed.
+#[pyfunction]
+fn sounded(data: &Bound<'_, PyAny>) -> PyResult<Vec<(String, f64, f64, Option<f64>, String)>> {
+    let played = aaw_model::schedule::sounded(&project(data)?);
+    Ok(played.into_iter().map(|s| (s.track_id, s.at, s.until, s.pitch, s.hit)).collect())
+}
+
 /// What `daw check` warns about in a valid song, as a JSON list of objects
 /// with a code, a level, a message, the paths of what each is about and its
 /// beat. `seconds` is each sample's file length by sample ID, for audio clips
@@ -205,5 +214,5 @@ fn midi(note: &str) -> PyResult<i64> {
 #[pymodule]
 mod aaw_py {
     #[pymodule_export]
-    use super::{beat, fingerprints, frame, load, midi, parse, save, schedule, to_yaml, validate, warnings};
+    use super::{beat, fingerprints, frame, load, midi, parse, save, schedule, sounded, to_yaml, validate, warnings};
 }
