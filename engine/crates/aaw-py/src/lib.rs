@@ -5,12 +5,16 @@
 //! A song crosses as plain data: the full dump, every field present, as dicts,
 //! lists, numbers and strings. Anything that takes a song validates it first.
 //! A document the model refuses raises `ValueError` with the model's message.
+//!
+//! `loudness` is the analyzer's meter run over saved audio, so `daw listen`
+//! and the app's window read one implementation.
 
 use aaw_model::value::{Key, Value};
 use aaw_model::{Beat, ModelError, Project};
 use num_bigint::BigInt;
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
+use pyo3::buffer::PyBuffer;
 use pyo3::exceptions::{PyOSError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyBytes, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
@@ -209,10 +213,51 @@ fn midi(note: &str) -> PyResult<i64> {
     aaw_model::rules::midi(note).map_err(PyValueError::new_err)
 }
 
+/// The loudness of stretches of audio, as the analyzer's meter measures what
+/// plays: `audio` is frames by one or two channels of 64-bit floats, C
+/// ordered, and each span a (first frame, frame past the last). Each result
+/// has integrated_lufs, loudness_range_lu, max_short_term_lufs and
+/// max_momentary_lufs, None where the span is too short or under the gate.
+#[pyfunction]
+fn loudness<'py>(
+    py: Python<'py>,
+    audio: PyBuffer<f64>,
+    rate: u32,
+    spans: Vec<(usize, usize)>,
+) -> PyResult<Vec<Bound<'py, PyDict>>> {
+    let shape = audio.shape().to_vec();
+    let samples = audio.as_slice(py).filter(|_| shape.len() == 2 && (shape[1] == 1 || shape[1] == 2));
+    let Some(samples) = samples else {
+        return Err(PyValueError::new_err("Loudness takes C-ordered float64 audio, frames by one or two channels"));
+    };
+    if rate == 0 {
+        return Err(PyValueError::new_err("Loudness needs a sample rate"));
+    }
+    let (frames, channels) = (shape[0], shape[1]);
+    let mut out = Vec::with_capacity(spans.len());
+    for (first, last) in spans {
+        if first > last || last > frames {
+            return Err(PyValueError::new_err(format!("No frames {first} to {last} in audio of {frames}")));
+        }
+        // One channel is measured as itself, not as two.
+        let span = samples[first * channels..last * channels]
+            .chunks_exact(channels)
+            .map(|f| [f[0].get(), if channels == 2 { f[1].get() } else { 0.0 }]);
+        let measured = aaw_dsp::loudness::measure(span, rate);
+        let result = PyDict::new(py);
+        result.set_item("integrated_lufs", measured.integrated_lufs)?;
+        result.set_item("loudness_range_lu", measured.range_lu)?;
+        result.set_item("max_short_term_lufs", measured.max_short_term_lufs)?;
+        result.set_item("max_momentary_lufs", measured.max_momentary_lufs)?;
+        out.push(result);
+    }
+    Ok(out)
+}
+
 /// The Agent DAW song model: validation, exact beats, canonical YAML,
 /// fingerprints and the schedule, from the Rust core.
 #[pymodule]
 mod aaw_py {
     #[pymodule_export]
-    use super::{beat, fingerprints, frame, load, midi, parse, save, schedule, sounded, to_yaml, validate, warnings};
+    use super::{beat, fingerprints, frame, load, loudness, midi, parse, save, schedule, sounded, to_yaml, validate, warnings};
 }

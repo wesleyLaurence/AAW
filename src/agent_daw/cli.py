@@ -159,8 +159,9 @@ def parser():
     listen.add_argument(
         "--section",
         metavar="ID",
-        help="One section of the mix and of each stem, with its third octaves and "
-        "resonances, in place of the report (daw describe listen)",
+        help="One section of the mix and of each stem, with its third octaves, "
+        "resonances, hits and what each compressor and limiter took off, in place of "
+        "the report (daw describe listen)",
     )
     listen.add_argument(
         "--overlap",

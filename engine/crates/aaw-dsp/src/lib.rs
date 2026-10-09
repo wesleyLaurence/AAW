@@ -8,6 +8,7 @@ pub mod delay;
 pub mod device;
 pub mod dynamics;
 pub mod envelope;
+pub mod loudness;
 pub mod meter;
 pub mod resample;
 pub mod reverb;

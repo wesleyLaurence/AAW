@@ -3,11 +3,12 @@
 
 use crate::program::{amplitude, compile_scoped, Cache, Scope, StemKind};
 use crate::render::{DeviceReport, Frame, Renderer};
+use aaw_dsp::dynamics::Reduction;
 use crate::{sndfile, stretch, wav};
 use aaw_dsp::resample::{pairwise_sum, Resampler};
 use aaw_model::pyfmt::{json_dumps, json_dumps_indent};
 use aaw_model::value::{dict, Value};
-use aaw_model::{frame, project_hash, Project, Stretch, Stretcher};
+use aaw_model::{frame, project_hash, Effect, Project, Stretch, Stretcher};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -84,19 +85,39 @@ fn engine_hash() -> Result<String, String> {
     Ok(hex(&Sha256::digest(&bytes)))
 }
 
-/// A device's entry in the report, as `Device.report`.
-fn device_report(d: &DeviceReport) -> Value {
-    if d.bypass {
-        return dict(vec![("type", Value::str(d.kind)), ("bypass", Value::Bool(true))]);
+/// A compressor's or limiter's reduction over some frames, as the report
+/// names it.
+fn reduction(r: &Reduction) -> Vec<(&'static str, Value)> {
+    vec![
+        ("max_gain_reduction_db", Value::Float(r.max)),
+        ("mean_gain_reduction_db", Value::Float(r.mean())),
+        ("fraction_over_1db_reduction", Value::Float(r.fraction_over_1db())),
+    ]
+}
+
+/// A device's entry in the report, as `Device.report`: its ID if the song
+/// gives it one, and a compressor's or limiter's reduction over the song and
+/// over each of its `sections` that holds a frame.
+fn device_report(d: &DeviceReport, effect: &Effect, sections: &[&str]) -> Value {
+    let mut out = vec![("type", Value::str(d.kind))];
+    if let Some(id) = effect.id() {
+        out.push(("id", Value::str(id)));
     }
-    let mut out = vec![("type", Value::str(d.kind)), ("latency_frames", Value::int(d.latency as i64))];
+    if d.bypass {
+        out.push(("bypass", Value::Bool(true)));
+        return dict(out);
+    }
+    out.push(("latency_frames", Value::int(d.latency as i64)));
     if !d.automated.is_empty() {
         out.push(("automated", Value::List(d.automated.iter().map(|a| Value::str(a)).collect())));
     }
     if let Some(r) = &d.reduction {
-        out.push(("max_gain_reduction_db", Value::Float(r.max)));
-        out.push(("mean_gain_reduction_db", Value::Float(r.mean())));
-        out.push(("fraction_over_1db_reduction", Value::Float(r.fraction_over_1db())));
+        out.extend(reduction(r));
+        let by_section: Vec<(&str, Value)> =
+            sections.iter().zip(&d.spans).filter(|(_, r)| r.frames > 0).map(|(id, r)| (*id, dict(reduction(r)))).collect();
+        if !by_section.is_empty() {
+            out.push(("sections", dict(by_section)));
+        }
     }
     dict(out)
 }
@@ -175,6 +196,14 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     let frames = (last - first).max(0) as usize;
     let names = program.stems();
     let mut renderer = Renderer::new(program.clone(), 0, opts.block_size);
+    // Each compressor and limiter says what it took off in each section.
+    let spans: Vec<(i64, i64)> = p
+        .sections
+        .iter()
+        .map(|s| (frame(&s.at_exact(), tempo, rate), frame(&(s.at_exact() + s.length_exact()), tempo, rate)))
+        .collect();
+    renderer.measure_spans(&spans);
+    let section_ids: Vec<&str> = p.sections.iter().map(|s| s.id.as_str()).collect();
     let mut mix: Vec<Frame> = Vec::with_capacity(frames);
     let mut stems: Vec<Vec<[f32; 2]>> = vec![Vec::with_capacity(frames); names.len()];
     let mut peaks = vec![0.0f64; names.len()];
@@ -322,7 +351,9 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     });
     written?;
     let reports = renderer.report();
-    let effects = |chain: &[DeviceReport]| Value::List(chain.iter().map(device_report).collect());
+    let effects = |chain: &[DeviceReport], of: &[Effect]| {
+        Value::List(chain.iter().zip(of).map(|(d, effect)| device_report(d, effect, &section_ids)).collect())
+    };
     let params = |lanes: &[String]| Value::List(lanes.iter().map(|l| Value::str(l)).collect());
     let mut track_reports = Vec::new();
     let mut stem = |name: &str, fields: Vec<(&str, Value)>| -> Result<(), String> {
@@ -345,10 +376,10 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         let events = track.synth.as_ref().map_or(track.voices.len(), |s| s.notes.len());
         let mut fields = vec![
             ("events", Value::int(events as i64)),
-            ("effects", effects(&reports.tracks[ti])),
+            ("effects", effects(&reports.tracks[ti], &t.effects)),
         ];
-        if !reports.patches[ti].is_empty() {
-            fields.push(("instrument_effects", effects(&reports.patches[ti])));
+        if let Some(synth) = t.midi.as_ref().and_then(|m| m.synth()).filter(|_| !reports.patches[ti].is_empty()) {
+            fields.push(("instrument_effects", effects(&reports.patches[ti], &synth.effects)));
         }
         if !track.automation.is_empty() {
             fields.push(("automation", params(&track.automation)));
@@ -361,7 +392,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     for (gi, g) in program.groups.iter().enumerate().filter(|(_, g)| g.in_mix) {
         let mut fields = vec![
             ("tracks", Value::List(g.members.iter().map(|s| Value::str(s)).collect())),
-            ("effects", effects(&reports.groups[gi])),
+            ("effects", effects(&reports.groups[gi], p.group(&g.id).map_or(&[], |g| &g.effects))),
         ];
         if !g.automation.is_empty() {
             fields.push(("automation", params(&g.automation)));
@@ -371,7 +402,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     for (ri, r) in program.returns.iter().enumerate() {
         let mut fields = vec![
             ("senders", Value::List(r.senders.iter().map(|s| Value::str(s)).collect())),
-            ("effects", effects(&reports.returns[ri])),
+            ("effects", effects(&reports.returns[ri], p.returns.iter().find(|x| x.id == r.id).map_or(&[], |x| &x.effects))),
         ];
         if !r.automation.is_empty() {
             fields.push(("automation", params(&r.automation)));
@@ -414,7 +445,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         ("tracks", dict(track_reports)),
         ("sections", Value::List(p.sections.iter().map(|s| s.dump(false)).collect())),
         ("tail_policy", Value::str("truncate at session length with explicit end fade")),
-        ("master_effects", effects(&master_effects)),
+        ("master_effects", effects(&master_effects, &p.master.effects)),
         ("master_automation", params(&program.master.automation)),
         ("stems_sum_to_mix", Value::Bool(stems_sum)),
         ("stem_policy", Value::str("post-insert, post-track and post-master gain and fade, before master effects; track stems are dry, a grouped track's before its group, each group and each return has its own stem; the ungrouped tracks, the groups and the returns sum to the mix; float WAV, same start and length")),

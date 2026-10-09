@@ -352,6 +352,11 @@ The report's `translation` says what the mix, each band and each stem loses
 summed to mono and through the band a small speaker plays, and
 `daw listen <render> --write-translation` writes the two as files to hear. See
 [docs/features/translation-checks.md](docs/features/translation-checks.md).
+The mix and each section have their loudness range and their loudest 3 s and
+400 ms, each track's `hits` say how hard its hits land at its stem, through its
+group and in the mix, and `effects` lists what each compressor and limiter took
+off, over the song and in each section. See
+[docs/features/dynamics-detail.md](docs/features/dynamics-detail.md).
 See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
 
 `daw reference add <song> --name <name>` measures a song you point to as what

@@ -9,6 +9,7 @@
 //! stayed away for longer than the ring holds. The audio thread never waits
 //! and never allocates.
 
+use crate::loudness::{lufs, Loudness};
 use crate::spectrum::{Analyzer, BINS, TAP_FRAMES};
 use crate::Frame;
 use std::collections::VecDeque;
@@ -74,64 +75,6 @@ impl Ring {
         }
         (end, lost)
     }
-}
-
-/// A biquad from its coefficients, run on one channel.
-#[derive(Clone, Debug)]
-pub struct Biquad {
-    b: [f64; 3],
-    a: [f64; 2],
-    z: [f64; 2],
-}
-
-impl Biquad {
-    pub fn new(b: [f64; 3], a: [f64; 2]) -> Biquad {
-        Biquad { b, a, z: [0.0; 2] }
-    }
-
-    #[inline]
-    pub fn next(&mut self, x: f64) -> f64 {
-        let y = self.b[0] * x + self.z[0];
-        self.z[0] = self.b[1] * x - self.a[0] * y + self.z[1];
-        self.z[1] = self.b[2] * x - self.a[1] * y;
-        y
-    }
-}
-
-/// The K-weighting of BS.1770 at a sample rate: a high shelf of +4 dB
-/// above 1.7 kHz and a highpass at 38 Hz, designed as the standard designs
-/// them, so at 48 kHz the coefficients are the standard's table.
-pub fn k_weighting(rate: f64) -> (Biquad, Biquad) {
-    let (f0, gain_db, q) = (1681.974450955533, 3.999843853973347, 0.7071752369554196);
-    let k = (PI * f0 / rate).tan();
-    let vh = 10f64.powf(gain_db / 20.0);
-    let vb = vh.powf(0.4996667741545416);
-    let a0 = 1.0 + k / q + k * k;
-    let shelf = Biquad::new(
-        [(vh + vb * k / q + k * k) / a0, 2.0 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0],
-        [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
-    );
-    let (f0, q) = (38.13547087602444, 0.5003270373238773);
-    let k = (PI * f0 / rate).tan();
-    let a0 = 1.0 + k / q + k * k;
-    let high = Biquad::new([1.0, -2.0, 1.0], [2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0]);
-    (shelf, high)
-}
-
-/// Loudness in LUFS of a K-weighted mean square summed over the channels.
-#[inline]
-fn lufs(power: f64) -> f64 {
-    -0.691 + 10.0 * power.max(1e-20).log10()
-}
-
-/// The mean of loudness values, in the power domain.
-fn mean_lufs(values: impl Iterator<Item = f64>) -> Option<f64> {
-    let (mut sum, mut n) = (0.0, 0usize);
-    for l in values {
-        sum += 10f64.powf((l + 0.691) / 10.0);
-        n += 1;
-    }
-    (n > 0).then(|| lufs(sum / n as f64))
 }
 
 /// Taps of the interpolating filter a true peak is estimated with: four
@@ -218,6 +161,10 @@ pub struct Reading {
     /// The loudness range since the meter was reset, in LU; None until
     /// enough has played.
     pub range_lu: Option<f32>,
+    /// The loudest 400 ms and the loudest 3 s since the meter was reset;
+    /// None until that much has played over the gate.
+    pub max_momentary_lufs: Option<f32>,
+    pub max_short_term_lufs: Option<f32>,
     /// The short-term loudness every 100 ms, oldest first, the last minutes.
     pub history: Vec<f32>,
     /// The level of each bin of the last 4096 frames as mono, in dB.
@@ -322,14 +269,10 @@ pub struct Meter {
     taps: [f64; TRUE_PEAK_TAPS],
     squares: [Window; 2],
     product: Window,
-    weighting: [(Biquad, Biquad); 2],
+    /// The loudness since the reset, which `daw listen` reads from a render
+    /// the same way, and each frame's K-weighted power over the last 400 ms.
+    loudness: Loudness,
     weighted: Window,
-    /// The K-weighted power of the 100 ms block being filled, and the
-    /// frames in it.
-    block: (f64, usize),
-    block_frames: usize,
-    /// The power of each 100 ms block since the reset.
-    blocks: Vec<f64>,
     integrated: Option<f64>,
     range: Option<f64>,
     short_term: f64,
@@ -374,11 +317,8 @@ impl Meter {
             taps: true_peak_filter(),
             squares: [Window::new(window), Window::new(window)],
             product: Window::new(window),
-            weighting: [k_weighting(rate_f), k_weighting(rate_f)],
+            loudness: Loudness::new(rate),
             weighted: Window::new(window),
-            block: (0.0, 0),
-            block_frames: (0.1 * rate_f).round() as usize,
-            blocks: Vec::new(),
             integrated: None,
             range: None,
             short_term: lufs(0.0),
@@ -458,8 +398,7 @@ impl Meter {
     pub fn reset(&mut self) {
         self.peak_hold = [0.0; 2];
         self.true_peak_hold = [0.0; 2];
-        self.blocks.clear();
-        self.block = (0.0, 0);
+        self.loudness.reset();
         self.integrated = None;
         self.range = None;
         self.history.clear();
@@ -469,7 +408,6 @@ impl Meter {
     /// Feeds frames, in order.
     pub fn feed(&mut self, x: &[Frame]) {
         for f in x {
-            let mut power = 0.0;
             for c in 0..2 {
                 let v = f[c];
                 let a = v.abs();
@@ -492,14 +430,9 @@ impl Meter {
                     }
                 }
                 self.squares[c].push(v * v);
-                let (shelf, high) = &mut self.weighting[c];
-                let w = high.next(shelf.next(v));
-                power += w * w;
             }
-            // The K-weighted power of the frame, summed over the channels as
-            // BS.1770 sums them.
+            let (power, block) = self.loudness.feed(f);
             self.weighted.push(power);
-            self.block.0 += power;
             self.product.push(f[0] * f[1]);
             self.mono[self.mono_at] = (f[0] + f[1]) * 0.5;
             self.mono_at = (self.mono_at + 1) & (TAP_FRAMES - 1);
@@ -526,8 +459,7 @@ impl Meter {
                 let column = spectrogram_column(&spectrum, &self.rows);
                 self.push_spectrogram(column);
             }
-            self.block.1 += 1;
-            if self.block.1 == self.block_frames {
+            if block {
                 self.block_done();
             }
         }
@@ -537,40 +469,16 @@ impl Meter {
         }
     }
 
-    /// A 100 ms block is full: its mean power joins the blocks, and the
-    /// loudnesses that move at this pace are worked out.
+    /// A 100 ms block is full: the loudnesses that move at this pace are
+    /// worked out.
     fn block_done(&mut self) {
-        let power = self.block.0 / self.block_frames as f64;
-        self.blocks.push(power);
-        self.block = (0.0, 0);
-        // Momentary blocks of 400 ms at this hop, gated as BS.1770 gates them.
-        let momentary: Vec<f64> = self.blocks.windows(4).map(|w| lufs(w.iter().sum::<f64>() / 4.0)).collect();
-        let above: Vec<f64> = momentary.iter().copied().filter(|l| *l > -70.0).collect();
-        self.integrated = mean_lufs(above.iter().copied()).and_then(|mean| {
-            let relative = mean - 10.0;
-            mean_lufs(above.iter().copied().filter(|l| *l > relative))
-        });
-        // Short-term: the last 3 s, and the range of the short-term values
-        // gated at −70 and −20 LU under their mean, the 10th to the 95th
-        // percentile, as EBU Tech 3342 has it.
-        let n = self.blocks.len();
-        let last = &self.blocks[n.saturating_sub(30)..];
-        self.short_term = lufs(last.iter().sum::<f64>() / last.len().max(30) as f64);
+        self.integrated = self.loudness.integrated();
+        self.range = self.loudness.range();
+        self.short_term = self.loudness.short_term();
         if self.history.len() == HISTORY {
             self.history.pop_front();
         }
         self.history.push_back(self.short_term as f32);
-        let short: Vec<f64> = self.blocks.windows(30).map(|w| lufs(w.iter().sum::<f64>() / 30.0)).collect();
-        let above: Vec<f64> = short.into_iter().filter(|l| *l > -70.0).collect();
-        self.range = mean_lufs(above.iter().copied()).and_then(|mean| {
-            let mut gated: Vec<f64> = above.into_iter().filter(|l| *l > mean - 20.0).collect();
-            if gated.len() < 2 {
-                return None;
-            }
-            gated.sort_by(|a, b| a.total_cmp(b));
-            let at = |q: f64| gated[((gated.len() - 1) as f64 * q).round() as usize];
-            Some(at(0.95) - at(0.10))
-        });
     }
 
     /// What has been measured, and the peaks since the last reading start
@@ -599,6 +507,8 @@ impl Meter {
             short_term_lufs: self.short_term as f32,
             integrated_lufs: self.integrated.map(|l| l as f32),
             range_lu: self.range.map(|r| r as f32),
+            max_momentary_lufs: self.loudness.max_momentary().map(|l| l as f32),
+            max_short_term_lufs: self.loudness.max_short_term().map(|l| l as f32),
             history: self.history.iter().copied().collect(),
             spectrum,
             spectrum_hold: self.spectrum_hold.clone(),
@@ -708,6 +618,35 @@ mod tests {
     }
 
     #[test]
+    fn the_meter_and_a_saved_render_s_report_read_one_loudness() {
+        // What `daw listen` reads from a file, `loudness::measure`, and what
+        // the window shows of the same frames as they come in blocks.
+        let rate = 44100.0;
+        let mut x = sine(220.0, 6.0, [0.05, 0.03], rate);
+        x.extend(sine(3000.0, 2.5, [0.4, 0.5], rate));
+        x.extend(noise(44100 * 5, 7).iter().map(|v| [v * 0.1, v * -0.08]));
+        let saved = crate::loudness::measure(x.iter().copied(), 44100);
+        let mut meter = Meter::new(44100);
+        let (mut at, mut size) = (0, 64);
+        while at < x.len() {
+            let n = size.min(x.len() - at);
+            meter.feed(&x[at..at + n]);
+            at += n;
+            size = size * 7 % 1021 + 1;
+        }
+        let r = meter.read();
+        let near = |shown: Option<f32>, read: Option<f64>| (shown.expect("shown") as f64 - read.expect("read")).abs() < 1e-4;
+        assert!(near(r.range_lu, saved.range_lu), "{:?} {:?}", r.range_lu, saved.range_lu);
+        assert!(near(r.max_short_term_lufs, saved.max_short_term_lufs));
+        assert!(near(r.max_momentary_lufs, saved.max_momentary_lufs));
+        assert!(near(r.integrated_lufs, saved.integrated_lufs));
+        assert!(saved.range_lu.unwrap() > 3.0 && saved.max_momentary_lufs > saved.max_short_term_lufs);
+        // The loudest three seconds are in the history the window draws.
+        let drawn = r.history.iter().copied().fold(f32::MIN, f32::max);
+        assert!((drawn - r.max_short_term_lufs.unwrap()).abs() < 1e-4);
+    }
+
+    #[test]
     fn the_stereo_field_reads_mono_inverted_and_unrelated() {
         let rate = 48000.0;
         let mut inverted = Meter::new(48000);
@@ -802,13 +741,5 @@ mod tests {
         let r = silent.read();
         assert_eq!((r.spectrogram_columns, r.waveform_columns), (50, 100));
         assert!(r.spectrogram.iter().all(|l| *l <= -190.0) && r.waveform.iter().all(|v| *v == 0.0));
-    }
-
-    #[test]
-    fn k_weighting_at_48k_is_the_standard_s_table() {
-        let (shelf, high) = k_weighting(48000.0);
-        assert!((shelf.b[0] - 1.53512485958697).abs() < 1e-9);
-        assert!((shelf.a[0] + 1.69065929318241).abs() < 1e-9);
-        assert!((high.a[0] + 1.99004745483398).abs() < 1e-9);
     }
 }

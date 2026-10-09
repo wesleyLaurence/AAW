@@ -62,6 +62,14 @@ words. `daw listen RENDER --write-translation` writes `mono.wav` and
 `daw compare` has each loss before and after. The fields and the method are in
 [translation-checks.md](translation-checks.md).
 
+The mix and each section also have `loudness_range_lu`, `max_short_term_lufs`
+and `max_momentary_lufs`, read by the analyzer's meter; each track has `hits`,
+how hard the hits the song schedules on it land at its stem, at its group's
+and in the mix; and `effects` lists each compressor and limiter with what it
+took off over the song and in each section, from the render's report.
+`daw compare` has each of them before and after. The fields and the method
+are in [dynamics-detail.md](dynamics-detail.md).
+
 ## Measurements
 
 The `mix`, each section's `audio`, and each track's `audio` and `sections` contain:
@@ -168,8 +176,9 @@ pattern occurrence maps for aligned regions.
 
 It does not infer taste, key, tempo or transients, overlap between stems
 is not masking as an ear does it, a resonance is a measured peak, not a
-fault, and the small speaker is a filter that stands in for a phone, not a
-model of one. It does
+fault, the small speaker is a filter that stands in for a phone, not a
+model of one, and a hit is one the song schedules, not an onset found in the
+audio. It does
 not introduce effects or change rendering semantics. Analysis currently rereads
 and measures the saved audio each time; there is no incremental analysis cache.
 Long songs and many stems take longer than a section preview. One measurement's
@@ -183,4 +192,6 @@ changes, preview alignment, snapshot independence, artifact tampering, legacy
 manifests and CLI JSON/PNG output. Overlap has tests of its own, on generated
 songs whose contests are known, and so has the finer spectrum, on noise, a tone
 and a Synth's line through a bell, and translation, on channels that are the
-same, unrelated and turned over, and on a sine bass.
+same, unrelated and turned over, and on a sine bass, and dynamics, on a tone at
+two levels, a kick through a fast and a slow compressor and under a held tone,
+and a limiter that works in one section of two.

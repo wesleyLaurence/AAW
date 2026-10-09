@@ -360,7 +360,8 @@ def test_an_analyzer_changes_nothing(tmp_path):
     out, report = run_chain(tmp_path / "watched", [{"type": "analyzer", "id": "meter"}, {"type": "limiter"}, {"type": "analyzer"}], x)
     plain, _ = run_chain(tmp_path / "plain", [{"type": "limiter"}], x)
     assert np.array_equal(out, plain)
-    assert report[0] == {"type": "analyzer", "latency_frames": 0} and report[2] == {"type": "analyzer", "latency_frames": 0}
+    assert report[0] == {"type": "analyzer", "id": "meter", "latency_frames": 0}
+    assert report[2] == {"type": "analyzer", "latency_frames": 0}
     song = daw("init", tmp_path / "song", "--bars", 4)["project"]
     daw("synth", "add", song, "keys")
     with pytest.raises(ValueError, match="not offered inside a patch"):

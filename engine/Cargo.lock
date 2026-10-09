@@ -99,6 +99,7 @@ dependencies = [
 name = "aaw-py"
 version = "0.1.0"
 dependencies = [
+ "aaw-dsp",
  "aaw-model",
  "num-bigint",
  "num-rational",

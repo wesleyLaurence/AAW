@@ -87,6 +87,12 @@ small speaker, with the largest in `observations`: a low end that cancels, a
 bass a phone will not play. `daw listen RENDER --write-translation` writes
 `mono.wav` and `small-speaker.wav` for the person to play; a loss can be
 meant, so say what was found before narrowing or driving anything.
+Before setting a compressor or a limiter, read `effects`, what each one took
+off in each section, and a track's `hits`: `punch_db` is how hard its hits
+land at its stem and `punch_in_mix_db` in the mix, so a kick that hits at its
+stem and not in the mix is covered, and an attack that is too fast shows as
+`punch_db` falling in `daw compare`. The mix's `loudness_range_lu`,
+`max_short_term_lufs` and `max_momentary_lufs` are what a master is held to.
 When the person names a song as what the mix should sound like, keep it with
 `daw reference add FILE --name NAME` and read `daw compare RENDER --reference
 NAME` for how the mix differs from it, by section (`daw describe reference`);

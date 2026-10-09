@@ -12,7 +12,7 @@ fn peak_db(f: Frame) -> f64 {
     20.0 * f[0].abs().max(f[1].abs()).log10()
 }
 
-/// Gain reduction over the output frames inside the session.
+/// How much a device took off over some frames.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Reduction {
     pub max: f64,
@@ -23,13 +23,19 @@ pub struct Reduction {
 
 impl Reduction {
     #[inline]
-    fn record(&mut self, db: f64, output_frame: i64, clock: &Clock) {
-        if clock.step == 1 && output_frame >= 0 && output_frame < clock.total {
-            self.max = self.max.max(db);
-            self.sum += db;
-            self.over_1db += u64::from(db > 1.0);
-            self.frames += 1;
-        }
+    fn add(&mut self, db: f64) {
+        self.max = self.max.max(db);
+        self.sum += db;
+        self.over_1db += u64::from(db > 1.0);
+        self.frames += 1;
+    }
+
+    /// Takes in what another stretch of frames measured.
+    fn join(&mut self, other: &Reduction) {
+        self.max = self.max.max(other.max);
+        self.sum += other.sum;
+        self.over_1db += other.over_1db;
+        self.frames += other.frames;
     }
 
     pub fn mean(&self) -> f64 {
@@ -38,6 +44,62 @@ impl Reduction {
 
     pub fn fraction_over_1db(&self) -> f64 {
         self.over_1db as f64 / self.frames.max(1) as f64
+    }
+}
+
+/// A device's gain reduction over the output frames inside the session:
+/// the whole of it, and each stretch between the edges a render asked for,
+/// from which a section's is read.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Reductions {
+    pub whole: Reduction,
+    /// Timeline frames, rising, and the reduction between each and the next.
+    edges: Vec<i64>,
+    parts: Vec<Reduction>,
+    /// The stretch the last frame fell in or after.
+    at: usize,
+}
+
+impl Reductions {
+    /// Measures each stretch between these timeline frames apart as well, in
+    /// whatever order they come. A render asks before it starts; nothing
+    /// played live does.
+    pub fn split(&mut self, edges: &[i64]) {
+        self.edges = edges.to_vec();
+        self.edges.sort_unstable();
+        self.edges.dedup();
+        self.parts = vec![Reduction::default(); self.edges.len().saturating_sub(1)];
+        self.at = 0;
+    }
+
+    #[inline]
+    fn record(&mut self, db: f64, output_frame: i64, clock: &Clock) {
+        if clock.step == 1 && output_frame >= 0 && output_frame < clock.total {
+            self.whole.add(db);
+            if !self.parts.is_empty() {
+                if output_frame < self.edges[self.at] {
+                    self.at = 0;
+                }
+                while self.at + 1 < self.parts.len() && output_frame >= self.edges[self.at + 1] {
+                    self.at += 1;
+                }
+                if output_frame >= self.edges[self.at] && output_frame < self.edges[self.at + 1] {
+                    self.parts[self.at].add(db);
+                }
+            }
+        }
+    }
+
+    /// The reduction over the frames from `start` to `end`, both of them
+    /// edges given to `split`.
+    pub fn within(&self, start: i64, end: i64) -> Reduction {
+        let mut out = Reduction::default();
+        for (part, edges) in self.parts.iter().zip(self.edges.windows(2)) {
+            if edges[0] >= start && edges[1] <= end {
+                out.join(part);
+            }
+        }
+        out
     }
 }
 
@@ -87,7 +149,7 @@ pub struct Compressor {
     pub makeup: Knob,
     thresholds: Vec<f64>,
     makeups: Vec<f64>,
-    pub reduction: Reduction,
+    pub reduction: Reductions,
 }
 
 impl Compressor {
@@ -103,7 +165,7 @@ impl Compressor {
             makeup,
             thresholds: vec![0.0; max_block],
             makeups: vec![0.0; max_block],
-            reduction: Reduction::default(),
+            reduction: Reductions::default(),
         }
     }
 
@@ -167,7 +229,7 @@ pub struct Limiter {
     sum: i64,
     position: usize,
     frames: u64,
-    pub reduction: Reduction,
+    pub reduction: Reductions,
 }
 
 impl Limiter {
@@ -189,7 +251,7 @@ impl Limiter {
             sum: 0,
             position: 0,
             frames: 0,
-            reduction: Reduction::default(),
+            reduction: Reductions::default(),
         }
     }
 
@@ -292,7 +354,7 @@ mod tests {
         }
         let db = 20.0 * peak(&x[24000..]).log10();
         assert!((db - (-6.0 - 9.0)).abs() < 0.1, "{db}");
-        assert!((c.reduction.max - 9.0).abs() < 0.05);
+        assert!((c.reduction.whole.max - 9.0).abs() < 0.05);
         // Below the threshold and the knee it does nothing.
         let quiet = sine(0.01, 4096);
         let mut y = quiet.clone();
@@ -328,6 +390,51 @@ mod tests {
         assert_eq!(Limiter::latency(3.0, 48000.0), 144);
         assert!(out[..144].iter().all(|f| *f == [0.0; 2]));
         assert_eq!(&out[144..], &quiet[..2000 - 144]);
+    }
+
+    #[test]
+    fn reduction_is_measured_between_the_edges_a_render_gives() {
+        // A second under the ceiling, a second 6 dB over it and a second
+        // under: three sections, the middle one also halved, and a fourth
+        // that starts where the song ends.
+        let n = 48000;
+        let mut x = sine(0.25, n);
+        x.extend(sine(1.0, n));
+        x.extend(sine(0.25, n));
+        let mut l = Limiter::new(-6.0, 20.0, 2.0, 48000.0);
+        let total = x.len() as i64;
+        let n = n as i64;
+        l.reduction.split(&[2 * n, 0, n, n, 3 * n, n + n / 2, 2 * n, 4 * n]);
+        let mut at = 0;
+        for chunk in x.chunks_mut(1000) {
+            l.process(chunk, Clock { frame: at, step: 1, total });
+            at += chunk.len() as i64;
+        }
+        let r = &l.reduction;
+        // The first section ends in the limiter's look-ahead, reaching for
+        // the peak that follows; the rest of it is untouched.
+        let first = r.within(0, n);
+        assert!(first.frames == 48000 && first.max > 5.0 && first.fraction_over_1db() < 0.01, "{first:?}");
+        let middle = r.within(n, 2 * n);
+        assert!((middle.max - 6.0).abs() < 0.01 && middle.fraction_over_1db() > 0.99 && (middle.mean() - 6.0).abs() < 0.1, "{middle:?}");
+        let half = r.within(n, n + n / 2);
+        assert!(half.frames == 24000 && (half.max - 6.0).abs() < 0.01);
+        // The last starts in the release and then rests.
+        let last = r.within(2 * n, 3 * n);
+        assert!(last.frames as i64 == n - 96 && last.fraction_over_1db() < 0.1 && last.mean() < 0.3, "{last:?}");
+        assert_eq!(r.within(3 * n, 4 * n), Reduction::default());
+        // The stretches together are the whole, which is measured as before.
+        let all = r.within(0, 3 * n);
+        assert_eq!((all.frames, all.over_1db, all.max), (r.whole.frames, r.whole.over_1db, r.whole.max));
+        assert!((all.sum - r.whole.sum).abs() < 1e-6);
+        // A transport that goes back finds its stretch again.
+        let mut again = Reductions::default();
+        again.split(&[0, 10, 20]);
+        let clock = Clock { frame: 0, step: 1, total: 20 };
+        for frame in [15, 16, 3, 4, 5, 19] {
+            again.record(2.0, frame, &clock);
+        }
+        assert_eq!((again.within(0, 10).frames, again.within(10, 20).frames), (3, 3));
     }
 
     #[test]

@@ -271,6 +271,14 @@ impl Chain {
         }
     }
 
+    /// Has each compressor and limiter measure its reduction between these
+    /// timeline frames apart.
+    fn split_reduction(&mut self, edges: &[i64]) {
+        for slot in &mut self.slots {
+            slot.unit.split_reduction(edges);
+        }
+    }
+
     /// Each device continues from the first unused device of `old` with the
     /// same signature.
     fn take_over(&mut self, old: &mut Chain) {
@@ -366,8 +374,10 @@ pub struct DeviceReport {
     pub latency: usize,
     /// The names of every lane on the effect, constant ones included, sorted.
     pub automated: Vec<String>,
-    /// Gain reduction over the session, for a compressor or limiter.
+    /// Gain reduction over the session, for a compressor or limiter, and
+    /// over each span given to `Renderer::measure_spans`, in their order.
     pub reduction: Option<Reduction>,
+    pub spans: Vec<Reduction>,
 }
 
 /// How many notes previewed through Samplers sound at once, across the
@@ -427,6 +437,8 @@ pub struct Renderer {
     /// not, until a later preview takes their place.
     previews: Vec<Option<Previewed>>,
     previewed: u64,
+    /// The stretches of the timeline a render reports reduction over apart.
+    spans: Vec<(i64, i64)>,
 }
 
 /// A frame of one program at the same beat in another.
@@ -637,6 +649,7 @@ impl Renderer {
             values: [0; 5].map(|_| vec![0.0; max_block]),
             previews: (0..PREVIEWS).map(|_| None).collect(),
             previewed: 0,
+            spans: Vec::new(),
             program,
         };
         r.seek(from, false);
@@ -1096,6 +1109,27 @@ impl Renderer {
         }
     }
 
+    /// Has every compressor and limiter measure its reduction over each of
+    /// these stretches of the timeline, as (first frame, frame past the
+    /// last), as well as over the session: a song's sections, which `report`
+    /// then gives in this order. For a render, before it starts: it
+    /// allocates.
+    pub fn measure_spans(&mut self, spans: &[(i64, i64)]) {
+        self.spans = spans.to_vec();
+        let edges: Vec<i64> = spans.iter().flat_map(|(a, b)| [*a, *b]).collect();
+        for t in &mut self.tracks {
+            t.chain.split_reduction(&edges);
+            t.patch_chain.split_reduction(&edges);
+        }
+        for g in &mut self.groups {
+            g.chain.split_reduction(&edges);
+        }
+        for r in &mut self.returns {
+            r.chain.split_reduction(&edges);
+        }
+        self.master_chain.split_reduction(&edges);
+    }
+
     /// What each channel's effects did: tracks in render order, the patch
     /// effects of each track's Synth, groups, returns, then the master.
     pub fn report(&self) -> Reports {
@@ -1110,13 +1144,18 @@ impl Renderer {
                         latency: 0,
                         automated: Vec::new(),
                         reduction: None,
+                        spans: Vec::new(),
                     },
                     Some(i) => DeviceReport {
                         kind,
                         bypass: false,
                         latency: chain.slots[*i].unit.latency,
                         automated: program.devices[*i].plan.lanes.keys().cloned().collect(),
-                        reduction: chain.slots[*i].unit.reduction().copied(),
+                        reduction: chain.slots[*i].unit.reduction().map(|r| r.whole),
+                        spans: chain.slots[*i]
+                            .unit
+                            .reduction()
+                            .map_or_else(Vec::new, |r| self.spans.iter().map(|(a, b)| r.within(*a, *b)).collect()),
                     },
                 })
                 .collect()

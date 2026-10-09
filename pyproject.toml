@@ -32,13 +32,14 @@ path = "engine/crates/aaw-py/Cargo.toml"
 binding = "PyO3"
 debug = false
 
-# Rebuild the module when the Rust model changes.
+# Rebuild the module when the Rust model or the meter changes.
 [tool.uv]
 cache-keys = [
     { file = "pyproject.toml" },
     { file = "engine/Cargo.lock" },
     { file = "engine/crates/aaw-py/**" },
     { file = "engine/crates/aaw-model/**" },
+    { file = "engine/crates/aaw-dsp/**" },
 ]
 
 [tool.pytest.ini_options]
