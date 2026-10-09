@@ -114,12 +114,22 @@ sections; a plain file has none. Every delta is **mix minus reference**.
 | `stereo_correlation`, `side_energy_fraction` | The stereo field |
 | `band_fraction` | Each of `daw listen`'s seven bands' share of the power, and the change in share |
 | `delta.band_db` | The tonal balance: each band's level, mix minus reference, with the median of the seven differences taken out |
+| `delta.spectrum_db` | The whole files only: the same balance in 31 [third octaves](spectrum-detail.md), listed as `methods.third_octave_hz`, with the median of their differences taken out |
+| `tilt_db_per_octave` | The slope of a line through the third octaves, and its difference: above zero the mix is brighter |
 
 `band_db` is the number to act on. A mix that is louder or quieter all over
 reads as 0 in every band, and a mix whose sub alone is 6 dB up reads `sub: 6` and
 the rest 0, which is the gain an equalizer or a fader would take. It is `null`
 in a band where either side holds under −70 dB of its power, and an observation
 says which side lacks the band.
+
+`spectrum_db` says where in a band the difference is: a bump at 315 Hz and an
+octave full from 250 to 500 Hz read the same in `low_mid` and not here. It is
+of the whole files only, since a section's third octaves follow the notes it
+plays, and a mix in another key can differ in a single low band for that alone.
+A reference added before third octaves were measured has no `spectrum_db` and
+no tilt, and is compared in the seven bands as it was; `daw reference add FILE
+--name NAME --replace` measures it again.
 
 `contour` holds how far apart the quietest and loudest sections are on each
 side, `mix_span_lu` and `reference_span_lu`.
@@ -128,15 +138,18 @@ side, `mix_span_lu` and `reference_span_lu`.
 words, the largest first by how many times over its threshold each is:
 
 ```text
-sub (20–60 Hz): 6.0 dB above the reference's balance over the whole mix; by section, drop +6.0 dB, verse +6.0 dB.
-loudness: the mix is 5.5 LU quieter than club-ref, -27.6 against -22.1 LUFS.
-contour: the mix's sections are within 1.0 LU of each other, and club-ref's within 4.2 LU.
+loudness: the mix is 5.7 LU quieter than club-ref, -27.2 against -21.5 LUFS.
+sub (20–60 Hz): by section, drop +6.0 dB, verse +6.0 dB.
+17.8–70.8 Hz: 4.5 dB above the reference's balance over the whole mix, 6.0 dB at 50 Hz.
 ```
 
-The thresholds are 1 LU of loudness, 1 dB of true peak, 3 dB of a band, 2 dB of
-crest, 5 points of side energy, 1.5 LU of a section's relative loudness and
-2 LU of span. A line names a measurement once, over the whole mix and then by
-section, up to four sections. They say which way and by how much, not what to
+The thresholds are 1 LU of loudness, 1 dB of true peak, 3 dB of a band, 0.5 dB
+an octave of tilt, 2 dB of crest, 5 points of side energy, 1.5 LU of a
+section's relative loudness and 2 LU of span. Over the whole mix the balance is
+said in third octaves: each run of bands next to each other that are past 3 dB
+the same way is one line, with the run's mean and its largest band. By section
+it is said in the seven bands. Any other measurement is named once, over the
+whole mix and then by section, up to four sections. They say which way and by how much, not what to
 do: a mix can differ from its reference on purpose.
 
 The report is printed and written to `analysis/ID/reference-NAME.json` in the
@@ -161,8 +174,9 @@ measurement in `daw listen`; its numbers are the same to the last bit.
   backlog line.
 - Keys, notes and arrangement are not compared, and a pair of sections is
   compared as two wholes, not bar by bar. The two can be at any tempo and length.
-- The bands are `daw listen`'s seven; third octaves and a tilt wait for
-  [a finer spectrum](spectrum-detail.md).
+- A section is compared in `daw listen`'s seven bands and its tilt. Third
+  octaves are compared over the whole files only: a section's follow the notes
+  it plays.
 - A beat map is always tried, and music without a steady beat can get one that
   means little, with phrases to match; name its sections in seconds.
 - The thresholds, the matching by loudness and the labels were tried on

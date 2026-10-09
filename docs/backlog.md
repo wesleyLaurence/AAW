@@ -20,73 +20,69 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **A finer spectrum in numbers.** The mix and each stem in third octaves
-   with a tilt, where `daw listen` has seven bands, and each stem's
-   resonances as a frequency, a height and a width, so an equalizer's band is
-   set from a number. [features/spectrum-detail.md](features/spectrum-detail.md)
-2. **Translation checks.** The mix measured as summed to mono and through a
+1. **Translation checks.** The mix measured as summed to mono and through a
    small speaker's band: what each band and each stem loses, and the two
    files written for the person to hear.
    [features/translation-checks.md](features/translation-checks.md)
-3. **Dynamics in detail.** A render's loudness range and its loudest three
+2. **Dynamics in detail.** A render's loudness range and its loudest three
    seconds, how hard each drum hits at its stem and through the mix, and each
    compressor's and limiter's reduction by section.
    [features/dynamics-detail.md](features/dynamics-detail.md)
-4. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+3. **Sound descriptors.** Each sample measured for brightness, attack, decay,
    low end and noise, with search sorted by them and samples like a chosen
    one, so the agent chooses sounds by more than their names.
    [features/sound-descriptors.md](features/sound-descriptors.md)
-5. **Listening markers.** The person drops a marker at the playhead while the
+4. **Listening markers.** The person drops a marker at the playhead while the
    song plays, with a word if they want, and the agent reads them with `daw`:
    "this bar", without a timecode.
-6. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+5. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
    is built, a clipper that holds a ceiling as a limiter does without its
    look-ahead is not. The utility is built ([utility](features/utility.md)).
-7. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
+6. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
    master's true peak can pass its ceiling and the agent leaves a margin by
    guess; a switch on the limiter that measures the peaks between the
    samples, so a ceiling of −1 dBTP is one.
-8. **A time selection in the app.** A range of beats dragged across the
+7. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-9. **A MIDI keyboard.** Notes played through the selected track, held and let
+8. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-10. **Sections and the song's length in the app.** A section made, named,
-    moved and removed in the ruler, which only draws them today; the length,
-    master gain and end fade typed in the transport bar, as the tempo is. The
-    agent has `daw section` and `daw set session.FIELD`; the person has neither
-    (D81).
-11. **A project made with `daw init` in the app's index,** so a song the agent
+9. **Sections and the song's length in the app.** A section made, named,
+   moved and removed in the ruler, which only draws them today; the length,
+   master gain and end fade typed in the transport bar, as the tempo is. The
+   agent has `daw section` and `daw set session.FIELD`; the person has neither
+   (D81).
+10. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-12. **Turns and A/B.** An agent request's commands grouped, named for the
+11. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-13. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+12. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-14. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+13. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-15. **Key and chord detection,** and swing detection, of samples and songs: a
+14. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-16. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+15. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-17. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+16. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-18. **The workspace and the two levels.** The workspace folder with its managed
+17. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-19. **The agent panel.** A conversation in the window, per project, over the
+18. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-20. **Stem separation** of a song.
-21. **Generated audio.** A sound, a loop or a whole song from a description, with
+19. **Stem separation** of a song.
+20. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -97,6 +93,31 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A finer spectrum, with the person listening:** `daw listen` of a mix of
+  the person's own, each stem's `resonances` read out and each heard by
+  sweeping a narrow boost of the stem's `eq` across the frequency, and
+  whether those are the peaks a person would name; a bell cut at a reported
+  `freq_hz`, `prominence_db` and `q` heard against the stem as it was, and
+  `daw compare` read for the fall; whether a snare's ring, read as a `q` of
+  16 however narrow it is, wants a narrower cut than the number says;
+  whether 5 dB over two octaves' median names too much or too little, and
+  whether a melody's notes, listed with `could_be_note: true`, crowd out
+  what matters; `spectrum.png` looked at beside the sound, and whether the
+  eight stems in color are the ones wanted; a mix's tilt against a
+  reference's, and whether 0.5 dB an octave is heard as brighter; a fresh
+  agent session asked why a stem sounds harsh or boxy, and whether it reads
+  `resonances` and `could_be_note`, says what it found and asks before
+  cutting. Generated audio only: pink noise at a tilt of 0 and white at +3,
+  a 1 kHz tone in its band alone, a Synth's sawtooth line through a bell of
+  +9 dB at 2.5 kHz and a `q` of 8 read as 2490 Hz, 6.3 dB and 8.3 and
+  nothing without the bell, a held note's partials as notes, a ring at
+  410 Hz in a drum's hits, a cut at the reported numbers falling 5.1 dB in
+  `daw compare`, and a mix's sub 6 dB up against a reference read in third
+  octaves, held by Python tests; one real render of fourteen stems read,
+  where it found between none and eight peaks a stem, each one that the
+  song's notes could explain, which nobody heard; `spectrum.png` of that
+  render looked at; about three seconds added to a three-minute song of
+  twelve stems.
 - **Overlap between stems, with the person listening:** `daw listen` of a
   mix of the person's own, the five pairs under `overlap` read out and each
   heard on the stems soloed together, and whether those are the pairs a
@@ -649,6 +670,15 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   listed too; the bands under 89 Hz read through longer windows; a grouped
   track read after its group's effects; `daw check` naming the worst pair of
   the last render.
+- Resonances further: a ring's own width and depth, read at a finer
+  resolution where a track's notes do not get in the way, since a peak
+  narrower than a twelfth of an octave reads as that wide; a resonance told
+  from a melody's partials by following each note's harmonics; dips, a band
+  a stem lacks against its neighbors; resonances of a file that is not a
+  render, a sample before it is imported; a section's third octaves against
+  a reference's.
+- A shorter `daw listen` by default, with the rest behind a flag, now that
+  the report holds third octaves and resonances for every stem.
 - An audio-capable model as an optional critic, with its own consent.
 - A certified true-peak measurement; the engine's 4× oversampled peak is an
   estimate.

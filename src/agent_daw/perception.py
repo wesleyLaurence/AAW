@@ -16,7 +16,7 @@ import pyloudnorm as pyln
 import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
-from . import overlap
+from . import overlap, spectrum
 from .model import atomic_text, beat, digest, frame, hash_matches, load, schedule
 
 VERSION = 1
@@ -37,6 +37,12 @@ def db(power):
 
 def delta(a, b):
     return float(b - a) if a is not None and b is not None else None
+
+
+def tilt_delta(a, b):
+    """The change in a tilt, to the two places a tilt has."""
+    change = delta(a.get("tilt_db_per_octave"), b.get("tilt_db_per_octave"))
+    return None if change is None else round(change, 2)
 
 
 # Silencing warnings changes what every thread sees, so one loudness is worked
@@ -90,19 +96,20 @@ def measure(x, rate, true_peak=True):
     """dBFS uses mean-square power across channels, with a unit peak reference.
     Without `true_peak` the oversampled peak, a third of the work, is left out."""
     n = min(len(x), 8192)
-    spectrum = BESIDE.submit(welch, x, rate, nperseg=n, axis=0)
+    coarse = BESIDE.submit(welch, x, rate, nperseg=n, axis=0)
     over = [
         BESIDE.submit(oversampled_peak, np.ascontiguousarray(x[:, c]))
         for c in range(x.shape[1] if true_peak else 0)
     ]
     field = BESIDE.submit(stereo, x)
+    fine = BESIDE.submit(spectrum.third_octaves, x, rate)
     loudness = integrated(x, rate)
     peak = float(np.max(np.abs(x)))
     power = float(np.mean(x * x))
-    freq, psd = spectrum.result()
-    spectrum = psd.mean(axis=1) * rate / n
+    freq, psd = coarse.result()
+    bins = psd.mean(axis=1) * rate / n
     band_power = {
-        name: float(spectrum[(freq >= lo) & (freq < hi)].sum())
+        name: float(bins[(freq >= lo) & (freq < hi)].sum())
         for name, (lo, hi) in BANDS.items()
     }
     total = sum(band_power.values())
@@ -125,6 +132,8 @@ def measure(x, rate, true_peak=True):
         "band_fraction": {
             k: v / total if total > 0 else None for k, v in band_power.items()
         },
+        "spectrum_db": fine.result(),
+        "tilt_db_per_octave": spectrum.tilt(fine.result()),
         "stereo_correlation": correlation,
         "side_energy_fraction": side_fraction,
         "silent": peak <= 1e-6,
@@ -337,24 +346,28 @@ def grid_of(folder, manifest, project, x, rate, offset, sections):
 
 
 def code_hash():
-    """One hash of the code that measures: this file and the overlap's."""
+    """One hash of the code that measures: this file, the overlap's and the spectrum's."""
     both = hashlib.sha256()
-    for path in (Path(__file__), Path(overlap.__file__)):
+    for path in (Path(__file__), Path(overlap.__file__), Path(spectrum.__file__)):
         both.update(digest(path).encode())
     return both.hexdigest()
 
 
 def analyze(source):
-    report, x, _ = measured(source)
+    report, x, _, _ = measured(source)
     return report, x
 
 
 def measured(source):
-    """A source's listen report, its audio and its overlap grid, if it has stems."""
+    """A source's listen report and its audio, with its overlap grid and its
+    stems' resonances, if it has stems."""
     audio_path, folder = resolve(source)
     x, rate = read_audio(audio_path)
     project, manifest, offset, sections = context(folder, x, rate)
     grid = grid_of(folder, manifest, project, x, rate, offset, sections)
+    rings = (
+        spectrum.Resonances(len(x), rate, project, manifest, offset, sections) if folder else None
+    )
     report = {
         "schema_version": VERSION,
         "kind": "listen",
@@ -379,6 +392,7 @@ def measured(source):
             "peak": "4x polyphase oversampling estimate, not certified true peak",
             "null": "undefined or insufficient signal/duration; never a zero measurement",
             "overlap": overlap.METHOD,
+            **spectrum.METHOD,
             "interpretation": "diagnostics only; no musical quality score, and overlap is not a masking diagnosis",
         },
         "dependencies": {
@@ -401,20 +415,22 @@ def measured(source):
         }
     if folder:
         for track, stem, actual_hash, verified in stems(folder, manifest, x, rate):
+            rings.add(track, stem)
             report["tracks"][track] = {
                 "kind": manifest["tracks"][track].get("kind", "track"),
                 "audio_sha256": actual_hash,
                 "hash_verified_against_render": verified,
-                "audio": measure(stem, rate),
+                "audio": measure(stem, rate) | rings.listed(track),
                 "sections": {
                     s["id"]: measure(stem[s["start_frame"] : s["end_frame"]], rate)
+                    | rings.listed(track, s["id"])
                     for s in sections
                 },
             }
             if grid:
                 grid.add(track, stem)
     report["overlap"] = grid.summary() if grid else None
-    return report, x, grid
+    return report, x, grid, rings
 
 
 def plot_listen(report, x, output):
@@ -503,9 +519,52 @@ def listen(source, images=True):
     return heard(source, images)[0]
 
 
+# What a section's measurements hold in the written report and not in the
+# printed one: thirty-one numbers for every stem in every section is most of a
+# report nobody asked for.
+BY_SECTION = ("spectrum_db", "resonances", "resonances_omitted")
+
+
+def printed(report):
+    """A listen report as `daw listen` prints it: the whole of it but each
+    section's third octaves and resonances, which `--section ID` prints."""
+    for section in report["sections"].values():
+        for key in BY_SECTION:
+            section["audio"].pop(key, None)
+    for track in report["tracks"].values():
+        for section in track["sections"].values():
+            for key in BY_SECTION:
+                section.pop(key, None)
+    return report
+
+
+def section_of(source, section, images=True):
+    """`daw listen RENDER --section ID`: one section of the mix and of each stem,
+    with its third octaves and the stem's resonances there."""
+    report = listen(source, images)
+    if section not in report["sections"]:
+        known = ", ".join(report["sections"]) or "none"
+        raise ValueError(f"No section named {section} in this render; its sections are {known}")
+    return {
+        "schema_version": VERSION,
+        "kind": "section",
+        "source": report["source"],
+        "section": section,
+        **{k: report["sections"][section][k] for k in ("start_seconds", "end_seconds")},
+        "third_octave_hz": spectrum.CENTERS,
+        "mix": report["sections"][section]["audio"],
+        "tracks": {
+            name: {"kind": track["kind"], "audio": track["sections"][section]}
+            for name, track in report["tracks"].items()
+        },
+        "report_path": report["report_path"],
+    }
+
+
 def heard(source, images=True):
-    """`daw listen`: the report, written beside the audio, and the overlap grid."""
-    report, audio, grid = measured(source)
+    """`daw listen`: the report, written beside the audio, with the overlap
+    grid and the stems' resonances."""
+    report, audio, grid, rings = measured(source)
     audio_path, folder = resolve(source)
     root = folder or audio_path.parent
     identity = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()[
@@ -513,12 +572,16 @@ def heard(source, images=True):
     ]
     output = root / "analysis" / identity
     output.mkdir(parents=True, exist_ok=True)
-    report["images"] = [plot_listen(report, audio, output)] if images else []
+    report["images"] = (
+        [plot_listen(report, audio, output), spectrum.plot(report, output / "spectrum.png")]
+        if images
+        else []
+    )
     report["report_path"] = str((output / "listen.json").resolve())
     atomic_text(
         output / "listen.json", json.dumps(report, indent=2, allow_nan=False) + "\n"
     )
-    return report, grid
+    return report, grid, rings
 
 
 def overlap_of(source, a, b, images=True):
@@ -569,7 +632,20 @@ def overlap_of(source, a, b, images=True):
 DB_FIELDS = ("integrated_lufs", "peak_dbfs", "estimated_true_peak_dbtp", "rms_dbfs")
 
 
-def metric_diff(a, b, gain):
+def each(a, b, gain=0.0):
+    """After minus before for each third octave, moved by a gain; None where
+    either is, and for measurements made before third octaves were."""
+    if a is None or b is None or gain is None:
+        return None
+    return [
+        None if before is None or after is None else round(after - before + gain, 2)
+        for before, after in zip(a, b)
+    ]
+
+
+def metric_diff(a, b, gain, fine=True):
+    """What changed between two measurements. Without `fine`, of a section, the
+    third octaves are left out and the tilt kept."""
     raw = {
         key: delta(a[key], b[key])
         for key in (
@@ -579,6 +655,7 @@ def metric_diff(a, b, gain):
             "side_energy_fraction",
         )
     }
+    raw["tilt_db_per_octave"] = tilt_delta(a, b)
     raw["band_dbfs"] = {k: delta(a["band_dbfs"][k], b["band_dbfs"][k]) for k in BANDS}
     raw["band_fraction"] = {
         k: delta(a["band_fraction"][k], b["band_fraction"][k]) for k in BANDS
@@ -594,6 +671,9 @@ def metric_diff(a, b, gain):
         k: v + gain if v is not None and gain is not None else None
         for k, v in raw["band_dbfs"].items()
     }
+    if fine:
+        raw["spectrum_db"] = each(a["spectrum_db"], b["spectrum_db"])
+        matched["spectrum_db"] = each(a["spectrum_db"], b["spectrum_db"], gain)
     return {
         "actual_delta": raw,
         "loudness_matched_delta": matched,
@@ -603,8 +683,8 @@ def metric_diff(a, b, gain):
 
 
 def compare(before, after, images=True):
-    a, grid_a = heard(before, images=images)
-    b, grid_b = heard(after, images=images)
+    a, grid_a, rings_a = heard(before, images=images)
+    b, grid_b, rings_b = heard(after, images=images)
     gain = delta(b["mix"]["integrated_lufs"], a["mix"]["integrated_lufs"])
     report = {
         "schema_version": VERSION,
@@ -654,18 +734,20 @@ def compare(before, after, images=True):
         report["sections"][name] = {
             "start_seconds": sa["start_seconds"],
             "end_seconds": sa["end_seconds"],
-            **metric_diff(sa["audio"], sb["audio"], gain),
+            **metric_diff(sa["audio"], sb["audio"], gain, fine=False),
         }
     report["unmatched_tracks"] = {
         "before": sorted(set(a["tracks"]) - set(b["tracks"])),
         "after": sorted(set(b["tracks"]) - set(a["tracks"])),
     }
+    resonances = spectrum.between(rings_a, rings_b, a, b)
     for name in sorted(set(a["tracks"]) & set(b["tracks"])):
         ta, tb = a["tracks"][name], b["tracks"][name]
         report["tracks"][name] = {
             **metric_diff(ta["audio"], tb["audio"], gain),
+            "resonances": resonances.get(name),
             "sections": {
-                s: metric_diff(ta["sections"][s], tb["sections"][s], gain)
+                s: metric_diff(ta["sections"][s], tb["sections"][s], gain, fine=False)
                 for s in sorted(aligned)
             },
         }

@@ -13,6 +13,7 @@ local.
 uv run daw listen projects/my-beat/renders/latest.json
 uv run daw listen projects/my-beat/renders/latest-preview.json --no-images
 uv run daw listen projects/my-beat/renders/latest.json --overlap kick bass
+uv run daw listen projects/my-beat/renders/latest.json --section drop
 uv run daw compare projects/my-beat/revisions/before-render.json projects/my-beat/renders/latest.json
 ```
 
@@ -29,7 +30,8 @@ produce JSON errors and a nonzero exit code.
 
 `listen` prints a JSON report and saves it under `analysis/<identity>/listen.json`
 inside the render directory (beside the audio for standalone files). It generates
-`overview.png` with energy, section markers and a log-frequency spectrogram.
+`overview.png` with energy, section markers and a log-frequency spectrogram, and
+`spectrum.png` with the mix's third octaves over its stems'.
 `compare` saves both listen reports and a `compare.json` under the after report's
 analysis directory; aligned timelines also produce `comparison.png`. Paths are
 returned in `report_path` and `images`. Use `--no-images` to omit PNG generation.
@@ -41,6 +43,14 @@ their energy in the same band at the same moments, with the band, how much of
 the time and where. `daw listen RENDER --overlap A B` prints one pair by band
 and by section in place of the report, with a picture, and `daw compare` has
 each pair's change. The fields and the method are in [masking.md](masking.md).
+
+Every measurement also has the finer `spectrum_db`, its power in 31 third
+octaves, and `tilt_db_per_octave`, and each stem has `resonances`: narrow peaks
+that stay where they are while the notes move, each a frequency, a height and a
+`q`. A section's third octaves and resonances are written and not printed;
+`daw listen RENDER --section ID` prints one section's in place of the report.
+`daw compare` has their change. The fields and the method are in
+[spectrum-detail.md](spectrum-detail.md).
 
 ## Measurements
 
@@ -58,6 +68,9 @@ The `mix`, each section's `audio`, and each track's `audio` and `sections` conta
   than downmixing the audio. Resolution degrades for very short audio. Welch's
   constant detrending excludes DC from this spectral description.
 - `band_fraction`: each band's share of total measured 20 Hz–20 kHz band power.
+- `spectrum_db`, `tilt_db_per_octave`: the power in each third octave from a
+  spectrum of its own, with windows of up to 32 768 frames, and the slope of a
+  line through them; see [spectrum-detail.md](spectrum-detail.md).
 - `stereo_correlation`: Pearson correlation between channels; `null` for mono,
   silence, or a channel without enough variance to define correlation.
 - `side_energy_fraction`: side/(mid+side) power, where mid=(L+R)/2 and side=(L−R)/2.
@@ -143,8 +156,9 @@ pattern occurrence maps for aligned regions.
 
 ## Boundaries and verification
 
-It does not infer taste, key, tempo or transients, and overlap between stems
-is not masking as an ear does it. It does
+It does not infer taste, key, tempo or transients, overlap between stems
+is not masking as an ear does it, and a resonance is a measured peak, not a
+fault. It does
 not introduce effects or change rendering semantics. Analysis currently rereads
 and measures the saved audio each time; there is no incremental analysis cache.
 Long songs and many stems take longer than a section preview. One measurement's
@@ -156,4 +170,5 @@ Tests cover known 1 kHz loudness, +6 dB gain and matching, band changes, silence
 stereo polarity, one-sided stereo, short files, 44.1/48 kHz, localized arrangement
 changes, preview alignment, snapshot independence, artifact tampering, legacy
 manifests and CLI JSON/PNG output. Overlap has tests of its own, on generated
-songs whose contests are known.
+songs whose contests are known, and so has the finer spectrum, on noise, a tone
+and a Synth's line through a bell.

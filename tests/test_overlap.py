@@ -170,7 +170,7 @@ def test_a_group_and_a_return_are_not_set_against_their_own_tracks(tmp_path):
             "tom": {"group": "drums"},
         },
     )
-    report, _, grid = measured(folder)
+    report, _, grid, _ = measured(folder)
     assert grid.related("kick", "drums") and grid.related("drums", "tom")
     assert grid.related("room", "kick") and grid.related("drums", "room")
     assert not grid.related("room", "tom") and not grid.related("kick", "tom")
@@ -191,7 +191,7 @@ def test_a_groups_pair_gives_way_to_its_tracks(tmp_path):
         groups=[{"id": "drums"}],
         tracks={"kick": {"group": "drums"}},
     )
-    report, _, grid = measured(folder)
+    report, _, grid, _ = measured(folder)
     assert grid.ranges("drums", "bass")
     assert [(p["a"], p["b"]) for p in report["overlap"]["pairs"]] == [("kick", "bass")]
 

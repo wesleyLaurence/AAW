@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import beats, library, perception
+from . import beats, library, overlap, perception, spectrum
 from .model import atomic_text, beat, digest
 
 VERSION = 1
@@ -36,6 +36,7 @@ NOTABLE = {
     "band_db": 3.0,
     "crest_db": 2.0,
     "side_energy_fraction": 0.05,
+    "tilt_db_per_octave": 0.5,
     "relative_lu": 1.5,
     "span_lu": 2.0,
 }
@@ -299,7 +300,7 @@ def add(file, name=None, bpm=None, downbeat=None, meter=None, replace=False) -> 
         "name": key,
         "added_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "source": entry,
-        "analysis_code_sha256": digest(Path(perception.__file__)),
+        "analysis_code_sha256": perception.code_hash(),
         "beat_map": None
         if beat_map is None
         else {k: v for k, v in beat_map.items() if k not in ("beats", "phrases", "duration", "sample_rate")},
@@ -394,6 +395,27 @@ def balance(mix, ref) -> dict:
     return {band: None if v is None else v - middle for band, v in raw.items()}
 
 
+def fine(mix, ref) -> list | None:
+    """Each third octave's level in the mix against the reference's, with the
+    median difference taken out as `balance` does: None for a band a side holds
+    under -70 dB of its power in, and altogether for a reference measured before
+    third octaves were."""
+    ours, theirs = mix.get("spectrum_db"), ref.get("spectrum_db")
+    if ours is None or theirs is None:
+        return None
+
+    def held(audio, level):
+        empty = level is None or audio["rms_dbfs"] is None or level < audio["rms_dbfs"] - 70
+        return None if empty else level
+
+    raw = [perception.delta(held(ref, b), held(mix, a)) for a, b in zip(ours, theirs)]
+    known = [v for v in raw if v is not None]
+    if len(known) < 3:
+        return [None] * len(raw)
+    middle = float(np.median(known))
+    return [None if v is None else round(v - middle, 2) for v in raw]
+
+
 def summary(audio, whole=None) -> dict:
     """What a comparison shows of one side: of a section when `whole` is the
     file's measurements, and otherwise of the file."""
@@ -406,6 +428,8 @@ def summary(audio, whole=None) -> dict:
         )
     for key in ("crest_db", "stereo_correlation", "side_energy_fraction"):
         out[key] = audio[key]
+    # A reference measured before third octaves were has no tilt.
+    out["tilt_db_per_octave"] = audio.get("tilt_db_per_octave")
     out["band_fraction"] = audio["band_fraction"]
     return out
 
@@ -417,6 +441,7 @@ def difference(mix, ref, mix_audio, ref_audio) -> dict:
         for key in mix
         if key != "band_fraction"
     }
+    out["tilt_db_per_octave"] = perception.tilt_delta(ref, mix)
     out["band_db"] = balance(mix_audio, ref_audio)
     out["band_fraction"] = {
         band: perception.delta(ref["band_fraction"][band], mix["band_fraction"][band])
@@ -474,9 +499,9 @@ def observations(report) -> list[str]:
         other = part["reference_section"]
         return sid if other == sid else f"{sid} against {other}"
 
-    def across(key, limit, read, phrase, amount=signed):
+    def across(key, limit, read, phrase, amount=signed, sections_only=False):
         """One observation for a measurement over the whole mix and its sections."""
-        over_all = read(whole)
+        over_all = None if sections_only else read(whole)
         rows = [
             (against(sid, part), read(part), amount(read(part)))
             for sid, part in parts.items()
@@ -510,12 +535,29 @@ def observations(report) -> list[str]:
             f"true peak: the mix's is {whole['mix']['estimated_true_peak_dbtp']:.1f} dBTP "
             f"against {name}'s {whole['reference']['estimated_true_peak_dbtp']:.1f}.",
         )
+    # Over the whole mix the balance is read in third octaves, each run of
+    # them past the threshold one way as one range; a section's third octaves
+    # follow its notes, so sections are read in the seven bands.
+    thirds = whole["delta"]["spectrum_db"]
+    for sign, way in ((1, "above"), (-1, "below")) if thirds else ():
+        past = [v is not None and sign * v >= NOTABLE["band_db"] for v in thirds]
+        for first, last in overlap.runs(past):
+            most = max(range(first, last + 1), key=lambda k: sign * thirds[k])
+            size = float(np.mean(thirds[first : last + 1]))
+            low, high = (spectrum.figures(edge) for edge in (spectrum.EDGES[first], spectrum.EDGES[last + 1]))
+            note(
+                thirds[most],
+                NOTABLE["band_db"],
+                f"{low:g}–{high:g} Hz: {abs(size):.1f} dB {way} the reference's balance over "
+                f"the whole mix, {abs(thirds[most]):.1f} dB at {spectrum.CENTERS[most]:g} Hz.",
+            )
     for band, (low, high) in perception.BANDS.items():
         across(
             f"{band} ({low}–{high} Hz)",
             NOTABLE["band_db"],
             lambda p, band=band: p["delta"]["band_db"][band],
             lambda v: f"{abs(v):.1f} dB {'above' if v > 0 else 'below'} the reference's balance",
+            sections_only=bool(thirds),
         )
         for side, other in (("mix", "reference"), ("reference", "mix")):
             mine = whole[side]["band_fraction"][band]
@@ -528,6 +570,14 @@ def observations(report) -> list[str]:
                     f"-70 dB of its power, where the {other} has "
                     f"{10 * np.log10(share):.0f} dB of its own.",
                 )
+    across(
+        "tilt",
+        NOTABLE["tilt_db_per_octave"],
+        lambda p: p["delta"]["tilt_db_per_octave"],
+        lambda v: f"{abs(v):.1f} dB an octave {'brighter' if v > 0 else 'darker'} than "
+        "the reference",
+        lambda v: f"{v:+.1f} dB an octave",
+    )
     across(
         "crest",
         NOTABLE["crest_db"],
@@ -626,7 +676,8 @@ def compare(source, name) -> dict:
         "whole": {
             "mix": ours,
             "reference": theirs,
-            "delta": difference(ours, theirs, mix, reference["mix"]),
+            "delta": difference(ours, theirs, mix, reference["mix"])
+            | {"spectrum_db": fine(mix, reference["mix"])},
         },
         "matching": {
             "sections": how,
@@ -656,6 +707,14 @@ def compare(source, name) -> dict:
             "seven differences taken out, so overall level reads as zero and one band "
             "moved reads as its amount; null where a side holds under -70 dB of its "
             "power in the band, or fewer than three bands compare",
+            "spectrum_db": "over the whole of each, each third octave's level, mix minus "
+            "reference, with the median of the differences taken out as band_db has it; null "
+            "where a side holds under -70 dB of its power in the band, and altogether for a "
+            "reference added before third octaves were measured: add it again with "
+            "daw reference add FILE --name NAME --replace",
+            "third_octave_hz": spectrum.CENTERS,
+            "tilt_db_per_octave": "the slope of a line through the third octaves from 50 Hz "
+            "to 10 kHz: 0 for pink noise, higher is brighter",
             "relative_lu": "a section's integrated loudness minus its file's",
             "label": "low, mid or high: where a section's loudness sits between the "
             "reference's quietest and loudest sections",

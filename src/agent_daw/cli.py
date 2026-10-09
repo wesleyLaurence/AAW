@@ -157,6 +157,12 @@ def parser():
     listen.add_argument("source", type=Path)
     listen.add_argument("--no-images", action="store_true")
     listen.add_argument(
+        "--section",
+        metavar="ID",
+        help="One section of the mix and of each stem, with its third octaves and "
+        "resonances, in place of the report (daw describe listen)",
+    )
+    listen.add_argument(
         "--overlap",
         nargs=2,
         metavar=("A", "B"),
@@ -262,9 +268,13 @@ def execute(a):
         from . import perception
 
         if a.command == "listen":
+            if a.overlap and a.section:
+                raise ValueError("listen takes --overlap A B or --section ID, not both")
             if a.overlap:
                 return perception.overlap_of(a.source, *a.overlap, images=not a.no_images)
-            return perception.listen(a.source, images=not a.no_images)
+            if a.section:
+                return perception.section_of(a.source, a.section, images=not a.no_images)
+            return perception.printed(perception.listen(a.source, images=not a.no_images))
         if (a.after is None) == (a.reference is None):
             raise ValueError(
                 "compare takes two renders, or one render and --reference NAME"

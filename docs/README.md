@@ -60,12 +60,12 @@ Built:
 | [the live analyzer](features/analyzer.md) | An effect that changes nothing and shows the sound passing through it: a strip in the device panel and a window with levels, loudness, spectrum, stereo field, spectrogram and waveform |
 | [comparing with a reference](features/reference-comparison.md) | `daw reference`: a song kept as what good sounds like, as measurements in the workspace library; `daw compare RENDER --reference NAME`: the mix against it, whole and section by section, with the differences in words |
 | [overlap between stems](features/masking.md) | `overlap` in `daw listen`: the pairs of stems with energy in the same band at the same moments, the band, how much of the time and where; `--overlap A B` for one pair by band and section, with a picture; each pair's change in `daw compare` |
+| [a finer spectrum in numbers](features/spectrum-detail.md) | `spectrum_db`, the mix and each stem in 31 third octaves, and `tilt_db_per_octave` in `daw listen`; each stem's `resonances`, the peaks that stay while the notes move, as a frequency, a height and a `q`; `--section ID` for one section's; their change in `daw compare`, and the balance against a reference in third octaves |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [a finer spectrum in numbers](features/spectrum-detail.md) | Next |
 | [translation checks](features/translation-checks.md) | Next |
 | [dynamics in detail](features/dynamics-detail.md) | Next |
 | [sound descriptors](features/sound-descriptors.md) | Next |

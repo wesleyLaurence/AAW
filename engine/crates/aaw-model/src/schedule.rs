@@ -1,7 +1,8 @@
 //! Event scheduling: every hit's start frame, from exact beats.
 
-use crate::{frame, Beat, Event, Midi, PadMode, Project, Sampler};
+use crate::{frame, Beat, Event, Instrument, Midi, PadMode, Project, Sampler, Wave};
 use num_rational::BigRational;
+use num_traits::ToPrimitive;
 use std::collections::HashMap;
 
 /// A note as an instrument receives it: nothing about pads, only its pitch,
@@ -153,4 +154,144 @@ pub fn schedule(p: &Project) -> Vec<Trigger> {
     let mut triggers: Vec<Trigger> = (0..p.tracks.len()).flat_map(|ti| track_triggers(p, ti)).collect();
     triggers.sort_by(|a, b| (a.start, &a.track_id, &a.pad).cmp(&(b.start, &b.track_id, &b.pad)));
     triggers
+}
+
+/// One thing a track plays, for reading its stem's spectrum against: a peak
+/// that stays put while the notes move is the sound's own, and one that
+/// follows them is the music.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sounded {
+    pub track_id: String,
+    /// Its start and end, in beats. A hit without a duration ends where it starts.
+    pub at: f64,
+    pub until: f64,
+    /// The pitch it sounds at, as a MIDI number: a Synth's note at each of
+    /// its oscillators, and a sample repitched to a note. None for a hit
+    /// without a note, which plays its sample as it is.
+    pub pitch: Option<f64>,
+    /// For a hit without a note, its pad and how far the pad's and the
+    /// event's transpose move it, in semitones; empty for a note.
+    pub hit: String,
+}
+
+/// Everything the tracks play, a track at a time in the order it starts.
+/// Audio clips are not in it: the song does not say what a file holds.
+pub fn sounded(p: &Project) -> Vec<Sounded> {
+    let f = |x: &BigRational| x.to_f64().unwrap_or(f64::NAN);
+    let mut out = Vec::new();
+    for t in &p.tracks {
+        let from = out.len();
+        let mut push = |at: f64, until: f64, pitch: Option<f64>, hit: String| {
+            out.push(Sounded { track_id: t.id.clone(), at, until, pitch, hit });
+        };
+        if let Some(midi) = &t.midi {
+            for n in track_notes(p, midi) {
+                let (at, until) = (f(&n.at), f(&(&n.at + &n.beats)));
+                match &midi.instrument {
+                    Some(Instrument::Synth(synth)) => {
+                        for o in synth.oscillators.values().filter(|o| o.wave != Wave::Noise) {
+                            let offset = 12.0 * o.octave as f64 + o.semitones + o.detune_cents / 100.0;
+                            push(at, until, Some(n.pitch as f64 + offset), String::new());
+                        }
+                    }
+                    Some(Instrument::Sampler(sampler)) => {
+                        let Some(entry) = sampler.entry(n.pitch) else { continue };
+                        let Some(pad) = sampler.pads.get(&entry.pad) else { continue };
+                        if entry.pitched {
+                            push(at, until, Some(n.pitch as f64 + pad.transpose), String::new());
+                        } else {
+                            push(at, until, None, format!("{} {}", entry.pad, pad.transpose));
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        for c in &t.clips {
+            let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
+            let (length, events) = (pattern.length_exact(), pattern.expanded());
+            for r in 0..c.repeats {
+                let base = c.at_exact() + BigRational::from_integer(r.into()) * &length;
+                for e in &events {
+                    let Some(pad) = t.pads.get(&e.pad) else { continue };
+                    let at = &base + e.at_exact();
+                    let until = &at + e.duration_exact().unwrap_or_else(|| BigRational::from_integer(0.into()));
+                    let moved = pad.transpose + e.transpose;
+                    let note = e.note.as_deref().filter(|n| !n.is_empty()).and_then(|n| crate::rules::midi(n).ok());
+                    match note {
+                        Some(note) => push(f(&at), f(&until), Some(note as f64 + moved), String::new()),
+                        None => push(f(&at), f(&until), None, format!("{} {}", e.pad, moved)),
+                    }
+                }
+            }
+        }
+        out[from..].sort_by(|a, b| a.at.total_cmp(&b.at));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_each_track_plays_has_its_pitch_or_its_pad() {
+        let p = crate::parse(
+            r#"
+session: {tempo: 120, length_beats: 16, sample_rate: 48000}
+samples:
+  kick: {path: kick.wav}
+  bass: {path: bass.wav, root_note: C2}
+patterns:
+  beat: {length_beats: 4, events: [{at: 0, pad: kick}, {at: 2, pad: kick, transpose: -2}]}
+  line: {length_beats: 4, events: [{at: 1, pad: bass, note: E2, duration: 1}]}
+tracks:
+  - id: drums
+    pads: {kick: {sample: kick}, bass: {sample: bass, transpose: 12}}
+    clips: [{pattern: beat, at: 0, repeats: 2}, {pattern: line, at: 4}]
+    audio: [{sample: kick, at: 8}]
+  - id: lead
+    type: midi
+    instrument: {synth: {oscillators: {a: {}, b: {octave: -1, detune_cents: 50}, n: {wave: noise}}}}
+    clips: [{id: c, length_beats: 4, notes: [{pitch: A4, duration: 2}, {pitch: C5, at: 3, duration: 4}]}]
+  - id: keys
+    type: midi
+    instrument:
+      sampler:
+        pads: {tone: {sample: bass}, hit: {sample: kick, transpose: 3}}
+        map: [{notes: C1, pad: hit}, {notes: [C2, C6], pad: tone, pitched: true}]
+    clips: [{id: k, at: 4, length_beats: 4, notes: [{pitch: C1, duration: 1}, {pitch: G3, at: 1, duration: 1}, {pitch: C0, at: 2, duration: 1}]}]
+"#,
+        )
+        .unwrap();
+        let of = |track: &str| -> Vec<(f64, f64, Option<f64>, String)> {
+            sounded(&p).into_iter().filter(|s| s.track_id == track).map(|s| (s.at, s.until, s.pitch, s.hit)).collect()
+        };
+        // A hit without a note is its pad and its transpose; a note is the
+        // pitch the sample is moved to. The audio clip is not listed.
+        assert_eq!(
+            of("drums"),
+            vec![
+                (0.0, 0.0, None, "kick 0".into()),
+                (2.0, 2.0, None, "kick -2".into()),
+                (4.0, 4.0, None, "kick 0".into()),
+                (5.0, 6.0, Some(52.0), String::new()),
+                (6.0, 6.0, None, "kick -2".into()),
+            ]
+        );
+        // A Synth's note at each oscillator but the noise; the last note is
+        // cut at its clip's end.
+        assert_eq!(
+            of("lead"),
+            vec![
+                (0.0, 2.0, Some(69.0), String::new()),
+                (0.0, 2.0, Some(57.5), String::new()),
+                (3.0, 4.0, Some(72.0), String::new()),
+                (3.0, 4.0, Some(60.5), String::new()),
+            ]
+        );
+        // A sampler's drum entry is a hit, a pitched one a note, and a note
+        // nothing maps is silent.
+        assert_eq!(of("keys"), vec![(4.0, 5.0, None, "hit 3".into()), (5.0, 6.0, Some(55.0), String::new())]);
+    }
 }

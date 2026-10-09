@@ -51,9 +51,9 @@ not say which of the two should give way.
 **Cells.** Each stem's power on a grid of bands by time, on the song's own
 grid. Time is a sixteenth note, or the next note up that lasts 100 ms: an
 eighth above 150 BPM. `cell_beats` says which. The 26 bands are the third
-octaves at the standard centers from 100 Hz to 20 kHz, the top one ending at
-20 kHz, and two an octave wide below, 20–45 Hz and 45–89 Hz, since a window
-that short cannot tell third octaves apart there. Edges are printed to three
+octaves of [`spectrum_db`](spectrum-detail.md) from 100 Hz to 20 kHz, the top
+one ending at 20 kHz, and two an octave wide below, 20–45 Hz and 45–89 Hz,
+since a window that short cannot tell third octaves apart there. Edges are printed to three
 figures. Channel powers are averaged, as `band_dbfs` does it.
 
 A cell is read through two windows a cell long, centered an eighth and five

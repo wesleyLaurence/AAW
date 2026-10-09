@@ -15,6 +15,7 @@ import numpy as np
 from numpy.lib.stride_tricks import sliding_window_view
 from scipy import fft
 
+from . import spectrum
 from .model import meter
 
 # Two stems contest a cell when the weaker is within CLOSE_DB of the stronger
@@ -42,11 +43,10 @@ WORST = 3
 MIN_CELL_SECONDS = 0.1
 SILENT = 1e-14  # power: -140 dBFS
 
-# Third octaves at the standard centers, 100 Hz to 20 kHz, the top one ending
-# at 20 kHz, and an octave each for the two below: a cell is too short to tell
-# third octaves apart there.
-EDGES = [20.0, *(10 ** (1.65 + 0.3 * k) for k in range(2))]
-EDGES += [10 ** (2.05 + 0.1 * k) for k in range(23)] + [20000.0]
+# The third octaves `spectrum_db` is in, from 100 Hz to 20 kHz, and an octave
+# each for the two below, three of them taken as one: a cell is too short to
+# tell third octaves apart there.
+EDGES = [20.0, spectrum.EDGES[4], *spectrum.EDGES[7:]]
 BANDS = list(zip(EDGES, EDGES[1:]))
 
 
