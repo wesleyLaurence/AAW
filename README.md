@@ -341,6 +341,9 @@ loudness-matched deltas plus a comparison chart. Both accept render directories,
 render pointers, `report.json`, or standalone audio. Add `--no-images` for JSON only.
 Outputs live under `analysis/` inside the render directory or beside standalone
 audio. Reports use the saved project snapshot and do not change the song or audio.
+A render's report also names the pairs of stems that overlap: the band, how much
+of the time and where, with `daw listen <render> --overlap <a> <b>` for one pair
+by band and section. See [docs/features/masking.md](docs/features/masking.md).
 See [docs/features/perception.md](docs/features/perception.md) for definitions and limitations.
 
 `daw reference add <song> --name <name>` measures a song you point to as what

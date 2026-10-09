@@ -101,6 +101,11 @@ Python, in `src/agent_daw`:
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
   snapshot-derived musical context, render comparisons and PNG summaries.
+- `overlap.py`: where two stems of a render put their energy in the same band
+  at the same moments, from each stem's power in cells of a band by a sixteenth
+  note against the stems' sum: the pairs in `daw listen`, one pair by band and
+  section with a picture, and each pair's change in `daw compare`; see
+  [masking.md](features/masking.md).
 - `reference.py`: a song the person names as a reference, measured once with
   its beat map's phrases as sections and kept as numbers in the workspace
   library, `~/Music/AAW/library/references/` (or `AAW_WORKSPACE`), with the
@@ -372,6 +377,10 @@ cover envelope semantics, constant lanes rendering exactly as static values, swe
 latency-compensated timing, block-partition invariance and validation.
 Perception tests use known tones, gain changes, silence, stereo polarity, changed
 frequencies, localized arrangement edits, previews and tampered render artifacts.
+Overlap tests use generated songs whose contests are known: two tones in one
+band over some bars, a bass under a kick with and without a keyed compressor,
+a group, a return and their tracks, a hit on the grid, and the pair's report
+and picture through `daw`.
 Reference tests use a generated song of a quiet and a loud half: its phrases as
 sections, a mix with its sub 6 dB up reported by section, sections matched by
 ID and by loudness, a file compared whole, a band one side lacks, and an AAC

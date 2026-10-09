@@ -73,7 +73,12 @@ Run `daw check PROJECT` before rendering and read each warning's code
 (`daw describe check`); investigate edits with a short section or isolated
 track render. Full mixes point from `renders/latest.json`; previews use
 `renders/latest-preview.json`. `daw listen` and `daw compare` measure audio;
-do not claim listening when only numerical analysis was performed.
+do not claim listening when only numerical analysis was performed
+(`daw describe listen`). A render's `overlap` names the pairs of stems that put
+their energy in the same band at the same moments; `daw listen RENDER --overlap
+A B` reads one pair by band and section, and `daw compare` says what an edit did
+to it. A pair is an observation, not a fault: say which pair and band before
+choosing what gives way.
 When the person names a song as what the mix should sound like, keep it with
 `daw reference add FILE --name NAME` and read `daw compare RENDER --reference
 NAME` for how the mix differs from it, by section (`daw describe reference`);

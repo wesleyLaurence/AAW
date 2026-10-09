@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export", "reference"];
+pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export", "listen", "reference"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -161,6 +161,19 @@ const BEATS: &[(&str, &str)] = &[
     ("phrases", "phrases are downbeats where the arrangement changes, with change from 0 to 1 against the song's largest. They are hints and can be a bar off."),
     ("click", "--click OUT.wav writes --seconds (20) of the song around --near, or from the first downbeat, with a click on each beat and a higher one on each downbeat. It is for a person to hear; it is not something you heard."),
     ("limits", "Estimates from audio. A song that changes tempo outright or is not in 4/4 is not handled."),
+];
+
+const LISTEN: &[(&str, &str)] = &[
+    ("command", "daw listen RENDER measures a saved render. RENDER is the render's folder, its report.json, its mix.wav or renders/latest.json; any other audio file is measured too, without sections or stems. It prints a report and writes it under analysis/ in the render's folder with overview.png, the energy over a spectrogram; --no-images leaves the picture out. daw compare BEFORE AFTER measures two renders and reports after minus before, as they are and with the after matched to the before's loudness. These measure; they do not hear, so do not say you listened."),
+    ("measurements", "mix, each entry of sections and each stem under tracks, whole and by section, hold integrated_lufs (BS.1770-4, gated), peak_dbfs, estimated_true_peak_dbtp, rms_dbfs, crest_db, band_dbfs and band_fraction in seven bands (sub 20-60 Hz, low 60-250, low_mid 250-500, mid 500-2000, high_mid 2000-4000, high 4000-8000, air 8000-20000), stereo_correlation and side_energy_fraction. null is undefined, such as the loudness of silence. timeline has the energy of each beat and the short-term loudness."),
+    ("stems", "tracks holds a stem for each track, group and return, as the render wrote them: a track's sound after its effects and fader and before the master's effects, a grouped track's before its group. musical_context is read from the song: how many hits each track schedules, whole and by section."),
+    ("overlap", "overlap says where two stems put their energy in the same band at the same moments: a kick and a bass both loud under 90 Hz on the same sixteenths. pairs lists up to five pairs, the most contested of the time first, and pairs_omitted counts the rest. A render of one stem, or a file, has overlap null. Every pair of stems is read but a group against its own tracks and a return against what feeds it, whose sound is theirs; a group's pair is left out where one of its tracks' pairs names the same bands."),
+    ("contested", "A cell is a band over a sixteenth note, or the next note up that lasts 100 ms (cell_beats): third octaves from 89 Hz to 20 kHz, and 20-45 and 45-89 Hz below. Two stems contest a cell when the weaker is within 6 dB of the stronger and within 9 dB of the stems' sum there, so the pair is what is heard. A cell does not count when the sum there is 40 dB under its band's loudest or 70 dB under the loudest anywhere, or is the skirt of a louder band: 12 dB under the band beside it, and 4 dB more for each band further. A stem sounds in a cell when it is within 9 dB of the sum there."),
+    ("pair", "a and b are the stems. band_hz is the range of bands the pair contests most, and other_bands_hz any other ranges. fraction is the contested moments over those where either stem sounds in the range; fraction_of_a and fraction_of_b are over the moments where that stem sounds, so a kick under a held bass reads fraction 0.25 and fraction_of_a 1: contested every time it hits. contested_beats is for how long in all. level_dbfs is the level of the stems' sum in the contested cells, and level_difference_db is a minus b there. keyed is true when one has a compressor keyed by the other: the duck is already in the audio and lowers the fraction. worst is up to three sections, or runs of bars in a song without sections, where the fraction is highest, with at_beat and length_beats. A range is named when its fraction is 0.25 or more, or 0.5 of one stem's moments, for 4 beats or more."),
+    ("one_pair", "daw listen RENDER --overlap A B prints one pair in place of the report: ranges, every range the pair contests, each with its fraction in every section; bands_hz, the 26 bands; whole, each band's a_dbfs and b_dbfs, the stems' levels over the render, with its fraction, fraction_of_a, fraction_of_b and level_difference_db; and sections, each with its fraction in every band, null where neither stem sounds. related is true for a pair the list leaves out, such as a group and its track. It writes overlap-A-B.png: bands up, beats across, each cell in the color of the stem that is louder there, and dark where the two contest it."),
+    ("compare", "daw compare BEFORE AFTER has overlap.pairs: each pair either render's list names, over the bands it was named for, with before, after and delta, the fraction's change, keyed_before and keyed_after, and by section where the two renders line up. A cut in one of the two, a keyed compressor or a part moved off the other's hits shows as the fraction falling."),
+    ("reading", "Overlap is energy at close levels, not masking as an ear does it, and not a fault by itself: a kick and its click layered on purpose contest every hit. It does not say which of the two should give way, which is a choice of arrangement, an equalizer's cut, a keyed compressor or a level. A stem far under another in a band is not in the list, since it is covered and not contested: read each stem's band_dbfs for that. Say what was found before changing the mix."),
+    ("limits", "The thresholds were chosen on generated audio and not with anyone listening. A grouped track is read before its group's effects and fader. No keys, notes or taste are judged. Each call reads and measures the audio again; a three-minute song of twelve stems takes most of a minute."),
 ];
 
 const REFERENCE: &[(&str, &str)] = &[
@@ -340,6 +353,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("beats", "daw samples beats: a song's tempo, beats, downbeats and phrases."),
     ("joins", "daw joins: checking a render's joins and length."),
     ("export", "daw export: a named WAV, AAC or MP3 file at a stated level."),
+    ("listen", "daw listen and daw compare: a render measured, whole, by section and by stem, and where two stems overlap."),
     ("reference", "daw reference and daw compare --reference: a song kept as what good sounds like, and a mix measured against it section by section."),
 ];
 
@@ -623,7 +637,7 @@ const START: &[(&str, &str)] = &[
     ("daw batch song chords.json", "Runs the commands of the file below as one undo step: a pad track with chords."),
     ("daw effect add song master --type limiter", "A limiter on the master holds the render under full scale."),
     ("daw render song", "Renders the mix and each track's stem under song/renders. The reply has the mix's peak and loudness."),
-    ("daw listen song/renders/latest.json", "Measures the render: loudness, spectrum and pictures to look at. It measures; it does not hear for you."),
+    ("daw listen song/renders/latest.json", "Measures the render: loudness, spectrum, where two tracks overlap and pictures to look at (daw describe listen). It measures; it does not hear for you."),
 ];
 
 /// What `daw describe start` prints.
@@ -734,6 +748,7 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         "beats" => json!({"semantics": texts(BEATS)}),
         "joins" => json!({"semantics": texts(JOINS)}),
         "export" => json!({"semantics": texts(EXPORT)}),
+        "listen" => json!({"semantics": texts(LISTEN)}),
         "reference" => json!({"semantics": texts(REFERENCE)}),
         _ => return None,
     })

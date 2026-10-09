@@ -59,12 +59,12 @@ Built:
 | [clips that loop](features/looping-clips.md) | A note clip or an audio clip whose content repeats until the clip ends, and `daw clip loop` |
 | [the live analyzer](features/analyzer.md) | An effect that changes nothing and shows the sound passing through it: a strip in the device panel and a window with levels, loudness, spectrum, stereo field, spectrogram and waveform |
 | [comparing with a reference](features/reference-comparison.md) | `daw reference`: a song kept as what good sounds like, as measurements in the workspace library; `daw compare RENDER --reference NAME`: the mix against it, whole and section by section, with the differences in words |
+| [overlap between stems](features/masking.md) | `overlap` in `daw listen`: the pairs of stems with energy in the same band at the same moments, the band, how much of the time and where; `--overlap A B` for one pair by band and section, with a picture; each pair's change in `daw compare` |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [masking between stems](features/masking.md) | Next |
 | [a finer spectrum in numbers](features/spectrum-detail.md) | Next |
 | [translation checks](features/translation-checks.md) | Next |
 | [dynamics in detail](features/dynamics-detail.md) | Next |

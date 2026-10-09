@@ -16,6 +16,7 @@ import pyloudnorm as pyln
 import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
+from . import overlap
 from .model import atomic_text, beat, digest, frame, hash_matches, load, schedule
 
 VERSION = 1
@@ -313,10 +314,47 @@ def musical_context(project, manifest, offset, count, sections):
     }
 
 
+def stems(folder, manifest, x, rate):
+    """Each stem of a render, checked against the mix and the render's report:
+    its name, audio, hash and whether the report had a hash to hold it to."""
+    for track in manifest["tracks"]:
+        path = folder / "stems" / f"{track}.wav"
+        stem, stem_rate = read_audio(path)
+        if stem.shape != x.shape or stem_rate != rate:
+            raise ValueError(f"Stem is not aligned with mix: {track}")
+        expected_hash = manifest["tracks"][track].get("audio_sha256")
+        actual_hash = digest(path)
+        if expected_hash and expected_hash != actual_hash:
+            raise ValueError(f"Stem hash mismatch: {track}")
+        yield track, stem, actual_hash, expected_hash is not None
+
+
+def grid_of(folder, manifest, project, x, rate, offset, sections):
+    """An empty overlap grid for a render of two stems or more, or None."""
+    if folder is None or len(manifest["tracks"]) < 2:
+        return None
+    return overlap.Grid(len(x), rate, project, manifest, offset, sections)
+
+
+def code_hash():
+    """One hash of the code that measures: this file and the overlap's."""
+    both = hashlib.sha256()
+    for path in (Path(__file__), Path(overlap.__file__)):
+        both.update(digest(path).encode())
+    return both.hexdigest()
+
+
 def analyze(source):
+    report, x, _ = measured(source)
+    return report, x
+
+
+def measured(source):
+    """A source's listen report, its audio and its overlap grid, if it has stems."""
     audio_path, folder = resolve(source)
     x, rate = read_audio(audio_path)
     project, manifest, offset, sections = context(folder, x, rate)
+    grid = grid_of(folder, manifest, project, x, rate, offset, sections)
     report = {
         "schema_version": VERSION,
         "kind": "listen",
@@ -340,13 +378,14 @@ def analyze(source):
             "silence": "all samples at or below -120 dBFS peak",
             "peak": "4x polyphase oversampling estimate, not certified true peak",
             "null": "undefined or insufficient signal/duration; never a zero measurement",
-            "interpretation": "diagnostics only; no musical quality score or masking diagnosis",
+            "overlap": overlap.METHOD,
+            "interpretation": "diagnostics only; no musical quality score, and overlap is not a masking diagnosis",
         },
         "dependencies": {
             name: importlib.metadata.version(name)
             for name in ("numpy", "scipy", "soundfile", "pyloudnorm", "matplotlib")
         },
-        "analysis_code_sha256": digest(Path(__file__)),
+        "analysis_code_sha256": code_hash(),
         "mix": measure(x, rate),
         "timeline": timeline(x, rate, project, offset),
         "sections": {},
@@ -361,26 +400,21 @@ def analyze(source):
             "audio": measure(x[a:b], rate),
         }
     if folder:
-        for track in manifest["tracks"]:
-            path = folder / "stems" / f"{track}.wav"
-            stem, stem_rate = read_audio(path)
-            if stem.shape != x.shape or stem_rate != rate:
-                raise ValueError(f"Stem is not aligned with mix: {track}")
-            expected_hash = manifest["tracks"][track].get("audio_sha256")
-            actual_hash = digest(path)
-            if expected_hash and expected_hash != actual_hash:
-                raise ValueError(f"Stem hash mismatch: {track}")
+        for track, stem, actual_hash, verified in stems(folder, manifest, x, rate):
             report["tracks"][track] = {
                 "kind": manifest["tracks"][track].get("kind", "track"),
                 "audio_sha256": actual_hash,
-                "hash_verified_against_render": expected_hash is not None,
+                "hash_verified_against_render": verified,
                 "audio": measure(stem, rate),
                 "sections": {
                     s["id"]: measure(stem[s["start_frame"] : s["end_frame"]], rate)
                     for s in sections
                 },
             }
-    return report, x
+            if grid:
+                grid.add(track, stem)
+    report["overlap"] = grid.summary() if grid else None
+    return report, x, grid
 
 
 def plot_listen(report, x, output):
@@ -466,7 +500,12 @@ def plot_listen(report, x, output):
 
 
 def listen(source, images=True):
-    report, audio = analyze(source)
+    return heard(source, images)[0]
+
+
+def heard(source, images=True):
+    """`daw listen`: the report, written beside the audio, and the overlap grid."""
+    report, audio, grid = measured(source)
     audio_path, folder = resolve(source)
     root = folder or audio_path.parent
     identity = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()[
@@ -478,6 +517,51 @@ def listen(source, images=True):
     report["report_path"] = str((output / "listen.json").resolve())
     atomic_text(
         output / "listen.json", json.dumps(report, indent=2, allow_nan=False) + "\n"
+    )
+    return report, grid
+
+
+def overlap_of(source, a, b, images=True):
+    """`daw listen RENDER --overlap A B`: one pair of stems by band and by
+    section, with a picture of who is louder in each cell and where the two
+    contest it."""
+    audio_path, folder = resolve(source)
+    if folder is None:
+        raise ValueError("--overlap reads a render's stems; this file has none")
+    x, rate = read_audio(audio_path)
+    project, manifest, offset, sections = context(folder, x, rate)
+    known = list(manifest["tracks"])
+    for name in (a, b):
+        if name not in known:
+            raise ValueError(
+                f"No stem named {name} in this render; its stems are {', '.join(known)}"
+            )
+    grid = overlap.Grid(len(x), rate, project, manifest, offset, sections)
+    for track, stem, _, _ in stems(folder, manifest, x, rate):
+        grid.add(track, stem)
+    report = {
+        "schema_version": VERSION,
+        "kind": "overlap",
+        "source": {
+            "audio_path": str(audio_path),
+            "audio_sha256": manifest["audio_sha256"],
+            "render_id": manifest.get("render_id"),
+            "start_seconds": offset / rate,
+            "tempo": project["session"]["tempo"],
+        },
+        "method": overlap.METHOD,
+        **grid.detail(a, b),
+    }
+    identity = hashlib.sha256(json.dumps(report, sort_keys=True).encode()).hexdigest()[
+        :16
+    ]
+    output = folder / "analysis" / identity
+    output.mkdir(parents=True, exist_ok=True)
+    name = f"overlap-{a}-{b}"
+    report["images"] = [overlap.plot(grid, a, b, output / f"{name}.png")] if images else []
+    report["report_path"] = str((output / f"{name}.json").resolve())
+    atomic_text(
+        output / f"{name}.json", json.dumps(report, indent=2, allow_nan=False) + "\n"
     )
     return report
 
@@ -519,8 +603,8 @@ def metric_diff(a, b, gain):
 
 
 def compare(before, after, images=True):
-    a = listen(before, images=images)
-    b = listen(after, images=images)
+    a, grid_a = heard(before, images=images)
+    b, grid_b = heard(after, images=images)
     gain = delta(b["mix"]["integrated_lufs"], a["mix"]["integrated_lufs"])
     report = {
         "schema_version": VERSION,
@@ -585,6 +669,9 @@ def compare(before, after, images=True):
                 for s in sorted(aligned)
             },
         }
+    report["overlap"] = overlap.between(
+        grid_a, grid_b, a, b, sorted(aligned) if same_timeline else []
+    )
     report["musical_context_delta"] = {}
     if a["musical_context"] and b["musical_context"]:
         # Returns have stems but schedule no triggers, so they have no context.
