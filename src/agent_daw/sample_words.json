@@ -1,0 +1,20 @@
+{
+  "words": {
+    "centroid_hz": ["dark", "warm", "bright"],
+    "low_fraction": ["thin", "full", "boomy"],
+    "attack_ms": ["sharp", "soft", "slow"],
+    "decay_ms": ["short", "medium", "long"],
+    "noisiness": ["tonal", "mixed", "noisy"]
+  },
+  "lines": {
+    "any": {"centroid_hz": [300, 1500], "low_fraction": [0.05, 0.5], "attack_ms": [3, 100], "decay_ms": [350, 4000], "noisiness": [0.25, 0.6]},
+    "808": {"attack_ms": [4.9, 13], "decay_ms": [1600, 2500]},
+    "bass": {"centroid_hz": [68, 210], "low_fraction": [0.7, 0.96], "attack_ms": [14, 49], "decay_ms": [720, 5600]},
+    "clap": {"centroid_hz": [2600, 3500], "decay_ms": [82, 150]},
+    "hat": {"centroid_hz": [7900, 10000], "decay_ms": [42, 120]},
+    "kick": {"low_fraction": [0.76, 0.85], "decay_ms": [110, 150], "noisiness": [0.37, 0.54]},
+    "percussion": {"centroid_hz": [1400, 3200], "decay_ms": [59, 330], "noisiness": [0.43, 0.77]},
+    "snare": {"centroid_hz": [2000, 3000], "decay_ms": [57, 97], "noisiness": [0.6, 0.76]},
+    "vocal": {"centroid_hz": [760, 1500], "attack_ms": [17, 59], "decay_ms": [380, 1700], "noisiness": [0.15, 0.37]}
+  }
+}

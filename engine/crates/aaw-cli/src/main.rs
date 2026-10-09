@@ -100,6 +100,7 @@ enum Topic {
     Automation,
     Edit,
     Check,
+    Samples,
     Beats,
     Joins,
     Export,
@@ -144,7 +145,9 @@ enum Top {
         #[arg(long)]
         schema: bool,
     },
-    /// The sample library: scan, search, analyze, inspect, audition, import.
+    /// The sample library: folders, search by name and by what a sample
+    /// measures as, analyze, like, beats, inspect, audition, import (daw
+    /// describe samples).
     #[command(disable_help_flag = true)]
     Samples(Forwarded),
     /// Songs kept as what good sounds like: add, list, show, sections, remove

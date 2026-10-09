@@ -97,6 +97,15 @@ Python, in `src/agent_daw`:
   data, the full dump of the validated document.
 - `analysis.py`: audio-derived pitch, onsets, tempo and loop/one-shot kind; see
   [sample-analysis.md](features/sample-analysis.md). Cached in the index by `library.py`.
+- `descriptors.py`: what a sample sounds like, as part of its analysis: the
+  centroid, the share of low end, attack, decay, noisiness, the loudest 400 ms
+  by the analyzer's meter and the punch `daw listen` gives a hit; a word for
+  five of them against the lines in `sample_words.json`, which the Rust model
+  reads too for `daw describe samples`; the category a sound measures as, a
+  hat or a kick; and the distance between two sounds. `library.py` sorts and
+  filters a search by them, lists the samples nearest one (`daw samples like`)
+  and measures the library several files at a time; see
+  [sound-descriptors.md](features/sound-descriptors.md).
 - `beats.py`: the beat and downbeat map of a whole song, its phrase changes and a
   click audition; see [beat-map.md](features/beat-map.md). Kept beside the audio by
   `library.py`.

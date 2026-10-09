@@ -1,4 +1,5 @@
-"""Audio-derived sample measurements: pitch, onsets, tempo and loop/one-shot kind.
+"""Audio-derived sample measurements: pitch, onsets, tempo, loop/one-shot kind
+and what the sound is like (descriptors.py).
 
 Every value is measured from decoded audio. Filename hints are only echoed for
 comparison. Pitch is a monophonic estimate; chords and noisy material are reported
@@ -13,9 +14,10 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
+from . import descriptors
 from .model import digest
 
-ANALYZER = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+ANALYZER = hashlib.sha256(Path(__file__).read_bytes() + descriptors.SOURCE).hexdigest()[:12]
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 MIN_HZ, MAX_HZ = 25.0, 2000.0
 PITCH_SECONDS = 10.0  # analysed from the first sound onward
@@ -349,6 +351,10 @@ def analyze(path: Path, bpm_hint=None) -> dict:
             if mid + side
             else None,
         }
+    rhythm = measure_rhythm(mono, sr, bpm_hint)
+    sound, loop = dict.fromkeys(descriptors.FIELDS), rhythm["kind"] == "loop"
+    if bounds:
+        sound = descriptors.measure(x, sr, start, end, loop)
     return {
         "path": str(path),
         "sha256": digest(path),
@@ -360,7 +366,9 @@ def analyze(path: Path, bpm_hint=None) -> dict:
         "level": level,
         "stereo": stereo,
         "pitch": measure_pitch(mono, sr),
-        "rhythm": measure_rhythm(mono, sr, bpm_hint),
+        "rhythm": rhythm,
+        "sound": sound,
+        "measured_category": descriptors.category(sound, loop),
         "source": "measured from decoded audio (mono sum); estimates, not ground truth",
     }
 

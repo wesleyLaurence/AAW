@@ -241,7 +241,7 @@ front first.
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
 | Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T; ⌘1, ⌘2 and ⌘3 step through them while the piano roll has the keys. The pattern's Step menu names its steps the same way, a beat to 1/64, and the same keys set it while the pattern has the keys: its 1/16 is a quarter of a beat |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
-| Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path |
+| Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path. A category lists the samples named for it and, once `daw samples analyze --all` has measured the library, those named for nothing that measure as it |
 | Click a sample | Plays it, as its file is, and gives the samples the keys; the speaker mark turns the playing off |
 | Up and Down, in the samples | Move to the sample before or after and play it, as in the Finder, until a click elsewhere takes the keys back. The selected sample is drawn in the accent color while the samples have the keys, gray when they do not |
 | Click + by a sample, or double-click it | Puts it where a drop on the selected row would: into a Sampler on the selected MIDI track, onto any other selected track as an audio clip at the start position, or with no track selected on a new MIDI track with a Sampler of it. The hint under the samples says which |

@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "beats", "joins", "export", "listen", "reference"];
+pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -150,6 +150,17 @@ const EDIT: &[(&str, &str)] = &[
     ("ranges", "daw range copy SONG START LENGTH --to AT, insert SONG AT LENGTH, delete SONG START LENGTH and clear SONG START LENGTH edit a range of beats across every track at once, with the pattern clips, note clips, audio clips, automation and sections in it: a verse repeated, four bars put in before the drop, a breakdown. START, LENGTH and AT are beats; a bar is four. copy puts the range over what is at AT, and with --insert opens time for it; insert opens empty beats and the song grows; delete removes the beats and closes the gap, so the song shrinks; clear empties the beats and moves nothing. --track T, repeatable, limits a command to some tracks, whose lanes go with them; the sections, the returns' and master's lanes and the song's length change only when every track does. Each command is one undo step, and its reply lists what it made (paths), split, moved and removed."),
     ("edges", "A clip that crosses a range's edge is cut there, so the range holds exactly what plays in it. A note clip becomes two, a note across the cut held to it on the left and the rest starting the right clip; a copy owns its notes under IDs of its own. An audio clip is split as audio split splits it, unfaded where the halves still meet; a half moved or copied away from the other fades 4 ms in or 12 ms out at the cut, since it joins other audio there. A pattern clip is cut only between repeats, and a looped clip only at a wrap, each half keeping the loop: inside one the command is refused, naming the clip; move the range to a repeat's edge, split the pattern or turn the loop off. A lane gains a point at each edge with the value it had there, so the curve outside the range is unchanged; a cleared range runs straight between its edges, inserted beats hold the value. A copy starts clean: tails of what came before the range are not part of it. After delete, the two clips that meet where the gap closed become one again when they are one music, so insert then delete gives the song back."),
     ("sections", "daw section duplicate SONG SECTION [--to AT] [--id ID] puts the section and what is under it again, right after it or at AT, pushing what follows later, under a free name or ID. daw section move SONG SECTION AT --with-content takes its beats with the label, over what is at AT; daw section remove SONG SECTION --with-content deletes its beats as range delete does. Without --with-content, move and remove touch the label alone."),
+];
+
+const SAMPLES: &[(&str, &str)] = &[
+    ("command", "daw samples search QUERY lists the library's samples whose path has every word of QUERY, by name, 20 unless --limit; --category, --type, --key and --bpm narrow it by what a file's name says, which is a hint. A row's path or id is what daw samples import, analyze, inspect, audition and like take. The library is the folders added with daw samples folders add DIR; the files in them are never changed. These measure; they do not hear, so do not say you listened."),
+    ("measured", "A row's measured is what the sample's audio does, or null for a sample not measured yet: pitched, note, cents and confidence, kind (one_shot, loop or uncertain) and bpm, the seven numbers of sound, category, words and words_among. daw samples analyze SAMPLE measures one sample and prints all of it, the seven under sound; daw samples analyze --all measures every sample of the library not measured yet, several at a time, a few minutes for some thousands of samples, saying how far it is on stderr, and a run that is stopped goes on from there. What is measured is kept until the file or the measuring changes. A search that sorts or filters by a measurement lists measured samples only: it says on stderr how many it left out, and is refused when it would leave out every match; --measure N measures the first N of them first."),
+    ("sound", "Seven numbers, each of the sound from its first sample within 50 dB of the peak to its last. centroid_hz is where the middle of its power lies, from 20 Hz to 20 kHz: a kick near 100, a snare near 2500, a hat near 8000. low_fraction is the share of its power under 120 Hz, from 0 to 1. attack_ms is the time the sound takes from first reaching a tenth of its level to first reaching nine tenths: a drum under 3, a pad hundreds. decay_ms is the time from there to the last moment within 20 dB of the level: how long it rings, and its length from there for a sound that is cut before it falls that far. The level is the peak, or for noise, whose highest sample is a chance, 3 dB over the RMS of its loudest 10 ms. noisiness runs from 0 for a tone to near 1 for noise: a stretch of 40 ms is held against the stretch from 2 to 40 ms after it, and what it shares with the one most like it is taken from 1, so an 808 reads near 0.02, a bass under 0.1, a kick 0.4, a snare 0.7 and a clap or a hat 0.8, whatever band they fill. loudness_lufs is its loudest 400 ms as daw listen weighs loudness, a shorter sound ending in silence: the difference between two samples' is the gain that matches them. punch_db is what daw listen gives a hit: the peak of the first 30 ms against the RMS of the 200 ms after them, silence where the sound has ended, never past 60. A loop has many hits, so its attack_ms, decay_ms and punch_db are null."),
+    ("words", "words gives centroid_hz, low_fraction, attack_ms, decay_ms and noisiness a word each: dark, warm or bright; thin, full or boomy; sharp, soft or slow; short, medium or long; tonal, mixed or noisy. A word says where the number lies among samples of the same category, named by words_among, so a long kick rings for 150 ms and a long 808 for two and a half seconds. lines lists the two lines between each field's three words, under any for every sample and under a category for the fields where its samples spread enough to tell apart: a number under the first line takes the first word, one at or over the second the third. A sample of a category with no lines of its own, or of none, is read against any. The lines are fixed: the thirds of the 1,318 samples of one library that are not loops, on October 9, 2026, rounded."),
+    ("category", "category is read from a file's name and is other for a name that says nothing. measured.category is what a single sound measures as where that is clear, hat or kick, and null otherwise: a short noisy sound with nothing low is a hat, a short low one with a hard start a kick. --category C finds the samples named C and those named for nothing that measure as C, and such a sample's words are C's."),
+    ("search", "--sort FIELD puts the most first: duration the longest, centroid the brightest, low the most low end, attack the slowest, decay the longest ringing, noisiness the noisiest, loudness the loudest and punch the hardest hit; --reverse turns the order around, by name too. A word as a flag keeps the samples it is true of, --short --bright, and --min-FIELD X and --max-FIELD X those whose number is between, with the same names as --sort: daw samples search kick --sort punch --limit 5; daw samples search snare --short --bright; daw samples search --category hat --max-decay 60 --sort loudness. --pitched, --unpitched, --note-range C1-B1, --measured-type and --measured-bpm filter by pitch, kind and tempo as measured."),
+    ("like", "daw samples like SAMPLE lists the measured samples nearest a chosen one in sound, nearest first, 10 unless --limit. SAMPLE is an id, a path, or a file in a project, which is measured there and then. It is compared with the samples of its category, by its name or else as it measures, and with every sample when it has none, which among says as any; --category C chooses, and --category any is every sample. A loop is compared with loops and a single sound with single sounds. distance is in steps over the numbers both have, the root of the mean of their squares: a step is half an octave of centroid_hz, 0.15 of low_fraction, a doubling of attack_ms plus 1, a doubling of decay_ms plus 10, 0.15 of noisiness and 6 dB of punch_db. Loudness is left out, since a gain changes it, and so is pitch: transpose the pad. Under 1 is close; compared counts the samples it was held against and not_measured those left out."),
+    ("limits", "Measurements of the first two minutes of a file; the centroid, the low end and noisiness are of the channels' sum. They do not say what a sound is: two samples a step apart can be a snare and a rim. A click before a slow swell has one attack, the click's or the swell's, and a sound with an echo a long decay. A fast sweep is not like itself a moment later, so a short kick that is mostly its sweep reads as noisy, and noise held to a narrow band, or a rumble under 100 Hz, as partly a tone. A loop's numbers are of the whole loop, not of its hits. The words' lines came from one library of bought sample packs and may sit elsewhere for another. Nothing is heard: audition a choice for the person with daw samples audition, or place it and let them listen."),
 ];
 
 const BEATS: &[(&str, &str)] = &[
@@ -361,6 +372,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("automation", "Lanes and points: what a lane can move and how values move between points."),
     ("edit", "Editing a finished song from audio clips: cuts, joins, crossfades, speed; and ranges of beats across the tracks: copy, insert, delete, clear, a section with what is under it."),
     ("check", "daw check: warnings about the song, each with a code: stacked clips, notes struck twice, crowded low registers."),
+    ("samples", "daw samples search, analyze and like: the library's sounds found by name and by what they measure as, brightness, low end, attack, decay, noisiness, loudness and punch, with a word for each, and the samples nearest a chosen one."),
     ("beats", "daw samples beats: a song's tempo, beats, downbeats and phrases."),
     ("joins", "daw joins: checking a render's joins and length."),
     ("export", "daw export: a named WAV, AAC or MP3 file at a stated level."),
@@ -632,7 +644,7 @@ pub fn topics() -> Json {
 /// The first-song recipe: `daw describe start`.
 const START: &[(&str, &str)] = &[
     ("daw init song --tempo 96 --bars 8", "Makes song/song.yaml: eight bars of 4/4 at 96 BPM (--time-signature 3/4 for a waltz). song is the PROJECT every other command takes."),
-    ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR."),
+    ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR. daw describe samples says how to choose between them by what they measure as."),
     ("daw samples import KICK_PATH --project song --id kick", "Copies the file into the project and names it kick in the song. Import the snare and the hat the same way, as snare and hat."),
     ("daw track add song drums", "A track of pads, played by patterns."),
     ("daw pad add song drums kick --sample kick", "A pad plays a sample. Add the snare and hat pads the same way; daw describe sampler lists what a pad takes."),
@@ -697,9 +709,9 @@ pub fn describe(topic: &str) -> Option<Json> {
     if let Some(lines) = fields(topic) {
         out.insert("fields".into(), lines);
     }
-    // What the schema cannot say: the matrix, what lanes can move and what
-    // check's codes mean.
-    for key in ["modulation", "automatable", "codes"] {
+    // What the schema cannot say: the matrix, what lanes can move, what
+    // check's codes mean and the lines between a sample's words.
+    for key in ["modulation", "automatable", "codes", "lines"] {
         if let Some(v) = full.remove(key) {
             out.insert(key.into(), v);
         }
@@ -756,6 +768,11 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         }),
         "edit" => json!({"schema": {"audio_clip": model("AudioClip")}, "semantics": texts(EDIT)}),
         "check" => json!({"semantics": texts(CHECK), "codes": texts(crate::check::CODES)}),
+        "samples" => {
+            let said: Json = serde_json::from_str(include_str!("../../../../src/agent_daw/sample_words.json"))
+                .expect("sample_words.json is JSON");
+            json!({"semantics": texts(SAMPLES), "lines": said["lines"]})
+        }
         "beats" => json!({"semantics": texts(BEATS)}),
         "joins" => json!({"semantics": texts(JOINS)}),
         "export" => json!({"semantics": texts(EXPORT)}),

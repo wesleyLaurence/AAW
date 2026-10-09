@@ -1,7 +1,9 @@
 # Sample analysis — implemented September 22, 2026
 
 `daw samples analyze` measures a sample's pitch, onsets, tempo and loop/one-shot
-kind from its decoded audio, not its filename. Filename hints are only echoed for
+kind from its decoded audio, not its filename. It also measures what the sample
+sounds like, under `sound` and `measured_category`, which
+[sound-descriptors.md](sound-descriptors.md) describes. Filename hints are only echoed for
 comparison. The results are estimates to check before composing, not ground truth.
 All computation is local and uses only numpy/scipy; no model or network call is made.
 
@@ -9,7 +11,7 @@ All computation is local and uses only numpy/scipy; no model or network call is 
 
 ```sh
 uv run daw samples analyze SAMPLE_ID          # or a file path
-uv run daw samples analyze --all              # every indexed sample; incremental
+uv run daw samples analyze --all              # every indexed sample; incremental, several at a time
 uv run daw samples search --pitched --note-range C1-B1
 uv run daw samples search --measured-type loop --measured-bpm 128
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
@@ -18,7 +20,7 @@ uv run daw check projects/my-beat/song.yaml   # includes root_notes and warnings
 
 Results for indexed files are cached in the `analysis` table of the sample index.
 A cached result is reused only while the file's size, mtime and the analyzer code
-hash (`analyzer`) are unchanged. `--refresh` recomputes it. Files outside the index can
+hash (`analyzer`, of `analysis.py` and `descriptors.py`) are unchanged. `--refresh` recomputes it. Files outside the index can
 be analyzed but are not cached. Measured search filters match only samples that
 have a current analysis. Run `analyze --all` after `scan` to include the whole
 library. Search rows carry a `measured` object, or `null` when a sample has not
