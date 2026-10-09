@@ -10,6 +10,7 @@ name = "aaw_py"
 crate-type = ["cdylib"]
 
 [dependencies]
+aaw-dsp.workspace = true
 aaw-model.workspace = true
 num-bigint = "0.4"
 num-rational = { version = "0.4.2", features = ["num-bigint"] }

@@ -198,9 +198,11 @@ that started before the section are kept.
 Each report entry under `tracks` has a `kind`: `track` or `return`. Tracks list
 their `events`; returns list their `senders`. Each entry has an `effects` list and
 the report has `master_effects`. Each effect entry gives the effect `type` and
-its `latency_frames`. Compressors and limiters add `max_gain_reduction_db`,
-`mean_gain_reduction_db` and `fraction_over_1db_reduction` over the rendered
-timeline. Bypassed effects show `bypass: true`. These describe what the processor
+its `latency_frames`, and its `id` if the song gives it one. Compressors and
+limiters add `max_gain_reduction_db`, `mean_gain_reduction_db` and
+`fraction_over_1db_reduction` over the rendered timeline, and the same three
+under `sections` for each of the song's sections
+([dynamics in detail](dynamics-detail.md)). Bypassed effects show `bypass: true`. These describe what the processor
 did, not how it sounds. `daw listen` measures return stems like track stems and
 labels them with the same `kind`; `daw compare` diffs them.
 

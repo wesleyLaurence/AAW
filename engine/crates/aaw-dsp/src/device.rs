@@ -6,7 +6,7 @@
 use crate::biquad::{butter, sections, Cascade};
 use crate::chorus::Chorus;
 use crate::delay::Delay;
-use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reduction};
+use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reductions};
 use crate::envelope::{Envelope, Knob, Param};
 use crate::meter::Ring;
 use crate::reverb::{Kernel, Reverb, Shape};
@@ -322,11 +322,21 @@ impl Unit {
     }
 
     /// Gain reduction so far, for a compressor or limiter.
-    pub fn reduction(&self) -> Option<&Reduction> {
+    pub fn reduction(&self) -> Option<&Reductions> {
         match &self.device {
             Device::Compressor(d) => Some(&d.reduction),
             Device::Limiter(d) => Some(&d.reduction),
             _ => None,
+        }
+    }
+
+    /// Has a compressor or limiter measure its reduction between these
+    /// timeline frames apart, for a render's sections.
+    pub fn split_reduction(&mut self, edges: &[i64]) {
+        match &mut self.device {
+            Device::Compressor(d) => d.reduction.split(edges),
+            Device::Limiter(d) => d.reduction.split(edges),
+            _ => {}
         }
     }
 }

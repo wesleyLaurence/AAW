@@ -127,7 +127,8 @@ def test_a_bell_on_a_melody_is_a_resonance_and_the_melody_is_not(tmp_path):
     assert (section["start_seconds"], section["end_seconds"]) == (16, 32)
     assert section["third_octave_hz"] == spectrum.CENTERS
     assert section["mix"] == written["sections"]["second"]["audio"]
-    assert section["tracks"]["lead"] == {"kind": "track", "audio": part}
+    hits = written["tracks"]["lead"]["hits"]["sections"]["second"]
+    assert section["tracks"]["lead"] == {"kind": "track", "audio": part, "hits": hits}
     # The Rust daw passes the flag on.
     assert daw("listen", belled, "--section", "second", "--no-images")["tracks"] == section["tracks"]
     code, error = cli("listen", belled, "--section", "third")

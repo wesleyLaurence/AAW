@@ -70,6 +70,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   devices with explicit block state, the spectrum tap an equalizer's panel
   draws from, the analyzer's ring and the meter that reads it for its
   levels, loudness, spectrum, stereo field, spectrogram and waveform (`meter`),
+  the loudness the meter and `daw listen` both read, gated, its range and its
+  loudest 3 s and 400 ms (`loudness`),
   wavetables, and the Synth, a polyphonic
   synthesizer played from a patch; see
   [effects.md](features/effects.md), [automation.md](features/automation.md),
@@ -86,7 +88,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see
   [../apps/mac/README.md](../apps/mac/README.md).
-- `aaw-py`: the song model for Python, built into the package as `agent_daw.aaw_py`.
+- `aaw-py`: the song model for Python, built into the package as `agent_daw.aaw_py`,
+  with the meter's loudness of saved audio.
 
 Python, in `src/agent_daw`:
 
@@ -120,6 +123,14 @@ Python, in `src/agent_daw`:
   their change in `daw compare`, and the two files `--write-translation`
   writes for a person to hear; see
   [translation-checks.md](features/translation-checks.md).
+- `dynamics.py`: how a mix moves. The loudness range and the loudest 3 s and
+  400 ms of a mix and its sections, from the analyzer's meter run over the
+  saved audio (`aaw_dsp::loudness`, through `aaw_py.loudness`); how hard each
+  track's scheduled hits land at its stem, at its group's and in the mix; and
+  each compressor's and limiter's reduction over the song and by section,
+  which the engine measures as it renders and writes in the render's report;
+  their change in `daw compare`; see
+  [dynamics-detail.md](features/dynamics-detail.md).
 - `reference.py`: a song the person names as a reference, measured once with
   its beat map's phrases as sections and kept as numbers in the workspace
   library, `~/Music/AAW/library/references/` (or `AAW_WORKSPACE`), with the

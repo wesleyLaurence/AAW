@@ -16,7 +16,7 @@ import pyloudnorm as pyln
 import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
-from . import overlap, spectrum, translation
+from . import dynamics, overlap, spectrum, translation
 from .model import atomic_text, beat, digest, frame, hash_matches, load, schedule
 
 VERSION = 1
@@ -347,10 +347,10 @@ def grid_of(folder, manifest, project, x, rate, offset, sections):
 
 def code_hash():
     """One hash of the code that measures: this file, the overlap's, the
-    spectrum's and the translation checks'."""
+    spectrum's, the translation checks' and the dynamics'."""
     both = hashlib.sha256()
-    for path in (Path(__file__), Path(overlap.__file__), Path(spectrum.__file__), Path(translation.__file__)):
-        both.update(digest(path).encode())
+    for path in (__file__, overlap.__file__, spectrum.__file__, translation.__file__, dynamics.__file__):
+        both.update(digest(Path(path)).encode())
     return both.hexdigest()
 
 
@@ -361,7 +361,9 @@ def analyze(source):
 
 def measured(source):
     """A source's listen report and its audio, with its overlap grid and its
-    stems' resonances, if it has stems, and its translation checks."""
+    stems' resonances, if it has stems, and its translation checks. The mix
+    and its sections have their loudness range and maxima, a render's tracks
+    their hits, and `effects` what its compressors and limiters took off."""
     audio_path, folder = resolve(source)
     x, rate = read_audio(audio_path)
     project, manifest, offset, sections = context(folder, x, rate)
@@ -370,6 +372,9 @@ def measured(source):
         spectrum.Resonances(len(x), rate, project, manifest, offset, sections) if folder else None
     )
     checks = translation.Checks(x, rate, BANDS, integrated)
+    hits = dynamics.Punch(x, rate, project, manifest, offset, sections) if folder else None
+    spans = [(0, len(x)), *((sec["start_frame"], sec["end_frame"]) for sec in sections)]
+    whole, *by_section = dynamics.loudness(x, rate, spans)
     report = {
         "schema_version": VERSION,
         "kind": "listen",
@@ -396,6 +401,7 @@ def measured(source):
             "overlap": overlap.METHOD,
             **spectrum.METHOD,
             "translation": translation.METHOD,
+            "dynamics": dynamics.METHOD,
             "interpretation": "diagnostics only; no musical quality score, and overlap is not a masking diagnosis",
         },
         "dependencies": {
@@ -403,18 +409,18 @@ def measured(source):
             for name in ("numpy", "scipy", "soundfile", "pyloudnorm", "matplotlib")
         },
         "analysis_code_sha256": code_hash(),
-        "mix": measure(x, rate),
+        "mix": measure(x, rate) | whole,
         "timeline": timeline(x, rate, project, offset),
         "sections": {},
         "tracks": {},
         "musical_context": musical_context(project, manifest, offset, len(x), sections),
     }
-    for sec in sections:
+    for sec, moves in zip(sections, by_section):
         a, b = sec["start_frame"], sec["end_frame"]
         report["sections"][sec["id"]] = {
             "start_seconds": (offset + a) / rate,
             "end_seconds": (offset + b) / rate,
-            "audio": measure(x[a:b], rate),
+            "audio": measure(x[a:b], rate) | moves,
         }
         checks.section(sec["id"], a, b, x[a:b], report["sections"][sec["id"]]["audio"]["integrated_lufs"])
     if folder:
@@ -435,7 +441,12 @@ def measured(source):
             }
             if grid:
                 grid.add(track, stem)
+            hits.add(track, stem)
             losses.result()
+        # A track's hits through its group are known once the group's stem is read.
+        for track, entry in report["tracks"].items():
+            entry["hits"] = hits.listed(track)
+    report["effects"] = dynamics.effects(manifest, project) if folder else None
     report["overlap"] = grid.summary() if grid else None
     report["translation"] = checks.summary(report["mix"]["integrated_lufs"])
     return report, x, grid, rings, checks
@@ -548,7 +559,8 @@ def printed(report):
 
 def section_of(source, section, images=True):
     """`daw listen RENDER --section ID`: one section of the mix and of each stem,
-    with its third octaves and the stem's resonances there."""
+    with its third octaves, the stem's resonances and hits there, and what
+    each compressor and limiter took off in it."""
     report = listen(source, images)
     if section not in report["sections"]:
         known = ", ".join(report["sections"]) or "none"
@@ -565,8 +577,13 @@ def section_of(source, section, images=True):
             "mono": report["translation"]["mono"] and report["translation"]["mono"]["sections"][section],
             "small_speaker": report["translation"]["small_speaker"]["sections"][section],
         },
+        "effects": report["effects"] and dynamics.section_effects(report["effects"], section),
         "tracks": {
-            name: {"kind": track["kind"], "audio": track["sections"][section]}
+            name: {
+                "kind": track["kind"],
+                "audio": track["sections"][section],
+                "hits": track["hits"] and track["hits"]["sections"].get(section),
+            }
             for name, track in report["tracks"].items()
         },
         "report_path": report["report_path"],
@@ -690,6 +707,10 @@ def metric_diff(a, b, gain, fine=True):
     if fine:
         raw["spectrum_db"] = each(a["spectrum_db"], b["spectrum_db"])
         matched["spectrum_db"] = each(a["spectrum_db"], b["spectrum_db"], gain)
+    # The loudness range and maxima, of a mix and its sections.
+    moved, moved_matched = dynamics.figures_between(a, b, gain)
+    raw |= moved
+    matched |= moved_matched
     return {
         "actual_delta": raw,
         "loudness_matched_delta": matched,
@@ -762,6 +783,7 @@ def compare(before, after, images=True):
         report["tracks"][name] = {
             **metric_diff(ta["audio"], tb["audio"], gain),
             "resonances": resonances.get(name),
+            "hits": dynamics.hits_between(ta["hits"], tb["hits"], sorted(aligned)),
             "sections": {
                 s: metric_diff(ta["sections"][s], tb["sections"][s], gain, fine=False)
                 for s in sorted(aligned)
@@ -771,6 +793,7 @@ def compare(before, after, images=True):
         grid_a, grid_b, a, b, sorted(aligned) if same_timeline else []
     )
     report["translation"] = translation.between(a["translation"], b["translation"], sorted(aligned))
+    report["effects"] = dynamics.effects_between(a["effects"], b["effects"], sorted(aligned))
     report["musical_context_delta"] = {}
     if a["musical_context"] and b["musical_context"]:
         # Returns have stems but schedule no triggers, so they have no context.

@@ -2,7 +2,7 @@
 //! of ITU-R BS.1770 and a spectral centroid, beside the peak `metrics` gives.
 
 use crate::render::Frame;
-use aaw_dsp::meter::k_weighting;
+use aaw_dsp::loudness::k_weighting;
 use realfft::RealFftPlanner;
 use std::f64::consts::PI;
 

@@ -20,65 +20,61 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **Dynamics in detail.** A render's loudness range and its loudest three
-   seconds, how hard each drum hits at its stem and through the mix, and each
-   compressor's and limiter's reduction by section.
-   [features/dynamics-detail.md](features/dynamics-detail.md)
-2. **Sound descriptors.** Each sample measured for brightness, attack, decay,
+1. **Sound descriptors.** Each sample measured for brightness, attack, decay,
    low end and noise, with search sorted by them and samples like a chosen
    one, so the agent chooses sounds by more than their names.
    [features/sound-descriptors.md](features/sound-descriptors.md)
-3. **Listening markers.** The person drops a marker at the playhead while the
+2. **Listening markers.** The person drops a marker at the playhead while the
    song plays, with a word if they want, and the agent reads them with `daw`:
    "this bar", without a timecode.
-4. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
+3. **A clipper.** Agents making loud mixes stopped at the limiter; saturation
    is built, a clipper that holds a ceiling as a limiter does without its
    look-ahead is not. The utility is built ([utility](features/utility.md)).
-5. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
+4. **A limiter that holds a true peak.** The limiter holds sample peaks, so a
    master's true peak can pass its ceiling and the agent leaves a margin by
    guess; a switch on the limiter that measures the peaks between the
    samples, so a ceiling of −1 dBTP is one.
-6. **A time selection in the app.** A range of beats dragged across the
+5. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-7. **A MIDI keyboard.** Notes played through the selected track, held and let
+6. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-8. **Sections and the song's length in the app.** A section made, named,
+7. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-9. **A project made with `daw init` in the app's index,** so a song the agent
+8. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-10. **Turns and A/B.** An agent request's commands grouped, named for the
-    request, kept or reverted as one, and the song restored to before any turn;
-    one key flips between before and after a turn while the loop plays.
-11. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+9. **Turns and A/B.** An agent request's commands grouped, named for the
+   request, kept or reverted as one, and the song restored to before any turn;
+   one key flips between before and after a turn while the loop plays.
+10. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords.
-12. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+11. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-13. **Key and chord detection,** and swing detection, of samples and songs: a
+12. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-14. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+13. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-15. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+14. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-16. **The workspace and the two levels.** The workspace folder with its managed
+15. **The workspace and the two levels.** The workspace folder with its managed
     instructions and `profile/`, `SONG.md` in a project, skills listed by name
     and description, the fixed project layout created by the tool, and
     `daw check` flagging files outside it; what the agent learned, said at the
     end of a session and written to `taste.md` with evidence.
-17. **The agent panel.** A conversation in the window, per project, over the
+16. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-18. **Stem separation** of a song.
-19. **Generated audio.** A sound, a loop or a whole song from a description, with
+17. **Stem separation** of a song.
+18. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
     [features/generated-audio.md](features/generated-audio.md)
@@ -89,6 +85,39 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Dynamics in detail, with the person listening:** `daw listen` of a mix
+  of the person's own, each track's `punch_db` read out with the track
+  soloed, and whether a higher number is a hit a person hears as harder; a
+  compressor's attack turned from fast to slow on a kick and `daw compare`
+  read against the ear; a kick whose `punch_in_mix_db` is far under its
+  `punch_db`, and whether it is one a person hears as buried, or the number
+  says little in a full mix, where every track's reads near the mix's own;
+  whether 30 and 200 ms suit a hat and a long bass note as they do a kick,
+  whether 50 ms is the right line for one hit, and whether a median hides
+  the ghost notes; a drum bus's compressor and `punch_in_group_db` against
+  the kick heard through the group; `effects` read out by section while the
+  song plays, and whether the limiter is heard to work where it says it does
+  and to rest where it says it rests; the mix's `loudness_range_lu` and
+  loudest 3 s against the analyzer's window while the song plays, and
+  against another meter if the person has one; a fresh agent session asked
+  to make a drop louder or to set a bus compressor, and whether it reads
+  `effects` and `hits`, says what it found and renders again to see what its
+  change did. Generated audio only: a tone at −20 LUFS and then at −30 at a
+  range of 10.0 with a loudest 3 s of −20.0, a kick at a punch of 13.2, at
+  7.1 through a compressor with an attack of 0.1 ms and 25.2 through one of
+  30 ms, at 9.7 in the mix under a held tone, a kit's kick and hat read
+  apart and the kick through its group's compressor, a Synth's chords as one
+  hit each, and a limiter at 0 in the quiet half of a song and at 5.7 dB,
+  76% of the time over 1 dB, in the loud half, held by Python tests; the
+  meter fed in uneven blocks held to the file's measurement, and a
+  limiter's reduction between section edges, by Rust tests; one real song
+  of fourteen stems and five sections rendered again from a copy and read,
+  where the mix ranged 2.8 LU with a loudest 3 s of −10.9 LUFS, the master's
+  limiter took up to 5.7 dB in the two loud sections, over 1 dB for 14% of
+  them, and under 0.6 dB in the other three, four keyed compressors took 7
+  to 22 dB, and five tracks' punch read 11 to 56 at their stems and 6 to 9
+  in the mix, none of which anybody heard; under a second added to a
+  three-minute song of twelve stems.
 - **Translation checks, with the person listening:** `daw listen
   --write-translation` of a mix of the person's own, `mono.wav` and
   `small-speaker.wav` played against the mix and against the song on a
@@ -710,6 +739,15 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   stem's losses by section; a reference's own losses, so a mix is held to
   what its reference keeps; `daw check` naming a mono loss of the last
   render.
+- Dynamics further: reduction over time, a value a beat, for a picture of
+  the limiter working under the energy; crest by band, to say that the low
+  end is squashed and the top is not; hits found in an audio clip by its
+  onsets, for a drum loop; a stem's loudness range; a reference's range and
+  loudest seconds, so a master is held to what its reference does; the
+  loudest 3 s and 400 ms drawn in the analyzer's window, which has them;
+  one gated loudness, where pyloudnorm, the meter and a Synth's audition
+  each have their own; `daw check` naming a limiter that works all through a
+  section of the last render.
 - A shorter `daw listen` by default, with the rest behind a flag, now that
   the report holds third octaves and resonances for every stem.
 - An audio-capable model as an optional critic, with its own consent.
