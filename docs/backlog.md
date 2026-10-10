@@ -76,7 +76,9 @@ wrong with the sounds everything else is built on.
     [features/stem-separation.md](features/stem-separation.md)
 15. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
-    a sample; a `daw generate` command for the agent and a panel in the app.
+    a sample and in a generated folder the library searches; `daw generate` for
+    the agent within a daily budget, and a Settings window and a Generate tab in
+    the app, in three stages.
     [features/generated-audio.md](features/generated-audio.md)
 
 ## Verify
