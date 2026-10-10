@@ -70,10 +70,10 @@ wrong with the sounds everything else is built on.
     the vocals alone for an a cappella, and the stems of drums, bass, vocals
     and the rest, each written into the project as a sample the agent or the
     person places. An open-source model run on this Mac, not one trained here
-    (D4): the MDX-Net and Demucs models Ultimate Vocal Remover runs are the
-    candidates. Which model for which split, how its weights and PyTorch are
-    installed outside the app's bundle, and what each model's license allows
-    are the open questions.
+    (D4): Demucs for the stems and a Mel-RoFormer or MDX-Net model, as
+    Ultimate Vocal Remover runs, for the vocals; `daw separate` first, then
+    more splits, the app and a reference's stems.
+    [features/stem-separation.md](features/stem-separation.md)
 15. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
