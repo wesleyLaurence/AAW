@@ -59,7 +59,14 @@ wrong with the sounds everything else is built on.
     end of a session and written to `taste.md` with evidence.
 12. **The agent panel.** A conversation in the window, per project, over the
     person's own Claude Code. [features/agent-panel.md](features/agent-panel.md)
-13. **Stem separation** of a song.
+13. **Stem separation** of a song. The vocals taken out for an instrumental,
+    the vocals alone for an a cappella, and the stems of drums, bass, vocals
+    and the rest, each written into the project as a sample the agent or the
+    person places. An open-source model run on this Mac, not one trained here
+    (D4): the MDX-Net and Demucs models Ultimate Vocal Remover runs are the
+    candidates. Which model for which split, how its weights and PyTorch are
+    installed outside the app's bundle, and what each model's license allows
+    are the open questions.
 14. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample; a `daw generate` command for the agent and a panel in the app.
