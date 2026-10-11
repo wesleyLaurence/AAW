@@ -2,19 +2,29 @@
 
 Status: proposed, not built. Backlog: Next, The agent panel. What it should feel like is in
 [concept.md](../concept.md#the-agent-in-the-window); this file is how, and what
-was checked about Claude Code on October 2, 2026 (version 2.1.287 on this Mac).
+was checked about Claude Code on October 2, 2026 (version 2.1.287 on this Mac)
+and again on October 11 (version 2.1.296). What a session is given before there
+is a panel, by starting the agent in a project's folder in a terminal, is
+[agent-context.md](agent-context.md).
 
 ## What
 
 A conversation with an agent inside the project's window, started in the
 project's folder, with the workspace's instructions, taste and skills attached,
-and a list of the project's past conversations.
+and a list of the project's conversations: as many threads as the person
+starts, each resumed where it stopped. Two projects open in two windows each
+have their own, and both can be working at once.
 
 ## Why
 
 Today the agent is a terminal beside the app. It has to be told which project is
 open, it loads instructions and skills from wherever it was started, and its
-conversations are not tied to the project.
+conversations are not tied to the project. Started in a project's folder under
+this checkout it has most of what the panel gives
+([agent-context.md](agent-context.md)), but only there: a project kept anywhere
+else is under no folder that holds the person's instructions and skills, the
+conversations are found by a path that changes when the folder moves, and
+nothing of them is seen in the window.
 
 ## Stages
 
@@ -43,20 +53,51 @@ From its documentation ([running it programmatically](https://code.claude.com/do
   `~/.claude/projects/<the folder's path with punctuation replaced>/`, one file
   each. `--resume ID` continues one, and since version 2.1.223 it is found from
   any folder. `--continue` takes the latest in the current folder.
+- **An instruction file's `@path` import of a file outside the folder the
+  session started in is not expanded** until it is approved in an interactive
+  session, and a `-p` run cannot ask: tried on October 11, when a session
+  started in a project folder had the root `CLAUDE.md` and none of the
+  `AGENTS.md` it imports. Instruction files in a folder attached with
+  `--add-dir` load only with `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1`.
+  So the panel hands over the workspace's instructions with
+  `--append-system-prompt-file`, as designed below, and not by an import.
+- **A project's own `AGENTS.md` that imports `SONG.md`** puts the song's text in
+  a session started in the project's folder, at launch, when no `CLAUDE.md` is
+  in that folder or above it (tried on October 11).
+- **Skills in the session's folder and in every folder above it, up to the
+  repository's root, are listed at launch** (tried on October 11, in a project
+  folder under this checkout). A project kept outside the workspace has only
+  its own, which is why the workspace is attached.
 - **`--allowedTools`** takes rules such as `Bash(daw *)`, and
   `--permission-prompt-tool` names an MCP tool that answers the requests that
   are left, which is how a host program shows them.
 
 ## Design
 
-**One process per project window,** started in the project's folder with the
-workspace attached and its `AGENTS.md` and `profile/` appended to the prompt. The
-project's own `SONG.md` and skills are then the session's by location.
+**One process per running conversation,** started in the project's folder with
+the workspace attached and its `AGENTS.md` and `profile/` appended to the prompt.
+The project's own `SONG.md` and skills are then the session's by location: its
+`AGENTS.md` imports `SONG.md`, and its skills are in its `.claude/skills/`.
 
 **Threads.** The project keeps its conversations' IDs and titles in
-`.daw/threads.json`. The panel lists them and resumes one by ID, so the list
-survives a move of the folder, and a Save As… in the middle of a conversation
-restarts the process in the new folder on the same ID.
+`.daw/threads.json`. The panel lists them, starts a new one and resumes one by
+ID, so the list survives a move of the folder, and a Save As… in the middle of a
+conversation restarts the process in the new folder on the same ID. A thread
+the person started in a terminal in the project's folder is in the list too, if
+the agent's own list for that folder can be read. One thread of a project runs
+at a time, and the others wait where they stopped, until the third open
+question is answered.
+
+**Several windows.** Each open project has its own process, its own thread list
+and its own host, so two projects can each have a conversation working at the
+same time and neither agent's commands reach the other's song. A panel's `daw`
+allowance names its own project's path.
+
+**Another project, from this one.** "Use the snare from that other song" is
+answered through `daw projects --all` and `daw` commands on the other project's
+path, which read it and copy a sample out of it. Those are asked for the first
+time, as anything outside the open project is, and the other project is never
+edited from here.
 
 **What each message carries.** The app adds the selection, the playhead and loop,
 and `daw changes --since` the agent's last turn, so "make this darker" needs no
@@ -73,7 +114,10 @@ has.
 
 - [New and Untitled projects](new-and-untitled-projects.md), which is built, for
   a project there from the first moment and a path that follows Save As….
-- The workspace and the two levels (Next), for the workspace, `SONG.md` and where skills live.
+- [What every session is given](agent-context.md) (Next), for `SONG.md`,
+  a project's `AGENTS.md` and where a project's skills live.
+- The workspace as a folder of its own (Next), for a project kept outside this
+  checkout. Until then the panel attaches the checkout.
 - Turns in the host (Later) would let the panel keep or revert a request as one.
   The panel is useful without them.
 
@@ -84,7 +128,10 @@ has.
 - The agent, asked which project it is in and what the person's rules are,
   answers from the project and the workspace without being told.
 - Closing and reopening the project lists the earlier conversation, and resuming
-  it continues with its context.
+  it continues with its context. A second thread is started beside it and both
+  stay in the list.
+- With two projects open, a request typed in each window is worked on at the
+  same time, and each agent's edits land in its own song.
 - A conversation survives Save As… and a move of the folder.
 - A request for something other than `daw` on this project asks first.
 - With Claude Code missing or signed out, the panel says which and what to do.
@@ -101,11 +148,17 @@ has.
 2. **Naming.** Anthropic's branding rules do not allow a product to call its
    agent "Claude Code" or to look like it. "Claude Agent" or "Powered by Claude"
    are the allowed forms.
-3. **Where a project's skills sit.** Claude Code finds them in `.claude/skills/`;
-   the concept draws `skills/`. A link, a plugin folder, or a list in the prompt.
-4. **How messages are sent in** to a running process, and how a turn is
+3. **Two threads of one project at once.** Both would edit one song through
+   one host, in one undo history, and neither agent knows what the other is
+   about to do.
+   Whether that is allowed, or the second waits, or it works on a version.
+4. **Where a project's skills sit.** Claude Code finds them in `.claude/skills/`,
+   which is where [agent-context.md](agent-context.md) puts them for now; the
+   concept draws a visible `skills/`. A link, a plugin folder, or a list in the
+   prompt.
+5. **How messages are sent in** to a running process, and how a turn is
    interrupted, from the CLI reference.
-5. **The transcript** stays in Claude Code's own folder on this Mac. Whether a
+6. **The transcript** stays in Claude Code's own folder on this Mac. Whether a
    copy should travel with the project.
-6. **Another agent** needs the same four things from its own program: start in a
+7. **Another agent** needs the same four things from its own program: start in a
    folder, stream, resume, ask permission.
