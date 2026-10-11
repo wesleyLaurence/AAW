@@ -955,9 +955,10 @@ checkout (D75):
 - **An app that stands alone on this Mac.** Sample search and import in Rust, so
   the browser needs no Python. An app icon. An install step that puts the app in
   Applications. The Python tools found through a setting, not a path compiled in.
-- **The `.aaw` file type and the project ID.** The project file under the app's
-  own extension, opened by double-click, and an ID in it that the index matches a
-  moved project by.
+- **The `.aaw` file type and the project ID.** A `My Beat.aaw` file in every
+  project beside `song.yaml`, opened by double-click in the Finder as an `.als`
+  opens Ableton, taken by every `daw` command, and an ID in it that the index
+  matches a moved project by. [features/project-file.md](features/project-file.md)
 - **Other Macs.** The rest of the Python ported or carried in the bundle,
   signing with a Developer ID and notarizing, the licenses of the Rust crates
   gathered into the bundle, and first launch creating the workspace.
