@@ -58,7 +58,7 @@ third-party plugins.
    (D13).
 8. **Outputs are inputs.** Anything rendered can come back as a sample, with the
    recipe that made it (D14).
-9. **Intent is layered memory.** The person's rules, the song's brief and learned
+9. **Intent is layered memory.** The person's rules, the song's `SONG.md` and learned
    taste are separate files with separate owners, and the agent can say which one
    drove a decision (D15, D16).
 10. **Theory is a library, not a constraint.** A song declares no key. Scales,
@@ -156,7 +156,8 @@ folder with an `.als` file:
 ```
 My Beat/
   My Beat.aaw      the song, a readable text document
-  SONG.md          what this song is, what was decided, where it stands
+  SONG.md          what this song is and is for, the person's instructions for it,
+                   where it is heading and what was decided
   skills/          skills for this project only
   samples/         every sound the song uses, copied in
   references/      tracks to match or learn from; never played in the song
@@ -222,7 +223,10 @@ neither the person nor the agent has to remember where things are.
 
 ## The agent: one home, and each project
 
-The agent works at two levels, and both are always in play.
+The agent works at two levels, and both are always in play: every conversation,
+in any project, has the person's instructions, taste and skills for all their
+music, and the instructions and skills of the project it is in, without being
+told to look for them.
 
 | Level | Lives in | Holds |
 |---|---|---|
@@ -257,17 +261,25 @@ starts in the workspace and reaches projects by path through the index.
 
 ### SONG.md
 
-The song's README: the first thing the agent reads, and the file it keeps current.
-Every section has an owner, so the agent can update it without rewriting the
-person's words.
+The one place for a song's idea, purpose, instructions, direction and
+decisions. It is to a project what `AGENTS.md` is to a code repository: in every
+conversation about the project from its first message, and kept current. Every
+section has an owner, so the agent can update it without rewriting the person's
+words.
 
 | Section | Owner | Contents |
 |---|---|---|
-| Vision | The person; the agent suggests edits | The feel, style, references, what the song is for |
-| Feedback | The agent, quoting the person, dated | What the person liked and disliked |
+| Vision | The person; the agent suggests edits | The idea, the feel and style, the references, what the song is for |
+| Instructions | The person; the agent never edits them | Rules for this song alone: what not to touch, who it is for, how it is delivered |
+| Direction | Both; the agent keeps it current | Where the song is heading: what is wanted next, what is unresolved, what the person liked and disliked that still holds |
 | Decisions | Both | Settled musical choices and why |
-| Now | The agent | Where the song stands and what is next |
-| Log | The agent | One line per session or version |
+
+- **It holds no history.** No log of sessions, no list of revisions. A decision
+  that is replaced is rewritten where it stands. What happened is in the
+  project's history, its versions and its conversations.
+- **It holds nothing the tool can print:** tracks, clips, tempo and levels are
+  read from the song.
+- **It stays short,** since it is read whole every time.
 
 ### Taste
 
@@ -289,19 +301,28 @@ Each entry in `taste.md` carries evidence and dates, and fades unless reconfirme
 
 ## The agent in the window
 
-- **One session per project, started in the project's folder.** The project's
-  `SONG.md` and skills are the session's own, and the workspace is attached to it.
-  The agent never has to be told which project it is in, including an Untitled
-  one.
-- **Threads belong to the project.** The panel lists the project's past
-  conversations and resumes any of them. The list survives a move, and a Save As…
-  in the middle of a conversation continues it in the new folder.
+- **A conversation is started in the project's folder.** The project's
+  `SONG.md` and skills are its own, and the workspace's instructions, taste and
+  skills are attached to it. The agent never has to be told which project it is
+  in, including an Untitled one.
+- **Threads belong to the project,** as conversations belong to a project in
+  Claude's and Codex's own apps. A project has as many as the person starts; the
+  panel lists them, opens a new one and resumes any of them. The list survives a
+  move, and a Save As… in the middle of a conversation continues it in the new
+  folder.
+- **Several projects at once.** Two projects open in two windows each have their
+  own conversation, and both can be working at the same time. Neither agent's
+  edits reach the other's song.
 - **Each message carries what the agent would otherwise ask for:** the selection,
   the playhead and loop, and what the person changed since the agent's last turn.
 - **Mentions:** `@track`, `@clip`, `@section`, `@skill`, `@reference`. A request
   typed with clips or a region selected applies to them.
 - **Approvals are in the panel.** `daw` commands on the open project need none.
-- **A terminal still works.** An agent started in the workspace can work across
+- **Across projects.** A conversation in one project can be pointed at another
+  by name, to reuse a sound from it or compare two mixes, and reaches it through
+  the project index.
+- **A terminal still works.** An agent started in a project's folder is given
+  what the panel's agent is. One started in the workspace can work across
   projects: reuse a sound from another song, compare two mixes, apply a saved
   chain.
 
@@ -324,7 +345,7 @@ Each entry in `taste.md` carries evidence and dates, and fades unless reconfirme
   | Ask | Reads and answers; makes no edits |
   | Edit | Edits live, as turns the person can revert |
   | Propose | Edits a version the person auditions and merges |
-  | Background | Works through a task list against the brief while the person is away |
+  | Background | Works through a task list against `SONG.md` while the person is away |
 
 ## What the agent works with
 
@@ -424,6 +445,8 @@ writing the file. A tool worth reusing moves to the workspace's `skills/` or
 A skill is a plain-English file: a name, when to use it and the steps. A person
 writes down their process once and runs it by name.
 
+- **For every project or for one.** A skill kept in the workspace is usable in
+  any project; one kept in a project is that project's alone.
 - **Captured from a session:** walk the agent through a process, then say "save
   that as a skill".
 - **Chained:** "run my mix pass, then my master chain".
@@ -436,11 +459,11 @@ writes down their process once and runs it by name.
 ## Long work on its own
 
 "Make a song and don't stop until it is done" runs a producer's loop: read the
-rules, taste and brief; plan sections; build one at a time; render; measure;
+rules, taste and `SONG.md`; plan sections; build one at a time; render; measure;
 revise; master; export. It is bounded and resumable, and it keeps the best so far.
 A definition of done, kept as a skill, is the checklist it grades against:
 arrangement complete, no clipping, loudness in range, sections distinct, nothing
-unresolved in the brief, stems and mix exported. "Technically complete" is not
+unresolved in `SONG.md`, stems and mix exported. "Technically complete" is not
 "artistically finished"; that judgment stays the person's.
 
 ## Signing in
@@ -501,6 +524,9 @@ themselves, or an API key, and the panel says which step is missing.
    too?
 5. Do leftover Untitled projects appear in Open Recent, or only in an offer at
    launch?
+6. Where a song's Instructions in `SONG.md` and the person's rules for all their
+   music differ, which wins? The rule for the one song is the more exact.
+7. May two conversations of one project work at the same time, on one song?
 6. Are versions snapshots in `versions/` or commits in a repository?
 7. Should the undo history survive closing the project?
 8. How much musical structure should the document carry, such as clips derived

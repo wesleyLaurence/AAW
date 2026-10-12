@@ -216,6 +216,6 @@ The work is a few hundred lines, most of it in `project.rs` and the tests.
 3. **Does a folder renamed in the Finder get its `.aaw` renamed** the next time
    it opens? This design leaves it, as Ableton leaves an `.als`.
 4. **Should `daw init` add the project to the app's index** now that the
-   project has an ID? That is Next, item 5, and could ride with this.
+   project has an ID? That is Next, item 7, and could ride with this.
 5. **Is `.aaw` taken?** No common Mac app is known to use it, but that was not
    searched.
