@@ -20,8 +20,8 @@ final class AgentPanelTests: XCTestCase {
         return root
     }()
 
-    /// A program that answers as Claude Code does on its pipes: a handshake,
-    /// then for each message a streamed greeting, a `daw` command that the
+    /// A program that answers as Claude Code does on its pipes: a handshake
+    /// answered with five commands, then for each message a streamed greeting, a `daw` command that the
     /// panel allows by itself, a `touch` that it asks about, and a result;
     /// "short" is answered with words alone, "blocks" with a message of a
     /// heading, a list and a fence, three `daw` commands in a row and a
@@ -47,13 +47,23 @@ final class AgentPanelTests: XCTestCase {
         t = m.get("type")
         if t == "control_request":
             sub = m["request"]["subtype"]
-            out({"type": "control_response", "response": {"subtype": "success", "request_id": m["request_id"], "response": {}}})
+            answer = {}
+            if sub == "initialize":
+                answer = {"commands": [
+                    {"name": "song-skill", "description": "Edit this song's hook (project)", "argumentHint": "[bars]"},
+                    {"name": "for-all", "description": "For every song (project)", "argumentHint": ""},
+                    {"name": "roar", "description": "Mine", "argumentHint": "[times]"},
+                    {"name": "clear", "description": "Start a new session", "argumentHint": "[name]"},
+                    {"name": "compact", "description": "Free up context", "argumentHint": "<instructions>"}]}
+            out({"type": "control_response", "response": {"subtype": "success", "request_id": m["request_id"], "response": answer}})
             if sub == "interrupt":
                 stopped = True
                 out({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": None, "session_id": "s"})
         elif t == "user":
             stopped = False
             text = m["message"]["content"]
+            if text.endswith("</app-context>"):
+                text = text[:text.rfind("<app-context>")].strip()
             out({"type": "system", "subtype": "init", "session_id": "s"})
             if text.endswith("signout"):
                 out({"type": "result", "subtype": "error", "is_error": True, "result": "Not logged in · Please run /login", "session_id": "s"})
@@ -300,6 +310,85 @@ final class AgentPanelTests: XCTestCase {
         guard case .tools(let tools) = rows[2] else { return XCTFail("\(rows[2])") }
         XCTAssertEqual(tools.count, 3)
         XCTAssertEqual(rows[2].id, tools[0].id)
+    }
+
+    /// The handshake's commands are listed under `/` before the first
+    /// message, in groups told by the skill folders, filtered as the person
+    /// types; the chosen one is a chip, and sends as `/name words` with the
+    /// app's context after it, through the process warmed for the thread.
+    func testSkillsAreListedChosenAndSent() throws {
+        let song = try workspaceAndProject()
+        for (folder, name) in [(song.deletingLastPathComponent(), "song-skill"), (scratch!, "for-all")] {
+            let dir = folder.appendingPathComponent(".claude/skills/\(name)")
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try "---\nname: \(name)\n---\n".write(to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        }
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        model.showsAgent = true
+        let agent = model.agent
+        wait("the handshake") { agent.handshook }
+        XCTAssertEqual(try starts().count, 1, "the process was started before any message")
+        XCTAssertNil(agent.currentID)
+        XCTAssertEqual(agent.sections.map(\.group), [.project, .workspace, .other])
+        XCTAssertEqual(agent.sections.map { $0.commands.map(\.name) }, [["song-skill"], ["for-all"], ["roar", "compact"]], "clear is hidden")
+        XCTAssertEqual(agent.sections[0].commands[0].description, "Edit this song's hook", "the engine's (project) comes off")
+        XCTAssertEqual(agent.sections[0].commands[0].hint, "[bars]")
+
+        // `/` lists all; typing filters by the name, then the description.
+        XCTAssertNil(agent.commandQuery)
+        agent.draft = "/"
+        XCTAssertEqual(agent.commandQuery, "")
+        XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["song-skill", "for-all", "roar", "compact"])
+        agent.draft = "/co"
+        XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["compact"])
+        agent.draft = "/song"
+        XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["song-skill", "for-all"])
+        XCTAssertTrue(agent.moveSelection(by: 1))
+        XCTAssertEqual(agent.commandSelection, 1)
+        XCTAssertTrue(agent.moveSelection(by: 1))
+        XCTAssertEqual(agent.commandSelection, 0, "the selection wraps")
+        XCTAssertTrue(agent.chooseSelected())
+        XCTAssertEqual(agent.chip?.name, "song-skill")
+        XCTAssertEqual(agent.draft, "/song-skill ")
+        XCTAssertNil(agent.commandQuery)
+        agent.draft = "/song-skill 8 bars"
+        XCTAssertEqual(agent.chip?.name, "song-skill", "the chip stays while the draft starts with its name")
+        agent.draft = "/song-skil"
+        XCTAssertNil(agent.chip, "and goes once it does not")
+        XCTAssertEqual(agent.commandQuery, "song-skil")
+
+        // Escape closes the list and leaves the text; the next key opens it.
+        XCTAssertTrue(agent.closeList())
+        XCTAssertNil(agent.commandQuery)
+        XCTAssertFalse(agent.closeList())
+        XCTAssertFalse(agent.moveSelection(by: 1))
+        XCTAssertFalse(agent.chooseSelected())
+        agent.draft = "/song-skill"
+        XCTAssertEqual(agent.commandQuery, "song-skill")
+        agent.draft = "a /b"
+        XCTAssertNil(agent.commandQuery, "a slash elsewhere is a slash")
+
+        agent.draft = "/ro"
+        XCTAssertTrue(agent.chooseSelected())
+        agent.draft = "/roar 8 bars short"
+        agent.send()
+        XCTAssertEqual(agent.draft, "")
+        XCTAssertNil(agent.chip)
+        wait("the turn") { !agent.working }
+        XCTAssertEqual(try starts().count, 1, "the warmed process took the message")
+        XCTAssertEqual(agent.threads.map(\.title), ["/roar 8 bars short"])
+        let message = try XCTUnwrap(try messages().first)
+        XCTAssertTrue(message.hasPrefix("/roar 8 bars short\n\n\(AppContext.open)\n"), message)
+        XCTAssertTrue(message.hasSuffix(AppContext.close), message)
+        XCTAssertEqual(AppContext.strip(message), "/roar 8 bars short")
+        XCTAssertEqual(agent.entries.first?.description, "you: /roar 8 bars short")
+
+        // A new conversation is warmed too, and keeps the list meanwhile.
+        agent.newThread()
+        XCTAssertEqual(agent.sections.count, 3)
+        wait("the second process") { (try? self.starts().count) == 2 }
+        wait("its handshake") { agent.handshook }
     }
 
     func testToolsFoldOnlyInRuns() {

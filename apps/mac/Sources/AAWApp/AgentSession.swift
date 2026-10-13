@@ -71,7 +71,9 @@ enum ClaudeCode {
             read.leave()
         }
         if done.wait(timeout: .now() + limit) == .timedOut {
-            process.terminate()
+            // Killed, not terminated: an interactive shell ignores SIGTERM
+            // and would stay behind, as a few did on this Mac.
+            kill(process.processIdentifier, SIGKILL)
             return nil
         }
         read.wait()
@@ -103,7 +105,7 @@ enum ClaudeCode {
     /// instructions here, which a session started in it has by location.
     static func prompt(project: URL, dawOnPath: Bool, workspace: URL?, workspaceText: String?) -> String {
         var text = """
-        You are the agent in the AAW app's panel, working on the project at \(project.path), which is open in the window beside the panel. Its folder is your working directory, so PROJECT is `.` in every `daw` command. \(dawOnPath ? "`daw` is on your PATH and is the app's own copy; `uv run daw` is the same engine in this checkout." : "Use `uv run daw`, which runs from a project's folder.") You run in Claude Code's auto mode, so most actions run without asking, and your `daw` commands on this project always do; what auto mode would still ask about is shown to the person to allow or refuse, so prefer `daw` and ask in words before reaching outside the project. Each message from the person begins with a block from the app, between <app-context> tags: what is selected, the start position and loop, whether the song plays, and what the person changed in the window since your last turn; read their edits as direction and do not undo them. Work a part at a time, so the person watches the song grow; your words and each command you run are shown in the panel, so keep replies short and say what you changed.
+        You are the agent in the AAW app's panel, working on the project at \(project.path), which is open in the window beside the panel. Its folder is your working directory, so PROJECT is `.` in every `daw` command. \(dawOnPath ? "`daw` is on your PATH and is the app's own copy; `uv run daw` is the same engine in this checkout." : "Use `uv run daw`, which runs from a project's folder.") You run in Claude Code's auto mode, so most actions run without asking, and your `daw` commands on this project always do; what auto mode would still ask about is shown to the person to allow or refuse, so prefer `daw` and ask in words before reaching outside the project. Each message from the person begins with a block from the app, between <app-context> tags: what is selected, the start position and loop, whether the song plays, and what the person changed in the window since your last turn; read their edits as direction and do not undo them. A message that runs a skill, `/name` and its words, has the block after the words instead, and the block is not part of the skill's arguments. Work a part at a time, so the person watches the song grow; your words and each command you run are shown in the panel, so keep replies short and say what you changed.
         """
         if let workspace {
             text += "\n\nThe workspace, with the person's instructions, taste and skills for all their music, is \(workspace.path)."
@@ -196,30 +198,33 @@ final class AgentProcess: @unchecked Sendable {
             }
         }
         try process.run()
-        output.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.took(handle.availableData)
-        }
-        errors.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let data = handle.availableData
-            // At the end of the pipe the handler is called again and again
-            // with nothing until it is taken off.
-            guard let self, !data.isEmpty else {
-                handle.readabilityHandler = nil
-                return
+        // Each pipe is read on a thread of its own until its end, rather
+        // than by a readability handler: a handler left at a pipe's end
+        // keeps the file-handle monitoring spinning, which starved other
+        // reads in the tests.
+        let out = output.fileHandleForReading
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            while true {
+                let data = out.availableData
+                guard !data.isEmpty, let self else { return }
+                self.took(data)
             }
-            self.lock.withLock {
-                self.said.append(data)
-                if self.said.count > 64 * 1024 { self.said = self.said.suffix(32 * 1024) }
+        }
+        let err = errors.fileHandleForReading
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            while true {
+                let data = err.availableData
+                guard !data.isEmpty, let self else { return }
+                self.lock.withLock {
+                    self.said.append(data)
+                    if self.said.count > 64 * 1024 { self.said = self.said.suffix(32 * 1024) }
+                }
             }
         }
     }
 
     /// Output as it arrives, cut into lines; a part of a line waits for the rest.
     private func took(_ data: Data) {
-        guard !data.isEmpty else {
-            output.fileHandleForReading.readabilityHandler = nil
-            return
-        }
         var lines: [Data] = []
         lock.withLock {
             buffer.append(data)

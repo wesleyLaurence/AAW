@@ -66,6 +66,69 @@ final class AgentThreadsTests: XCTestCase {
         XCTAssertEqual(AppContext.strip(message), "make it darker")
         XCTAssertEqual(AppContext.strip("plain words"), "plain words")
         XCTAssertEqual(AppContext.wrap(context: " \n", text: "words"), "words")
+        // A skill is read from the message's start, so the context follows it.
+        let command = AppContext.wrap(context: "Nothing is selected.", text: "/roar-edit from :41")
+        XCTAssertEqual(command, "/roar-edit from :41\n\n<app-context>\nNothing is selected.\n</app-context>")
+        XCTAssertEqual(AppContext.strip(command), "/roar-edit from :41")
+        XCTAssertEqual(AppContext.wrap(context: "x", text: "/ not a skill").prefix(13), "<app-context>")
+    }
+
+    /// A message's first word as a skill's name, and the rest.
+    func testACommandIsSplitFromItsWords() {
+        XCTAssertEqual(AgentCommands.split("/roar-edit from :41")?.name, "roar-edit")
+        XCTAssertEqual(AgentCommands.split("/roar-edit from :41")?.rest, " from :41")
+        XCTAssertEqual(AgentCommands.split("/plugin:skill")?.name, "plugin:skill")
+        XCTAssertEqual(AgentCommands.split("/compact\nkeep the drums")?.rest, "\nkeep the drums")
+        XCTAssertNil(AgentCommands.split("/"))
+        XCTAssertNil(AgentCommands.split("/roar,edit"))
+        XCTAssertNil(AgentCommands.split("a /b"))
+        XCTAssertNil(AgentCommands.split(""))
+    }
+
+    /// The handshake's commands grouped by the skill folders, with the
+    /// engine's own hidden, and filtered by a query.
+    func testCommandsAreGroupedAndFiltered() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("aaw skills \(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for (skills, name) in [(".claude/skills", "one"), (".agents/skills", "two"), (".claude/skills", "no-skill-file")] {
+            let dir = folder.appendingPathComponent(skills).appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            if name != "no-skill-file" { try "".write(to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8) }
+        }
+        XCTAssertEqual(AgentCommands.skillNames(in: folder), ["one", "two"])
+        XCTAssertEqual(AgentCommands.skillNames(in: folder.appendingPathComponent("nowhere")), [])
+
+        let commands = [
+            AgentCommand(name: "clear", description: "Start over"),
+            AgentCommand(name: "plug:in", description: "(plug) A plugin's"),
+            AgentCommand(name: "one", description: "The song's (project)", hint: "[bars]"),
+            AgentCommand(name: "__remote", description: "Internal"),
+            AgentCommand(name: "two", description: "Every song's (project)"),
+            AgentCommand(name: "compact", description: "Free up context"),
+        ]
+        let sections = AgentCommands.grouped(commands, project: ["one"], workspace: ["two"])
+        XCTAssertEqual(sections, [
+            .init(group: .project, commands: [AgentCommand(name: "one", description: "The song's", hint: "[bars]")]),
+            .init(group: .workspace, commands: [AgentCommand(name: "two", description: "Every song's")]),
+            .init(group: .other, commands: [AgentCommand(name: "plug:in", description: "(plug) A plugin's"), AgentCommand(name: "compact", description: "Free up context")]),
+        ])
+        XCTAssertEqual(AgentCommands.grouped(commands, project: [], workspace: []).map(\.group), [.other])
+        XCTAssertEqual(AgentCommands.filter(sections, query: "").count, 3)
+        XCTAssertEqual(AgentCommands.filter(sections, query: "SONG").map { $0.commands.map(\.name) }, [["one"], ["two"]], "the description matches too, in any case")
+        XCTAssertEqual(AgentCommands.filter(sections, query: "co").map { $0.commands.map(\.name) }, [["compact"]])
+        XCTAssertEqual(AgentCommands.filter(sections, query: "zzz"), [])
+        // A name that starts with the query comes before one that has it.
+        let other = [AgentCommands.Section(group: .other, commands: [AgentCommand(name: "recompact"), AgentCommand(name: "compact"), AgentCommand(name: "x", description: "compact")])]
+        XCTAssertEqual(AgentCommands.filter(other, query: "comp").map { $0.commands.map(\.name) }, [["compact", "recompact", "x"]])
+    }
+
+    /// A skill the person ran, as Claude Code records it.
+    func testARecordedCommandIsReadAsThePersonsLine() {
+        let line = "<command-message>roar-edit</command-message>\n<command-name>/roar-edit</command-name>\n<command-args>from :41\n\n<app-context>\nNothing is selected.\n</app-context></command-args>"
+        XCTAssertEqual(AgentCommands.recorded(line), "/roar-edit from :41")
+        XCTAssertEqual(AgentCommands.recorded("<command-message>compact</command-message>\n<command-name>/compact</command-name>\n<command-args></command-args>"), "/compact")
+        XCTAssertNil(AgentCommands.recorded("<command-name>/clear</command-name>\n<local-command-stdout></local-command-stdout>"), "a local command is not the person's line")
+        XCTAssertNil(AgentCommands.recorded("plain words"))
     }
 
     /// Claude Code names a folder's sessions folder by the folder's path
@@ -95,6 +158,8 @@ final class AgentThreadsTests: XCTestCase {
     {"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"a subagent's words"}]},"uuid":"7"}
     {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done: sixteenths on the hats in the chorus."}]},"uuid":"8"}
     {"type":"user","message":{"role":"user","content":[{"type":"text","text":"thanks"}]},"uuid":"9"}
+    {"type":"user","message":{"role":"user","content":"<command-message>roar-edit</command-message>\\n<command-name>/roar-edit</command-name>\\n<command-args>from :41\\n\\n<app-context>\\nNothing is selected.\\n</app-context></command-args>"},"uuid":"10"}
+    {"type":"user","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x\\n\\nMake the edit.\\n\\nARGUMENTS: from :41"}]},"isMeta":true,"uuid":"11"}
     not json
 
     """
@@ -111,6 +176,7 @@ final class AgentThreadsTests: XCTestCase {
             .tool(name: "Read", summary: "SONG.md"),
             .agent("Done: sixteenths on the hats in the chorus."),
             .person("thanks"),
+            .person("/roar-edit from :41"),
         ])
     }
 

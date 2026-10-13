@@ -20,16 +20,28 @@ struct AgentPanelView: View {
         VStack(alignment: .leading, spacing: 0) {
             Header(agent: agent)
             Divider()
-            if agent.entries.isEmpty {
-                Text(hint(agent))
-                    .font(.system(size: Self.textSize))
-                    .foregroundStyle(.secondary)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Spacer(minLength: 0)
-            } else {
-                Conversation(agent: agent)
+            ZStack(alignment: .bottom) {
+                if agent.entries.isEmpty {
+                    VStack(spacing: 0) {
+                        Text(hint(agent))
+                            .font(.system(size: Self.textSize))
+                            .foregroundStyle(.secondary)
+                            .padding(14)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Spacer(minLength: 0)
+                    }
+                } else {
+                    Conversation(agent: agent)
+                }
+                // The skills over the conversation's foot while `/` is
+                // typed, just above the field.
+                if agent.commandQuery != nil {
+                    CommandList(agent: agent)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 6)
+                }
             }
+            .frame(maxHeight: .infinity)
             if let trouble = trouble(agent) {
                 Divider()
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
@@ -324,23 +336,54 @@ private struct RowView: View, Equatable {
     }
 }
 
-/// The person's words on a rounded fill in their color, set in from the left.
+/// The person's words on a rounded fill in their color, set in from the
+/// left; a skill they ran is its chip, then the words after it.
 private struct PersonRow: View {
     let text: String
 
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 36)
-            Text(text)
-                .font(.system(size: AgentPanelView.textSize))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(Who.user.color.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+            Group {
+                if let (name, rest) = AgentCommands.split(text) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        CommandChip(name: name)
+                        if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text(rest.trimmingCharacters(in: .whitespacesAndNewlines))
+                                .font(.system(size: AgentPanelView.textSize))
+                                .textSelection(.enabled)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                } else {
+                    Text(text)
+                        .font(.system(size: AgentPanelView.textSize))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Who.user.color.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
         }
         .padding(.horizontal, 12)
         .accessibilityLabel("You")
+    }
+}
+
+/// A skill's `/name` on a rounded fill in the person's color, as the field
+/// draws it.
+private struct CommandChip: View {
+    let name: String
+
+    var body: some View {
+        Text("/" + name)
+            .font(.system(size: 12, design: .monospaced))
+            .foregroundStyle(.white)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 1)
+            .background(Who.user.color, in: RoundedRectangle(cornerRadius: 4))
+            .accessibilityLabel("Skill \(name)")
     }
 }
 
@@ -648,12 +691,111 @@ private struct Composer: View {
             .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08)))
             if agent.entries.isEmpty {
-                Text("Return sends · Shift-Return starts a new line")
+                Text("Return sends · Shift-Return starts a new line · / lists your skills")
                     .font(.system(size: AgentPanelView.smallSize))
                     .foregroundStyle(Color(nsColor: Theme.faintText))
                     .padding(.leading, 4)
             }
         }
         .padding(10)
+    }
+}
+
+/// The skills the agent runs by name, in their groups, filtered by what
+/// was typed after `/`: each a name, its hint and a line of description,
+/// the keys' row on a fill, twelve rows tall at the most and scrolling.
+private struct CommandList: View {
+    let agent: AgentPanel
+
+    static let rowHeight: CGFloat = 38
+    static let headingHeight: CGFloat = 22
+    static let mostRows = 12
+
+    var body: some View {
+        let sections = agent.listed
+        let commands = sections.flatMap(\.commands)
+        let selected = commands.indices.contains(agent.commandSelection) ? commands[agent.commandSelection] : nil
+        let rows = CGFloat(min(commands.count, Self.mostRows)) * Self.rowHeight + CGFloat(sections.count) * Self.headingHeight
+        VStack(alignment: .leading, spacing: 0) {
+            if commands.isEmpty {
+                Text(empty)
+                    .font(.system(size: AgentPanelView.smallSize))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(height: Self.rowHeight)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections, id: \.group) { section in
+                                Text(section.group.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: Self.headingHeight, alignment: .bottomLeading)
+                                    .padding(.bottom, 2)
+                                ForEach(section.commands) { command in
+                                    row(command, selected: command == selected)
+                                        .id(command.name)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    // No taller than its rows, twelve at the most, nor
+                    // than the room over the field, which a fixed height
+                    // would push the window out for.
+                    .frame(maxHeight: min(rows + 8, CGFloat(Self.mostRows) * Self.rowHeight))
+                    .onChange(of: agent.commandSelection, initial: true) {
+                        if let selected { proxy.scrollTo(selected.name) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: Theme.header), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Skills")
+    }
+
+    /// What an empty list says: the handshake not yet answered, no engine,
+    /// or nothing matching.
+    private var empty: String {
+        switch agent.status {
+        case .missing: "Claude Code was not found, so no skills are listed."
+        case .signedOut: "Claude Code is signed out, so no skills are listed."
+        default: agent.commands.isEmpty && !agent.handshook ? "Loading skills…" : "No skill matches."
+        }
+    }
+
+    private func row(_ command: AgentCommand, selected: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("/" + command.name)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(selected ? Color.primary : Color(nsColor: Theme.text))
+                if !command.hint.isEmpty {
+                    Text(command.hint)
+                        .font(.system(size: AgentPanelView.smallSize))
+                        .foregroundStyle(Color(nsColor: Theme.faintText))
+                        .lineLimit(1)
+                }
+            }
+            if !command.description.isEmpty {
+                Text(command.description)
+                    .font(.system(size: AgentPanelView.smallSize))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight, alignment: .leading)
+        .background(selected ? Color(nsColor: Theme.selectedRow) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { agent.choose(command) }
+        .accessibilityLabel(command.name)
     }
 }

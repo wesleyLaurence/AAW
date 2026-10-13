@@ -402,13 +402,15 @@ between the last of them and the picture:
 | `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there. In the detail panel, while it shows the devices of a MIDI track with a Sampler or no instrument, the file loads the Sampler |
 | `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2` | A click or a drag in the first analyzer window that is open, in its content, which the song window's clicks do not reach; `--key opt+cmd+l` opens it. `--snapshot NAME.png` also writes `NAME-analyzer.png` of each open analyzer window, `-analyzer-2` for a second, and `--measure` adds `analyzer`, the first open window's draw times through the run and, as `read_ms`, what each reading of the meter from the host took |
 | `--wait SECONDS` | Leaves time, such as for a `daw` command from a terminal |
-| `--ask TEXT` | Shows the agent panel and sends TEXT as a message to the project's most recent conversation, or a new one; the picture waits for the agent's turn to end, up to ten minutes, or until a request waits for a person, which the picture then shows. `AAW_AGENT=PROGRAM` runs that program in Claude Code's place, speaking its stream-json lines, as the tests do |
+| `--ask TEXT` | Shows the agent panel and sends TEXT as a message to the project's most recent conversation, or a new one, a skill when it starts with `/name`; the picture waits for the agent's turn to end, up to ten minutes, or until a request waits for a person, which the picture then shows. `AAW_AGENT=PROGRAM` runs that program in Claude Code's place, speaking its stream-json lines, as the tests do. A click in the panel's field and `--type /` lists the skills in the picture, since the list is a view in the window |
 | `--export PATH [--export-level LEVEL]` | After the actions, writes the mix as PATH, as File › Export Audio… does when its panel closes: the format is the extension's (`.wav` 24-bit, `.m4a`, `.mp3`) and the level `peak=-1`, `lufs=-14`, `gain=-3` or `rendered`, as rendered unless given. What the command reported is printed, then the picture is taken if one was asked for, with the banner in it, and the run quits; a file that is there is refused as the command refuses it, and a failed export says why on stderr and ends with status 1 |
 
 Run `daw` commands against the song meanwhile to see them land in the picture.
 A click is queued and a key is sent at once, so a click that follows a typed
 name or marker can land after the key that follows it: leave `--wait 1`
-after such a click.
+after such a click. Each action makes the window key first and a key goes to
+the window itself, so a run works while another app, or another AAW, is in
+front.
 A key that plays is heard on the speakers. Headers are 212 points wide and rows
 start 109 points down, under a ruler whose marker strip is from 75 to 91 points
 down: 46 for each track, more while its sends or lanes show

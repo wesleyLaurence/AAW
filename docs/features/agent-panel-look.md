@@ -12,10 +12,10 @@ assumes it, and nothing in the window is named or drawn as Claude's.
 ## What
 
 Nothing the panel does changed; how it reads did. The three items after
-this one, a skill chosen with `/`, files dropped in and the microphone,
-each add something to the field at the foot, so the field was rebuilt here
-first as an AppKit text view they build into, with their two controls
-already in it, gray.
+this one, a skill chosen with `/` ([skill commands](skill-commands.md),
+built), files dropped in and the microphone, each add something to the
+field at the foot, so the field was rebuilt here first as an AppKit text
+view they build into, with their two controls already in it, gray.
 
 ## The rows
 

@@ -22,8 +22,9 @@ open in two windows each have their own agent, and both work at once.
 
 ## How it works
 
-**One process per running conversation.** Sending a message starts Claude
-Code in the project's folder with
+**One process per running conversation.** Showing the panel, opening a
+thread or starting a new conversation starts Claude Code in the project's
+folder with
 
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
@@ -33,10 +34,13 @@ claude -p --input-format stream-json --output-format stream-json --verbose
 ```
 
 and keeps it running between turns, each message a line of JSON on its input
-and each event a line on its output. The process goes when the conversation
-changes, the project closes or, after Save As…, at the next message, which
-resumes the same conversation in the new folder. `AgentProcess` in
-`AgentSession.swift` runs it; `AgentPanel` reads its events.
+and each event a line on its output. It is started before the first message
+so that its handshake's list of skills is there when `/` is typed
+([skill commands](skill-commands.md)); it waits on its input and costs no
+turn. The process goes when the conversation changes, the project closes
+or, after Save As…, at once, and the next message resumes the same
+conversation in the new folder. `AgentProcess` in `AgentSession.swift` runs
+it; `AgentPanel` reads its events.
 
 **Finding Claude Code.** The app asks the person's login shell where `claude`
 is and what its PATH is, once, since an app opened from the Finder has a bare
@@ -66,7 +70,9 @@ song plays, what is selected (clips with their track and bar, a row, a marker,
 notes or events in the editors) and what the person changed in the window or
 the file since the agent's last turn ended, from the activity list, the
 newest twelve. The panel shows the words alone, and takes the context off
-again when a conversation is drawn from its record.
+again when a conversation is drawn from its record. A message that runs a
+skill, `/name words`, has the block after the words, since the command is
+read from the start ([skill commands](skill-commands.md)).
 
 **Approvals.** The agent runs in Claude Code's auto mode, as the person's
 own terminal sessions do, so Claude Code decides most actions by itself:
@@ -113,12 +119,12 @@ a terminal and sign in.
 |---|---|
 | View › Agent, ⌥⌘C, the speech mark in the transport bar | Shows or hides the panel, at the right, over the activity panel when both show; kept between projects. The line at its left edge drags its width from 280 to 640 points, 320 to start, kept too |
 | `+` and the clock at the panel's top | A new conversation; a popover of the project's conversations, most recent first, each with when it was last used, Rename and Delete in its menu |
-| The field at the foot | Grows to eight lines. Return sends; Shift-Return starts a new line; Escape gives the keys back. Send is gray while there is nothing to send or the agent works; `+` and the microphone wait for their items |
+| The field at the foot | Grows to eight lines. Return sends; Shift-Return starts a new line; Escape gives the keys back. `/` first lists the skills, and the one chosen is a chip ([skill commands](skill-commands.md)). Send is gray while there is nothing to send or the agent works; `+` and the microphone wait for their items |
 | Stop, beside the spinner | Interrupts the turn; the agent says where it stopped |
 | A tool's row | Gray while it runs, a tick when it returned, a cross when it failed; a click shows or hides what it returned. Two or more in a row are one line, "Ran 3 commands", that a click opens |
 | The "↓" pill | Shown once the person scrolls up from the end; the panel stops following the stream until they are back at the bottom, or press it |
 | Allow, Refuse | Answer a request; the card then says which, and the agent goes on |
-| `--ask TEXT` on the command line | Shows the panel and sends the text as a message; the picture waits for the turn to end, up to ten minutes, or until a request waits for a person |
+| `--ask TEXT` on the command line | Shows the panel and sends the text as a message, a skill when it starts with `/name`; the picture waits for the turn to end, up to ten minutes, or until a request waits for a person |
 
 ## Limits
 

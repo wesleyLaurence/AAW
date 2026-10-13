@@ -448,6 +448,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// takes the path a real click or key press takes.
     private func perform(_ action: Launch.Action) {
         guard let window = songs.first?.window, let content = window.contentView else { return }
+        // The key window, so that a click gives a field the focus and a
+        // key reaches it, even while another app is in front.
+        if !window.isKeyWindow { window.makeKeyAndOrderFront(nil) }
         let now = ProcessInfo.processInfo.systemUptime
         func mouse(_ type: NSEvent.EventType, _ p: CGPoint, flags: NSEvent.ModifierFlags = [], count: Int = 1) {
             let at = CGPoint(x: p.x, y: content.bounds.height - p.y)
@@ -481,7 +484,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             ) else { return }
             // A key with Command is a menu's, as it is when a person presses it.
             if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
-            NSApp.sendEvent(event)
+            // To the window itself, as a click is: the app has no key
+            // window while another app, or another AAW, is in front.
+            window.sendEvent(event)
         case .drop(let file, let p):
             // No drag can be made up, so the file is handed to where a drag
             // that ended at the point would have left it: in the detail

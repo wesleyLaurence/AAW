@@ -223,7 +223,11 @@ public final class SongModel {
     /// Whether the agent panel shows, kept between projects.
     public var showsAgent: Bool = UserDefaults.standard.object(forKey: "agent.shown") == nil || UserDefaults.standard.bool(forKey: "agent.shown") {
         didSet {
-            if showsAgent != oldValue { UserDefaults.standard.set(showsAgent, forKey: "agent.shown") }
+            guard showsAgent != oldValue else { return }
+            UserDefaults.standard.set(showsAgent, forKey: "agent.shown")
+            // Shown, the panel starts its conversation's process, so that
+            // the skills are listed before the first message.
+            if showsAgent { agent.warm() }
         }
     }
     /// The conversation with the agent in this project's window.

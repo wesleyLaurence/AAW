@@ -75,7 +75,7 @@ Proposed, in the order of Next in the backlog:
 |---|---|
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
-| [skills as slash commands](features/skill-commands.md) | Next |
+| [skills as slash commands](features/skill-commands.md) | Built |
 | [files and clips in the conversation](features/agent-attachments.md) | Next |
 | [speaking to the agent](features/voice-input.md) | Next |
 | [stem separation](features/stem-separation.md) | Next |
