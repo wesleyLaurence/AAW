@@ -31,7 +31,8 @@ def cli(*args):
         capture_output=True,
         text=True,
     )
-    return out.returncode, json.loads(out.stdout if out.returncode == 0 else out.stderr)
+    # An error is the last line of stderr; notes may come before it.
+    return out.returncode, json.loads(out.stdout if out.returncode == 0 else out.stderr.strip().splitlines()[-1])
 
 
 def render(path, output=None, block_size=None, track_id=None, section=None):

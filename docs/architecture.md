@@ -36,7 +36,7 @@ rendering and technical inspection. There is no embedded autonomous composer.
   │ automation · routing · mixer   │     Python: samples scan/search/
   │ real-time driver (CoreAudio)   │     analyze/beats/import, reference,
   │ offline driver (WAV, stems)    │     listen, compare, check,
-  └────────────────────────────────┘     timeline, joins, export
+  └────────────────────────────────┘     timeline, joins, export, separate
 ```
 
 With no app or `daw host` running for a project, `daw` applies a command to the
@@ -178,13 +178,21 @@ Python, in `src/agent_daw`:
 - `joins.py`: checks of a rendered edit of a song: each join's beat, splice and
   level, the file's length, and an excerpt of each join; see
   [join-checks.md](features/join-checks.md).
+- `separation.py`: `daw separate`, a song taken apart on this Mac into vocals
+  and instrumental or drums, bass, vocals and the rest, each part a sample in
+  the project with the source's length; the manifest of models
+  (`separation_models.json`: address, size, hash, author, license), the
+  runtime `daw separate setup` makes with `uv` under the app's data folder,
+  and the recipe beside the parts. `separate_runner.py` runs under that
+  environment, not the checkout's, and drives audio-separator; see
+  [stem-separation.md](features/stem-separation.md).
 - `timeline.py`: a song's places in beats and seconds, where each track's sound is,
   the start of a sound that ends on a beat, and fitting the session's length; see
   [timeline.md](features/timeline.md).
 - `cli.py`: `samples`, `reference`, `listen`, `compare`, `check`, `timeline`,
-  `joins` and `export`. `check` is `inspect` with measured root notes and the
+  `joins`, `export` and `separate`. `check` is `inspect` with measured root notes and the
   model's warnings, as objects with a code.
-  Every other command is passed to the Rust `daw`, which passes these eight back, so
+  Every other command is passed to the Rust `daw`, which passes these nine back, so
   there is one command either way. A
   sample import copies the file, or decodes a compressed one, and adds it to the
   song with `daw apply`, so a running host takes it as an undoable edit.

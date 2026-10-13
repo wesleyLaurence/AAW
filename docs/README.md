@@ -78,7 +78,7 @@ Proposed, in the order of Next in the backlog:
 | [skills as slash commands](features/skill-commands.md) | Built |
 | [files and clips in the conversation](features/agent-attachments.md) | Built |
 | [speaking to the agent](features/voice-input.md) | Built |
-| [stem separation](features/stem-separation.md) | Next |
+| [stem separation](features/stem-separation.md) | Built: `daw separate`; more splits, the app and a reference's stems are Later |
 | [generated audio](features/generated-audio.md) | Next |
 | [the `.aaw` project file](features/project-file.md) | Later › Shipping |
 | [the agent's engine for other people](features/agent-engine.md) | Later › Shipping |

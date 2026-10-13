@@ -67,15 +67,7 @@ wrong with the sounds everything else is built on.
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-13. **Stem separation** of a song. The vocals taken out for an instrumental,
-    the vocals alone for an a cappella, and the stems of drums, bass, vocals
-    and the rest, each written into the project as a sample the agent or the
-    person places. An open-source model run on this Mac, not one trained here
-    (D4): Demucs for the stems and a Mel-RoFormer or MDX-Net model, as
-    Ultimate Vocal Remover runs, for the vocals; `daw separate` first, then
-    more splits, the app and a reference's stems.
-    [features/stem-separation.md](features/stem-separation.md)
-14. **Generated audio.** A sound, a loop or a whole song from a description, with
+13. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample and in a generated folder the library searches; `daw generate` for
     the agent within a daily budget, and a Settings window and a Generate tab in
@@ -88,6 +80,27 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Stem separation, by the person on a record of their own:** `daw separate
+  PROJECT SONG.m4a` on a song they know, `--quality fast` against `best`
+  for the vocals, the a cappella and the instrumental heard soloed and against
+  the source, and whether the best model's 199 s on this Mac for four
+  minutes buys more than Inst HQ 4's 92; `--split stems --tracks` on a
+  clip of it, the drums, bass, vocals and other heard one at a time and
+  together, whether the song plays as it was under the muted source,
+  whether `htdemucs_ft`'s 269 s buy more than `htdemucs`'s 51, and whether
+  the piano of `stems6` bleeds as its README says; the residual read
+  against what is heard, since on generated audio Demucs lost 15 to 20 dB
+  summed; the parts placed over a beat made here, and the beat map of the
+  source laid on a part; whether a part at 44.1 kHz in a 48 kHz song is
+  heard wrong; whether the first reply's rights line reads right and
+  `-96 dB` on a clip among others is what a person expects; the song
+  playing while a model runs, which was never tried; and an agent session
+  asked for an a cappella, whether it reaches for `daw separate` from
+  `daw describe separate` and places the part. Scripted runs only: the
+  stand-in in tests, `htdemucs` over eight seconds of generated audio
+  through the real runtime, and the five models over four generated
+  minutes for their times ([stem separation](features/stem-separation.md));
+  nothing heard.
 - **Speaking to the agent, by the person at the Mac:** Dictation turned
   on in System Settings › Keyboard with English added, since without it
   this Mac had no language for on-device recognition and the button
@@ -963,6 +976,14 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   ahead of its pattern's first beat.
 - A grid for each step row. A pattern has one, so triplet hats over straight
   kicks are steps for one and events for the other.
+- **More splits for `daw separate`** (stage 2 of
+  [stem separation](features/stem-separation.md)): lead from backing vocals,
+  a drum kit by its pieces, reverb and echo taken off a vocal, crowd noise,
+  and the best instrumentals, each a community model the person chooses to
+  download by name with its license shown, since most have none or a
+  non-commercial one; whether Demucs through MLX or demucs-rs should run the
+  stem splits faster; `fast` vocals from an MIT model instead of UVR's; and
+  progress in the runner's lines, which say the stage and not how far.
 
 ### Tools and devices the agent writes
 
@@ -979,8 +1000,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - References: several for one song, side by side; one attached to a project,
   so every `daw compare` uses it without being told; a clip of one written
   at the mix's loudness for the person to play beside it; sections paired by
-  more than loudness when no IDs are shared; a reference's stems, once a song
-  can be separated.
+  more than loudness when no IDs are shared; a reference's stems from `daw
+  separate`, `daw reference add --stems`, so `daw compare` holds a mix's kick
+  and bass to a record's (stage 4 of
+  [stem separation](features/stem-separation.md)).
 - Search by description with an audio-text model, only if a labeled test shows
   it beats names and measurements.
 - Descriptors further: a loop's hits measured one at a time, so it has an
@@ -1054,6 +1077,15 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - An automation segment's shape set by dragging it. The app draws the curve and
   `daw` sets it.
 - The window following the song's end when the song grows.
+- **Separate… in the app** (stage 3 of
+  [stem separation](features/stem-separation.md)): a sample in the browser or
+  an audio clip on the timeline taken apart from its menu, with the split,
+  the quality and the model's size and license beside it, off the main thread
+  with progress and a cancel, the parts laid on tracks under the source as
+  `--tracks` lays them; the runtime made by the app on a Mac without this
+  checkout, which must find `uv` or carry it (Shipping); whether the model
+  should wait for the transport to stop, since it takes the GPU and every
+  core.
 - Save As… over a folder that is already there, after asking.
 - The Python commands (`check`, `timeline`, `export`, `samples import`)
   following a project that was saved under another name, as the Rust ones do.

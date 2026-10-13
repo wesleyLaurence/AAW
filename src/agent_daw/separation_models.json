@@ -1,0 +1,173 @@
+{
+  "comment": "The models daw separate runs: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
+  "runner": {
+    "package": "audio-separator",
+    "version": "0.47.0",
+    "python": "cpython-3.12-macos-aarch64-none",
+    "also": ["audioread"],
+    "data": [
+      {
+        "name": "download_checks.json",
+        "url": "https://raw.githubusercontent.com/TRvlvr/application_data/main/filelists/download_checks.json"
+      },
+      {
+        "name": "mdx_model_data.json",
+        "url": "https://raw.githubusercontent.com/TRvlvr/application_data/main/mdx_model_data/model_data_new.json"
+      },
+      {
+        "name": "vr_model_data.json",
+        "url": "https://raw.githubusercontent.com/TRvlvr/application_data/main/vr_model_data/model_data_new.json"
+      }
+    ]
+  },
+  "models": [
+    {
+      "name": "mdx-inst-hq4",
+      "title": "UVR-MDX-NET Inst HQ 4",
+      "family": "MDX-Net",
+      "split": "vocals",
+      "quality": "fast",
+      "file": "UVR-MDX-NET-Inst_HQ_4.onnx",
+      "parts": {"Instrumental": "instrumental", "Vocals": "vocals"},
+      "author": "Anjok07 and aufr33 (Ultimate Vocal Remover)",
+      "license": "MIT by the statement in UVR's README, which asks for credit; no license file",
+      "license_url": "https://github.com/Anjok07/ultimatevocalremovergui#license",
+      "sdr": {"vocals": 8.83, "instrumental": 15.51},
+      "files": [
+        {
+          "name": "UVR-MDX-NET-Inst_HQ_4.onnx",
+          "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/UVR-MDX-NET-Inst_HQ_4.onnx",
+          "bytes": 59074342,
+          "sha256": "3c4b5b9b05090fdf238f38ba5046813982d50e2a652e9cb3324ea79720c3c9c8"
+        }
+      ]
+    },
+    {
+      "name": "kim-mel-roformer",
+      "title": "Mel-Band RoFormer, vocals, by Kimberley Jensen",
+      "family": "Mel-RoFormer",
+      "split": "vocals",
+      "quality": "best",
+      "file": "vocals_mel_band_roformer.ckpt",
+      "parts": {"Vocals": "vocals", "Other": "instrumental"},
+      "author": "Kimberley Jensen",
+      "license": "MIT",
+      "license_url": "https://huggingface.co/KimberleyJSN/melbandroformer",
+      "sdr": {"vocals": 12.6},
+      "files": [
+        {
+          "name": "vocals_mel_band_roformer.ckpt",
+          "url": "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs/vocals_mel_band_roformer.ckpt",
+          "bytes": 913106900,
+          "sha256": "87201f4d31afb5bc79993230fc49446918425574db48c01c405e44f365c7559e"
+        },
+        {
+          "name": "vocals_mel_band_roformer.yaml",
+          "url": "https://github.com/nomadkaraoke/python-audio-separator/releases/download/model-configs/vocals_mel_band_roformer.yaml",
+          "bytes": 944,
+          "sha256": "b958b29c8f7195f0d86bee6759a33980db675c4ecaf2fcaa80fa125828e6cd38"
+        }
+      ]
+    },
+    {
+      "name": "htdemucs",
+      "title": "Demucs v4 (htdemucs)",
+      "family": "Demucs",
+      "split": "stems",
+      "quality": "fast",
+      "file": "htdemucs.yaml",
+      "parts": {"Vocals": "vocals", "Drums": "drums", "Bass": "bass", "Other": "other"},
+      "author": "Alexandre Défossez, Meta AI",
+      "license": "MIT",
+      "license_url": "https://github.com/adefossez/demucs/blob/main/LICENSE",
+      "sdr": {"vocals": 9.87, "drums": 9.45, "bass": 11.64},
+      "files": [
+        {
+          "name": "955717e8-8726e21a.th",
+          "url": "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/955717e8-8726e21a.th",
+          "bytes": 84141911,
+          "sha256": "8726e21a993978c7ba086d3872e7608d7d5bfca646ca4aca459ffda844faa8b4"
+        },
+        {
+          "name": "htdemucs.yaml",
+          "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/htdemucs.yaml",
+          "bytes": 21,
+          "sha256": "239c445d0b14454d541ad8bd9bb271c9e536d267e8a4625208744cbb2e7bb66c"
+        }
+      ]
+    },
+    {
+      "name": "htdemucs_ft",
+      "title": "Demucs v4, fine-tuned (htdemucs_ft, a bag of four)",
+      "family": "Demucs",
+      "split": "stems",
+      "quality": "best",
+      "file": "htdemucs_ft.yaml",
+      "parts": {"Vocals": "vocals", "Drums": "drums", "Bass": "bass", "Other": "other"},
+      "author": "Alexandre Défossez, Meta AI",
+      "license": "MIT",
+      "license_url": "https://github.com/adefossez/demucs/blob/main/LICENSE",
+      "sdr": {"vocals": 10.79, "drums": 10.02, "bass": 12.02},
+      "files": [
+        {
+          "name": "f7e0c4bc-ba3fe64a.th",
+          "url": "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/f7e0c4bc-ba3fe64a.th",
+          "bytes": 84141271,
+          "sha256": "ba3fe64ae8ef66ac9a4857222ce48efbdc5eb3ad375cb79dd13debee5aaa4066"
+        },
+        {
+          "name": "d12395a8-e57c48e6.th",
+          "url": "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/d12395a8-e57c48e6.th",
+          "bytes": 84141271,
+          "sha256": "e57c48e6b0e38af4f7118d7bd08c49f0a0c0edf7d09143bdd902ea0d237303e6"
+        },
+        {
+          "name": "92cfc3b6-ef3bcb9c.th",
+          "url": "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/92cfc3b6-ef3bcb9c.th",
+          "bytes": 84141271,
+          "sha256": "ef3bcb9c8b40d14ae5d51b6db2587339cc12c6b77c0be151ce6d69002e087bf2"
+        },
+        {
+          "name": "04573f0d-f3cf25b2.th",
+          "url": "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/04573f0d-f3cf25b2.th",
+          "bytes": 84141271,
+          "sha256": "f3cf25b222c4eed7cd49dd8b2c9597d50c18bd154090f7b919cfa5f93cf22c49"
+        },
+        {
+          "name": "htdemucs_ft.yaml",
+          "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/htdemucs_ft.yaml",
+          "bytes": 149,
+          "sha256": "69470b8c1bbd674437b51bc9fb491327a10ab0396b702c93389b9cf750016346"
+        }
+      ]
+    },
+    {
+      "name": "htdemucs_6s",
+      "title": "Demucs v4, six stems (htdemucs_6s)",
+      "family": "Demucs",
+      "split": "stems6",
+      "quality": "best",
+      "file": "htdemucs_6s.yaml",
+      "parts": {"Vocals": "vocals", "Drums": "drums", "Bass": "bass", "Guitar": "guitar", "Piano": "piano", "Other": "other"},
+      "author": "Alexandre Défossez, Meta AI",
+      "license": "MIT",
+      "license_url": "https://github.com/adefossez/demucs/blob/main/LICENSE",
+      "sdr": {"vocals": 9.57, "drums": 8.47, "bass": 10.1},
+      "note": "Its own README calls the piano full of bleed.",
+      "files": [
+        {
+          "name": "5c90dfd2-34c22ccb.th",
+          "url": "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/5c90dfd2-34c22ccb.th",
+          "bytes": 54996327,
+          "sha256": "34c22ccb381c6f9fdbf324f04e1e2fe21aaaf293f5ded163a162697ff9a02ddd"
+        },
+        {
+          "name": "htdemucs_6s.yaml",
+          "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/htdemucs_6s.yaml",
+          "bytes": 21,
+          "sha256": "207405151270af8fd81c2373c25d27950916682ac91dca7884a11ce13dad6f58"
+        }
+      ]
+    }
+  ]
+}

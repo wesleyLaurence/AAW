@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins` and `export`.
+"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins`, `export` and `separate`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export")
+COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export", "separate")
 
 
 def engine() -> Path:
@@ -58,6 +58,7 @@ def run_engine(*args):
 
 def parser():
     from . import descriptors, library
+    from .separation import SPLITS
 
     p = argparse.ArgumentParser(
         prog="daw",
@@ -336,6 +337,41 @@ def parser():
     )
     export.add_argument("--render", type=Path, help="A render to export instead of the latest")
     export.add_argument("--replace", action="store_true", help="Write over an existing file")
+    separate = sub.add_parser(
+        "separate",
+        help="Take a song apart on this Mac into vocals and instrumental, or drums, bass, "
+        "vocals and the rest, each a sample in the project; daw separate models lists the "
+        "models and daw separate setup installs them (daw describe separate)",
+        description="daw separate PROJECT SOURCE takes a song apart with an open-source model "
+        "run on this Mac and writes each part into the project as a sample. SOURCE is a "
+        "sample's ID, an audio clip as tracks.T.audio.N, or a file, imported first. "
+        "daw separate models lists what can run and what is downloaded; daw separate setup "
+        "makes the runtime and downloads the default models, or --models NAME.",
+    )
+    separate.add_argument("project", help="The project, or models, or setup")
+    separate.add_argument("source", nargs="?", help="A sample ID, an audio clip, or a file")
+    separate.add_argument(
+        "--split",
+        choices=list(SPLITS),
+        help="vocals (the default): vocals and instrumental; stems: drums, bass, vocals, other; "
+        "stems6: with guitar and piano",
+    )
+    separate.add_argument(
+        "--quality", choices=["fast", "best"], default="best", help="Which model of the split; best unless given"
+    )
+    separate.add_argument("--model", help="A model by name, from daw separate models")
+    separate.add_argument(
+        "--id", dest="prefix", help="The parts' sample IDs are PREFIX-PART; the source's ID unless given"
+    )
+    separate.add_argument(
+        "--tracks",
+        action="store_true",
+        help="Lay the parts on tracks of their own under the source, and silence the source clip",
+    )
+    install = separate.add_argument_group("setup", "what daw separate setup installs")
+    install.add_argument("--models", nargs="+", metavar="NAME", help="These models; the defaults unless given")
+    install.add_argument("--all", action="store_true", help="Every model in the manifest")
+    install.add_argument("--runtime-only", action="store_true", help="The environment and no model")
     return p
 
 
@@ -382,6 +418,20 @@ def execute(a):
         if not 0 < a.seconds <= 30 or (a.limit is not None and a.limit <= 0):
             raise ValueError("seconds must be >0 and <=30, and limit >0")
         return joins.check(a.source, a.limit, a.seconds, not a.no_excerpts)
+    if a.command == "separate":
+        from . import separation
+
+        if a.project == "models":
+            return separation.listing(a.split)
+        if a.project == "setup":
+            return separation.setup(a.models, a.all, a.runtime_only)
+        if a.source is None:
+            raise ValueError("separate takes PROJECT SOURCE, or models, or setup")
+        if a.models or a.all or a.runtime_only:
+            raise ValueError("--models, --all and --runtime-only go with daw separate setup")
+        return separation.separate(
+            song_file(a.project), a.source, a.split, a.quality, a.model, a.prefix, a.tracks
+        )
     if a.command == "export":
         from .export import export
 
