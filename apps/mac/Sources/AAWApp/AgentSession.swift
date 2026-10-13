@@ -81,13 +81,14 @@ enum ClaudeCode {
 
     /// The arguments of a conversation's process: one message in and each
     /// event out as a line of JSON, the text as it streams, approvals asked
-    /// over the same pipe, resumed by ID or started under one the panel
-    /// chose, the workspace attached, and the panel's own instructions
-    /// added to Claude Code's prompt.
+    /// over the same pipe in Claude Code's auto mode, which decides most
+    /// actions by itself as in the person's terminal sessions, resumed by
+    /// ID or started under one the panel chose, the workspace attached, and
+    /// the panel's own instructions added to Claude Code's prompt.
     static func arguments(resume: String?, sessionID: String, workspace: URL?, prompt: String) -> [String] {
         var arguments = [
             "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-            "--include-partial-messages", "--permission-prompt-tool", "stdio",
+            "--include-partial-messages", "--permission-mode", "auto", "--permission-prompt-tool", "stdio",
         ]
         if let resume { arguments += ["--resume", resume] } else { arguments += ["--session-id", sessionID] }
         if let workspace { arguments += ["--add-dir", workspace.path] }
@@ -102,7 +103,7 @@ enum ClaudeCode {
     /// instructions here, which a session started in it has by location.
     static func prompt(project: URL, dawOnPath: Bool, workspace: URL?, workspaceText: String?) -> String {
         var text = """
-        You are the agent in the AAW app's panel, working on the project at \(project.path), which is open in the window beside the panel. Its folder is your working directory, so PROJECT is `.` in every `daw` command. \(dawOnPath ? "`daw` is on your PATH and is the app's own copy; `uv run daw` is the same engine in this checkout." : "Use `uv run daw`, which runs from a project's folder.") Your `daw` commands on this project run without asking; anything else you ask for is shown to the person to allow or refuse, so prefer `daw` and ask in words before reaching outside the project. Each message from the person begins with a block from the app, between <app-context> tags: what is selected, the start position and loop, whether the song plays, and what the person changed in the window since your last turn; read their edits as direction and do not undo them. Work a part at a time, so the person watches the song grow; your words and each command you run are shown in the panel, so keep replies short and say what you changed.
+        You are the agent in the AAW app's panel, working on the project at \(project.path), which is open in the window beside the panel. Its folder is your working directory, so PROJECT is `.` in every `daw` command. \(dawOnPath ? "`daw` is on your PATH and is the app's own copy; `uv run daw` is the same engine in this checkout." : "Use `uv run daw`, which runs from a project's folder.") You run in Claude Code's auto mode, so most actions run without asking, and your `daw` commands on this project always do; what auto mode would still ask about is shown to the person to allow or refuse, so prefer `daw` and ask in words before reaching outside the project. Each message from the person begins with a block from the app, between <app-context> tags: what is selected, the start position and loop, whether the song plays, and what the person changed in the window since your last turn; read their edits as direction and do not undo them. Work a part at a time, so the person watches the song grow; your words and each command you run are shown in the panel, so keep replies short and say what you changed.
         """
         if let workspace {
             text += "\n\nThe workspace, with the person's instructions, taste and skills for all their music, is \(workspace.path)."

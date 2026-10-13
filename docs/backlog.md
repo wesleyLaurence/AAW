@@ -95,8 +95,9 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   are heard while the song plays; the first request that is not `daw` on the
   project, which is the first approval card anyone has seen from a real
   session, since the request's shape was taken from the Agent SDK's
-  documentation, and whether Allow and Refuse each do what they say; a request to edit
-  `SONG.md`, which is a card today, and whether that is wanted; whether the
+  documentation, and whether Allow and Refuse each do what they say; whether
+  auto mode, which the panel runs in since D112, asks about little enough,
+  and whether an edit of `SONG.md` runs without a card in it; whether the
   app's context ahead of each message, the start position, the selection
   and the person's changes since the last turn, is read as direction and
   whether its length is felt; Stop in the middle of a turn; the project

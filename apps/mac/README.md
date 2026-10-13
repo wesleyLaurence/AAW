@@ -551,8 +551,9 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 - The agent panel drives the person's own Claude Code, found through their
   login shell, and says so when it is missing or signed out; no other agent
   and no sign-in in the app. One conversation of a project runs at a time.
-  Reads anywhere under the checkout need no approval, since it is attached
-  as the workspace; `daw` on another project, and any edit of a file, ask.
+  It runs in Claude Code's auto mode, so most actions need no approval;
+  what auto mode would ask about is a card, unless it is `daw` on the
+  project. The mode is not chosen in the panel.
   A thread is not renamed or removed in the panel. The approval card's
   request was taken from the Agent SDK's documentation and has not been
   seen from a real session ([the agent panel](../../docs/features/agent-panel.md)).
