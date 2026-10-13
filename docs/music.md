@@ -131,6 +131,7 @@ the operation needs. A refused edit names the field it meant and the fix.
 |---|---|
 | Find sounds | `daw describe samples`: `daw samples search` by name, sorted and filtered by what a sample measures as (`--sort punch`, `--short --bright`, `--max-decay 300`), and `daw samples like SAMPLE` for the nearest to one chosen; `daw samples analyze --all` measures the library once; filenames are hints, and a measurement is not a listen |
 | Use a sound | `daw samples import` copies it into the project; import compressed audio before measuring it |
+| A song's vocals, instrumental or stems | `daw describe separate`; `daw separate PROJECT SOURCE` for an a cappella and an instrumental, `--split stems` for drums, bass, vocals and the rest, each a sample in the project, `--tracks` to lay them under the source; `daw separate models` says what is downloaded, and a measurement is not a listen |
 | Pitched or gated samples | `daw describe sampler`; confirm root octave with `samples analyze` or import `--root-note auto`; resolve `daw check` root warnings |
 | MIDI notes and instruments | `daw describe midi` |
 | A synthesized sound | `daw describe synth`; start from a factory patch with `daw synth add TRACK --patch NAME` (`daw patch list`), hear it with `daw synth audition`, keep it with `daw patch save` |

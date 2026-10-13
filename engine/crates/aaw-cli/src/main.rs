@@ -5,8 +5,8 @@
 //! recorded in its history. Otherwise they run headless: load, apply, save, exit.
 //!
 //! The sample library and the perception tools are Python: `samples`,
-//! `reference`, `listen`, `compare` and `check` run there, with this process's
-//! arguments and output.
+//! `reference`, `listen`, `compare`, `check`, `timeline`, `joins`, `export`
+//! and `separate` run there, with this process's arguments and output.
 //!
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
 //! with exit status 1.
@@ -106,6 +106,7 @@ enum Topic {
     Export,
     Listen,
     Reference,
+    Separate,
 }
 
 #[derive(Subcommand)]
@@ -180,6 +181,11 @@ enum Top {
     /// Write the song's render as a named WAV, AAC or MP3 file, at a stated level.
     #[command(disable_help_flag = true)]
     Export(Forwarded),
+    /// Take a song apart on this Mac into vocals and instrumental, or drums,
+    /// bass, vocals and the rest, each a sample in the project; `separate
+    /// models` lists the models and `separate setup` installs them.
+    #[command(disable_help_flag = true)]
+    Separate(Forwarded),
     /// Rewrite a project in canonical form.
     Fmt { project: Song },
     /// Validate and atomically replace project fields from a JSON merge patch.
@@ -1486,7 +1492,8 @@ fn run(cli: &Cli) -> Result<Json> {
         | Top::Check(_)
         | Top::Timeline(_)
         | Top::Joins(_)
-        | Top::Export(_) => {
+        | Top::Export(_)
+        | Top::Separate(_) => {
             unreachable!("Python commands are forwarded before this")
         }
         Top::Render {
@@ -2401,6 +2408,7 @@ fn name(top: &Top) -> String {
         Top::Timeline(_) => "timeline".into(),
         Top::Joins(_) => "joins".into(),
         Top::Export(_) => "export".into(),
+        Top::Separate(_) => "separate".into(),
         Top::Fmt { .. } => "fmt".into(),
         Top::Apply { .. } => "apply".into(),
         Top::Model { .. } => "model".into(),
@@ -2475,7 +2483,8 @@ fn main() -> ExitCode {
     | Top::Check(f)
     | Top::Timeline(f)
     | Top::Joins(f)
-    | Top::Export(f) = &cli.command
+    | Top::Export(f)
+    | Top::Separate(f) = &cli.command
     {
         let command = name(&cli.command);
         return forward(&command, &f.args).unwrap_or_else(|error| {

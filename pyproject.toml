@@ -25,9 +25,10 @@ daw = "agent_daw.cli:main"
 where = ["src"]
 
 # The words for a sample's measurements and the lines between them, which
-# the Rust model reads from the same file for daw describe samples.
+# the Rust model reads from the same file for daw describe samples; and the
+# manifest of the models daw separate runs.
 [tool.setuptools.package-data]
-agent_daw = ["sample_words.json"]
+agent_daw = ["sample_words.json", "separation_models.json"]
 
 # The song model is the Rust one: engine/crates/aaw-py builds into the package
 # as agent_daw.aaw_py, for the interpreter the package is installed into.

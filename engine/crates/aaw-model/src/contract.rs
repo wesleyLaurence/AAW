@@ -13,7 +13,7 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
-pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference"];
+pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -234,6 +234,17 @@ const EXPORT: &[(&str, &str)] = &[
     ("app", "In the Mac app, File > Export Audio... (shift-cmd-R) runs this same export from a save panel that opens in the project's exports folder, with the format (WAV 24- or 16-bit, AAC, MP3), the level (as rendered, --peak, --lufs or --gain) and the ceiling beside the name, and shows the measurements and warnings in a banner. The song does not change."),
 ];
 
+const SEPARATE: &[(&str, &str)] = &[
+    ("command", "daw separate PROJECT SOURCE [--split vocals|stems|stems6] [--quality fast|best] [--model NAME] [--id PREFIX] [--tracks] takes a song apart on this Mac with an open-source model and writes each part into the project as a sample. SOURCE is a sample's ID in the song, an audio clip as tracks.T.audio.N, or a file by path, which is imported first as daw samples import does, .m4a and .mp3 decoded. --split vocals, the default, gives vocals and instrumental; stems gives drums, bass, vocals and other; stems6 adds guitar and piano. --quality picks the split's model, best unless given, and --model names one from daw separate models. The parts are samples named PREFIX-PART, PREFIX being the source's ID unless --id gives one. A song of four minutes takes from under a minute to four and a half (models); nothing else should be asked of the Mac meanwhile, and the song should not be playing."),
+    ("parts", "Each part is 32-bit float WAV at 44.1 kHz under separated/ in the project, with the source's length to the frame, so a part placed where the source was plays in time with it and a beat map of the source is a beat map of each part. The reply lists each part with its sample_id, path, frames, peak_dbfs and integrated_lufs, and residual_db, the parts summed against the source in dB under it: a low residual, under -30, says the parts add up to the song; it does not say a part is clean, and a model whose instrumental is the song minus its vocals adds up by construction. These measure; nobody heard the parts. Place one and let the person listen, or say what was measured."),
+    ("tracks", "The parts are placed only with --tracks: a track a part, PREFIX-PART, right after the source's track and in its group, each with an audio clip at the source clip's place with the clip's fields, and the source clip falls silent, its track muted when the clip is alone there or else its gain_db at -96, so the song plays the same until a part is changed. From a sample with no clip, each part plays whole from beat 0 and the song grows to the end of the bar it ends in. The samples and the tracks land as one edit, undone as one; undo takes them out of the song and leaves the files."),
+    ("recipe", "separated/HASH-MODEL.separated.json, HASH the first twelve characters of the source file's sha256, holds the source, the split, the model with its author and license, the hashes of its weights, the runtime's versions and device, the parameters, the residual, the seconds and memory it took, each part's hash and measurements, and the date. The same source through the same model is found there and returned at once, with reused true and nothing run; a part changed or missing is made again."),
+    ("models", "daw separate models [--split S] lists each model with its split, quality, parts, size in MB, author, license, SDR scores in dB (compare within a column), whether it is here and the command that gets it, and the runtime's state. vocals: fast is UVR-MDX-NET Inst HQ 4 (59 MB, MIT by UVR's README, which asks for credit), best Kimberley Jensen's Mel-Band RoFormer (913 MB, MIT), the better vocal by a wide margin and the slower by far; stems: fast htdemucs (84 MB), best htdemucs_ft (336 MB, a bag of four, about four times as slow); stems6: htdemucs_6s (55 MB), whose piano its README calls full of bleed. All by Alexandre Défossez under MIT but the first. On an M2 with 16 GB, four minutes of audio took 92 s through Inst HQ 4, 199 s through the RoFormer, 51 s through htdemucs, 269 s through htdemucs_ft and 81 s through htdemucs_6s, on the GPU. No weight is in the repository or rehosted by this project: the manifest names each file's address, size, hash, author and license."),
+    ("setup", "daw separate setup makes the runtime once, a Python environment of about 1 GB (audio-separator, torch, onnxruntime) under ~/Library/Application Support/AAW/separation (or AAW_DATA_DIR), made by uv with an Apple silicon Python, and downloads the default models, 1.4 GB, from where their authors put them, each checked against the manifest's hash; --models NAME... picks models, --all takes every one, --runtime-only makes the environment alone. It says on stderr what it downloads and how large before it does. A command that needs the runtime or a model it lacks says what is missing, how large it is and the command that gets it, and downloads nothing by itself. Only the downloads leave the Mac; no audio does, and there is no service and no key."),
+    ("rights", "Stems of a recording are copies of it: taking a song apart for practice, study or a private remix is what people use these models for, and publishing or selling the parts or a remix needs the rights to the song. The person answers for the audio they separate; the first reply says so once, and each recipe names its source."),
+    ("limits", "An Apple silicon Mac on macOS 14 or later; torch ships nothing new enough for an Intel Mac. A 48 kHz source is resampled to 44.1 kHz once, by the runner, and its parts stay at 44.1 kHz, which the engine resamples as it plays; its residual is read at 44.1 kHz too. The model takes the GPU and every core while it runs. Lead from backing vocals, a drum kit by its pieces, reverb taken off a vocal and other community models, Separate in the app and a reference's stems are not built; daw separate models lists everything that is."),
+];
+
 fn texts(items: &[(&str, &str)]) -> Json {
     Json::Object(items.iter().map(|(k, v)| (k.to_string(), json!(v))).collect())
 }
@@ -381,6 +392,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("export", "daw export: a named WAV, AAC or MP3 file at a stated level."),
     ("listen", "daw listen and daw compare: a render measured, whole, by section and by stem, in third octaves, with each stem's resonances, where two stems overlap, what the mix loses in mono and on a small speaker, how hard each track's hits land and what each compressor, limiter and clipper took off."),
     ("reference", "daw reference and daw compare --reference: a song kept as what good sounds like, and a mix measured against it section by section."),
+    ("separate", "daw separate: a song taken apart on this Mac into vocals and instrumental, or drums, bass, vocals and the rest, each a sample in the project; the models, their licenses and the runtime."),
 ];
 
 /// The topic that describes each model, for a field list that meets a
@@ -781,6 +793,7 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         "export" => json!({"semantics": texts(EXPORT)}),
         "listen" => json!({"semantics": texts(LISTEN)}),
         "reference" => json!({"semantics": texts(REFERENCE)}),
+        "separate" => json!({"semantics": texts(SEPARATE)}),
         _ => return None,
     })
 }

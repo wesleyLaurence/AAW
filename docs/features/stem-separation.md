@@ -1,323 +1,215 @@
-# Stem separation — proposed October 10, 2026
+# Stem separation — stage 1 implemented October 13, 2026
 
-Status: proposed, not built. Backlog: Next, Stem separation. What is said here
-about models, licenses and tools was read from their repositories, model cards,
-papers and package indexes on October 10, 2026. Nothing was installed or run,
-and no time on a Mac was measured; every speed below is an estimate.
-
-## What
-
-A song taken apart into the parts it was mixed from, on this Mac, by an
-open-source model: the vocals removed for an instrumental, the vocals alone for
-an a cappella, or the stems of drums, bass, vocals and the rest. Each part is
-written into the project as a sample, which the agent or the person places,
-slices and mixes like any other. The agent runs it as a `daw` command; the
-person runs it from a sample or an audio clip in the app.
+`daw separate` takes a song apart on this Mac, by an open-source model, into
+the parts it was mixed from: the vocals and the instrumental, or drums, bass,
+vocals and the rest. Each part is written into the project as a sample, which
+the agent or the person places, slices and mixes like any other. Stage 1,
+the command with vocals and stems, is built (D119); more splits, Separate… in
+the app and a reference's stems are Later lines in [the backlog](../backlog.md).
 
 No model is trained here (D4). The models are the ones the Ultimate Vocal
 Remover community runs, chosen by what each split needs and what each model's
-license allows.
+license allows; nothing is bundled or rehosted.
 
-## Why
+## Commands
 
-A finished song is the material a person most often wants to work with and
-the one this app can do least with today. A whole song can be imported, mapped
-by `daw samples beats` and cut on its downbeats, but every cut carries the
-whole mix. Separation opens what a person does with a record:
-
-- **A vocal over a new beat:** the a cappella imported, mapped and put over a
-  song made here.
-- **An instrumental:** the song without its voice, to sing or rap over, or to
-  sample a bar where the voice was in the way.
-- **A part to learn from or to sample:** the drums of a break, sliced into
-  pads (Slicing a break, in Next); the bass line, to read its notes (Key and
-  chord detection, in Next).
-- **A reference by its parts:** [the reference comparison](reference-comparison.md)
-  says a reference has no stems. With them, the agent can hold a mix's kick
-  and bass to a record's, and [overlap](masking.md) can read a record's pairs.
-
-The person asked for it by name: "take an audio track and remove the vocals or
-isolate the vocals into an a cappella, or look into the stems of a song."
-
-## Stages
-
-1. **`daw separate`, vocals and four stems.** From the command line, with a
-   small set of permissively licensed models downloaded on first use.
-2. **More splits.** Six stems, lead and backing vocals, a drum kit by its
-   pieces, and reverb taken off a vocal; community models the person chooses
-   to download, with each license shown.
-3. **Separate in the app.** A sample in the browser or an audio clip on the
-   timeline separated from its menu, with progress, and the stems laid on
-   tracks under it.
-4. **A reference's stems.** `daw reference add --stems`, so `daw compare` can
-   compare track to track.
-
-Each is a backlog line and a pull request of its own when it is picked up.
-
-## What exists
-
-### Ultimate Vocal Remover
-
-[Ultimate Vocal Remover](https://github.com/Anjok07/ultimatevocalremovergui)
-(UVR) is a desktop program, not a library: a Tkinter window for Windows, macOS
-and Linux, version 5.6, with no command line. Its README says the code is MIT,
-though the repository has no LICENSE file. It runs several families of model
-and downloads their weights from GitHub releases of
-[TRvlvr/model_repo](https://github.com/TRvlvr/model_repo), which states no
-license either. A rewrite, UVR 6, was announced on October 6, 2026
-([issue 2399](https://github.com/Anjok07/ultimatevocalremovergui/issues/2399))
-for within six weeks; it does not say whether it has a command line.
-
-What this app takes from UVR is its models and the community's knowledge of
-them, not its program.
-
-### The models
-
-| Family | What it is good for | Size | License of the weights |
-|---|---|---|---|
-| **Demucs v4** (`htdemucs`, `htdemucs_ft`, `htdemucs_6s`) | Four stems; six with guitar and piano | 84 MB; 336 MB for `_ft`, a bag of four; 55 MB for `_6s` | MIT, by the repository; no separate file |
-| **MDX-Net** (`Kim_Vocal_2`, `UVR-MDX-NET-Inst_HQ_3` to `_5`, `KARA_2`) | Vocals and instrumental, small and fast, as ONNX | 53 to 67 MB | "MIT, credit UVR" in UVR's README; no file |
-| **MDX23C** (`MDX23C-8KFFT-InstVoc_HQ`) | Vocals and instrumental, better than MDX-Net | 448 MB | As MDX-Net |
-| **Mel-Band and BS-RoFormer** (community checkpoints) | The best vocals and instrumentals that can be downloaded | 200 MB to 1.7 GB, most 640 to 913 MB | Varies; see below |
-| **VR** (`HP-Karaoke`, `DeEcho-DeReverb`) | Lead from backing vocals, reverb and echo off a vocal | about 127 MB | As MDX-Net |
-| **SCNet** | Four stems, faster than Demucs at about its quality | — | Code MIT; few public weights |
-
-How good each is, as signal-to-distortion ratio in dB (higher is better).
-The numbers are from different test sets, so compare within a column, not across:
-
-| Model | Vocals | Instrumental | Drums | Bass | Source |
-|---|---|---|---|---|---|
-| Kim Mel-RoFormer | 12.60 | — | — | — | audio-separator's scores |
-| viperx BS-RoFormer 1297 | 11.77 | 16.45 | — | — | audio-separator's scores |
-| unwa BS-Roformer Leap Xe | 11.79 | 18.10 | — | — | MVSEP multisong board |
-| MDX23C InstVoc HQ | 10.56 | 15.83 | — | — | audio-separator's scores |
-| Kim_Vocal_2 (MDX-Net) | 10.18 | 15.36 | — | — | audio-separator's scores |
-| UVR-MDX-NET-Inst_HQ_4 | — | 15.51 | — | — | audio-separator's scores |
-| htdemucs_ft | 10.79 | — | 10.02 | 12.02 | audio-separator's scores |
-| htdemucs_6s | 9.57 | — | 8.47 | 10.10 | audio-separator's scores |
-| BS-RoFormer SW (six stems) | 11.30 | — | 14.11 | 14.62 | MVSEP multisong board |
-
-So the ranking the community uses holds: for vocals and instrumental,
-RoFormer before MDX23C before MDX-Net before Demucs; for four stems,
-BS-RoFormer SW before `htdemucs_ft` before `htdemucs`; for six, BS-RoFormer
-SW well before `htdemucs_6s`, whose piano its own README calls full of bleed.
-SDR is not everything: the community also scores "fullness" against
-"bleedless", since a full instrumental keeps a ghost of the voice and a clean
-one sounds thinner. That choice is for ears.
-
-The papers: [BS-RoFormer](https://arxiv.org/abs/2309.02612),
-[Mel-RoFormer](https://arxiv.org/abs/2310.01809),
-[SCNet](https://arxiv.org/abs/2401.13276). ByteDance released no weights; every
-RoFormer checkpoint is a community one, most trained with
-[ZFTurbo's Music-Source-Separation-Training](https://github.com/ZFTurbo/Music-Source-Separation-Training) (MIT).
-The live board is [MVSEP's quality checker](https://mvsep.com/quality_checker/multisong_leaderboard?sort=vocals);
-its best entries are MVSEP's own models, which cannot be downloaded.
-
-### Licenses
-
-Code and weights are licensed apart, and most of the best weights have no
-license at all, which by default reserves every right.
-
-| License | Weights |
-|---|---|
-| MIT or Apache | Demucs v4; Kim Mel-RoFormer ([model card](https://huggingface.co/KimberleyJSN/melbandroformer)); SYH99999's fine-tunes and four-stem RoFormers |
-| MIT by statement, no file | UVR's own MDX-Net, MDX23C and VR models |
-| GPL-3.0 | anvuew's de-reverb and karaoke RoFormers |
-| Non-commercial (CC BY-NC, BY-NC-SA) | becruily's "deux" and "delimit"; Sucial's de-reverb, echo and chorus models |
-| None stated | viperx's RoFormers; most of unwa's, Gabox's and becruily's; BS-RoFormer SW, whose first host is gone and whose rehost says "license: unknown" |
-
-This app is free and open source and ships from a public repository. So:
-
-- **Nothing is bundled or rehosted.** Weights are downloaded on the person's
-  Mac from where their authors put them, the way UVR does. Only a manifest is
-  committed: each model's name, address, size, hash, author and license.
-- **The default models are MIT or Apache:** Demucs and Kim Mel-RoFormer. UVR's
-  MDX-Net models are used with the credit its README asks for, and the missing
-  file is an open question.
-- **Any other model is the person's choice.** A model with no license, or a
-  non-commercial or GPL one, is listed with its license and author and
-  downloaded only when the person asks for it by name.
-
-**The song's rights do not change.** Stems of a record are copies of it. To
-take apart a song for practice, study or a private remix is what people use
-UVR for; to publish or sell stems or a remix needs the rights to the song. The
-command and the panel say once, the first time, that the person answers for
-the audio they separate, and the recipe beside each stem names its source.
-
-### The tools that run them
-
-| Tool | What it is | License | For this app |
-|---|---|---|---|
-| [audio-separator](https://github.com/nomadkaraoke/python-audio-separator) 0.47.0 | A command and Python API running every UVR family: MDX (ONNX), VR, Demucs, MDX23C and RoFormer; ensembles and presets; MPS and CoreML on Apple silicon | MIT | One dependency for every model; a large set of packages; its default cache is `/tmp`; it rehosts some community checkpoints itself |
-| [Demucs](https://github.com/adefossez/demucs) 4.1.0 | The maintained fork; weights on Hugging Face as safetensors; `uvx demucs song.mp3` works alone | MIT | Demucs only, small and steady |
-| [demucs-mlx](https://github.com/andrade0/demucs-mlx) | HTDemucs on Apple's MLX, 3 minutes of audio in 5.3 s on an M4 Max, within 1 ppm of PyTorch | MIT | Fast; still needs torch for STFT and loading |
-| [demucs-rs](https://github.com/nikhilunni/demucs-rs) | HTDemucs in Rust on Burn and wgpu, Metal on a Mac | Apache-2.0 | No Python at all, and young: about 150 stars and no benchmarks |
-| MLX and CoreML conversions of Mel-RoFormer | e.g. `mlx-community/mel-roformer-zfturbo-vocals-v1-mlx` | MIT, per their cards | A vocal model without torch; unproven |
-
-On Apple silicon the gap is complex numbers: PyTorch's Metal backend lacks some
-FFT operations, so Demucs and audio-separator run the STFT on the CPU and the
-network on the GPU. audio-separator needs torch 2.13 or later, which needs
-macOS 14.
-
-### What it costs
-
-- **Disk.** torch is about 524 MB installed and onnxruntime 78 MB; a whole
-  audio-separator environment is likely about 1 GB. The default models add
-  about 1.4 GB (`htdemucs_ft` 336, Kim Mel-RoFormer 913, `htdemucs` 84,
-  `Inst_HQ_4` 59). Each stem of a four-minute song is about 85 MB as float WAV.
-- **Memory.** Demucs needs 3 GB and about 7 GB at its defaults; a large
-  RoFormer likely 4 to 10 GB, less with smaller chunks or half precision. An
-  8 GB Mac is marginal for the large models.
-- **Time** for a four-minute song, estimated: `htdemucs` tens of seconds on
-  the GPU, about six minutes on the CPU alone; `htdemucs_ft` about four times
-  `htdemucs`; a large RoFormer one to five minutes on a base M1 or M2. The
-  first stage measures them.
-
-## Design
-
-**One command, a split and a quality.**
-
-```
-daw separate PROJECT SOURCE [--split vocals|stems|stems6] [--quality fast|best]
-                            [--model NAME] [--id NAME] [--tracks]
-daw separate models [--split vocals]     # what can run, its size, license, and whether it is here
-daw separate setup                       # install the runtime and the default models
+```sh
+uv run daw separate PROJECT mix                       # vocals and instrumental, best model
+uv run daw separate PROJECT mix --quality fast        # the small, quick model
+uv run daw separate PROJECT tracks.song.audio.0 --split stems --tracks
+uv run daw separate PROJECT ~/Music/Song.m4a --split stems6 --id song
+uv run daw separate models [--split vocals]           # what can run, its size and license, what is here
+uv run daw separate setup [--models NAME...] [--all] [--runtime-only]
 ```
 
-`SOURCE` is a sample ID in the song, an audio clip, or a file by path, which is
-imported first as `daw samples import` does. `--split vocals` (the default)
-gives `vocals` and `instrumental`; `stems` gives `drums`, `bass`, `vocals` and
-`other`; `stems6` adds `guitar` and `piano`. `--quality` picks the model from
-the manifest; `--model` names one. The reply lists each new sample's ID, path
-and length, the model and its license, and the seconds it took.
+`SOURCE` is a sample's ID in the song, an audio clip as `tracks.T.audio.N`, or
+a file by path, which is imported first as `daw samples import` does, `.m4a`
+and `.mp3` decoded. `--split vocals` (the default) gives `vocals` and
+`instrumental`; `stems` gives `drums`, `bass`, `vocals` and `other`; `stems6`
+adds `guitar` and `piano`. `--quality` picks the split's model from the
+manifest, `best` unless given; `--model` names one. The parts are samples named
+`PREFIX-PART`, `PREFIX` the source's ID unless `--id` gives one.
 
 | Split | `fast` | `best` (default) |
 |---|---|---|
-| `vocals` | UVR-MDX-NET-Inst_HQ_4 (59 MB) | Kim Mel-RoFormer (913 MB) |
-| `stems` | `htdemucs` (84 MB) | `htdemucs_ft` (336 MB) |
+| `vocals` | UVR-MDX-NET Inst HQ 4 (59 MB) | Kimberley Jensen's Mel-Band RoFormer (913 MB) |
+| `stems` | `htdemucs` (84 MB) | `htdemucs_ft` (336 MB, a bag of four) |
 | `stems6` | `htdemucs_6s` (55 MB) | `htdemucs_6s` |
 
-**The parts are samples.** Each is written under `separated/` in the project
-as 32-bit float WAV at the model's 44.1 kHz, named by the source's hash and
-the part, and added to the song as a sample (`song-vocals`, `song-drums`). It
-places nothing unless asked: `--tracks` adds a track a part, each with an
-audio clip at the source clip's place and length, and mutes the source clip,
-so the song plays the same until a part is changed. With a host running, that
-is one undoable step with the origin of whoever asked; undo takes the samples
-and tracks out and leaves the files.
+The reply lists the source, the model with its author and license, each part
+(`sample_id`, `path`, `frames`, `peak_dbfs`, `integrated_lufs`, whether it was
+added now), `residual_db`, the seconds it took, the memory, the runtime's
+versions and device, the recipe's path, and once, the first time on this Mac,
+the rights line. `daw describe separate` says the same for an agent.
 
-**The parts line up with the source.** Every part has the source's length to
-the frame, so a part placed where the source was plays in time with it, and a
-beat map of the source is a beat map of each part.
+## The parts
 
-**What the parts lose is measured.** The reply gives each part's loudness and
-the residual: the parts summed against the source, in dB under it. A low
-residual says the parts add up to the song; a high one says the model dropped
-something. The agent reads these numbers instead of guessing, and still says
-that a measurement is not a listen.
+Each part is 32-bit float WAV at 44.1 kHz, the models' rate, under
+`separated/` in the project, named by the first twelve characters of the
+source file's hash, the model and the part. Every part has the source's length
+to the frame, so a part placed where the source was plays in time with it and a
+beat map of the source is a beat map of each part. A 48 kHz source is resampled
+to 44.1 kHz once, by the runner, and its parts stay there; the engine resamples
+them as it plays.
 
-**The recipe is beside it.** `NAME.separated.json` holds the source's hash,
-the model, its version, the hash of its weights, its license and author, every
-parameter and the date. The same source through the same model and
-parameters is found in the project and not separated again. Unlike a
-generated sound, a recipe here remakes the same audio, within the noise of the
-GPU.
+The runner gives the model the source with its peak at -6 dBFS and scales each
+part back by the same gain, because audio-separator scales any stem that passes
+full scale down to it, which would lose the parts' level against the source;
+the recipe records the gain. Nothing else is normalized.
 
-**The runtime lives outside the app and the project.** Separation runs in its
-own Python environment, made by `uv` under the app's data folder
-(`~/Library/Application Support/AAW/separation/`), not in this package's
-dependencies: torch would add a gigabyte to every checkout and to the bundle.
-Weights go to `models/` beside it, checked against the manifest's hash. `daw
-separate setup` makes both and says how much it will download first; a
-command that needs a missing model says how big it is and how to get it, and
-downloads nothing unasked. `daw` runs the environment as a separate process,
-as it runs `afconvert` and `rubberband`, and reads progress as JSON lines.
+**What the parts lose is measured.** `residual_db` is the parts summed against
+the source, in dB under it, read by the runner at 44.1 kHz. A low residual
+says the parts add up to the song; a high one says the model dropped something.
+It does not say a part is clean, and a model whose instrumental is the song
+minus its vocals adds up by construction. The command measures; nobody heard
+the parts unless the person did.
 
-**One adapter, so the runner can change.** The process takes a source, a
-model from the manifest and an output folder, and writes the parts and their
-measurements. Stage 1 implements it with audio-separator, which runs every
-family the manifest names. Demucs through MLX or demucs-rs can replace it for
-the stem splits later without changing the command.
+**Placing is asked for.** `--tracks` adds a track a part, `PREFIX-PART`,
+right after the source's track and in its group, each with an audio clip at the
+source clip's place with the clip's fields, and the source clip falls silent:
+its track is muted when the clip is alone there, or else the clip's `gain_db`
+goes to -96, since a clip has no mute of its own. The song plays the same until
+a part is changed. From a sample with no clip, each part plays whole from beat 0
+and the song grows to the end of the bar it ends in. The samples and the tracks
+land as one edit through `daw apply`, so a running host hears it and one undo
+takes them out; the files stay.
 
-**What leaves the machine** is a download of a model, from the address in the
-manifest, when the person or the agent asks for it. No audio leaves; there is
-no service and no key.
+**The recipe is beside the parts.** `separated/HASH-MODEL.separated.json`
+holds the source (sample, path, hash, its rate), the split, the model with its
+author and license, the hashes of its weights, the runtime's versions and
+device, the parameters, the residual, the seconds and memory, each part's hash
+and measurements, and the date. The same source through the same model is found
+there and returned at once, with `reused: true`; a part missing is made again.
+A model on the GPU is not bit-deterministic, so a remade part can hash
+differently from the one the song recorded, and the engine then refuses the song
+as a changed asset, as it does for any sample edited in place: the sample has to
+be removed from the song (or its `sha256` corrected) before the part is remade.
 
-**Separate in the app.** A sample in the browser and an audio clip on the
-timeline get Separate… in their menus: the split, the quality, and a line with
-the model, its size and its license. It runs off the main thread with
-progress and can be cancelled. When it ends, the parts are on tracks under the
-source, as `--tracks` lays them.
+## The runtime and the models
 
-**Tests never download a model.** A stand-in runner on this machine "separates"
-a generated mix of a sine bass, a click and a noise vocal by filtering, and
-tests the command, the files, the alignment, the residual, the recipe, the
-reuse and the undo. One test that runs `htdemucs` on generated audio is
-opt-in, for a Mac with the runtime.
+Separation runs in a Python environment of its own under the app's data folder,
+`~/Library/Application Support/AAW/separation/` (or `AAW_DATA_DIR`), not in
+this package's dependencies: torch is a gigabyte that no checkout or bundle
+should carry. `daw separate setup` makes it with `uv` and installs
+[audio-separator](https://github.com/nomadkaraoke/python-audio-separator)
+0.47.0, which runs every family the manifest names (MDX-Net as ONNX, Demucs,
+RoFormer) on Apple's GPU through MPS and CoreML, with `audioread`, which that
+version imports without depending on. The interpreter is an Apple silicon
+Python 3.12 that `uv` downloads (`cpython-3.12-macos-aarch64-none`): the
+checkout's own `uv` and Python here are Intel builds under Rosetta, and torch
+ships no Intel Mac wheels new enough, so an Intel Mac is refused with that
+reason. `daw` starts the environment's Python on
+`src/agent_daw/separate_runner.py` as a process, as it runs `afconvert` and
+`rubberband`, and reads its progress as lines of JSON, which `daw` passes on
+as notes on stderr; the last line carries the parts and the measurements. A
+process started by a Rosetta parent answers `uname -p` with `i386`, which is
+what audio-separator reads to decide between the GPU and the CPU, so the runner
+tells it `arm` on an arm64 machine; without that every model ran on the CPU,
+Inst HQ 4 in four minutes for four minutes of audio. PyTorch's Metal backend
+(2.14) also refuses a one-dimensional convolution whose output is longer than
+65536 frames ("Output channels > 65536 not supported at the MPS device"),
+which Demucs's first encoder and last decoder layers are on its 7.8 s
+segments, so the runner runs a convolution the GPU refuses on the CPU and the
+rest of the network stays on the GPU; those two layers have few channels.
 
-## Depends on
+The manifest, `src/agent_daw/separation_models.json`, lists each model's name,
+family, split, quality, audio-separator file name, parts, author, license and
+its address, and each of its files' URL, size and sha256. Weights go to
+`models/` beside the environment and are checked against the manifest's hash on
+download and before each run. Setup also fetches the three small data files
+audio-separator reads at load (`download_checks.json`, `mdx_model_data.json`,
+`vr_model_data.json`), which are not hashed since their authors change them.
 
-- Nothing for stage 1 beyond `uv`, which the checkout already needs.
-- An app that stands alone (Shipping) for stage 3 on a Mac without this
-  checkout: the app must find `uv`, or carry it, to make the environment.
-- A decision when picking it up. D4 names Demucs; using RoFormer and MDX-Net
-  models, a runner of another project's, and a license rule for downloaded
-  weights is a new entry in [decisions.md](../decisions.md).
+| Model | Family | Files | Author | License |
+|---|---|---|---|---|
+| `mdx-inst-hq4` | MDX-Net (ONNX) | `UVR-MDX-NET-Inst_HQ_4.onnx` from TRvlvr/model_repo | Anjok07 and aufr33 (UVR) | MIT by UVR's README, which asks for credit; no license file |
+| `kim-mel-roformer` | Mel-Band RoFormer | `vocals_mel_band_roformer.ckpt` and its YAML, from audio-separator's model-configs release (the UVR host has none) | Kimberley Jensen | MIT (model card) |
+| `htdemucs`, `htdemucs_ft`, `htdemucs_6s` | Demucs v4 | `.th` weights from dl.fbaipublicfiles.com, YAML from TRvlvr/model_repo | Alexandre Défossez, Meta AI | MIT |
 
-## Done when
+A command that needs the runtime or a model it lacks says what is missing, how
+large it is and the command that gets it, and downloads nothing by itself;
+`setup` says on stderr what it downloads and how large before it does. Only the
+downloads leave the Mac. No audio does; there is no service and no key.
 
-- `daw separate` of a song puts an a cappella and an instrumental in the
-  project as samples a pad or an audio clip plays, with the recipe beside
-  them, and `--split stems` puts drums, bass, vocals and other.
-- Each part has the source's length to the frame, and the parts on tracks
-  with `--tracks` play the song as it was.
-- The reply gives each part's loudness, the residual, the model, its license
-  and the seconds taken.
-- The same command again finds the parts and returns at once.
-- With the runtime or a model missing, the command says what is missing, how
-  big it is and the command that gets it, and downloads nothing.
-- No weights are in the repository; each model in the manifest has its
-  license and author; a model with no license downloads only by name.
-- The time and memory of each default model on a four-minute song are
-  measured on the person's Mac and written here.
-- An agent asked for an a cappella of a song, or its drums, makes it and uses
-  it.
-- A person has done each of the above by hand and heard the parts, `fast`
-  against `best`.
+**The song's rights do not change.** Stems of a record are copies of it. The
+first reply on a Mac carries the rights line, `daw separate models` repeats it,
+and each recipe names its source.
+
+## What it costs on this Mac
+
+Measured on October 13, 2026 on the person's Mac, an Apple M2 with 16 GB on
+macOS 14.8, over four minutes of generated stereo audio at 44.1 kHz (a bass
+line, a kick and a hat, a chord pad and a harmonic voice with vibrato), the
+song not playing and nothing else asked of the Mac. Memory is the runner's
+peak resident set; the GPU's share of unified memory is in it. The residual is
+of generated audio and says nothing about a record.
+
+| Model | Device | Loading | Separating | Peak memory | Residual |
+|---|---|---|---|---|---|
+| `mdx-inst-hq4` (vocals, fast) | CoreML | 4 s | 92 s | 4.0 GB | -41 dB |
+| `kim-mel-roformer` (vocals, best) | MPS | 4 s | 199 s | 1.5 GB | -149 dB |
+| `htdemucs` (stems, fast) | MPS | 2 s | 51 s | 1.4 GB | -20 dB |
+| `htdemucs_ft` (stems, best) | MPS | 2 s | 269 s | 1.7 GB | -17 dB |
+| `htdemucs_6s` (stems6) | MPS | 2 s | 81 s | 1.3 GB | -15 dB |
+
+On the CPU alone, before the runner told audio-separator the processor is
+`arm`, Inst HQ 4 took 240 s and `htdemucs` 260 s for the same four minutes,
+at 2.3 and 2.8 GB. The RoFormer's residual says its instrumental is the song
+minus its vocals; Inst HQ 4's is the model's own instrumental, with the vocals
+as the song minus it times UVR's compensation, so the two nearly add up; Demucs
+gives four parts of its own, which lose 15 to 20 dB of the song summed.
+
+The environment is 1.0 GB and the five models 1.45 GB (the four defaults
+1.39 GB). Each part of a four-minute stereo song is 42 MB.
+
+## Tests
+
+`tests/test_separation.py` runs `daw separate` over a stand-in,
+`tests/stand_in_separator.py`, named by `AAW_SEPARATOR`: the runner's arguments
+and lines, with the parts cut from a generated mix of a sine bass, a noise vocal
+and clicks by frequency band, so that they sum to it. The tests hold the parts'
+format, length and alignment, the residual, the recipe and its reuse, a part
+remade when its file is gone, a file imported first, a 48 kHz source's parts at
+44.1 kHz, `--tracks` from a clip alone on its track and among others, from a
+sample with the song grown, and in a group, the render unchanged by the parts
+on tracks under the muted source, the one edit undone under a host, the
+refusals when the runtime or a model is missing or a file does not match the
+manifest, the manifest's fields, and `daw describe separate`. One test runs
+`htdemucs` over eight seconds of generated audio through the real runtime when
+`AAW_SEPARATE_REAL` is set and the runtime is installed; no test downloads a
+model. With `AAW_SEPARATOR` set no model file is required.
+
+## Limits
+
+- An Apple silicon Mac on macOS 14 or later. An Intel Mac is refused: torch
+  ships nothing new enough for it.
+- The parts are at 44.1 kHz whatever the song's rate.
+- The runner's lines say the stage, not how far along the model is; a bar of
+  progress, which the app will want, is a Later line.
+- The model takes the GPU and every core while it runs. Whether the audio
+  thread drops out while a song plays was not tried; separate while the song
+  is stopped.
+- No lead from backing vocals, drum kit pieces, de-reverb or crowd models; no
+  model without a license or with a non-commercial one is in the manifest;
+  Separate… in the app and a reference's stems are not built. Each is a Later
+  line.
+- Nobody has heard a part. The defaults were chosen from the community's
+  scores; `fast` against `best` on a record is the first thing to listen to.
 
 ## Open questions
 
-1. **The runner.** audio-separator runs every model and brings a large tree of
-   packages, a cache in `/tmp` to point elsewhere, and community checkpoints it
-   rehosts. Demucs alone plus onnxruntime for MDX-Net is smaller and covers
-   stage 1 except Kim Mel-RoFormer. A spike installs each and runs a song.
-2. **No Python at all.** demucs-rs runs the stem splits from Rust on Metal and
-   would suit an app that stands alone; it is young. Whether to try it once
-   stage 1 works, and whether a RoFormer in MLX or CoreML can do the vocals.
+1. **Which model for `best` vocals.** Kim Mel-RoFormer is MIT and among the
+   best scored, at 913 MB and the longest wait; whether `fast` is good enough
+   that `best` is rarely worth it is for the person's ears.
+2. **The instrumental as a model's output or as the song minus the vocals.**
+   Inst HQ 4 gives the instrumental and subtracts for the vocals; Kim's model
+   gives the vocals and audio-separator subtracts for the rest. Which sounds
+   better is for ears, and either can be offered.
 3. **UVR's weights.** Its README says MIT and asks for credit; its repository
-   and the weights' host have no license file. Whether to ask the authors,
-   and whether `fast` vocals should be an MIT model instead.
-4. **Models with no license.** The best instrumentals (unwa, Gabox, becruily)
-   and the best six stems (BS-RoFormer SW) have none. Downloaded by name with
-   the license shown, as drawn here, or left out of the manifest.
-5. **The instrumental as a model's output or as the song minus the vocals.**
-   An instrumental model is fuller; the subtraction always adds up to the
-   song. Which sounds better is for ears, and either can be offered.
-6. **Which model for `best` vocals.** Kim Mel-RoFormer is MIT and among the
-   best, at 913 MB and minutes a song. Whether `fast` is good enough that `best`
-   is rarely worth the wait.
-7. **Separating while the song plays.** The model takes the GPU and every
-   core. Whether the audio thread drops out, and whether separation should
-   wait for the transport to stop or run at a lower priority.
-8. **The time on this Mac.** Every number under What it costs is an estimate.
-   The first stage measures the default models on the person's Mac, and an
-   8 GB Mac if one is near.
-9. **Places in the song.** Whether `--tracks` should be the default in the
+   and the weights' host have no license file. Whether to ask the authors, and
+   whether `fast` vocals should be an MIT model instead.
+4. **Places in the song.** Whether `--tracks` should be the default in the
    app, a group holding the parts, and where the source clip goes.
-10. **The sample rate.** The models work at 44.1 kHz. A 48 kHz song resamples
-    the parts as it plays; whether to resample them back at write time.
-11. **Further splits.** Lead from backing vocals, a drum kit by its pieces
-    (DrumSep), reverb and echo off a vocal, crowd noise: each has models, most
-    with no license or a non-commercial one. Stage 2 picks them.
-12. **UVR 6.** Due by late November 2026. Whether it brings a command line or
-    new permissively licensed models worth adding to the manifest.
+5. **Separating while the song plays.** Not tried.
+6. **UVR 6**, due by late November 2026: whether it brings new permissively
+   licensed models worth adding to the manifest.
