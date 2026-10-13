@@ -23,9 +23,10 @@ final class AgentPanelTests: XCTestCase {
     /// A program that answers as Claude Code does on its pipes: a handshake,
     /// then for each message a streamed greeting, a `daw` command that the
     /// panel allows by itself, a `touch` that it asks about, and a result;
-    /// "short" is answered with words alone, and "signout" as a session
-    /// with no login.
-    private nonisolated static let fake = """
+    /// "short" is answered with words alone, "blocks" with a message of a
+    /// heading, a list and a fence, three `daw` commands in a row and a
+    /// last word, and "signout" as a session with no login.
+    nonisolated static let fake = """
     #!/usr/bin/env python3
     import json, os, sys
     log = open(os.environ["AAW_FAKE_LOG"], "a")
@@ -37,6 +38,8 @@ final class AgentPanelTests: XCTestCase {
     def ev(e):
         out({"type": "stream_event", "api_message_id": "m1", "event": e})
     stopped = False
+    BLOCKS = "## What I did\\n\\nMoved the hats, then:\\n\\n- Quieter by **3 dB**\\n- Off the beat\\n\\n```sh\\ndaw status .\\n```\\n"
+    pending = []
     for line in sys.stdin:
         m = json.loads(line)
         log.write(line)
@@ -55,6 +58,19 @@ final class AgentPanelTests: XCTestCase {
             if text.endswith("signout"):
                 out({"type": "result", "subtype": "error", "is_error": True, "result": "Not logged in · Please run /login", "session_id": "s"})
                 continue
+            if text.endswith("blocks"):
+                ev({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
+                for piece in BLOCKS.split(" "):
+                    ev({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": piece + " "}})
+                ev({"type": "content_block_stop", "index": 0})
+                out({"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [
+                    {"type": "text", "text": BLOCKS},
+                    {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "daw status ."}},
+                    {"type": "tool_use", "id": "b2", "name": "Bash", "input": {"command": "daw map ."}},
+                    {"type": "tool_use", "id": "b3", "name": "Bash", "input": {"command": "daw check ."}}]}})
+                pending = ["b1", "b2", "b3"]
+                out({"type": "control_request", "request_id": "b1", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "daw status ."}}})
+                continue
             ev({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
             ev({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "Hello "}})
             ev({"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "from the fake"}})
@@ -72,7 +88,16 @@ final class AgentPanelTests: XCTestCase {
                 continue
             rid = m["response"]["request_id"]
             allowed = m["response"]["response"].get("behavior") == "allow"
-            if rid == "r1":
+            if rid in pending:
+                pending.remove(rid)
+                out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": rid, "content": "ok " + rid, "is_error": False}]}})
+                if pending:
+                    cmd = {"b2": "daw map .", "b3": "daw check ."}[pending[0]]
+                    out({"type": "control_request", "request_id": pending[0], "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": cmd}}})
+                else:
+                    out({"type": "assistant", "message": {"id": "m4", "role": "assistant", "content": [{"type": "text", "text": "Done."}]}})
+                    out({"type": "result", "subtype": "success", "is_error": False, "result": "Done.", "session_id": "s"})
+            elif rid == "r1":
                 out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "host: true" if allowed else "refused", "is_error": not allowed}]}})
                 out({"type": "assistant", "message": {"id": "m2", "role": "assistant", "content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "touch x"}}]}})
                 out({"type": "control_request", "request_id": "r2", "request": {"subtype": "can_use_tool", "tool_name": "Bash", "input": {"command": "touch x"}}})
@@ -245,6 +270,89 @@ final class AgentPanelTests: XCTestCase {
         defer { again.close() }
         XCTAssertEqual(again.agent.currentID, first)
         XCTAssertEqual(again.agent.threads.map(\.title), ["first short", "second short"])
+    }
+
+    /// A message of blocks streams into one entry, and three `daw`
+    /// commands in a row, each allowed by the panel, fold into one row.
+    func testBlocksStreamAndToolsFold() throws {
+        let song = try workspaceAndProject()
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+        agent.send("blocks")
+        wait("the turn") { !agent.working }
+        XCTAssertNil(agent.streamingID)
+        guard case .agent(_, let text)? = agent.entries.dropFirst().first else { return XCTFail("\(agent.entries)") }
+        XCTAssertEqual(MarkdownBlocks.parse(text), [
+            .heading(level: 2, text: "What I did"),
+            .paragraph("Moved the hats, then:"),
+            .list([.init(depth: 0, ordered: false, number: 0, text: "Quieter by **3 dB**"), .init(depth: 0, ordered: false, number: 0, text: "Off the beat")]),
+            .code(language: "sh", text: "daw status .", closed: true),
+        ])
+        XCTAssertEqual(agent.entries.map(\.description).suffix(4), [
+            "tool Bash daw status . → ok b1",
+            "tool Bash daw map . → ok b2",
+            "tool Bash daw check . → ok b3",
+            "agent: Done.",
+        ])
+        let rows = AgentPanel.fold(agent.entries)
+        XCTAssertEqual(rows.count, 4)
+        guard case .tools(let tools) = rows[2] else { return XCTFail("\(rows[2])") }
+        XCTAssertEqual(tools.count, 3)
+        XCTAssertEqual(rows[2].id, tools[0].id)
+    }
+
+    func testToolsFoldOnlyInRuns() {
+        typealias E = AgentPanel.Entry
+        let tool = { (id: Int) in E.tool(id: id, use: "", name: "Bash", summary: "ls", result: nil, failed: false) }
+        XCTAssertEqual(AgentPanel.fold([.person(id: 1, text: "a"), tool(2), .agent(id: 3, text: "b"), tool(4), tool(5), .note(id: 6, text: "c"), tool(7), tool(8)]), [
+            .entry(.person(id: 1, text: "a")), .entry(tool(2)), .entry(.agent(id: 3, text: "b")), .tools([tool(4), tool(5)]),
+            .entry(.note(id: 6, text: "c")), .tools([tool(7), tool(8)]),
+        ])
+        XCTAssertEqual(AgentPanel.fold([]), [])
+    }
+
+    /// A thread renamed and deleted from the panel: the list is saved with
+    /// the name, the deleted thread stays out when Claude Code's own list
+    /// is merged again, and the one shown becomes a new conversation.
+    func testAThreadIsRenamedAndDeleted() throws {
+        let song = try workspaceAndProject()
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+        agent.send("first short")
+        wait("the first turn") { !agent.working }
+        let first = try XCTUnwrap(agent.currentID)
+        agent.newThread()
+        agent.send("second short")
+        wait("the second turn") { !agent.working }
+        let second = try XCTUnwrap(agent.currentID)
+
+        agent.rename(first, "  The hats \nmore")
+        XCTAssertEqual(agent.threads.map(\.title), ["second short", "The hats"])
+        agent.rename(first, " ")
+        XCTAssertEqual(agent.threads.map(\.title), ["second short", "The hats"], "an empty name is not taken")
+
+        agent.delete(second)
+        XCTAssertNil(agent.currentID)
+        XCTAssertEqual(agent.entries, [])
+        XCTAssertEqual(agent.threads.map(\.id), [first])
+        let folder = song.deletingLastPathComponent()
+        var list = ThreadList(project: folder)
+        XCTAssertEqual(list.removed, [second])
+        list.merge([ClaudeTranscripts.Session(id: second, title: "second short", modified: 1)])
+        XCTAssertEqual(list.entries.map(\.id), [first])
+        agent.refreshThreads()
+        XCTAssertEqual(agent.threads.map(\.id), [first])
+
+        // The next message starts a new thread; deleting the one shown
+        // while the agent works is refused.
+        agent.send("third short")
+        XCTAssertNotEqual(agent.currentID, second)
+        agent.delete(try XCTUnwrap(agent.currentID))
+        XCTAssertNotNil(agent.currentID, "refused while working")
+        wait("the third turn") { !agent.working }
+        XCTAssertEqual(agent.threads.count, 2)
     }
 
     func testSignedOutIsSaid() throws {

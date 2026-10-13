@@ -228,6 +228,27 @@ public final class SongModel {
     }
     /// The conversation with the agent in this project's window.
     let agent = AgentPanel()
+    /// The width of the column at the right, the agent panel and the
+    /// activity panel, which the person drags at its left edge: between
+    /// `sideWidths`, and kept between projects.
+    public var sideWidth: CGFloat = SongModel.sideWidth(UserDefaults.standard.object(forKey: "side.width") as? Double) {
+        didSet {
+            let held = Self.sideWidth(Double(sideWidth))
+            if held != sideWidth { sideWidth = held }
+            if sideWidth != oldValue { UserDefaults.standard.set(Double(sideWidth), forKey: "side.width") }
+        }
+    }
+
+    /// How narrow and how wide the column at the right can be dragged; its
+    /// width until it is dragged is `defaultSideWidth`.
+    public static let sideWidths: ClosedRange<CGFloat> = 280...640
+    public static let defaultSideWidth: CGFloat = 320
+
+    /// A width held to the range, or the default for none.
+    public static func sideWidth(_ wanted: Double?) -> CGFloat {
+        guard let wanted else { return defaultSideWidth }
+        return min(max(CGFloat(wanted), sideWidths.lowerBound), sideWidths.upperBound)
+    }
     /// The detail panel's height, which the person drags at its top edge:
     /// `leastDetailHeight` at the least, and kept between projects.
     public var detailHeight: CGFloat = max(SongModel.leastDetailHeight, CGFloat(UserDefaults.standard.double(forKey: "detail.height"))) {

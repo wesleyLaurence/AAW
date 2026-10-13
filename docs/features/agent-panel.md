@@ -83,19 +83,24 @@ A request still waiting when the conversation changes or the turn is stopped
 is refused.
 
 **Threads.** A project's conversations are in `.daw/threads.json` beside
-the song: each one's session ID, its title, the first line the person typed,
-and when it started and was last used, most recent first. The list goes with
+the song: each one's session ID, its title, the first line the person typed
+until renamed, and when it started and was last used, most recent first,
+and the IDs of the ones the person deleted. The list goes with
 the folder, so a move or a Save As… keeps it, and a copy made with Save As…
-has the same threads, which resume in the copy's folder. The menu at the
-panel's top lists them with New Conversation; choosing one shows it where it
-stopped, drawn from Claude Code's own record of it, under
+has the same threads, which resume in the copy's folder. The clock at the
+panel's top lists them in a popover, with Rename and Delete in each row's
+menu, and `+` beside it starts a new conversation; choosing one shows it
+where it stopped, drawn from Claude Code's own record of it, under
 `~/.claude/projects/` (or `CLAUDE_CONFIG_DIR`) in a folder named for the
 project's folder, every character that is not a letter or a digit made `-`;
 the next message resumes it. A session the person started in a terminal in
 the project's folder is in that record too, and is listed under its first
-message. Opening a project shows its most recent thread. One thread of a
-project runs at a time: while the agent works, changing conversations is
-refused with the reason, and Stop interrupts the turn.
+message, unless it was deleted in the panel. Opening a project shows its
+most recent thread. One thread of a
+project runs at a time: while the agent works, changing conversations and
+deleting the one shown are refused with the reason, and Stop interrupts
+the turn. How the rows, the field and the width are drawn is in
+[the agent panel's look](agent-panel-look.md).
 
 **Being missing or signed out.** With no Claude Code found, the panel says
 so and what to do. A session that ends saying it is not logged in, or whose
@@ -106,11 +111,12 @@ a terminal and sign in.
 
 | Part | Does |
 |---|---|
-| View › Agent, ⌥⌘C, the speech mark in the transport bar | Shows or hides the panel, 320 points at the right, over the activity panel when both show; kept between projects |
-| The menu at the panel's top | The project's conversations, most recent first, and New Conversation |
-| The field at the foot | Return sends; Option-Return starts a new line; Escape gives the keys back. The arrow is gray while the agent works |
+| View › Agent, ⌥⌘C, the speech mark in the transport bar | Shows or hides the panel, at the right, over the activity panel when both show; kept between projects. The line at its left edge drags its width from 280 to 640 points, 320 to start, kept too |
+| `+` and the clock at the panel's top | A new conversation; a popover of the project's conversations, most recent first, each with when it was last used, Rename and Delete in its menu |
+| The field at the foot | Grows to eight lines. Return sends; Shift-Return starts a new line; Escape gives the keys back. Send is gray while there is nothing to send or the agent works; `+` and the microphone wait for their items |
 | Stop, beside the spinner | Interrupts the turn; the agent says where it stopped |
-| A tool's row | Gray while it runs, a tick when it returned, a cross when it failed; a click shows or hides what it returned |
+| A tool's row | Gray while it runs, a tick when it returned, a cross when it failed; a click shows or hides what it returned. Two or more in a row are one line, "Ran 3 commands", that a click opens |
+| The "↓" pill | Shown once the person scrolls up from the end; the panel stops following the stream until they are back at the bottom, or press it |
 | Allow, Refuse | Answer a request; the card then says which, and the agent goes on |
 | `--ask TEXT` on the command line | Shows the panel and sends the text as a message; the picture waits for the turn to end, up to ten minutes, or until a request waits for a person |
 
@@ -124,14 +130,14 @@ a terminal and sign in.
   does: a command auto mode allows, or that the person has allowed in their
   settings, runs without a card. The mode is not chosen in the panel, and
   the app adds nothing to those settings.
-- The agent's text is shown with its inline markdown; code blocks and lists
-  are shown as typed.
+- The agent's text is drawn in blocks; tables are drawn as their lines in
+  monospace and images as links ([the look](agent-panel-look.md)).
 - A conversation's earlier messages are drawn from Claude Code's record of
   it; where that cannot be read, the panel says so and the conversation
   still resumes. A copy of a project made with Save As… lists the original's
   threads and draws them from the original folder's record.
-- A thread cannot be renamed or removed in the panel; `.daw/threads.json` can
-  be edited.
+- Delete takes a thread out of the project's list and keeps it out;
+  Claude Code's own record of it stays where it was.
 - The approval request's shape was taken from Claude Code's SDK; no card from
   a real session has been answered: see below.
 - **The engine is the developer's own.** The panel drives the Claude Code

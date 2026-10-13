@@ -31,12 +31,17 @@ struct ThreadList: Equatable {
 
     private struct File: Codable {
         var threads: [Entry]
+        /// The IDs of threads the person deleted, so that Claude Code's own
+        /// record of them, which stays, does not list them again.
+        var removed: [String]?
     }
 
     /// `.daw/threads.json` in the project's folder.
     let file: URL
     /// Most recent first.
     private(set) var entries: [Entry] = []
+    /// Deleted in the panel; left out when Claude Code's list is merged.
+    private(set) var removed: [String] = []
 
     static func file(project folder: URL) -> URL {
         folder.appendingPathComponent(".daw", isDirectory: true).appendingPathComponent("threads.json")
@@ -47,6 +52,7 @@ struct ThreadList: Equatable {
         self.file = file
         if let data = try? Data(contentsOf: file), let read = try? JSONDecoder().decode(File.self, from: data) {
             entries = read.threads
+            removed = read.removed ?? []
             sort()
         }
     }
@@ -71,6 +77,7 @@ struct ThreadList: Equatable {
             if entries[i].title.isEmpty { entries[i].title = title }
         } else {
             entries.append(Entry(id: id, title: title, started: now))
+            removed.removeAll { $0 == id }
         }
         sort()
     }
@@ -79,15 +86,19 @@ struct ThreadList: Equatable {
         if let i = entries.firstIndex(where: { $0.id == id }) { entries[i].title = title }
     }
 
+    /// Takes a thread out of the list, and keeps it out when Claude Code's
+    /// own record of it is merged again.
     mutating func remove(_ id: String) {
         entries.removeAll { $0.id == id }
+        if !removed.contains(id) { removed.append(id) }
     }
 
     /// Adds the threads of Claude Code's own list for the folder that this
     /// one lacks, such as one started in a terminal, titled by their first
-    /// message. Nothing the list has is changed.
+    /// message. Nothing the list has is changed, and a thread the person
+    /// deleted stays out.
     mutating func merge(_ found: [ClaudeTranscripts.Session]) {
-        for session in found where self[session.id] == nil {
+        for session in found where self[session.id] == nil && !removed.contains(session.id) {
             entries.append(Entry(id: session.id, title: session.title, started: session.modified, last: session.modified))
         }
         sort()
@@ -97,7 +108,7 @@ struct ThreadList: Equatable {
         try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(File(threads: entries)).write(to: file, options: .atomic)
+        try encoder.encode(File(threads: entries, removed: removed.isEmpty ? nil : removed)).write(to: file, options: .atomic)
     }
 
     /// A thread's title from the person's first message: its first line, cut
