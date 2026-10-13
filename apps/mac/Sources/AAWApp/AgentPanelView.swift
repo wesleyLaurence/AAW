@@ -2,49 +2,39 @@ import AAWCore
 import AppKit
 import SwiftUI
 
-/// The agent panel: the project's threads in a menu at the top, the
-/// conversation shown as it streams, each tool the agent runs with its
-/// result, each request waiting for the person, and the field the person
-/// types in at the foot.
+/// The agent panel: the conversation's title and the project's threads at
+/// the top, the conversation shown as it streams, the person's words in a
+/// bubble and the agent's in blocks, the tools it runs folded into a row,
+/// each request waiting for the person, and the field at the foot.
 struct AgentPanelView: View {
     let model: SongModel
+
+    /// The conversation at 13 points, the tools and notes at 11.
+    static let textSize: CGFloat = 13
+    static let smallSize: CGFloat = 11
+    /// The fill of a code block, and of a command on a card.
+    static let codeFill = Color(nsColor: Theme.gray(0.09))
 
     var body: some View {
         let agent = model.agent
         VStack(alignment: .leading, spacing: 0) {
-            header(agent)
+            Header(agent: agent)
             Divider()
             if agent.entries.isEmpty {
                 Text(hint(agent))
-                    .font(.system(size: 12))
+                    .font(.system(size: Self.textSize))
                     .foregroundStyle(.secondary)
-                    .padding(12)
+                    .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 Spacer(minLength: 0)
             } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(agent.entries) { entry in
-                                EntryRow(agent: agent, entry: entry)
-                                    .id(entry.id)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .onChange(of: agent.entries.last) {
-                        if let last = agent.entries.last { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                    .onAppear {
-                        if let last = agent.entries.last { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
+                Conversation(agent: agent)
             }
             if let trouble = trouble(agent) {
                 Divider()
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-                    Text(trouble).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(trouble).font(.system(size: Self.smallSize)).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 12)
@@ -57,47 +47,6 @@ struct AgentPanelView: View {
         .background(Color(nsColor: Theme.gray(0.14)))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Agent")
-    }
-
-    private func header(_ agent: AgentPanel) -> some View {
-        HStack(spacing: 8) {
-            Menu {
-                Button("New Conversation") { agent.newThread() }
-                if !agent.threads.isEmpty { Divider() }
-                ForEach(agent.threads) { thread in
-                    Toggle(isOn: Binding(get: { agent.currentID == thread.id }, set: { if $0 { agent.open(thread.id) } })) {
-                        Text(thread.title.isEmpty ? "Untitled conversation" : thread.title)
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(agent.current.map { $0.title.isEmpty ? "Untitled conversation" : $0.title } ?? "New conversation")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold)).foregroundStyle(.secondary)
-                }
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize(horizontal: false, vertical: true)
-            .help("This project's conversations with the agent. Choose one to go on with it, or start a new one.")
-            .accessibilityLabel("Conversation")
-            Spacer(minLength: 0)
-            if agent.working {
-                ProgressView().controlSize(.mini)
-                Button {
-                    agent.stop()
-                } label: {
-                    Image(systemName: "stop.circle").font(.system(size: 13))
-                }
-                .buttonStyle(.borderless)
-                .help("Stop the agent's turn")
-                .accessibilityLabel("Stop")
-            }
-        }
-        .padding(.horizontal, 12)
-        .frame(height: TimelineLayout.rulerHeight - 1)
     }
 
     private func hint(_ agent: AgentPanel) -> String {
@@ -119,81 +68,473 @@ struct AgentPanelView: View {
         case .unknown, .ready: nil
         }
     }
+
+    /// The agent's inline markdown read, each line kept.
+    static func inline(_ text: String) -> AttributedString {
+        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+    }
 }
 
-/// The field the person types in, with Send. Return sends; Option-Return
-/// starts a new line.
-private struct Composer: View {
+// MARK: The header
+
+/// The conversation's title, Stop while the agent works, `+` for a new
+/// conversation and the clock that lists the project's conversations.
+private struct Header: View {
     let agent: AgentPanel
-    let model: SongModel
-    @FocusState private var focused: Bool
+    @State private var showsThreads = false
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Ask the agent…", text: Binding(get: { agent.draft }, set: { agent.draft = $0 }), axis: .vertical)
-                .textFieldStyle(.plain)
-                .lineLimit(1...6)
-                .font(.system(size: 12))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
-                .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 5))
-                .focused($focused)
-                .onSubmit { agent.send() }
-                .onExitCommand { focused = false; model.onFocus?() }
-                .accessibilityLabel("Message to the agent")
-                .help("What to ask or change. Return sends; Option-Return starts a new line.")
+        HStack(spacing: 6) {
+            Text(agent.current.map { $0.title.isEmpty ? "Untitled conversation" : $0.title } ?? "New conversation")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityLabel("Conversation")
+            Spacer(minLength: 0)
+            if agent.working {
+                ProgressView().controlSize(.mini)
+                Button {
+                    agent.stop()
+                } label: {
+                    Image(systemName: "stop.circle").font(.system(size: 14))
+                }
+                .buttonStyle(.borderless)
+                .help("Stop the agent's turn")
+                .accessibilityLabel("Stop")
+            }
             Button {
-                agent.send()
+                agent.newThread()
             } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 20))
+                Image(systemName: "plus").font(.system(size: 13, weight: .medium))
             }
             .buttonStyle(.borderless)
-            .disabled(agent.working || agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .help("Send (Return)")
-            .accessibilityLabel("Send")
+            .help("New conversation")
+            .accessibilityLabel("New conversation")
+            Button {
+                showsThreads.toggle()
+            } label: {
+                Image(systemName: "clock").font(.system(size: 13, weight: .medium))
+            }
+            .buttonStyle(.borderless)
+            .help("This project's conversations")
+            .accessibilityLabel("Conversations")
+            .popover(isPresented: $showsThreads, arrowEdge: .bottom) {
+                ThreadsList(agent: agent, dismiss: { showsThreads = false })
+            }
         }
-        .padding(10)
+        .padding(.horizontal, 12)
+        .frame(height: TimelineLayout.rulerHeight - 1)
+    }
+}
+
+/// The project's conversations, most recent first, each with when it was
+/// last used, and Rename and Delete in its menu.
+private struct ThreadsList: View {
+    let agent: AgentPanel
+    let dismiss: () -> Void
+    @State private var renaming: String?
+    @State private var name = ""
+
+    private static let when: RelativeDateTimeFormatter = {
+        let f = RelativeDateTimeFormatter()
+        f.unitsStyle = .short
+        return f
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if agent.threads.isEmpty {
+                Text("No conversations yet.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .padding(12)
+            }
+            ForEach(agent.threads) { thread in
+                row(thread)
+            }
+        }
+        .frame(width: 280)
+        .padding(.vertical, 6)
+    }
+
+    private func row(_ thread: ThreadList.Entry) -> some View {
+        let current = agent.currentID == thread.id
+        return HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                if renaming == thread.id {
+                    TextField("Title", text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: 12))
+                        .onSubmit {
+                            agent.rename(thread.id, name)
+                            renaming = nil
+                        }
+                        .onExitCommand { renaming = nil }
+                } else {
+                    Text(thread.title.isEmpty ? "Untitled conversation" : thread.title)
+                        .font(.system(size: 12, weight: current ? .semibold : .regular))
+                        .lineLimit(1)
+                }
+                Text(Self.when.localizedString(for: Date(timeIntervalSince1970: thread.last), relativeTo: Date()))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            Menu {
+                Button("Rename") {
+                    name = thread.title
+                    renaming = thread.id
+                }
+                Button("Delete") {
+                    agent.delete(thread.id)
+                }
+            } label: {
+                Image(systemName: "ellipsis").font(.system(size: 12))
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Conversation menu")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
+        .background(current ? Color(nsColor: Theme.selectedRow) : Color.clear)
+        .onTapGesture {
+            guard renaming == nil else { return }
+            agent.open(thread.id)
+            dismiss()
+        }
+    }
+}
+
+// MARK: The conversation
+
+/// The rows as they stream. The view follows the stream while the person is
+/// at the bottom and stops once they scroll up, with a pill to go back.
+private struct Conversation: View {
+    let agent: AgentPanel
+    @State private var following = true
+    /// When the view last scrolled by itself, so that the jump is not read
+    /// as the person scrolling up.
+    @State private var autoScrolled = Date.distantPast
+    @State private var viewport: CGFloat = 0
+
+    /// How near the bottom still counts as at it.
+    private static let nearBottom: CGFloat = 60
+    private static let bottom = "bottom"
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(AgentPanel.fold(agent.entries)) { row in
+                        RowView(agent: agent, row: row, streaming: agent.streamingID).equatable()
+                    }
+                    Color.clear.frame(height: 1).id(Self.bottom)
+                }
+                .padding(.vertical, 10)
+                .background(GeometryReader { g in
+                    let maxY = g.frame(in: .named("conversation")).maxY
+                    Color.clear.onChange(of: maxY, initial: true) { _, maxY in saw(bottom: maxY) }
+                })
+            }
+            .coordinateSpace(name: "conversation")
+            .background(GeometryReader { g in
+                Color.clear.onChange(of: g.size.height, initial: true) { _, height in viewport = height }
+            })
+            .onChange(of: agent.entries) {
+                guard following else { return }
+                autoScrolled = Date()
+                proxy.scrollTo(Self.bottom, anchor: .bottom)
+            }
+            .onAppear {
+                autoScrolled = Date()
+                proxy.scrollTo(Self.bottom, anchor: .bottom)
+            }
+            .overlay(alignment: .bottom) {
+                if !following {
+                    Button {
+                        following = true
+                        autoScrolled = Date()
+                        withAnimation { proxy.scrollTo(Self.bottom, anchor: .bottom) }
+                    } label: {
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 12, weight: .semibold))
+                            .frame(width: 28, height: 28)
+                            .background(Color(nsColor: Theme.header), in: Circle())
+                            .overlay(Circle().stroke(Color.white.opacity(0.12)))
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.bottom, 10)
+                    .help("Back to the latest")
+                    .accessibilityLabel("Scroll to the end")
+                }
+            }
+        }
+    }
+
+    /// The content's foot moved: at the bottom, or near it, the view
+    /// follows the stream; further up, unless the view itself just
+    /// scrolled, the person scrolled up and it stops.
+    private func saw(bottom maxY: CGFloat) {
+        let distance = maxY - viewport
+        if distance <= Self.nearBottom {
+            following = true
+        } else if Date().timeIntervalSince(autoScrolled) > 0.5 {
+            following = false
+        }
     }
 }
 
 /// One row of the conversation.
-private struct EntryRow: View {
+private struct RowView: View, Equatable {
     let agent: AgentPanel
+    let row: AgentPanel.Row
+    let streaming: Int?
+
+    nonisolated static func == (a: RowView, b: RowView) -> Bool { a.row == b.row && a.streaming == b.streaming }
+
+    var body: some View {
+        switch row {
+        case .tools(let tools):
+            ToolsRow(tools: tools)
+        case .entry(let entry):
+            switch entry {
+            case .person(_, let text):
+                PersonRow(text: text)
+            case .agent(let id, let text):
+                AgentRow(text: text, streaming: streaming == id)
+            case .tool:
+                ToolLine(entry: entry)
+                    .padding(.horizontal, 12)
+            case .approval(_, let request, let summary, let allowed):
+                ApprovalCard(agent: agent, request: request, summary: summary, allowed: allowed)
+            case .note(_, let text):
+                Text(text)
+                    .font(.system(size: AgentPanelView.smallSize))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 12)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+}
+
+/// The person's words on a rounded fill in their color, set in from the left.
+private struct PersonRow: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Spacer(minLength: 36)
+            Text(text)
+                .font(.system(size: AgentPanelView.textSize))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Who.user.color.opacity(0.18), in: RoundedRectangle(cornerRadius: 12))
+        }
+        .padding(.horizontal, 12)
+        .accessibilityLabel("You")
+    }
+}
+
+/// The agent's text in blocks, with a cursor at the end while it streams.
+private struct AgentRow: View {
+    let text: String
+    let streaming: Bool
+    @State private var blink = false
+
+    var body: some View {
+        let blocks = MarkdownBlocks.parse(text)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                BlockView(block: block)
+            }
+            if streaming {
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Who.agent.color)
+                    .frame(width: 2, height: 14)
+                    .opacity(blink ? 0.2 : 1)
+                    .onAppear { withAnimation(.easeInOut(duration: 0.6).repeatForever()) { blink = true } }
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityLabel("Agent")
+    }
+}
+
+/// One block of the agent's text.
+private struct BlockView: View {
+    let block: MarkdownBlock
+
+    var body: some View {
+        switch block {
+        case .paragraph(let text):
+            Text(AgentPanelView.inline(text))
+                .font(.system(size: AgentPanelView.textSize))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        case .heading(let level, let text):
+            Text(AgentPanelView.inline(text))
+                .font(.system(size: level == 1 ? 17 : level == 2 ? 15 : AgentPanelView.textSize, weight: .semibold))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+        case .list(let items):
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(item.ordered ? "\(item.number)." : item.depth == 0 ? "•" : "◦")
+                            .font(.system(size: AgentPanelView.textSize))
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 14, alignment: .trailing)
+                        Text(AgentPanelView.inline(item.text))
+                            .font(.system(size: AgentPanelView.textSize))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.leading, CGFloat(item.depth) * 16)
+                }
+            }
+        case .code(_, let text, _):
+            CodeBlock(text: text)
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 8) {
+                RoundedRectangle(cornerRadius: 1).fill(Color.secondary.opacity(0.5)).frame(width: 2)
+                Text(AgentPanelView.inline(text))
+                    .font(.system(size: AgentPanelView.textSize))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        case .rule:
+            Divider().padding(.vertical, 2)
+        case .table(let text):
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(text)
+                    .font(.system(size: AgentPanelView.smallSize, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize()
+            }
+        }
+    }
+}
+
+/// Fenced code on a darker fill, in monospace, with Copy at its corner.
+private struct CodeBlock: View {
+    let text: String
+    @State private var copied = false
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize()
+                    .padding(10)
+                    .padding(.trailing, 20)
+            }
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(text, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copied = false }
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .padding(4)
+            .help("Copy")
+            .accessibilityLabel("Copy")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AgentPanelView.codeFill, in: RoundedRectangle(cornerRadius: 6))
+    }
+}
+
+/// Two or more tools in a row, folded into one line that opens.
+private struct ToolsRow: View {
+    let tools: [AgentPanel.Entry]
+    @State private var open = false
+
+    var body: some View {
+        let results = tools.compactMap { if case .tool(_, _, _, _, let result, _) = $0 { result } else { nil } }
+        let running = results.count < tools.count
+        let failed = tools.contains { if case .tool(_, _, _, _, _, true) = $0 { true } else { false } }
+        let commands = tools.allSatisfy { if case .tool(_, _, "Bash", _, _, _) = $0 { true } else { false } }
+        let last = tools.last.map { if case .tool(_, _, let name, let summary, _, _) = $0 { name == "Bash" ? summary : "\(name) \(summary)" } else { "" } } ?? ""
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                ToolMark(running: running, failed: failed)
+                Text(running ? "\(commands ? "Running" : "Using") \(tools.count) \(commands ? "commands" : "tools")" : "\(commands ? "Ran" : "Used") \(tools.count) \(commands ? "commands" : "tools")")
+                    .font(.system(size: AgentPanelView.smallSize))
+                    .foregroundStyle(.secondary)
+                if !open {
+                    Text(last)
+                        .font(.system(size: AgentPanelView.smallSize, design: .monospaced))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: open ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { open.toggle() }
+            .help(open ? "Hide the tools" : "Show each tool")
+            if open {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(tools) { tool in
+                        ToolLine(entry: tool)
+                    }
+                }
+                .padding(.leading, 16)
+            }
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Tools")
+    }
+}
+
+private struct ToolMark: View {
+    let running: Bool
+    let failed: Bool
+
+    var body: some View {
+        Image(systemName: failed ? "xmark.circle" : running ? "circle.dotted" : "checkmark.circle")
+            .font(.system(size: 10))
+            .foregroundStyle(failed ? Color.red : Color.secondary)
+    }
+}
+
+/// One tool: gray while it runs, a tick or a cross after, and a click shows
+/// what it returned.
+private struct ToolLine: View {
     let entry: AgentPanel.Entry
     @State private var expanded = false
 
     var body: some View {
-        switch entry {
-        case .person(_, let text):
-            VStack(alignment: .leading, spacing: 4) {
-                chip("you", Who.user.color)
-                Text(text)
-                    .font(.system(size: 12))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .agent(_, let text):
-            VStack(alignment: .leading, spacing: 4) {
-                chip("agent", Who.agent.color)
-                Text(Self.markdown(text))
-                    .font(.system(size: 12))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        case .tool(_, _, let name, let summary, let result, let failed):
+        if case .tool(_, _, let name, let summary, let result, let failed) = entry {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: failed ? "xmark.circle" : result == nil ? "circle.dotted" : "checkmark.circle")
-                        .font(.system(size: 10))
-                        .foregroundStyle(failed ? Color.red : Color.secondary)
+                    ToolMark(running: result == nil, failed: failed)
                     Text(name == "Bash" ? summary : "\(name) \(summary)")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: AgentPanelView.smallSize, design: .monospaced))
                         .foregroundStyle(.secondary)
                         .lineLimit(expanded ? nil : 2)
                         .textSelection(.enabled)
@@ -208,61 +549,111 @@ private struct EntryRow: View {
                         .padding(.leading, 16)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 4)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .onTapGesture { expanded.toggle() }
             .help(result == nil ? "Running" : "Click to show or hide what it returned")
-        case .approval(_, let request, let summary, let allowed):
-            VStack(alignment: .leading, spacing: 6) {
-                Text(allowed == nil ? "The agent asks to run this:" : allowed == true ? "Allowed:" : "Refused:")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(allowed == nil ? Color.orange : Color.secondary)
-                Text(summary)
-                    .font(.system(size: 11, design: .monospaced))
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-                if allowed == nil {
-                    HStack(spacing: 8) {
-                        Button("Allow") { agent.answer(request, allow: true) }
-                            .keyboardShortcut(.defaultAction)
-                        Button("Refuse") { agent.answer(request, allow: false) }
-                    }
-                    .controlSize(.small)
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(allowed == nil ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 6))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("Approval")
-        case .note(_, let text):
-            Text(text)
-                .font(.system(size: 11))
-                .italic()
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
 
-    private func chip(_ name: String, _ color: Color) -> some View {
-        Text(name)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundStyle(Color.black.opacity(0.8))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(color, in: RoundedRectangle(cornerRadius: 3))
+/// A request the person answers: the command on the code block's fill,
+/// Allow in the accent color.
+private struct ApprovalCard: View {
+    let agent: AgentPanel
+    let request: String
+    let summary: String
+    let allowed: Bool?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(allowed == nil ? "The agent asks to run this:" : allowed == true ? "Allowed:" : "Refused:")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(allowed == nil ? Color.orange : Color.secondary)
+            Text(summary)
+                .font(.system(size: 12, design: .monospaced))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(AgentPanelView.codeFill, in: RoundedRectangle(cornerRadius: 6))
+            if allowed == nil {
+                HStack(spacing: 8) {
+                    Button("Allow") { agent.answer(request, allow: true) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Color(nsColor: Theme.insertion))
+                        .keyboardShortcut(.defaultAction)
+                    Button("Refuse") { agent.answer(request, allow: false) }
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(allowed == nil ? 0.12 : 0.04), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Approval")
     }
+}
 
-    /// The agent's text with its inline markdown read, each paragraph kept.
-    static func markdown(_ text: String) -> AttributedString {
-        (try? AttributedString(markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(text)
+// MARK: The field
+
+/// The field the person types in, in a rounded well with the controls at
+/// its right: `+` for attachments and the microphone, which the next items
+/// build, and Send. Return sends; Shift-Return starts a new line.
+private struct Composer: View {
+    let agent: AgentPanel
+    let model: SongModel
+    @State private var height: CGFloat = ComposerTextView.fontSize + 4 + ComposerTextView.inset.height * 2
+
+    var body: some View {
+        let empty = agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .bottom, spacing: 2) {
+                ComposerField(agent: agent, model: model, height: $height)
+                    .frame(height: height)
+                    .accessibilityLabel("Message to the agent")
+                    .help("What to ask or change. Return sends; Shift-Return starts a new line.")
+                Button {} label: {
+                    Image(systemName: "plus.circle").font(.system(size: 17))
+                }
+                .buttonStyle(.borderless)
+                .disabled(true)
+                .help("Files and clips in the conversation: not built yet")
+                .accessibilityLabel("Attach")
+                Button {} label: {
+                    Image(systemName: "mic").font(.system(size: 15))
+                }
+                .buttonStyle(.borderless)
+                .disabled(true)
+                .help("Speaking to the agent: not built yet")
+                .accessibilityLabel("Microphone")
+                Button {
+                    agent.send()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(agent.working || empty ? Color.secondary : Who.user.color)
+                }
+                .buttonStyle(.borderless)
+                .disabled(agent.working || empty)
+                .help("Send (Return)")
+                .accessibilityLabel("Send")
+                .padding(.trailing, 2)
+            }
+            .padding(.leading, 6)
+            .padding(.trailing, 4)
+            .padding(.vertical, 3)
+            .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08)))
+            if agent.entries.isEmpty {
+                Text("Return sends · Shift-Return starts a new line")
+                    .font(.system(size: AgentPanelView.smallSize))
+                    .foregroundStyle(Color(nsColor: Theme.faintText))
+                    .padding(.leading, 4)
+            }
+        }
+        .padding(10)
     }
 }

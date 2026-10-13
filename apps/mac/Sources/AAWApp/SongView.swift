@@ -7,10 +7,6 @@ import SwiftUI
 struct SongView: View {
     let model: SongModel
 
-    /// The width of the column at the right, the agent panel and the
-    /// activity panel.
-    static let sideWidth: CGFloat = 320
-
     var body: some View {
         VStack(spacing: 0) {
             TransportBar(model: model)
@@ -42,7 +38,9 @@ struct SongView: View {
                     }
                 }
                 if model.showsAgent || model.showsActivity {
-                    Divider()
+                    // The line the column's width is dragged at.
+                    SideResizer(model: model)
+                        .frame(width: SideResizerView.thickness)
                     // The agent's conversation over the activity, which is
                     // what its commands do.
                     VStack(spacing: 0) {
@@ -57,7 +55,7 @@ struct SongView: View {
                                 .frame(height: model.showsAgent ? 220 : nil)
                         }
                     }
-                    .frame(width: Self.sideWidth)
+                    .frame(width: model.sideWidth)
                 }
             }
             // Over the arrangement, so that a refused edit does not move what
@@ -133,6 +131,66 @@ final class DetailResizerView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         Theme.separator.setFill()
         CGRect(x: bounds.minX, y: bounds.midY.rounded() - 0.5, width: bounds.width, height: 1).fill()
+    }
+}
+
+/// The line between the arrangement and the column at the right, which is
+/// dragged to make the agent and activity panels wider or narrower.
+private struct SideResizer: NSViewRepresentable {
+    let model: SongModel
+
+    func makeNSView(context: Context) -> SideResizerView {
+        SideResizerView(model: model)
+    }
+
+    func updateNSView(_ view: SideResizerView, context: Context) {}
+}
+
+final class SideResizerView: NSView {
+    private let model: SongModel
+    private var start: (x: CGFloat, width: CGFloat)?
+
+    /// How wide the strip is to take hold of.
+    static let thickness: CGFloat = 5
+    /// The least the arrangement keeps beside the column.
+    static let leastArrangement: CGFloat = 400
+
+    init(model: SongModel) {
+        self.model = model
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("not used")
+    }
+
+    override var intrinsicContentSize: NSSize { NSSize(width: Self.thickness, height: NSView.noIntrinsicMetric) }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .resizeLeftRight)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        start = (event.locationInWindow.x, model.sideWidth)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start, let content = window?.contentView else { return }
+        // Left is a wider column.
+        let width = start.width - (event.locationInWindow.x - start.x)
+        let most = content.bounds.width - Self.leastArrangement
+        model.sideWidth = min(width, max(most, SongModel.sideWidths.lowerBound))
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        start = nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        Theme.separator.setFill()
+        CGRect(x: bounds.midX.rounded() - 0.5, y: bounds.minY, width: 1, height: bounds.height).fill()
     }
 }
 

@@ -25,6 +25,41 @@ final class AgentPanel {
             case .person(let id, _), .agent(let id, _), .tool(let id, _, _, _, _, _), .approval(let id, _, _, _), .note(let id, _): id
             }
         }
+
+        var isTool: Bool {
+            if case .tool = self { return true }
+            return false
+        }
+    }
+
+    /// A row of the panel: an entry, or a run of tools folded into one.
+    enum Row: Identifiable, Equatable {
+        case entry(Entry)
+        /// Two or more tools in a row, with no words between them.
+        case tools([Entry])
+
+        var id: Int {
+            switch self {
+            case .entry(let entry): entry.id
+            case .tools(let entries): entries.first?.id ?? 0
+            }
+        }
+    }
+
+    /// The entries as rows: consecutive tools are one row, and one tool
+    /// stays one row.
+    static func fold(_ entries: [Entry]) -> [Row] {
+        var rows: [Row] = []
+        var run: [Entry] = []
+        func flush() {
+            if run.count == 1 { rows.append(.entry(run[0])) } else if run.count > 1 { rows.append(.tools(run)) }
+            run = []
+        }
+        for entry in entries {
+            if entry.isTool { run.append(entry) } else { flush(); rows.append(.entry(entry)) }
+        }
+        flush()
+        return rows
     }
 
     /// Whether the person's Claude Code can be used.
@@ -48,6 +83,8 @@ final class AgentPanel {
     /// Whether the agent is on a turn.
     private(set) var working = false
     private(set) var status = Status.unknown
+    /// The entry whose text is streaming in, for the cursor at its end.
+    private(set) var streamingID: Int?
     /// What the person is typing.
     var draft = ""
 
@@ -175,7 +212,25 @@ final class AgentPanel {
     }
 
     func rename(_ id: String, _ title: String) {
+        let title = ThreadList.title(from: title)
+        guard !title.isEmpty else { return }
         saveThreads { $0.rename(id, title) }
+    }
+
+    /// Takes a thread out of the project's list; Claude Code's own record
+    /// of it stays. The panel shows a new conversation if it was the one
+    /// shown.
+    func delete(_ id: String) {
+        if id == currentID {
+            guard !working else {
+                song?.refuse("The agent is still working; wait for it, or press Stop, before deleting this conversation")
+                return
+            }
+            endProcess()
+            currentID = nil
+            entries = []
+        }
+        saveThreads { $0.remove(id) }
     }
 
     /// The thread shown.
@@ -315,6 +370,7 @@ final class AgentPanel {
                     let id = next()
                     entries.append(.agent(id: id, text: ""))
                     streaming = entries.count - 1
+                    streamingID = id
                     if let message { streamed.insert(message) }
                 }
             case "content_block_delta":
@@ -324,6 +380,7 @@ final class AgentPanel {
                 }
             case "content_block_stop":
                 streaming = nil
+                streamingID = nil
             default:
                 break
             }
@@ -381,6 +438,7 @@ final class AgentPanel {
         case "result":
             working = false
             streaming = nil
+            streamingID = nil
             // A request still waiting at the turn's end, after a stop, is refused.
             for (request, _) in pending { decided(request, allowed: false) }
             if let song { lastTurnRevision = song.arrangement.revision }
@@ -421,6 +479,8 @@ final class AgentPanel {
         }
         if working {
             working = false
+            streaming = nil
+            streamingID = nil
             if let song { lastTurnRevision = song.arrangement.revision }
         }
         for (request, _) in pending { decided(request, allowed: false) }
