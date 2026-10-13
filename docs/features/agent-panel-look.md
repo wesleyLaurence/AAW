@@ -12,8 +12,10 @@ assumes it, and nothing in the window is named or drawn as Claude's.
 ## What
 
 Nothing the panel does changed; how it reads did. The three items after
-this one, a skill chosen with `/` ([skill commands](skill-commands.md),
-built), files dropped in and the microphone, each add something to the
+this one, a skill chosen with `/` ([skill commands](skill-commands.md)),
+files dropped in ([files and clips in the
+conversation](agent-attachments.md)) and the microphone ([speaking to the
+agent](voice-input.md)), all built since, each add something to the
 field at the foot, so the field was rebuilt here first as an AppKit text
 view they build into, with their two controls already in it, gray.
 
@@ -58,9 +60,9 @@ dashes, since the person types commands. Return and Enter send; Shift-Return
 starts a new line; Escape gives the keys back to the arrangement. A
 composition under way with an input method takes Return itself. At the
 well's right, `+` for attachments ([files and clips in the
-conversation](agent-attachments.md), built after this), the microphone,
-gray until its item is built, and Send, gray until there is something to
-send and while the agent works. Under the well, in the faint color, "Return sends ·
+conversation](agent-attachments.md), built after this), the microphone
+([speaking to the agent](voice-input.md), built after this too), and
+Send, gray until there is something to send and while the agent works. Under the well, in the faint color, "Return sends ·
 Shift-Return starts a new line", until the conversation has a row.
 Option-Return no longer breaks the line.
 

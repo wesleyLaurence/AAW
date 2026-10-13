@@ -77,7 +77,7 @@ Proposed, in the order of Next in the backlog:
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
 | [files and clips in the conversation](features/agent-attachments.md) | Built |
-| [speaking to the agent](features/voice-input.md) | Next |
+| [speaking to the agent](features/voice-input.md) | Built |
 | [stem separation](features/stem-separation.md) | Next |
 | [generated audio](features/generated-audio.md) | Next |
 | [the `.aaw` project file](features/project-file.md) | Later › Shipping |

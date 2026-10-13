@@ -528,6 +528,162 @@ final class AgentPanelTests: XCTestCase {
         try FileManager.default.removeItem(at: record.deletingLastPathComponent())
     }
 
+    /// A transcriber the test speaks through, a word at a time.
+    @MainActor
+    final class HandTranscriber: Transcriber {
+        var availability: Availability = .ready
+        var heard: (@MainActor (String, Bool) -> Void)?
+        var level: (@MainActor (Float) -> Void)?
+        var ended: (@MainActor (String?) -> Void)?
+        var said = ""
+        var starts = 0
+        var stops = 0
+
+        func start(heard: @escaping @MainActor (String, Bool) -> Void, level: @escaping @MainActor (Float) -> Void,
+                   ended: @escaping @MainActor (String?) -> Void) {
+            starts += 1
+            said = ""
+            (self.heard, self.level, self.ended) = (heard, level, ended)
+        }
+
+        /// The recognizer's next hypothesis: the whole so far.
+        func say(_ text: String, final: Bool = false) {
+            said = text
+            level?(0.7)
+            heard?(text, final)
+            if final { end() }
+        }
+
+        func stop() {
+            stops += 1
+            heard?(said, true)
+            end()
+        }
+
+        private func end() {
+            guard let ended else { return }
+            (heard, level, self.ended) = (nil, nil, nil)
+            ended(nil)
+        }
+    }
+
+    /// Speaking into the field: the words go on after what was typed as
+    /// they come, the tail uncertain until the next word; Return while
+    /// listening stops and sends nothing, then sends; Escape takes the
+    /// spoken words out; typing stops it; a pause stops it; and what
+    /// cannot listen refuses with its reason.
+    func testSpeakingFillsTheField() throws {
+        let song = try workspaceAndProject()
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+        let hand = HandTranscriber()
+        agent.transcriber = hand
+        XCTAssertNil(agent.speechTrouble)
+
+        // After typed text, with a space between; the last word uncertain.
+        agent.draft = "please"
+        agent.toggleListening()
+        XCTAssertTrue(agent.listening)
+        XCTAssertEqual(hand.starts, 1)
+        XCTAssertEqual(agent.draft, "please")
+        hand.say("move")
+        XCTAssertEqual(agent.draft, "please move")
+        XCTAssertEqual(agent.inputLevel, 0.7)
+        XCTAssertEqual(agent.uncertainRange, NSRange(location: "please ".utf16.count, length: 4))
+        hand.say("move the")
+        XCTAssertEqual(agent.uncertainRange, NSRange(location: "please move ".utf16.count, length: 3))
+        hand.say("move the hats")
+        XCTAssertEqual(agent.draft, "please move the hats")
+        XCTAssertEqual(agent.uncertainRange, NSRange(location: "please move the ".utf16.count, length: 4))
+        hand.say("move the hats off the beat.", final: true)
+        XCTAssertFalse(agent.listening)
+        XCTAssertEqual(agent.draft, "please move the hats off the beat.")
+        XCTAssertNil(agent.uncertainRange)
+        XCTAssertEqual(agent.inputLevel, 0)
+
+        // Return while listening stops it and sends nothing; the next sends.
+        agent.draft = ""
+        agent.toggleListening()
+        hand.say("move the")
+        agent.send()
+        XCTAssertEqual(hand.stops, 1)
+        XCTAssertFalse(agent.listening)
+        XCTAssertFalse(agent.working)
+        XCTAssertEqual(agent.entries, [])
+        XCTAssertEqual(agent.draft, "move the")
+        agent.draft += " short"
+        agent.send()
+        XCTAssertTrue(agent.working)
+        XCTAssertEqual(agent.entries.first?.description, "you: move the short")
+        wait("the turn") { !agent.working }
+
+        // Escape takes the spoken words out and leaves what was typed, and
+        // what the recognizer still says is dropped.
+        agent.draft = "quieter"
+        agent.toggleListening()
+        hand.say("move")
+        XCTAssertTrue(agent.cancelListening())
+        XCTAssertFalse(agent.listening)
+        XCTAssertEqual(hand.stops, 2)
+        XCTAssertEqual(agent.draft, "quieter")
+        XCTAssertNil(agent.uncertainRange)
+        XCTAssertFalse(agent.cancelListening(), "nothing to cancel")
+        agent.draft = ""
+
+        // Typing while listening stops it, keeping what was typed.
+        agent.toggleListening()
+        hand.say("move")
+        agent.draft = "move it"
+        XCTAssertFalse(agent.listening)
+        XCTAssertEqual(hand.stops, 3)
+        XCTAssertEqual(agent.draft, "move it")
+        agent.draft = ""
+
+        // A pause of a few seconds stops it.
+        agent.pauseAfterWords = 0.1
+        agent.toggleListening()
+        hand.say("move")
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertTrue(agent.listening, "not yet")
+        wait("the pause") { !agent.listening }
+        XCTAssertEqual(hand.stops, 4)
+        XCTAssertEqual(agent.draft, "move")
+        agent.draft = ""
+
+        // The microphone's button stops it too; the next click listens again.
+        agent.pauseAfterWords = 3
+        agent.toggleListening()
+        hand.say("move")
+        agent.toggleListening()
+        XCTAssertFalse(agent.listening)
+        XCTAssertEqual(agent.draft, "move")
+        agent.toggleListening()
+        XCTAssertTrue(agent.listening)
+        XCTAssertEqual(hand.starts, 7)
+        hand.say("on")
+        XCTAssertEqual(agent.draft, "move on")
+        agent.stopListening()
+        agent.draft = ""
+
+        // What cannot listen refuses, and says why.
+        agent.transcriber = FileTranscriber(file: scratch.appendingPathComponent("none.txt"))
+        XCTAssertEqual(agent.speechTrouble, "This Mac has no speech recognizer")
+        agent.toggleListening()
+        XCTAssertFalse(agent.listening)
+        XCTAssertEqual(model.refusal, "This Mac has no speech recognizer")
+
+        // The stand-in a scripted run names fills the field by itself.
+        let file = scratch.appendingPathComponent("said.txt")
+        try "move the hats off the beat".write(to: file, atomically: true, encoding: .utf8)
+        let standIn = FileTranscriber(file: file)
+        standIn.interval = 0.01
+        agent.transcriber = standIn
+        agent.toggleListening()
+        wait("the words") { !agent.listening }
+        XCTAssertEqual(agent.draft, "move the hats off the beat")
+    }
+
     func testToolsFoldOnlyInRuns() {
         typealias E = AgentPanel.Entry
         let tool = { (id: Int) in E.tool(id: id, use: "", name: "Bash", summary: "ls", result: nil, failed: false) }

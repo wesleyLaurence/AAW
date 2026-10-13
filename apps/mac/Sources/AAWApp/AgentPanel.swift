@@ -128,6 +128,36 @@ final class AgentPanel {
     /// without a card.
     @ObservationIgnored private(set) var attachedPaths: Set<String> = []
 
+    // Speaking.
+
+    /// Whether the microphone is on and the words go into the field.
+    private(set) var listening = false
+    /// The microphone's level while listening, 0 to 1, for the ring.
+    private(set) var inputLevel: Float = 0
+    /// What was heard since listening began, the recognizer's latest
+    /// hypothesis, which the draft ends with.
+    @ObservationIgnored private var spoken = ""
+    /// The hypothesis before this one, which tells how much has firmed up.
+    @ObservationIgnored private var spokenBefore = ""
+    /// The draft before listening began, and the same with a space after
+    /// it where the words go on after text.
+    @ObservationIgnored private var spokenOriginal = ""
+    @ObservationIgnored private var spokenBase = ""
+    /// The spoken characters whose words may still change, drawn in the
+    /// faint color; nil while nothing is uncertain.
+    private(set) var uncertainRange: NSRange?
+    /// Stops listening after this long with no new word, once some were
+    /// heard, or with none heard at all.
+    @ObservationIgnored var pauseAfterWords: TimeInterval = 3
+    @ObservationIgnored var pauseAfterNothing: TimeInterval = 10
+    @ObservationIgnored private var pauseTimer: Timer?
+    /// Escape took the words out, or the person typed: what the recognizer
+    /// still says is dropped.
+    @ObservationIgnored private var cancelled = false
+    /// What turns speech into text: the Mac's recognizer, or the stand-in
+    /// `AAW_SPEECH` names.
+    @ObservationIgnored lazy var transcriber: any Transcriber = Transcribers.make(environment: environment)
+
     /// The song whose window this is; set once, after the model is made.
     @ObservationIgnored weak var song: SongModel?
 
@@ -307,6 +337,11 @@ final class AgentPanel {
     /// what they attached, to the thread shown, starting or resuming its
     /// process as needed. Attachments alone send with a word for them.
     func send() {
+        // Return while listening stops it; the next Return sends.
+        if listening {
+            stopListening()
+            return
+        }
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         if text.isEmpty {
             guard !attachments.isEmpty, !working else { return }
@@ -420,6 +455,12 @@ final class AgentPanel {
     /// The draft changed: a chip whose name the draft no longer starts
     /// with goes, and `/` with a name typed so far shows the list.
     private func draftChanged() {
+        // Typing while listening stops it, keeping what was typed; what
+        // the recognizer still says is dropped.
+        if listening, !cancelled, draft != spokenBase + spoken {
+            cancelled = true
+            transcriber.stop()
+        }
         if let chip, AgentCommands.split(draft)?.name != chip.name { self.chip = nil }
         var query: String?
         if chip == nil, draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace), !listClosed {
@@ -461,6 +502,95 @@ final class AgentPanel {
         commandQuery = nil
         listClosed = true
         return true
+    }
+
+    // MARK: Speaking
+
+    /// Why the microphone cannot listen now, in a line; nil when it can.
+    var speechTrouble: String? {
+        transcriber.available ? nil : SpeechTranscriber.reason(transcriber.availability)
+    }
+
+    /// The microphone's button: starts listening, or stops it, keeping
+    /// the words.
+    func toggleListening() {
+        if listening { stopListening() } else { startListening() }
+    }
+
+    /// Starts listening: the words go on after the draft, and the field
+    /// shows them as they come, the uncertain tail in the faint color.
+    func startListening() {
+        guard !listening else { return }
+        if let trouble = speechTrouble {
+            song?.refuse(trouble)
+            return
+        }
+        var base = draft
+        spokenOriginal = base
+        if !base.isEmpty, base.last?.isWhitespace == false { base += " " }
+        spokenBase = base
+        spoken = ""
+        spokenBefore = ""
+        uncertainRange = nil
+        inputLevel = 0
+        listening = true
+        armPause()
+        transcriber.start(
+            heard: { [weak self] text, final in self?.heard(text, final: final) },
+            level: { [weak self] level in self?.inputLevel = level },
+            ended: { [weak self] reason in self?.listeningEnded(reason) }
+        )
+    }
+
+    /// Stops listening; what was heard stays in the field, the caret at
+    /// its end.
+    func stopListening() {
+        guard listening else { return }
+        transcriber.stop()
+    }
+
+    /// Escape while listening: stops, and takes the spoken words out.
+    /// False when not listening, so that Escape does what it did.
+    func cancelListening() -> Bool {
+        guard listening else { return false }
+        cancelled = true
+        spoken = ""
+        uncertainRange = nil
+        transcriber.stop()
+        draft = spokenOriginal
+        return true
+    }
+
+    private func heard(_ text: String, final: Bool) {
+        guard listening, !cancelled else { return }
+        spokenBefore = spoken
+        spoken = text
+        draft = spokenBase + text
+        let firm = final ? text.utf16.count : Transcribers.firmLength(previous: spokenBefore, current: text)
+        let start = spokenBase.utf16.count + firm
+        let length = text.utf16.count - firm
+        uncertainRange = length > 0 ? NSRange(location: start, length: length) : nil
+        if !final { armPause() }
+    }
+
+    private func listeningEnded(_ reason: String?) {
+        guard listening else { return }
+        listening = false
+        cancelled = false
+        inputLevel = 0
+        uncertainRange = nil
+        pauseTimer?.invalidate()
+        pauseTimer = nil
+        if let reason { song?.refuse(reason) }
+    }
+
+    /// A pause of a few seconds stops listening by itself.
+    private func armPause() {
+        pauseTimer?.invalidate()
+        let after = spoken.isEmpty ? pauseAfterNothing : pauseAfterWords
+        pauseTimer = Timer.scheduledTimer(withTimeInterval: after, repeats: false) { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.stopListening() } }
+        }
     }
 
     // MARK: What goes with the next message
@@ -745,6 +875,7 @@ final class AgentPanel {
 
     /// The window is closing.
     func close() {
+        stopListening()
         endProcess()
         locating?.cancel()
     }
