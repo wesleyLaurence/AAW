@@ -1,7 +1,8 @@
 # Making music with AAW
 
-Use `uv run daw ...` in this checkout. This guide is for operating existing
-capabilities; developing them follows [development.md](development.md).
+Use `uv run daw ...` in this checkout, from its root or from a project's
+folder under it. This guide is for operating existing capabilities; developing
+them follows [development.md](development.md).
 
 ## Find the song and its state
 
@@ -11,7 +12,6 @@ For a new song, `uv run daw init projects/NAME` creates an empty project, in
 4/4 unless `--time-signature 3/4` says otherwise;
 `uv run daw describe start` is the dozen commands from there to a rendered song,
 and the quickest way to learn the verbs.
-Before continuing a song, read its local `HANDOFF.md` if present.
 
 Run `uv run daw map PROJECT` to see the arrangement bar by bar: where each
 track plays, the same music under the same letter, and `#` where two clips of a
@@ -20,6 +20,64 @@ Run `uv run daw inspect PROJECT` before editing and `uv run daw status PROJECT`
 for transport, host state and the person's selection. Use `daw get PROJECT PATH`
 for just the objects needed. If a Rust command reports a new `project` path after
 Save As, use that path from then on, including for Python commands.
+
+## What the song and the person ask for
+
+Every project has a `SONG.md` at the top of its folder. It is to the project
+what `AGENTS.md` is to a code repository: read at the start of every session
+on the song, short, and about what holds, not what happened.
+
+| Section | Whose | Holds |
+|---|---|---|
+| Vision | The person's: suggest a change, never rewrite it | The idea, the feel and style, the references, what the song is for |
+| Instructions | The person's: never edit it | Rules for this song alone: what not to touch, who it is for, how it is delivered |
+| Direction | Both: keep it current | Where the song is heading: what is wanted next, what is unresolved, what the person liked and disliked that still holds |
+| Decisions | Both | Settled choices and why |
+
+- **Have it before the first edit.** The project's own `AGENTS.md` imports it,
+  and Claude Code then puts its text in the session: at launch when the
+  session started in the project's folder, and at the first file read in the
+  project when it started at the root. A `daw` command is not a file read, so
+  read `SONG.md` yourself when its text is not in the session yet.
+- **No history.** No log, no dated list of sessions, no revision notes. A
+  decision that is replaced is rewritten where it stands. What happened is the
+  host's history (`daw changes`) and the conversation.
+- **Nothing the tool prints.** Tracks, clips, tempo, sections and levels come
+  from `daw inspect`, `daw map` and `daw status`.
+- **About a page,** since every session reads it whole. Past that, propose
+  what to cut; start no second file.
+- **Say what you changed in it** at the end of a turn that changed it.
+- **A project without one** was made before `daw init` and the app wrote it.
+  Offer to write it with the person: from a `HANDOFF.md` or `brief.md`, keep
+  the vision and the rules and decisions that still hold, and drop the
+  revision lists.
+
+The person's instructions for all their music are
+`.claude/rules/instructions.md` at the checkout's root, and what agents have
+learned of their taste is `.claude/rules/taste.md` beside it. Claude Code loads
+both into every session started at the root or below it; read them first
+otherwise.
+
+- **Never edit the instructions.** They are the person's.
+- **Taste is written with the person.** Each entry has its evidence and dates:
+  "Keeps lead vocals dry and upfront. Evidence: asked to remove vocal reverb in
+  two songs (2026-10-02, 2026-10-15)." Say what you would add at the end of a
+  session, and write it when the person agrees. An edit the person made by
+  hand may be an experiment or a fix for one song: ask whether it holds beyond
+  this song before writing it down. What is true of one song goes in its
+  `SONG.md`.
+- **Where they differ:** the person's instructions, then `SONG.md`, then
+  taste, then defaults. Say which one decided when it matters.
+
+A skill is a workflow the person keeps for a kind of job. Skills for every
+project are in `.claude/skills/` at the root, and a project's own in
+`.claude/skills/NAME/SKILL.md` in its folder. Where the session started
+decides what it has:
+
+| Started in | Has | Lacks |
+|---|---|---|
+| The project's folder, `cd projects/NAME && claude` | The root instructions, the person's two files and the root's skills from the folders above; `SONG.md` at launch; the project's skills as commands; a conversation list of this project alone (`claude --resume`, `claude --continue`); PROJECT is `.` | Other projects, which are outside the session's folder: reading one asks first, and `claude --add-dir` on the checkout or the other project grants it |
+| The checkout's root | Every project in reach, to reuse a sound from another song or compare two mixes | A project's skills, which Claude Code does not load from a folder Git ignores: read the name and description at the top of each `SKILL.md` under the project's `.claude/skills/`, and the body of one that applies. One conversation list for every song |
 
 ## Edit together
 
@@ -78,7 +136,7 @@ the operation needs. A refused edit names the field it meant and the fix.
 | Effects, groups or return buses | `daw describe effects`; a drum bus is `daw group add PROJECT drums --tracks kick,snare,hats`, with effects, a level and sends of its own; a chain worth keeping is `daw rack save PROJECT tracks.T NAME`, and `daw rack load` adds it to a chain in any song (`daw rack list`); track stems include inserts but exclude return contributions and master effects; groups and returns have separate stems, and a grouped track's stem is before its group |
 | Automation | `daw describe automation`; give automated effects an `id` and ramp levels over a few milliseconds |
 | Repeat, insert, remove or empty whole bars across the tracks | `daw range copy\|insert\|delete\|clear` and `daw section duplicate\|move\|remove --with-content`; `daw describe edit` under `ranges` |
-| Finished-song edits from timecodes | `daw describe edit`, `beats`, `joins` and `export`, each before its step; follow the person's own skill for the kind of edit when one is listed |
+| Finished-song edits from timecodes | `daw describe edit`, `beats`, `joins` and `export`, each before its step; follow the person's own skill for the kind of edit when one is listed, at the root or in the project |
 
 ## Check and hand off
 
@@ -127,6 +185,8 @@ read `daw describe export` when delivering a named file.
 
 Keep the editable project, selected source hashes, stems and render report with
 demos. Keep song-specific automation inside the ignored project directory.
-Report the result, artifact paths and uncertainties. Update the project's
-handoff when useful for continuing work, without copying state the CLI can read.
+Report the result, artifact paths and uncertainties. Bring the project's
+`SONG.md` up to date where the session changed where the song is heading or
+what is decided, without copying state the CLI can read, and say what you
+changed in it.
 Audio, the sample database and environments stay out of Git; no upload is required.

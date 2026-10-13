@@ -24,6 +24,9 @@ projects/*/renders/
 /.claude/skills/
 /.agents/skills/
 
+# And the person's instructions and taste for all their music.
+/.claude/rules/
+
 # Mac app build output and generated bindings
 apps/mac/.build/
 apps/mac/build/

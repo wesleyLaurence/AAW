@@ -44,8 +44,14 @@ file itself and exits, under the project's `.daw.lock`. A running host registers
 its project and socket under `~/Library/Application Support/AAW/hosts`.
 
 A project is a folder with `song.yaml`, its samples and its renders, and a
-command takes the folder or the file. The app opens on an Untitled project, a
-folder in its data folder (`~/Library/Application Support/AAW`, or
+command takes the folder or the file. Beside the song is `SONG.md`, what the
+song is for, where it is heading and what was decided, and an `AGENTS.md`
+that imports it; `daw init` and the app write both, and nothing reads them
+but the test of whether an Untitled project holds nothing: they are for the
+agent, as the person's instructions, taste and skills under the root's
+`.claude/` are. See [agent-context.md](features/agent-context.md).
+
+The app opens on an Untitled project, a folder in its data folder (`~/Library/Application Support/AAW`, or
 `AAW_DATA_DIR`). Save As… is a command to the host, which moves an Untitled
 project's folder or copies a named one's, carries on there with its history and
 what is playing, and keeps answering at the path it had. The app keeps an index

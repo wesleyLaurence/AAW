@@ -141,6 +141,9 @@ fn a_project_is_named_by_its_folder_or_its_song_file() {
     assert_eq!(project::song_file(&dir.path().join("gone")), dir.path().join("gone/song.yaml"));
     assert_eq!(project::song_file(&dir.path().join("gone/other.yaml")), dir.path().join("gone/other.yaml"));
     assert_eq!(project::shown(&song), folder);
+    // The song's notes are beside it, and the file that imports them.
+    assert_eq!(text(&folder.join("SONG.md")), "## Vision\n\n## Instructions\n\n## Direction\n\n## Decisions\n");
+    assert_eq!(text(&folder.join("AGENTS.md")), "Read SONG.md before working on this project, and keep it current.\n\n@SONG.md\n");
     assert_eq!(project::shown(&folder.join("other.yaml")), folder.join("other.yaml"));
     // A second project in the folder is refused.
     assert!(project::create(&folder, 100.0, 4, None, None).unwrap_err().contains("already exists"));
@@ -172,8 +175,14 @@ fn untitled_projects_take_the_lowest_free_name_and_blank_ones_are_swept() {
     let blank = |song: &Path| project::untouched(song.parent().unwrap(), &text(song));
     assert!(blank(&first) && blank(&second));
 
-    // A project with a track, and one with a file beside the song, hold something.
+    // A project with a track, one with a file beside the song and one with
+    // something written in its notes hold something.
     let third = project::create_untitled().unwrap();
+    let noted = project::create_untitled().unwrap();
+    let notes = noted.with_file_name(project::NOTES_FILE);
+    std::fs::write(&notes, text(&notes) + "\nKeep the vocal dry.\n").unwrap();
+    assert!(!blank(&noted));
+    project::delete_untitled(&noted).unwrap();
     let mut s = Session::open(&second, false).unwrap();
     s.edit(&cmd(json!({"op": "track.add", "id": "drums"})), Origin::User, None, None).unwrap();
     s.write().unwrap();

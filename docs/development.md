@@ -64,13 +64,20 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
 - Keep demo composition separate from reusable engine code. Do not hardcode
   creative patterns, sample names or a person's absolute library path in it.
 - Keep personal music out of this repository: arrangements, samples, source manifests,
-  creative briefs, handoff notes, revisions, renders, exports, and song-specific scripts.
+  a song's `SONG.md`, revisions, renders, exports, and song-specific scripts.
 - Store creative work under ignored `projects/` or `content/`, or outside the repository.
 - A skill is personal content like a song: who asks, which sounds, the limits, the
-  file names. Keep it in ignored `.claude/skills/NAME/` or `.agents/skills/NAME/`, or
-  in your own skills folder; this repository tracks none. A skill names `daw`
-  commands and paths under `projects/` or `content/`, never an absolute library
-  path. See [skills](features/skills.md).
+  file names. Keep it in ignored `.claude/skills/NAME/` or `.agents/skills/NAME/`, in
+  a project's own `.claude/skills/NAME/`, or in your own skills folder; this
+  repository tracks none. A skill names `daw` commands and paths under `projects/`
+  or `content/`, never an absolute library path. See [skills](features/skills.md).
+- The person's instructions and taste for all their music are personal too: ignored
+  `.claude/rules/instructions.md` and `.claude/rules/taste.md`. Claude Code loads
+  them into a development session as well; they say nothing about the software.
+  See [what every session is given](features/agent-context.md).
+- The root has no `CLAUDE.md`: Claude Code reads `AGENTS.md` directly, and beside a
+  `CLAUDE.md` it would read neither a project's `AGENTS.md` nor, in a session
+  started in a project's folder, the root's.
 - Put song-specific automation inside its ignored project directory. Never force-add
   ignored content or embed personal compositions in tooling, tests, or documentation.
 - Generic examples and test fixtures must be independent of personal songs and private

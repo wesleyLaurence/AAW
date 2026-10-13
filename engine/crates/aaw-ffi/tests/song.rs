@@ -1963,6 +1963,8 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     transport(&seen);
     let a = song.arrangement();
     assert_eq!((a.title.as_str(), a.tempo, a.length_beats, a.tracks.len()), ("Untitled", 120.0, 128.0, 0));
+    // The project the app made has its notes, and still holds nothing.
+    assert!(std::fs::read_to_string(folder.join("SONG.md")).unwrap().starts_with("## Vision\n"));
     assert_eq!((song.path(), song.is_untitled(), song.untouched()), (first.clone(), true, true));
     // While it is open it is not swept away, and a second takes the next name.
     assert_eq!(project_sweep_untitled(), Vec::<String>::new());
@@ -1997,6 +1999,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     assert_eq!(u.arrangement.title, "My Beat");
     assert!(u.touched.contains(&touch(Part::Session, 0, Delta::Changed)));
     assert_eq!((song.path(), song.is_untitled(), folder.exists()), (at.clone(), false, false));
+    std::fs::write(named.join("SONG.md"), "## Vision\n\nA beat for the gym.\n").unwrap();
     // Undo is still the agent's track, and a command for the old path lands.
     assert_eq!(u.undo, step("Add track bass", Who::Agent));
     let reply = client::ask(Path::new(&first), &Request::new(serde_json::from_value(json!({"op": "undo"})).unwrap(), Origin::Agent)).unwrap().unwrap();
@@ -2011,6 +2014,9 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     assert!(matches!(next(&seen), Seen::Moved(path) if path == second));
     let u = update(&seen);
     assert_eq!((u.change.op.as_str(), u.arrangement.title.as_str()), ("project.copy", "My Beat 2"));
+    // The notes go with the project, and the file that imports them.
+    assert_eq!(std::fs::read_to_string(copy.join("SONG.md")).unwrap(), "## Vision\n\nA beat for the gym.\n");
+    assert!(copy.join("AGENTS.md").exists());
     assert_eq!(std::fs::read_to_string(&at).unwrap(), before);
     song.undo().unwrap();
     assert_eq!(update(&seen).arrangement.tracks.len(), 0);

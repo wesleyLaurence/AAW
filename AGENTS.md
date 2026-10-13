@@ -21,6 +21,23 @@ Architecture, backlog and feature designs are development references, not music
 prerequisites. When the person proposes future work, record a line under Ideas
 in `docs/backlog.md`; do not create a separate notes or plan file.
 
+## What a music session is given
+
+- **The person's instructions and taste for all their music** are
+  `.claude/rules/instructions.md` and `.claude/rules/taste.md` at this root,
+  ignored by Git. Claude Code loads both into every session started at or
+  below this root; another agent reads them before music work. Never edit the
+  instructions.
+- **A project's `SONG.md`,** at the top of its folder, is what the song is and
+  is for, the person's instructions for it, where it is heading and what was
+  decided. The project's own `AGENTS.md` imports it. Have it before the first
+  edit, and keep it current.
+- **Skills** for every project are in `.claude/skills/` at this root, and a
+  project's own in its `.claude/skills/`.
+
+[docs/music.md](docs/music.md) says who writes what in each, which wins where
+they differ, and what a session started here or in a project's folder has.
+
 ## Tools and shared boundaries
 
 - In this checkout use `uv run daw ...`. Discover verbs with `uv run daw --help`,
@@ -29,10 +46,11 @@ in `docs/backlog.md`; do not create a separate notes or plan file.
   `daw describe start` makes a first song. `--schema` adds a topic's JSON Schema.
 - Command results are JSON; runtime errors use stderr and a nonzero exit status.
   Help and argument-parsing errors may be plain text.
-- Preserve personal work. Songs, samples, briefs, handoffs, renders, exports and
+- Preserve personal work. Songs, their `SONG.md`, samples, renders, exports and
   song-specific scripts belong under ignored `projects/` or `content/`, or outside
   this repository. Import selected audio; never modify the source library.
-- Commit reusable code, tests, docs and generic examples only. Personal skills
-  stay ignored or in a personal skills folder; never force-add personal content.
+- Commit reusable code, tests, docs and generic examples only. Personal skills,
+  instructions and taste stay ignored or in a personal folder; never force-add
+  personal content.
 - A skill describes a repeatable workflow and is personal: this repository ships
   none. [Skill conventions](docs/features/skills.md) apply when adding or changing one.

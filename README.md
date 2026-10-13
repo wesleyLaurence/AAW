@@ -6,6 +6,10 @@ Open this with Codex or Claude and start creating music.
 
 For agent tasks, [AGENTS.md](AGENTS.md) routes to [making music](docs/music.md)
 or [developing AAW](docs/development.md); read the guide for the current task.
+Start the agent at this root, or in a project's folder under it for a session
+about that one song: either has the project's `SONG.md` and your own
+instructions ([what every session is given](docs/features/agent-context.md)).
+Claude Code reads `AGENTS.md` from version 2.1.277.
 
 AAW is an open-source workspace where humans and agents collaboratively build
 music at the track, object, and project level. Here are notes on what the project
@@ -161,7 +165,7 @@ uv run daw samples analyze SAMPLE_ID
 uv run daw samples audition SAMPLE_ID --output /tmp/candidate.wav
 uv run daw samples beats SONG.wav --near 0:41
 
-uv run daw init projects/my-beat --tempo 160 --bars 20
+uv run daw init projects/my-beat --tempo 160 --bars 20   # song.yaml, and SONG.md for what the song is for
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
 uv run daw samples import ~/Music/song.m4a --project projects/my-beat/song.yaml --id song
