@@ -843,8 +843,8 @@ private struct ApprovalCard: View {
 
 /// The field the person types in, in a rounded well with what is attached
 /// as chips above it and the controls at its right: `+` for a file or the
-/// selected clips, the microphone, which the next item builds, and Send.
-/// Return sends; Shift-Return starts a new line.
+/// selected clips, the microphone, and Send. Return sends; Shift-Return
+/// starts a new line.
 private struct Composer: View {
     let agent: AgentPanel
     let model: SongModel
@@ -877,13 +877,7 @@ private struct Composer: View {
                     .fixedSize()
                     .help("Attach a file, or the selected clips, to the message; a file dropped or pasted here attaches too")
                     .accessibilityLabel("Attach")
-                    Button {} label: {
-                        Image(systemName: "mic").font(.system(size: 15))
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(true)
-                    .help("Speaking to the agent: not built yet")
-                    .accessibilityLabel("Microphone")
+                    MicrophoneButton(agent: agent)
                     Button {
                         agent.send()
                     } label: {
@@ -930,6 +924,40 @@ private struct Composer: View {
         } else {
             panel.begin(completionHandler: handler)
         }
+    }
+}
+
+/// The microphone: a click listens and the words go into the field; while
+/// it listens the symbol is filled in the person's color with a ring that
+/// follows the level, and a click stops. Where the Mac cannot listen, the
+/// help says why and a click says so in the transport bar.
+private struct MicrophoneButton: View {
+    let agent: AgentPanel
+
+    var body: some View {
+        let listening = agent.listening
+        let trouble = agent.speechTrouble
+        Button {
+            agent.toggleListening()
+        } label: {
+            ZStack {
+                if listening {
+                    Circle()
+                        .stroke(Who.user.color.opacity(0.5), lineWidth: 2)
+                        .frame(width: 20, height: 20)
+                        .scaleEffect(1 + CGFloat(agent.inputLevel) * 0.6)
+                        .animation(.easeOut(duration: 0.08), value: agent.inputLevel)
+                }
+                Image(systemName: listening ? "mic.fill" : "mic")
+                    .font(.system(size: 15))
+                    .foregroundStyle(listening ? Who.user.color : trouble == nil ? Color.primary : Color.secondary)
+            }
+            .frame(width: 24, height: 24)
+        }
+        .buttonStyle(.borderless)
+        .help(listening ? "Listening: click, Return or a pause stops; Escape takes the words out"
+              : trouble ?? "Speak to the agent: the words appear in the field, recognized on this Mac, for you to read and send")
+        .accessibilityLabel(listening ? "Stop listening" : "Microphone")
     }
 }
 

@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
 /// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
-/// `--ask TEXT`, `--attach FILE` and `--attach-clips`
+/// `--ask TEXT`, `--attach FILE`, `--attach-clips` and `--listen`
 /// in the order to perform them, then `--export PATH [--export-level
 /// LEVEL]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
 /// `--after SECONDS` and `--size WxH`.
@@ -35,6 +35,8 @@ struct Launch {
         case attach(URL)
         /// The selected clips attached, as `+` › Attach Selected Clips.
         case attachClips
+        /// The microphone's button: listening starts, or stops.
+        case listen
     }
 
     /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
@@ -145,6 +147,8 @@ struct Launch {
                 if let path = rest.popFirst(), !path.isEmpty { actions.append(.attach(URL(fileURLWithPath: path))) }
             case "--attach-clips":
                 actions.append(.attachClips)
+            case "--listen":
+                actions.append(.listen)
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
             case "--measure":
@@ -540,6 +544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .attachClips:
             songs.first?.model.showsAgent = true
             songs.first?.model.agent.attachSelectedClips()
+        case .listen:
+            songs.first?.model.showsAgent = true
+            songs.first?.model.agent.toggleListening()
         case .wait:
             break
         }

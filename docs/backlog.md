@@ -23,54 +23,51 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **Speaking to the agent.** A microphone in the field: the words recognized
-   on the Mac appear in the field as they are said, and the person reads and
-   sends them. [features/voice-input.md](features/voice-input.md)
-2. **`daw audio crossfade` with an option, while the app has the project
+1. **`daw audio crossfade` with an option, while the app has the project
    open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
    "Bad request: invalid type: map, expected f64", where the same command with
    no option, and with the options on a project no host has open, sets the
    join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
    on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
    same three options and has not been tried with a host.
-3. **A time selection in the app.** A range of beats dragged across the
+2. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-4. **A MIDI keyboard.** Notes played through the selected track, held and let
+3. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-5. **Sections and the song's length in the app.** A section made, named,
+4. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-6. **A project made with `daw init` in the app's index,** so a song the agent
+5. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-7. **Turns and A/B.** An agent request's commands grouped, named for the
+6. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-8. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+7. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-9. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+8. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
    that replays it.
-10. **Key and chord detection,** and swing detection, of samples and songs: a
+9. **Key and chord detection,** and swing detection, of samples and songs: a
    loop matched to the song's key before it is placed.
-11. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+10. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-12. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+11. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-13. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+12. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-14. **Stem separation** of a song. The vocals taken out for an instrumental,
+13. **Stem separation** of a song. The vocals taken out for an instrumental,
     the vocals alone for an a cappella, and the stems of drums, bass, vocals
     and the rest, each written into the project as a sample the agent or the
     person places. An open-source model run on this Mac, not one trained here
@@ -78,7 +75,7 @@ wrong with the sounds everything else is built on.
     Ultimate Vocal Remover runs, for the vocals; `daw separate` first, then
     more splits, the app and a reference's stems.
     [features/stem-separation.md](features/stem-separation.md)
-15. **Generated audio.** A sound, a loop or a whole song from a description, with
+14. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample and in a generated folder the library searches; `daw generate` for
     the agent within a daily budget, and a Settings window and a Generate tab in
@@ -91,6 +88,26 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Speaking to the agent, by the person at the Mac:** Dictation turned
+  on in System Settings › Keyboard with English added, since without it
+  this Mac had no language for on-device recognition and the button
+  refused; the microphone clicked in a project of their own, the two
+  permission questions answered, and a request spoken while the song
+  plays, whether the words are in the field within a second and the
+  uncertain tail in the faint color reads right, whether the song under
+  the voice is heard wrong, and whether the recognizer's punctuation is
+  wanted; a click, Return and a pause of three seconds each stopping, and
+  whether three seconds is right; Escape taking the words out; a word
+  typed while listening; the ring at the symbol, and whether it reads as
+  the level; the app signed with a Developer ID, and whether the
+  microphone opens under the hardened runtime with `AAW.entitlements`;
+  the refusals read in the transport bar, with the microphone or speech
+  recognition turned off for AAW in Privacy. Scripted runs over a file
+  stand-in showed the field filling, the filled symbol with its ring and
+  the faint tail, Escape, typing and Return in pictures; the real
+  recognizer was reached twice by mistake and refused for want of the
+  language ([speaking to the agent](features/voice-input.md)); nothing
+  spoken.
 - **Files and clips in the conversation, by the person in a real
   session:** a screenshot of a chain in another DAW dropped on the panel
   from the Finder, the outline and "Add to the message" seen on the way,
@@ -1066,9 +1083,9 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   frame read for the agent; a
   dropped sound imported at once rather than when it is placed; Apple's
   server recognition where the Mac cannot recognize the locale on the
-  device, and the song ducked while the person speaks; `SpeechTranscriber`
-  on macOS 26; spoken words sent as the person stops speaking
-  ([attachments](features/agent-attachments.md),
+  device, the song ducked while the person speaks, hold to talk,
+  `SpeechTranscriber` on macOS 26 and spoken words sent as the person
+  stops speaking ([attachments](features/agent-attachments.md),
   [speaking](features/voice-input.md)).
 - Ghost clips: the agent proposes the next bars, drawn translucent, and Tab
   accepts.

@@ -32,11 +32,20 @@ final class ComposerTextView: NSTextView {
     var chip: String? {
         didSet {
             guard chip != oldValue else { return }
-            colorChip()
+            colorText()
             needsDisplay = true
         }
     }
     var hint = ""
+    /// The characters still uncertain while the person speaks, drawn in
+    /// the faint color until the recognizer firms them up.
+    var faintRange: NSRange? {
+        didSet {
+            guard faintRange != oldValue else { return }
+            colorText()
+            needsDisplay = true
+        }
+    }
 
     static let fontSize: CGFloat = 13
     static let mostLines = 8
@@ -128,7 +137,7 @@ final class ComposerTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         onChange?(string)
-        colorChip()
+        colorText()
         reportHeight()
     }
 
@@ -149,7 +158,7 @@ final class ComposerTextView: NSTextView {
         guard string != text else { return }
         string = text
         setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
-        colorChip()
+        colorText()
         reportHeight()
     }
 
@@ -180,15 +189,29 @@ final class ComposerTextView: NSTextView {
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
     }
 
-    /// The chip's text in white, as a temporary attribute the storage does
-    /// not keep.
-    private func colorChip() {
+    /// The chip's text in white and the uncertain spoken tail in the faint
+    /// color, as temporary attributes the storage does not keep.
+    private func colorText() {
         guard let layoutManager else { return }
-        let whole = NSRange(location: 0, length: (string as NSString).length)
+        let length = (string as NSString).length
+        let whole = NSRange(location: 0, length: length)
         layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: whole)
         if let range = chipRange {
             layoutManager.addTemporaryAttribute(.foregroundColor, value: Self.chipText, forCharacterRange: range)
         }
+        if let range = faintRange {
+            let clipped = NSIntersectionRange(range, whole)
+            if clipped.length > 0 {
+                layoutManager.addTemporaryAttribute(.foregroundColor, value: Theme.faintText, forCharacterRange: clipped)
+            }
+        }
+    }
+
+    /// The color the characters are drawn in, for tests: the text's, the
+    /// chip's or the faint one.
+    func color(at index: Int) -> NSColor? {
+        guard let layoutManager, index < (string as NSString).length else { return nil }
+        return layoutManager.temporaryAttribute(.foregroundColor, atCharacterIndex: index, effectiveRange: nil) as? NSColor ?? textColor
     }
 
     /// Where the chip is drawn, in the view.
@@ -257,7 +280,9 @@ struct ComposerField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSScrollView {
         let (scroll, text) = ComposerTextView.make()
         text.onSend = { [weak agent] in agent?.send() }
-        text.onEscape = { [weak text, weak model] in
+        text.onEscape = { [weak agent, weak text, weak model] in
+            // While the person speaks, Escape takes the spoken words out.
+            if agent?.cancelListening() == true { return }
             text?.window?.makeFirstResponder(nil)
             model?.onFocus?()
         }
@@ -287,5 +312,6 @@ struct ComposerField: NSViewRepresentable {
         text.hint = agent.chip?.hint ?? ""
         text.chip = agent.chip?.name
         text.set(agent.draft)
+        text.faintRange = agent.uncertainRange
     }
 }
