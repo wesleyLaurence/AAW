@@ -291,7 +291,7 @@ final class AgentPanelTests: XCTestCase {
     func testTheArguments() {
         XCTAssertEqual(ClaudeCode.arguments(resume: nil, sessionID: "id1", workspace: URL(fileURLWithPath: "/w"), prompt: "P"), [
             "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
-            "--include-partial-messages", "--permission-prompt-tool", "stdio",
+            "--include-partial-messages", "--permission-mode", "auto", "--permission-prompt-tool", "stdio",
             "--session-id", "id1", "--add-dir", "/w", "--append-system-prompt", "P",
         ])
         XCTAssertEqual(ClaudeCode.arguments(resume: "id1", sessionID: "id1", workspace: nil, prompt: "P").suffix(4),

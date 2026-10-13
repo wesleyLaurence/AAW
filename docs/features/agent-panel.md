@@ -4,7 +4,7 @@ A conversation with the agent in the project's window, over the person's own
 Claude Code. What it should feel like is in
 [concept.md](../concept.md#the-agent-in-the-window); what a session is given
 by location is [agent-context.md](agent-context.md). The choices made in
-building it are D111. What was checked about Claude Code is at the end, with
+building it are D111, and D112 put it in auto mode. What was checked about Claude Code is at the end, with
 what nobody has tried.
 
 ## What
@@ -27,7 +27,7 @@ Code in the project's folder with
 
 ```
 claude -p --input-format stream-json --output-format stream-json --verbose
-    --include-partial-messages --permission-prompt-tool stdio
+    --include-partial-messages --permission-mode auto --permission-prompt-tool stdio
     --session-id ID | --resume ID
     --add-dir WORKSPACE --append-system-prompt TEXT
 ```
@@ -68,9 +68,11 @@ the file since the agent's last turn ended, from the activity list, the
 newest twelve. The panel shows the words alone, and takes the context off
 again when a conversation is drawn from its record.
 
-**Approvals.** Claude Code applies its own rules first: reads in the
-project's folder and its safe commands need nobody. What is left comes to
-the app as a request on the output, which `Approval` decides: a Bash command
+**Approvals.** The agent runs in Claude Code's auto mode, as the person's
+own terminal sessions do, so Claude Code decides most actions by itself:
+reads, edits in the project, its safe commands and what its classifier
+judges safe need nobody. What auto mode would still ask about comes to the
+app as a request on the output, which `Approval` decides: a Bash command
 that is `daw`, or `uv run daw`, on this project, each command of the line
 either `daw` with no path leading outside the project's folder or a reader
 such as `head`, `grep` or `jq` its output goes through, is allowed at once.
@@ -118,9 +120,10 @@ a terminal and sign in.
   file under it, another project's included, needs no approval; a `daw`
   command that names another project does. The concept's `~/Music/AAW/`
   workspace is in the backlog.
-- Claude Code's own rules and the person's settings decide before the app
-  does: a command the person has allowed in their settings runs without a
-  card. The app adds nothing to those settings.
+- Claude Code's auto mode and the person's settings decide before the app
+  does: a command auto mode allows, or that the person has allowed in their
+  settings, runs without a card. The mode is not chosen in the panel, and
+  the app adds nothing to those settings.
 - The agent's text is shown with its inline markdown; code blocks and lists
   are shown as typed.
 - A conversation's earlier messages are drawn from Claude Code's record of
@@ -142,6 +145,7 @@ as the panel drives it:
 | A message as a line of stream-json input, with `--include-partial-messages` | `system` init with the session ID, `stream_event` lines with the text in `text_delta` pieces, the whole `assistant` message, `user` lines with each tool result, and a `result` line with `is_error`, `session_id` and the text |
 | `control_request` with subtype `interrupt` on the input | Answered with a `control_response`; the pending tool use was rejected and the turn ended with `error_during_execution`; the next message in the same process was answered |
 | `control_request` with subtype `initialize` first | Answered with Claude Code's commands and settings |
+| A message with `--permission-mode auto`, October 12, 2026 | `system` init with `permissionMode` `auto`, and the turn answered |
 | `ls`, `echo`, `sleep` with `--permission-prompt-tool stdio` | Each ran with no request, allowed by Claude Code's own rules |
 | A command that would need a request, from a script | Not tried: the request's fields (`can_use_tool`, `tool_name`, `input`) and the answer (`behavior` allow with `updatedInput`, or deny with a `message`) are as the Agent SDK documents them |
 | The built app, `--ask` with a request to say which project it is in, what `SONG.md` says under Instructions and to run `daw status .`, on a scratch project outside the checkout | Answered from the folder and the file, ran the command and read `host: true` back, in a picture of the panel; the thread was kept in `.daw/threads.json`. Whether the app answered a request for the command or Claude Code's own rules allowed it is not in the record, so the first card from a real session is still for the person to see |
