@@ -24,6 +24,11 @@ the `daw describe` topics to read.
 - **In this checkout** a skill goes in `.claude/skills/NAME/SKILL.md`. Claude Code
   loads it by name there. Git ignores everything under `.claude/skills/` and
   `.agents/skills/`, so `git add -A` cannot commit a skill.
+- **In one project** a skill for that song alone goes in the project's own
+  folder, `projects/NAME/.claude/skills/NAME/SKILL.md`. A session started in the
+  project's folder lists it beside the checkout's; one started at the root reads
+  it as the music guide says
+  ([what every session is given](agent-context.md)).
 - **Outside the checkout**, your own skills folder (`~/.claude/skills/NAME/`)
   works from any directory once `daw` is on the PATH, which the Mac app's menu sets
   up. In this checkout keep to `uv run daw`.

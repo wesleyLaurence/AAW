@@ -63,7 +63,8 @@ From its documentation ([running it programmatically](https://code.claude.com/do
   `--append-system-prompt-file`, as designed below, and not by an import.
 - **A project's own `AGENTS.md` that imports `SONG.md`** puts the song's text in
   a session started in the project's folder, at launch, when no `CLAUDE.md` is
-  in that folder or above it (tried on October 11).
+  in that folder or above it (tried on October 11, and on October 12 with the
+  root's removed and a project `daw init` made).
 - **Skills in the session's folder and in every folder above it, up to the
   repository's root, are listed at launch** (tried on October 11, in a project
   folder under this checkout). A project kept outside the workspace has only
@@ -114,8 +115,8 @@ has.
 
 - [New and Untitled projects](new-and-untitled-projects.md), which is built, for
   a project there from the first moment and a path that follows Save As….
-- [What every session is given](agent-context.md) (Next), for `SONG.md`,
-  a project's `AGENTS.md` and where a project's skills live.
+- [What every session is given](agent-context.md), which is built, for
+  `SONG.md`, a project's `AGENTS.md` and where a project's skills live.
 - The workspace as a folder of its own (Next), for a project kept outside this
   checkout. Until then the panel attaches the checkout.
 - Turns in the host (Later) would let the panel keep or revert a request as one.

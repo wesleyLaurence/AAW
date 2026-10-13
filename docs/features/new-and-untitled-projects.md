@@ -26,6 +26,8 @@ own. The registry of hosts stays where it was (`AAW_HOST_DIR`).
 
 `aaw_host::project::create` writes one; `daw init` and the app both call it. The
 app's is 120 BPM and 32 bars, 64 seconds, and `daw init` keeps its own defaults.
+Beside the song it writes `SONG.md` and an `AGENTS.md` that imports it
+([what every session is given](agent-context.md)), since October 12, 2026.
 
 An Untitled project is a folder in `Untitled/` of the data folder, named
 Untitled, Untitled 2, Untitled 3 and so on with the lowest number not in use,
@@ -99,7 +101,8 @@ themselves, and follow a project that was saved elsewhere in the same way.
 | Untitled, holds something | Asks: Save…, Delete or Cancel |
 
 "Holds nothing" is about what is there, not about what was done: the folder has
-no file but the song, and the song is the blank one it began as. A track added
+no file but the song and the `SONG.md` and `AGENTS.md` written with it, each as
+it was written, and the song is the blank one it began as. A track added
 and then undone leaves nothing to ask about.
 
 Save… runs Save As… and closes if the project was saved. Delete closes and

@@ -46,7 +46,7 @@ project's folder or the song file in it. It implements:
 
 | Command | Does |
 |---|---|
-| `daw init DIRECTORY [--tempo T] [--bars N] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song of N bars, in 4/4 unless a time signature such as `3/4` or `6/8` is given |
+| `daw init DIRECTORY [--tempo T] [--bars N] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song of N bars, in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
 | `daw describe [start\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|check\|samples\|beats\|joins\|export\|listen\|reference] [--schema]` | The authoring contract: without a topic, the topics a line each; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file. `--schema` adds the topic's JSON Schema, and with no topic prints the whole song's |
@@ -366,7 +366,7 @@ out.
 A project as the app needs it is in `projects.rs`: a new Untitled project in
 the app's data folder (`AAW_DATA_DIR`, or `~/Library/Application Support/AAW`),
 the ones a crash left there, and whether one holds nothing and can be deleted
-unasked. `Song` saves its project under another name and reports the new path
+unasked: a blank song, and `SONG.md` and `AGENTS.md` as they were written. `Song` saves its project under another name and reports the new path
 to its observer.
 
 The browser's shared index is `library.sqlite` in `AAW_DATA_DIR` (otherwise

@@ -1,5 +1,6 @@
-//! A project as a folder: the song file in it, a blank project, moving and
-//! copying one, and the Untitled projects the app keeps in its data folder.
+//! A project as a folder: the song file in it, a blank project and the notes
+//! written beside it, moving and copying one, and the Untitled projects the
+//! app keeps in its data folder.
 //!
 //! The data folder is `~/Library/Application Support/AAW`, or `AAW_DATA_DIR`.
 //! It holds `Untitled/`, a folder for each project that has no name yet, and
@@ -16,6 +17,17 @@ type Result<T> = std::result::Result<T, String>;
 
 /// The song's file in a project's folder.
 pub const SONG_FILE: &str = "song.yaml";
+/// The song's notes, which the person and the agent keep: what the song is
+/// and is for, the person's instructions for it, where it is heading and what
+/// was decided. A project starts with the four headings and nothing under them.
+pub const NOTES_FILE: &str = "SONG.md";
+pub const NOTES: &str = "## Vision\n\n## Instructions\n\n## Direction\n\n## Decisions\n";
+/// What puts the notes in an agent's session: an agent that expands imports
+/// has their text, and one that does not reads the first line.
+pub const AGENT_FILE: &str = "AGENTS.md";
+pub const AGENT_TEXT: &str = "Read SONG.md before working on this project, and keep it current.\n\n@SONG.md\n";
+/// The files a project is made with beside its song, and what each says then.
+const BESIDE: [(&str, &str); 2] = [(NOTES_FILE, NOTES), (AGENT_FILE, AGENT_TEXT)];
 /// What a project made by the app starts with.
 pub const UNTITLED_TEMPO: f64 = 120.0;
 pub const UNTITLED_BARS: i64 = 32;
@@ -107,7 +119,8 @@ pub fn blank(tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) ->
 }
 
 /// Writes a blank project into a folder, which is made if it is not there,
-/// and returns its song file.
+/// and returns its song file. The notes and the file that imports them are
+/// written beside the song; one that is already in the folder is left as it is.
 pub fn create(directory: &Path, tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) -> Result<PathBuf> {
     let path = directory.join(SONG_FILE);
     if path.exists() {
@@ -115,6 +128,12 @@ pub fn create(directory: &Path, tempo: f64, bars: i64, title: Option<&str>, mete
     }
     let project = blank(tempo, bars, title, meter)?;
     aaw_model::save(&project, &path).map_err(|e| e.to_string())?;
+    for (name, text) in BESIDE {
+        let file = directory.join(name);
+        if file.symlink_metadata().is_err() {
+            std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))?;
+        }
+    }
     Ok(path)
 }
 
@@ -154,19 +173,23 @@ pub fn is_untitled(song: &Path) -> bool {
     song.parent().and_then(Path::parent) == Some(root.as_path())
 }
 
-/// Whether a folder has no file but the song.
+/// Whether a folder has no file but the song and the files written beside
+/// it, each as it was written.
 fn only_song(folder: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return false;
     };
     entries.flatten().all(|entry| {
         let name = entry.file_name();
-        name == SONG_FILE || IGNORED.iter().any(|i| name == *i)
+        name == SONG_FILE
+            || IGNORED.iter().any(|i| name == *i)
+            || BESIDE.iter().any(|(file, text)| name == *file && std::fs::read_to_string(entry.path()).is_ok_and(|t| t == *text))
     })
 }
 
-/// Whether a project holds nothing: its folder has only the song, and the
-/// song, given as its canonical YAML, is the blank one the folder began with.
+/// Whether a project holds nothing: its folder has only the song and its
+/// notes with nothing written in them, and the song, given as its canonical
+/// YAML, is the blank one the folder began with.
 pub fn untouched(folder: &Path, yaml: &str) -> bool {
     only_song(folder)
         && blank(UNTITLED_TEMPO, UNTITLED_BARS, Some(&name_of(folder)), None).is_ok_and(|b| aaw_model::to_yaml(&b) == yaml)

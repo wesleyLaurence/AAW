@@ -102,7 +102,9 @@ what the Finder shows.
 
 The "holds nothing" test for an Untitled project (`IGNORED` and `untouched` in
 `project.rs`) leaves the `.aaw` out, as it does the lock file, so a blank
-Untitled project is still deleted without a question.
+Untitled project is still deleted without a question. `SONG.md` and the
+project's `AGENTS.md` are already passed over while they are as written
+(`BESIDE`).
 
 ### Opening a project by its `.aaw`
 

@@ -1657,7 +1657,8 @@ public final class SongModel {
 
     // MARK: The project
 
-    /// Whether the project holds nothing: a blank song and no other file.
+    /// Whether the project holds nothing: a blank song, its notes as they
+    /// were written and no other file.
     /// Closing such an Untitled project deletes it without a question.
     var untouched: Bool {
         song.untouched()

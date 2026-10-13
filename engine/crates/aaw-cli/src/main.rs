@@ -110,7 +110,8 @@ enum Topic {
 
 #[derive(Subcommand)]
 enum Top {
-    /// Create DIRECTORY/song.yaml, an empty song.
+    /// Create DIRECTORY/song.yaml, an empty song, and SONG.md beside it for
+    /// what the song is for, where it is heading and what was decided.
     Init {
         directory: PathBuf,
         #[arg(long, default_value_t = 144.0)]
@@ -1463,7 +1464,8 @@ fn run(cli: &Cli) -> Result<Json> {
     match &cli.command {
         Top::Init { directory, tempo, bars, time_signature } => {
             let path = project::create(directory, *tempo, *bars, None, time_signature.as_deref())?;
-            Ok(json!({"project": std::fs::canonicalize(&path).map_err(text)?}))
+            let path = std::fs::canonicalize(&path).map_err(text)?;
+            Ok(json!({"notes": path.with_file_name(project::NOTES_FILE), "project": path}))
         }
         Top::Projects { all } => projects(*all),
         Top::Move { project, new_folder } => edit(project, C::Move { to: absolute(new_folder)? }),

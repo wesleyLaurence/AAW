@@ -12,10 +12,24 @@ def test_init_and_describe_through_either_entry_point(tmp_path):
     code, made = cli("init", tmp_path / "new", "--tempo", 120, "--bars", 8)
     assert code == 0, made
     path = tmp_path / "new" / "song.yaml"
-    assert made == {"project": str(path.resolve())}
+    notes = path.with_name("SONG.md")
+    assert made == {"notes": str(notes.resolve()), "project": str(path.resolve())}
     assert path.read_text() == "schema_version: 1\nsession:\n  tempo: 120.0\n  length_beats: 32\n"
+    # The song's notes start as four headings, and the project's AGENTS.md imports them.
+    assert notes.read_text() == "## Vision\n\n## Instructions\n\n## Direction\n\n## Decisions\n"
+    assert path.with_name("AGENTS.md").read_text().splitlines()[-1] == "@SONG.md"
+    assert sorted(p.name for p in path.parent.iterdir()) == ["AGENTS.md", "SONG.md", "song.yaml"]
     code, again = cli("init", tmp_path / "new")
     assert code == 1 and "already exists" in again["error"]
+    # Notes that are already in the folder are kept.
+    (tmp_path / "kept").mkdir()
+    (tmp_path / "kept" / "SONG.md").write_text("## Vision\n\nA waltz.\n")
+    daw("init", tmp_path / "kept")
+    assert (tmp_path / "kept" / "SONG.md").read_text() == "## Vision\n\nA waltz.\n"
+    assert (tmp_path / "kept" / "AGENTS.md").exists()
+    notes = daw("describe", "project")["semantics"]["notes"]
+    assert all(word in notes for word in ["SONG.md", "Vision", "Instructions", "Direction", "Decisions", "no history"])
+    assert "SONG.md" in daw("describe", "start")["steps"][0]["does"]
     assert daw("init", tmp_path / "other")["project"] == str((tmp_path / "other" / "song.yaml").resolve())
     assert load(tmp_path / "other" / "song.yaml")["session"]["length_beats"] == 64
 
