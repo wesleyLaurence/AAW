@@ -72,7 +72,10 @@ the file since the agent's last turn ended, from the activity list, the
 newest twelve. The panel shows the words alone, and takes the context off
 again when a conversation is drawn from its record. A message that runs a
 skill, `/name words`, has the block after the words, since the command is
-read from the start ([skill commands](skill-commands.md)).
+read from the start ([skill commands](skill-commands.md)). What the person
+attached follows the block as a list between `<attachments>` tags, and an
+image among them goes ahead as a block the agent sees
+([files and clips in the conversation](agent-attachments.md)).
 
 **Approvals.** The agent runs in Claude Code's auto mode, as the person's
 own terminal sessions do, so Claude Code decides most actions by itself:
@@ -86,7 +89,8 @@ Anything else, a command with another program, a path outside the project,
 a home path, a redirection, a subshell, or any other tool, an edit of
 `SONG.md` included, is a card in the panel with Allow and Refuse, and a beep.
 A request still waiting when the conversation changes or the turn is stopped
-is refused.
+is refused. A file the person attached may be read without a card: by Read,
+by `daw`, or by a program that inspects a file; writing to it still asks.
 
 **Threads.** A project's conversations are in `.daw/threads.json` beside
 the song: each one's session ID, its title, the first line the person typed
@@ -119,7 +123,8 @@ a terminal and sign in.
 |---|---|
 | View › Agent, ⌥⌘C, the speech mark in the transport bar | Shows or hides the panel, at the right, over the activity panel when both show; kept between projects. The line at its left edge drags its width from 280 to 640 points, 320 to start, kept too |
 | `+` and the clock at the panel's top | A new conversation; a popover of the project's conversations, most recent first, each with when it was last used, Rename and Delete in its menu |
-| The field at the foot | Grows to eight lines. Return sends; Shift-Return starts a new line; Escape gives the keys back. `/` first lists the skills, and the one chosen is a chip ([skill commands](skill-commands.md)). Send is gray while there is nothing to send or the agent works; `+` and the microphone wait for their items |
+| The field at the foot | Grows to eight lines. Return sends; Shift-Return starts a new line; Escape gives the keys back. `/` first lists the skills, and the one chosen is a chip ([skill commands](skill-commands.md)). Send is gray while there is nothing to send or the agent works; the microphone waits for its item |
+| A drop on the panel, ⌘V in the field, `+` | Attaches a file, an image or the selected clips to the next message, as chips above the field ([files and clips in the conversation](agent-attachments.md)) |
 | Stop, beside the spinner | Interrupts the turn; the agent says where it stopped |
 | A tool's row | Gray while it runs, a tick when it returned, a cross when it failed; a click shows or hides what it returned. Two or more in a row are one line, "Ran 3 commands", that a click opens |
 | The "↓" pill | Shown once the person scrolls up from the end; the panel stops following the stream until they are back at the bottom, or press it |

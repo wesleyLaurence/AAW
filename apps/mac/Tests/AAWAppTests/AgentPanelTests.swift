@@ -62,8 +62,13 @@ final class AgentPanelTests: XCTestCase {
         elif t == "user":
             stopped = False
             text = m["message"]["content"]
-            if text.endswith("</app-context>"):
-                text = text[:text.rfind("<app-context>")].strip()
+            if isinstance(text, list):
+                text = "\\n".join(b["text"] for b in text if b["type"] == "text")
+            for tag in ("</attachments>", "</app-context>"):
+                if text.endswith(tag):
+                    text = text[:text.rfind(tag.replace("/", ""))].strip()
+            if text.startswith("<attachments>"):
+                text = text[text.find("</attachments>") + 14:].strip()
             out({"type": "system", "subtype": "init", "session_id": "s"})
             if text.endswith("signout"):
                 out({"type": "result", "subtype": "error", "is_error": True, "result": "Not logged in · Please run /login", "session_id": "s"})
@@ -127,11 +132,15 @@ final class AgentPanelTests: XCTestCase {
         log = scratch.appendingPathComponent("fake.log")
         setenv(ClaudeCode.override, program.path, 1)
         setenv("AAW_FAKE_LOG", log.path, 1)
+        // Claude Code's record of sessions, read for a resumed thread, in
+        // the scratch folder rather than the person's own.
+        setenv("CLAUDE_CONFIG_DIR", scratch.appendingPathComponent("claude").path, 1)
     }
 
     override func tearDown() async throws {
         unsetenv(ClaudeCode.override)
         unsetenv("AAW_FAKE_LOG")
+        unsetenv("CLAUDE_CONFIG_DIR")
         try FileManager.default.removeItem(at: scratch)
     }
 
@@ -391,6 +400,134 @@ final class AgentPanelTests: XCTestCase {
         wait("its handshake") { agent.handshook }
     }
 
+    /// Files attached go with the next message: an image as a block the
+    /// engine sees, scaled and typed, and every file as a line of the
+    /// list after the context; the chips are on the person's row; a file
+    /// attached is one the agent may then read without a card; the
+    /// selected clips attach by reference.
+    func testFilesAndClipsAttachToTheNextMessage() throws {
+        let song = scratch.appendingPathComponent("projects/My Song/song.yaml")
+        try FileManager.default.createDirectory(at: song.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try """
+        session: {length_beats: 16}
+        tracks:
+        - id: keys
+          type: midi
+          clips:
+          - at: 4
+            length_beats: 4
+            id: lead1
+            notes:
+            - {pitch: 60, duration: 1}
+            - {pitch: 64, at: 1, duration: 1}
+
+        """.write(to: song, atomically: true, encoding: .utf8)
+        let files = try AgentAttachmentsTests.files(in: scratch)
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+
+        agent.attach(file: files.png)
+        agent.attach(file: files.png)
+        agent.attach(file: files.wav)
+        agent.attach(file: files.mid)
+        agent.attach(file: files.mov)
+        XCTAssertEqual(agent.attachments.map(\.name), ["shot.png", "kick.wav", "two.mid", "clip.mov"], "a file attaches once")
+        XCTAssertEqual(agent.attachments.map(\.kind), [.image, .sound, .midi, .video])
+        XCTAssertEqual(agent.attachments[0].detail, "40×20; seen")
+        XCTAssertNotNil(agent.attachments[0].picture)
+        XCTAssertEqual(agent.attachments[1].detail, "0.50 s, mono, 44.1 kHz")
+        XCTAssertEqual(agent.attachments[2].detail, "2 tracks: Piano, Bass; 3 notes")
+        XCTAssertTrue(agent.attachments[3].detail.hasSuffix("not read"), agent.attachments[3].detail)
+        agent.removeAttachment(agent.attachments[3].id)
+        XCTAssertEqual(agent.attachments.count, 3)
+
+        // The selected clip, by its reference.
+        XCTAssertFalse(agent.canAttachClips)
+        let clip = try XCTUnwrap(model.placedClips().first)
+        model.select(clips: [clip.key])
+        XCTAssertTrue(agent.canAttachClips)
+        agent.attachSelectedClips()
+        agent.attachSelectedClips()
+        XCTAssertEqual(agent.attachments.count, 4, "a clip attaches once")
+        let attachedClip = agent.attachments[3]
+        XCTAssertEqual(attachedClip.kind, .clip)
+        XCTAssertEqual(attachedClip.name, "lead1")
+        XCTAssertEqual(attachedClip.reference, clip.notes?.reference)
+        XCTAssertEqual(attachedClip.detail, "note clip lead1 on keys at 2.1.1, 4 beats, 2 notes")
+
+        agent.draft = "use these short"
+        agent.send()
+        XCTAssertEqual(agent.attachments, [])
+        XCTAssertEqual(agent.entries.first?.description, "you: use these short + shot.png, kick.wav, two.mid, lead1")
+        wait("the turn") { !agent.working }
+        XCTAssertEqual(agent.threads.map(\.title), ["use these short"])
+
+        // What the stand-in was given: the image first, then one text block
+        // with the context, the list and the words.
+        let content = try XCTUnwrap(try logged().compactMap { ($0["message"] as? [String: Any])?["content"] as? [[String: Any]] }.first)
+        XCTAssertEqual(content.map { $0["type"] as? String }, ["image", "text"])
+        let source = try XCTUnwrap(content[0]["source"] as? [String: Any])
+        XCTAssertEqual(source["type"] as? String, "base64")
+        XCTAssertEqual(source["media_type"] as? String, "image/png")
+        let data = try XCTUnwrap(Data(base64Encoded: source["data"] as? String ?? ""))
+        let image = try XCTUnwrap(NSBitmapImageRep(data: data))
+        XCTAssertEqual(image.pixelsWide, 40)
+        XCTAssertEqual(image.pixelsHigh, 20)
+        let text = try XCTUnwrap(content[1]["text"] as? String)
+        XCTAssertTrue(text.hasPrefix(AppContext.open), text)
+        XCTAssertTrue(text.hasSuffix("\n\nuse these short"), text)
+        let list = try XCTUnwrap(text.range(of: "\n\n<attachments>\n").map { text[$0.upperBound...] })
+        XCTAssertTrue(list.hasPrefix("""
+        - image: \(files.png.path) (40×20; seen)
+        - sound: \(files.wav.path) (0.50 s, mono, 44.1 kHz)
+        - midi: \(files.mid.path) (2 tracks: Piano, Bass; 3 notes)
+        - clip: \(clip.notes?.reference ?? "") (note clip lead1 on keys at 2.1.1, 4 beats, 2 notes)
+        </attachments>
+        """), String(list))
+        XCTAssertEqual(AppContext.strip(text), "use these short")
+
+        // Reading an attached file needs no card; writing to it does.
+        let attached = agent.attachedPaths
+        XCTAssertEqual(attached, [files.png.path, files.wav.path, files.mid.path])
+        let project = song.deletingLastPathComponent()
+        XCTAssertEqual(Approval.decide(tool: "Read", input: ["file_path": files.png.path], project: project, attached: attached), .allow)
+        XCTAssertEqual(Approval.decide(tool: "Bash", input: ["command": "daw samples inspect \"\(files.wav.path)\""], project: project, attached: attached), .allow)
+        XCTAssertEqual(Approval.decide(tool: "Bash", input: ["command": "afinfo '\(files.wav.path)'"], project: project, attached: attached), .allow)
+        XCTAssertEqual(Approval.decide(tool: "Bash", input: ["command": "cp '\(files.wav.path)' samples/"], project: project, attached: attached), .ask("cp '\(files.wav.path)' samples/"))
+        XCTAssertEqual(Approval.decide(tool: "Write", input: ["file_path": files.png.path], project: project, attached: attached), .ask("Write \(files.png.path)"))
+
+        // Attachments alone send with a word for them; too many images are refused.
+        agent.attach(file: files.wav)
+        agent.send()
+        XCTAssertEqual(agent.entries.last(where: { if case .person = $0 { true } else { false } })?.description, "you: Here is what I attached. + kick.wav")
+        wait("the stand-in's request") { agent.entries.contains { if case .approval(_, _, _, nil) = $0 { true } else { false } } }
+        if case .approval(_, let request, _, _)? = agent.entries.last { agent.answer(request, allow: false) }
+        wait("the second turn") { !agent.working }
+        for n in 0..<AgentAttachments.mostImages {
+            let copy = scratch.appendingPathComponent("shot\(n).png")
+            try FileManager.default.copyItem(at: files.png, to: copy)
+            agent.attach(file: copy)
+        }
+        agent.attach(file: files.png)
+        XCTAssertEqual(agent.attachments.count, AgentAttachments.mostImages)
+        XCTAssertEqual(model.refusal, "Ten images go with one message at the most")
+
+        // A resumed conversation draws the chips from the record. The
+        // stand-in keeps no record, so one is written as Claude Code writes it.
+        let id = try XCTUnwrap(agent.currentID)
+        let record = ClaudeTranscripts.folder(for: project).appendingPathComponent("\(id).jsonl")
+        try FileManager.default.createDirectory(at: record.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let line = try JSONSerialization.data(withJSONObject: ["type": "user", "message": ["role": "user", "content": content], "uuid": "1"])
+        try (String(decoding: line, as: UTF8.self) + "\n").write(to: record, atomically: true, encoding: .utf8)
+        agent.newThread()
+        XCTAssertEqual(agent.attachedPaths, [])
+        agent.open(id)
+        XCTAssertEqual(agent.entries.map(\.description), ["you: use these short + shot.png, kick.wav, two.mid, \(clip.notes?.reference ?? "")"])
+        XCTAssertEqual(agent.attachedPaths, [files.png.path, files.wav.path, files.mid.path])
+        try FileManager.default.removeItem(at: record.deletingLastPathComponent())
+    }
+
     func testToolsFoldOnlyInRuns() {
         typealias E = AgentPanel.Entry
         let tool = { (id: Int) in E.tool(id: id, use: "", name: "Bash", summary: "ls", result: nil, failed: false) }
@@ -536,7 +673,7 @@ extension AgentPanel.Entry {
     /// The row in a line, for the tests to read.
     var description: String {
         switch self {
-        case .person(_, let text): "you: \(text)"
+        case .person(_, let text, let attachments): "you: \(text)" + (attachments.isEmpty ? "" : " + " + attachments.map(\.name).joined(separator: ", "))
         case .agent(_, let text): "agent: \(text)"
         case .tool(_, _, let name, let summary, let result, let failed):
             "tool \(name) \(summary)" + (result.map { failed ? " ✗ \($0)" : " → \($0)" } ?? "")

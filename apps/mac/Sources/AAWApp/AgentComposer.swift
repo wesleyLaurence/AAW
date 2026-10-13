@@ -15,6 +15,9 @@ final class ComposerTextView: NSTextView {
     /// A key for the list of skills over the field; true when the list
     /// took it.
     var onListKey: ((ListKey) -> Bool)?
+    /// ⌘V with the pasteboard; true when what is on it was attached
+    /// rather than typed: files, or an image.
+    var onPaste: ((NSPasteboard) -> Bool)?
     /// The height the text wants, within one to `mostLines` lines; told
     /// once when set, then at each change.
     var onHeight: ((CGFloat) -> Void)? {
@@ -127,6 +130,12 @@ final class ComposerTextView: NSTextView {
         onChange?(string)
         colorChip()
         reportHeight()
+    }
+
+    /// Files and images pasted attach to the message; text pastes as text.
+    override func paste(_ sender: Any?) {
+        if onPaste?(NSPasteboard.general) == true { return }
+        super.paste(sender)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -262,6 +271,7 @@ struct ComposerField: NSViewRepresentable {
             case .close: return agent.closeList()
             }
         }
+        text.onPaste = { [weak agent] board in agent?.attach(pasteboard: board) ?? false }
         text.onHeight = { height in
             DispatchQueue.main.async { self.height = height }
         }

@@ -7,7 +7,8 @@ import UniformTypeIdentifiers
 /// song file, and with none a new Untitled project. For checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
-/// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2` and `--wait SECONDS`
+/// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
+/// `--ask TEXT`, `--attach FILE` and `--attach-clips`
 /// in the order to perform them, then `--export PATH [--export-level
 /// LEVEL]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
 /// `--after SECONDS` and `--size WxH`.
@@ -29,6 +30,11 @@ struct Launch {
         /// A message typed into the agent panel and sent. The picture waits
         /// for the agent's turn to end.
         case ask(String)
+        /// A file attached to the agent panel's next message, as a drop on
+        /// the panel does it.
+        case attach(URL)
+        /// The selected clips attached, as `+` › Attach Selected Clips.
+        case attachClips
     }
 
     /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
@@ -135,6 +141,10 @@ struct Launch {
                 if let seconds = rest.popFirst().flatMap(Double.init) { actions.append(.wait(seconds)) }
             case "--ask":
                 if let text = rest.popFirst(), !text.isEmpty { actions.append(.ask(text)) }
+            case "--attach":
+                if let path = rest.popFirst(), !path.isEmpty { actions.append(.attach(URL(fileURLWithPath: path))) }
+            case "--attach-clips":
+                actions.append(.attachClips)
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
             case "--measure":
@@ -520,8 +530,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 post(.leftMouseUp, to)
             }
         case .ask(let text):
+            // As typed and sent, so that what `--attach` added goes with it.
             songs.first?.model.showsAgent = true
-            songs.first?.model.agent.send(text)
+            songs.first?.model.agent.draft = text
+            songs.first?.model.agent.send()
+        case .attach(let file):
+            songs.first?.model.showsAgent = true
+            songs.first?.model.agent.attach(file: file)
+        case .attachClips:
+            songs.first?.model.showsAgent = true
+            songs.first?.model.agent.attachSelectedClips()
         case .wait:
             break
         }

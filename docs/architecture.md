@@ -49,7 +49,9 @@ conversation, with the checkout attached as the workspace: messages go in and
 events come out as lines of JSON, its `daw` commands on the project are
 allowed by the app and anything else is a card the person answers, the
 skills it names in its handshake are listed under `/` in the field and run
-by name, and the
+by name, a file dropped on the panel goes with the next message, an image
+as a picture it sees and the rest by path, a selected clip by its
+reference, and the
 project's conversations are kept in `.daw/threads.json` beside the song. A
 terminal started in the project's folder has the same by location. See
 [agent-panel.md](features/agent-panel.md).

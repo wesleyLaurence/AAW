@@ -23,59 +23,54 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **Files and clips in the conversation.** A file dropped or pasted into
-   the panel going with the next message: an image seen by the agent, a
-   sound, a MIDI file or a document as its path the agent may read without a
-   card, a selected clip by its reference; then a clip dragged from the
-   timeline. [features/agent-attachments.md](features/agent-attachments.md)
-2. **Speaking to the agent.** A microphone in the field: the words recognized
+1. **Speaking to the agent.** A microphone in the field: the words recognized
    on the Mac appear in the field as they are said, and the person reads and
    sends them. [features/voice-input.md](features/voice-input.md)
-3. **`daw audio crossfade` with an option, while the app has the project
+2. **`daw audio crossfade` with an option, while the app has the project
    open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
    "Bad request: invalid type: map, expected f64", where the same command with
    no option, and with the options on a project no host has open, sets the
    join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
    on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
    same three options and has not been tried with a host.
-4. **A time selection in the app.** A range of beats dragged across the
+3. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-5. **A MIDI keyboard.** Notes played through the selected track, held and let
+4. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-6. **Sections and the song's length in the app.** A section made, named,
+5. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-7. **A project made with `daw init` in the app's index,** so a song the agent
+6. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-8. **Turns and A/B.** An agent request's commands grouped, named for the
+7. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-9. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+8. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-10. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+9. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
    that replays it.
-11. **Key and chord detection,** and swing detection, of samples and songs: a
+10. **Key and chord detection,** and swing detection, of samples and songs: a
    loop matched to the song's key before it is placed.
-12. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+11. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-13. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+12. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-14. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+13. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-15. **Stem separation** of a song. The vocals taken out for an instrumental,
+14. **Stem separation** of a song. The vocals taken out for an instrumental,
     the vocals alone for an a cappella, and the stems of drums, bass, vocals
     and the rest, each written into the project as a sample the agent or the
     person places. An open-source model run on this Mac, not one trained here
@@ -83,7 +78,7 @@ wrong with the sounds everything else is built on.
     Ultimate Vocal Remover runs, for the vocals; `daw separate` first, then
     more splits, the app and a reference's stems.
     [features/stem-separation.md](features/stem-separation.md)
-16. **Generated audio.** A sound, a loop or a whole song from a description, with
+15. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample and in a generated folder the library searches; `daw generate` for
     the agent within a daily budget, and a Settings window and a Generate tab in
@@ -96,6 +91,32 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Files and clips in the conversation, by the person in a real
+  session:** a screenshot of a chain in another DAW dropped on the panel
+  from the Finder, the outline and "Add to the message" seen on the way,
+  and whether the agent describes what is in it; a screenshot pasted with
+  ⌘V, and whether `.daw/attachments/` in the project is the right place
+  for it; a reference track dropped from the Finder and a kick dragged
+  from the browser, and whether the agent reads each with `daw samples
+  inspect` without a card and imports it when asked to place it, and
+  whether the browser's library ID and category on the line help; a
+  `.mid` from a keyboard dropped and placed with `daw midi import`; a clip
+  selected and `+` › Attach Selected Clips, whether the agent reads it by
+  its reference, and whether a clip wants to be dragged from the timeline
+  instead (stage 2, not built); a video dropped, and whether "not read" is
+  enough; a patch and a rack dragged from the browser, which were never
+  tried; a chip clicked and its popover read, a file moved afterwards and
+  the chip's word for it; whether a thumbnail, the kind's symbol and 160
+  points of name read right, whether the chips belong above the field or
+  in it, and whether sending with nothing typed should say "Here is what I
+  attached."; a thread with attachments opened again, and whether its
+  chips are there; ten images at once. Scripted runs over the stand-in
+  showed four chips above the field and three on the sent bubble in
+  pictures and the image block and the list in the log; against Claude
+  Code 2.1.296 a generated picture was described, a generated WAV
+  inspected and a generated MIDI file read without a card, in a picture,
+  and the record kept the image and the list ([files and clips in the
+  conversation](features/agent-attachments.md)); nothing by hand.
 - **Skills under `/`, by the person in a real session:** `/` typed in
   the field of a project of their own, whether `roar-edit` and the
   project's skills are under the right headings and the rest reads as
