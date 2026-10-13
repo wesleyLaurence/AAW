@@ -20,9 +20,9 @@ engine provides deterministic editing, sample retrieval, sequencing, playback,
 rendering and technical inspection. There is no embedded autonomous composer.
 
 ```
-  Mac app (Swift, SwiftUI + AppKit)            agent in a terminal
-  arrangement, mixer, device view,             daw set / move / add / play
-  transport, space bar, drag edits                     │
+  Mac app (Swift, SwiftUI + AppKit)            agent: Claude Code, in the app's
+  arrangement, mixer, device view,             panel or in a terminal
+  transport, space bar, drag edits             daw set / move / add / play
          │ in-process calls (UniFFI)                   │ local socket
          ▼                                             ▼
   ┌──────────────────── session host (Rust) ─────────────────────┐
@@ -42,6 +42,15 @@ rendering and technical inspection. There is no embedded autonomous composer.
 With no app or `daw host` running for a project, `daw` applies a command to the
 file itself and exits, under the project's `.daw.lock`. A running host registers
 its project and socket under `~/Library/Application Support/AAW/hosts`.
+
+The agent is the person's own Claude Code. In the app each project's window
+has a panel that runs it as a process in the project's folder, one a running
+conversation, with the checkout attached as the workspace: messages go in and
+events come out as lines of JSON, its `daw` commands on the project are
+allowed by the app and anything else is a card the person answers, and the
+project's conversations are kept in `.daw/threads.json` beside the song. A
+terminal started in the project's folder has the same by location. See
+[agent-panel.md](features/agent-panel.md).
 
 A project is a folder with `song.yaml`, its samples and its renders, and a
 command takes the folder or the file. Beside the song is `SONG.md`, what the

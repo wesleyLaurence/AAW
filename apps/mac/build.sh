@@ -75,6 +75,9 @@ mkdir -p "$contents/MacOS" "$contents/Helpers" "$frameworks" "$licenses"
 cp "$bin/AAW" "$contents/MacOS/AAW"
 cp "$engine/target/release/daw" "$contents/Helpers/daw"
 cp "$here/Info.plist" "$contents/Info.plist"
+# The checkout stands in for the workspace: the agent panel attaches it, for
+# the person's instructions, taste and skills, to a project kept anywhere.
+/usr/libexec/PlistBuddy -c "Add :AAWCheckout string $(cd "$here/../.." && pwd)" "$contents/Info.plist"
 
 # Runs a command that has things to say when it works too, and shows them only
 # when it fails.

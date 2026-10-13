@@ -10,7 +10,7 @@ kept.
   and the agent make good music with the tool (D75), with what lets the agent
   understand the sound of a session first (D98), and the agent's
   conversations by project before either (D109); what every session is given
-  went first and is built.
+  and the agent panel went first and are built.
 - **Verify** is work that is merged and that nobody has heard or tried by hand,
   with what is most worth hearing first.
 - **Later** is wanted and not ordered.
@@ -22,55 +22,51 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **The agent panel.** A conversation in the window over the person's own
-   Claude Code, with several threads to a project, listed and resumed there,
-   and two projects open in two windows each with a conversation working at
-   the same time. [features/agent-panel.md](features/agent-panel.md)
-2. **`daw audio crossfade` with an option, while the app has the project
+1. **`daw audio crossfade` with an option, while the app has the project
    open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
    "Bad request: invalid type: map, expected f64", where the same command with
    no option, and with the options on a project no host has open, sets the
    join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
    on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
    same three options and has not been tried with a host.
-3. **A time selection in the app.** A range of beats dragged across the
+2. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-4. **A MIDI keyboard.** Notes played through the selected track, held and let
+3. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-5. **Sections and the song's length in the app.** A section made, named,
+4. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-6. **A project made with `daw init` in the app's index,** so a song the agent
+5. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-7. **Turns and A/B.** An agent request's commands grouped, named for the
+6. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-8. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+7. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-9. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+8. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
    that replays it.
-10. **Key and chord detection,** and swing detection, of samples and songs: a
-    loop matched to the song's key before it is placed.
-11. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+9. **Key and chord detection,** and swing detection, of samples and songs: a
+   loop matched to the song's key before it is placed.
+10. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-12. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+11. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-13. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+12. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-14. **Stem separation** of a song. The vocals taken out for an instrumental,
+13. **Stem separation** of a song. The vocals taken out for an instrumental,
     the vocals alone for an a cappella, and the stems of drums, bass, vocals
     and the rest, each written into the project as a sample the agent or the
     person places. An open-source model run on this Mac, not one trained here
@@ -78,7 +74,7 @@ wrong with the sounds everything else is built on.
     Ultimate Vocal Remover runs, for the vocals; `daw separate` first, then
     more splits, the app and a reference's stems.
     [features/stem-separation.md](features/stem-separation.md)
-15. **Generated audio.** A sound, a loop or a whole song from a description, with
+14. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample and in a generated folder the library searches; `daw generate` for
     the agent within a daily budget, and a Settings window and a Generate tab in
@@ -91,6 +87,34 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The agent panel, by the person, first of all with a real request:** the
+  app built with `./build.sh` and a project of their own opened, View › Agent
+  shown, and a request typed; whether the agent answers from `SONG.md` and
+  the person's rules when asked which project it is in and what the rules
+  are, without being told; whether its `daw` edits land in the window and
+  are heard while the song plays; the first request that is not `daw` on the
+  project, which is the first approval card anyone has seen from a real
+  session, since the request's shape was taken from the Agent SDK's
+  documentation, and whether Allow and Refuse each do what they say; a request to edit
+  `SONG.md`, which is a card today, and whether that is wanted; whether the
+  app's context ahead of each message, the start position, the selection
+  and the person's changes since the last turn, is read as direction and
+  whether its length is felt; Stop in the middle of a turn; the project
+  closed and opened again, the earlier conversation listed and resumed with
+  its context, a second thread started beside it and both in the menu, and a
+  session started in a terminal in the project's folder listed too; two
+  projects open with a request typed in each, both worked on at once and
+  each agent's edits in its own song; Save As… in the middle of a
+  conversation and the next message going on in the new folder; the panel
+  with Claude Code signed out, and on a Mac without it; whether 320 points
+  with the activity under it is the right width, whether the agent's words
+  read well with inline markdown alone, and whether a tool's row wants its
+  result open by default. Tests drive the panel over a stand-in program
+  that speaks Claude Code's lines; one scripted `--ask` against the real
+  Claude Code, on a scratch project outside the checkout, answered which
+  project and what `SONG.md` says, ran `daw status .` and read the open host
+  back, seen in a picture; the stream, the interrupt and the handshake were
+  seen from a script, and no approval card from a real session was.
 - **What every session is given, by the person in sessions of their own,**
   first here because every session after it rests on it and it takes minutes:
   `cd projects/NAME && claude` in a project, asked what the song is for and

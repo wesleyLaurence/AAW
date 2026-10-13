@@ -1,0 +1,504 @@
+import AppKit
+import Observation
+
+/// The conversation with the agent in a project's window: the project's
+/// threads, the one shown, its messages as they stream, the tools the agent
+/// runs with their results, the requests waiting for the person's answer,
+/// and the state of the person's own Claude Code. One runs for each open
+/// project, in the project's folder, so two windows have two agents at work.
+@MainActor
+@Observable
+final class AgentPanel {
+    /// A row of the conversation.
+    enum Entry: Identifiable, Equatable {
+        case person(id: Int, text: String)
+        case agent(id: Int, text: String)
+        /// A tool the agent used: what it was given, and what came back.
+        case tool(id: Int, use: String, name: String, summary: String, result: String?, failed: Bool)
+        /// A request the person answers: allowed, refused, or still waiting.
+        case approval(id: Int, request: String, summary: String, allowed: Bool?)
+        /// A word from the panel: a resumed conversation, a stop, an error.
+        case note(id: Int, text: String)
+
+        var id: Int {
+            switch self {
+            case .person(let id, _), .agent(let id, _), .tool(let id, _, _, _, _, _), .approval(let id, _, _, _), .note(let id, _): id
+            }
+        }
+    }
+
+    /// Whether the person's Claude Code can be used.
+    enum Status: Equatable {
+        /// Not looked for yet.
+        case unknown
+        case ready
+        /// Not found by the person's shell.
+        case missing
+        /// Found, and signed out: what it said.
+        case signedOut(String)
+        /// Found, and failed to run: what it said.
+        case failed(String)
+    }
+
+    /// The project's threads, most recent first.
+    private(set) var threads: [ThreadList.Entry] = []
+    /// The thread shown; nil while a new conversation waits for its first message.
+    private(set) var currentID: String?
+    private(set) var entries: [Entry] = []
+    /// Whether the agent is on a turn.
+    private(set) var working = false
+    private(set) var status = Status.unknown
+    /// What the person is typing.
+    var draft = ""
+
+    /// The song whose window this is; set once, after the model is made.
+    @ObservationIgnored weak var song: SongModel?
+
+    @ObservationIgnored private var process: AgentProcess?
+    /// The thread and the folder the process was started for.
+    @ObservationIgnored private var processThread: String?
+    @ObservationIgnored private var processFolder: URL?
+    @ObservationIgnored private var located: ClaudeCode.Located?
+    @ObservationIgnored private var locating: Task<ClaudeCode.Located?, Never>?
+    /// The messages the text of which streamed, so that the whole message
+    /// that follows is not shown twice.
+    @ObservationIgnored private var streamed: Set<String> = []
+    /// The entry the current text block streams into.
+    @ObservationIgnored private var streaming: Int?
+    /// The input of each request waiting for the person, by its request ID.
+    @ObservationIgnored private var pending: [String: [String: Any]] = [:] {
+        didSet { awaitingAnswer = !pending.isEmpty }
+    }
+    /// Whether a request waits for the person's Allow or Refuse.
+    private(set) var awaitingAnswer = false
+    /// The song's revision when the agent's last turn ended: the person's
+    /// changes after it go with the next message.
+    @ObservationIgnored private var lastTurnRevision: UInt64 = 0
+    /// Whether the person pressed Stop during this turn.
+    @ObservationIgnored private var stopping = false
+    /// The folders the project has had, whose records a thread's earlier
+    /// messages may be in.
+    @ObservationIgnored private var folders: [URL] = []
+    @ObservationIgnored private var ids = 0
+    /// The environment of the app, which the agent inherits.
+    @ObservationIgnored private let environment: [String: String]
+
+    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+        self.environment = environment
+    }
+
+    /// The project's folder, where the agent works.
+    private var folder: URL? { song?.url.deletingLastPathComponent() }
+
+    private func next() -> Int {
+        ids += 1
+        return ids
+    }
+
+    // MARK: Threads
+
+    /// Reads the project's threads, and Claude Code's own list for the
+    /// folder, and shows the most recent one, if any, where it stopped.
+    func start() {
+        guard let folder else { return }
+        folders = [folder]
+        refreshThreads()
+        if let first = threads.first { open(first.id) }
+        locating = Task.detached { [environment] in ClaudeCode.locate(environment: environment) }
+        Task { [weak self] in
+            guard let self, let task = locating else { return }
+            let found = await task.value
+            located = found
+            if status == .unknown { status = found == nil ? .missing : .ready }
+        }
+    }
+
+    func refreshThreads() {
+        guard let folder else { return }
+        var list = ThreadList(project: folder)
+        list.merge(ClaudeTranscripts.sessions(in: ClaudeTranscripts.folder(for: folder)))
+        threads = list.entries
+    }
+
+    private func saveThreads(_ change: (inout ThreadList) -> Void) {
+        guard let folder else { return }
+        var list = ThreadList(project: folder)
+        change(&list)
+        do {
+            try list.save()
+        } catch {
+            note("The thread list was not saved: \(error.localizedDescription)")
+        }
+        threads = list.entries
+    }
+
+    /// A new conversation: nothing shown until the first message, which
+    /// starts it.
+    func newThread() {
+        guard !working else {
+            song?.refuse("The agent is still working; wait for it, or press Stop, before starting another conversation")
+            return
+        }
+        endProcess()
+        currentID = nil
+        entries = []
+    }
+
+    /// Shows a thread where it stopped, drawn from Claude Code's record of
+    /// it; the next message resumes it.
+    func open(_ id: String) {
+        guard !working else {
+            song?.refuse("The agent is still working; wait for it, or press Stop, before changing conversations")
+            return
+        }
+        guard id != currentID else { return }
+        endProcess()
+        currentID = id
+        entries = []
+        var found = false
+        for folder in folders {
+            let file = ClaudeTranscripts.folder(for: folder).appendingPathComponent("\(id).jsonl")
+            guard FileManager.default.fileExists(atPath: file.path) else { continue }
+            found = true
+            for line in ClaudeTranscripts.read(file) {
+                switch line {
+                case .person(let text): entries.append(.person(id: next(), text: text))
+                case .agent(let text): entries.append(.agent(id: next(), text: text))
+                case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: summary, result: nil, failed: false))
+                }
+            }
+            break
+        }
+        if !found {
+            note("Earlier messages are in Claude Code's own record, which was not found here; the conversation goes on from where it stopped.")
+        }
+    }
+
+    func rename(_ id: String, _ title: String) {
+        saveThreads { $0.rename(id, title) }
+    }
+
+    /// The thread shown.
+    var current: ThreadList.Entry? {
+        currentID.flatMap { id in threads.first { $0.id == id } }
+    }
+
+    // MARK: Messages
+
+    /// Sends what the person typed, with the app's context ahead of it, to
+    /// the thread shown, starting or resuming its process as needed.
+    func send() {
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        draft = ""
+        send(text)
+    }
+
+    func send(_ text: String) {
+        guard !working else {
+            song?.refuse("The agent is still working; wait for it, or press Stop")
+            return
+        }
+        guard let song, let folder else { return }
+        entries.append(.person(id: next(), text: text))
+        working = true
+        stopping = false
+        let id = currentID ?? UUID().uuidString.lowercased()
+        let isNew = currentID == nil
+        currentID = id
+        let context = song.agentContext(since: lastTurnRevision)
+        let message = AppContext.wrap(context: context, text: text)
+        Task { [weak self] in
+            guard let self else { return }
+            if located == nil { located = await locating?.value }
+            guard let located else {
+                status = .missing
+                working = false
+                note("Claude Code was not found. Install it, sign in by running `claude` in a terminal, then try again.")
+                return
+            }
+            if isNew {
+                saveThreads { $0.note(id, title: ThreadList.title(from: text)) }
+            }
+            if process == nil || processThread != id || processFolder != folder {
+                endProcess()
+                guard start(located, thread: id, folder: folder, resume: !isNew && hasRun(id)) else {
+                    working = false
+                    return
+                }
+            }
+            process?.send(["type": "user", "message": ["role": "user", "content": message]])
+        }
+    }
+
+    /// Whether a thread has had a turn, so that its process resumes it
+    /// rather than starting it under its ID.
+    private func hasRun(_ id: String) -> Bool {
+        if let entry = threads.first(where: { $0.id == id }), entry.last > entry.started { return true }
+        return folders.contains { FileManager.default.fileExists(atPath: ClaudeTranscripts.folder(for: $0).appendingPathComponent("\(id).jsonl").path) }
+    }
+
+    /// Starts Claude Code for a thread in the project's folder.
+    private func start(_ located: ClaudeCode.Located, thread: String, folder: URL, resume: Bool) -> Bool {
+        let workspace = ClaudeCode.workspace(project: folder)
+        let under = workspace.map { ClaudeCode.isUnder(folder, workspace: $0) } ?? false
+        let daw = Exporter.daw
+        let prompt = ClaudeCode.prompt(project: folder, dawOnPath: daw != nil, workspace: workspace,
+                                       workspaceText: under ? nil : workspace.map(ClaudeCode.workspaceText))
+        let arguments = ClaudeCode.arguments(resume: resume ? thread : nil, sessionID: thread, workspace: workspace, prompt: prompt)
+        var environment = self.environment
+        var path = located.path
+        if let daw { path = daw.deletingLastPathComponent().path + ":" + path }
+        environment["PATH"] = path
+        do {
+            process = try AgentProcess(
+                executable: located.executable, arguments: arguments, folder: folder, environment: environment,
+                onEvent: { [weak self] event in self?.took(event) },
+                onExit: { [weak self] status, said in self?.exited(status: status, said: said) }
+            )
+        } catch {
+            status = .failed(error.localizedDescription)
+            note("Claude Code could not be started: \(error.localizedDescription)")
+            return false
+        }
+        processThread = thread
+        processFolder = folder
+        streamed = []
+        // The handshake the stream-json input expects before its first message.
+        process?.send(["type": "control_request", "request_id": "init", "request": ["subtype": "initialize"]])
+        return true
+    }
+
+    private func endProcess() {
+        process?.end()
+        process = nil
+        processThread = nil
+        processFolder = nil
+        for (request, _) in pending { decided(request, allowed: false) }
+    }
+
+    /// Interrupts the turn.
+    func stop() {
+        guard working, let process else { return }
+        stopping = true
+        process.send(["type": "control_request", "request_id": "stop-\(next())", "request": ["subtype": "interrupt"]])
+    }
+
+    /// Answers a request the agent made.
+    func answer(_ request: String, allow: Bool) {
+        guard pending[request] != nil else { return }
+        decided(request, allowed: allow)
+    }
+
+    private func decided(_ request: String, allowed: Bool) {
+        let input = pending.removeValue(forKey: request) ?? [:]
+        let response: [String: Any] = allowed
+            ? ["behavior": "allow", "updatedInput": input]
+            : ["behavior": "deny", "message": "The person refused this in the app's panel."]
+        process?.send(["type": "control_response", "response": ["subtype": "success", "request_id": request, "response": response]])
+        if let i = entries.firstIndex(where: { if case .approval(_, request, _, _) = $0 { true } else { false } }),
+           case .approval(let id, _, let summary, _) = entries[i] {
+            entries[i] = .approval(id: id, request: request, summary: summary, allowed: allowed)
+        }
+    }
+
+    // MARK: What the process says
+
+    private func took(_ event: [String: Any]) {
+        switch event["type"] as? String {
+        case "stream_event":
+            guard let inner = event["event"] as? [String: Any] else { return }
+            let message = event["api_message_id"] as? String
+            switch inner["type"] as? String {
+            case "content_block_start":
+                if (inner["content_block"] as? [String: Any])?["type"] as? String == "text" {
+                    let id = next()
+                    entries.append(.agent(id: id, text: ""))
+                    streaming = entries.count - 1
+                    if let message { streamed.insert(message) }
+                }
+            case "content_block_delta":
+                if let delta = inner["delta"] as? [String: Any], delta["type"] as? String == "text_delta",
+                   let text = delta["text"] as? String, let i = streaming, case .agent(let id, let had) = entries[i] {
+                    entries[i] = .agent(id: id, text: had + text)
+                }
+            case "content_block_stop":
+                streaming = nil
+            default:
+                break
+            }
+        case "assistant":
+            guard let message = event["message"] as? [String: Any], let blocks = message["content"] as? [[String: Any]] else { return }
+            let id = message["id"] as? String
+            for block in blocks {
+                switch block["type"] as? String {
+                case "text":
+                    // Streamed already, unless the stream gave nothing.
+                    if let id, streamed.contains(id) { continue }
+                    if let text = block["text"] as? String, !text.isEmpty { entries.append(.agent(id: next(), text: text)) }
+                case "tool_use":
+                    guard let name = block["name"] as? String else { continue }
+                    let input = block["input"] as? [String: Any] ?? [:]
+                    let use = block["id"] as? String ?? ""
+                    entries.append(.tool(id: next(), use: use, name: name, summary: ClaudeTranscripts.toolSummary(name: name, input: input), result: nil, failed: false))
+                default:
+                    break
+                }
+            }
+        case "user":
+            guard let message = event["message"] as? [String: Any], let blocks = message["content"] as? [[String: Any]] else { return }
+            for block in blocks where block["type"] as? String == "tool_result" {
+                guard let use = block["tool_use_id"] as? String else { continue }
+                let text: String
+                if let string = block["content"] as? String {
+                    text = string
+                } else if let parts = block["content"] as? [[String: Any]] {
+                    text = parts.compactMap { $0["text"] as? String }.joined(separator: "\n")
+                } else {
+                    text = ""
+                }
+                let failed = block["is_error"] as? Bool ?? false
+                if let i = entries.lastIndex(where: { if case .tool(_, use, _, _, _, _) = $0 { true } else { false } }),
+                   case .tool(let id, _, let name, let summary, _, _) = entries[i] {
+                    entries[i] = .tool(id: id, use: use, name: name, summary: summary, result: text, failed: failed)
+                }
+            }
+        case "control_request":
+            guard let request = event["request"] as? [String: Any], let id = event["request_id"] as? String else { return }
+            if request["subtype"] as? String == "can_use_tool", let tool = request["tool_name"] as? String, let folder {
+                let input = request["input"] as? [String: Any] ?? [:]
+                pending[id] = input
+                switch Approval.decide(tool: tool, input: input, project: folder) {
+                case .allow:
+                    decided(id, allowed: true)
+                case .ask(let summary):
+                    entries.append(.approval(id: next(), request: id, summary: summary, allowed: nil))
+                    NSSound.beep()
+                }
+            } else {
+                process?.send(["type": "control_response", "response": ["subtype": "error", "request_id": id, "error": "The AAW panel does not answer this request."]])
+            }
+        case "result":
+            working = false
+            streaming = nil
+            // A request still waiting at the turn's end, after a stop, is refused.
+            for (request, _) in pending { decided(request, allowed: false) }
+            if let song { lastTurnRevision = song.arrangement.revision }
+            if let id = currentID { saveThreads { $0.note(id, title: "") } }
+            if event["is_error"] as? Bool == true {
+                let said = (event["result"] as? String) ?? (event["subtype"] as? String) ?? "error"
+                if stopping {
+                    note("Stopped.")
+                } else if Self.isSignedOut(said) {
+                    status = .signedOut(said)
+                    note("Claude Code is signed out: run `claude` in a terminal and sign in, then try again.")
+                } else {
+                    note("The agent stopped: \(said)")
+                }
+            }
+            stopping = false
+        default:
+            break
+        }
+    }
+
+    /// The process ended: by itself after its input closed, or with a
+    /// reason, such as being signed out.
+    private func exited(status: Int32, said: String) {
+        guard process != nil else { return }
+        process = nil
+        processThread = nil
+        processFolder = nil
+        let reason = said.trimmingCharacters(in: .whitespacesAndNewlines)
+        if status != 0 {
+            if Self.isSignedOut(reason) {
+                self.status = .signedOut(reason)
+                note("Claude Code is signed out: run `claude` in a terminal and sign in, then try again.")
+            } else if working || !reason.isEmpty {
+                self.status = .failed(reason)
+                note("Claude Code ended (status \(status))\(reason.isEmpty ? "." : ": \(reason.suffix(400))")")
+            }
+        }
+        if working {
+            working = false
+            if let song { lastTurnRevision = song.arrangement.revision }
+        }
+        for (request, _) in pending { decided(request, allowed: false) }
+    }
+
+    /// Whether what Claude Code said means it has no login.
+    static func isSignedOut(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return lower.contains("not logged in") || lower.contains("/login") || lower.contains("invalid api key")
+            || lower.contains("please log in") || lower.contains("authentication_error")
+    }
+
+    private func note(_ text: String) {
+        entries.append(.note(id: next(), text: text))
+    }
+
+    // MARK: The project
+
+    /// The project was saved under another name: the process goes on in the
+    /// new folder at the next message, and the thread list is read there.
+    func projectMoved(from old: URL) {
+        guard let folder else { return }
+        folders.insert(folder, at: 0)
+        if !working { endProcess() }
+        refreshThreads()
+    }
+
+    /// The window is closing.
+    func close() {
+        endProcess()
+        locating?.cancel()
+    }
+}
+
+extension SongModel {
+    /// What goes ahead of the person's message: the transport, the selection
+    /// and what the person changed in the window since the agent's last turn.
+    func agentContext(since revision: UInt64) -> String {
+        let a = arrangement
+        func bar(_ beat: Double) -> String {
+            TimelineLayout.position(beat, beatsPerBar: a.barBeats, beatUnit: a.beatUnit)
+        }
+        var lines: [String] = []
+        var transport = "Start position \(bar(self.transport.cue))"
+        if let loop = self.transport.loopRegion {
+            transport += "; loop from \(bar(loop.start)) to \(bar(loop.start + loop.length))"
+        } else {
+            transport += "; no loop"
+        }
+        transport += self.transport.playing ? "; playing." : "; stopped."
+        lines.append(transport)
+        var selected: [String] = []
+        for clip in placedClips() where selectedClips.contains(clip.key) {
+            let track = a.tracks.indices.contains(clip.track) ? a.tracks[clip.track].id : "?"
+            if let pattern = clip.clip { selected.append("clip of pattern \(pattern.pattern) on \(track) at \(bar(clip.at))") }
+            if let audio = clip.audio { selected.append("audio clip \(audio.sample) on \(track) at \(bar(clip.at))") }
+            if let notes = clip.notes { selected.append("note clip \(notes.id) on \(track) at \(bar(clip.at))") }
+        }
+        switch selectedRow {
+        case .track(let key): if let t = a.tracks.first(where: { $0.key == key }) { selected.append("track \(t.id)") }
+        case .group(let key): if let g = a.groups.first(where: { $0.key == key }) { selected.append("group \(g.id)") }
+        case .bus(let key): if let r = a.returns.first(where: { $0.key == key }) { selected.append("return \(r.id)") }
+        case .master: selected.append("the master")
+        case nil: break
+        }
+        if let marker = selectedMarker, let m = a.markers.first(where: { $0.key == marker }) {
+            selected.append("marker \(m.id) at \(bar(m.at))\(m.text.isEmpty ? "" : " (\(m.text))")")
+        }
+        if !selectedNotes.isEmpty { selected.append("\(selectedNotes.count) note\(selectedNotes.count == 1 ? "" : "s") in the piano roll") }
+        if !selectedEvents.isEmpty { selected.append("\(selectedEvents.count) event\(selectedEvents.count == 1 ? "" : "s") in the pattern") }
+        lines.append(selected.isEmpty ? "Nothing is selected." : "Selected: " + selected.joined(separator: "; ") + ".")
+        let changes = activity.filter { $0.revision > revision && $0.origin != .agent }.reversed()
+        if !changes.isEmpty {
+            let shown = changes.prefix(12).map { "- \($0.label) (\($0.origin == .user ? "in the window" : "in the file"))" }
+            var text = "Since your last turn the person changed:\n" + shown.joined(separator: "\n")
+            if changes.count > 12 { text += "\n- and \(changes.count - 12) more" }
+            lines.append(text)
+        }
+        return lines.joined(separator: "\n")
+    }
+}

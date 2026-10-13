@@ -220,6 +220,14 @@ public final class SongModel {
     public var showsActivity = true
     public var showsDetail = true
     public var showsBrowser = false
+    /// Whether the agent panel shows, kept between projects.
+    public var showsAgent: Bool = UserDefaults.standard.object(forKey: "agent.shown") == nil || UserDefaults.standard.bool(forKey: "agent.shown") {
+        didSet {
+            if showsAgent != oldValue { UserDefaults.standard.set(showsAgent, forKey: "agent.shown") }
+        }
+    }
+    /// The conversation with the agent in this project's window.
+    let agent = AgentPanel()
     /// The detail panel's height, which the person drags at its top edge:
     /// `leastDetailHeight` at the least, and kept between projects.
     public var detailHeight: CGFloat = max(SongModel.leastDetailHeight, CGFloat(UserDefaults.standard.double(forKey: "detail.height"))) {
@@ -307,6 +315,8 @@ public final class SongModel {
         arrangement = song.arrangement()
         deviceRow = arrangement.tracks.first.map { .track($0.key) }
         relay.model = self
+        agent.song = self
+        agent.start()
     }
 
     // MARK: What the host reports
@@ -364,6 +374,7 @@ public final class SongModel {
         formerURLs.append(old)
         url = new
         untitled = song.isUntitled()
+        agent.projectMoved(from: old.deletingLastPathComponent())
         onMoved?(old)
     }
 
@@ -1580,7 +1591,7 @@ public final class SongModel {
         return error.localizedDescription
     }
 
-    private func refuse(_ message: String) {
+    func refuse(_ message: String) {
         refusal = message
         refusalTimer?.cancel()
         refusalTimer = after(6) { $0.refusal = nil }
@@ -1693,6 +1704,7 @@ public final class SongModel {
     public func close() {
         endDrag()
         closeAnalyzers()
+        agent.close()
         // After queued commands, so none is sent to a closed host.
         commands.sync { song.close() }
     }
