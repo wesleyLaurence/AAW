@@ -128,16 +128,25 @@ enum AppContext {
     static let open = "<app-context>"
     static let close = "</app-context>"
 
-    /// The message as it is sent: the context, then the person's words.
+    /// The message as it is sent: the context, then the person's words. A
+    /// message that runs a skill, `/name words`, is read from its start, so
+    /// the context follows it there instead.
     static func wrap(context: String, text: String) -> String {
         let body = context.trimmingCharacters(in: .whitespacesAndNewlines)
-        return body.isEmpty ? text : "\(open)\n\(body)\n\(close)\n\n\(text)"
+        guard !body.isEmpty else { return text }
+        if AgentCommands.split(text) != nil { return "\(text)\n\n\(open)\n\(body)\n\(close)" }
+        return "\(open)\n\(body)\n\(close)\n\n\(text)"
     }
 
     /// The person's words without the context, as the panel shows them.
     static func strip(_ message: String) -> String {
-        guard message.hasPrefix(open), let end = message.range(of: close) else { return message }
-        return String(message[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.hasPrefix(open), let end = message.range(of: close) {
+            return String(message[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if message.hasSuffix(close), let start = message.range(of: open, options: .backwards) {
+            return String(message[..<start.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return message
     }
 }
 
@@ -260,8 +269,10 @@ enum ClaudeTranscripts {
         }
     }
 
-    /// The person's line, unless the text is a command's record or empty.
+    /// The person's line: a skill they ran as `/name words`, or their words;
+    /// nothing for a local command's record or an empty line.
     private static func personLine(_ text: String) -> Line? {
+        if let command = AgentCommands.recorded(text) { return .person(command) }
         let shown = AppContext.strip(text)
         let trimmed = shown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("<command-name>"), !trimmed.hasPrefix("<local-command"),

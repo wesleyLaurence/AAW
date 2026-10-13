@@ -20,6 +20,9 @@ final class ProjectsTests: XCTestCase {
 
     override func setUpWithError() throws {
         _ = Self.folders
+        // A project's panel starts its agent when shown; a program that
+        // ends at once stands in, so no test runs the person's Claude Code.
+        setenv(ClaudeCode.override, "/usr/bin/true", 1)
         scratch = SongModel.normal(FileManager.default.temporaryDirectory.appendingPathComponent("aaw projects \(UUID().uuidString)"))
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
     }

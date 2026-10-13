@@ -86,7 +86,36 @@ final class AgentPanel {
     /// The entry whose text is streaming in, for the cursor at its end.
     private(set) var streamingID: Int?
     /// What the person is typing.
-    var draft = ""
+    var draft = "" {
+        didSet {
+            guard draft != oldValue else { return }
+            listClosed = false
+            draftChanged()
+        }
+    }
+
+    // The skills under `/`.
+
+    /// The commands the engine listed in its handshake, for `/` in the
+    /// field; the last list the project saw until a new process answers.
+    private(set) var commands: [AgentCommand] = []
+    /// The commands in their groups, as the list shows them unfiltered.
+    private(set) var sections: [AgentCommands.Section] = []
+    /// Whether the running process has answered the handshake.
+    private(set) var handshook = false
+    /// The skill chosen from the list, a chip at the field's start while
+    /// the draft still begins with its name.
+    private(set) var chip: AgentCommand?
+    /// What the person typed after `/`, while the list shows; nil when it
+    /// does not.
+    private(set) var commandQuery: String?
+    /// The row the keys are on, over the sections' commands in order.
+    private(set) var commandSelection = 0
+    /// Escape closed the list for this draft; the next keystroke opens it.
+    @ObservationIgnored private var listClosed = false
+    /// The last list each project folder saw, for the moment before a new
+    /// process answers.
+    @ObservationIgnored private static var lastCommands: [String: [AgentCommand]] = [:]
 
     /// The song whose window this is; set once, after the model is made.
     @ObservationIgnored weak var song: SongModel?
@@ -141,12 +170,28 @@ final class AgentPanel {
         folders = [folder]
         refreshThreads()
         if let first = threads.first { open(first.id) }
+        if let last = Self.lastCommands[folder.path] { setCommands(last) }
         locating = Task.detached { [environment] in ClaudeCode.locate(environment: environment) }
         Task { [weak self] in
             guard let self, let task = locating else { return }
             let found = await task.value
             located = found
             if status == .unknown { status = found == nil ? .missing : .ready }
+            warm()
+        }
+    }
+
+    /// Starts the conversation's process before its first message, while
+    /// the panel shows, so that the handshake's list of skills is there
+    /// when `/` is typed; it waits on its input and costs no turn.
+    func warm() {
+        guard song?.showsAgent == true, !working, process == nil, folder != nil else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            if located == nil { located = await locating?.value }
+            guard let located, !working, process == nil, let folder else { return }
+            let id = currentID ?? UUID().uuidString.lowercased()
+            _ = start(located, thread: id, folder: folder, resume: currentID != nil && hasRun(id))
         }
     }
 
@@ -179,6 +224,7 @@ final class AgentPanel {
         endProcess()
         currentID = nil
         entries = []
+        warm()
     }
 
     /// Shows a thread where it stopped, drawn from Claude Code's record of
@@ -209,6 +255,7 @@ final class AgentPanel {
         if !found {
             note("Earlier messages are in Claude Code's own record, which was not found here; the conversation goes on from where it stopped.")
         }
+        warm()
     }
 
     func rename(_ id: String, _ title: String) {
@@ -229,6 +276,7 @@ final class AgentPanel {
             endProcess()
             currentID = nil
             entries = []
+            warm()
         }
         saveThreads { $0.remove(id) }
     }
@@ -246,6 +294,7 @@ final class AgentPanel {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         draft = ""
+        chip = nil
         send(text)
     }
 
@@ -258,7 +307,8 @@ final class AgentPanel {
         entries.append(.person(id: next(), text: text))
         working = true
         stopping = false
-        let id = currentID ?? UUID().uuidString.lowercased()
+        // A new conversation takes the ID its warmed process was started under.
+        let id = currentID ?? processThread ?? UUID().uuidString.lowercased()
         let isNew = currentID == nil
         currentID = id
         let context = song.agentContext(since: lastTurnRevision)
@@ -319,8 +369,75 @@ final class AgentPanel {
         processThread = thread
         processFolder = folder
         streamed = []
-        // The handshake the stream-json input expects before its first message.
+        handshook = false
+        // The handshake the stream-json input expects before its first
+        // message, whose answer lists the commands.
         process?.send(["type": "control_request", "request_id": "init", "request": ["subtype": "initialize"]])
+        return true
+    }
+
+    // MARK: The skills under `/`
+
+    /// The list's rows in order: the filtered sections' commands.
+    var listed: [AgentCommands.Section] {
+        AgentCommands.filter(sections, query: commandQuery ?? "")
+    }
+
+    private var listedCommands: [AgentCommand] { listed.flatMap(\.commands) }
+
+    /// Keeps the handshake's list, grouped by the project's and the
+    /// workspace's skill folders, and remembers it for the folder.
+    private func setCommands(_ commands: [AgentCommand]) {
+        self.commands = commands
+        guard let folder else { return }
+        Self.lastCommands[folder.path] = commands
+        let workspace = ClaudeCode.workspace(project: folder).map(AgentCommands.skillNames) ?? []
+        sections = AgentCommands.grouped(commands, project: AgentCommands.skillNames(in: folder), workspace: workspace)
+    }
+
+    /// The draft changed: a chip whose name the draft no longer starts
+    /// with goes, and `/` with a name typed so far shows the list.
+    private func draftChanged() {
+        if let chip, AgentCommands.split(draft)?.name != chip.name { self.chip = nil }
+        var query: String?
+        if chip == nil, draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace), !listClosed {
+            query = String(draft.dropFirst())
+        }
+        if query != commandQuery {
+            commandQuery = query
+            commandSelection = 0
+        }
+    }
+
+    /// Moves the list's selection; false when no list shows.
+    func moveSelection(by step: Int) -> Bool {
+        guard commandQuery != nil else { return false }
+        let count = listedCommands.count
+        guard count > 0 else { return true }
+        commandSelection = (commandSelection + step + count) % count
+        return true
+    }
+
+    /// Chooses the selected row; false when no list shows.
+    func chooseSelected() -> Bool {
+        guard commandQuery != nil else { return false }
+        let commands = listedCommands
+        if commands.indices.contains(commandSelection) { choose(commands[commandSelection]) }
+        return true
+    }
+
+    /// Puts the command in the field as a chip, with the caret after it.
+    func choose(_ command: AgentCommand) {
+        chip = command
+        draft = "/\(command.name) "
+        commandQuery = nil
+    }
+
+    /// Closes the list and leaves what was typed; false when no list shows.
+    func closeList() -> Bool {
+        guard commandQuery != nil else { return false }
+        commandQuery = nil
+        listClosed = true
         return true
     }
 
@@ -420,6 +537,13 @@ final class AgentPanel {
                     entries[i] = .tool(id: id, use: use, name: name, summary: summary, result: text, failed: failed)
                 }
             }
+        case "control_response":
+            // The handshake's answer: the commands the engine runs by name.
+            guard let response = event["response"] as? [String: Any], response["request_id"] as? String == "init" else { return }
+            handshook = true
+            if let inner = response["response"] as? [String: Any], let list = inner["commands"] as? [[String: Any]] {
+                setCommands(list.compactMap(AgentCommand.init))
+            }
         case "control_request":
             guard let request = event["request"] as? [String: Any], let id = event["request_id"] as? String else { return }
             if request["subtype"] as? String == "can_use_tool", let tool = request["tool_name"] as? String, let folder {
@@ -504,7 +628,10 @@ final class AgentPanel {
     func projectMoved(from old: URL) {
         guard let folder else { return }
         folders.insert(folder, at: 0)
-        if !working { endProcess() }
+        if !working {
+            endProcess()
+            warm()
+        }
         refreshThreads()
     }
 

@@ -47,7 +47,9 @@ The agent is the person's own Claude Code. In the app each project's window
 has a panel that runs it as a process in the project's folder, one a running
 conversation, with the checkout attached as the workspace: messages go in and
 events come out as lines of JSON, its `daw` commands on the project are
-allowed by the app and anything else is a card the person answers, and the
+allowed by the app and anything else is a card the person answers, the
+skills it names in its handshake are listed under `/` in the field and run
+by name, and the
 project's conversations are kept in `.daw/threads.json` beside the song. A
 terminal started in the project's folder has the same by location. See
 [agent-panel.md](features/agent-panel.md).
