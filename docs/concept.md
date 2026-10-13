@@ -315,8 +315,15 @@ Each entry in `taste.md` carries evidence and dates, and fades unless reconfirme
   edits reach the other's song.
 - **Each message carries what the agent would otherwise ask for:** the selection,
   the playhead and loop, and what the person changed since the agent's last turn.
-- **Mentions:** `@track`, `@clip`, `@section`, `@skill`, `@reference`. A request
-  typed with clips or a region selected applies to them.
+- **Mentions:** `@track`, `@clip`, `@section`, `@reference`, and `/skill` to
+  run a skill by name, as in Claude Code. A request typed with clips or a
+  region selected applies to them.
+- **Files and clips in the conversation.** A file dropped into the panel goes
+  with the message: a picture the agent sees, a sound, a MIDI file or a
+  document as its path, which the agent reads with its tools; a clip dragged
+  from the timeline goes by its reference.
+- **Spoken requests.** A microphone turns the person's words into text in the
+  field, recognized on the Mac, which they read and send.
 - **Approvals are in the panel.** `daw` commands on the open project need none.
 - **Across projects.** A conversation in one project can be pointed at another
   by name, to reuse a sound from it or compare two mixes, and reaches it through
@@ -453,7 +460,8 @@ writes down their process once and runs it by name.
 - **Built-in and personal.** The app ships craft skills, such as mixing to a
   reference, finishing a song and preparing stems, and updates them. The person's
   own take precedence.
-- **Visible in the app:** a panel lists them and `@skill` runs one.
+- **Visible in the app:** a panel lists them, and `/` in the agent panel's
+  field lists them and runs one.
 - **Shared:** skills, devices and presets can be packaged for other people.
 
 ## Long work on its own
@@ -468,14 +476,24 @@ unresolved in `SONG.md`, stems and mix exported. "Technically complete" is not
 
 ## Signing in
 
-The end state is a button in the panel: **Sign in with Claude**, **Sign in with
-ChatGPT**. The person picks the agent they already pay for, signs in on that
-company's page and comes back to a working panel. They install nothing else and
-never see a terminal.
+The panel on the developer's Mac drives the Claude Code they installed and
+signed in to themselves. That is for building the app: a distributed app may
+not use people's claude.ai login or subscription limits, and no sign-in
+program for third-party apps exists (D114). A shipped app gets its agent one
+of three ways, the person's choice in Settings, and the panel says which step
+is missing:
 
-That depends on the companies' terms as well as on this app. Until a sign-in is
-approved, the app uses the agent the person has installed and signed in to
-themselves, or an API key, and the panel says which step is missing.
+- **Claude Code's engine with the person's own API key,** paid at API rates,
+  with each turn's cost shown and a budget. Keeps everything the panel has.
+- **The app's own harness** over a provider's API, or a local model on the
+  Mac that sends nothing off it. Keeps the window and does for itself what
+  Claude Code brings: skills, the project's files, sessions, safety.
+- **No agent in the window:** AAW as an MCP server that the Claude, ChatGPT
+  or Codex the person already pays for connects to.
+
+[The agent's engine](features/agent-engine.md) has the routes. A **Sign in
+with Claude** or **Sign in with ChatGPT** button is for a program that may
+open to this app one day; nothing is built on its existing.
 
 ## Installing
 

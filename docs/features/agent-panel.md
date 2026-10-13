@@ -134,6 +134,13 @@ a terminal and sign in.
   be edited.
 - The approval request's shape was taken from Claude Code's SDK; no card from
   a real session has been answered: see below.
+- **The engine is the developer's own.** The panel drives the Claude Code
+  the person installed and signed in to, which a distributed app may not do:
+  Anthropic allows no third-party app to use people's claude.ai login or
+  subscription limits. This is for building and trying the app on this Mac
+  (D114); the routes for other people, an API key, a harness or a local
+  model, or AAW as an MCP server, are in
+  [the agent's engine](agent-engine.md).
 
 ## What was checked
 
@@ -169,7 +176,9 @@ was typed by hand, and no card was answered in a real session.
    built on the Claude Agent SDK", and points to API keys. On this Mac the
    panel uses the person's own installation and login. Whether a distributed
    app may drive a person's own signed-in Claude Code has to be confirmed
-   with Anthropic.
+   with Anthropic. *Answered October 13, 2026 (D114): it may not. The panel
+   as built is for this checkout; a shipped app's engine is in [the agent's
+   engine](agent-engine.md).*
 2. **Naming.** Anthropic's branding rules do not allow a product to call its
    agent "Claude Code" or to look like it. "Claude Agent" or "Powered by
    Claude" are the allowed forms. The panel says "the agent" and names Claude

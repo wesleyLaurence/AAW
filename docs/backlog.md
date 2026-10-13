@@ -10,7 +10,8 @@ kept.
   and the agent make good music with the tool (D75), with what lets the agent
   understand the sound of a session first (D98), and the agent's
   conversations by project before either (D109); what every session is given
-  and the agent panel went first and are built.
+  and the agent panel went first and are built, and what the person asked
+  for after using the panel goes first now (D113).
 - **Verify** is work that is merged and that nobody has heard or tried by hand,
   with what is most worth hearing first.
 - **Later** is wanted and not ordered.
@@ -22,51 +23,70 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **`daw audio crossfade` with an option, while the app has the project
+1. **The agent panel's look.** The person's words in a bubble, the agent's
+   in blocks with lists and code, its tools folded into one row, a field
+   that grows and holds the controls the next three items add, Return sends
+   and Shift-Return breaks the line, a conversation renamed and deleted, the
+   panel's width dragged; what the person asked for after using the panel
+   (D113). [features/agent-panel-look.md](features/agent-panel-look.md)
+2. **Skills as slash commands.** `/` in the field listing the project's, the
+   workspace's and the person's skills with their descriptions, one chosen
+   as a blue chip and sent as `/name args`, which Claude Code runs; the list
+   from the handshake the panel already sends.
+   [features/skill-commands.md](features/skill-commands.md)
+3. **Files and clips in the conversation.** A file dropped or pasted into
+   the panel going with the next message: an image seen by the agent, a
+   sound, a MIDI file or a document as its path the agent may read without a
+   card, a selected clip by its reference; then a clip dragged from the
+   timeline. [features/agent-attachments.md](features/agent-attachments.md)
+4. **Speaking to the agent.** A microphone in the field: the words recognized
+   on the Mac appear in the field as they are said, and the person reads and
+   sends them. [features/voice-input.md](features/voice-input.md)
+5. **`daw audio crossfade` with an option, while the app has the project
    open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
    "Bad request: invalid type: map, expected f64", where the same command with
    no option, and with the options on a project no host has open, sets the
    join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
    on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
    same three options and has not been tried with a host.
-2. **A time selection in the app.** A range of beats dragged across the
+6. **A time selection in the app.** A range of beats dragged across the
    tracks and copied, inserted, deleted or cleared as `daw range` does it,
    and a section dragged with its content; which gesture makes it is the
    open question in [features/bar-ranges.md](features/bar-ranges.md).
-3. **A MIDI keyboard.** Notes played through the selected track, held and let
+7. **A MIDI keyboard.** Notes played through the selected track, held and let
    go rather than a beat long, through a Synth and through a Sampler, whose
    pitch needs audio prepared on the way; recording into note clips; quantize.
    The person plays a riff and the agent builds around it.
-4. **Sections and the song's length in the app.** A section made, named,
+8. **Sections and the song's length in the app.** A section made, named,
    moved and removed in the ruler, which only draws them today; the length,
    master gain and end fade typed in the transport bar, as the tempo is. The
    agent has `daw section` and `daw set session.FIELD`; the person has neither
    (D81).
-5. **A project made with `daw init` in the app's index,** so a song the agent
+9. **A project made with `daw init` in the app's index,** so a song the agent
    starts in a terminal opens from Open Recent.
-6. **Turns and A/B.** An agent request's commands grouped, named for the
+10. **Turns and A/B.** An agent request's commands grouped, named for the
    request, kept or reverted as one, and the song restored to before any turn;
    one key flips between before and after a turn while the loop plays.
-7. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+11. **Note transformations and chords.** Humanize with a seed, arpeggiate and
    vary; chord symbols written as notes; a theory library of scales and chords.
-8. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+12. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
    that replays it.
-9. **Key and chord detection,** and swing detection, of samples and songs: a
+13. **Key and chord detection,** and swing detection, of samples and songs: a
    loop matched to the song's key before it is placed.
-10. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+14. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-11. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+15. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-12. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+16. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-13. **Stem separation** of a song. The vocals taken out for an instrumental,
+17. **Stem separation** of a song. The vocals taken out for an instrumental,
     the vocals alone for an a cappella, and the stems of drums, bass, vocals
     and the rest, each written into the project as a sample the agent or the
     person places. An open-source model run on this Mac, not one trained here
@@ -74,7 +94,7 @@ wrong with the sounds everything else is built on.
     Ultimate Vocal Remover runs, for the vocals; `daw separate` first, then
     more splits, the app and a reference's stems.
     [features/stem-separation.md](features/stem-separation.md)
-14. **Generated audio.** A sound, a loop or a whole song from a description, with
+18. **Generated audio.** A sound, a loop or a whole song from a description, with
     the person's own ElevenLabs key kept in the Keychain, saved in the project as
     a sample and in a generated folder the library searches; `daw generate` for
     the agent within a daily budget, and a Settings window and a Generate tab in
@@ -825,7 +845,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Structure in the document: named motifs, a clip defined by its relation to
   another. Chord symbols are Next.
 - Positions as `m:ss` wherever a command takes a beat.
-- An MCP adapter, only if it proves more reliable for agents than the CLI.
+- An MCP adapter, if it proves more reliable for agents than the CLI, and
+  as the route that lets other people's own Claude, ChatGPT or Codex work
+  in the window without an engine of the app's
+  ([the agent's engine](features/agent-engine.md), Shipping).
 - `daw metronome on|off`, and a note previewed through a Sampler from the
   terminal as `daw synth audition --play` previews through a Synth, so the
   agent can play the person a sound on the keys. The host has both; only the
@@ -991,7 +1014,17 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   --sort` and `daw samples like` are for the agent (D104).
 - The analyzer's spectrogram as a surface in three dimensions, as Insight
   draws it, and its window's arrangements of panes saved by name.
-- A skills panel, and `@track`, `@clip`, `@section`, `@skill` in the chat.
+- A skills panel, and `@track`, `@clip`, `@section`, `@reference` in the
+  chat, over the same popover `/` opens for a skill
+  ([skill commands](features/skill-commands.md)).
+- The agent panel further: Claude Code's `compact` and other own commands
+  under `/`, if wanted; a video's sound or a frame read for the agent; a
+  dropped sound imported at once rather than when it is placed; Apple's
+  server recognition where the Mac cannot recognize the locale on the
+  device, and the song ducked while the person speaks; `SpeechTranscriber`
+  on macOS 26; spoken words sent as the person stops speaking
+  ([attachments](features/agent-attachments.md),
+  [speaking](features/voice-input.md)).
 - Ghost clips: the agent proposes the next bars, drawn translucent, and Tab
   accepts.
 
@@ -1018,7 +1051,13 @@ checkout (D75):
 - **Other Macs.** The rest of the Python ported or carried in the bundle,
   signing with a Developer ID and notarizing, the licenses of the Rust crates
   gathered into the bundle, and first launch creating the workspace.
-- **Sign-in buttons and other agents,** as the companies' terms allow.
+- **The agent's engine for other people.** The panel on a Mac that is not
+  the developer's, which may not drive a subscription login: Claude Code's
+  engine with the person's own API key in the Keychain, each turn's cost
+  shown and a budget; a harness of the app's own over a provider's API or a
+  local model; AAW as an MCP server for the agent the person already pays
+  for; a sign-in button only if a program opens (D114).
+  [features/agent-engine.md](features/agent-engine.md)
 - A record of every dependency and model: version, license, whether it may be
   redistributed.
 - A statement of what leaves the machine, tested with the network off.
