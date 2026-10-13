@@ -73,6 +73,56 @@ final class AgentThreadsTests: XCTestCase {
         XCTAssertEqual(AppContext.wrap(context: "x", text: "/ not a skill").prefix(13), "<app-context>")
     }
 
+    /// What is attached goes as a list after the context, and comes off
+    /// again with it; a message's record gives the attachments back.
+    func testAttachmentsAreListedAndReadBack() {
+        let attachments = [
+            AgentAttachment(kind: .image, name: "shot.png", path: "/Users/x/Desktop/shot.png", detail: "1024×768; seen"),
+            AgentAttachment(kind: .sound, name: "kick (1).wav", path: "/Users/x/kick (1).wav", detail: "0.40 s, mono, 44.1 kHz"),
+            AgentAttachment(kind: .clip, name: "lead1", reference: "@12", detail: "note clip lead1 on keys at 5.1.1"),
+            AgentAttachment(kind: .patch, name: "Soft Pad"),
+            AgentAttachment(kind: .folder, name: "takes", path: "/Users/x/takes"),
+        ]
+        let message = AppContext.wrap(context: "Nothing is selected.", text: "use these", attachments: attachments)
+        XCTAssertEqual(message, """
+        <app-context>
+        Nothing is selected.
+        </app-context>
+
+        <attachments>
+        - image: /Users/x/Desktop/shot.png (1024×768; seen)
+        - sound: /Users/x/kick (1).wav (0.40 s, mono, 44.1 kHz)
+        - clip: @12 (note clip lead1 on keys at 5.1.1)
+        - patch: Soft Pad
+        - folder: /Users/x/takes
+        </attachments>
+
+        use these
+        """)
+        XCTAssertEqual(AppContext.strip(message), "use these")
+        let read = AgentAttachments.listed(in: message)
+        XCTAssertEqual(read.map(\.kind), [.image, .sound, .clip, .patch, .folder])
+        XCTAssertEqual(read.map(\.name), ["shot.png", "kick (1).wav", "@12", "Soft Pad", "takes"])
+        XCTAssertEqual(read.map(\.path), ["/Users/x/Desktop/shot.png", "/Users/x/kick (1).wav", nil, nil, "/Users/x/takes"])
+        XCTAssertEqual(read[2].reference, "@12")
+        XCTAssertEqual(read.map(\.detail), ["1024×768; seen", "0.40 s, mono, 44.1 kHz", "note clip lead1 on keys at 5.1.1", "", ""])
+        // A skill's message has both after its words; no context, the list alone.
+        let command = AppContext.wrap(context: "x", text: "/roar-edit go", attachments: [attachments[0]])
+        XCTAssertTrue(command.hasPrefix("/roar-edit go\n\n<app-context>\nx\n</app-context>\n\n<attachments>\n"), command)
+        XCTAssertEqual(AppContext.strip(command), "/roar-edit go")
+        XCTAssertEqual(AgentAttachments.listed(in: command).map(\.name), ["shot.png"])
+        XCTAssertEqual(AppContext.wrap(context: "", text: "w", attachments: [attachments[3]]), "<attachments>\n- patch: Soft Pad\n</attachments>\n\nw")
+        XCTAssertEqual(AgentAttachments.listed(in: "no list"), [])
+        XCTAssertNil(AgentAttachment(line: "- nothing: x"))
+        XCTAssertNil(AgentAttachment(line: "plain"))
+        // The content the engine takes: the words alone with nothing
+        // attached, else the images as blocks and the text as one.
+        XCTAssertEqual(AgentAttachments.content(text: "t", attachments: []) as? String, "t")
+        let blocks = AgentAttachments.content(text: "t", attachments: [attachments[1]]) as? [[String: Any]]
+        XCTAssertEqual(blocks?.count, 1)
+        XCTAssertEqual(blocks?.first?["type"] as? String, "text")
+    }
+
     /// A message's first word as a skill's name, and the rest.
     func testACommandIsSplitFromItsWords() {
         XCTAssertEqual(AgentCommands.split("/roar-edit from :41")?.name, "roar-edit")
@@ -157,7 +207,7 @@ final class AgentThreadsTests: XCTestCase {
     {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"SONG.md"}}]},"uuid":"6"}
     {"type":"assistant","isSidechain":true,"message":{"role":"assistant","content":[{"type":"text","text":"a subagent's words"}]},"uuid":"7"}
     {"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Done: sixteenths on the hats in the chorus."}]},"uuid":"8"}
-    {"type":"user","message":{"role":"user","content":[{"type":"text","text":"thanks"}]},"uuid":"9"}
+    {"type":"user","message":{"role":"user","content":[{"type":"image","source":{"type":"base64","media_type":"image/png","data":"iVBORw0KGgo="}},{"type":"text","text":"<app-context>\\nNothing is selected.\\n</app-context>\\n\\n<attachments>\\n- image: /x/shot.png (8×8; seen)\\n</attachments>\\n\\nthanks"}]},"uuid":"9"}
     {"type":"user","message":{"role":"user","content":"<command-message>roar-edit</command-message>\\n<command-name>/roar-edit</command-name>\\n<command-args>from :41\\n\\n<app-context>\\nNothing is selected.\\n</app-context></command-args>"},"uuid":"10"}
     {"type":"user","message":{"role":"user","content":[{"type":"text","text":"Base directory for this skill: /x\\n\\nMake the edit.\\n\\nARGUMENTS: from :41"}]},"isMeta":true,"uuid":"11"}
     not json
@@ -170,13 +220,13 @@ final class AgentThreadsTests: XCTestCase {
     func testATranscriptIsReadAsMessages() throws {
         let lines = ClaudeTranscripts.parse(Data(transcript.utf8))
         XCTAssertEqual(lines, [
-            .person("Make the hats busier"),
+            .person("Make the hats busier", []),
             .agent("I'll look at the drums first."),
             .tool(name: "Bash", summary: "daw map ."),
             .tool(name: "Read", summary: "SONG.md"),
             .agent("Done: sixteenths on the hats in the chorus."),
-            .person("thanks"),
-            .person("/roar-edit from :41"),
+            .person("thanks", [AgentAttachment(kind: .image, name: "shot.png", path: "/x/shot.png", detail: "8×8; seen")]),
+            .person("/roar-edit from :41", []),
         ])
     }
 

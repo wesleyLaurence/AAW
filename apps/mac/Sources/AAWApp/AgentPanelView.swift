@@ -1,6 +1,7 @@
 import AAWCore
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The agent panel: the conversation's title and the project's threads at
 /// the top, the conversation shown as it streams, the person's words in a
@@ -14,6 +15,13 @@ struct AgentPanelView: View {
     static let smallSize: CGFloat = 11
     /// The fill of a code block, and of a command on a card.
     static let codeFill = Color(nsColor: Theme.gray(0.09))
+
+    /// Whether a drag is over the panel, which outlines it.
+    @State private var dropping = false
+
+    /// What a drag may bring: files, a sample's path from the browser, a
+    /// patch or a rack.
+    static let dropTypes: [UTType] = [.fileURL, .utf8PlainText, .plainText, UTType(exportedAs: Browser.patchType), UTType(exportedAs: Browser.rackType)]
 
     var body: some View {
         let agent = model.agent
@@ -57,8 +65,71 @@ struct AgentPanelView: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
+        // A drag from the Finder, the browser or elsewhere let go anywhere
+        // over the panel goes with the next message.
+        .onDrop(of: Self.dropTypes, isTargeted: $dropping) { providers in
+            Self.take(providers, into: agent, browser: model.browser)
+        }
+        .overlay {
+            if dropping {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8).fill(Who.user.color.opacity(0.1))
+                    RoundedRectangle(cornerRadius: 8).stroke(Who.user.color, lineWidth: 2)
+                    Text("Add to the message")
+                        .font(.system(size: Self.textSize, weight: .semibold))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color(nsColor: Theme.header), in: RoundedRectangle(cornerRadius: 6))
+                }
+                .padding(4)
+                .allowsHitTesting(false)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Agent")
+    }
+
+    /// Attaches what was dropped: each file URL; a path from the browser,
+    /// with what the browser knows of the sample it dragged; a patch or a
+    /// rack by name. True when a provider is read.
+    static func take(_ providers: [NSItemProvider], into agent: AgentPanel, browser: Browser) -> Bool {
+        var taken = false
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                taken = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier) { item, _ in
+                    let url = (item as? URL) ?? (item as? Data).flatMap { URL(dataRepresentation: $0, relativeTo: nil) }
+                    guard let url else { return }
+                    DispatchQueue.main.async { MainActor.assumeIsolated { agent.attach(file: url) } }
+                }
+            } else if let type = [Browser.patchType, Browser.rackType].first(where: provider.hasItemConformingToTypeIdentifier) {
+                taken = true
+                let kind: AgentAttachment.Kind = type == Browser.patchType ? .patch : .rack
+                provider.loadDataRepresentation(forTypeIdentifier: type) { data, _ in
+                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            let file = kind == .patch ? browser.patches.first { $0.name == name }?.file : browser.racks.first { $0.name == name }?.file
+                            agent.attach(AgentAttachments.make(kind: kind, name: name, file: file))
+                        }
+                    }
+                }
+            } else if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
+                taken = true
+                provider.loadItem(forTypeIdentifier: UTType.plainText.identifier) { item, _ in
+                    let text = (item as? String) ?? (item as? Data).flatMap { String(data: $0, encoding: .utf8) }
+                    guard let text, text.hasPrefix("/"), FileManager.default.fileExists(atPath: text) else { return }
+                    DispatchQueue.main.async {
+                        MainActor.assumeIsolated {
+                            // The browser's sample, when the path is the one it dragged.
+                            let sample = browser.dragged?.path == text ? browser.dragged : nil
+                            agent.attach(file: URL(fileURLWithPath: text), sample: sample)
+                        }
+                    }
+                }
+            }
+        }
+        return taken
     }
 
     private func hint(_ agent: AgentPanel) -> String {
@@ -313,8 +384,8 @@ private struct RowView: View, Equatable {
             ToolsRow(tools: tools)
         case .entry(let entry):
             switch entry {
-            case .person(_, let text):
-                PersonRow(text: text)
+            case .person(_, let text, let attachments):
+                PersonRow(text: text, attachments: attachments)
             case .agent(let id, let text):
                 AgentRow(text: text, streaming: streaming == id)
             case .tool:
@@ -337,14 +408,16 @@ private struct RowView: View, Equatable {
 }
 
 /// The person's words on a rounded fill in their color, set in from the
-/// left; a skill they ran is its chip, then the words after it.
+/// left; a skill they ran is its chip, then the words after it; what went
+/// with the message is a row of chips under the words.
 private struct PersonRow: View {
     let text: String
+    var attachments: [AgentAttachment] = []
 
     var body: some View {
         HStack(spacing: 0) {
             Spacer(minLength: 36)
-            Group {
+            VStack(alignment: .leading, spacing: 6) {
                 if let (name, rest) = AgentCommands.split(text) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         CommandChip(name: name)
@@ -361,6 +434,9 @@ private struct PersonRow: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if !attachments.isEmpty {
+                    AttachmentChips(attachments: attachments, remove: nil)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -368,6 +444,129 @@ private struct PersonRow: View {
         }
         .padding(.horizontal, 12)
         .accessibilityLabel("You")
+    }
+}
+
+/// The attachments as chips that wrap: a thumbnail or a symbol by kind,
+/// the name, and `×` where they can still be taken off. A click shows what
+/// the chip stands for, and whether its file is still there.
+private struct AttachmentChips: View {
+    let attachments: [AgentAttachment]
+    let remove: ((Int) -> Void)?
+
+    var body: some View {
+        FlowLayout(spacing: 6) {
+            ForEach(attachments) { attachment in
+                AttachmentChip(attachment: attachment, remove: remove.map { remove in { remove(attachment.id) } })
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Attachments")
+    }
+}
+
+private struct AttachmentChip: View {
+    let attachment: AgentAttachment
+    let remove: (() -> Void)?
+    @State private var showsDetail = false
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let picture = attachment.picture {
+                Image(nsImage: picture.image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 18, height: 18)
+                    .clipShape(RoundedRectangle(cornerRadius: 3))
+            } else {
+                Image(systemName: attachment.kind.symbol)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 14)
+            }
+            Text(attachment.name)
+                .font(.system(size: AgentPanelView.smallSize))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 160)
+            if let remove {
+                Button(action: remove) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 14, height: 14)
+                }
+                .buttonStyle(.plain)
+                .help("Take it off the message")
+                .accessibilityLabel("Remove \(attachment.name)")
+            }
+        }
+        .padding(.leading, 5)
+        .padding(.trailing, remove == nil ? 7 : 3)
+        .padding(.vertical, 3)
+        .background(Color(nsColor: Theme.header), in: RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.white.opacity(0.1)))
+        .contentShape(Rectangle())
+        .onTapGesture { showsDetail.toggle() }
+        .help(attachment.path ?? attachment.detail)
+        .popover(isPresented: $showsDetail, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(attachment.name).font(.system(size: 12, weight: .semibold))
+                if let path = attachment.path {
+                    Text(path).font(.system(size: 11)).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                if let reference = attachment.reference {
+                    Text(reference).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                if !attachment.detail.isEmpty {
+                    Text(attachment.detail).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+                if attachment.missing {
+                    Text("This file is no longer there.").font(.system(size: 11)).foregroundStyle(.orange)
+                }
+            }
+            .padding(10)
+            .frame(maxWidth: 360, alignment: .leading)
+        }
+        .accessibilityLabel("\(attachment.kind.rawValue) \(attachment.name)")
+    }
+}
+
+/// Rows of views that wrap at the width, left to right.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 6
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        return place(width: width, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let laid = place(width: bounds.width, subviews: subviews)
+        for (subview, origin) in zip(subviews, laid.origins) {
+            subview.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y), proposal: .unspecified)
+        }
+    }
+
+    private func place(width: CGFloat, subviews: Subviews) -> (size: CGSize, origins: [CGPoint]) {
+        var origins: [CGPoint] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var widest: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            origins.append(CGPoint(x: x, y: y))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return (CGSize(width: widest, height: y + rowHeight), origins)
     }
 }
 
@@ -642,62 +841,95 @@ private struct ApprovalCard: View {
 
 // MARK: The field
 
-/// The field the person types in, in a rounded well with the controls at
-/// its right: `+` for attachments and the microphone, which the next items
-/// build, and Send. Return sends; Shift-Return starts a new line.
+/// The field the person types in, in a rounded well with what is attached
+/// as chips above it and the controls at its right: `+` for a file or the
+/// selected clips, the microphone, which the next item builds, and Send.
+/// Return sends; Shift-Return starts a new line.
 private struct Composer: View {
     let agent: AgentPanel
     let model: SongModel
     @State private var height: CGFloat = ComposerTextView.fontSize + 4 + ComposerTextView.inset.height * 2
 
     var body: some View {
-        let empty = agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let empty = agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && agent.attachments.isEmpty
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .bottom, spacing: 2) {
-                ComposerField(agent: agent, model: model, height: $height)
-                    .frame(height: height)
-                    .accessibilityLabel("Message to the agent")
-                    .help("What to ask or change. Return sends; Shift-Return starts a new line.")
-                Button {} label: {
-                    Image(systemName: "plus.circle").font(.system(size: 17))
+            VStack(alignment: .leading, spacing: 0) {
+                if !agent.attachments.isEmpty {
+                    AttachmentChips(attachments: agent.attachments, remove: { agent.removeAttachment($0) })
+                        .padding(.horizontal, 8)
+                        .padding(.top, 8)
+                        .padding(.bottom, 2)
                 }
-                .buttonStyle(.borderless)
-                .disabled(true)
-                .help("Files and clips in the conversation: not built yet")
-                .accessibilityLabel("Attach")
-                Button {} label: {
-                    Image(systemName: "mic").font(.system(size: 15))
+                HStack(alignment: .bottom, spacing: 2) {
+                    ComposerField(agent: agent, model: model, height: $height)
+                        .frame(height: height)
+                        .accessibilityLabel("Message to the agent")
+                        .help("What to ask or change. Return sends; Shift-Return starts a new line.")
+                    Menu {
+                        Button("Attach File…") { Self.chooseFiles(for: agent) }
+                        Button("Attach Selected Clips") { agent.attachSelectedClips() }
+                            .disabled(!agent.canAttachClips)
+                    } label: {
+                        Image(systemName: "plus.circle").font(.system(size: 17))
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .help("Attach a file, or the selected clips, to the message; a file dropped or pasted here attaches too")
+                    .accessibilityLabel("Attach")
+                    Button {} label: {
+                        Image(systemName: "mic").font(.system(size: 15))
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(true)
+                    .help("Speaking to the agent: not built yet")
+                    .accessibilityLabel("Microphone")
+                    Button {
+                        agent.send()
+                    } label: {
+                        Image(systemName: "arrow.up.circle.fill")
+                            .font(.system(size: 20))
+                            .foregroundStyle(agent.working || empty ? Color.secondary : Who.user.color)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(agent.working || empty)
+                    .help("Send (Return)")
+                    .accessibilityLabel("Send")
+                    .padding(.trailing, 2)
                 }
-                .buttonStyle(.borderless)
-                .disabled(true)
-                .help("Speaking to the agent: not built yet")
-                .accessibilityLabel("Microphone")
-                Button {
-                    agent.send()
-                } label: {
-                    Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 20))
-                        .foregroundStyle(agent.working || empty ? Color.secondary : Who.user.color)
-                }
-                .buttonStyle(.borderless)
-                .disabled(agent.working || empty)
-                .help("Send (Return)")
-                .accessibilityLabel("Send")
-                .padding(.trailing, 2)
+                .padding(.leading, 6)
+                .padding(.trailing, 4)
+                .padding(.vertical, 3)
             }
-            .padding(.leading, 6)
-            .padding(.trailing, 4)
-            .padding(.vertical, 3)
             .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 10))
             .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08)))
             if agent.entries.isEmpty {
-                Text("Return sends · Shift-Return starts a new line · / lists your skills")
+                Text("Return sends · Shift-Return starts a new line · / lists your skills · drop a file to attach it")
                     .font(.system(size: AgentPanelView.smallSize))
                     .foregroundStyle(Color(nsColor: Theme.faintText))
                     .padding(.leading, 4)
             }
         }
         .padding(10)
+    }
+
+    /// The file panel, as a sheet of the window; what is chosen attaches.
+    static func chooseFiles(for agent: AgentPanel) {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.message = "Add to the message"
+        panel.prompt = "Attach"
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK else { return }
+            agent.attach(files: panel.urls)
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
+        }
     }
 }
 

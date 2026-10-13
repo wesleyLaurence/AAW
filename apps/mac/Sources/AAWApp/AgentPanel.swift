@@ -1,3 +1,4 @@
+import AAWCore
 import AppKit
 import Observation
 
@@ -11,7 +12,8 @@ import Observation
 final class AgentPanel {
     /// A row of the conversation.
     enum Entry: Identifiable, Equatable {
-        case person(id: Int, text: String)
+        /// The person's words, and what went with them.
+        case person(id: Int, text: String, attachments: [AgentAttachment] = [])
         case agent(id: Int, text: String)
         /// A tool the agent used: what it was given, and what came back.
         case tool(id: Int, use: String, name: String, summary: String, result: String?, failed: Bool)
@@ -22,7 +24,7 @@ final class AgentPanel {
 
         var id: Int {
             switch self {
-            case .person(let id, _), .agent(let id, _), .tool(let id, _, _, _, _, _), .approval(let id, _, _, _), .note(let id, _): id
+            case .person(let id, _, _), .agent(let id, _), .tool(let id, _, _, _, _, _), .approval(let id, _, _, _), .note(let id, _): id
             }
         }
 
@@ -116,6 +118,15 @@ final class AgentPanel {
     /// The last list each project folder saw, for the moment before a new
     /// process answers.
     @ObservationIgnored private static var lastCommands: [String: [AgentCommand]] = [:]
+
+    // What goes with the next message.
+
+    /// The files and clips attached since the last message, as chips above
+    /// the field, in the order they were added.
+    private(set) var attachments: [AgentAttachment] = []
+    /// The paths attached in this conversation, which the agent may read
+    /// without a card.
+    @ObservationIgnored private(set) var attachedPaths: Set<String> = []
 
     /// The song whose window this is; set once, after the model is made.
     @ObservationIgnored weak var song: SongModel?
@@ -224,6 +235,7 @@ final class AgentPanel {
         endProcess()
         currentID = nil
         entries = []
+        attachedPaths = []
         warm()
     }
 
@@ -238,6 +250,7 @@ final class AgentPanel {
         endProcess()
         currentID = id
         entries = []
+        attachedPaths = []
         var found = false
         for folder in folders {
             let file = ClaudeTranscripts.folder(for: folder).appendingPathComponent("\(id).jsonl")
@@ -245,7 +258,8 @@ final class AgentPanel {
             found = true
             for line in ClaudeTranscripts.read(file) {
                 switch line {
-                case .person(let text): entries.append(.person(id: next(), text: text))
+                case .person(let text, let attached):
+                    entries.append(.person(id: next(), text: text, attachments: stamped(attached)))
                 case .agent(let text): entries.append(.agent(id: next(), text: text))
                 case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: summary, result: nil, failed: false))
                 }
@@ -276,6 +290,7 @@ final class AgentPanel {
             endProcess()
             currentID = nil
             entries = []
+            attachedPaths = []
             warm()
         }
         saveThreads { $0.remove(id) }
@@ -288,23 +303,30 @@ final class AgentPanel {
 
     // MARK: Messages
 
-    /// Sends what the person typed, with the app's context ahead of it, to
-    /// the thread shown, starting or resuming its process as needed.
+    /// Sends what the person typed, with the app's context ahead of it and
+    /// what they attached, to the thread shown, starting or resuming its
+    /// process as needed. Attachments alone send with a word for them.
     func send() {
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            guard !attachments.isEmpty, !working else { return }
+            text = "Here is what I attached."
+        }
+        let attached = attachments
         draft = ""
         chip = nil
-        send(text)
+        attachments = []
+        send(text, attachments: attached)
     }
 
-    func send(_ text: String) {
+    func send(_ text: String, attachments attached: [AgentAttachment] = []) {
         guard !working else {
             song?.refuse("The agent is still working; wait for it, or press Stop")
             return
         }
         guard let song, let folder else { return }
-        entries.append(.person(id: next(), text: text))
+        entries.append(.person(id: next(), text: text, attachments: attached))
+        for path in attached.compactMap(\.path) { attachedPaths.insert(URL(fileURLWithPath: path).standardizedFileURL.path) }
         working = true
         stopping = false
         // A new conversation takes the ID its warmed process was started under.
@@ -312,7 +334,7 @@ final class AgentPanel {
         let isNew = currentID == nil
         currentID = id
         let context = song.agentContext(since: lastTurnRevision)
-        let message = AppContext.wrap(context: context, text: text)
+        let message = AgentAttachments.content(text: AppContext.wrap(context: context, text: text, attachments: attached), attachments: attached)
         Task { [weak self] in
             guard let self else { return }
             if located == nil { located = await locating?.value }
@@ -441,6 +463,92 @@ final class AgentPanel {
         return true
     }
 
+    // MARK: What goes with the next message
+
+    /// Gives attachments their IDs, and remembers their paths as the
+    /// conversation's.
+    private func stamped(_ list: [AgentAttachment]) -> [AgentAttachment] {
+        list.map { attachment in
+            var stamped = attachment
+            stamped.id = next()
+            if let path = attachment.path { attachedPaths.insert(URL(fileURLWithPath: path).standardizedFileURL.path) }
+            return stamped
+        }
+    }
+
+    /// Adds one attachment for the next message; a file already attached
+    /// is not added twice, and images stop at ten.
+    func attach(_ attachment: AgentAttachment) {
+        if let path = attachment.path, attachments.contains(where: { $0.path == path }) { return }
+        if attachment.kind == .image, attachments.filter({ $0.kind == .image }).count >= AgentAttachments.mostImages {
+            song?.refuse("Ten images go with one message at the most")
+            return
+        }
+        var stamped = attachment
+        stamped.id = next()
+        attachments.append(stamped)
+    }
+
+    /// Attaches a file from the Finder or the browser.
+    func attach(file url: URL, sample: SampleInfo? = nil) {
+        attach(AgentAttachments.make(file: url, sample: sample))
+    }
+
+    func attach(files urls: [URL]) {
+        for url in urls { attach(file: url) }
+    }
+
+    /// Attaches an image with no file, as one pasted, written under the
+    /// project's `.daw/attachments/`.
+    func attach(image: NSImage) {
+        guard let folder else { return }
+        guard let attachment = AgentAttachments.make(image: image, project: folder) else {
+            song?.refuse("The image could not be read")
+            return
+        }
+        attach(attachment)
+    }
+
+    /// Whether clips are selected in the window to attach.
+    var canAttachClips: Bool { song?.selectedClips.isEmpty == false }
+
+    /// Attaches the clips selected in the window, each by its reference.
+    func attachSelectedClips() {
+        guard let song else { return }
+        let a = song.arrangement
+        let clips = song.placedClips().filter { song.selectedClips.contains($0.key) }.sorted { ($0.track, $0.at) < ($1.track, $1.at) }
+        guard !clips.isEmpty else {
+            song.refuse("Select a clip on the timeline first")
+            return
+        }
+        for clip in clips {
+            let attachment = AgentAttachments.make(clip: clip, track: a.tracks.indices.contains(clip.track) ? a.tracks[clip.track] : nil) {
+                TimelineLayout.position($0, beatsPerBar: a.barBeats, beatUnit: a.beatUnit)
+            }
+            if attachments.contains(where: { $0.reference == attachment.reference }) { continue }
+            attach(attachment)
+        }
+    }
+
+    /// What was dropped or pasted: files by their URLs, else an image, else
+    /// a sample's path from the browser; true when something was taken.
+    @discardableResult
+    func attach(pasteboard board: NSPasteboard) -> Bool {
+        if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            attach(files: urls)
+            return true
+        }
+        if board.canReadObject(forClasses: [NSImage.self], options: nil), let image = NSImage(pasteboard: board) {
+            attach(image: image)
+            return true
+        }
+        return false
+    }
+
+    func removeAttachment(_ id: Int) {
+        attachments.removeAll { $0.id == id }
+    }
+
     private func endProcess() {
         process?.end()
         process = nil
@@ -549,7 +657,7 @@ final class AgentPanel {
             if request["subtype"] as? String == "can_use_tool", let tool = request["tool_name"] as? String, let folder {
                 let input = request["input"] as? [String: Any] ?? [:]
                 pending[id] = input
-                switch Approval.decide(tool: tool, input: input, project: folder) {
+                switch Approval.decide(tool: tool, input: input, project: folder, attached: attachedPaths) {
                 case .allow:
                     decided(id, allowed: true)
                 case .ask(let summary):

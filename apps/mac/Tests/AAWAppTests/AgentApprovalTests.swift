@@ -59,6 +59,50 @@ final class AgentApprovalTests: XCTestCase {
         XCTAssertEqual(Approval.decide(tool: "Agent", input: [:], project: project), .ask("Agent"))
     }
 
+    /// A file the person attached may be read, by the Read tool, by `daw`
+    /// and by a program that inspects a file, though it is outside the
+    /// project; writing to it, copying it elsewhere and reading beside it
+    /// still ask, and a folder attached covers what is in it.
+    func testAttachedFilesMayBeRead() {
+        let attached: Set<String> = ["/Users/someone/Downloads/take.wav", "/Users/someone/Desktop/takes"]
+        func decide(_ command: String) -> Approval.Decision {
+            Approval.decide(tool: "Bash", input: ["command": command], project: project, attached: attached)
+        }
+        for command in [
+            "daw samples inspect /Users/someone/Downloads/take.wav",
+            "daw samples analyze \"/Users/someone/Downloads/take.wav\"",
+            "daw samples import . /Users/someone/Downloads/take.wav --as take",
+            "daw listen /Users/someone/Downloads/take.wav",
+            "daw midi import . /Users/someone/Desktop/takes/riff.mid",
+            "afinfo /Users/someone/Downloads/take.wav",
+            "file /Users/someone/Desktop/takes/riff.mid | head",
+            "afinfo /Users/someone/Downloads/take.wav && daw status .",
+        ] {
+            XCTAssertEqual(decide(command), .allow, command)
+        }
+        for command in [
+            "cp /Users/someone/Downloads/take.wav samples/",
+            "afinfo /Users/someone/Downloads/other.wav",
+            "afinfo samples/kick.wav",
+            "afinfo",
+            "sox /Users/someone/Downloads/take.wav out.wav",
+            "daw samples inspect /Users/someone/Downloads/take.wav.bak",
+        ] {
+            XCTAssertEqual(decide(command), .ask(command), command)
+        }
+        XCTAssertEqual(Approval.decide(tool: "Read", input: ["file_path": "/Users/someone/Downloads/take.wav"], project: project, attached: attached), .allow)
+        XCTAssertEqual(Approval.decide(tool: "Read", input: ["file_path": "/Users/someone/Desktop/takes/a/b.wav"], project: project, attached: attached), .allow)
+        XCTAssertEqual(Approval.decide(tool: "Read", input: ["file_path": "/Users/someone/Downloads/other.wav"], project: project, attached: attached),
+                       .ask("Read /Users/someone/Downloads/other.wav"))
+        XCTAssertEqual(Approval.decide(tool: "Write", input: ["file_path": "/Users/someone/Downloads/take.wav"], project: project, attached: attached),
+                       .ask("Write /Users/someone/Downloads/take.wav"))
+        XCTAssertEqual(Approval.decide(tool: "Read", input: ["file_path": "/Users/someone/Downloads/take.wav"], project: project),
+                       .ask("Read /Users/someone/Downloads/take.wav"), "nothing attached")
+        XCTAssertEqual(decide("afinfo /Users/someone/Downloads/take.wav"), .allow)
+        XCTAssertEqual(Approval.decide(tool: "Bash", input: ["command": "afinfo /Users/someone/Downloads/take.wav"], project: project),
+                       .ask("afinfo /Users/someone/Downloads/take.wav"), "nothing attached")
+    }
+
     /// A path inside the project is inside however it is written.
     func testPathsInsideTheProject() {
         XCTAssertFalse(Approval.leadsOutside("samples/kick.wav", project: project))

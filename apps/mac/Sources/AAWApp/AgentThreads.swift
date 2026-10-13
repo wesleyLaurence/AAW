@@ -128,25 +128,40 @@ enum AppContext {
     static let open = "<app-context>"
     static let close = "</app-context>"
 
-    /// The message as it is sent: the context, then the person's words. A
-    /// message that runs a skill, `/name words`, is read from its start, so
-    /// the context follows it there instead.
-    static func wrap(context: String, text: String) -> String {
+    /// The message as it is sent: the context, the list of what is
+    /// attached, then the person's words. A message that runs a skill,
+    /// `/name words`, is read from its start, so both follow it there
+    /// instead.
+    static func wrap(context: String, text: String, attachments: [AgentAttachment] = []) -> String {
+        var blocks: [String] = []
         let body = context.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !body.isEmpty else { return text }
-        if AgentCommands.split(text) != nil { return "\(text)\n\n\(open)\n\(body)\n\(close)" }
-        return "\(open)\n\(body)\n\(close)\n\n\(text)"
+        if !body.isEmpty { blocks.append("\(open)\n\(body)\n\(close)") }
+        let list = AgentAttachments.list(attachments)
+        if !list.isEmpty { blocks.append(list) }
+        guard !blocks.isEmpty else { return text }
+        if AgentCommands.split(text) != nil { return ([text] + blocks).joined(separator: "\n\n") }
+        return (blocks + [text]).joined(separator: "\n\n")
     }
 
-    /// The person's words without the context, as the panel shows them.
+    /// The person's words without the context and the attachments, as the
+    /// panel shows them.
     static func strip(_ message: String) -> String {
-        if message.hasPrefix(open), let end = message.range(of: close) {
-            return String(message[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let tags = [(open, close), (AgentAttachments.open, AgentAttachments.close)]
+        var stripped = true
+        while stripped {
+            stripped = false
+            for (open, close) in tags {
+                if text.hasPrefix(open), let end = text.range(of: close) {
+                    text = String(text[end.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    stripped = true
+                } else if text.hasSuffix(close), let start = text.range(of: open, options: .backwards) {
+                    text = String(text[..<start.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    stripped = true
+                }
+            }
         }
-        if message.hasSuffix(close), let start = message.range(of: open, options: .backwards) {
-            return String(message[..<start.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return message
+        return text
     }
 }
 
@@ -164,7 +179,8 @@ enum ClaudeTranscripts {
 
     /// A message as the panel draws it.
     enum Line: Equatable {
-        case person(String)
+        /// The person's words, and what the message listed as attached.
+        case person(String, [AgentAttachment])
         case agent(String)
         /// A tool the agent used, with what it was given in a line.
         case tool(name: String, summary: String)
@@ -222,7 +238,7 @@ enum ClaudeTranscripts {
         // The first messages are near the top; a whole transcript can be megabytes.
         let head = handle.readData(ofLength: 256 * 1024)
         for line in head.split(separator: UInt8(ascii: "\n")) {
-            if case .person(let text)? = parse(line: Data(line)).first { return text }
+            if case .person(let text, _)? = parse(line: Data(line)).first { return text }
         }
         return nil
     }
@@ -269,15 +285,17 @@ enum ClaudeTranscripts {
         }
     }
 
-    /// The person's line: a skill they ran as `/name words`, or their words;
-    /// nothing for a local command's record or an empty line.
+    /// The person's line: a skill they ran as `/name words`, or their words,
+    /// with what the message listed as attached; nothing for a local
+    /// command's record or an empty line.
     private static func personLine(_ text: String) -> Line? {
-        if let command = AgentCommands.recorded(text) { return .person(command) }
+        let attachments = AgentAttachments.listed(in: text)
+        if let command = AgentCommands.recorded(text) { return .person(command, attachments) }
         let shown = AppContext.strip(text)
         let trimmed = shown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("<command-name>"), !trimmed.hasPrefix("<local-command"),
               !trimmed.hasPrefix("[Request interrupted") else { return nil }
-        return .person(shown)
+        return .person(shown, attachments)
     }
 
     /// A tool call in a line: a command as typed, a file's path, or the
