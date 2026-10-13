@@ -78,6 +78,7 @@ decides what it has:
 |---|---|---|
 | The project's folder, `cd projects/NAME && claude` | The root instructions, the person's two files and the root's skills from the folders above; `SONG.md` at launch; the project's skills as commands; a conversation list of this project alone (`claude --resume`, `claude --continue`); PROJECT is `.` | Other projects, which are outside the session's folder: reading one asks first, and `claude --add-dir` on the checkout or the other project grants it |
 | The checkout's root | Every project in reach, to reuse a sound from another song or compare two mixes | A project's skills, which Claude Code does not load from a folder Git ignores: read the name and description at the top of each `SKILL.md` under the project's `.claude/skills/`, and the body of one that applies. One conversation list for every song |
+| The app's agent panel (View › Agent) | What a session in the project's folder has, the checkout attached, and ahead of each message the start position, the loop, the selection and what the person changed in the window since the last turn; `daw` commands on the project run without asking, and the project's conversations are listed in the panel's menu ([the agent panel](features/agent-panel.md)) | Anything that is not `daw` on the project is a card the person answers, so say in words what is needed outside the project before asking for it |
 
 ## Edit together
 

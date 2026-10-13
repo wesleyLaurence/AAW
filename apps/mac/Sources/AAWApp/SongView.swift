@@ -7,6 +7,10 @@ import SwiftUI
 struct SongView: View {
     let model: SongModel
 
+    /// The width of the column at the right, the agent panel and the
+    /// activity panel.
+    static let sideWidth: CGFloat = 320
+
     var body: some View {
         VStack(spacing: 0) {
             TransportBar(model: model)
@@ -37,10 +41,23 @@ struct SongView: View {
                         DetailView(model: model)
                     }
                 }
-                if model.showsActivity {
+                if model.showsAgent || model.showsActivity {
                     Divider()
-                    ActivityPanel(model: model)
-                        .frame(width: 270)
+                    // The agent's conversation over the activity, which is
+                    // what its commands do.
+                    VStack(spacing: 0) {
+                        if model.showsAgent {
+                            AgentPanelView(model: model)
+                        }
+                        if model.showsAgent, model.showsActivity {
+                            Divider()
+                        }
+                        if model.showsActivity {
+                            ActivityPanel(model: model)
+                                .frame(height: model.showsAgent ? 220 : nil)
+                        }
+                    }
+                    .frame(width: Self.sideWidth)
                 }
             }
             // Over the arrangement, so that a refused edit does not move what
@@ -296,6 +313,16 @@ struct TransportBar: View {
             }
             .opacity(model.agentWorking ? 1 : 0)
             .animation(.easeOut(duration: 0.3), value: model.agentWorking)
+
+            Button {
+                model.showsAgent.toggle()
+            } label: {
+                Image(systemName: model.agent.working ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(model.agent.working ? Who.agent.color : Color.primary)
+            }
+            .help("Show or hide the agent panel (⌥⌘C)")
+            .accessibilityLabel("Agent panel")
 
             Button {
                 model.showsActivity.toggle()

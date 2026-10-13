@@ -13,7 +13,9 @@ clips are made, moved, trimmed and copied, and their notes drawn and edited in a
 piano roll; a MIDI file dropped on the timeline is a note clip, and a note clip
 is exported as one. A browser finds
 samples in the library's index and adds them to the song as audio clips and as
-Samplers on MIDI tracks. Save As… gives a project a
+Samplers on MIDI tracks. An agent panel holds the project's conversations
+with the person's own Claude Code, started in the project's folder, whose
+`daw` commands land in the window. Save As… gives a project a
 name and a place. The bundle holds `daw` and
 the libraries it needs, and a menu item puts `daw` on the PATH.
 
@@ -165,7 +167,8 @@ front first.
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play, and past the end of a looped clip's loop, which is shaded with a mark at the wrap. Under the notes, a lane of each note's velocity as a stalk at its start. Beside it the clip's ID, its length, its loop in beats or off, the grid, Preview, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
 | Analyzer window | A window of its own for each analyzer opened from its strip or with View › Analyzer Window (⌥⌘L), titled for the row and the song: the levels, the loudness with its history, the spectrum with its peaks held, the stereo field, and the last twenty seconds scrolling as a waveform of each channel and as a spectrogram, as panes in three columns, drawn at the display's rate while the window can be seen, resizing freely, going full screen with the green button and staying open whatever the song's window selects; closed when the effect goes or the project closes ([the analyzer](../../docs/features/analyzer.md)) |
 | Samples | Left of the arrangement, when shown: the library's samples by search, category and kind, each with its length and what is known of its tempo, key and pitch |
-| Activity | Each change with who made it (agent, you, or an edit of the file), newest first. A drag is one entry |
+| Agent | Right of the arrangement, when shown: the project's conversations with the agent in a menu at the top, the one shown as it streams, each tool the agent runs with what it returned, each request waiting for Allow or Refuse, and a field to type in at the foot. The agent is the person's own Claude Code, started in the project's folder with the checkout attached, so it has `SONG.md`, the project's skills and the person's instructions, taste and skills; its `daw` commands on the project run without asking and land in the window ([the agent panel](../../docs/features/agent-panel.md)) |
+| Activity | Each change with who made it (agent, you, or an edit of the file), newest first. A drag is one entry. Under the agent panel when both show |
 
 | Input | Does |
 |---|---|
@@ -248,6 +251,12 @@ front first.
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
 | Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T; ⌘1, ⌘2 and ⌘3 step through them while the piano roll has the keys. The pattern's Step menu names its steps the same way, a beat to 1/64, and the same keys set it while the pattern has the keys: its 1/16 is a quarter of a beat |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
+| ⌥⌘C, View › Agent, or the speech mark at the right of the transport bar | Shows or hides the agent panel, 320 points at the right with the activity panel under it; kept between projects. The mark is in the agent's color while it works |
+| Type in the agent panel's field; Return | Sends the message to the conversation shown, with the start position, the loop, the selection and what you changed since the agent's last turn ahead of it, which the agent reads and the panel does not show; a new conversation starts with its first message, titled by its first line. Option-Return starts a new line; Escape gives the keys back. While the agent works, the arrow is gray and another message is refused |
+| The menu at the panel's top | New Conversation, or one of the project's conversations, most recent first, shown where it stopped and resumed by the next message; refused while the agent works. A session started in a terminal in the project's folder is listed too |
+| Stop, beside the spinner | Interrupts the agent's turn; a request still waiting is refused |
+| Allow or Refuse on a card | Answers a request the agent made for anything that is not `daw` on this project: another program, a path outside the project's folder, an edit of a file, `SONG.md` included. The card then says which, and the agent goes on |
+| Click a tool's row | Shows or hides what the tool returned; gray while it runs, a cross when it failed |
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path. A category lists the samples named for it and, once `daw samples analyze --all` has measured the library, those named for nothing that measure as it |
 | Click a sample | Plays it, as its file is, and gives the samples the keys; the speaker mark turns the playing off |
 | Up and Down, in the samples | Move to the sample before or after and play it, as in the Finder, until a click elsewhere takes the keys back. The selected sample is drawn in the accent color while the samples have the keys, gray when they do not |
@@ -390,6 +399,7 @@ between the last of them and the picture:
 | `--drop FILE,X,Y` | Lets an audio or MIDI file go at a point, as a drag from the Finder that ends there. In the detail panel, while it shows the devices of a MIDI track with a Sampler or no instrument, the file loads the Sampler |
 | `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2` | A click or a drag in the first analyzer window that is open, in its content, which the song window's clicks do not reach; `--key opt+cmd+l` opens it. `--snapshot NAME.png` also writes `NAME-analyzer.png` of each open analyzer window, `-analyzer-2` for a second, and `--measure` adds `analyzer`, the first open window's draw times through the run and, as `read_ms`, what each reading of the meter from the host took |
 | `--wait SECONDS` | Leaves time, such as for a `daw` command from a terminal |
+| `--ask TEXT` | Shows the agent panel and sends TEXT as a message to the project's most recent conversation, or a new one; the picture waits for the agent's turn to end, up to ten minutes, or until a request waits for a person, which the picture then shows. `AAW_AGENT=PROGRAM` runs that program in Claude Code's place, speaking its stream-json lines, as the tests do |
 | `--export PATH [--export-level LEVEL]` | After the actions, writes the mix as PATH, as File › Export Audio… does when its panel closes: the format is the extension's (`.wav` 24-bit, `.m4a`, `.mp3`) and the level `peak=-1`, `lufs=-14`, `gain=-3` or `rendered`, as rendered unless given. What the command reported is printed, then the picture is taken if one was asked for, with the banner in it, and the run quits; a file that is there is refused as the command refuses it, and a failed export says why on stderr and ends with status 1 |
 
 Run `daw` commands against the song meanwhile to see them land in the picture.
@@ -469,6 +479,11 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
 | `Sources/AAWApp/Export.swift` | File › Export Audio…: the panel's choices as the arguments of the bundle's `daw export`, the command's result as the banner reads it, and the process that runs it off the main thread, tested in `Tests` |
+| `Sources/AAWApp/AgentPanel.swift` | The agent panel's model: the project's threads, the conversation shown and its rows, the events read from the process, the requests waiting for the person, and what each message carries ahead of the person's words, tested in `Tests` over a stand-in program |
+| `Sources/AAWApp/AgentPanelView.swift` | The agent panel's SwiftUI: the menu of threads, the rows as they stream, the cards, the field |
+| `Sources/AAWApp/AgentSession.swift` | Finding the person's Claude Code through their shell, the arguments and the prompt a conversation is started with, the workspace, and the process read as lines of JSON, tested in `Tests` |
+| `Sources/AAWApp/AgentApproval.swift` | What the agent may do without asking: a shell line read as its commands, `daw` on the project allowed, the rest asked, tested in `Tests` |
+| `Sources/AAWApp/AgentThreads.swift` | `.daw/threads.json`, the context wrapped ahead of a message, and Claude Code's own record of sessions read for a folder's list and a resumed thread's earlier messages, tested in `Tests` |
 | `Sources/AAWApp/ExportPanel.swift` | The format, level and ceiling under the name in the Export Audio panel |
 | `Sources/AAWApp/Projects.swift` | The index of the projects the app knows, and what closing a project does, tested in `Tests` |
 | `Sources/AAWApp/App.swift` | The app delegate, menus, windows, launch, Save As…, closing and the command line |
@@ -533,6 +548,14 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
   and a group is not dragged into another: a group is not in a group.
 - The analyzer's panes are arranged by hand each time rather than from a
   saved set; the agent cannot read its numbers.
+- The agent panel drives the person's own Claude Code, found through their
+  login shell, and says so when it is missing or signed out; no other agent
+  and no sign-in in the app. One conversation of a project runs at a time.
+  Reads anywhere under the checkout need no approval, since it is attached
+  as the workspace; `daw` on another project, and any edit of a file, ask.
+  A thread is not renamed or removed in the panel. The approval card's
+  request was taken from the Agent SDK's documentation and has not been
+  seen from a real session ([the agent panel](../../docs/features/agent-panel.md)).
 - The app has no icon, and the Python tools are not in its bundle, so Export
   Audio… needs the Python the bundle's `daw` finds, and says so where there is
   none. It exports the whole mix only, one file at a time, and the transport

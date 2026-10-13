@@ -26,6 +26,9 @@ struct Launch {
         /// its content.
         case analyzerClick(CGPoint)
         case analyzerDrag(CGPoint, CGPoint)
+        /// A message typed into the agent panel and sent. The picture waits
+        /// for the agent's turn to end.
+        case ask(String)
     }
 
     /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
@@ -130,6 +133,8 @@ struct Launch {
                 if n.count == 4 { actions.append(.analyzerDrag(CGPoint(x: n[0], y: n[1]), CGPoint(x: n[2], y: n[3]))) }
             case "--wait":
                 if let seconds = rest.popFirst().flatMap(Double.init) { actions.append(.wait(seconds)) }
+            case "--ask":
+                if let text = rest.popFirst(), !text.isEmpty { actions.append(.ask(text)) }
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
             case "--measure":
@@ -185,6 +190,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var scripted: Bool { launch.snapshot != nil || launch.measure != nil || launch.export != nil }
     /// A scripted export failed: the run ends with that status after the picture.
     private var exportFailed = false
+    /// How long the picture has waited for the agent's turn after `--ask`.
+    private var askWaited = 0.0
 
     /// How many projects Open Recent lists.
     static let recentLimit = 15
@@ -507,6 +514,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 post(.leftMouseDragged, to)
                 post(.leftMouseUp, to)
             }
+        case .ask(let text):
+            songs.first?.model.showsAgent = true
+            songs.first?.model.agent.send(text)
         case .wait:
             break
         }
@@ -557,6 +567,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// `NAME-analyzer-2.png` and so on.
     private func snapshot(to url: URL) {
         guard let controller = songs.first, let view = controller.window?.contentView else { exit(1) }
+        // After `--ask`, the picture is of the agent's answer: it waits for
+        // the turn, up to ten minutes, unless a request waits for a person,
+        // which the picture then shows.
+        if controller.model.agent.working, !controller.model.agent.awaitingAnswer,
+           launch.actions.contains(where: { if case .ask = $0 { true } else { false } }), askWaited < 600 {
+            askWaited += 0.5
+            later(0.5) { $0.snapshot(to: url) }
+            return
+        }
         var pictures = [(view, url)]
         for (i, analyzer) in controller.model.openAnalyzerWindows.enumerated() {
             guard let content = analyzer.window?.contentView else { continue }
@@ -680,6 +699,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
             item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
             item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]),
+            item("Agent", #selector(SongWindowController.toggleAgent(_:)), "c", [.command, .option]),
             .separator(),
             item("Analyzer Window", #selector(SongWindowController.openAnalyzer(_:)), "l", [.command, .option]),
         ])
@@ -920,6 +940,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func zoomOut(_ sender: Any?) { model.zoom(.out) }
     @objc func zoomToFit(_ sender: Any?) { model.zoom(.fit) }
     @objc func toggleActivity(_ sender: Any?) { model.showsActivity.toggle() }
+    @objc func toggleAgent(_ sender: Any?) { model.showsAgent.toggle() }
     @objc func toggleBrowser(_ sender: Any?) { model.showsBrowser.toggle() }
 
     /// Shows the devices or the pattern in the detail panel, or hides the
@@ -1018,6 +1039,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.state = model.transport.loopRegion == nil ? .off : .on
             return !typing
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
+        case #selector(toggleAgent(_:)): item.state = model.showsAgent ? .on : .off
         case #selector(toggleDevices(_:)): item.state = model.showsDetail && model.detail == .devices ? .on : .off
         case #selector(togglePattern(_:)):
             // The clip last selected: a pattern, or an audio clip.
