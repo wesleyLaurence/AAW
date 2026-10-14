@@ -79,82 +79,81 @@ fn sound(
         None => generate::default_id(&request.text, |candidate| p.samples.contains_key(candidate)),
     };
     let data_dir = project::data_dir();
-    let mut settings = generate::load_settings(&data_dir);
     let base = generate::base_url();
     if estimate {
+        let settings = generate::load_settings(&data_dir);
         let mut out = request.estimate(&settings, origin);
         out["sample_id"] = json!(id);
         out["key"] = json!(generate::key(&base).ok().flatten().is_some());
         return Ok(out);
     }
-    settings.allow(origin, request.seconds_asked())?;
-    let key = generate::key(&base)?.ok_or_else(generate::no_key)?;
-    let client = Client::new(&base, key);
+    // The seconds asked for are held before anything is sent, and settled
+    // once the audio says how long it is: nothing when nothing came back.
+    let asked = request.seconds_asked();
+    let (hold, held) = generate::hold(&data_dir, origin, asked)?;
     let mut notes: Vec<String> = Vec::new();
-    if settings.tier.is_none() {
-        match generate::subscription(&client) {
-            Ok(sub) => {
-                settings.tier = Some(sub.tier);
-                generate::save_settings(&data_dir, &settings)?;
-            }
-            Err(e) => notes.push(format!("The plan's tier could not be read ({e}); the sound is asked for as MP3 at 128 kb/s")),
-        }
-    }
-    let generated = generate::sound(&client, &request, settings.tier.as_deref())?;
-    notes.extend(generated.notes.iter().cloned());
-    if generated.tier.is_some() && generated.tier != settings.tier {
-        settings.tier = generated.tier.clone();
-    }
-    let folder = generate::dir();
-    let saved = generate::save(&generated, &folder, &generate::file_stem(&id), &request, origin)?;
-    // What was generated is spent, whether or not the import below succeeds.
-    settings.spend(origin, saved.seconds);
-    generate::save_settings(&data_dir, &settings)?;
-
-    let label = format!("Generate {id}");
-    let (sample_path, recipe, revision) = match generated.format {
-        Format::Pcm44100 => {
-            let entry = generate::project_copy(&saved, &project_dir)?;
-            let path = entry["path"].as_str().unwrap_or_default().to_string();
-            let recipe = recipe_beside(&path);
-            let patch = json!({"samples": {id.clone(): entry}});
-            let reply = route(cli, project, Command::Apply { patch, label: Some(label) }, None)
-                .map_err(|e| format!("The sound was generated and saved as {} but not imported: {e}", saved.file.display()))?;
-            (path, recipe, reply.get("revision").cloned())
-        }
-        Format::Mp3At192 | Format::Mp3At128 => {
-            // A compressed file is decoded by the same import a person's file
-            // goes through, which adds it to the song as an edit of its own.
-            let mut command = python::command("samples")?;
-            if std::env::var_os("AAW_DAW").is_none() {
-                command.env("AAW_DAW", std::env::current_exe().map_err(text)?);
-            }
-            command.args(["import", &saved.file.to_string_lossy(), "--project", &song.to_string_lossy(), "--id", &id]);
-            let out = command.output().map_err(|e| format!("Could not start Python: {e}"))?;
-            if !out.status.success() {
-                let stderr = String::from_utf8_lossy(&out.stderr);
-                let message = serde_json::from_str::<Json>(stderr.trim().lines().last().unwrap_or(""))
-                    .ok()
-                    .and_then(|j| j.get("error").and_then(Json::as_str).map(str::to_string))
-                    .unwrap_or_else(|| stderr.trim().to_string());
-                return Err(format!(
-                    "The sound was generated and saved as {} but not imported: {message}",
-                    saved.file.display()
-                ));
-            }
-            let reply: Json = serde_json::from_slice(&out.stdout).map_err(|e| format!("samples import printed no JSON: {e}"))?;
-            let path = reply["path"].as_str().unwrap_or_default().to_string();
-            let recipe_file = generate::project_recipe(&saved, &project_dir, &path)?;
-            let recipe = format!("samples/{}", recipe_file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-            (path, recipe, reply.get("revision").cloned())
+    let generated = match ask(&base, &data_dir, &request, held.tier.clone(), &mut notes) {
+        Ok(generated) => generated,
+        Err(e) => {
+            // The request's refusal is what the caller needs; a hold that
+            // could not be given back stays counted.
+            let _ = hold.settle(&data_dir, 0.0, None);
+            return Err(e);
         }
     };
+    notes.extend(generated.notes.iter().cloned());
+    let folder = generate::dir();
+    let saved = generate::save(&generated, &folder, &generate::file_stem(&id), &request, origin);
+    // What came back is spent, whether or not it was saved or imported.
+    let spent = match &saved {
+        Ok(saved) if saved.seconds > 0.0 => saved.seconds,
+        _ => generated.pcm_seconds().unwrap_or(asked),
+    };
+    let tier = generated.tier.clone().filter(|t| held.tier.as_ref() != Some(t));
+    let mut settings = hold.settle(&data_dir, spent, tier)?;
+    let saved = saved?;
+
+    let not_imported = |e: String| format!("The sound was generated and saved as {} but not imported: {e}", saved.file.display());
+    let mut seconds = saved.seconds;
+    let (entry, recipe) = match generated.format {
+        Format::Pcm44100 => {
+            let entry = generate::project_copy(&saved, &project_dir)?;
+            let recipe = recipe_beside(entry["path"].as_str().unwrap_or_default());
+            (entry, recipe)
+        }
+        Format::Mp3At192 | Format::Mp3At128 => {
+            // A compressed file is decoded into the project by the same
+            // import a person's file goes through, and taken into the song
+            // below as a PCM sound is.
+            let mut copied = python::run(
+                "samples",
+                &["import", &saved.file.to_string_lossy(), "--project", &song.to_string_lossy(), "--copy-only"],
+            )
+            .map_err(not_imported)?;
+            let path = copied["path"].as_str().unwrap_or_default().to_string();
+            let recipe_file = generate::project_recipe(&saved, &project_dir, &path)?;
+            let recipe = format!("samples/{}", recipe_file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
+            if let Some(entry) = copied.as_object_mut() {
+                // The decoder says the length where libsndfile could not.
+                if let Some(decoded) = entry.remove("decoded").and_then(|d| d["duration"].as_f64()).filter(|_| seconds <= 0.0) {
+                    seconds = decoded;
+                }
+            }
+            (copied, recipe)
+        }
+    };
+    let sample_path = entry["path"].as_str().unwrap_or_default().to_string();
+    let patch = json!({"samples": {id.clone(): entry}});
+    let reply = route(cli, project, Command::Apply { patch, label: Some(format!("Generate {id}")) }, None).map_err(not_imported)?;
+    let revision = reply.get("revision").cloned();
     // The library's search reads its index, so the new sound is scanned in
     // now; the scan is incremental and registers the folder the first time.
     match python::run("samples", &["scan", &folder.to_string_lossy()]) {
         Ok(_) if !settings.folder_registered => {
-            settings.folder_registered = true;
-            generate::save_settings(&data_dir, &settings)?;
+            settings = generate::update_settings(&data_dir, |s| {
+                s.folder_registered = true;
+                Ok(s.clone())
+            })?;
         }
         Ok(_) => {}
         Err(e) => notes.push(format!(
@@ -165,7 +164,7 @@ fn sound(
     let mut out = json!({
         "sample_id": id,
         "path": sample_path,
-        "seconds": (saved.seconds * 1000.0).round() / 1000.0,
+        "seconds": (seconds * 1000.0).round() / 1000.0,
         "sample_rate": saved.sample_rate,
         "channels": saved.channels,
         "format": generated.format.name(),
@@ -193,6 +192,25 @@ fn sound(
     Ok(out)
 }
 
+/// The key, the plan's tier when it is not yet known, and the sound.
+fn ask(base: &str, data_dir: &Path, request: &SoundRequest, mut tier: Option<String>, notes: &mut Vec<String>) -> Result<generate::Generated> {
+    let key = generate::key(base)?.ok_or_else(generate::no_key)?;
+    let client = Client::new(base, key);
+    if tier.is_none() {
+        match generate::subscription(&client) {
+            Ok(sub) => {
+                tier = Some(sub.tier.clone());
+                generate::update_settings(data_dir, |s| {
+                    s.tier = Some(sub.tier);
+                    Ok(())
+                })?;
+            }
+            Err(e) => notes.push(format!("The plan's tier could not be read ({e}); the sound is asked for as MP3 at 128 kb/s")),
+        }
+    }
+    generate::sound(&client, request, tier.as_deref())
+}
+
 /// The recipe a project copy has beside it: `HASH12_stem.generated.json`.
 fn recipe_beside(sample_path: &str) -> String {
     let path = Path::new(sample_path);
@@ -211,6 +229,7 @@ pub fn keys(cmd: &KeysCmd) -> Result<Json> {
                     "AAW_GENERATE_URL names a stand-in on this machine, whose key is AAW_TEST_GENERATE_KEY; the Keychain is not written".into(),
                 );
             }
+            generate::keychain_address(&base)?;
             let key = read_key()?;
             keys::write(service, &key)?;
             let mut out = json!({
@@ -222,9 +241,10 @@ pub fn keys(cmd: &KeysCmd) -> Result<Json> {
             let client = Client::new(&base, generate::Key::new(&key).expect("checked above"));
             match generate::subscription(&client) {
                 Ok(sub) => {
-                    let mut settings = generate::load_settings(&data_dir);
-                    settings.tier = Some(sub.tier.clone());
-                    generate::save_settings(&data_dir, &settings)?;
+                    generate::update_settings(&data_dir, |s| {
+                        s.tier = Some(sub.tier.clone());
+                        Ok(())
+                    })?;
                     out["subscription"] = sub.json();
                 }
                 Err(e) => out["problem"] = json!(e),
@@ -245,8 +265,10 @@ pub fn keys(cmd: &KeysCmd) -> Result<Json> {
                     match generate::subscription(&Client::new(&base, key)) {
                         Ok(sub) => {
                             if settings.tier.as_deref() != Some(sub.tier.as_str()) {
-                                settings.tier = Some(sub.tier.clone());
-                                generate::save_settings(&data_dir, &settings)?;
+                                settings = generate::update_settings(&data_dir, |s| {
+                                    s.tier = Some(sub.tier.clone());
+                                    Ok(s.clone())
+                                })?;
                             }
                             out["subscription"] = sub.json();
                         }
@@ -267,9 +289,10 @@ pub fn keys(cmd: &KeysCmd) -> Result<Json> {
         }
         KeysCmd::Remove { service } => {
             let removed = keys::remove(service)?;
-            let mut settings = generate::load_settings(&data_dir);
-            settings.tier = None;
-            generate::save_settings(&data_dir, &settings)?;
+            generate::update_settings(&data_dir, |s| {
+                s.tier = None;
+                Ok(())
+            })?;
             Ok(json!({"service": service, "removed": removed}))
         }
         KeysCmd::Budget { agent_seconds } => {
@@ -278,8 +301,10 @@ pub fn keys(cmd: &KeysCmd) -> Result<Json> {
                 if !(0.0..=86_400.0).contains(seconds) {
                     return Err("--agent-seconds must be 0 to 86400".into());
                 }
-                settings.budget_seconds = *seconds;
-                generate::save_settings(&data_dir, &settings)?;
+                settings = generate::update_settings(&data_dir, |s| {
+                    s.budget_seconds = *seconds;
+                    Ok(s.clone())
+                })?;
             }
             Ok(json!({"budget": settings.budget_json(), "settings": generate::settings_path(&data_dir)}))
         }

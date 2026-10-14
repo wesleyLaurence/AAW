@@ -94,9 +94,10 @@ formats, the errors, the terms and the limits.
    named by the first twelve characters of its hash as `samples import` names
    a copy, with the recipe beside it as `samples/HASH12_DATE-TIME-ID.generated.json`,
    and added to the song's `samples` by one `apply`, labelled `Generate ID`,
-   routed to a running host or made headless like any edit. An MP3 goes
-   through `samples import` itself, which decodes it once to WAV and adds it
-   as an edit of its own; the recipe is then written beside the decoded copy.
+   routed to a running host or made headless like any edit. An MP3 is
+   decoded once to WAV by `samples import --copy-only`, which changes nothing
+   in the song; the recipe is written beside the decoded copy, and the entry
+   it prints is added by the same `apply`, with the request's origin.
 
 The project then plays and renders with the network off, and nothing is
 generated again at a render. Undo takes the sample out of the song; the files
@@ -108,13 +109,16 @@ read the plan's tier and keep it in `generate.json` in the data folder
 tier, the budget, the day's spend by origin and whether the folder was
 registered, and never the key. The sound is asked for as `pcm_44100` on Pro,
 Scale, Business and Enterprise, `mp3_44100_192` on Creator and
-`mp3_44100_128` otherwise, which is also what an unknown tier gets. A 403, or
-a refusal that names `output_format`, whose code is not the plan's
-(`subscription_required`, `missing_permissions`, `invalid_api_key`,
-`quota_exceeded`, `insufficient_credits`) is asked for again one format lower,
-once a step, and the tier is corrected downward (`creator` after PCM failed,
-`starter` after 192 kb/s). A 429 is retried once after `retry-after`, capped
-at 30 s. Nothing else is retried, so a request is paid for at most once.
+`mp3_44100_128` otherwise, which is also what an unknown tier gets. A refusal
+whose code is not the plan's (`subscription_required`, `missing_permissions`,
+`invalid_api_key`, `quota_exceeded`, `insufficient_credits`) and that names the
+format, in its message (`output_format` or the format's name) or its code, is
+asked for again one format lower, once a step, and the tier is corrected
+downward (`creator` after PCM failed, `starter` after 192 kb/s). A 403 that
+says nothing of why may be the format and may be anything else, so it is
+asked for again one format lower once in a request, and the tier is left as
+it was. A 429 is retried once after `retry-after`, capped at 30 s. Nothing
+else is retried, so a request is paid for at most once.
 
 ## The recipe
 
@@ -154,9 +158,13 @@ the key.
 **Tests never touch the Keychain.** `AAW_GENERATE_URL` points the commands at a
 stand-in server; when it does, and only when it names a loopback address
 (`127.0.0.1`, `localhost`, `::1`), the key is read from `AAW_TEST_GENERATE_KEY`
-instead, and `daw keys set` refuses to write the Keychain. A real key set there
-could only ever reach this machine. On Linux the Keychain functions say they
-need a Mac.
+instead, and `daw keys set` refuses to write the Keychain. Any other address
+but the service's own, `https://api.elevenlabs.io`, is refused before the
+Keychain is read, so an agent that can set the variable cannot have the
+person's key sent where it can read it; that includes this machine named in a
+way the check does not take as loopback, such as `127.1` or `0.0.0.0`. The
+client follows no redirect, since the key's header would go with it to any
+host. On Linux the Keychain functions say they need a Mac.
 
 ## What the agent may spend
 
@@ -168,9 +176,13 @@ Each second of audio costs credits, and an agent can loop. So:
 - **What counts as the agent.** Requests with the agent's origin, the default.
   A request with `--origin user`, as the app's panel will send it, is the
   person's and does not count; it is still recorded in the day's spend.
-- **Before a request** the budget is held to the length asked for, or 30 s
-  when the model picks it. **After,** the length of the audio that came back
-  is what is counted, whether or not the import then succeeds.
+- **Before a request** the length asked for, or 30 s when the model picks
+  it, is held in the day's spend, under a lock on `generate.json`, so
+  requests made at once each count what the others hold. **After,** the
+  length of the audio that came back replaces the hold, whether or not it is
+  then saved or imported: from the file, or for PCM not saved from its bytes,
+  or the length asked for when neither says. A request refused or not
+  reached gives the hold back.
 - **When it is spent,** the command refuses with what was spent today, what
   was asked, and how the person raises the limit; nothing is sent. The topic
   tells the agent to tell the person and not work around it.
@@ -216,9 +228,10 @@ package show: `{detail: {status, message}}`, `{detail: "text"}`, `{detail:
   `project_copy`, `project_recipe`, `list` and `default_id`.
 - `aaw-host/src/keys.rs`: the Keychain through `security-framework` on macOS,
   a refusal elsewhere.
-- `aaw-cli/src/generate.rs`: `daw generate` and `daw keys`, the import routed
-  through `apply` or `samples import`, the folder registered once, the key
-  read with `rpassword` on a terminal.
+- `aaw-cli/src/generate.rs`: `daw generate` and `daw keys`, the budget held
+  and settled, the import routed through `apply` after `samples import
+  --copy-only` decodes an MP3, the folder registered once, the key read with
+  `rpassword` on a terminal.
 - `aaw-model/src/contract.rs`: the `generate` topic.
 - Tests: `aaw-host/tests/generate.rs` against a stand-in server written in
   the test over `TcpListener` (no `tiny_http`), covering the request as
@@ -375,11 +388,8 @@ generates, auditions and drags a result onto the timeline while the song plays.
 6. **The budget's unit.** Seconds of audio, since seconds are what the agent
    controls. Credits would be more exact, and the service's own key quota
    already counts them.
-7. **The origin of an MP3's import.** `samples import` applies the edit
-   without the caller's `--origin`, so a person's MP3 result is logged as the
-   agent's; a PCM result keeps the origin. Import in Rust would end this.
-8. **The generated folder and the terms.** It is the person's own material.
+7. **The generated folder and the terms.** It is the person's own material.
    Whether anything that copies a workspace (a backup, a move to another Mac)
    needs to say so.
-9. **Which music model is the default** for stage 2. `music_v2_5` is the
+8. **Which music model is the default** for stage 2. `music_v2_5` is the
    newest and the API still defaults to `music_v1`.
