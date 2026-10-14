@@ -12,7 +12,7 @@ import soundfile as sf
 from agent_daw.model import save
 from helpers import SR, cli, daw
 
-TOPICS = ["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate"]
+TOPICS = ["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"]
 
 
 def run(*args, cwd=None):

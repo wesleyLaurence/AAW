@@ -67,11 +67,12 @@ wrong with the sounds everything else is built on.
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-13. **Generated audio.** A sound, a loop or a whole song from a description, with
-    the person's own ElevenLabs key kept in the Keychain, saved in the project as
-    a sample and in a generated folder the library searches; `daw generate` for
-    the agent within a daily budget, and a Settings window and a Generate tab in
-    the app, in three stages.
+13. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
+    or from a section-by-section plan the agent writes (`daw generate music`,
+    `daw generate plan`), with its beat map in the reply; then a Settings
+    window with the key's field and the budget, and a Generate tab in the
+    browser that generates, auditions and drags a result while the song plays.
+    Stage 1, the key and `daw generate sound`, is built.
     [features/generated-audio.md](features/generated-audio.md)
 
 ## Verify
@@ -80,6 +81,25 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Generated audio, by the person with a real key:** `daw keys set
+  elevenlabs` typed at the terminal, and whether the Keychain asks once per
+  build and whether `security find-generic-password` asks the person;
+  `daw keys status`, and whether the tier, the credits and the reset read as
+  the plan says; `daw generate sound PROJECT "vinyl crackle, warm" --seconds 4`
+  and the sound heard, then `--bars 2 --loop` for a drum loop at the song's
+  tempo on an audio clip that repeats, and whether the join clicks and the
+  tempo holds; the `cost_credits` the reply gives against the account's
+  usage page, what a sound with no length costs and how long it is, whether
+  `pcm_44100` is given at the person's tier or falls back and what the
+  refusal says, and whether the PCM is mono; a prompt naming an artist, and
+  what the service answers; a fresh agent session asked for a sound the
+  library lacks, and whether it reads `daw describe generate`, runs
+  `--estimate` first, generates within its budget, auditions the result for
+  the person and says it was not heard. Scripted runs only: every request
+  against a stand-in on the machine, the files, the edit and the undo under a
+  host, the budget, each refusal and the key in no output
+  ([generated audio](features/generated-audio.md)); no request has reached
+  the service, and nothing heard.
 - **Stem separation, by the person on a record of their own:** `daw separate
   PROJECT SONG.m4a` on a song they know, `--quality fast` against `best`
   for the vocals, the a cappella and the instrumental heard soloed and against
