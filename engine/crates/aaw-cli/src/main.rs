@@ -31,6 +31,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+mod generate;
+
 // Debug builds abort when the audio callback allocates.
 #[cfg(debug_assertions)]
 #[global_allocator]
@@ -107,6 +109,7 @@ enum Topic {
     Listen,
     Reference,
     Separate,
+    Generate,
 }
 
 #[derive(Subcommand)]
@@ -332,6 +335,15 @@ enum Top {
     Patch(PatchCmd),
     #[command(subcommand)]
     Rack(RackCmd),
+    /// Generated audio: a sound or a loop from a description through the
+    /// ElevenLabs API at the person's own key, saved in the project as a
+    /// sample and in the workspace's generated folder (daw describe generate).
+    #[command(subcommand)]
+    Generate(GenerateCmd),
+    /// The person's keys for outside services, kept in the macOS Keychain and
+    /// never printed: set, status, remove, and the agent's daily budget.
+    #[command(subcommand)]
+    Keys(KeysCmd),
     #[command(subcommand)]
     Midi(MidiCmd),
     #[command(subcommand)]
@@ -725,6 +737,64 @@ enum PatchCmd {
     /// Load a patch into a MIDI track, in place of its whole synth; the
     /// notes stay. PATCH is a name from `daw patch list` or a .yaml file.
     Load { project: Song, track: String, patch: String },
+}
+
+/// Generated audio: `daw describe generate` says what each kind is for, the
+/// limits, the costs, the budget and the terms.
+#[derive(Subcommand)]
+enum GenerateCmd {
+    /// A sound or a loop from TEXT, 0.5 to 30 seconds, made by ElevenLabs
+    /// and imported into the project as the sample --id, with its recipe
+    /// beside it and a copy in the generated folder. Nothing is placed: pad
+    /// add or audio add plays it.
+    Sound {
+        project: Song,
+        text: String,
+        /// The length in seconds, 0.5 to 30; the model picks one when
+        /// neither this nor --bars is given.
+        #[arg(long)]
+        seconds: Option<f64>,
+        /// The length as bars of the song's tempo and meter, at most 30
+        /// seconds; the tempo is written into the request and the recipe.
+        #[arg(long)]
+        bars: Option<f64>,
+        /// A sound made to repeat, with no audible start or end.
+        #[arg(long = "loop")]
+        looped: bool,
+        /// How literally the text is followed, 0 to 1; 0.3 unless given.
+        #[arg(long)]
+        influence: Option<f64>,
+        /// The sample's ID in the song; the first words of TEXT unless given.
+        #[arg(long)]
+        id: Option<String>,
+        /// Send nothing: the seconds, the credits by the documented rate and
+        /// what is left of the agent's budget today.
+        #[arg(long)]
+        estimate: bool,
+    },
+    /// What this project has generated, newest first, each with its prompt,
+    /// length, cost and the sample that plays it.
+    List { project: Song },
+}
+
+/// Keys for outside services, in the macOS Keychain. No command prints one.
+#[derive(Subcommand)]
+enum KeysCmd {
+    /// Keep a key for SERVICE (elevenlabs): typed on the terminal without
+    /// being shown, or the first line of a pipe; then checked with the
+    /// service once, so a wrong key is said at once.
+    Set { service: String },
+    /// Whether a key is kept and, from the service, the plan's tier, the
+    /// credits used and allowed and when they reset; the agent's budget.
+    Status,
+    /// Forget the service's key.
+    Remove { service: String },
+    /// The seconds of audio the agent may generate in a day without asking:
+    /// 120 unless set, 0 to ask every time. Without a value, what it is.
+    Budget {
+        #[arg(long, allow_negative_numbers = true)]
+        agent_seconds: Option<f64>,
+    },
 }
 
 /// Effect racks: a chain of effects as a YAML file, saved in the workspace
@@ -1965,6 +2035,8 @@ fn run(cli: &Cli) -> Result<Json> {
                 Ok(reply)
             }
         },
+        Top::Generate(g) => generate::run(cli, g),
+        Top::Keys(k) => generate::keys(k),
         Top::Patch(p) => match p {
             PatchCmd::List { words } => {
                 let query = words.join(" ");
@@ -2442,6 +2514,8 @@ fn name(top: &Top) -> String {
         Top::Synth(_) => group("synth", ""),
         Top::Patch(_) => group("patch", ""),
         Top::Rack(_) => group("rack", ""),
+        Top::Generate(_) => group("generate", ""),
+        Top::Keys(_) => group("keys", ""),
         Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),

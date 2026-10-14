@@ -524,8 +524,9 @@ open to this app one day; nothing is built on its existing.
 - No clip launching or session view. The model is the arrangement.
 - No hosting of third-party plugins, unless a need appears that cannot be met
   here.
-- No generative audio model at the core. One may appear as an instrument for
-  texture, never as the product.
+- No generative audio model at the core. A generator at the person's own key
+  is a source of material, a sound or a loop to cut up as a sample is, and an
+  instrument for texture; never the product (D120).
 - Not a replacement for every DAW. Stems and MIDI go out to the tools a person
   already uses.
 

@@ -106,8 +106,11 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It also makes a blank project, moves or copies a project's folder,
   reads and writes Standard MIDI files of one part (`midi_file`), draws the
-  song as a grid of tracks by bars for `daw map` (`map`), and tells an agent's
-  next edit of the markers the person left since its last command.
+  song as a grid of tracks by bars for `daw map` (`map`), tells an agent's
+  next edit of the markers the person left since its last command, asks
+  ElevenLabs for a sound at the person's own key and files it with its recipe
+  (`generate`), the key in the macOS Keychain (`keys`); see
+  [generated-audio.md](features/generated-audio.md).
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see
