@@ -421,3 +421,91 @@ fn an_estimate_sends_nothing() {
     let e = request("a riser", Some(3.0)).estimate(&settings, Origin::Agent);
     assert_eq!((&e["credits"], &e["allowed"], &e["sent"]), (&json!(120.0), &json!(true), &json!(false)));
 }
+
+#[test]
+fn the_keychain_key_goes_to_the_service_and_nowhere_else() {
+    assert!(generate::keychain_address(generate::DEFAULT_URL).is_ok());
+    // Addresses the loopback check does not take as this machine are not the
+    // service either, so no key is read for them and nothing is sent.
+    for base in ["https://elsewhere.example", "http://127.1:9000", "http://0.0.0.0:9000", "http://localhost.:9000", "https://api.elevenlabs.io.example"] {
+        let e = generate::key(base).unwrap_err();
+        assert!(e.contains("neither ElevenLabs") && e.contains("nothing was sent"), "{base}: {e}");
+    }
+}
+
+#[test]
+fn a_redirect_is_not_followed_so_the_key_goes_nowhere_else() {
+    let stand_in = StandIn::start("pro");
+    let elsewhere = StandIn::start("pro");
+    let location: &'static str = Box::leak(format!("{}/v1/user/subscription", elsewhere.url).into_boxed_str());
+    stand_in.next(Scripted::Refuse(302, "", vec![("location", location)]));
+    let e = generate::subscription(&stand_in.client()).unwrap_err();
+    assert!(e.contains("302"), "{e}");
+    stand_in.next(Scripted::Refuse(303, "", vec![("location", location)]));
+    let e = generate::sound(&stand_in.client(), &request("a whoosh", Some(1.0)), Some("pro")).unwrap_err();
+    assert!(e.contains("303"), "{e}");
+    assert!(elsewhere.seen().is_empty());
+}
+
+#[test]
+fn a_403_that_does_not_say_why_steps_down_once_and_leaves_the_tier() {
+    let stand_in = StandIn::start("pro");
+    stand_in.next(Scripted::Refuse(403, r#"{"detail": "Forbidden"}"#, vec![]));
+    stand_in.next(Scripted::Mp3(b"not-really-mp3".to_vec()));
+    let generated = generate::sound(&stand_in.client(), &request("a hum", Some(1.0)), Some("pro")).unwrap();
+    assert_eq!(generated.format, Format::Mp3At192);
+    assert_eq!(generated.tier.as_deref(), Some("pro"));
+    assert!(generated.notes[0].contains("did not say why"), "{:?}", generated.notes);
+
+    // A second is the answer: three requests are never made for it.
+    let stand_in = StandIn::start("pro");
+    for _ in 0..2 {
+        stand_in.next(Scripted::Refuse(403, r#"{"detail": "Forbidden"}"#, vec![]));
+    }
+    let e = generate::sound(&stand_in.client(), &request("a hum", Some(1.0)), Some("pro")).unwrap_err();
+    assert!(e.contains("plan does not include this"), "{e}");
+    let formats: Vec<String> = stand_in.seen().iter().map(|s| s.query.clone()).collect();
+    assert_eq!(formats, ["output_format=pcm_44100", "output_format=mp3_44100_192"]);
+}
+
+#[test]
+fn a_hold_counts_against_requests_meanwhile_and_settles_to_what_came_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let data = dir.path().join("data");
+    generate::update_settings(&data, |s| {
+        s.budget_seconds = 10.0;
+        Ok(())
+    })
+    .unwrap();
+    let (first, _) = generate::hold(&data, Origin::Agent, 6.0).unwrap();
+    let e = generate::hold(&data, Origin::Agent, 6.0).unwrap_err();
+    assert!(e.contains("6.0 s of 10 s"), "{e}");
+    let settled = first.settle(&data, 3.0, Some("creator".into())).unwrap();
+    assert_eq!(settled.spent_by(Origin::Agent), 3.0);
+    assert_eq!(settled.tier.as_deref(), Some("creator"));
+    // Nothing back gives the hold back.
+    let (second, _) = generate::hold(&data, Origin::Agent, 6.0).unwrap();
+    assert_eq!(generate::load_settings(&data).spent_by(Origin::Agent), 9.0);
+    second.settle(&data, 0.0, None).unwrap();
+    assert_eq!(generate::load_settings(&data).spent_by(Origin::Agent), 3.0);
+    // A hold from a day since rolled over: only what came back counts, today.
+    let (stale, _) = generate::hold(&data, Origin::User, 5.0).unwrap();
+    let stale = generate::Hold { day: "2001-01-01".into(), ..stale };
+    assert_eq!(stale.settle(&data, 2.0, None).unwrap().spent_by(Origin::User), 7.0);
+
+    // Requests at once: each sees what the others hold.
+    generate::update_settings(&data, |s| {
+        s.budget_seconds = 13.0;
+        Ok(())
+    })
+    .unwrap();
+    let threads: Vec<_> = (0..8)
+        .map(|_| {
+            let data = data.clone();
+            std::thread::spawn(move || generate::hold(&data, Origin::Agent, 2.0).is_ok())
+        })
+        .collect();
+    let allowed = threads.into_iter().map(|t| t.join().unwrap()).filter(|ok| *ok).count();
+    assert_eq!(allowed, 5);
+    assert_eq!(generate::load_settings(&data).spent_by(Origin::Agent), 13.0);
+}

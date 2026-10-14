@@ -45,6 +45,7 @@ class StandIn:
 
     def __init__(self, tier="pro"):
         self.tier = tier
+        self.delay = 0
         self.seen = []
         self.script = deque()
         stand_in = self
@@ -79,6 +80,7 @@ class StandIn:
                     sub = {"tier": stand_in.tier, "character_count": 500, "character_limit": 10000, "next_character_count_reset_unix": 1761955200, "status": "active"}
                     return self._reply(200, json.dumps(sub).encode())
                 if method == "POST" and path == "/v1/sound-generation":
+                    time.sleep(stand_in.delay)
                     seconds = (body or {}).get("duration_seconds") or 2
                     headers = [("request-id", f"req-{len(stand_in.seen)}"), ("character-cost", str(round(seconds * 40))), ("content-type", "audio/pcm")]
                     return self._reply(200, pcm(seconds), headers)
@@ -326,7 +328,7 @@ def mp3_bytes(path):
     return None
 
 
-def test_a_plan_without_pcm_gets_an_mp3_that_import_decodes(tmp_path, stand_in, song):
+def test_a_plan_without_pcm_gets_an_mp3_that_import_decodes(tmp_path, stand_in, song, monkeypatch):
     mp3 = mp3_bytes(tmp_path / "tone.mp3")
     if mp3 is None or not (shutil.which("afconvert") or shutil.which("ffmpeg")):
         pytest.skip("no MP3 encoder or decoder here")
@@ -343,6 +345,14 @@ def test_a_plan_without_pcm_gets_an_mp3_that_import_decodes(tmp_path, stand_in, 
     recipe = json.loads((song.parent / made["recipe"]).read_text())
     assert recipe["parameters"]["output_format"] == "mp3_44100_128" and recipe["file"] == Path(made["path"]).name
     assert daw("generate", "list", song)["generated"][0]["sample_id"] == "tone"
+    # Taken into the song as a PCM sound is: the person's edit, named for the
+    # sound, and the agent's budget not counted.
+    stand_in.script.append((200, mp3, [("request-id", "req-mp3-2")]))
+    with hosted(song, monkeypatch):
+        made = daw("--origin", "user", "generate", "sound", song, "a tone", "--seconds", 1, "--id", "tone2")
+        assert made["revision"] >= 1 and made["origin"] == "user"
+        assert daw("status", song)["undo"] == {"label": "Generate tone2", "origin": "user"}
+    assert made["budget"]["spent_today"]["agent"] == 1.0 and 0.9 < made["budget"]["spent_today"]["user"] < 1.2
 
 
 def test_describe_and_help_say_what_the_agent_needs():
@@ -356,3 +366,43 @@ def test_describe_and_help_say_what_the_agent_needs():
     assert code == 0 and "--bars" in out and "--estimate" in out and "--loop" in out
     code, out, _ = run("keys", "--help")
     assert code == 0 and all(word in out for word in ["set", "status", "remove", "budget"])
+
+
+def test_the_keychain_key_is_sent_to_elevenlabs_only(stand_in, song, monkeypatch):
+    # The stand-in, named so the loopback check does not take it as this
+    # machine: the Keychain is asked for nothing and the stand-in hears nothing.
+    port = stand_in.url.rsplit(":", 1)[1]
+    monkeypatch.setenv("AAW_GENERATE_URL", f"http://127.1:{port}")
+    message = failure("generate", "sound", song, "a whoosh", "--seconds", 1)
+    assert "neither ElevenLabs" in message and "nothing was sent" in message
+    status = daw("keys", "status")
+    assert status["key"] is None and "neither ElevenLabs" in status["problem"]
+    code, out, err = run("keys", "set", "elevenlabs", stdin="sk_typed\n")
+    assert code == 1 and "neither ElevenLabs" in err and "sk_typed" not in out + err
+    assert stand_in.seen == []
+    assert status["budget"]["spent_today"] == {"agent": 0.0, "user": 0.0}
+
+
+def test_a_sound_that_could_not_be_saved_is_still_counted(tmp_path, stand_in, song):
+    # The generated folder cannot be made: its parent is a file.
+    (tmp_path / "workspace").mkdir(exist_ok=True)
+    (tmp_path / "workspace" / "library").write_text("in the way")
+    failure("generate", "sound", song, "a whoosh", "--seconds", 2)
+    assert len(stand_in.sounds()) == 1
+    assert daw("keys", "status")["budget"]["spent_today"]["agent"] == 2.0
+
+
+def test_requests_at_once_cannot_spend_past_the_budget(stand_in, song):
+    daw("keys", "budget", "--agent-seconds", 5)
+    stand_in.delay = 0.5
+    runs = [
+        subprocess.Popen([os.environ["AAW_DAW"], "generate", "sound", str(song), "a hit", "--seconds", "2", "--id", f"hit{n}"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        for n in range(4)
+    ]
+    codes = [r.wait(timeout=60) for r in runs]
+    for r in runs:
+        r.stdout.close()
+        r.stderr.close()
+    assert sorted(codes) == [0, 0, 1, 1]
+    assert len(stand_in.sounds()) == 2
+    assert daw("keys", "status")["budget"]["spent_today"]["agent"] == 4.0

@@ -9,8 +9,9 @@
 //! settings file in the data folder, `generate.json`, holds the plan's tier,
 //! the agent's daily budget in seconds of audio and what each origin spent
 //! today, and never the key. `AAW_GENERATE_URL` points the client at a
-//! stand-in server for tests; only when it names a loopback address is the
-//! key taken from `AAW_TEST_GENERATE_KEY` instead of the Keychain.
+//! stand-in server for tests: when it names a loopback address the key is
+//! taken from `AAW_TEST_GENERATE_KEY`, and the Keychain's key goes to no
+//! address but the service's own.
 
 use crate::command::Origin;
 use crate::patches::{slug, timestamp};
@@ -76,12 +77,25 @@ pub fn is_loopback(url: &str) -> bool {
 }
 
 /// The key for `base`: from `AAW_TEST_GENERATE_KEY` when the address is a
-/// loopback stand-in, and from the Keychain otherwise. None when none is set.
+/// loopback stand-in, and from the Keychain when it is the service's own.
+/// None when none is set.
 pub fn key(base: &str) -> Result<Option<Key>> {
     if is_loopback(base) {
         return Ok(std::env::var("AAW_TEST_GENERATE_KEY").ok().and_then(|k| Key::new(&k)));
     }
+    keychain_address(base)?;
     crate::keys::read()
+}
+
+/// Refuses any address but the service's own for the Keychain's key, so an
+/// agent that sets `AAW_GENERATE_URL` cannot have the key sent where it reads it.
+pub fn keychain_address(base: &str) -> Result<()> {
+    if base == DEFAULT_URL {
+        return Ok(());
+    }
+    Err(format!(
+        "AAW_GENERATE_URL names {base}, which is neither ElevenLabs ({DEFAULT_URL}) nor a stand-in on this machine; the Keychain's key is sent to ElevenLabs only, so nothing was sent"
+    ))
 }
 
 /// What the person is told when there is no key.
@@ -150,6 +164,63 @@ pub fn save_settings(data_dir: &Path, s: &Settings) -> Result<()> {
     write_file(&path, text.as_bytes())
 }
 
+/// Reads, changes and writes `generate.json` under a lock beside it, so two
+/// commands at once each see what the other spent. Nothing is written when
+/// `change` refuses.
+pub fn update_settings<T>(data_dir: &Path, change: impl FnOnce(&mut Settings) -> Result<T>) -> Result<T> {
+    std::fs::create_dir_all(data_dir).map_err(|e| format!("{}: {e}", data_dir.display()))?;
+    let lock = std::fs::File::options()
+        .append(true)
+        .create(true)
+        .open(data_dir.join(".generate.lock"))
+        .map_err(|e| format!("{}: {e}", data_dir.display()))?;
+    lock.lock().map_err(|e| format!("{SETTINGS_FILE} could not be locked: {e}"))?;
+    let mut settings = load_settings(data_dir);
+    let out = change(&mut settings)?;
+    save_settings(data_dir, &settings)?;
+    Ok(out)
+}
+
+/// The seconds a request holds against the day's spend while it runs, so a
+/// request made meanwhile is refused what this one may use.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Hold {
+    pub origin: Origin,
+    pub seconds: f64,
+    pub day: String,
+}
+
+/// Holds `seconds` for `origin`, or refuses as `Settings::allow` does with
+/// nothing held. The settings as held come back too.
+pub fn hold(data_dir: &Path, origin: Origin, seconds: f64) -> Result<(Hold, Settings)> {
+    update_settings(data_dir, |s| {
+        s.allow(origin, seconds)?;
+        s.spend(origin, seconds);
+        let hold = Hold {
+            origin,
+            seconds,
+            day: s.day.clone(),
+        };
+        Ok((hold, s.clone()))
+    })
+}
+
+impl Hold {
+    /// Spends what was generated in place of what was held: 0 when nothing
+    /// came back. A hold from a day since rolled over was cleared with it, so
+    /// only what was generated is counted, today. `tier`, when given, is kept.
+    pub fn settle(self, data_dir: &Path, generated: f64, tier: Option<String>) -> Result<Settings> {
+        update_settings(data_dir, |s| {
+            let held = if s.day == self.day { self.seconds } else { 0.0 };
+            s.spend(self.origin, generated - held);
+            if tier.is_some() {
+                s.tier = tier;
+            }
+            Ok(s.clone())
+        })
+    }
+}
+
 impl Settings {
     /// A new day starts the spend over.
     fn roll_day(&mut self) {
@@ -169,9 +240,10 @@ impl Settings {
         (self.budget_seconds - self.spent_by(Origin::Agent)).max(0.0)
     }
 
+    /// Adds to what `origin` spent today; a negative amount gives back a hold.
     pub fn spend(&mut self, origin: Origin, seconds: f64) {
         self.roll_day();
-        let total = self.spent_by(origin) + seconds;
+        let total = (self.spent_by(origin) + seconds).max(0.0);
         self.spent.insert(origin.as_str().into(), json!(round3(total)));
     }
 
@@ -302,6 +374,11 @@ impl Reply {
         serde_json::from_slice(&self.body).unwrap_or(Json::Null)
     }
 
+    /// A 2xx. Redirects are not followed, so a 3xx is a failure too.
+    fn ok(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
+
     /// The error a failed reply carries: its code, its message and, for a
     /// refused prompt, the prompt the service suggests. The shapes seen in
     /// the service's documentation are `{detail: {status, message}}`,
@@ -338,6 +415,12 @@ impl Reply {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FormatRefusal {
+    Named,
+    Unnamed,
+}
+
 /// A reply the service refused, read for what to tell the person.
 #[derive(Clone, Debug)]
 pub struct Failure {
@@ -355,14 +438,24 @@ impl Failure {
     }
 
     /// Whether a refusal is of the format asked for, as the plan's tier
-    /// decides it.
-    fn is_format(&self, format: Format) -> bool {
+    /// decides it: `Named` when it names the format, `Unnamed` for a 403
+    /// that says nothing of why, which may be the format and may be anything.
+    fn format_refusal(&self, format: Format) -> Option<FormatRefusal> {
         let m = self.message.to_ascii_lowercase();
+        let code = self.code.as_deref().unwrap_or("").to_ascii_lowercase();
         let plan = matches!(
-            self.code.as_deref(),
-            Some("invalid_api_key" | "missing_permissions" | "subscription_required" | "quota_exceeded" | "insufficient_credits" | "bad_prompt")
+            code.as_str(),
+            "invalid_api_key" | "missing_permissions" | "subscription_required" | "quota_exceeded" | "insufficient_credits" | "bad_prompt"
         );
-        !plan && (self.status == 403 || m.contains("output_format") || m.contains(format.name()))
+        if plan || self.is_bad_prompt() {
+            None
+        } else if m.contains("output_format") || m.contains(format.name()) || code.contains("format") {
+            Some(FormatRefusal::Named)
+        } else if self.status == 403 {
+            Some(FormatRefusal::Unnamed)
+        } else {
+            None
+        }
     }
 
     /// What happened and what to do, as the table in the feature's file says.
@@ -409,8 +502,12 @@ impl std::fmt::Debug for Client {
 
 impl Client {
     pub fn new(base: &str, key: Key) -> Client {
+        // A redirect is not followed: the key's header would go with it to
+        // whatever host it names.
         let mut config = ureq::Agent::config_builder()
             .http_status_as_error(false)
+            .max_redirects(0)
+            .max_redirects_will_error(false)
             .timeout_connect(Some(Duration::from_secs(20)))
             .timeout_global(Some(Duration::from_secs(300)))
             .user_agent("aaw-daw");
@@ -499,7 +596,7 @@ impl Subscription {
 /// Asks the service what the key's plan is.
 pub fn subscription(client: &Client) -> Result<Subscription> {
     let reply = client.get("/v1/user/subscription")?;
-    if reply.status >= 400 {
+    if !reply.ok() {
         return Err(reply.failure().explain());
     }
     let j = reply.json();
@@ -665,10 +762,19 @@ pub struct Generated {
     pub notes: Vec<String>,
 }
 
+impl Generated {
+    /// The length of PCM from its bytes; None for a compressed format.
+    pub fn pcm_seconds(&self) -> Option<f64> {
+        (self.format == Format::Pcm44100).then(|| (self.bytes.len() / 2) as f64 / f64::from(self.format.sample_rate()))
+    }
+}
+
 /// Asks for a sound, in the best format the tier allows. A 429 is retried
-/// once after the wait the reply gives; a format the plan refuses is asked for
-/// again one format lower, once, and the tier is corrected. Nothing else is
-/// retried, so a request is paid for at most once.
+/// once after the wait the reply gives. A refusal that names the format is
+/// asked for again one format lower, once a step, and the tier is corrected;
+/// a 403 that does not say why is asked for once lower and the tier left, as
+/// it may be refused for something else. Nothing else is retried, so a
+/// request is paid for at most once.
 pub fn sound(client: &Client, request: &SoundRequest, tier: Option<&str>) -> Result<Generated> {
     request.check()?;
     let body = request.body();
@@ -676,9 +782,10 @@ pub fn sound(client: &Client, request: &SoundRequest, tier: Option<&str>) -> Res
     let mut tier = tier.map(str::to_string);
     let mut notes = Vec::new();
     let mut retried_429 = false;
+    let mut retried_unnamed = false;
     loop {
         let reply = client.post("/v1/sound-generation", &[("output_format", format.name())], &body)?;
-        if reply.status < 400 {
+        if reply.ok() {
             let header = |name: &str| reply.header(name).map(str::to_string);
             let request_id = header("request-id").or_else(|| header("x-request-id"));
             let cost = header("character-cost").or_else(|| header("x-character-count")).and_then(|s| s.trim().parse().ok());
@@ -698,17 +805,31 @@ pub fn sound(client: &Client, request: &SoundRequest, tier: Option<&str>) -> Res
             std::thread::sleep(Duration::from_secs_f64(wait));
             continue;
         }
-        if let (true, Some(lower)) = (failure.is_format(format) && !failure.is_bad_prompt(), format.lower()) {
-            notes.push(format!(
-                "The plan refused {} ({}); asked again as {} and the tier noted as {}",
-                format.name(),
-                failure.message,
-                lower.name(),
-                format.tier_below()
-            ));
-            tier = Some(format.tier_below().to_string());
-            format = lower;
-            continue;
+        match (failure.format_refusal(format), format.lower()) {
+            (Some(FormatRefusal::Named), Some(lower)) => {
+                notes.push(format!(
+                    "The plan refused {} ({}); asked again as {} and the tier noted as {}",
+                    format.name(),
+                    failure.message,
+                    lower.name(),
+                    format.tier_below()
+                ));
+                tier = Some(format.tier_below().to_string());
+                format = lower;
+                continue;
+            }
+            (Some(FormatRefusal::Unnamed), Some(lower)) if !retried_unnamed => {
+                retried_unnamed = true;
+                notes.push(format!(
+                    "ElevenLabs refused {} with a 403 that did not say why ({}); asked again as {}, and the tier left as it was",
+                    format.name(),
+                    failure.message,
+                    lower.name()
+                ));
+                format = lower;
+                continue;
+            }
+            _ => {}
         }
         return Err(failure.explain());
     }
