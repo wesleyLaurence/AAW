@@ -39,6 +39,13 @@ open -a build/AAW.app path/to/project   # its folder, or the song.yaml in it
 ./build.sh dist                     # build/AAW-0.1.0.zip, to share
 ```
 
+To keep the app in the Dock, copy `build/AAW.app` to Applications and drag it
+from there to the Dock, or, while it runs, choose Options › Keep in Dock from
+its Dock icon. The Dock runs the copy it was given, so after a new build drag
+the new one in, or copy it over the one in Applications. Its icon is
+`AppIcon.png` beside this README, 1024 pixels with the corners transparent,
+on Apple's grid: the shape 824 pixels wide, centered.
+
 `build.sh` builds the Rust core as a static library, generates the Swift
 bindings from it with UniFFI, wraps both as an XCFramework under `Generated/`,
 builds the Swift package and `daw`, and assembles and signs the bundle.
@@ -58,6 +65,7 @@ com.dropbox.ignored 1 .build build Generated`.
 | `Helpers/daw` | The `daw` binary, built as the tests build it |
 | `Frameworks` | libsndfile and the seven libraries it links (Ogg, Vorbis and its encoder, FLAC, Opus, mpg123 and LAME), copied from Homebrew |
 | `Resources/Licenses` | The licenses of those libraries |
+| `Resources/AppIcon.icns` | The app's icon, made by `build.sh` from `AppIcon.png` at every size the Dock and the Finder draw it at |
 
 The app is signed with `AAW.entitlements`, which asks for the microphone under
 the hardened runtime, and `Info.plist` says why the app wants the microphone

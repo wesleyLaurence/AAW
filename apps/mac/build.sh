@@ -113,6 +113,18 @@ embed() {
     done
 }
 
+# The icon: AppIcon.png, 1024 pixels on Apple's grid, at every size the Dock
+# and the Finder draw it at, as the .icns Info.plist names.
+iconset="$here/build/AppIcon.iconset"
+rm -rf "$iconset"
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+    quiet sips -z "$size" "$size" "$here/AppIcon.png" --out "$iconset/icon_${size}x${size}.png"
+    quiet sips -z "$((size * 2))" "$((size * 2))" "$here/AppIcon.png" --out "$iconset/icon_${size}x${size}@2x.png"
+done
+quiet iconutil -c icns "$iconset" -o "$contents/Resources/AppIcon.icns"
+rm -rf "$iconset"
+
 embed "$contents/MacOS/AAW" "@executable_path/../Frameworks"
 embed "$contents/Helpers/daw" "@executable_path/../Frameworks"
 # The copies link one another: go round until a pass brings no more in.
