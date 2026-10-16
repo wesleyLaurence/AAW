@@ -909,6 +909,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - **Fresh-agent task routing:** start new Claude and Codex sessions for a simple song edit and a development task; verify only the applicable guide loads. Links and ignore rules were checked locally; fresh sessions have not been tried.
 - **Install Command Line Tool:** its alerts and the request for an administrator's
   password.
+- **The app icon** in the Dock, the Finder and the ⌘-Tab switcher: seen only
+  as the `.icns` rendered to a picture.
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
   (Later, under Shipping).
 
@@ -1156,7 +1158,7 @@ Waiting since October 4, 2026, while the app is built and opened from this
 checkout (D75):
 
 - **An app that stands alone on this Mac.** Sample search and import in Rust, so
-  the browser needs no Python. An app icon. An install step that puts the app in
+  the browser needs no Python. An install step that puts the app in
   Applications. The Python tools found through a setting, not a path compiled in.
 - **The `.aaw` file type and the project ID.** A `My Beat.aaw` file in every
   project beside `song.yaml`, opened by double-click in the Finder as an `.als`
