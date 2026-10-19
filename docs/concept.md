@@ -169,8 +169,9 @@ My Beat/
 ```
 
 - **`.aaw` is the app's own file type.** Double-clicking it opens the project,
-  Finder shows the app's icon on it, and Open… offers only projects. The file is
-  still readable text that the agent and Git can work with.
+  Finder shows the app's icon on it and on the project's folder, and Open…
+  offers only projects. The file is still readable text that the agent and Git
+  can work with.
 - **The folder stays a plain folder,** not a package Finder shows as one file, so
   the person and the agent can reach exports, renders and notes directly.
 - **A project is self-contained.** Sample paths are relative to the folder and
@@ -397,12 +398,20 @@ address that stays valid as other edits land, and every error says how to fix it
   library and loaded into any song, and factory patches ship with it (D69).
   Glide and sustain loops on the sampler.
 - **Effects:** filter, equalizer, compressor with sidechain, limiter, delay,
-  reverb, saturation and a clipper, utility, chorus, phaser, gate, transient
-  shaper, multiband compressor, pitch shift.
+  reverb, saturation and a clipper, utility, chorus, overdrive, phaser, gate,
+  transient shaper, multiband compressor, pitch shift; a rack as a device
+  that holds a chain and folds, and an instrument rack that saves an
+  instrument with its effects as one. MIDI effects before an instrument, an
+  arpeggiator first.
 - **An analyzer:** an effect that changes nothing and shows the sound as it
   plays, wherever in a chain it is put: levels, loudness, spectrum,
   spectrogram, stereo field and waveform.
-- **Routing:** sends and returns, groups, sidechains from any track or pad.
+- **Routing:** sends and returns, groups and groups within groups, sidechains
+  from any track or pad.
+- **Recording:** an audio track recorded from an input device, and resampling
+  from a track, a group or the mix; a track frozen to audio and thawed (D123).
+- **The length is the song's content.** A clip placed past the end extends the
+  song; nothing is refused for lying past it, and no length is typed (D123).
 - **Automation** of any continuous parameter.
 - **Time:** tempo and time signature changes, stretch at pitch, warp markers for
   material whose tempo drifts.
@@ -426,6 +435,14 @@ address that stays valid as other edits land, and every error says how to fix it
 A script that changes the arrangement issues commands through the host, never by
 writing the file. A tool worth reusing moves to the workspace's `skills/` or
 `devices/`. Effect chains, pad setups and whole tracks save as named text presets.
+
+The two device tiers are written to one spec: a manifest that declares a
+device's fields, from which its panel, its `daw` verbs, its lanes and its
+listing in the browser follow, and code in a sandboxed language or a known
+Python environment that the engine runs in playback and export alike. The
+agent writes a device from a description, and a device is a folder that is
+shared as a patch or a rack is, so the DAW is not limited to what ships in it
+(D123).
 
 ## Library and perception
 
@@ -519,8 +536,10 @@ open to this app one day; nothing is built on its existing.
 
 ## What it is not
 
-- No recording of new audio. Input is samples, songs and files, what the agent
-  synthesizes, and notes played on a keyboard.
+- No multitrack studio. Audio is recorded from an input or resampled from the
+  song itself, a take at a time, so a guitar, a hummed line or a beatboxed
+  rhythm reaches the song; punch-in, comping and a session view are not the
+  goal (D123, revising the line that said no recording at all).
 - No clip launching or session view. The model is the arrangement.
 - No hosting of third-party plugins, unless a need appears that cannot be met
   here.

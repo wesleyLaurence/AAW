@@ -1,7 +1,15 @@
 # The `.aaw` project file — proposed October 11, 2026
 
-Status: proposed, not built. Backlog: Later › Shipping, The `.aaw` file type and
-the project ID. What is said here about the code was read from this checkout on
+Status: proposed, not built. Backlog: Next, The `.aaw` project and its
+folder, moved up from Later › Shipping on October 19, 2026, when the person
+asked again: "a much more clear .aaw file type that is the object for a session
+that you can click and it opens it up. Each project really should be a folder,
+that folder should have the AAW icon displayed on it ... Then also there is a
+.aaw file in that folder that when you click it the app opens with that
+project ... it can also hold the individual project level skills as well."
+The project's own skills already live in its `.claude/skills/`
+([skills](skills.md)); the folder's icon is new and is under The folder's
+icon below. What is said here about the code was read from this checkout on
 October 11, 2026; what is said about macOS (Uniform Type Identifiers, Launch
 Services) is from Apple's documentation as remembered, and nothing was built or
 tried on a Mac.
@@ -134,8 +142,21 @@ In `apps/mac/Info.plist`:
 - `CFBundleDocumentTypes`: that type with the role Editor and the rank Owner, in
   place of today's claim on `public.yaml` at the rank Alternate, which offers AAW
   for every YAML file on the Mac.
-- An icon for the document once the app has one (An app that stands alone, under
-  Shipping). Until then the Finder draws its generic document.
+- An icon for the document, from the app's icon (D122), set as the type's
+  `UTTypeIconFile` so the Finder draws the `.aaw` with it.
+
+### The folder's icon
+
+The person wants the project's folder shown with the app's icon too. A folder
+is not a document type, so Launch Services cannot do it; the Finder draws a
+custom icon on a folder that holds an `Icon\r` resource file with its icon and
+has the custom-icon bit set in its Finder info, which `NSWorkspace.setIcon(_:
+forFile:options:)` writes in one call. `project::create` cannot call that from
+Rust, so the app sets it when it makes or first opens a project, and `daw
+init` leaves it to the app. The `Icon\r` file is hidden and must be passed over
+by the "holds nothing" test and by `daw check`'s layout rule. On another Mac
+without the icon file the folder is plain, which is what Ableton's folder is
+too.
 
 The open panel's `allowedContentTypes` becomes the project type and folders, in
 place of YAML and folders.
@@ -218,6 +239,9 @@ The work is a few hundred lines, most of it in `project.rs` and the tests.
 3. **Does a folder renamed in the Finder get its `.aaw` renamed** the next time
    it opens? This design leaves it, as Ableton leaves an `.als`.
 4. **Should `daw init` add the project to the app's index** now that the
-   project has an ID? That is Next, item 7, and could ride with this.
+   project has an ID? That is Next too, and could ride with this.
+6. **Whether the folder's icon is worth a hidden file in every project,**
+   which Dropbox and Git see; the person asked for it, so yes unless it
+   proves to be a nuisance.
 5. **Is `.aaw` taken?** No common Mac app is known to use it, but that was not
    searched.

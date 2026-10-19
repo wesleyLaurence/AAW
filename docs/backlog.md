@@ -23,51 +23,155 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-1. **`daw audio crossfade` with an option, while the app has the project
-   open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
-   "Bad request: invalid type: map, expected f64", where the same command with
-   no option, and with the options on a project no host has open, sets the
-   join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
-   on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
-   same three options and has not been tried with a host.
-2. **A time selection in the app.** A range of beats dragged across the
-   tracks and copied, inserted, deleted or cleared as `daw range` does it,
-   and a section dragged with its content; which gesture makes it is the
-   open question in [features/bar-ranges.md](features/bar-ranges.md).
-3. **A MIDI keyboard.** Notes played through the selected track, held and let
-   go rather than a beat long, through a Synth and through a Sampler, whose
-   pitch needs audio prepared on the way; recording into note clips; quantize.
-   The person plays a riff and the agent builds around it.
-4. **Sections and the song's length in the app.** A section made, named,
-   moved and removed in the ruler, which only draws them today; the length,
-   master gain and end fade typed in the transport bar, as the tempo is. The
-   agent has `daw section` and `daw set session.FIELD`; the person has neither
-   (D81).
-5. **A project made with `daw init` in the app's index,** so a song the agent
-   starts in a terminal opens from Open Recent.
-6. **Turns and A/B.** An agent request's commands grouped, named for the
-   request, kept or reverted as one, and the song restored to before any turn;
-   one key flips between before and after a turn while the loop plays.
-7. **Note transformations and chords.** Humanize with a seed, arpeggiate and
-   vary; chord symbols written as notes; a theory library of scales and chords.
-8. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
-   that replays it.
-9. **Key and chord detection,** and swing detection, of samples and songs: a
-   loop matched to the song's key before it is placed.
-10. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+Items 1–23 are the person's notes from using the app, brought on October 19,
+2026, and come before everything else (D123). Items 24–36 are the order as it
+stood.
+
+1. **The trim cursor.** The pointer at a clip's edge becomes the resize
+   cursor, so a trim is told from a move before the drag begins.
+2. **One preview at a time in the piano roll.** A note moved quickly with the
+   arrow keys leaves each earlier preview ringing, so several sound together;
+   the preview of a note that moves again replaces the one before it, and only
+   one is heard.
+3. **A on the keyboard for automation everywhere.** A shows the automation
+   lanes of every track and hides them again, as Ableton's does; the A mark
+   leaves each header.
+4. **An automation segment bent by dragging.** The segment between two points
+   highlighted in blue when the pointer is over it and dragged up or down into
+   a curve, writing the point's `shape`, which the model has and the app draws
+   but does not set ([automation](features/automation.md)).
+5. **Effects reordered by dragging.** A device's title dragged before another
+   in the device panel, the insertion strip lighting where it lands, as the
+   ◂ ▸ marks and `daw effect move` move it today; the same in a Synth's chain.
+6. **An overdrive.** A distortion effect kind, harder than the saturation's
+   curves: drive, tone, output and a mix, with its lanes; a tenth kind, added
+   as the utility and the clipper were.
+7. **Groups within groups.** Groups selected with Shift and ⌘G made a group
+   of their own, named, with the mute, solo, effects, sends and fader a group
+   has today, and the sum of the groups through it; `daw group add --groups`
+   and `daw set groups.G.group`. Groups were built without nesting (D92).
+   [features/nested-groups.md](features/nested-groups.md)
+8. **A song with no end to hit.** The length managed in the background: a clip
+   placed or dragged past the end extends the song, nothing is refused or
+   warned for lying past it, the bars field leaves the transport bar and the
+   lighter and darker bars go; the loop and the export are what still read an
+   end. [features/song-length.md](features/song-length.md)
+9. **The agent panel's column: one mark.** The activity panel's mark leaves
+   the transport bar, the agent panel takes the mark the activity has, and
+   the activity opens from the Window menu alone.
+10. **The field's + at the left, centered.** The `+` at the left of the
+    agent panel's field and centered on its height.
+11. **`@` mentions.** `@` in the field opens the song's names over the list
+    `/` opens: tracks, clips, samples, sections, markers, references and the
+    project's files; the chosen one goes with the message by the reference
+    `daw` takes, as Attach Selected Clips sends a clip
+    ([skill commands](features/skill-commands.md), open question 2).
+12. **Audio settings.** A preferences window for the output and input device,
+    the sample rate and the bit depth, and the song played through whatever
+    the Mac has: AirPods Pro refused a song at 44.1 kHz stereo made with the
+    speakers. [features/audio-settings.md](features/audio-settings.md)
+13. **Recording audio.** An audio track armed and recorded from the built-in
+    microphone or a Scarlett interface into a clip, with a count-in and the
+    metronome; and resampling, the same recording from an internal source, a
+    track, a group or the whole mix. The concept said no recording; revised
+    (D123). [features/recording.md](features/recording.md)
+14. **A sound recorded into the conversation.** `+` › Record Audio, or a mark
+    in the field: the person hums a melody, beatboxes a rhythm or plays a
+    guitar through the chosen input, the recording saved under the project
+    and attached, so the agent transcribes it to notes and places it. Built on
+    [recording](features/recording.md) and
+    [attachments](features/agent-attachments.md).
+15. **Freezing a track.** A track's instrument and effects rendered to a file
+    and played as an audio clip in its place, its devices kept and bypassed
+    until it is unfrozen; `daw track freeze|unfreeze`.
+16. **A rack as a device, and an instrument rack.** A rack in a chain as one
+    device with its effects inside, each folded to a narrow column or opened
+    out, effects dragged into it as into a container; an instrument rack, an
+    instrument with its effects saved and loaded as one. A saved rack lays its
+    effects into the chain today ([effect racks](features/effect-racks.md)).
+    [features/rack-devices.md](features/rack-devices.md)
+17. **MIDI effects, an arpeggiator first.** A device before the instrument
+    that changes the notes as they play: rate, order, octaves and gate on the
+    grid; then chord, scale and velocity devices.
+18. **Favorites.** A section of the browser anything is put in, a sample, a
+    patch, a rack, an effect kind or a device, kept with the person's library
+    and listed first.
+19. **The `.aaw` project and its folder.** A file in every project that a
+    double-click opens, the folder shown with the app's icon, and the
+    project's skills inside it; designed under Shipping and moved up.
+    [features/project-file.md](features/project-file.md)
+20. **Devices anyone builds, to a spec.** An instrument or effect written as
+    code against one spec, with its fields, its panel and its `daw` verbs, so
+    the agent writes a new device from a description, the engine runs it in
+    playback and export, and it is shared as a file as a patch or a rack is.
+    [features/custom-devices.md](features/custom-devices.md)
+21. **The person's skills: reverse-engineer, mix, master, arrange.** Written
+    with the agent in the ignored skills folder, each a music session over
+    `daw listen`, `compare`, `separate` and the Synth: a sound or a track
+    rebuilt from scratch as near as the tool allows, a session mixed, a mix
+    mastered, parts arranged into a form. What each finds missing becomes a
+    line here.
+22. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
+    kick layered under the wrong hits several times in a row, where the
+    waveform made them plain, and a mashup of two songs matched in tempo but a
+    beat ahead or behind: a song's drum hits as a list and a picture, `daw
+    samples hits FILE` or on a stem, the transients in a band (a kick's
+    45–90 Hz) with each one's time, level and the spacing to the next, since
+    `daw listen` hits are scheduled hits only; and `daw samples beats` on a
+    song with an odd bar, where the downbeat phase flips after it and bar.beat
+    labels after it read two beats off, said when it changes or re-fit each
+    phrase; each checked on those songs.
+23. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
+    vocal stem; a smaller model, or Whisper through MLX on this Mac, as a
+    command of the tool's own, the lyric's bar still read from the stem.
+
+24. **`daw audio crossfade` with an option, while the app has the project
+    open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
+    "Bad request: invalid type: map, expected f64", where the same command with
+    no option, and with the options on a project no host has open, sets the
+    join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
+    on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
+    same three options and has not been tried with a host.
+25. **A time selection in the app.** A range of beats dragged across the
+    tracks and copied, inserted, deleted or cleared as `daw range` does it,
+    and a section dragged with its content; which gesture makes it is the
+    open question in [features/bar-ranges.md](features/bar-ranges.md).
+26. **A MIDI keyboard.** Notes played through the selected track, held and let
+    go rather than a beat long, through a Synth and through a Sampler, whose
+    pitch needs audio prepared on the way; recording into note clips; quantize.
+    The person plays a riff and the agent builds around it.
+27. **Sections, the master gain and the end fade in the app.** A section
+    made, named, moved and removed in the ruler, which only draws them today;
+    the master gain and end fade typed in the transport bar, as the tempo is.
+    The agent has `daw section` and `daw set session.FIELD`; the person has
+    neither (D81). The length is item 8's, managed in the background.
+28. **A project made with `daw init` in the app's index,** so a song the agent
+    starts in a terminal opens from Open Recent.
+29. **Turns and A/B.** An agent request's commands grouped, named for the
+    request, kept or reverted as one, and the song restored to before any turn;
+    one key flips between before and after a turn while the loop plays.
+30. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+    vary; chord symbols written as notes; a theory library of scales and chords,
+    the person's own tables of chords by intervals, scales and modes, and note
+    frequencies its data where the model's own knowledge is not to be trusted.
+31. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+    that replays it.
+32. **Key and chord detection,** and swing detection, of samples and songs: a
+    loop matched to the song's key before it is placed.
+33. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains are built ([effect racks](features/effect-racks.md)).
-11. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+34. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-12. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+35. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-13. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
+36. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
     or from a section-by-section plan the agent writes (`daw generate music`,
     `daw generate plan`), with its beat map in the reply; then a Settings
     window with the key's field and the budget, and a Generate tab in the
@@ -958,7 +1062,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   phases and filter state as a render has them.
 - Glide and a sustain loop on the sampler.
 - More effects: phaser, gate, transient shaper, multiband compressor, pitch
-  shift. What a clipper is taking off shown in its panel while the song plays,
+  shift; an overdrive is Next. What a clipper is taking off shown in its panel while the song plays,
   which only a render's report says today; and, if its last clip is heard, a
   switch to leave it out before a limiter, or more passes of the oversampled
   stage ([clipper](features/clipper.md)). An effect dragged from the browser
@@ -970,9 +1074,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   in the report ([a limiter that holds a true
   peak](features/true-peak-limiter.md)).
 - Sends from a return to a return.
-- Tempo and time signature changes within a song. One tempo and one meter
-  hold throughout, the beat map included; the song's one time signature is
-  built ([time signature](features/time-signature.md)).
+- Tempo and time signature changes within a song, asked about again on
+  October 19, 2026. One tempo and one meter hold throughout, the beat map
+  included; the song's one time signature is built
+  ([time signature](features/time-signature.md)).
 - Warp markers for a song whose tempo drifts.
 - MIDI controller and expression editing, including pedal, pitch bend and MPE.
 - MIDI files beyond one part (D65): a file of several tracks or channels made
@@ -1013,7 +1118,8 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   with the recipe that made them, edits through the host.
 - Offline devices: a script as an effect, re-run when its input changes.
 - Real-time devices in a sandboxed language, after a spike (FAUST is the
-  candidate).
+  candidate); the spec they are written to is Next
+  ([devices anyone builds](features/custom-devices.md)).
 - `daw promote`: a render, slice or pattern into the library with its recipe.
 
 ### Library and perception
@@ -1085,9 +1191,6 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### The app
 
-- A song that grows when a pattern clip is placed past its end, as it does for
-  an audio clip. A blank project is 32 bars, and a pattern clip cannot be
-  dragged further.
 - Audio clips: a crossfade made by dragging one clip over another, where today
   both play; an edge that snaps to the beats of the file's beat map; a clip's
   lead shown and dragged; several clips trimmed at once.
@@ -1096,9 +1199,6 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   `daw samples beats` has left one.
 - A larger picture of a clip's file in the detail panel, with the part the clip
   plays marked.
-- An automation segment's shape set by dragging it. The app draws the curve and
-  `daw` sets it.
-- The window following the song's end when the song grows.
 - **Separate… in the app** (stage 3 of
   [stem separation](features/stem-separation.md)): a sample in the browser or
   an audio clip on the timeline taken apart from its menu, with the split,
@@ -1128,11 +1228,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   --sort` and `daw samples like` are for the agent (D104).
 - The analyzer's spectrogram as a surface in three dimensions, as Insight
   draws it, and its window's arrangements of panes saved by name.
-- A skills panel, and `@track`, `@clip`, `@section`, `@reference` in the
-  chat, over the same list `/` opens for a skill
-  ([skill commands](features/skill-commands.md)).
+- A skills panel over the same list `/` opens for a skill
+  ([skill commands](features/skill-commands.md)); `@` mentions are Next.
 - The agent panel further: the commands of Claude Code's own that the `/`
-  list hides shown, if wanted, and `@` mentions over the same list
+  list hides shown, if wanted
   ([skill commands](features/skill-commands.md)); a video's sound or a
   frame read for the agent; a
   dropped sound imported at once rather than when it is placed; Apple's
@@ -1149,7 +1248,7 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - A definition of done as a skill, and a bounded, resumable loop that keeps the
   best so far.
 - Craft skills shipped with the app: mix to a reference, finish a song, prepare
-  stems.
+  stems. The person's own four are Next, and what they learn feeds these.
 - Agent roles: a drummer and a mix engineer at once, each an origin.
 
 ### Shipping
@@ -1160,10 +1259,6 @@ checkout (D75):
 - **An app that stands alone on this Mac.** Sample search and import in Rust, so
   the browser needs no Python. An install step that puts the app in
   Applications. The Python tools found through a setting, not a path compiled in.
-- **The `.aaw` file type and the project ID.** A `My Beat.aaw` file in every
-  project beside `song.yaml`, opened by double-click in the Finder as an `.als`
-  opens Ableton, taken by every `daw` command, and an ID in it that the index
-  matches a moved project by. [features/project-file.md](features/project-file.md)
 - **Other Macs.** The rest of the Python ported or carried in the bundle,
   signing with a Developer ID and notarizing, the licenses of the Rust crates
   gathered into the bundle, and first launch creating the workspace.
@@ -1171,7 +1266,10 @@ checkout (D75):
   the developer's, which may not drive a subscription login: Claude Code's
   engine with the person's own API key in the Keychain, each turn's cost
   shown and a budget; a harness of the app's own over a provider's API or a
-  local model; AAW as an MCP server for the agent the person already pays
+  local model, perhaps a fork of an open agent framework such as LangChain's
+  deep agents, with a sandbox for the code and files it runs and more of the
+  audio work native to it, which the person wants explored once the panel's
+  items are built; AAW as an MCP server for the agent the person already pays
   for; a sign-in button only if a program opens (D114).
   [features/agent-engine.md](features/agent-engine.md)
 - A record of every dependency and model: version, license, whether it may be
@@ -1183,6 +1281,15 @@ checkout (D75):
 
 One line each, newest first.
 
+- Saving as it goes against Ableton's unsaved changes: the host writes the song
+  after every edit, so nothing is lost and there is no Save, no dirty mark and
+  no crash recovery; what is given up is a known good state to return to, which
+  turns and A/B (Next), named versions (Later) and the undo history kept across
+  closing a project would give back. Said out loud on October 19, 2026; worth
+  thinking through once turns are built.
+- The person's tables of every chord by its intervals, of scales and modes and
+  of note frequencies by name: whether a model needs them as data or knows
+  them. Taken into the theory library's item in Next.
 - The Mac tests leave a defaults domain a run, `aaw.tests.export.UUID`, in
   `~/Library/Preferences`; a few dozen sit there. The export tests should
   take theirs away.

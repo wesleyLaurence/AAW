@@ -70,7 +70,7 @@ the harness has to do itself: find and load skills, read `AGENTS.md` and
 safe. That is the cost of being free of any one provider. Whether a local
 model can drive `daw` well enough, a song of several sections through
 `describe`, `start` and the checks, is open question 3 and is answered by
-the sessions under Verify run against one.
+the sessions under Verify run against one. On October 19, 2026 the person named the shape they want explored: a fork of an open agent framework such as LangChain's deep agents, customized for this system, with a sandbox for the code and file system work it does and more of the audio processing native to it, once the panel's items are built.
 
 **3. Claude Code's engine with a sign-in.** Not available: the button the
 concept once named needs a program Anthropic has not opened. Kept here so

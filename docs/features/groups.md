@@ -100,7 +100,8 @@ wants to fold to the few things it is made of.
   not the song, as the sends' fold is: folding is not an edit, and a fresh
   window opens with every group shown.
 - **No nesting.** A group cannot be in a group, and a group does not send to
-  another group. A track dragged in the window out of the run of its group's
+  another group. Nesting is Next, asked for on October 19, 2026
+  ([groups within groups](nested-groups.md)). A track dragged in the window out of the run of its group's
   tracks is refused by the host, and the row goes back.
 
 ## Limits
