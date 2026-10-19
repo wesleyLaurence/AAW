@@ -151,9 +151,9 @@ in the next song with one command and the person drops from the browser.
 
 - **A rack as a unit afterwards.** Whether a loaded rack should be shown as
   one device whose effects fold, with macros over them as Ableton's rack has,
-  rather than its effects laid into the chain. This is Ableton's rack proper
-  and would need a device kind of its own; it waits until a chain of five is
-  found hard to read.
+  rather than its effects laid into the chain. Asked for by the person on
+  October 19, 2026 and designed as [a rack as a device](rack-devices.md),
+  Next.
 - **Which chain a rack is saved from in the app.** The device panel saves
   the row shown. Whether the Synth panel wants a Save Rack… of the patch's
   own effects too, when `daw rack save tracks.T.instrument.synth` has it.
