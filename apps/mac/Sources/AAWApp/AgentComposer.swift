@@ -26,7 +26,7 @@ final class ComposerTextView: NSTextView {
             reportHeight()
         }
     }
-    var placeholder = "Ask the agent…"
+    var placeholder = "Create or edit this session"
     /// The chosen skill's name, drawn as a chip while the text starts with
     /// `/name`, and what its words are, drawn after the chip until typed.
     var chip: String? {
