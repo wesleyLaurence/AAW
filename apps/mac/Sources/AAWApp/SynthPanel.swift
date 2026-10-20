@@ -489,7 +489,7 @@ struct SynthLaneMark: View {
                     model.edit(.laneRemove(lane: lane))
                 } else {
                     model.edit(.laneAdd(row: .track(key: track.key), param: param))
-                    model.onShowLanes?(.track(track.key))
+                    model.showAutomation()
                 }
             } label: {
                 Image(systemName: field.lane == nil ? "diamond" : "diamond.fill")

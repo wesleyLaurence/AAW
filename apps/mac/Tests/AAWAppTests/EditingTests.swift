@@ -54,11 +54,8 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(part(track.pan), .pan)
         XCTAssertEqual(part(track.sendBar(0)), .send(0))
         XCTAssertEqual(part(track.sendName(1)), .send(1))
-        XCTAssertEqual(part(track.auto), .auto)
         XCTAssertEqual(track.part(at: CGPoint(x: 135, y: 110)), .name, "the name reaches to the buttons")
         XCTAssertEqual(track.part(at: CGPoint(x: 207, y: 130)), .body, "beside the pan")
-        XCTAssertFalse(track.name.intersects(track.auto))
-        XCTAssertFalse(track.auto.intersects(track.mute))
         XCTAssertLessThanOrEqual(track.send(1).maxY, 100 + track.height)
         XCTAssertFalse(track.name.intersects(track.mute))
         XCTAssertFalse(track.volume.intersects(track.pan))
@@ -98,8 +95,8 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(member.part(at: CGPoint(x: track.fold.midX, y: track.fold.midY)), .body, "left of the indent")
         XCTAssertEqual(track.part(at: CGPoint(x: track.members.midX, y: track.members.midY)), .fold, "a track has no members mark")
         for row in [bus, master] {
-            XCTAssertEqual(row.part(at: CGPoint(x: row.auto.midX, y: row.auto.midY)), .auto)
-            XCTAssertFalse(row.auto.intersects(row.volume) || row.auto.intersects(row.name))
+            XCTAssertFalse(row.name.intersects(row.volume), "the name reaches to the volume")
+            XCTAssertEqual(row.part(at: CGPoint(x: row.volume.minX - 10, y: row.name.midY)), .name)
         }
     }
 

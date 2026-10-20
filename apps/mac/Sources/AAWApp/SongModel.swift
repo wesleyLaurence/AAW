@@ -218,6 +218,9 @@ public final class SongModel {
     /// The position the transport bar shows.
     public var position: Double = 0
     public var showsActivity = true
+    /// Whether every row's automation lanes are shown, as A sets it. The
+    /// window's, not the song's.
+    public private(set) var showsAutomation = false
     public var showsDetail = true
     public var showsBrowser = false
     /// Whether the agent panel shows, kept between projects.
@@ -279,8 +282,9 @@ public final class SongModel {
     @ObservationIgnored var onRename: ((RowID) -> Void)?
     /// Asks the view to let the person type what a marker says.
     @ObservationIgnored var onMarkerText: ((UInt64) -> Void)?
-    /// Asks the view to unfold a row's automation lanes.
-    @ObservationIgnored var onShowLanes: ((RowID) -> Void)?
+    /// Called when the automation lanes were shown or hidden, for the
+    /// arrangement to lay its rows out again.
+    @ObservationIgnored var onAutomation: (() -> Void)?
     /// Gives the keys back to the arrangement, after a value was typed.
     @ObservationIgnored var onFocus: (() -> Void)?
     /// Called when the timeline's grid was chosen, for the arrangement to draw it.
@@ -1562,6 +1566,18 @@ public final class SongModel {
     /// Loops the selected clips. With none selected, turns the loop off, or
     /// back on over its last region; with no earlier loop, it covers the
     /// section at the start position, else that bar.
+    /// Shows every row's automation lanes, or hides them again.
+    public func toggleAutomation() {
+        showsAutomation.toggle()
+        onAutomation?()
+    }
+
+    /// Shows the automation lanes, for a lane just added to be seen.
+    public func showAutomation() {
+        guard !showsAutomation else { return }
+        toggleAutomation()
+    }
+
     public func toggleLoop() {
         if let span = selectedSpan, span.end > span.start {
             let region = LoopRegion(start: span.start, length: span.end - span.start)

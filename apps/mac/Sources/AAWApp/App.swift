@@ -725,6 +725,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator(),
             gridHolder,
             .separator(),
+            // Every row's automation lanes, as Ableton's A.
+            item("Automation", #selector(SongWindowController.toggleAutomation(_:)), "a", []),
+            .separator(),
             item("Browser", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
             item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
@@ -970,6 +973,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func zoomOut(_ sender: Any?) { model.zoom(.out) }
     @objc func zoomToFit(_ sender: Any?) { model.zoom(.fit) }
     @objc func toggleActivity(_ sender: Any?) { model.showsActivity.toggle() }
+    @objc func toggleAutomation(_ sender: Any?) { model.toggleAutomation() }
     @objc func toggleAgent(_ sender: Any?) { model.showsAgent.toggle() }
     @objc func toggleBrowser(_ sender: Any?) { model.showsBrowser.toggle() }
 
@@ -1069,6 +1073,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             item.state = model.transport.loopRegion == nil ? .off : .on
             return !typing
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
+        case #selector(toggleAutomation(_:)):
+            item.state = model.showsAutomation ? .on : .off
+            return !typing
         case #selector(toggleAgent(_:)): item.state = model.showsAgent ? .on : .off
         case #selector(toggleDevices(_:)): item.state = model.showsDetail && model.detail == .devices ? .on : .off
         case #selector(togglePattern(_:)):

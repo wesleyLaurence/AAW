@@ -11,7 +11,7 @@ final class ContextMenuTests: XCTestCase {
     }
 
     func testATracksMenuHasRenameTheSettingsTheAddsAndDelete() {
-        let items = ContextMenu.row(kind: .track, muted: false, soloed: false, lanesShown: false)
+        let items = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false)
         XCTAssertEqual(actions(items), [
             .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .group, nil, .delete,
         ])
@@ -27,19 +27,19 @@ final class ContextMenuTests: XCTestCase {
     }
 
     func testTheTitlesFollowWhatTheRowIsSetTo() {
-        let items = ContextMenu.row(kind: .track, muted: true, soloed: true, lanesShown: true)
+        let items = ContextMenu.row(kind: .track, muted: true, soloed: true, automationShown: true)
         XCTAssertEqual(titles(items), [
             "Rename", "Unmute", "Unsolo", "Hide Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
         ])
     }
 
     func testAGroupedTrackLeavesItsGroupAndAGroupUngroups() {
-        let grouped = ContextMenu.row(kind: .track, muted: false, soloed: false, lanesShown: false, grouped: true)
+        let grouped = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, grouped: true)
         XCTAssertEqual(actions(grouped), [
             .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .leaveGroup, nil, .delete,
         ])
         XCTAssertEqual(grouped.first { $0.action == .leaveGroup }?.title, "Remove from Group")
-        let group = ContextMenu.row(kind: .group, muted: false, soloed: true, lanesShown: false)
+        let group = ContextMenu.row(kind: .group, muted: false, soloed: true, automationShown: false)
         XCTAssertEqual(actions(group), [
             .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .ungroup, nil, .delete,
         ])
@@ -50,14 +50,14 @@ final class ContextMenuTests: XCTestCase {
     }
 
     func testAReturnHasNoSoloAndAddsAReturn() {
-        let items = ContextMenu.row(kind: .bus, muted: false, soloed: false, lanesShown: false)
+        let items = ContextMenu.row(kind: .bus, muted: false, soloed: false, automationShown: false)
         XCTAssertEqual(actions(items), [
             .rename, nil, .mute, .automation, nil, .addTrack, .addMIDITrack, .addReturn, nil, .delete,
         ])
     }
 
     func testTheMasterIsNeitherRenamedNorMutedNorDeleted() {
-        let items = ContextMenu.row(kind: .master, muted: false, soloed: false, lanesShown: false)
+        let items = ContextMenu.row(kind: .master, muted: false, soloed: false, automationShown: false)
         XCTAssertEqual(actions(items), [.automation, nil, .addTrack, .addMIDITrack, .addReturn])
         XCTAssertFalse(items.contains { $0.action == .rename || $0.action == .mute || $0.action == .delete })
     }

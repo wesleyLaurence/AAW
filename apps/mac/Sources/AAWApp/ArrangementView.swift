@@ -76,7 +76,6 @@ private struct RowVisual {
     var mute = false
     var solo = false
     /// Whether the row has automation lanes.
-    var automated = false
     var kind: HeaderLayout.Kind
     var y: Animated
     var height: Animated
@@ -393,8 +392,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var unfolded: Set<UInt64> = []
     /// The groups whose tracks are folded away under them.
     private var foldedGroups: Set<UInt64> = []
-    /// The rows whose automation lanes are shown.
-    private var lanesShown: Set<RowID> = []
     private var heldPoints: [UInt64: HeldPoint] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
     /// The marker whose text is being typed, in a field at its flag.
@@ -429,7 +426,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         gridChosen()
         model.onRename = { [weak self] row in self?.beginRename(row) }
         model.onMarkerText = { [weak self] marker in self?.beginMarkerText(marker) }
-        model.onShowLanes = { [weak self] row in self?.showLanes(of: row) }
+        model.onAutomation = { [weak self] in
+            guard let self else { return }
+            self.show(self.model.arrangement, animated: true)
+        }
         model.onFocus = { [weak self] in
             guard let self else { return }
             self.window?.makeFirstResponder(self)
@@ -545,12 +545,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
         /// How much taller a row is for its lanes, while they are shown.
         func lanesHeight(_ id: RowID, _ lanes: [LaneView]) -> CGFloat {
-            HeaderLayout.extraHeight(lanes: lanesShown.contains(id) ? lanes.count : nil)
+            HeaderLayout.extraHeight(lanes: model.showsAutomation ? lanes.count : nil)
         }
 
         func place(_ id: RowID, name: String, detail: String, color: NSColor?, mute: Bool, solo: Bool,
                    gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = [],
-                   lanes: Int, grouped: Bool = false, collapsed: Bool = false) {
+                   grouped: Bool = false, collapsed: Bool = false) {
             liveRows.insert(id)
             var row: RowVisual
             if let old = rows[id], !old.removing {
@@ -569,7 +569,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             row.detail = detail
             row.mute = mute
             row.solo = solo
-            row.automated = lanes > 0
             row.grouped = grouped
             row.collapsed = collapsed
             row.gain = level(.gain(id), from: row.gain, to: gain)
@@ -601,7 +600,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 + lanesHeight(.group(group.key), group.lanes)
             place(.group(group.key), name: group.id, detail: Self.chain(group.effects), color: model.color(of: group.key),
                   mute: group.mute, solo: group.solo, gain: group.gainDb, pan: group.pan,
-                  kind: .group, height: height, sends: group.sends, lanes: group.lanes.count,
+                  kind: .group, height: height, sends: group.sends,
                   collapsed: foldedGroups.contains(group.key))
             y += height
         }
@@ -621,7 +620,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 : Self.chain(track.effects)
             place(.track(track.key), name: track.id, detail: chain, color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
-                  kind: .track, height: height, sends: track.sends, lanes: track.lanes.count, grouped: group != nil)
+                  kind: .track, height: height, sends: track.sends, grouped: group != nil)
             for clip in track.clips {
                 liveClips.insert(clip.key)
                 let length = clip.patternBeats * Double(clip.repeats)
@@ -703,14 +702,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         for bus in a.returns {
             let height = TimelineLayout.busHeight + lanesHeight(.bus(bus.key), bus.lanes)
             place(.bus(bus.key), name: bus.id, detail: Self.chain(bus.effects), color: nil,
-                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: height,
-                  lanes: bus.lanes.count)
+                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: height)
             y += height
         }
         let masterHeight = TimelineLayout.busHeight + lanesHeight(.master, a.master.lanes)
         place(.master, name: "Master", detail: Self.chain(a.master.effects), color: nil,
-              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, height: masterHeight,
-              lanes: a.master.lanes.count)
+              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, height: masterHeight)
         y += masterHeight
 
         // What is gone fades out, then is dropped.
@@ -778,13 +775,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .slider, .points, .trim, .noteTrim, .fade, .marker: drag = nil
         default: break
         }
-        show(model.arrangement, animated: true)
-    }
-
-    /// Unfolds a row's automation lanes.
-    private func showLanes(of row: RowID) {
-        guard !lanesShown.contains(row) else { return }
-        lanesShown.insert(row)
         show(model.arrangement, animated: true)
     }
 
@@ -953,14 +943,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         var sends = 0
         if id.strip, let key = id.key, unfolded.contains(key) { sends = returns }
         return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: id.strip && returns > 0,
-                            lanes: lanesShown.contains(id) ? model.lanes(of: id).count : nil,
+                            lanes: model.showsAutomation ? model.lanes(of: id).count : nil,
                             collapsed: row.collapsed, grouped: row.grouped)
     }
 
     /// The lanes shown under a row whose top is at `top`, each with its
     /// rectangle on the timeline.
     private func laneRects(_ id: RowID, _ row: RowVisual, top: CGFloat) -> [(lane: LaneView, rect: CGRect)] {
-        guard lanesShown.contains(id) else { return [] }
+        guard model.showsAutomation else { return [] }
         let header = header(id, row, top: top)
         let x = TimelineLayout.headerWidth
         return model.lanes(of: id).enumerated().map { index, lane in
@@ -1314,11 +1304,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         let twice = event.clickCount == 2
         switch header.part(at: p) {
-        case .auto:
-            // With Option, every row follows.
-            let all = event.modifierFlags.contains(.option) ? rows.filter { !$0.value.removing }.map(\.key) : [id]
-            if lanesShown.contains(id) { lanesShown.subtract(all) } else { lanesShown.formUnion(all) }
-            show(model.arrangement, animated: true)
         case .laneRemove(let index):
             let lanes = model.lanes(of: id)
             if lanes.indices.contains(index) { model.edit(.laneRemove(lane: lanes[index].key)) }
@@ -1449,7 +1434,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             model.select(row: id)
             needsDisplay = true
-            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, lanesShown: lanesShown.contains(id), grouped: row.grouped)
+            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.grouped)
             return menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
         }
         guard let hit = clip(at: p) else { return nil }
@@ -1506,9 +1491,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .ungroup: model.ungroupSelection()
         case .leaveGroup:
             if case .track(let key) = id { model.leaveGroup(track: key) }
-        case .automation:
-            if lanesShown.contains(id) { lanesShown.remove(id) } else { lanesShown.insert(id) }
-            show(model.arrangement, animated: true)
+        case .automation: model.toggleAutomation()
         case .addTrack: model.addTrack()
         case .addMIDITrack: model.addTrack(midi: true)
         case .addReturn: model.addReturn()
@@ -2155,6 +2138,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             switch event.charactersIgnoringModifiers {
             case " ": model.togglePlay()
             case "l": model.toggleLoop()
+            // Every row's automation lanes, as Ableton's A.
+            case "a": model.toggleAutomation()
             // A marker where the song is playing; with Shift, one to name.
             case "m": model.addMarker()
             case "M": model.addMarker(ask: true)
@@ -2824,13 +2809,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     /// The mark that shows a row's lanes: lit while they are shown, and in
     /// the lanes' color when the row has any.
-    private func lanesBadge(_ row: RowVisual, in box: CGRect, shown: Bool, alpha: CGFloat) {
-        fill(rounded: box, (shown ? Theme.automation : Theme.gray(1)).withAlphaComponent((shown ? 1 : 0.07) * alpha))
-        let color = shown ? Theme.gray(0.08) : (row.automated ? Theme.automation : Theme.faintText)
-        text("A", in: CGRect(x: box.minX, y: box.minY + 1.5, width: box.width, height: 11),
-             font: Self.badgeFont, color: color.withAlphaComponent(alpha), align: .center)
-    }
-
     /// A mute or solo badge, lit when on.
     private func badge(_ letter: String, on: Bool, color: NSColor, in box: CGRect, alpha: CGFloat) {
         fill(rounded: box, (on ? color : Theme.gray(1)).withAlphaComponent((on ? 1 : 0.07) * alpha))
@@ -2888,7 +2866,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 name.draw(with: header.name, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine])
             }
 
-            lanesBadge(row, in: header.auto, shown: header.lanes != nil, alpha: alpha)
             guard header.strip else {
                 // Returns and the master: one line, with the volume as a value to drag.
                 fill(rounded: header.volume, Theme.control.withAlphaComponent(0.28 * alpha))

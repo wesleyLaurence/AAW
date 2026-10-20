@@ -1091,7 +1091,7 @@ private struct LaneMark: View {
                     model.edit(.laneRemove(lane: lane))
                 } else {
                     model.edit(.laneAdd(row: row.row, param: param))
-                    model.onShowLanes?(row)
+                    model.showAutomation()
                 }
             } label: {
                 Image(systemName: field.lane == nil ? "diamond" : "diamond.fill")
