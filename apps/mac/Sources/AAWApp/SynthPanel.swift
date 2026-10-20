@@ -31,12 +31,25 @@ struct SynthPanel: View {
     /// A source dragged out of a column's title or the matrix's chips; the
     /// data is the source's name, `env2`, `lfo1`, `macros.tone`, `velocity`.
     static let sourceType = "org.aaw.synth-source"
+    /// The width of an insertion strip, before each effect column and after
+    /// the last.
+    static let strip: CGFloat = 8
+    /// An effect of the patch dragged out of its column's title, to be moved
+    /// in the patch's chain where it lands; the data is its key.
+    static let effectType = "org.aaw.synth-effect"
 
     /// How wide the panel is: a column for each part, and one for each of
-    /// the patch's effects.
+    /// the patch's effects with a strip before each and after the last.
     static func width(_ synth: SynthView) -> CGFloat {
-        let columns = 2 + synth.oscillators.count + synth.envelopes.count + synth.lfos.count + (synth.macros.isEmpty ? 0 : 1) + 1 + synth.effects.count
-        return CGFloat(columns) * (column + gap) + gap
+        let columns = 2 + synth.oscillators.count + synth.envelopes.count + synth.lfos.count + (synth.macros.isEmpty ? 0 : 1) + 1
+        return width(columns: columns, effects: synth.effects.count)
+    }
+
+    /// The width of `columns` columns of parts and `effects` effect columns,
+    /// each effect with a strip before it and the last with one after.
+    static func width(columns: Int, effects: Int) -> CGFloat {
+        let strips = effects == 0 ? 0 : effects + 1
+        return CGFloat(columns + effects) * (column + gap) + CGFloat(strips) * (strip + gap) + gap
     }
 
     private func set(_ field: String) -> (FieldValue) -> Edit {
@@ -98,7 +111,8 @@ struct SynthPanel: View {
     }
 
     var body: some View {
-        ScrollView(.vertical) {
+        let keys = synth.effects.map(\.key)
+        return ScrollView(.vertical) {
             HStack(alignment: .top, spacing: Self.gap) {
                 column {
                     HStack(spacing: 4) {
@@ -215,9 +229,13 @@ struct SynthPanel: View {
                     }
                 }
                 ForEach(Array(synth.effects.enumerated()), id: \.element.key) { index, effect in
+                    SynthInsertion(model: model, index: index, keys: keys, height: height - 10)
                     column {
                         SynthEffectColumn(model: model, track: track, effect: effect, index: index, count: synth.effects.count)
                     }
+                }
+                if !synth.effects.isEmpty {
+                    SynthInsertion(model: model, index: synth.effects.count, keys: keys, height: height - 10)
                 }
             }
             .padding(.horizontal, Self.gap)
@@ -227,10 +245,71 @@ struct SynthPanel: View {
     }
 }
 
+/// The strip before each of the patch's effect columns and after the last:
+/// an effect of the patch dragged by its title is moved here, as the ◂ ▸
+/// marks move it, and the strip is lit while the drag is over it, unless the
+/// move would leave the effect where it is.
+private struct SynthInsertion: View {
+    let model: SongModel
+    let index: Int
+    let keys: [UInt64]
+    let height: CGFloat
+    @State private var targeted = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: 2)
+            .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
+            .frame(width: SynthPanel.strip, height: height)
+            .onDrop(of: [SynthPanel.effectType], delegate: SynthInsertionDrop(model: model, index: index, keys: keys, targeted: $targeted))
+            .help("Drop one of the patch's effects here, dragged from its title, to move it in the chain")
+    }
+}
+
+/// What lands on a strip of the Synth's chain: an effect of the patch,
+/// moved to the strip's place. The strips on either side of it refuse it.
+private struct SynthInsertionDrop: DropDelegate {
+    let model: SongModel
+    let index: Int
+    let keys: [UInt64]
+    @Binding var targeted: Bool
+
+    private var move: (key: UInt64, to: Int)? {
+        guard let key = model.draggedEffect, let from = keys.firstIndex(of: key),
+              let to = DeviceChain.moveTarget(from: from, strip: index) else { return nil }
+        return (key, to)
+    }
+
+    func validateDrop(info: DropInfo) -> Bool {
+        info.hasItemsConforming(to: [SynthPanel.effectType])
+    }
+
+    func dropEntered(info: DropInfo) {
+        targeted = move != nil
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        let ok = move != nil
+        if targeted != ok { targeted = ok }
+        return DropProposal(operation: ok ? .move : .cancel)
+    }
+
+    func dropExited(info: DropInfo) {
+        targeted = false
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        targeted = false
+        guard let move else { return false }
+        model.edit(.effectMove(effect: move.key, index: UInt32(move.to)))
+        return true
+    }
+}
+
 /// One of the patch's own effects as a column: its name with the marks that
 /// bypass, move and remove it, and a row for each of its fields, each with
 /// the lane mark of the track, as an effect's panel has them. An equalizer
-/// lists its bands, each a group of rows with a mark to take it out.
+/// lists its bands, each a group of rows with a mark to take it out. Its
+/// title dragged onto a strip between the columns moves it there.
 private struct SynthEffectColumn: View {
     let model: SongModel
     let track: TrackView
@@ -299,6 +378,18 @@ private struct SynthEffectColumn: View {
         .buttonStyle(.borderless)
         .font(.system(size: 8))
         .frame(height: 14)
+        .contentShape(Rectangle())
+        .onDrag {
+            let provider = NSItemProvider()
+            let key = effect.key
+            model.draggedEffect = key
+            provider.registerDataRepresentation(forTypeIdentifier: SynthPanel.effectType, visibility: .ownProcess) { completion in
+                completion(Data(String(key).utf8), nil)
+                return nil
+            }
+            return provider
+        }
+        .help("Drag onto a strip between the patch's effects to move the effect there")
         Group {
             if effect.kind == "eq" {
                 ForEach(0..<Int(effect.bands), id: \.self) { band in

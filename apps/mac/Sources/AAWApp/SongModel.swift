@@ -48,9 +48,20 @@ struct DeviceChain {
     var track: TrackView? = nil
     /// The song's effect types, for adding one.
     static let kinds = browserEffects()
-    /// An effect dragged out of the device panel by its title, to be copied
-    /// where it lands with Option; the data is its key.
+    /// An effect dragged out of the device panel by its title, to be moved
+    /// in its chain where it lands, or copied there with Option; the data is
+    /// its key.
     static let effectType = "org.aaw.effect"
+
+    /// Where an effect at `from` in a chain goes when it is let go on the
+    /// insertion strip `strip`, which sits before the effect of that index
+    /// and after the last; nil for the strips on either side of the effect,
+    /// where it would land where it is.
+    static func moveTarget(from: Int, strip: Int) -> Int? {
+        if strip == from || strip == from + 1 { return nil }
+        return strip < from ? strip : strip - 1
+    }
+
 }
 
 /// What the detail panel shows: a row's devices, or the clip last selected,
@@ -161,6 +172,12 @@ public final class SongModel {
     /// The selected effect of that row, clicked by its title in the device
     /// panel: what Copy, Duplicate and Delete act on while the devices show.
     private(set) var selectedEffect: UInt64?
+    /// The effect last dragged by its title, of a chain or of a Synth's
+    /// patch, set as the drag starts: a strip reads it to say where the
+    /// effect would go, since the drag's own data is not readable until it
+    /// is let go. It stays set after the drag, and is read only while a drag
+    /// of an effect's type is over a strip.
+    var draggedEffect: UInt64?
     /// What the detail panel shows: devices after a row is selected, and a
     /// pattern after a clip is.
     var detail = Detail.devices
