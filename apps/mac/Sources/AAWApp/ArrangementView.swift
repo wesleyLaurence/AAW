@@ -69,6 +69,12 @@ private struct HeldPoint {
     var until: CFTimeInterval?
 }
 
+/// A segment's bend shown ahead of the host, as a dragged point is.
+private struct HeldShape {
+    var shape: Double
+    var until: CFTimeInterval?
+}
+
 private struct RowVisual {
     var name: String
     var detail: String
@@ -282,6 +288,18 @@ private struct PointsDrag {
     var collapse: UInt64?
 }
 
+/// A segment of a lane bent by dragging: the point it follows, whose
+/// `shape` it writes.
+private struct BendDrag {
+    var key: UInt64
+    /// The segment's ends on the timeline when the drag began.
+    var from: CGPoint
+    var to: CGPoint
+    var gesture: String
+    var shape: Double
+    var moved = false
+}
+
 /// A marker dragged along the ruler.
 private struct MarkerDrag {
     var key: UInt64
@@ -324,6 +342,7 @@ private enum Drag {
     case fade(FadeDrag)
     case reorder(ReorderDrag)
     case points(PointsDrag)
+    case bend(BendDrag)
     case marker(MarkerDrag)
     /// A rectangle that selects what it touches: clips, or the points of
     /// the lanes shown; with those selected before it when Shift was held.
@@ -393,6 +412,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// The groups whose tracks are folded away under them.
     private var foldedGroups: Set<UInt64> = []
     private var heldPoints: [UInt64: HeldPoint] = [:]
+    private var heldShapes: [UInt64: HeldShape] = [:]
     private var renaming: (row: RowID, field: NSTextField)?
     /// The marker whose text is being typed, in a field at its flag.
     private var noting: (marker: UInt64, field: NSTextField)?
@@ -407,6 +427,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var dropFile: (path: String, seconds: Double?, beats: Double?)?
     /// The audio clip under the pointer, which shows its fades' handles.
     private var hoverClip: UInt64?
+    /// The automation segment under the pointer, by the point it follows:
+    /// lit, since a drag bends it.
+    private var hoverSegment: UInt64?
     private var measuring: Measuring?
 
     init(model: SongModel) {
@@ -533,6 +556,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 if let hold = heldPoints[point.key], hold.until != nil,
                    abs(hold.at - point.at) < 1e-9, abs(hold.value - point.value) < 1e-9 {
                     heldPoints[point.key] = nil
+                }
+                if let hold = heldShapes[point.key], hold.until != nil, abs(hold.shape - point.shape) < 1e-9 {
+                    heldShapes[point.key] = nil
                 }
             }
         }
@@ -770,9 +796,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private func revert() {
         held.removeAll()
         heldPoints.removeAll()
+        heldShapes.removeAll()
         heldMarkers.removeAll()
         switch drag {
-        case .slider, .points, .trim, .noteTrim, .fade, .marker: drag = nil
+        case .slider, .points, .bend, .trim, .noteTrim, .fade, .marker: drag = nil
         default: break
         }
         show(model.arrangement, animated: true)
@@ -809,12 +836,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             heldPoints = heldPoints.filter { $0.value.until.map { now <= $0 } ?? true }
             needsDisplay = true
         }
+        if heldShapes.values.contains(where: { $0.until.map { now > $0 } ?? false }) {
+            heldShapes = heldShapes.filter { $0.value.until.map { now <= $0 } ?? true }
+            needsDisplay = true
+        }
         if heldMarkers.values.contains(where: { $0.until.map { now > $0 } ?? false }) {
             heldMarkers = heldMarkers.filter { $0.value.until.map { now <= $0 } ?? true }
             needsDisplay = true
         }
         var busy = stepMeasure(at: now) || !glows.isEmpty || held.values.contains { $0.until != nil }
-            || heldPoints.values.contains { $0.until != nil } || heldMarkers.values.contains { $0.until != nil }
+            || heldPoints.values.contains { $0.until != nil } || heldShapes.values.contains { $0.until != nil }
+            || heldMarkers.values.contains { $0.until != nil }
             || rows.values.contains {
                 $0.y.isRunning(at: now) || $0.height.isRunning(at: now) || $0.gain.isRunning(at: now)
                     || $0.pan.isRunning(at: now) || $0.alpha.isRunning(at: now)
@@ -975,6 +1007,29 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let hold = heldPoints[point.key]
             return (point, CGPoint(x: layout.x(hold?.at ?? point.at), y: scale.y(hold?.value ?? point.value, in: rect)))
         }
+    }
+
+    /// The line of a lane's segment from a placed point to the next, as the
+    /// places it passes after the first: held, straight, or the curve the
+    /// person is giving it or the host has.
+    private func curve(from a: (point: PointView, at: CGPoint), to b: (point: PointView, at: CGPoint)) -> [CGPoint] {
+        if a.point.hold { return [CGPoint(x: b.at.x, y: a.at.y), b.at] }
+        return TimelineLayout.curve(from: a.at, to: b.at, shape: heldShapes[a.point.key]?.shape ?? a.point.shape)
+    }
+
+    /// The segment under the pointer in a lane, by the point it follows and
+    /// its ends: the pointer is on the line between two points and on
+    /// neither, and the line can bend, being neither held nor level and
+    /// wide enough to take hold of.
+    private func segment(at p: CGPoint, in lane: LaneView, rect: CGRect) -> (point: PointView, from: CGPoint, to: CGPoint)? {
+        let placed = positions(lane, in: rect)
+        guard !placed.contains(where: { hypot($0.at.x - p.x, $0.at.y - p.y) <= 7 }) else { return nil }
+        for (a, b) in zip(placed, placed.dropFirst()) {
+            guard !a.point.hold, b.at.x - a.at.x >= 8, abs(b.at.y - a.at.y) >= 2, p.x > a.at.x, p.x < b.at.x else { continue }
+            guard TimelineLayout.distance(p, toLineThrough: [a.at] + curve(from: a, to: b)) <= 5 else { return nil }
+            return (a.point, a.at, b.at)
+        }
+        return nil
     }
 
     /// The top and height a row is settling at, in the view.
@@ -1519,8 +1574,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// A press in a lane: on a point it selects it and may drag the selected
     /// points, twice it removes it, with Option it changes whether it holds,
     /// and with Shift it adds it to the selection or takes it out; twice on
-    /// the lane it adds a point there, and a drag in the clear selects the
-    /// points a rectangle touches.
+    /// the lane it adds a point there, on a segment between two points it
+    /// bends the segment, and a drag in the clear selects the points a
+    /// rectangle touches.
     private func laneDown(_ lane: LaneView, rect: CGRect, at p: CGPoint, _ event: NSEvent) {
         let near = positions(lane, in: rect)
             .map { (point: $0.point, distance: hypot($0.at.x - p.x, $0.at.y - p.y)) }
@@ -1534,6 +1590,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.edit(.pointAdd(lane: lane.key, at: at, value: scale.value(atY: p.y, in: rect))) { [weak self] made in
                     self?.model.select(points: Set(made))
                 }
+            } else if let segment = segment(at: p, in: lane, rect: rect) {
+                // The segment follows the pointer up or down into a curve.
+                drag = .bend(BendDrag(key: segment.point.key, from: segment.from, to: segment.to, gesture: model.newGesture(),
+                                      shape: heldShapes[segment.point.key]?.shape ?? segment.point.shape))
             } else {
                 if !shift { model.select(points: []) }
                 drag = .marquee(origin: p, now: p, base: shift ? model.selectedPoints : [], points: true)
@@ -1547,7 +1607,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         if event.modifierFlags.contains(.option) {
             model.select(points: [key])
-            model.edit(.pointSet(point: key, at: nil, value: nil, hold: !near.point.hold))
+            model.edit(.pointSet(point: key, at: nil, value: nil, hold: !near.point.hold, shape: nil))
             return
         }
         var selection = model.selectedPoints
@@ -1790,6 +1850,23 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.drag(.pointsSet(points: places), gesture: d.gesture)
             }
             drag = .points(d)
+        case .bend(var d):
+            // The curve comes to the pointer: the shape that takes the
+            // segment through the pointer's place, to a hundredth and within
+            // -1 to 1, which the ends of the lane reach; past the segment's
+            // ends in time it keeps its bend.
+            let t = Double((p.x - d.from.x) / (d.to.x - d.from.x))
+            let along = min(max(Double((p.y - d.from.y) / (d.to.y - d.from.y)), 0.001), 0.999)
+            if let shape = shapeThrough(t: t, along: along) {
+                let bent = (shape * 100).rounded() / 100
+                if bent != d.shape {
+                    d.shape = bent
+                    d.moved = true
+                    heldShapes[d.key] = HeldShape(shape: bent, until: nil)
+                    model.drag(.pointSet(point: d.key, at: nil, value: nil, hold: nil, shape: bent), gesture: d.gesture)
+                }
+            }
+            drag = .bend(d)
         case .marker(var d):
             // The marker goes to the grid line under the pointer, or with ⌘
             // anywhere, as a point does.
@@ -1870,6 +1947,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             } else if let key = d.collapse {
                 model.select(points: [key])
             }
+        case .bend(let d):
+            model.endDrag()
+            // The bend stays as dragged until the host's song has it.
+            if d.moved { heldShapes[d.key]?.until = CACurrentMediaTime() + 1 }
         case .marker(let d):
             model.endDrag()
             if d.moved {
@@ -1896,22 +1977,29 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     override func mouseMoved(with event: NSEvent) {
         // The cursor is the cursor rects' (`resetCursorRects`); the pointer's
-        // place only decides which audio clip shows its fades' handles.
+        // place only decides which audio clip shows its fades' handles and
+        // which automation segment is lit for bending.
         let p = convert(event.locationInWindow, from: nil)
         var hover: UInt64?
-        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight, lane(at: p) == nil,
-           case .audio(let clip)? = clip(at: p)?.hit {
-            hover = clip.key
+        var segment: UInt64?
+        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight {
+            if let hit = lane(at: p) {
+                segment = self.segment(at: p, in: hit.lane, rect: hit.rect)?.point.key
+            } else if case .audio(let clip)? = clip(at: p)?.hit {
+                hover = clip.key
+            }
         }
-        if hover != hoverClip {
+        if hover != hoverClip || segment != hoverSegment {
             hoverClip = hover
+            hoverSegment = segment
             needsDisplay = true
         }
     }
 
     override func mouseExited(with event: NSEvent) {
-        if hoverClip != nil {
+        if hoverClip != nil || hoverSegment != nil {
             hoverClip = nil
+            hoverSegment = nil
             needsDisplay = true
         }
     }
@@ -1923,7 +2011,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             drag = nil
             show(model.arrangement, animated: true)
             return true
-        case .slider, .points, .marker, nil:
+        case .slider, .points, .bend, .marker, nil:
             return false
         }
     }
@@ -2757,32 +2845,34 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let line = NSBezierPath()
             line.move(to: CGPoint(x: min(rect.minX, first.at.x), y: first.at.y))
             line.line(to: first.at)
-            let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
+            // The segment under the pointer, or the one being bent, is lit.
+            var lit: NSBezierPath?
+            var bending: UInt64?
+            if case .bend(let d) = drag { bending = d.key }
             for (a, b) in zip(placed, placed.dropFirst()) {
-                if a.point.hold {
-                    // A point that holds keeps its value until the next.
-                    line.line(to: CGPoint(x: b.at.x, y: a.at.y))
-                } else if a.point.shape != 0, b.at.x - a.at.x >= 2 {
-                    // A shaped segment is the curve it plays: bent in the
-                    // parameter's own domain, as the engine bends it.
-                    let from = heldPoints[a.point.key]?.value ?? a.point.value
-                    let to = heldPoints[b.point.key]?.value ?? b.point.value
-                    let ratio = lane.log && from > 0 && to > 0
-                    let steps = max(8, min(64, Int((b.at.x - a.at.x) / 3)))
-                    for i in 1..<steps {
-                        let t = Double(i) / Double(steps)
-                        let along = shapedProgress(t, shape: a.point.shape)
-                        let value = ratio ? from * pow(to / from, along) : from + (to - from) * along
-                        line.line(to: CGPoint(x: a.at.x + (b.at.x - a.at.x) * CGFloat(t), y: scale.y(value, in: rect)))
-                    }
+                // A point that holds keeps its value until the next; a shaped
+                // segment is the curve it plays, bent as the engine bends it.
+                let through = curve(from: a, to: b)
+                for place in through { line.line(to: place) }
+                if a.point.key == bending || (bending == nil && a.point.key == hoverSegment) {
+                    let path = NSBezierPath()
+                    path.move(to: a.at)
+                    for place in through { path.line(to: place) }
+                    lit = path
                 }
-                line.line(to: b.at)
             }
             line.line(to: CGPoint(x: max(rect.maxX, last.at.x), y: last.at.y))
             line.lineWidth = 1.5
             line.lineJoinStyle = .round
             Theme.automation.withAlphaComponent(alpha).setStroke()
             line.stroke()
+            if let lit {
+                lit.lineWidth = 2.5
+                lit.lineJoinStyle = .round
+                lit.lineCapStyle = .round
+                Theme.bend.withAlphaComponent(alpha).setStroke()
+                lit.stroke()
+            }
             // The value shows beside the one point selected, or the one grabbed.
             var named: UInt64?
             if case .points(let d) = drag { named = d.grabbed.key } else if model.selectedPoints.count == 1 { named = model.selectedPoints.first }

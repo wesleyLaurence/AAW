@@ -347,12 +347,15 @@ pub enum Edit {
     LaneRemove { lane: u64 },
     /// Adds a point to a lane. The point is what the edit makes.
     PointAdd { lane: u64, at: f64, value: f64 },
-    /// Moves a point in time, in value, or both, or changes whether it holds.
+    /// Moves a point in time, in value, or both, changes whether it holds,
+    /// or bends the segment after it: `shape` from -1 to 1, zero straight,
+    /// as a drag of the segment sets it.
     PointSet {
         point: u64,
         at: Option<f64>,
         value: Option<f64>,
         hold: Option<bool>,
+        shape: Option<f64>,
     },
     /// Moves points, of one lane or several, each to its place, as one step.
     PointsSet { points: Vec<PointPlace> },
@@ -2042,7 +2045,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 "at": beat_at(*at)?, "value": number(*value),
             })])
         }
-        Edit::PointSet { point, at, value, hold } => {
+        Edit::PointSet { point, at, value, hold, shape } => {
             let mut command = json!({"op": "point.set", "point": handle_text(*point)});
             if let Some(at) = at {
                 command["at"] = beat_at(*at)?;
@@ -2052,6 +2055,9 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             if let Some(hold) = hold {
                 command["curve"] = json!(if *hold { "hold" } else { "linear" });
+            }
+            if let Some(shape) = shape {
+                command["shape"] = number(*shape);
             }
             Ok(vec![command])
         }

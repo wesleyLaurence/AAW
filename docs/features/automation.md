@@ -192,8 +192,14 @@ field's, id and index collisions, round-trip formatting, `inspect`, `check` and
 A moving lane costs little. A minute of continuous change on a 48 dB filter or
 an EQ band adds less than a tenth of a second to a render on an M2.
 
+The Mac app draws a shaped segment as the curve it plays, and a drag of the
+segment between two points bends it, writing the first point's `shape`: the
+segment under the pointer is lit, and the drag gives it the shape whose curve
+passes under the pointer, in the parameter's domain as the engine bends it
+(`shapeThrough` in the app is the inverse of `shapedProgress`). The edit is
+`point.set` with `shape`, one gesture a drag, so one undo step.
+
 Not yet implemented: smoothing options and curves other than a bent line and a
-hold. The Mac app draws a shaped segment as the curve it plays; a shape is set
-with `daw`, not in the app. Also missing are LFOs and other modulation, automation of switches and
+hold. Also missing are LFOs and other modulation, automation of switches and
 device-rebuilding parameters, automation of pad or sampler parameters, and tempo
 automation.

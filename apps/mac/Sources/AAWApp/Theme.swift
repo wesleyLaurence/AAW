@@ -55,6 +55,8 @@ enum Theme {
     /// An automation lane's line and points, and the mark of what has one.
     static let automation = rgb(0xf0884a)
     static let automationLane = gray(0.125)
+    /// The segment of a lane under the pointer, which a drag bends.
+    static let bend = rgb(0x4aa8ff)
     /// The fill of a knob's bar in a device panel.
     static let knob = rgb(0x4d6f96)
     /// The Synth's modulation: a source's tab, and how far an entry reaches

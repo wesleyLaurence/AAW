@@ -850,7 +850,7 @@ fn lanes_and_points_are_edited_by_key() {
 
     // A dragged point is one undo step; moved past another, it stays in order.
     for (at, value) in [(10.0, -8.0), (20.0, -9.0)] {
-        song.edit(Edit::PointSet { point: mid, at: Some(at), value: Some(value), hold: None }, Some("point".into())).unwrap();
+        song.edit(Edit::PointSet { point: mid, at: Some(at), value: Some(value), hold: None, shape: None }, Some("point".into())).unwrap();
     }
     update(&seen);
     let u = update(&seen);
@@ -861,15 +861,27 @@ fn lanes_and_points_are_edited_by_key() {
     assert_eq!(lane(&update(&seen), 1, 0).points.iter().map(|p| p.shape).collect::<Vec<_>>(), [0.0, -0.5, 0.0]);
     song.undo().unwrap();
     update(&seen);
-    song.edit(Edit::PointSet { point: late, at: None, value: None, hold: Some(true) }, None).unwrap();
+    song.edit(Edit::PointSet { point: late, at: None, value: None, hold: Some(true), shape: None }, None).unwrap();
     assert_eq!(points(&lane(&update(&seen), 1, 0))[1], (16.0, -12.0, true));
     song.undo().unwrap();
     update(&seen);
+    // A segment bent by dragging: one gesture, one undo step, nothing else of
+    // the point changed; a bend past 1 is refused.
+    for shape in [0.25, 0.6] {
+        song.edit(Edit::PointSet { point: late, at: None, value: None, hold: None, shape: Some(shape) }, Some("bend".into())).unwrap();
+    }
+    update(&seen);
+    let u = update(&seen);
+    assert_eq!(lane(&u, 1, 0).points.iter().map(|p| p.shape).collect::<Vec<_>>(), [0.0, 0.6, 0.0]);
+    assert_eq!(points(&lane(&u, 1, 0))[1], (16.0, -12.0, false));
+    assert!(song.edit(Edit::PointSet { point: late, at: None, value: None, hold: None, shape: Some(1.5) }, None).is_err());
+    song.undo().unwrap();
+    assert_eq!(lane(&update(&seen), 1, 0).points[1].shape, 0.0);
     song.undo().unwrap();
     assert_eq!(points(&lane(&update(&seen), 1, 0))[1], (8.25, -6.0, false));
     // A point past the session end, or a value out of range, is refused.
     assert!(song.edit(Edit::PointAdd { lane: volume.key, at: 40.0, value: 0.0 }, None).is_err());
-    assert!(song.edit(Edit::PointSet { point: mid, at: None, value: Some(99.0), hold: None }, None).is_err());
+    assert!(song.edit(Edit::PointSet { point: mid, at: None, value: Some(99.0), hold: None, shape: None }, None).is_err());
 
     // An effect's knob: the field shows its lane, on the knob's own range.
     let filter = start.tracks[1].effects[0].key;
