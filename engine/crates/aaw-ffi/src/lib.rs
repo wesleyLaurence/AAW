@@ -621,13 +621,17 @@ impl Song {
     /// a Synth or a Sampler, and the track's chain, outside the timeline and
     /// the undo history, as the Synth panel's keys and the piano roll do:
     /// `pitch` a MIDI number, `velocity` 1 to 127 and how long it is held in
-    /// beats. Opens the output if nothing has played yet.
-    pub fn preview_note(&self, track: u64, pitch: i32, velocity: u32, length_beats: f64) -> Result<(), SongError> {
+    /// beats. With `replace` the track's earlier previews are let go first,
+    /// each through its release, so one is heard at a time: the piano roll's
+    /// way, where a note moved again replaces the one before it; the Synth
+    /// panel's keys sound together. Opens the output if nothing has played
+    /// yet.
+    pub fn preview_note(&self, track: u64, pitch: i32, velocity: u32, length_beats: f64, replace: bool) -> Result<(), SongError> {
         let id = {
             let doc = locked(&self.doc);
             edits::track_id(doc.as_ref().ok_or_else(closed)?, track)?
         };
-        self.transport(json!({"op": "note.preview", "track": id, "pitch": pitch, "velocity": velocity, "length_beats": length_beats}))
+        self.transport(json!({"op": "note.preview", "track": id, "pitch": pitch, "velocity": velocity, "length_beats": length_beats, "replace": replace}))
     }
 
     /// Toggles the playback monitor click without editing the song.

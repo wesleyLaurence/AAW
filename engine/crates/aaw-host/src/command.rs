@@ -595,8 +595,11 @@ pub enum Command {
     /// Plays a note now through a MIDI track's Synth and the track's chain,
     /// outside the timeline and the undo history: `pitch` a MIDI number or
     /// a name such as `C4`, `velocity` 1 to 127 (100 unless given) and
-    /// `length_beats` how long it is held (1 unless given). Monitoring, as
-    /// the metronome is: never an edit of the song.
+    /// `length_beats` how long it is held (1 unless given), and `replace`
+    /// whether the track's earlier previews are let go first, each through
+    /// its release, so one is heard at a time (false unless given: they
+    /// sound together, as a chord on the keys). Monitoring, as the
+    /// metronome is: never an edit of the song.
     #[serde(rename = "note.preview")]
     NotePreview {
         track: String,
@@ -605,6 +608,8 @@ pub enum Command {
         velocity: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length_beats: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        replace: Option<bool>,
     },
     /// Monitoring only; never an edit of the song.
     #[serde(rename = "metronome")]

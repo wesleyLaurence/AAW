@@ -54,17 +54,22 @@ pub enum Message {
     Loop(Option<(usize, usize)>),
     /// A note played now through a track's Synth, outside the timeline: the
     /// track's place among the program's tracks, its pitch as a MIDI number,
-    /// its velocity 0 to 1 and how many frames it is held.
+    /// its velocity 0 to 1 and how many frames it is held; `replace` lets
+    /// go the track's earlier previews first.
     Preview {
         track: usize,
         pitch: f64,
         velocity: f64,
         frames: usize,
+        replace: bool,
     },
     /// A note played now through a track's Sampler, outside the timeline:
     /// the track's place among the program's tracks, and the voice
-    /// `program::preview_voice` made for it.
-    PreviewVoice { track: usize, voice: Voice },
+    /// `program::preview_voice` made for it; `replace` as for `Preview`.
+    PreviewVoice { track: usize, voice: Voice, replace: bool },
+    /// Lets go the notes previewed through a track, each through its
+    /// release, with nothing played in their place.
+    LetGoPreviews { track: usize },
 }
 
 /// What the audio thread hands back to the host to be freed.
@@ -197,21 +202,32 @@ impl Control {
     /// Plays a note now through the Synth of the program's track at `track`,
     /// whether or not the transport rolls: `note.preview`. The note is
     /// heard through the track's chain and fader and is never recorded.
-    pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize) -> Result<(), String> {
+    /// With `replace` the track's earlier previews are let go first, each
+    /// through its release, so one is heard at a time.
+    pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize, replace: bool) -> Result<(), String> {
         self.send(Message::Preview {
             track,
             pitch,
             velocity,
             frames,
+            replace,
         })
     }
 
     /// Plays a note now through the Sampler of the program's track at
     /// `track`, whether or not the transport rolls: `note.preview` on a
     /// track with a Sampler, with the voice `program::preview_voice` made.
-    pub fn preview_voice(&mut self, track: usize, voice: Voice) -> Result<(), String> {
+    /// `replace` as for `preview`.
+    pub fn preview_voice(&mut self, track: usize, voice: Voice, replace: bool) -> Result<(), String> {
         self.collect();
-        self.send(Message::PreviewVoice { track, voice })
+        self.send(Message::PreviewVoice { track, voice, replace })
+    }
+
+    /// Lets go the notes previewed through the program's track at `track`,
+    /// each through its release, as `replace` does without a note to play:
+    /// a replaced preview whose pitch the Sampler's map leaves silent.
+    pub fn let_go_previews(&mut self, track: usize) -> Result<(), String> {
+        self.send(Message::LetGoPreviews { track })
     }
 
     /// The last program sent.
@@ -330,20 +346,21 @@ impl Player {
             }
             Message::Loop(region) => self.region = region,
             Message::Metronome(enabled) => self.metronome = enabled,
-            Message::Preview { track, pitch, velocity, frames } => {
+            Message::Preview { track, pitch, velocity, frames, replace } => {
                 // A resting stream wakes for the note.
                 self.resting = false;
                 self.quiet = 0;
-                self.deck.renderer.preview(track, pitch, velocity, frames);
+                self.deck.renderer.preview(track, pitch, velocity, frames, replace);
             }
-            Message::PreviewVoice { track, voice } => {
+            Message::PreviewVoice { track, voice, replace } => {
                 self.resting = false;
                 self.quiet = 0;
                 // The voice it takes the place of may hold the last of its audio.
-                if let Some(old) = self.deck.renderer.preview_voice(track, voice) {
+                if let Some(old) = self.deck.renderer.preview_voice(track, voice, replace) {
                     self.throw(Garbage::Voice(old));
                 }
             }
+            Message::LetGoPreviews { track } => self.deck.renderer.let_go_previews(track),
         }
     }
 

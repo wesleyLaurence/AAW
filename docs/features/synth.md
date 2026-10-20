@@ -442,8 +442,10 @@ daw synth audition SONG lead --notes C2,G2 --play     # the same notes, through 
 a pitch, velocity and length through a MIDI track's Synth, the patch's effects
 and the track's chain, from where the stream stands, whether or not the song
 plays, outside the timeline and the undo history, and nothing of it is
-rendered. A note held while a knob is dragged carries on under the new patch,
-and through a change of wave. It needs a host, which opens the output if
+rendered. `replace: true` lets go the track's earlier previews first, each
+through its release, so one is heard at a time; the piano roll sends it and
+the keys do not ([piano roll](piano-roll.md)). A note held while a knob is
+dragged carries on under the new patch, and through a change of wave. It needs a host, which opens the output if
 nothing has played yet; it refuses a track with no synth, and plays nothing
 through a Sampler. While the transport stands still the stream is no longer
 cut at the song's end: a tail or a previewed note is heard whole wherever the

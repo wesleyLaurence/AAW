@@ -107,7 +107,7 @@ fn a_previewed_note_is_heard_while_stopped_through_the_chain_and_survives_a_patc
     let peak = |x: &[Frame]| x.iter().fold(0.0f64, |m, f| m.max(f[0].abs()));
     // Stopped, resting: nothing sounds until a note is previewed.
     assert_eq!(peak(&pull(&mut player, 4800)), 0.0);
-    control.preview(0, 69.0, 1.0, 24000).unwrap();
+    control.preview(0, 69.0, 1.0, 24000, false).unwrap();
     let out = pull(&mut player, 24000);
     assert!(peak(&out[1000..]) > 0.1, "the previewed note sounds while stopped");
     let crossings = out[4000..20000].windows(2).filter(|w| w[0][0] <= 0.0 && w[1][0] > 0.0).count();
@@ -120,7 +120,7 @@ fn a_previewed_note_is_heard_while_stopped_through_the_chain_and_survives_a_patc
     let edited = Arc::new(compile_cached(&project, dir.path(), &mut cache).unwrap());
     assert_eq!(edited.structure, p.structure);
     control.load(edited).unwrap();
-    control.preview(0, 57.0, 0.8, 48000).unwrap();
+    control.preview(0, 57.0, 0.8, 48000, false).unwrap();
     let after = pull(&mut player, 2400);
     assert!(peak(&after) > 0.05, "still sounding across the take-over");
     // A wave changed: another structure, swapped through the dip, and the note is still there after it.
@@ -137,7 +137,7 @@ fn a_previewed_note_is_heard_while_stopped_through_the_chain_and_survives_a_patc
     let _ = pull(&mut player, p.total);
     assert!(!player.playing());
     pull(&mut player, 60000);
-    control.preview(0, 72.0, 1.0, 9600).unwrap();
+    control.preview(0, 72.0, 1.0, 9600, false).unwrap();
     let late = pull(&mut player, 4800);
     assert!(peak(&late[500..]) > 0.05, "heard with the transport standing past the end");
     // A render has none of it.

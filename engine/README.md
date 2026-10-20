@@ -302,7 +302,11 @@ nothing has played yet, and refuses a track with no instrument and a note
 outside 0 to 127. A Sampler plays it as the same note in a clip would: the
 host prepares the voice (`program::preview_voice`) and the player plays up to
 16 such notes at once, the oldest giving its place; a pitch no map entry
-plays is silent, and the reply's `sounds` is false. The player keeps
+plays is silent, and the reply's `sounds` is false. `"replace": true` lets
+go the track's earlier previews first, as if their keys were lifted, a
+Synth's through its amp release and a Sampler's through its pad's release
+(or the player's fade when that is shorter), so one is heard at a time; the
+piano roll sends it, and the Synth panel's keys do not. The player keeps
 previewed notes apart from the song's: they survive a program swap, voices it
 has finished with go back to the host to be freed, and while the transport
 stands still the stream is cut by nothing, the end fade and the gate at the

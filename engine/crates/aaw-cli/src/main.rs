@@ -2027,6 +2027,7 @@ fn run(cli: &Cli) -> Result<Json> {
                                 pitch: json!(pitch),
                                 velocity: Some(*velocity),
                                 length_beats: Some(json!(length_beats)),
+                                replace: None,
                             },
                         )?;
                     }

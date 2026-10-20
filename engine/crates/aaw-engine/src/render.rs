@@ -398,6 +398,16 @@ impl Previewed {
         self.cursor < self.voice.length
     }
 
+    /// Lets the note go now, as if its key were lifted: it ends through the
+    /// pad's release from here, or over `fade` frames when the pad has none
+    /// shorter. A note already in its release is left to it.
+    fn let_go(&mut self, fade: usize) {
+        let release = self.voice.release.max(fade);
+        if self.voice.length > self.cursor + release {
+            self.voice.length = self.cursor + release;
+        }
+    }
+
     fn render(&mut self, out: &mut [Frame]) {
         let frames = out.len().min(self.voice.length - self.cursor);
         for (k, o) in out[..frames].iter_mut().enumerate() {
@@ -674,10 +684,28 @@ impl Renderer {
     /// program's tracks, outside the timeline: `pitch` as a MIDI number,
     /// `velocity` 0 to 1, let go after `frames` frames. It runs through the
     /// track's chain and fader as its notes do, whether or not the transport
-    /// rolls. Nothing happens for a track without a Synth. Does not allocate.
-    pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize) {
+    /// rolls. With `replace` the track's earlier previews are let go first,
+    /// so this one sounds alone. Nothing happens for a track without a
+    /// Synth. Does not allocate.
+    pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize, replace: bool) {
+        if replace {
+            self.let_go_previews(track);
+        }
         if let Some(s) = self.tracks.get_mut(track).and_then(|t| t.synth.as_mut()) {
             s.preview(pitch, velocity, frames);
+        }
+    }
+
+    /// Lets go the notes previewed through the track at `track`, Synth or
+    /// Sampler, as if their keys were lifted: each rings out through its
+    /// release. Does not allocate.
+    pub fn let_go_previews(&mut self, track: usize) {
+        if let Some(s) = self.tracks.get_mut(track).and_then(|t| t.synth.as_mut()) {
+            s.let_go_previews();
+        }
+        let fade = self.fade;
+        for p in self.previews.iter_mut().flatten().filter(|p| p.track == track) {
+            p.let_go(fade);
         }
     }
 
@@ -685,8 +713,12 @@ impl Renderer {
     /// `program::preview_voice`, now and outside the timeline, as `preview`
     /// does through a Synth. Returns the voice whose slot it takes, a
     /// finished one or else the oldest, for the caller to free off the audio
-    /// thread. Does not allocate.
-    pub fn preview_voice(&mut self, track: usize, voice: Voice) -> Option<Voice> {
+    /// thread. With `replace` the track's earlier previews are let go first,
+    /// so this one sounds alone. Does not allocate.
+    pub fn preview_voice(&mut self, track: usize, voice: Voice, replace: bool) -> Option<Voice> {
+        if replace {
+            self.let_go_previews(track);
+        }
         self.previewed += 1;
         let slot = match self.previews.iter().position(|s| s.as_ref().is_none_or(|s| !s.sounding())) {
             Some(free) => free,
