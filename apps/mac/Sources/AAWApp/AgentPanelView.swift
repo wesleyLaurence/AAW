@@ -842,9 +842,9 @@ private struct ApprovalCard: View {
 // MARK: The field
 
 /// The field the person types in, in a rounded well with what is attached
-/// as chips above it and the controls at its right: `+` for a file or the
-/// selected clips, the microphone, and Send. Return sends; Shift-Return
-/// starts a new line.
+/// as chips above it, `+` for a file or the selected clips at its left,
+/// centered on the field's height, and the microphone and Send at its
+/// right. Return sends; Shift-Return starts a new line.
 private struct Composer: View {
     let agent: AgentPanel
     let model: SongModel
@@ -861,10 +861,7 @@ private struct Composer: View {
                         .padding(.bottom, 2)
                 }
                 HStack(alignment: .bottom, spacing: 2) {
-                    ComposerField(agent: agent, model: model, height: $height)
-                        .frame(height: height)
-                        .accessibilityLabel("Message to the agent")
-                        .help("What to ask or change. Return sends; Shift-Return starts a new line.")
+                    // The `+` at the left, centered on the field's height (D132).
                     Menu {
                         Button("Attach File…") { Self.chooseFiles(for: agent) }
                         Button("Attach Selected Clips") { agent.attachSelectedClips() }
@@ -875,8 +872,13 @@ private struct Composer: View {
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
+                    .frame(height: height)
                     .help("Attach a file, or the selected clips, to the message; a file dropped or pasted here attaches too")
                     .accessibilityLabel("Attach")
+                    ComposerField(agent: agent, model: model, height: $height)
+                        .frame(height: height)
+                        .accessibilityLabel("Message to the agent")
+                        .help("What to ask or change. Return sends; Shift-Return starts a new line.")
                     MicrophoneButton(agent: agent)
                     Button {
                         agent.send()
@@ -891,8 +893,7 @@ private struct Composer: View {
                     .accessibilityLabel("Send")
                     .padding(.trailing, 2)
                 }
-                .padding(.leading, 6)
-                .padding(.trailing, 4)
+                .padding(.horizontal, 4)
                 .padding(.vertical, 3)
             }
             .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 10))
