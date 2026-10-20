@@ -348,6 +348,9 @@ struct GroupState {
     bus: Vec<Frame>,
     strip: Strip,
     sends: Vec<[Glide; 2]>,
+    /// A group in a group runs ahead by its group's lead; its sends are
+    /// delayed by it, back to the timeline.
+    send_delay: [DelayLine; 2],
 }
 
 struct ReturnState {
@@ -627,6 +630,10 @@ impl Renderer {
                 bus: vec![SILENCE; max_block],
                 strip: Strip::new(fade),
                 sends: g.sends.iter().map(|_| [Glide::new(fade), Glide::new(fade)]).collect(),
+                send_delay: {
+                    let lead = g.lead - g.chain.latency;
+                    [DelayLine::new(lead), DelayLine::new(lead)]
+                },
             })
             .collect::<Vec<_>>();
         let returns = program
@@ -904,30 +911,55 @@ impl Renderer {
             }
         }
 
-        // Groups: each one's chain on the sum of its tracks, whose output
-        // lands on the timeline, then its strip, sends and the sum.
+        // Groups, each after the groups in it: its chain on the sum of its
+        // members, whose output lands at its own group's input or on the
+        // timeline, then its strip, sends and the sum.
         for (gi, g) in program.groups.iter().enumerate() {
-            let state = &mut self.groups[gi];
+            let (before, after) = self.groups.split_at_mut(gi + 1);
+            let state = &mut before[gi];
+            // Where the group's output lands: its group's lead ahead of the
+            // timeline, or on it.
+            let out = aligned + (g.lead - g.chain.latency) as i64;
             let x = &mut state.bus[..n];
             if !state.chain.slots.is_empty() {
                 state.chain.process(x, clock(aligned + g.lead as i64), &self.tracks, &mut self.key);
                 if rolling {
-                    gate(x, aligned, step, total);
+                    gate(x, out, step, total);
                 }
             }
             let [left, right, level, ..] = &mut self.values;
-            levels(&g.gain, &g.pan, aligned, step, &mut left[..n], &mut right[..n], &mut level[..n]);
+            levels(&g.gain, &g.pan, out, step, &mut left[..n], &mut right[..n], &mut level[..n]);
             let post = &mut self.post[..n];
             fade_strip(&mut state.strip, &*x, post, &mut self.values);
+            // A group in a group sends from the timeline, as a grouped
+            // track does.
+            let (tap_pre, tap_post): (&[Frame], &[Frame]) = if out > aligned {
+                let (pre, after) = (&mut self.tap_pre[..n], &mut self.tap_post[..n]);
+                pre.copy_from_slice(x);
+                after.copy_from_slice(post);
+                state.send_delay[0].process(pre);
+                state.send_delay[1].process(after);
+                (pre, after)
+            } else {
+                (x, post)
+            };
             let [level, offsets, ..] = &mut self.values;
-            sends(&g.sends, &mut state.sends, g.silent, x, post, &mut self.returns, aligned, step, level, offsets);
+            sends(&g.sends, &mut state.sends, g.silent, tap_pre, tap_post, &mut self.returns, aligned, step, level, offsets);
             mute(&mut state.strip.heard, g.silent, post, &mut offsets[..n]);
-            if g.in_mix {
+            if let Some(parent) = g.group {
+                let bus = &mut after[parent - gi - 1].bus[..n];
+                for (b, p) in bus.iter_mut().zip(post.iter()) {
+                    b[0] += p[0];
+                    b[1] += p[1];
+                }
+            } else if g.in_mix {
                 for (d, p) in self.dry[..n].iter_mut().zip(post.iter()) {
                     d[0] += p[0];
                     d[1] += p[1];
                 }
-                stem(stems, post, aligned);
+            }
+            if g.in_mix {
+                stem(stems, post, out);
                 stems += 1;
             }
         }

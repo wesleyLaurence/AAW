@@ -451,6 +451,46 @@ def test_a_group_sums_its_tracks_through_its_own_chain_and_has_a_stem(mix, tmp_p
         render(path, track_id="absent")
 
 
+def test_a_group_of_groups_sums_them_and_is_made_from_the_command_line(mix, tmp_path):
+    path, data = mix
+    data["tracks"].insert(1, {"id": "pad", "pads": {"k": {"sample": "kick"}}})
+    save(data, path)
+    base = render(path, tmp_path / "base")
+    daw("group", "add", path, "drums", "--tracks", "snare,kick")
+    daw("group", "add", path, "synths", "--tracks", "pad")
+    # A group of the two groups: the pad's track moves after the drums'.
+    daw("group", "add", path, "music", "--groups", "drums,synths", "--gain-db", "-6")
+    song = load(path)
+    assert [t["id"] for t in song["tracks"]] == ["snare", "kick", "pad"]
+    assert [g.get("group") for g in song["groups"]] == ["music", "music", None]
+    summary = daw("inspect", path)
+    music = next(g for g in summary["groups"] if g["id"] == "music")
+    assert (music["groups"], music["tracks"], music["group"]) == (["drums", "synths"], [], None)
+    assert next(g for g in summary["groups"] if g["id"] == "drums")["group"] == "music"
+    # A cycle is refused with the names.
+    with pytest.raises(Exception, match="cannot be in group"):
+        daw("set", path, "groups.music.group", "drums")
+    report = render(path, tmp_path / "nested")
+    out = tmp_path / "nested"
+    entry = report["tracks"]["music"]
+    assert (entry["kind"], entry["tracks"], entry["groups"]) == ("group", ["snare", "kick", "pad"], ["drums", "synths"])
+    assert report["tracks"]["drums"]["group"] == "music"
+    assert report["stems_sum_to_mix"] is False
+    # The outer group's stem is the inner groups' summed at its level, and
+    # with the returns it is the mix.
+    gain = 10 ** (-6 / 20)
+    expected = (stem(out, "drums") + stem(out, "synths")) * gain
+    assert np.max(abs(stem(out, "music") - expected)) < 1e-6
+    total = stem(out, "music") + stem(out, "plate") + stem(out, "echo")
+    mixed = sf.read(out / "mix.wav", always_2d=True)[0]
+    assert np.max(abs(mixed - total)) < 2e-7
+    assert np.array_equal(stem(out, "snare"), stem(tmp_path / "base", "snare"))
+    # Removing the outer group leaves the inner ones on the master.
+    daw("group", "remove", path, "music")
+    assert [g.get("group") for g in load(path)["groups"]] == [None, None]
+    assert "groups nest" in daw("describe", "project")["semantics"]["groups"]
+
+
 def test_a_group_is_made_and_described_from_the_command_line(mix, tmp_path):
     path, data = mix
     data["tracks"].insert(1, {"id": "pad", "pads": {"k": {"sample": "kick"}}})

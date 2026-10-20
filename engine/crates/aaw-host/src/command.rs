@@ -86,8 +86,9 @@ pub enum Command {
         id: String,
         index: usize,
     },
-    /// A group of the tracks named, which are moved together to where the
-    /// first of them is; a track in another group leaves it.
+    /// A group of the tracks and groups named, whose tracks are moved
+    /// together to where the first of them is; a track or group in another
+    /// group leaves it. `group` among the fields puts the new group in one.
     #[serde(rename = "group.add")]
     GroupAdd {
         id: String,
@@ -95,13 +96,16 @@ pub enum Command {
         index: Option<usize>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tracks: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        groups: Vec<String>,
         #[serde(flatten)]
         fields: Fields,
     },
-    /// Removes a group; its tracks go to the master again.
+    /// Removes a group; its tracks and groups go to its own group, or to
+    /// the master.
     #[serde(rename = "group.remove")]
     GroupRemove { group: String },
-    /// Renames a group and the tracks' `group` naming it.
+    /// Renames a group and the tracks' and groups' `group` naming it.
     #[serde(rename = "group.rename")]
     GroupRename { group: String, to: String },
     #[serde(rename = "group.move")]
@@ -1171,11 +1175,41 @@ impl<'a> Edit<'a> {
         out
     }
 
-    /// The tracks in a group.
+    /// The tracks in a group: the ones that name it.
     fn tracks_in(&self, group: &str) -> Vec<Loc> {
+        self.naming("tracks", group)
+    }
+
+    /// The groups in a group: the ones that name it.
+    fn groups_in(&self, group: &str) -> Vec<Loc> {
+        self.naming("groups", group)
+    }
+
+    /// The items of a list whose `group` is the one named.
+    fn naming(&self, list: &str, group: &str) -> Vec<Loc> {
+        (0..self.root.get(list).map_or(0, |n| n.items().len()))
+            .map(|i| vec![Step::Key(list.into()), Step::Index(i)])
+            .filter(|loc| self.node(loc).field("group") == Some(group))
+            .collect()
+    }
+
+    /// Every track under a group: its own and those of the groups in it,
+    /// in their order.
+    fn tracks_under(&self, group: &str) -> Vec<Loc> {
+        let mut groups: Vec<String> = vec![group.to_string()];
+        let mut i = 0;
+        while i < groups.len() {
+            for loc in self.groups_in(&groups[i].clone()) {
+                let id = self.node(&loc).field("id").unwrap_or_default().to_string();
+                if !groups.contains(&id) {
+                    groups.push(id);
+                }
+            }
+            i += 1;
+        }
         (0..self.root.get("tracks").map_or(0, |n| n.items().len()))
             .map(|i| vec![Step::Key("tracks".into()), Step::Index(i)])
-            .filter(|loc| self.node(loc).field("group") == Some(group))
+            .filter(|loc| self.node(loc).field("group").is_some_and(|g| groups.iter().any(|x| x == g)))
             .collect()
     }
 
@@ -1217,11 +1251,20 @@ impl<'a> Edit<'a> {
                         }
                     }
                     "groups" => {
-                        // Its tracks go to the master again.
+                        // Its tracks and groups go to its own group, or to
+                        // the master again.
                         if let Some(id) = item.node.field("id").map(str::to_string) {
-                            for track in self.tracks_in(&id) {
-                                if let Some(m) = self.node_mut(&track).map_mut() {
-                                    m.shift_remove("group");
+                            let parent = item.node.field("group").map(str::to_string);
+                            for member in self.tracks_in(&id).into_iter().chain(self.groups_in(&id)) {
+                                if let Some(m) = self.node_mut(&member).map_mut() {
+                                    match &parent {
+                                        Some(parent) => {
+                                            m.insert("group".into(), Node::Leaf(Value::str(parent)));
+                                        }
+                                        None => {
+                                            m.shift_remove("group");
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1381,31 +1424,56 @@ impl<'a> Edit<'a> {
                 let loc = self.at(&format!("returns.{id}"))?;
                 out.label = format!("Remove {}", self.remove_at(&loc)?);
             }
-            GroupAdd { id, index, tracks: members, fields } => {
+            GroupAdd { id, index, tracks: members, groups: inner, fields } => {
                 let mut f = Fields::new();
                 f.insert("id".into(), Json::String(id.clone()));
                 f.extend(fields.clone());
                 let node = with_empty(&f, &["effects", "sends", "automation"], &[])?;
                 out.made.push(self.insert(&[], "groups", *index, node)?);
-                // The tracks named join it, moved together to where the first
-                // of them is, in their order.
+                // The groups named join it.
+                let mut names = Vec::new();
+                let mut inner_ids: Vec<String> = Vec::new();
+                for g in inner {
+                    let loc = self.at(&format!("groups.{g}"))?;
+                    let name = self.name(&loc);
+                    if name == *id {
+                        return Err(format!("{id}: a group cannot be in itself"));
+                    }
+                    if !inner_ids.contains(&name) {
+                        inner_ids.push(name.clone());
+                        names.push(name);
+                        self.set_leaf(&loc, "group", Value::str(id));
+                    }
+                }
+                // The tracks named join it, and are moved with every track
+                // under the groups named together to where the first of
+                // them is, in their order.
                 let mut places: Vec<usize> = Vec::new();
+                let mut joining: Vec<usize> = Vec::new();
                 for t in members {
                     let loc = self.track(t)?;
                     let Some(Step::Index(i)) = loc.last() else { unreachable!() };
                     places.push(*i);
+                    joining.push(*i);
+                }
+                for g in &inner_ids {
+                    for loc in self.tracks_under(g) {
+                        let Some(Step::Index(i)) = loc.last() else { unreachable!() };
+                        places.push(*i);
+                    }
                 }
                 places.sort_unstable();
                 places.dedup();
-                let mut names = Vec::new();
                 if let Some(&first) = places.first() {
                     let list = self.list(&[], "tracks")?;
-                    let mut taken: Vec<Item> = places.iter().rev().map(|&i| list.remove(i)).collect();
+                    let mut taken: Vec<(usize, Item)> = places.iter().rev().map(|&i| (i, list.remove(i))).collect();
                     taken.reverse();
-                    for (k, mut item) in taken.into_iter().enumerate() {
-                        names.push(item.node.field("id").unwrap_or_default().to_string());
-                        if let Some(m) = item.node.map_mut() {
-                            m.insert("group".into(), Node::Leaf(Value::str(id)));
+                    for (k, (was, mut item)) in taken.into_iter().enumerate() {
+                        if joining.contains(&was) {
+                            names.push(item.node.field("id").unwrap_or_default().to_string());
+                            if let Some(m) = item.node.map_mut() {
+                                m.insert("group".into(), Node::Leaf(Value::str(id)));
+                            }
                         }
                         list.insert(first + k, item);
                     }
@@ -1424,8 +1492,8 @@ impl<'a> Edit<'a> {
                 let loc = self.at(&format!("groups.{group}"))?;
                 let old = self.name(&loc);
                 self.set_leaf(&loc, "id", Value::str(to));
-                for track in self.tracks_in(&old) {
-                    self.set_leaf(&track, "group", Value::str(to));
+                for member in self.tracks_in(&old).into_iter().chain(self.groups_in(&old)) {
+                    self.set_leaf(&member, "group", Value::str(to));
                 }
                 out.label = format!("Rename group {old} to {to}");
             }

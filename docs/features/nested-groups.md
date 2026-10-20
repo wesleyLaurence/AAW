@@ -1,20 +1,20 @@
-# Groups within groups — proposed October 19, 2026
+# Groups within groups (implemented 2026-10-20)
 
-Status: proposed, not built. Backlog: Next, Groups within groups. Asked for by
-the person on October 19, 2026: "group tracks, then also have groups within
-groups, with ability to solo and mute groups, and also apply an FX chain to a
-group, control volume", and "selecting a set of groups and saving them into an
-even higher level group, so nested groups". Mute, solo, a chain, sends and a
-fader on a group are built ([groups that fold](groups.md), D92); nesting was
-left out of that design on purpose and is what this adds.
+Status: built in the pull request that closed the person's note of October 19,
+2026, "group tracks, then also have groups within groups, with ability to solo
+and mute groups, and also apply an FX chain to a group, control volume", and
+"selecting a set of groups and saving them into an even higher level group, so
+nested groups" (D123), decision D129. Mute, solo, a chain, sends and a fader on
+a group were built on October 7 ([groups that fold](groups.md), D92), which
+left nesting out on purpose; this adds it.
 
 ## What
 
 A group can be in a group. Drums (kick, snare, hats) and Percussion (shaker,
-congas) are two groups; both selected and ⌘G pressed makes Rhythm, a group of
-the two, named in the same sheet, with its own chain, fader, pan, mute, solo and
-sends. Drums and Percussion are summed into Rhythm, Rhythm into the master.
-Any depth is allowed; two or three is what a song uses.
+congas) are two groups; both selected and ⌘G pressed makes a group of the two,
+named in the same sheet, with its own chain, fader, pan, mute, solo and sends.
+Drums and Percussion are summed into it, and it into the master. Any depth is
+allowed; two or three is what a song uses.
 
 ```yaml
 groups:
@@ -31,6 +31,24 @@ groups:
 `groups[].group` names the group a group is summed into, as `tracks[].group`
 does for a track, or is left out for the master.
 
+| Command | What it does |
+|---|---|
+| `daw group add SONG rhythm --groups drums,percussion [--tracks a,b] [--group P]` | A group of the groups and tracks named, in group P if given; their tracks move together to where the first of them is |
+| `daw set SONG groups.G.group P`, `daw remove SONG groups.G.group` | Puts a group in another; takes it out, to the master |
+| `daw group remove SONG P` | Removes P; the tracks and groups in it go to P's own group, or to the master |
+| `daw group rename SONG P NEW` | The groups in P follow, as its tracks do |
+| `daw inspect SONG` | Each group's `groups` beside its `tracks`, and its `group` |
+
+In the app a group's row is set in under the group it is in, as a track's is
+under its group, once more for each level, and the band in the group's shade
+spans the indent. The mark before its name folds everything under it away,
+tracks and groups. Shift-click on a track's or a group's header adds it to the
+selected rows; ⌘G, or Group Tracks in a header's menu, groups the selected
+rows, tracks and groups, when they are all in the same group or all in none,
+and puts the new group there. Ungroup on a group leaves what was in it on the
+group's own group, or on the master. Remove from Group in a group's menu takes
+it out of its group. The group's lane draws the clips of every track under it.
+
 ## Why
 
 A song of twenty tracks is mixed as four or five things, and some of those are
@@ -43,52 +61,53 @@ the person knows has it.
 
 - **The same kind of channel.** A group stays `groups[]`, with one more
   optional field, `group`. No new kind, no tree in the document: the engine's
-  group stage runs the groups in dependency order, innermost first, which a
-  topological sort over `group` gives; a cycle is refused by the model with the
-  two names.
-- **Order in the window.** A group's members, tracks and groups, sit next to
-  each other in their lists, as a group's tracks do now, and the inner group's
-  row sits above its tracks under its parent's row, set in a step further. The
-  model's contiguity rule extends to groups: a group's child groups are
-  contiguous in `groups[]` and their tracks contiguous in `tracks[]`, and
-  `daw group add` moves them together as it moves tracks.
-- **Latency.** A grouped track already runs ahead by its group's latency; a
-  grouped group runs ahead by its parent's, so the sum of the chain latencies
-  down the path is what the member is advanced by. The master waits for the
-  slowest path, as it waits for the slowest group now.
+  group stage runs the groups with every group after the groups in it, which
+  `Project::group_order` gives, so a group's sum is made before its own
+  group's. A group that names itself, an unknown group or a group under it is
+  refused with the names: "kit: cannot be in group music, which is in kit".
+- **Order in the window.** The tracks under a group, its own and those of the
+  groups in it, are next to each other in `tracks[]`; the rule that held a
+  group's tracks together now holds the whole subtree, and the window draws
+  each group's row above the first track under it, set in by its depth.
+  `groups[]` itself is in any order: the tree is read from `group`, not from
+  the list. `daw group add --groups` moves every track under the groups named
+  together with the tracks named, to where the first of them is, as it moved
+  tracks (open question 3 of the proposal, answered by moving).
+- **Latency.** A group's lead is its chain's latency over its own group's
+  lead: the sum of the chain latencies down the path to the master. Its
+  members run ahead by it, its own output lands at its group's input, its
+  sends are delayed back to the timeline as a grouped track's are, and the
+  master waits for the slowest path. A song whose groups have no latency is
+  the same samples as the flat mix, to rounding.
 - **Mute and solo.** A muted group silences everything under it and their
-  sends. A soloed group is heard with everything under it; a soloed member is
-  heard through its parents, alone. Same words as D92's, applied down the tree.
-- **Stems.** A render writes a stem for each group as now, a parent's being
-  the sum of its children through its chain; `report.stems_sum_to_mix` stays
-  false when anything is grouped, and the report's group entry lists its
-  `groups` beside its `tracks`.
-- **Commands.** `daw group add SONG rhythm --groups drums,percussion` and
-  `--tracks` together; `daw set SONG groups.G.group P` and `daw remove SONG
-  groups.G.group`; `daw group remove` on a parent leaves its children where it
-  was, on its own parent or the master. `daw inspect` and `daw map` show the
-  tree as indented lines.
-- **The app.** ⌘G on a selection of groups, or of groups and tracks mixed,
-  makes a group of them; Ungroup on a parent leaves the children; Remove from
-  Group on a child. The fold folds the whole subtree. A drag of a group's row
-  out of its parent's run is refused as a track's is.
+  sends; a mute over a solo wins. A soloed group is heard with everything
+  under it; a soloed track or group is heard through its groups, alone.
+- **Stems.** A render writes a stem for each group, a nested group's being its
+  sound before its group, at its group's input; so the stems of the ungrouped
+  tracks, the outermost groups and the returns sum to the mix, and
+  `report.stems_sum_to_mix` is false when anything is grouped. A group's
+  report entry lists `tracks`, every track under it, since that is whose
+  sound the stem holds and what `daw listen` reads it for, `groups`, the
+  groups in it, and its `group`. `render --track G` renders the group with
+  everything under it.
+- **The app's selection.** The window had one selected row; Shift-click on a
+  track's or a group's header adds it to a set beside it, cleared by the next
+  click, and Group Tracks reads both, or the tracks of the selected clips as
+  before. The rows must share a group, or all be on the master, since the new
+  group is made where they are; the item is otherwise disabled.
+- **The fold** is the window's, as before, and hides the whole subtree.
 
-## Done when
+## Limits
 
-- The YAML above validates, renders, and the rhythm stem equals the drums and
-  percussion stems summed through rhythm's chain, in a Rust test.
-- A cycle, a child outside its parent's run and a group that names itself are
-  refused with the names.
-- ⌘G over two selected groups makes the parent in a scripted run, and the
-  picture shows the parent's row above them, each set in.
-- Mute, solo and latency tests of D92 pass down two levels.
-- [groups.md](groups.md) rewritten as the reference, "No nesting" gone.
+- `daw map` still draws the tracks without their groups.
+- A group does not send to a group, as D92 decided.
+- A group's row is not dragged into or out of another group: the menu's
+  Remove from Group and ⌘G move it.
+- Rows selected with Shift are read by Group Tracks alone: Delete, Mute and
+  the rest act on the selected row.
 
 ## Open questions
 
-1. How deep the window should draw: a third level set in again, or the same
-   indent as the second.
-2. Whether a group should be able to send to another group, which D92 refused
-   and this does not change.
-3. Whether `daw group add` of groups that are not contiguous should move them,
-   as it moves tracks, or refuse, since moving a group moves its tracks too.
+- Whether `daw map` should show the tree.
+- Whether a third level should be set in again, as it is, or stop at the
+  second's indent for a narrow header.

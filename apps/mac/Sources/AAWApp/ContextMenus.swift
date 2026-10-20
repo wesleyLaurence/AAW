@@ -45,7 +45,8 @@ public enum ContextMenu {
     /// A header's menu: Rename, what a row is set to, a row added after it,
     /// and Delete. The master has no name of its own, no mute mark and cannot
     /// go; a return has no solo. A track offers Group Tracks, or Remove from
-    /// Group when it is in one (`grouped`); a group offers Ungroup.
+    /// Group when it is in one (`grouped`); a group offers Ungroup, and
+    /// Remove from Group when it is in a group.
     public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
@@ -72,6 +73,9 @@ public enum ContextMenu {
             items.append(Item(title: "Add Track", action: .addTrack, key: "t"))
             items.append(Item(title: "Add MIDI Track", action: .addMIDITrack, key: "T"))
             items.append(.separator)
+            if grouped {
+                items.append(Item(title: "Remove from Group", action: .leaveGroup))
+            }
             items.append(Item(title: "Ungroup", action: .ungroup, key: "G"))
         case .bus, .master:
             items.append(Item(title: "Add Track", action: .addTrack, key: "t"))

@@ -47,6 +47,12 @@ final class ContextMenuTests: XCTestCase {
             "Rename", "Mute", "Unsolo", "Show Automation", "Add Track", "Add MIDI Track", "Ungroup", "Delete",
         ])
         XCTAssertEqual(group.first { $0.action == .ungroup }?.key, "G")
+        // A group in a group also leaves it.
+        let nested = ContextMenu.row(kind: .group, muted: false, soloed: false, automationShown: false, grouped: true)
+        XCTAssertEqual(actions(nested), [
+            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .leaveGroup, .ungroup, nil, .delete,
+        ])
+        XCTAssertEqual(nested.first { $0.action == .leaveGroup }?.title, "Remove from Group")
     }
 
     func testAReturnHasNoSoloAndAddsAReturn() {

@@ -192,24 +192,33 @@ pub struct TrackProgram {
     pub group: Option<usize>,
 }
 
-/// A group: the sum of its tracks through its chain, gain and pan, to the
-/// master sum and its sends. Its tracks arrive at its input early by its
-/// chain's latency, so that its output lands on the faders' timeline.
+/// A group: the sum of its tracks and of the groups in it through its
+/// chain, gain and pan, to its own group or the master sum and to its
+/// sends. Its members arrive at its input early by its chain's latency and
+/// its own lead, so that its output lands where its group takes it, or on
+/// the faders' timeline.
 #[derive(Debug)]
 pub struct GroupProgram {
     pub id: String,
     pub chain: ChainProgram,
     pub gain: Param,
     pub pan: Param,
-    /// Muted, or solo-muted; its tracks are silent with it.
+    /// Muted, or solo-muted; everything under it is silent with it.
     pub silent: bool,
     /// A send for each of the program's returns.
     pub sends: Vec<SendProgram>,
     /// Frames the group's input leads the faders' timeline by: its chain's
-    /// latency. Its tracks' faders and sends run that much ahead, and their
-    /// sends are delayed by it.
+    /// latency and its own group's lead. Its members' faders run that much
+    /// ahead, and their sends are delayed by it. Its own output lands
+    /// `lead - chain.latency` ahead, at its group's input.
     pub lead: usize,
+    /// The group among the program's groups this one's output goes into,
+    /// instead of the master sum; it comes later among them.
+    pub group: Option<usize>,
+    /// The tracks that name it, in render order.
     pub members: Vec<String>,
+    /// The groups that name it, in their order.
+    pub groups: Vec<String>,
     /// Whether the group is heard and has a stem; a return preview's groups,
     /// which only feed the return, are not.
     pub in_mix: bool,
@@ -279,6 +288,8 @@ pub struct Program {
     pub total: usize,
     /// Tracks in render order: sidechain sources first.
     pub tracks: Vec<TrackProgram>,
+    /// Groups with every group after the groups in it, so that a group's
+    /// sum is made before its own group's.
     pub groups: Vec<GroupProgram>,
     pub returns: Vec<ReturnProgram>,
     pub master: MasterProgram,
@@ -318,8 +329,8 @@ impl Program {
         self.fader(f) * amplitude(self.master.gain.at(f as i64))
     }
 
-    /// Where each stem is: tracks in render order, then groups, then
-    /// returns. The name, and what it is of.
+    /// Where each stem is: tracks in render order, then groups in theirs,
+    /// then returns. The name, and what it is of.
     pub fn stems(&self) -> Vec<(&str, StemKind)> {
         let tracks = self.tracks.iter().filter(|t| t.in_mix).map(|t| (t.id.as_str(), StemKind::Track));
         let groups = self.groups.iter().filter(|g| g.in_mix).map(|g| (g.id.as_str(), StemKind::Group));
@@ -1046,8 +1057,10 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     let rate = p.session.sample_rate;
     let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
     // A preview needs the target's sidechain sources; a group's also needs
-    // its tracks and theirs, and a return's its senders, the tracks of the
-    // groups that send to it, and theirs. Only the target is heard.
+    // everything under it and their keys, and a return's its senders, what
+    // is under the groups that send to it, and their keys. Only the target
+    // is heard. The groups are kept with every group after the groups in
+    // it, so that a group's sum is made before its own group's.
     let is_return = |id: &str| p.returns.iter().any(|r| r.id == id);
     type Channels<'a> = (Vec<String>, Vec<&'a str>, Vec<&'a aaw_model::Group>, Vec<&'a aaw_model::Return>);
     let with_sources = |mut needed: Vec<String>| {
@@ -1056,28 +1069,41 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         }
         needed
     };
+    // A group's keys: its chain's and those of every group under it.
+    let group_sources = |id: &str| -> Vec<String> {
+        let mut out = p.sidechain_sources(id);
+        for g in p.descendant_groups(id) {
+            out.extend(p.sidechain_sources(&g.id));
+        }
+        out
+    };
+    let ordered = |wanted: &dyn Fn(&aaw_model::Group) -> bool| -> Vec<&aaw_model::Group> { p.group_order().into_iter().filter(|g| wanted(g)).collect() };
     let (needed, heard, groups, returns): Channels = match scope {
         Scope::Song => (
             p.tracks.iter().map(|t| t.id.clone()).collect(),
             p.tracks.iter().map(|t| t.id.as_str()).collect(),
-            p.groups.iter().collect(),
+            p.group_order(),
             p.returns.iter().collect(),
         ),
         Scope::Channel(id) if is_return(id) => {
-            let groups: Vec<&aaw_model::Group> = p.groups.iter().filter(|g| g.sends.iter().any(|s| s.to == id)).collect();
+            let sending: Vec<&aaw_model::Group> = p.groups.iter().filter(|g| g.sends.iter().any(|s| s.to == id)).collect();
+            let mut under: Vec<&str> = Vec::new();
             let mut needed: Vec<String> = p.senders(id).into_iter().map(str::to_string).collect();
-            for g in &groups {
-                needed.extend(p.members(&g.id).iter().map(|t| t.id.clone()));
-                needed.extend(p.sidechain_sources(&g.id));
+            for g in &sending {
+                under.push(&g.id);
+                under.extend(p.descendant_groups(&g.id).iter().map(|d| d.id.as_str()));
+                needed.extend(p.tracks_under(&g.id).iter().map(|t| t.id.clone()));
+                needed.extend(group_sources(&g.id));
             }
             let mut needed = with_sources(needed);
             needed.extend(p.sidechain_sources(id));
-            (needed, Vec::new(), groups, p.returns.iter().filter(|r| r.id == id).collect())
+            (needed, Vec::new(), ordered(&|g| under.contains(&g.id.as_str())), p.returns.iter().filter(|r| r.id == id).collect())
         }
         Scope::Channel(id) if p.group(id).is_some() => {
-            let mut needed = with_sources(p.members(id).iter().map(|t| t.id.clone()).collect());
-            needed.extend(p.sidechain_sources(id));
-            (needed, Vec::new(), p.groups.iter().filter(|g| g.id == id).collect(), Vec::new())
+            let mut needed = with_sources(p.tracks_under(id).iter().map(|t| t.id.clone()).collect());
+            needed.extend(group_sources(id));
+            let under: Vec<&str> = std::iter::once(id).chain(p.descendant_groups(id).iter().map(|d| d.id.as_str())).collect();
+            (needed, Vec::new(), ordered(&|g| under.contains(&g.id.as_str())), Vec::new())
         }
         Scope::Channel(id) if p.track(id).is_some() => {
             let mut needed = p.sidechain_sources(id);
@@ -1088,13 +1114,18 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     };
     cache.begin();
     let any_solo = p.tracks.iter().any(|t| t.solo) || p.groups.iter().any(|g| g.solo);
-    // A group is silent when muted, or when something is soloed and neither
-    // it nor a track of its is; a track is silent when it or its group is
-    // muted, or when something is soloed and neither it nor its group is.
-    let group_silent = |g: &aaw_model::Group| g.mute || (any_solo && !g.solo && !p.members(&g.id).iter().any(|t| t.solo));
+    // A group is silent when it or a group over it is muted, or when
+    // something is soloed and nothing over it, under it or itself is; a
+    // track is silent when it or a group over it is muted, or when
+    // something is soloed and neither it nor a group over it is.
+    let group_silent = |g: &aaw_model::Group| {
+        let over = p.ancestors(&g.id);
+        let under_solo = p.tracks_under(&g.id).iter().any(|t| t.solo) || p.descendant_groups(&g.id).iter().any(|d| d.solo);
+        g.mute || over.iter().any(|a| a.mute) || (any_solo && !g.solo && !over.iter().any(|a| a.solo) && !under_solo)
+    };
     let track_silent = |t: &aaw_model::Track| {
-        let g = t.group.as_deref().and_then(|g| p.group(g));
-        t.mute || g.is_some_and(|g| g.mute) || (any_solo && !t.solo && !g.is_some_and(|g| g.solo))
+        let over = p.track_ancestors(t);
+        t.mute || over.iter().any(|g| g.mute) || (any_solo && !t.solo && !over.iter().any(|g| g.solo))
     };
     let group_index = |t: &aaw_model::Track| t.group.as_deref().and_then(|g| groups.iter().position(|x| x.id == g));
     let index: HashMap<&str, usize> = p.tracks.iter().enumerate().map(|(i, t)| (t.id.as_str(), i)).collect();
@@ -1211,10 +1242,24 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             pan: lanes.channel("pan", g.pan),
             silent: group_silent(g),
             sends,
+            group: g.group.as_deref().and_then(|parent| groups.iter().position(|x| x.id == parent)),
             members: tracks.iter().filter(|t| t.group.is_some_and(|i| groups[i].id == g.id)).map(|t| t.id.clone()).collect(),
-            in_mix: !matches!(scope, Scope::Channel(id) if is_return(id)),
+            groups: groups.iter().filter(|c| c.group.as_deref() == Some(&g.id)).map(|c| c.id.clone()).collect(),
+            in_mix: match scope {
+                Scope::Song => true,
+                Scope::Channel(id) => g.id == id,
+            },
             automation: lanes.params,
         });
+    }
+    // A group's lead is its chain's latency over its own group's lead; the
+    // groups come after the groups in them, so the outermost are summed
+    // last and their leads are known first.
+    for i in (0..summed.len()).rev() {
+        if let Some(parent) = summed[i].group {
+            debug_assert!(parent > i, "a group comes before its own group");
+            summed[i].lead += summed[parent].lead;
+        }
     }
     // The faders' timeline: every track's inserts have come through, a
     // grouped track's early by its group's latency, so that the group's
@@ -1293,7 +1338,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         devices(&t.chain, &mut h);
     }
     for g in &summed {
-        (&g.id, g.lead, g.in_mix).hash(&mut h);
+        (&g.id, g.lead, g.in_mix, g.group).hash(&mut h);
         devices(&g.chain, &mut h);
     }
     for r in &buses {

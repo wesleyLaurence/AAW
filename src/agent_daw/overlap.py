@@ -89,13 +89,14 @@ class Grid:
         session = project["session"]
         self.tempo = float(session["tempo"])
         self.project, self.manifest = project, manifest
-        # The stems that sum to the mix: all but a grouped track, whose sound
-        # is in its group's. A preview of a grouped track alone has only those.
+        # The stems that sum to the mix: all but a grouped track or group,
+        # whose sound is in its group's. A preview of a grouped track alone
+        # has only those.
         entries = manifest["tracks"]
         self.summing = {
             name
             for name, entry in entries.items()
-            if entry.get("kind", "track") != "track" or not entry.get("group")
+            if entry.get("kind", "track") == "return" or not entry.get("group")
         } or set(entries)
         self.cell_beats = 0.25
         while self.cell_beats * 60 / self.tempo < MIN_CELL_SECONDS:
