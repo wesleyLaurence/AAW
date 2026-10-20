@@ -162,6 +162,26 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(l.snapped(9.7, free: false), 9.75)
     }
 
+    func testASegmentsCurveIsWhereItIsTakenHoldOf() {
+        // A straight segment is its far point; a bent one passes the places
+        // the engine's curve does, from the first point's height to the
+        // next's, a quarter of the way at halfway for a shape of 0.5.
+        let a = CGPoint(x: 100, y: 140), b = CGPoint(x: 196, y: 108)
+        XCTAssertEqual(TimelineLayout.curve(from: a, to: b, shape: 0), [b])
+        let bent = TimelineLayout.curve(from: a, to: b, shape: 0.5)
+        XCTAssertEqual(bent.count, 32, "a place every three points")
+        XCTAssertEqual(bent.last, b)
+        XCTAssertEqual(bent[15], CGPoint(x: 148, y: 132), "a quarter of the way up at halfway")
+        let line = [a] + bent
+        // On the curve the pointer is within reach; on the straight line
+        // between the points it is not.
+        XCTAssertEqual(TimelineLayout.distance(CGPoint(x: 148, y: 132), toLineThrough: line), 0, accuracy: 0.5)
+        XCTAssertGreaterThan(TimelineLayout.distance(CGPoint(x: 148, y: 124), toLineThrough: line), 5)
+        XCTAssertEqual(TimelineLayout.distance(CGPoint(x: 148, y: 124), toLineThrough: [a, b]), 0, accuracy: 0.5)
+        // Beyond either end, the distance is to the end.
+        XCTAssertEqual(TimelineLayout.distance(CGPoint(x: 90, y: 140), toLineThrough: [a, b]), 10, accuracy: 1e-9)
+    }
+
     func testLevelsFollowADragInSteps() {
         XCTAssertEqual(Fader.fraction(-60, in: Fader.gain), 0)
         XCTAssertEqual(Fader.fraction(6, in: Fader.gain), 1)

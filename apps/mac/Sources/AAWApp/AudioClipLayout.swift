@@ -154,3 +154,16 @@ public func shapedProgress(_ t: Double, shape: Double) -> Double {
     let power = pow(4, abs(shape))
     return shape > 0 ? pow(t, power) : 1 - pow(1 - t, power)
 }
+
+/// The shape that takes a segment `along` its values at `t` of its time: the
+/// inverse of `shapedProgress`, for a segment dragged so that its curve
+/// passes under the pointer. Within -1 to 1, zero where that place is on the
+/// straight line; nothing at the segment's ends, where every shape passes.
+public func shapeThrough(t: Double, along: Double) -> Double? {
+    guard t > 0, t < 1, along > 0, along < 1 else { return nil }
+    if abs(along - t) < 1e-9 { return 0 }
+    // t to the power is along; the power is 4 to the shape.
+    let power = along < t ? log(along) / log(t) : log(1 - along) / log(1 - t)
+    let shape = min(max(log(power) / log(4), 0), 1)
+    return along < t ? shape : -shape
+}

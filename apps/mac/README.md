@@ -231,6 +231,7 @@ front first.
 | Click a point; Shift-click; drag in the clear of a lane | Selects it; adds it to the selection or takes it out; selects the points a rectangle holds, in every lane it crosses |
 | Drag a point | Moves the selected points in time, no further than the points of their lanes that stay, and up or down by as much of each lane, heard as they move, one undo step. They stop together at a lane's edge. The value shows beside the one point selected |
 | Double-click a point, or Delete | Removes it, or Delete the selected points; a lane's last point takes the lane with it. Option-click changes whether it holds its value until the next |
+| Point at the line between two points; drag it | The segment is lit in blue; a drag up or down bends it into the curve that passes under the pointer, writing the first point's `shape` from -1 to 1, heard as it bends, one undo step. A held or level segment, or one too short to take hold of, is not lit |
 | Click × by a lane; + Lane | Removes the lane; offers the row's parameters that have none |
 | Add Effect, in the device panel | Adds an effect to the end of the chain, with a place to start |
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |

@@ -128,6 +128,25 @@ final class AudioClipLayoutTests: XCTestCase {
         XCTAssertEqual(shapedProgress(7, shape: 0.5), 1)
     }
 
+    func testADraggedSegmentTakesTheShapeThatPassesUnderThePointer() {
+        // The shape is the one whose curve goes through the pointer's place:
+        // the inverse of the engine's formula, a quarter of the way at
+        // halfway being 0.5, and the mirror below the line.
+        XCTAssertEqual(shapeThrough(t: 0.5, along: 0.25)!, 0.5, accuracy: 1e-9)
+        XCTAssertEqual(shapeThrough(t: 0.5, along: 0.0625)!, 1, accuracy: 1e-9)
+        XCTAssertEqual(shapeThrough(t: 0.5, along: 0.75)!, -0.5, accuracy: 1e-9)
+        XCTAssertEqual(shapeThrough(t: 0.5, along: 0.5), 0, "on the line it is straight")
+        for (t, shape) in [(0.2, 0.7), (0.5, -0.3), (0.9, 0.1), (0.35, -1.0)] {
+            XCTAssertEqual(shapeThrough(t: t, along: shapedProgress(t, shape: shape))!, shape, accuracy: 1e-9)
+        }
+        // Past 1 the shape is held there, and at the ends there is none.
+        XCTAssertEqual(shapeThrough(t: 0.5, along: 0.01), 1)
+        XCTAssertEqual(shapeThrough(t: 0.5, along: 0.999), -1)
+        XCTAssertNil(shapeThrough(t: 0, along: 0.5))
+        XCTAssertNil(shapeThrough(t: 1, along: 0.5))
+        XCTAssertNil(shapeThrough(t: 0.5, along: 0))
+    }
+
     func testNumbersAreWrittenPlainly() {
         XCTAssertEqual(ValueScale.plain(44), "44")
         XCTAssertEqual(ValueScale.plain(6.5), "6.5")

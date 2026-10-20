@@ -206,6 +206,32 @@ public struct TimelineLayout: Equatable {
         return least...most
     }
 
+    /// The line of an automation segment from one point to the next, as the
+    /// places it passes after the first: the next point alone when it is
+    /// straight, else the curve it plays, bent between the two as the engine
+    /// bends it in the parameter's domain, which is the lane's height.
+    public static func curve(from a: CGPoint, to b: CGPoint, shape: Double) -> [CGPoint] {
+        guard shape != 0, b.x - a.x >= 2 else { return [b] }
+        let steps = max(8, min(64, Int((b.x - a.x) / 3)))
+        return (1...steps).map { i in
+            let t = Double(i) / Double(steps)
+            let along = CGFloat(shapedProgress(t, shape: shape))
+            return CGPoint(x: a.x + (b.x - a.x) * CGFloat(t), y: a.y + (b.y - a.y) * along)
+        }
+    }
+
+    /// How far a place is from a line through points, in points.
+    public static func distance(_ p: CGPoint, toLineThrough points: [CGPoint]) -> CGFloat {
+        var least = CGFloat.infinity
+        for (a, b) in zip(points, points.dropFirst()) {
+            let (dx, dy) = (b.x - a.x, b.y - a.y)
+            let length = dx * dx + dy * dy
+            let t = length > 0 ? min(max(((p.x - a.x) * dx + (p.y - a.y) * dy) / length, 0), 1) : 0
+            least = min(least, hypot(p.x - (a.x + dx * t), p.y - (a.y + dy * t)))
+        }
+        return least
+    }
+
     /// How far up automation points can move together, as a fraction of
     /// their lanes' height, each staying inside its lane: `fractions` is how
     /// far up its lane each one is.
