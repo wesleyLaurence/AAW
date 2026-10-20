@@ -489,3 +489,38 @@ def test_an_analyzer_changes_nothing(tmp_path):
         daw("effect", "add", song, "tracks.keys.instrument.synth", "--type", "analyzer")
     daw("effect", "add", song, "tracks.keys", "--type", "analyzer")
     assert [e["type"] for e in load(song)["tracks"][0]["effects"]] == ["analyzer"]
+
+
+def test_overdrive_distorts_darkens_and_mixes(tmp_path):
+    """The curve adds odd harmonics, the tone takes the upper ones off, the
+    output sets the top, a mix of 0 is the input, and a lane moves the drive."""
+    x = tone(100, amp=0.5)
+
+    def harmonic(y, k):
+        spectrum = np.abs(np.fft.rfft(y[SR // 2 :, 0]))
+        return spectrum[int(round(100 * k * (SR // 2) / SR))] / (SR // 4)
+
+    # Driven, the top is at full scale through the open tone, and up to 2 dB over it
+    # through a low one, which leaves the square's louder fundamental; a song trims
+    # the output, as this does by 3 dB.
+    open_, report = run_chain(tmp_path / "open", [{"type": "overdrive", "tone_hz": 20000, "output_db": -3}], x)
+    assert report == [{"type": "overdrive", "latency_frames": 0}]
+    assert harmonic(open_, 3) > 0.1 and harmonic(open_, 15) > 0.005 and harmonic(open_, 2) < 1e-4
+    assert 0.98 * 10 ** (-3 / 20) < np.abs(open_).max() < 1.02 * 10 ** (-3 / 20)
+    # The tone at 500 Hz takes the fifteenth harmonic by about 19 dB and leaves the third.
+    dark, _ = run_chain(tmp_path / "dark", [{"type": "overdrive", "tone_hz": 500, "output_db": -3}], x)
+    assert 1.0 * 10 ** (-3 / 20) < np.abs(dark).max() < 4 / np.pi * 10 ** (-3 / 20)
+    assert 0.08 < harmonic(dark, 15) / harmonic(open_, 15) < 0.14
+    assert harmonic(dark, 3) > harmonic(open_, 3) * 0.5
+    # The output trims the result, and a mix of 0 passes the input through.
+    quiet, _ = run_chain(tmp_path / "quiet", [{"type": "overdrive", "tone_hz": 20000, "output_db": -15}], x)
+    assert abs(np.abs(quiet).max() - np.abs(open_).max() * 10 ** (-12 / 20)) < 0.01
+    same, _ = run_chain(tmp_path / "same", [{"type": "overdrive", "mix_percent": 0}], x)
+    assert np.array_equal(same, x.astype(np.float32))
+    # A lane on the drive: clean in the first half, driven in the second.
+    lane = {0: {"drive_db": [(0, 0, "hold"), (1, 48)]}}
+    moved, _ = run_chain(tmp_path / "moved", [{"type": "overdrive", "tone_hz": 20000, "output_db": -3}], x, automation=lane)
+    assert harmonic(moved, 3) > 0.1 and np.abs(moved[: SR // 4]).max() < 0.5 < np.abs(moved[3 * SR // 4 :]).max()
+    # Past its ranges it is refused.
+    with pytest.raises(ValueError, match="drive_db"):
+        run_chain(tmp_path / "hot", [{"type": "overdrive", "drive_db": 61}], x)

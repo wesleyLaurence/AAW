@@ -10,6 +10,7 @@ use crate::delay::Delay;
 use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reductions};
 use crate::envelope::{Envelope, Knob, Param};
 use crate::meter::Ring;
+use crate::overdrive::Overdrive;
 use crate::reverb::{Kernel, Reverb, Shape};
 use crate::saturation::Saturation;
 use crate::spectrum::Tap;
@@ -118,6 +119,7 @@ impl Plan {
             }
             Effect::Chorus(_) => hash("chorus"),
             Effect::Saturation(s) => hash(("saturation", s.mode)),
+            Effect::Overdrive(_) => hash("overdrive"),
             // A polarity flip or a sum to mono is a jump, so a change of either
             // fades through rather than gliding.
             Effect::Utility(u) => hash(("utility", u.invert, u.mono, u.mono_below_hz.map(f64::to_bits))),
@@ -153,6 +155,7 @@ pub enum Device {
     Reverb(Reverb),
     Chorus(Chorus),
     Saturation(Saturation),
+    Overdrive(Overdrive),
     Utility(Utility),
     /// An analyzer, which changes nothing: what it shows is read from the
     /// unit's ring.
@@ -271,6 +274,14 @@ impl Unit {
                 rate,
                 max_block,
             )),
+            Effect::Overdrive(o) => Device::Overdrive(Overdrive::new(
+                knob("drive_db", o.drive_db),
+                param("tone_hz", o.tone_hz),
+                knob("output_db", o.output_db),
+                knob("mix_percent", o.mix_percent),
+                rate,
+                max_block,
+            )),
             Effect::Utility(u) => Device::Utility(Utility::new(
                 u.invert,
                 u.mono,
@@ -305,6 +316,7 @@ impl Unit {
             Device::Reverb(d) => d.process(x, clock),
             Device::Chorus(d) => d.process(x, clock),
             Device::Saturation(d) => d.process(x, clock),
+            Device::Overdrive(d) => d.process(x, clock),
             Device::Utility(d) => d.process(x, clock),
             Device::Analyzer => {}
         }
@@ -331,6 +343,7 @@ impl Unit {
             (Device::Reverb(new), Device::Reverb(was)) => new.take_over(was),
             (Device::Chorus(new), Device::Chorus(was)) => new.take_over(was),
             (Device::Saturation(new), Device::Saturation(was)) => new.take_over(was),
+            (Device::Overdrive(new), Device::Overdrive(was)) => new.take_over(was),
             (Device::Utility(new), Device::Utility(was)) => new.take_over(was),
             _ => {}
         }

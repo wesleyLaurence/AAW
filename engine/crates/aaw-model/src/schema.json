@@ -646,6 +646,7 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer"
               },
@@ -678,6 +679,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
               },
               {
                 "$ref": "#/$defs/Utility"
@@ -944,6 +948,7 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer"
               },
@@ -976,6 +981,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
               },
               {
                 "$ref": "#/$defs/Utility"
@@ -1085,6 +1093,7 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer"
               },
@@ -1117,6 +1126,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
               },
               {
                 "$ref": "#/$defs/Utility"
@@ -1759,6 +1771,7 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer"
               },
@@ -1791,6 +1804,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
               },
               {
                 "$ref": "#/$defs/Utility"
@@ -2252,6 +2268,7 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility"
               },
               "propertyName": "type"
@@ -2283,6 +2300,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
               },
               {
                 "$ref": "#/$defs/Utility"
@@ -2481,6 +2501,7 @@
                 "reverb": "#/$defs/Reverb",
                 "chorus": "#/$defs/Chorus",
                 "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer"
               },
@@ -2513,6 +2534,9 @@
               },
               {
                 "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
               },
               {
                 "$ref": "#/$defs/Utility"
@@ -2673,6 +2697,67 @@
         "type"
       ],
       "title": "Saturation",
+      "type": "object"
+    },
+    "Overdrive": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "overdrive",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "drive_db": {
+          "default": 24,
+          "maximum": 60,
+          "minimum": 0,
+          "title": "Drive Db",
+          "type": "number"
+        },
+        "tone_hz": {
+          "default": 6000,
+          "maximum": 20000,
+          "minimum": 200,
+          "title": "Tone Hz",
+          "type": "number"
+        },
+        "output_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -24,
+          "title": "Output Db",
+          "type": "number"
+        },
+        "mix_percent": {
+          "default": 100,
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Mix Percent",
+          "type": "number"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Overdrive",
       "type": "object"
     },
     "Utility": {

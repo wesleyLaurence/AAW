@@ -78,6 +78,7 @@ in the chain shifts indexes but not ids. EQ fields are addressed per band, e.g.
 | `reverb` | `mix_percent` | linear |
 | `chorus` | `rate_hz` / `depth_ms`, `delay_ms`, `mix_percent` | log / linear |
 | `saturation` | `drive_db`, `output_db`, `mix_percent` | linear |
+| `overdrive` | `tone_hz` / `drive_db`, `output_db`, `mix_percent` | log / linear |
 | `utility` | `gain_db`, `pan`, `width_percent` | linear |
 
 Everything else is rejected: switches such as `mode`, `slope_db_per_octave`,

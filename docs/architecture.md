@@ -86,8 +86,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   warnings `daw check` gives of a valid song, each with a code (`check`); see
   [musical-checks.md](features/musical-checks.md).
 - `aaw-dsp`: bandlimited repitch, lane envelopes, the filter, EQ,
-  compressor/sidechain, limiter, clipper, delay, reverb, chorus, saturation
-  and utility devices with explicit block state, the level between the
+  compressor/sidechain, limiter, clipper, delay, reverb, chorus, saturation,
+  overdrive and utility devices with explicit block state, the level between the
   samples that a limiter on a true peak and the analyzer's meter read
   (`truepeak`), the spectrum tap an
   equalizer's panel
@@ -272,8 +272,10 @@ their slopes, drawn in the app as one curve over the playing spectrum; see
 [true-peak-limiter.md](features/true-peak-limiter.md)),
 `clipper` (a ceiling no sample passes, with a knee and oversampling; see
 [clipper.md](features/clipper.md)),
-`delay`, `reverb`, `chorus`, `saturation`, `utility` (gain, pan, width, mono
-below a frequency, polarity; see [utility.md](features/utility.md)) and
+`delay`, `reverb`, `chorus`, `saturation`, `overdrive` (a distortion with a
+tone after its curve; see [overdrive.md](features/overdrive.md)), `utility`
+(gain, pan, width, mono below a frequency, polarity; see
+[utility.md](features/utility.md)) and
 `analyzer` (changes nothing; the app shows the sound through it, in the
 device panel and in a window of its own; see
 [analyzer.md](features/analyzer.md); not inside a Synth patch), listed in order under
@@ -454,7 +456,8 @@ choke groups, swing, gate release, block-size invariance, stems reconstruction,
 clipping rejection, copied-asset portability/tamper detection, incremental index
 updates, stable formatting, stale-edit rejection, section equivalence and track previews.
 Effect tests cover filter and EQ responses, compressor curves, limiter ceilings and
-latency, a true peak held, the clipper's ceiling, knee and latency, delay echo timing, reverb
+latency, a true peak held, the clipper's ceiling, knee and latency, the overdrive's
+curve and tone, delay echo timing, reverb
 decay and seeding, block-partition invariance,
 sidechain ducking and preview/stem equivalence. Routing tests cover pre/post-fader
 sends, mute/solo, return stems and previews and section tails. Automation tests
