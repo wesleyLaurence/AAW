@@ -1351,6 +1351,9 @@ impl<'a> Edit<'a> {
         let mut out = Outcome::default();
         match cmd {
             Set { path, value } => {
+                if path == "session.length_beats" {
+                    return Err("The length is the song's content: the next whole bar after the last clip, automation point, section or marker, set after every edit. Place something where the song should reach".into());
+                }
                 let new = Node::new(&json_value(value)?);
                 // A missing key of a map is added, e.g. a new pad; anything else
                 // must exist.
@@ -1853,15 +1856,6 @@ impl<'a> Edit<'a> {
                 let start = at.as_ref().map(beat_at).transpose()?.unwrap_or_default();
                 let meter = self.meter();
                 let length = part.length(meter);
-                let bar = meter.bar();
-                let end = &start + &length;
-                let song = exact(self.root.get("session").and_then(|s| s.get("length_beats")))
-                    .unwrap_or_else(|| BigRational::from_integer(16.into()));
-                if end > song {
-                    // To the end of the bar the clip ends in, as for an audio clip.
-                    let grown = (&end / &bar).ceil() * &bar;
-                    self.run(&Set { path: "session.length_beats".into(), value: to_json(&beat_value(&grown)) })?;
-                }
                 let target = match track {
                     Some(t) => {
                         let loc = self.track(t)?;

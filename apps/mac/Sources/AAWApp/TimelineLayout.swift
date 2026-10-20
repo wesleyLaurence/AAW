@@ -43,8 +43,13 @@ public struct TimelineLayout: Equatable {
     public var lanesWidth: CGFloat { max(0, size.width - Self.headerWidth) }
     public var lanesHeight: CGFloat { max(0, size.height - Self.rulerHeight) }
 
-    /// Beats shown past the end, so the last bar is not against the edge.
-    public var tailBeats: Double { beatsPerBar }
+    /// Beats the view scrolls past the end: a screen of them, and two bars
+    /// at the least, so that a clip is dropped or dragged past the end, which
+    /// moves to hold it (D130).
+    public var tailBeats: Double {
+        guard pixelsPerBeat > 0 else { return 2 * beatsPerBar }
+        return max(2 * beatsPerBar, Double(lanesWidth / pixelsPerBeat))
+    }
     public var contentWidth: CGFloat { CGFloat(lengthBeats + tailBeats) * pixelsPerBeat }
 
     public func x(_ beat: Double) -> CGFloat {
@@ -72,10 +77,10 @@ public struct TimelineLayout: Equatable {
         Self.rulerHeight + contentY - scroll.y
     }
 
-    /// The zoom at which the whole song fits the lanes.
+    /// The zoom at which the whole song and one bar more fit the lanes.
     public var fitPixelsPerBeat: CGFloat {
         guard lanesWidth > 0 else { return pixelsPerBeat }
-        return lanesWidth / CGFloat(lengthBeats + tailBeats)
+        return lanesWidth / CGFloat(lengthBeats + beatsPerBar)
     }
 
     public var minPixelsPerBeat: CGFloat { min(fitPixelsPerBeat / 2, Self.maxPixelsPerBeat) }
@@ -136,21 +141,22 @@ public struct TimelineLayout: Equatable {
     }
 
     /// The start of the grid step that holds `x`, or with `free` the beat
-    /// there to a thousandth, inside the song: where a new clip goes.
+    /// there to a thousandth, not before the song: where a new clip goes. It
+    /// may be past the song's end, which moves to hold the clip.
     public func step(atX x: CGFloat, free: Bool) -> Double {
         let raw = beat(atX: x)
         let g = grid
         let beat = free ? (raw * 1000).rounded() / 1000 : (raw / g).rounded(.down) * g
-        let last = free ? lengthBeats - 0.001 : ((lengthBeats / g).rounded(.up) - 1) * g
-        return max(0, min(beat, last))
+        return max(0, beat)
     }
 
-    /// A beat on the grid, or with `free` to a thousandth of a beat, from the
-    /// song's start to its end: where an automation point can be.
+    /// A beat on the grid, or with `free` to a thousandth of a beat, not
+    /// before the song's start: where an automation point can be. Past the
+    /// end, the end moves to it.
     public func snapped(_ beat: Double, free: Bool) -> Double {
         let g = grid
         let on = free ? (beat * 1000).rounded() / 1000 : (beat / g).rounded() * g
-        return min(max(on, 0), lengthBeats)
+        return max(on, 0)
     }
 
     /// Where each marker's flag is drawn and pressed, from its line: as wide
@@ -188,21 +194,22 @@ public struct TimelineLayout: Equatable {
     /// or with `free` thousandths of a beat, and no further than `range`, which
     /// is how far the clips can move and stay in the song.
     /// How far automation points can move in time together: each no further
-    /// than the nearest point of its lane that stays, nor before the song or
-    /// past its end. `lanes` holds each lane's points in time order, with
-    /// whether each one moves.
-    public static func pointRange(_ lanes: [[(at: Double, moving: Bool)]], length: Double) -> ClosedRange<Double> {
+    /// than the nearest point of its lane that stays, nor before the song;
+    /// the last point of a lane may go as far past the end as it likes, and
+    /// the end moves to it. `lanes` holds each lane's points in time order,
+    /// with whether each one moves.
+    public static func pointRange(_ lanes: [[(at: Double, moving: Bool)]]) -> ClosedRange<Double> {
         var least = -Double.infinity
         var most = Double.infinity
         for points in lanes {
             for (index, point) in points.enumerated() where point.moving {
                 let before = points[..<index].last { !$0.moving }?.at ?? 0
-                let after = points[(index + 1)...].first { !$0.moving }?.at ?? length
+                let after = points[(index + 1)...].first { !$0.moving }?.at ?? .infinity
                 least = max(least, before - point.at)
                 most = min(most, after - point.at)
             }
         }
-        guard least.isFinite, most.isFinite, least <= 0, most >= 0 else { return 0...0 }
+        guard least.isFinite, least <= 0, most >= 0 else { return 0...0 }
         return least...most
     }
 
@@ -249,13 +256,12 @@ public struct TimelineLayout: Equatable {
         return min(max(steps, least), most) * step
     }
 
-    /// The repeats that bring the end of a clip nearest `x`: at least one, and
-    /// no more than fit in the song.
+    /// The repeats that bring the end of a clip nearest `x`: at least one.
+    /// Past the song's end, the end moves to hold them.
     public func repeats(atX x: CGFloat, clipAt at: Double, patternBeats: Double) -> Int {
         guard patternBeats > 0 else { return 1 }
         let wanted = ((beat(atX: x) - at) / patternBeats).rounded()
-        let fit = ((lengthBeats - at) / patternBeats + 1e-9).rounded(.down)
-        return Int(max(1, min(wanted, fit)))
+        return Int(max(1, wanted))
     }
 
     public mutating func clamp() {

@@ -341,7 +341,6 @@ struct TransportBar: View {
             HStack(spacing: 10) {
                 TempoField(model: model)
                 MeterField(model: model)
-                Text("\(Int((a.lengthBeats / a.barBeats).rounded(.up))) bars").foregroundStyle(.secondary)
             }
             .font(.system(size: 12).monospacedDigit())
             .foregroundStyle(model.sessionChanged ? Who.agent.color : Color.primary)

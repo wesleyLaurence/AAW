@@ -347,10 +347,11 @@ impl Session {
         if expect.is_some_and(|x| x != self.doc.sha) {
             return Err("Stale project revision; inspect and retry".into());
         }
-        let (project, node, outcome) = match cmd {
+        let (project, node, mut outcome) = match cmd {
             Command::Apply { patch, label } => {
                 let merged = aaw_model::merge(&self.doc.project.dump(false), &json_value(patch)?);
-                let project = Project::validate(&merged).map_err(|e| aaw_model::hint::explain(&merged, &e))?;
+                let mut project = Project::validate(&merged).map_err(|e| aaw_model::hint::explain(&merged, &e))?;
+                self.settle(&mut project);
                 let node = tree::matched(&project.dump(false), Some(&self.doc.tree()), &mut self.next);
                 let outcome = Outcome {
                     label: label.clone().unwrap_or_else(|| "Apply a merge patch".into()),
@@ -363,13 +364,18 @@ impl Session {
                 let mut next = self.next;
                 let outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).run(cmd)?;
                 let value = root.value();
-                let project = Project::validate(&value).map_err(|e| aaw_model::hint::explain(&value, &e))?;
+                let mut project = Project::validate(&value).map_err(|e| aaw_model::hint::explain(&value, &e))?;
+                self.settle(&mut project);
                 let node = tree::carry(&project.dump(false), Some(&root), &mut next);
                 self.next = next;
                 (project, node, outcome)
             }
         };
         self.verify_changed(&project)?;
+        if outcome.report.contains_key("length_beats") {
+            // A range command reports the song's length: as settled.
+            outcome.report.insert("length_beats".into(), value_json(&project.session.length_beats.to_value()));
+        }
         let batch = matches!(cmd, Command::Batch { .. });
         let made: Vec<(u64, String)> = outcome
             .made
@@ -405,6 +411,18 @@ impl Session {
         }
         reply.extend(report);
         Ok((Json::Object(reply), change))
+    }
+
+    /// Sets the song's length to its content: the next whole bar after the
+    /// last sound, so that nothing lies past the end (D130). An audio clip
+    /// that plays to its file's end needs the file's length.
+    fn settle(&self, project: &mut Project) {
+        let seconds = |sample: &str| -> Option<f64> {
+            let asset = project.samples.get(sample)?;
+            aaw_engine::sndfile::info(&self.dir.join(&asset.path)).ok().map(|info| info.seconds())
+        };
+        let length = aaw_model::fitted_length(project, &seconds);
+        project.session.length_beats = aaw_model::Beat::from_exact(&length);
     }
 
     fn stamp_reply(&self, changed: bool) -> Map<String, Json> {

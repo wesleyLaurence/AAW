@@ -726,7 +726,7 @@ pub fn owners(p: &Project) -> Vec<Owner<'_>> {
         .collect()
 }
 
-/// `Project.references`: cross-references, graphs and session bounds.
+/// `Project.references`: cross-references and graphs.
 pub fn references(p: &Project) -> Result<(), String> {
     let track_ids: Vec<&str> = p.tracks.iter().map(|t| t.id.as_str()).collect();
     let group_ids: Vec<&str> = p.groups.iter().map(|g| g.id.as_str()).collect();
@@ -861,7 +861,6 @@ pub fn references(p: &Project) -> Result<(), String> {
             }
         }
     }
-    let length = p.session.length_exact();
     for owner in owners(p) {
         let name = owner.name();
         let ids: Vec<&str> = owner.effects().iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
@@ -875,13 +874,6 @@ pub fn references(p: &Project) -> Result<(), String> {
                 return Err(format!("{name}: more than one lane for {}", lane.param));
             }
             for point in &lane.points {
-                if point.at_exact() > length {
-                    return Err(format!(
-                        "{name}: {} point at {} is after the session end",
-                        lane.param,
-                        point.at.text()
-                    ));
-                }
                 if !t.range.contains(point.value) {
                     return Err(format!(
                         "{name}: {} value {} outside {}",
@@ -897,16 +889,6 @@ pub fn references(p: &Project) -> Result<(), String> {
     if section_ids.len() != p.sections.len() {
         return Err("Section IDs must be unique".into());
     }
-    for s in &p.sections {
-        if s.at_exact() + s.length_exact() > length {
-            return Err(format!("Section {} exceeds session", s.id));
-        }
-    }
-    for m in &p.markers {
-        if m.at_exact() > length {
-            return Err(format!("Marker {} is past the session's end", m.id));
-        }
-    }
     for t in &p.tracks {
         for pad in t.pads.values() {
             if !p.samples.contains_key(&pad.sample) {
@@ -917,20 +899,11 @@ pub fn references(p: &Project) -> Result<(), String> {
             if !p.samples.contains_key(&clip.sample) {
                 return Err(format!("{}: unknown sample {}", t.id, clip.sample));
             }
-            // Its sound may run past the session's end, as a tail does; its
-            // start may not.
-            if clip.at_exact() >= length {
-                return Err(format!("{}: audio clip starts past the session", t.id));
-            }
         }
         for clip in &t.clips {
             let Some(pattern) = p.patterns.get(&clip.pattern) else {
                 return Err(format!("{}: unknown pattern {}", t.id, clip.pattern));
             };
-            let span = pattern.length_exact() * BigRational::from_integer(clip.repeats.into());
-            if clip.at_exact() + span > length {
-                return Err(format!("{}: clip exceeds session", t.id));
-            }
             for e in pattern.expanded() {
                 let Some(pad) = t.pads.get(&e.pad) else {
                     return Err(format!("{}: unknown pad {}", t.id, e.pad));
@@ -965,11 +938,6 @@ pub fn references(p: &Project) -> Result<(), String> {
                             ));
                         }
                     }
-                }
-            }
-            for clip in &midi.clips {
-                if clip.at_exact() + clip.length_exact() > length {
-                    return Err(format!("{}: clip {} exceeds session", t.id, clip.id));
                 }
             }
         }

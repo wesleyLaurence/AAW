@@ -97,11 +97,11 @@ range's sections are copied under a free ID (`verse-2`), or the one given.
   selection in Ableton replaces it: clips there are cut at the destination's
   edges and the pieces inside removed, and the lane's points too. `--insert`
   opens time for it instead, as `insert` does. A note clip's copy owns its
-  notes under IDs of its own. A copy that reaches past the song's end grows
-  the song to the end of that bar.
+  notes under IDs of its own. A copy that reaches past the song's end moves
+  the end to the next whole bar after it, as any edit does
+  ([song-length.md](song-length.md)).
 - **`range insert AT LENGTH`** opens empty time: everything at or after AT
-  moves later, and the song grows by LENGTH. With `--track`, the song grows
-  only if a clip was pushed past its end.
+  moves later, and the song's end moves with its content.
 - **`range delete START LENGTH`** removes the range and closes the gap; the
   song shrinks by LENGTH. The two clips of a track that meet where the gap
   closed become one again when they are one music: a pattern clip and its
@@ -126,7 +126,7 @@ Each command is one step with one undo, through the host when one runs, with
 a label such as `Copy beats 32–64 to 96` or `Duplicate section verse at 96 as
 verse2`. The reply lists what the command made as `path` or `paths`, the clips
 it `split`, `moved` and `removed` by path, the `sections` a copy made, and the
-song's `length_beats` after it.
+song's `length_beats` after it, as settled to its content.
 
 **Tails.** A copy starts clean: a note held into the range from before it is
 cut at the edge as above, and the reverb and delay tails of what came before

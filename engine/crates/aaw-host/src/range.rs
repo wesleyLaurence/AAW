@@ -30,11 +30,6 @@ type Result<T> = std::result::Result<T, String>;
 const CUT_FADE_IN_MS: f64 = 4.0;
 const CUT_FADE_OUT_MS: f64 = 12.0;
 
-/// A bar, for growing the song to hold what an edit moved past its end.
-fn bar() -> BigRational {
-    BigRational::from_integer(4.into())
-}
-
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Kind {
     Pattern,
@@ -382,28 +377,14 @@ fn lane_copy(
 
 /// A range's end, after checking its length and, with `within`, that it does
 /// not reach past the song.
-fn check_range(start: &BigRational, length: &BigRational, song: &BigRational, within: bool) -> Result<BigRational> {
+/// The end of a range of `length` beats from `start`; a range may lie
+/// past the song's end, where there is nothing, since the end is the song's
+/// content (D130).
+fn check_range(start: &BigRational, length: &BigRational) -> Result<BigRational> {
     if !length.is_positive() {
         return Err("LENGTH is a number of beats above zero".into());
     }
-    let end = start + length;
-    if *start >= *song {
-        return Err(format!(
-            "Beats {}–{} are past the song's end at {}",
-            beat_text(start),
-            beat_text(&end),
-            beat_text(song)
-        ));
-    }
-    if within && end > *song {
-        return Err(format!(
-            "Beats {}–{} reach past the song's end at {}",
-            beat_text(start),
-            beat_text(&end),
-            beat_text(song)
-        ));
-    }
-    Ok(end)
+    Ok(start + length)
 }
 
 fn beats(s: &BigRational, e: &BigRational) -> String {
@@ -430,12 +411,10 @@ impl<'a> Edit<'a> {
         Ok(Scope { tracks: locs, names, all })
     }
 
+    /// The song's length as the tree holds it before the host settles it
+    /// to the content after the edit (D130).
     fn song_length(&self) -> BigRational {
         exact(self.root.get("session").and_then(|s| s.get("length_beats"))).unwrap_or_else(|| BigRational::from_integer(16.into()))
-    }
-
-    fn set_song_length(&mut self, length: &BigRational) {
-        self.set_leaf(&[Step::Key("session".into())], "length_beats", beat_value(length));
     }
 
     /// The song as it stands, validated, for what a lane's parameter is.
@@ -1044,32 +1023,6 @@ impl<'a> Edit<'a> {
         Ok(())
     }
 
-    /// Grows the song to the end of the bar that holds the last clip, when
-    /// an edit moved one past its end.
-    fn fit_length(&mut self) -> Result<()> {
-        let mut last = BigRational::zero();
-        for i in 0..self.root.get("tracks").map_or(0, |t| t.items().len()) {
-            let track = vec![Step::Key("tracks".into()), Step::Index(i)];
-            for (key, kind) in self.lists(&track) {
-                for item in self.node(&track).get(key).map_or(&[][..], Node::items) {
-                    let (start, end) = self.timed(kind, &item.node)?;
-                    // An audio clip may sound past the end; its start may not.
-                    let end = match kind {
-                        Kind::Audio => start,
-                        _ => end.unwrap_or(start),
-                    };
-                    last = last.max(end);
-                }
-            }
-        }
-        let song = self.song_length();
-        if last > song {
-            let grown = (&last / bar()).ceil() * bar();
-            self.set_song_length(&grown);
-        }
-        Ok(())
-    }
-
     /// The reply's lists: what was split, moved and removed, by path, and
     /// what was made as the command's objects.
     fn finish(&mut self, out: &mut Outcome, report: Report) -> Result<()> {
@@ -1105,7 +1058,7 @@ impl<'a> Edit<'a> {
         rename: Option<(&str, &str)>,
     ) -> Result<()> {
         let scope = self.scope(tracks)?;
-        let end = check_range(start, length, &self.song_length(), false)?;
+        let end = check_range(start, length)?;
         let project = self.validated()?;
         let mut report = Report::default();
         // The source is read before anything moves, and not touched.
@@ -1119,8 +1072,6 @@ impl<'a> Edit<'a> {
             if scope.all {
                 self.sections_insert(to, length);
                 self.markers_insert(to, length);
-                let song = self.song_length() + length;
-                self.set_song_length(&song);
             }
         } else {
             self.split_scope(&scope, &dest_end, &mut report)?;
@@ -1136,8 +1087,6 @@ impl<'a> Edit<'a> {
             lane_copy(&src, start, &end, items, to, insert, domain, next)
         })?;
         let ids = if scope.all { self.sections_place(clones, &by, rename, &mut report)? } else { Vec::new() };
-        // A copy past the end, or one on some tracks pushed past it, grows the song.
-        self.fit_length()?;
         out.report.insert("sections".into(), json!(ids));
         out.label = if insert {
             format!("Insert a copy of {} at {}{}", beats(start, &end), beat_text(to), scope.suffix())
@@ -1153,10 +1102,6 @@ impl<'a> Edit<'a> {
         if !length.is_positive() {
             return Err("LENGTH is a number of beats above zero".into());
         }
-        let song = self.song_length();
-        if *at > song {
-            return Err(format!("Beat {} is past the song's end at {}", beat_text(at), beat_text(&song)));
-        }
         let project = self.validated()?;
         let mut report = Report::default();
         self.split_scope(&scope, at, &mut report)?;
@@ -1165,9 +1110,6 @@ impl<'a> Edit<'a> {
         if scope.all {
             self.sections_insert(at, length);
             self.markers_insert(at, length);
-            self.set_song_length(&(song + length));
-        } else {
-            self.fit_length()?;
         }
         out.label = format!("Insert {} beats at {}{}", beat_text(length), beat_text(at), scope.suffix());
         self.finish(out, report)
@@ -1176,8 +1118,7 @@ impl<'a> Edit<'a> {
     /// `range.delete`: the range removed and the gap closed.
     pub(crate) fn range_delete(&mut self, out: &mut Outcome, start: &BigRational, length: &BigRational, tracks: &[String]) -> Result<()> {
         let scope = self.scope(tracks)?;
-        let song = self.song_length();
-        let end = check_range(start, length, &song, true)?;
+        let end = check_range(start, length)?;
         let project = self.validated()?;
         let mut report = Report::default();
         self.split_scope(&scope, start, &mut report)?;
@@ -1189,7 +1130,6 @@ impl<'a> Edit<'a> {
         if scope.all {
             self.sections_delete(start, &end, &mut report)?;
             self.markers_delete(start, &end, &mut report)?;
-            self.set_song_length(&(song - length));
         }
         out.label = format!("Delete {}{}", beats(start, &end), scope.suffix());
         self.finish(out, report)
@@ -1198,7 +1138,7 @@ impl<'a> Edit<'a> {
     /// `range.clear`: what is in the range removed; nothing moves.
     pub(crate) fn range_clear(&mut self, out: &mut Outcome, start: &BigRational, length: &BigRational, tracks: &[String]) -> Result<()> {
         let scope = self.scope(tracks)?;
-        let end = check_range(start, length, &self.song_length(), false)?;
+        let end = check_range(start, length)?;
         let project = self.validated()?;
         let mut report = Report::default();
         self.split_scope(&scope, start, &mut report)?;
@@ -1261,7 +1201,6 @@ impl<'a> Edit<'a> {
         let (index, _, _) = self.section(section)?;
         self.set_section(index, to, &dest_end);
         self.markers_move(&start, &end, &by)?;
-        self.fit_length()?;
         out.label = format!("Move section {section} to {} with its content", beat_text(to));
         self.finish(out, report)
     }

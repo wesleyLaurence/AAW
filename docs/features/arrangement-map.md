@@ -50,11 +50,8 @@ it. A person sees the arrangement view at a glance; this is the agent's equivale
 `--per beat` makes a cell a beat and `--per 2` two bars; `--per` takes any
 positive number of bars, `1/2` among them. `--from` and `--to` keep a range of
 beats, the last cell perhaps shorter, and `--track drums,bass` (or the flag
-repeated) keeps some tracks. Without `--to` the grid runs to the song's end, or
-to the end of an audio clip that plays past it, which a line under the grid
-then says: the song ends where that bar begins, and nothing after it is heard.
-Only an audio clip can run past the end; validation keeps pattern and note
-clips inside the song.
+repeated) keeps some tracks. Without `--to` the grid runs to the song's end,
+the next whole bar after its last sound ([song-length.md](song-length.md)).
 
 **What a cell says.**
 

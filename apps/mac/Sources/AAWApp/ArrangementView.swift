@@ -1666,7 +1666,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         guard let grabbed = moving.first(where: { $0.key == key }) else { return }
         drag = .points(PointsDrag(
             points: moving, grabbed: grabbed, rect: rect,
-            range: TimelineLayout.pointRange(Array(around.values), length: layout.lengthBeats),
+            range: TimelineLayout.pointRange(Array(around.values)),
             lift: TimelineLayout.liftRange(moving.map(\.fraction)),
             gesture: model.newGesture(), collapse: collapse
         ))
@@ -1741,12 +1741,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let placed = model.placedClips().filter { selection.contains($0.key) }
         let tracks = placed.map(\.track)
         guard let first = placed.map(\.at).min(), let top = tracks.min(), let bottom = tracks.max() else { return }
-        // Pattern clips stay inside the song; an audio clip takes the song's end with it.
-        let room = placed.filter { $0.audio == nil }.map { layout.lengthBeats - $0.end }.min() ?? Self.farBeats
+        // Not before the song; as far past its end as the drag goes, since
+        // the end moves to hold what lands there (D130).
         drag = .clips(ClipDrag(
             start: p,
             origin: Dictionary(uniqueKeysWithValues: placed.map { ($0.key, ($0.at, $0.track)) }),
-            range: min(0, -first)...max(0, room),
+            range: min(0, -first)...Self.farBeats,
             rowRange: -top...max(0, model.arrangement.tracks.count - 1 - bottom),
             collapse: collapse
         ))
@@ -1823,12 +1823,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             drag = .trim(d)
         case .noteTrim(var d):
             // On the grid or, with ⌘, off it; a grid step long at the
-            // least, and inside the song. The notes stay where they are.
+            // least. The notes stay where they are; the song's end moves to
+            // hold a clip lengthened past it.
             let free = model.free(event.modifierFlags)
             let least = free ? 0.001 : layout.grid
             let (start, end) = (d.clip.at, d.clip.at + d.clip.lengthBeats)
             let wanted = snappedBeat(atX: p.x, free: free)
-            let beat = d.start ? min(wanted, end - least) : min(max(wanted, start + least), layout.lengthBeats)
+            let beat = d.start ? min(wanted, end - least) : max(wanted, start + least)
             if beat != d.beat, beat >= 0 {
                 d.beat = beat
                 d.moved = true
@@ -2275,14 +2276,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// Moves the selected clips by a grid step or to the next track, if they
-    /// stay in the song. An audio clip may pass the song's end, which grows.
+    /// stay after the song's start and on its tracks. A clip may pass the
+    /// song's end, which moves to hold it.
     private func nudge(by: Double, rows: Int) {
         let placed = model.placedClips().filter { model.selectedClips.contains($0.key) }
         let tracks = placed.map(\.track)
         guard let first = placed.map(\.at).min(), let top = tracks.min(), let bottom = tracks.max() else { return }
-        let last = placed.filter { $0.audio == nil }.map(\.end).max() ?? 0
-        guard first + by >= 0, last + by <= layout.lengthBeats,
-              top + rows >= 0, bottom + rows < model.arrangement.tracks.count else {
+        guard first + by >= 0, top + rows >= 0, bottom + rows < model.arrangement.tracks.count else {
             NSSound.beep()
             return
         }
@@ -2593,9 +2593,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         for item in lanes { drawLane(item.lane, in: item.rect, alpha: item.alpha) }
 
+        // The song's end, the next whole bar after its last sound: a thin
+        // line, where the loop set to the whole song stops. The bars past it
+        // are drawn as the bars before it, since a clip may be put there.
         let end = layout.x(layout.lengthBeats)
-        if end < bounds.width {
-            fill(CGRect(x: end, y: ruler, width: bounds.width - end, height: bounds.height - ruler), Theme.pastEnd)
+        if end >= header, end < bounds.width {
             fill(CGRect(x: end.rounded(), y: ruler, width: 1, height: bounds.height - ruler), Theme.gray(1, 0.25))
         }
         // A faint line under each marker, so what it marks is found below it.

@@ -188,7 +188,7 @@ def test_a_decoded_song_keeps_its_grid(tmp_path):
     assert any(shutil.which(name) for name in DECODERS)
     subprocess.run(command, cwd=tmp_path, check=True)
     project = tmp_path / "project" / "song.yaml"
-    code, made = cli("init", project.parent, "--tempo", 120, "--bars", 8)
+    code, made = cli("init", project.parent, "--tempo", 120)
     db = tmp_path / "index.sqlite"
     code, asset = cli("samples", "--db", db, "import", tmp_path / "song.m4a", "--project", project, "--id", "song")
     assert code == 0, asset

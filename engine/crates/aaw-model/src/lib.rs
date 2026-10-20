@@ -12,6 +12,7 @@ pub mod contract;
 pub mod describe;
 pub mod hash;
 pub mod hint;
+pub mod length;
 pub mod meter;
 pub mod pyfmt;
 pub mod rules;
@@ -24,6 +25,7 @@ pub mod yaml_load;
 
 pub use beat::{beat, frame, signed_beat, Beat};
 pub use hash::{fingerprints, hash_matches, project_hash};
+pub use length::{content_end, fitted_length};
 pub use meter::Meter;
 pub use schema::*;
 pub use validate::ValidationError;

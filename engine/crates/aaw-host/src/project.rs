@@ -30,7 +30,6 @@ pub const AGENT_TEXT: &str = "Read SONG.md before working on this project, and k
 const BESIDE: [(&str, &str); 2] = [(NOTES_FILE, NOTES), (AGENT_FILE, AGENT_TEXT)];
 /// What a project made by the app starts with.
 pub const UNTITLED_TEMPO: f64 = 120.0;
-pub const UNTITLED_BARS: i64 = 32;
 
 /// Files a host or the Finder leaves in a folder, which are not the project's.
 const IGNORED: [&str; 2] = [".daw.lock", ".DS_Store"];
@@ -99,15 +98,11 @@ pub fn resolved(path: &Path) -> Result<PathBuf> {
     }
 }
 
-/// A song of so many bars of `meter` (4/4 when None) with everything else at
-/// its default.
-pub fn blank(tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) -> Result<Project> {
-    if bars <= 0 {
-        return Err("bars must be positive".into());
-    }
+/// An empty song in `meter` (4/4 when None) with everything else at its
+/// default: one bar long, since the length is the song's content (D130).
+pub fn blank(tempo: f64, title: Option<&str>, meter: Option<&str>) -> Result<Project> {
     let meter = meter.map(aaw_model::Meter::parse).transpose()?.unwrap_or_default();
-    let length = meter.bar() * num_rational::BigRational::from_integer(bars.into());
-    let length = aaw_model::Beat::from_exact(&length);
+    let length = aaw_model::Beat::from_exact(&meter.bar());
     let mut session = vec![("tempo", Value::Float(tempo)), ("length_beats", length.to_value())];
     if meter != aaw_model::Meter::COMMON {
         session.push(("time_signature", Value::Str(meter.text())));
@@ -121,12 +116,12 @@ pub fn blank(tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) ->
 /// Writes a blank project into a folder, which is made if it is not there,
 /// and returns its song file. The notes and the file that imports them are
 /// written beside the song; one that is already in the folder is left as it is.
-pub fn create(directory: &Path, tempo: f64, bars: i64, title: Option<&str>, meter: Option<&str>) -> Result<PathBuf> {
+pub fn create(directory: &Path, tempo: f64, title: Option<&str>, meter: Option<&str>) -> Result<PathBuf> {
     let path = directory.join(SONG_FILE);
     if path.exists() {
         return Err(format!("Project already exists: {}", path.display()));
     }
-    let project = blank(tempo, bars, title, meter)?;
+    let project = blank(tempo, title, meter)?;
     aaw_model::save(&project, &path).map_err(|e| e.to_string())?;
     for (name, text) in BESIDE {
         let file = directory.join(name);
@@ -157,7 +152,7 @@ pub fn create_untitled() -> Result<PathBuf> {
         let folder = root.join(&name);
         // Making the folder is the claim on the name.
         match std::fs::create_dir(&folder) {
-            Ok(()) => return create(&folder, UNTITLED_TEMPO, UNTITLED_BARS, Some(&name), None),
+            Ok(()) => return create(&folder, UNTITLED_TEMPO, Some(&name), None),
             Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
             Err(e) => return Err(format!("{}: {e}", folder.display())),
         }
@@ -192,7 +187,7 @@ fn only_song(folder: &Path) -> bool {
 /// YAML, is the blank one the folder began with.
 pub fn untouched(folder: &Path, yaml: &str) -> bool {
     only_song(folder)
-        && blank(UNTITLED_TEMPO, UNTITLED_BARS, Some(&name_of(folder)), None).is_ok_and(|b| aaw_model::to_yaml(&b) == yaml)
+        && blank(UNTITLED_TEMPO, Some(&name_of(folder)), None).is_ok_and(|b| aaw_model::to_yaml(&b) == yaml)
 }
 
 /// Deletes an Untitled project's folder. Refuses any other folder.

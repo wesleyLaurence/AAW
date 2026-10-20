@@ -19,7 +19,7 @@ def song(tmp_path):
     downbeat on beat 4, starting 5 ms before it."""
     beat_song(tmp_path / "original.wav", bars=12)
     path = tmp_path / "edit" / "song.yaml"
-    daw("init", path.parent, "--tempo", 120, "--bars", 14)
+    daw("init", path.parent, "--tempo", 120)
     daw("set", path, "session.sample_rate", 44100)
     daw("set", path, "session.master_gain_db", 0)
     db = tmp_path / "index.sqlite"
@@ -46,8 +46,10 @@ def test_a_cut_makes_a_join_that_passes_every_check(song):
     # inspect lists them, and the timeline knows where their sound is.
     listed = daw("inspect", song)["tracks"][0]["audio"]
     assert [(c["ref"], c["at"]) for c in listed] == [("tracks.song.audio.0", 4), ("tracks.song.audio.1", 20)]
-    code, fitted = cli("timeline", song, "--fit")
-    assert code == 0 and fitted["fitted"]["length_beats"] == 47
+    code, fitted = cli("timeline", song)
+    assert code == 0, fitted
+    # The song ends at the bar after the second clip's file ends.
+    assert fitted["length"]["beats"] == load(song)["session"]["length_beats"] == 48
     assert fitted["tracks"]["song"]["first_sound"]["seconds"] == pytest.approx(2 - 0.005)
     # The song plays at its own level: nothing is turned down on the way.
     report = render(song)

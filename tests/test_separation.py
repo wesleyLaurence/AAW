@@ -84,7 +84,7 @@ def mix(path, rate=RATE, seconds=SECONDS, channels=2):
 def song(tmp_path, env):
     """A project at 120 BPM with the mix as the sample `mix`, and a clip of it on track `song` at beat 4."""
     folder = tmp_path / "project"
-    daw("init", folder, "--tempo", 120, "--bars", 8)
+    daw("init", folder, "--tempo", 120)
     path = folder / "song.yaml"
     daw("set", path, "session.master_gain_db", 0)
     (folder / "samples").mkdir()
@@ -227,10 +227,9 @@ def clip_among_others_then_a_sample_source(song):
     assert project["tracks"][0]["audio"][0]["gain_db"] == -3
     assert project["tracks"][1]["audio"][0]["source_end_seconds"] == 1 and project["tracks"][1]["audio"][0]["at"] == 12
     daw("undo", song)
-    # From the sample itself: whole parts from beat 0 on a two-bar song that grows to hold them.
+    # From the sample itself: whole parts from beat 0, which the song grows to hold.
     daw("remove", song, "tracks.song.audio.1")
     daw("audio", "move", song, "tracks.song.audio.0", "--at", 0)
-    daw("set", song, "session.length_beats", 2)
     code, made = cli("separate", song, "mix", "--id", "whole", "--tracks")
     assert code == 0, made
     project = load(song)
@@ -384,7 +383,7 @@ def test_htdemucs_separates_generated_audio_on_this_mac(tmp_path, monkeypatch):
     if not separation.runtime()["installed"]:
         pytest.skip("The separation runtime is not installed")
     folder = tmp_path / "real"
-    daw("init", folder, "--tempo", 120, "--bars", 8)
+    daw("init", folder, "--tempo", 120)
     path = folder / "song.yaml"
     (folder / "samples").mkdir()
     x = mix(folder / "samples" / "mix.wav", seconds=8)

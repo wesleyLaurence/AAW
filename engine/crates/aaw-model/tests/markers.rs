@@ -37,12 +37,13 @@ fn what_a_marker_cannot_be() {
     let refused = |markers: &str| parse(&with(markers)).unwrap_err().to_string();
     assert!(refused("[{text: nowhere}]").contains("markers.0.at"), "{}", refused("[{text: nowhere}]"));
     assert!(refused("[{id: a, at: 1}, {id: a, at: 2}]").contains("Two markers have the ID a"));
-    assert!(refused("[{at: 33}]").contains("Marker m1 is past the session's end"));
     assert!(refused("[{at: -1}]").contains("markers.0.at"));
     assert!(refused("[{id: 9lives, at: 1}]").contains("markers.0.id"));
     assert!(refused("[{at: 1, note: x}]").contains("markers.0.note"));
-    // At the song's end is in the song; a text is at most 200 characters.
+    // At the song's end, or past it, is allowed: the length is the song's
+    // content (D130). A text is at most 200 characters.
     parse(&with("[{at: 32}]")).unwrap();
+    parse(&with("[{at: 33}]")).unwrap();
     let long = "x".repeat(201);
     assert!(refused(&format!("[{{at: 1, text: {long}}}]")).contains("at most 200 characters"));
     parse(&with(&format!("[{{at: 1, text: {}}}]", "x".repeat(200)))).unwrap();

@@ -206,7 +206,7 @@ final class ProjectsTests: XCTestCase {
         let model = try SongModel(url: made)
         XCTAssertEqual(model.arrangement.title, "Untitled")
         XCTAssertEqual(model.arrangement.tempo, 120)
-        XCTAssertEqual(model.arrangement.lengthBeats, 128)
+        XCTAssertEqual(model.arrangement.lengthBeats, 4, "an empty song is one bar")
         XCTAssertTrue(model.untitled && model.untouched)
         XCTAssertEqual(Closing.of(untitled: model.untitled, untouched: model.untouched), .delete)
 

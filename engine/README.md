@@ -46,7 +46,7 @@ project's folder or the song file in it. It implements:
 
 | Command | Does |
 |---|---|
-| `daw init DIRECTORY [--tempo T] [--bars N] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song of N bars, in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) |
+| `daw init DIRECTORY [--tempo T] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song one bar long until something is put in it, since the length is the song's content (D130), in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
 | `daw describe [start\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|check\|samples\|beats\|joins\|export\|listen\|reference\|separate\|generate] [--schema]` | The authoring contract: without a topic, the topics a line each; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file. `--schema` adds the topic's JSON Schema, and with no topic prints the whole song's |
@@ -352,9 +352,9 @@ they play (`files.rs`): each file's length, and the beats of the map `daw
 samples beats` left beside it, when that map is of the sample the song lists.
 The person's edits of an audio clip keep its sound ending where it is drawn: an
 end is trimmed to the fade out's length before the beat, and a longer fade out
-starts earlier. An edit that would end an audio clip past the song's end by
-more than the end fade lengthens the song to the end of that bar, in the same
-step; `daw` commands leave the length to whoever sends them.
+starts earlier. An edit that puts any clip past the song's end moves the end to
+the next whole bar after it, since the host settles `session.length_beats` to
+the song's content after every edit (`Session::settle`, D130).
 What a device panel shows of an effect type, or of the Sampler's pad, comes
 from `aaw_model::describe`.
 Such a host is reached through its socket like any other, and compiles each

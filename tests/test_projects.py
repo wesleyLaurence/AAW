@@ -200,7 +200,7 @@ def test_a_copy_carries_the_host_on_and_leaves_the_original(rust_daw, tmp_path, 
 
 
 def test_move_and_copy_without_a_host(rust_daw, tmp_path, folders):
-    made = daw(rust_daw, "init", tmp_path / "one", "--tempo", 100, "--bars", 8)
+    made = daw(rust_daw, "init", tmp_path / "one", "--tempo", 100)
     daw(rust_daw, "track", "add", tmp_path / "one", "drums")
     moved = daw(rust_daw, "move", tmp_path / "one", tmp_path / "two")
     two = tmp_path.resolve() / "two" / "song.yaml"

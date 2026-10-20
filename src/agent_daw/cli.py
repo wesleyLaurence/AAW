@@ -301,9 +301,11 @@ def parser():
     timeline.add_argument("--end-at", help="A beat for --pad to end on; gives the beat it starts on")
     timeline.add_argument("--pad", metavar="TRACK.PAD")
     timeline.add_argument(
-        "--fit", action="store_true", help="Set the session's length to where its sound ends"
+        "--fit",
+        action="store_true",
+        help="Does nothing now: the length is the song's content, set after every edit",
     )
-    timeline.add_argument("--tail", type=float, default=0, help="Beats to leave after it, with --fit")
+    timeline.add_argument("--tail", type=float, default=0, help="Kept with --fit; does nothing")
     timeline.add_argument(
         "--tempo-for", type=float, metavar="SECONDS", help="The tempo at which the song is this long"
     )

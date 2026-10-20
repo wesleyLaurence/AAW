@@ -30,7 +30,7 @@ def registry(monkeypatch):
 def phrase(tmp_path):
     """A song with an instrumentless MIDI track holding a chord and a melody."""
     song = tmp_path / "song"
-    daw("init", song, "--tempo", 120, "--bars", 8)
+    daw("init", song, "--tempo", 120)
     path = song / "song.yaml"
     daw("track", "add", path, "keys", "--type", "midi")
     made = daw("clip", "add", path, "keys", "--at", 4, "--length-beats", 4)
@@ -281,7 +281,7 @@ def test_racks_are_saved_from_a_chain_listed_and_added_to_a_chain_in_another_son
         daw("rack", "save", path, "tracks.keys", "Keys Chain")
     # Added to another song's master, in one undo step, with the same effects.
     other = tmp_path / "other"
-    daw("init", other, "--tempo", 100, "--bars", 4)
+    daw("init", other, "--tempo", 100)
     added = daw("rack", "load", other, "master", "Keys Chain")
     assert added["label"] == "Add rack Keys Chain to master" and added["effects"] == ["utility", "eq", "limiter"]
     assert [e["type"] for e in load(other / "song.yaml")["master"]["effects"]] == ["utility", "eq", "limiter"]

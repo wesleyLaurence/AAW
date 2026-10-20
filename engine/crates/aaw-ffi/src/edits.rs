@@ -10,7 +10,7 @@ use aaw_host::session::{value_json, Doc};
 use aaw_host::tree::{self, handle_text, Item, Node, Step};
 use aaw_model::describe::{self, Initial};
 use aaw_model::rules::{midi, note_name, target, Owner, TargetKind};
-use aaw_model::{AudioClip, Beat, Effect, Project, Sample};
+use aaw_model::{AudioClip, Beat, Effect, Project};
 use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive, Zero};
 use serde_json::{json, Value as Json};
@@ -610,43 +610,14 @@ impl<'a> Song<'a> {
         Err("The clip is no longer in the song".into())
     }
 
-    /// The command that lengthens the song to the end of the bar an audio
-    /// clip's sound ends in, when that is past the song's end.
-    fn lengthen(&self, end: &BigRational) -> Option<Json> {
-        // What runs past the end by less than the song's end fade is taken by
-        // that fade, as a short fade out after a clip that ends on the song's
-        // end is. A file's length in beats is seldom a round number, too.
-        let session = &self.project.session;
-        let slack = fade_beats(session.end_fade_ms, session.tempo).max(1e-6);
-        let end = end - BigRational::from_float(slack).unwrap_or_default();
-        if end <= self.project.session.length_exact() {
-            return None;
-        }
-        let bar = BigRational::from_integer(4.into());
-        let length = (end / &bar).ceil() * bar;
-        Some(json!({"op": "set", "path": "session.length_beats", "value": beat(&length)}))
-    }
-
-    /// `commands`, after the song is made long enough for an audio clip that
-    /// ends at `end`: then they are one step, named `label`.
-    fn grown(&self, mut commands: Vec<Json>, end: Option<&BigRational>, label: impl FnOnce() -> String) -> Vec<Json> {
-        match end.and_then(|end| self.lengthen(end)) {
-            Some(longer) => {
-                commands.insert(0, longer);
-                batch(commands, label())
-            }
-            None => commands,
-        }
-    }
 }
 
 impl Song<'_> {
     /// The commands that copy clips `by` beats later and `rows` tracks down:
     /// a pattern or note clip as the host duplicates it, an audio clip as the
-    /// clip again on another beat. The song grows to hold an audio clip's.
+    /// clip again on another beat. The host lengthens the song to hold them.
     fn copies(&self, tree: &Node, clips: &[u64], spans: &[Placed], by: &BigRational, rows: i64, verb: &str) -> Result<Vec<Json>> {
         let tracks = items(tree, "tracks");
-        let mut furthest = None;
         let mut sample = "";
         let commands = clips
             .iter()
@@ -671,7 +642,6 @@ impl Song<'_> {
                 fields.insert("track".into(), json!(handle_text(to.handle)));
                 fields.insert("at".into(), at);
                 sample = &audio.sample;
-                furthest = later(furthest.take(), &s.end + by);
                 Ok(copy)
             })
             .collect::<Result<Vec<_>>>()?;
@@ -679,7 +649,6 @@ impl Song<'_> {
             1 => format!("{verb} audio clip {sample}"),
             n => format!("{verb} {n} clips"),
         };
-        let commands = self.grown(commands, furthest.as_ref(), label);
         // One audio clip's copy is an `audio.add` to the host, which this names.
         Ok(match commands.as_slice() {
             [only] if only["op"] == "audio.add" => batch(commands, label()),
@@ -689,11 +658,14 @@ impl Song<'_> {
 }
 
 /// The later of two ends.
-fn later(a: Option<BigRational>, b: BigRational) -> Option<BigRational> {
-    Some(match a {
-        Some(a) if a > b => a,
-        _ => b,
-    })
+/// `commands` as the host takes them: one alone, or more as one step named
+/// `label`.
+fn named(commands: Vec<Json>, label: impl FnOnce() -> String) -> Vec<Json> {
+    if commands.len() > 1 {
+        batch(commands, label())
+    } else {
+        commands
+    }
 }
 
 /// The commands that list a copied file among the song's samples, unless it
@@ -1168,7 +1140,6 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             // The model's beats are positions, so the sign is put back after.
             let distance = aaw_model::beat(&Beat::Float(by.abs()))?;
             let by_exact = if *by < 0.0 { -distance } else { distance };
-            let mut furthest = None;
             let mut sample = "";
             let commands = clips
                 .iter()
@@ -1186,7 +1157,6 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     }
                     if let Some(audio) = at.audio {
                         sample = &audio.sample;
-                        furthest = later(furthest.take(), at.end + &by_exact);
                     }
                     Ok(command)
                 })
@@ -1195,7 +1165,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 1 => format!("Move audio clip {sample}"),
                 n => format!("Move {n} clips"),
             };
-            Ok(song.grown(commands, furthest.as_ref(), label))
+            Ok(named(commands, label))
         }
         Edit::ClipRepeats { clip: key, repeats } => Ok(vec![json!({"op": "clip.repeats", "clip": clip(key), "repeats": repeats})]),
         Edit::ClipsDuplicate { clips } => {
@@ -1235,7 +1205,6 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 Some(key) => tracks.iter().position(|i| i.handle == *key).ok_or("The track is no longer in the song")? as i64 - top,
                 None => 0,
             };
-            let mut furthest = None;
             let mut commands = Vec::new();
             for (c, start) in clips.iter().zip(&starts) {
                 let to = usize::try_from(c["track"].as_i64().unwrap_or(0) + rows).ok().and_then(|i| tracks.get(i));
@@ -1246,18 +1215,12 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 fields.insert("op".into(), json!(if kind == "audio" { "audio.add" } else { "clip.add" }));
                 fields.insert("track".into(), json!(handle_text(to.handle)));
                 fields.insert("at".into(), beat(&(start + &shift)));
-                if kind == "audio" {
-                    furthest = later(furthest.take(), start + &shift + typed_exact(c["length"].as_str().unwrap_or("0"))?);
-                }
                 commands.push(command);
             }
             let label = match commands.len() {
                 1 => "Paste a clip".to_string(),
                 n => format!("Paste {n} clips"),
             };
-            if let Some(longer) = furthest.as_ref().and_then(|end| song.lengthen(end)) {
-                commands.insert(0, longer);
-            }
             Ok(batch(commands, label))
         }
         Edit::ClipTrim { clip: key, start, end } => {
@@ -1790,7 +1753,6 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             let tempo = project.session.tempo;
             let mut trim = json!({"op": "audio.trim", "clip": clip(key)});
             let mut commands = Vec::new();
-            let mut sounds = at.end;
             // No earlier than its file starts, or the song.
             let first = start.map(|start| start.max(song.beat_of(audio, 0.0)).max(0.0));
             if let Some(first) = first {
@@ -1816,17 +1778,10 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     end - fade_beats(fade, tempo)
                 };
                 trim["end"] = beat_at(leaves)?;
-                sounds = aaw_model::beat(&Beat::Float(end.max(0.0)))?;
             }
             commands.insert(0, trim);
             let label = format!("Trim audio clip {}", audio.sample);
-            Ok(match commands.len() {
-                1 => song.grown(commands, Some(&sounds), || label),
-                _ => {
-                    commands.splice(0..0, song.lengthen(&sounds));
-                    batch(commands, label)
-                }
-            })
+            Ok(named(commands, || label))
         }
         Edit::AudioFade { clip: key, fade_in_ms, fade_out_ms } => {
             let tree = doc.tree();
@@ -1896,20 +1851,12 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 FieldValue::Absent => json!({"op": "remove", "path": path}),
                 value => json!({"op": "set", "path": path, "value": field_json(value)}),
             };
-            // At another tempo of its own the clip plays for other beats.
-            let mut end = None;
             if field == "source_bpm" {
-                let bpm = match value {
-                    FieldValue::Number { value } if *value > 0.0 => *value,
-                    _ => project.session.tempo,
-                };
-                let mut retimed = audio.clone();
-                retimed.source_bpm = Some(bpm);
-                let beats = (song.source_end(audio)? - audio.source_start_seconds) * bpm / 60.0
-                    + tail_beats(&retimed, project.session.tempo, song.seconds(&audio.sample));
-                end = Some(&at.start + span(beats));
+                // Named for what it does: at another tempo of its own the
+                // clip plays for other beats.
+                return Ok(batch(vec![command], format!("Set the tempo of audio clip {}", audio.sample)));
             }
-            Ok(song.grown(vec![command], end.as_ref(), || format!("Set the tempo of audio clip {}", audio.sample)))
+            Ok(vec![command])
         }
         Edit::TrackAdd { index, midi } => {
             let mut command = json!({
@@ -2515,21 +2462,6 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     format!("Add track {id} with audio clip {sample}")
                 }
             };
-            // The clip plays its whole file, at the file's own tempo.
-            let file = Sample {
-                path: asset.path.clone(),
-                sha256: Some(asset.sha256.clone()),
-                source: None,
-                source_sha256: None,
-                root_note: None,
-            };
-            let end = files.of(directory, &file).map(|file| {
-                let beats = file.seconds * project.session.tempo / 60.0;
-                &start + span(beats)
-            });
-            if let Some(longer) = end.as_ref().and_then(|end| song.lengthen(end)) {
-                commands.insert(0, longer);
-            }
             Ok(batch(commands, label))
         }
     }

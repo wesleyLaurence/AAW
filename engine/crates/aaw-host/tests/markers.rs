@@ -114,8 +114,14 @@ fn what_a_marker_command_refuses() {
     edit(&mut s, json!({"op": "marker.add", "at": 4})).unwrap();
     assert!(refused(&mut s, json!({"op": "marker.text", "marker": "m9", "text": "x"})).contains("m9 is not a marker; the markers are m1"));
     assert!(refused(&mut s, json!({"op": "marker.text", "marker": "tracks.drums", "text": "x"})).contains("is not a marker"));
-    assert!(refused(&mut s, json!({"op": "marker.add", "at": 33})).contains("Marker m2 is past the session's end"));
-    assert!(refused(&mut s, json!({"op": "marker.move", "marker": "m1", "at": 40})).contains("past the session's end"));
+    // A marker past the end moves the end to hold it (D130).
+    edit(&mut s, json!({"op": "marker.add", "at": 33})).unwrap();
+    assert_eq!(get(&s, "session.length_beats"), json!(36));
+    edit(&mut s, json!({"op": "marker.move", "marker": "m1", "at": 40})).unwrap();
+    assert_eq!(get(&s, "session.length_beats"), json!(40));
+    edit(&mut s, json!({"op": "marker.remove", "markers": ["m2"]})).unwrap();
+    edit(&mut s, json!({"op": "marker.move", "marker": "m1", "at": 4})).unwrap();
+    assert_eq!(get(&s, "session.length_beats"), json!(32));
     assert!(refused(&mut s, json!({"op": "marker.add", "at": 5, "id": "m1"})).contains("Two markers have the ID m1"));
     assert!(refused(&mut s, json!({"op": "marker.add", "at": 5, "text": "x".repeat(201)})).contains("at most 200 characters"));
     assert!(refused(&mut s, json!({"op": "marker.remove"})).contains("Name the markers"));

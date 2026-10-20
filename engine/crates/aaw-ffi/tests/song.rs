@@ -391,8 +391,11 @@ fn clips_move_resize_and_duplicate_on_exact_beats() {
     // Nothing to do is no change; no track above the first is refused.
     assert!(song.edit(Edit::ClipsMove { clips: vec![fill], by: 0.0, rows: 0 }, None).unwrap().is_empty());
     assert!(song.edit(Edit::ClipsMove { clips: vec![fill], by: 0.0, rows: -1 }, None).is_err());
-    let e = song.edit(Edit::ClipsMove { clips: vec![fill], by: 12.0, rows: 0 }, None).unwrap_err().to_string();
-    assert_eq!(e, "drums: clip exceeds session");
+    // A clip moved past the end takes the song's end with it (D130).
+    song.edit(Edit::ClipsMove { clips: vec![fill], by: 12.0, rows: 0 }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.length_beats, 36.0);
+    song.undo().unwrap();
+    update(&seen);
 
     // A clip on a third of a beat stays on thirds when it moves.
     let third = agent(&path, json!({"op": "clip.add", "track": "perc", "pattern": "fill", "at": "1/3"}));
@@ -500,7 +503,9 @@ fn clips_dragged_with_option_are_copied_as_far_as_a_move_goes() {
     assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: 0.0, rows: 0 }, None).unwrap().is_empty());
     assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: -17.0, rows: 0 }, None).unwrap_err().to_string().contains("before the song"));
     assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: 0.0, rows: 2 }, None).is_err());
-    assert!(song.edit(Edit::ClipsCopy { clips: vec![fill], by: 15.0, rows: 0 }, None).is_err());
+    // A copy past the end takes the song's end with it (D130).
+    song.edit(Edit::ClipsCopy { clips: vec![fill], by: 15.0, rows: 0 }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.length_beats, 36.0);
     song.close();
 }
 
@@ -879,8 +884,12 @@ fn lanes_and_points_are_edited_by_key() {
     assert_eq!(lane(&update(&seen), 1, 0).points[1].shape, 0.0);
     song.undo().unwrap();
     assert_eq!(points(&lane(&update(&seen), 1, 0))[1], (8.25, -6.0, false));
-    // A point past the session end, or a value out of range, is refused.
-    assert!(song.edit(Edit::PointAdd { lane: volume.key, at: 40.0, value: 0.0 }, None).is_err());
+    // A point past the song's end moves the end to it (D130); a value out
+    // of range is refused.
+    song.edit(Edit::PointAdd { lane: volume.key, at: 40.0, value: 0.0 }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.length_beats, 40.0);
+    song.undo().unwrap();
+    update(&seen);
     assert!(song.edit(Edit::PointSet { point: mid, at: None, value: Some(99.0), hold: None, shape: None }, None).is_err());
 
     // An effect's knob: the field shows its lane, on the knob's own range.
@@ -1192,20 +1201,20 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move 2 clips"));
     assert_eq!((u.arrangement.tracks[0].clips[1].at, audio(&u, 1)[0].at), (14.0, 4.5));
 
-    // A clip that would end past the song's end lengthens the song to the end
-    // of that bar, in the same step.
+    // A clip that ends past the song's end takes the end to the end of that
+    // bar, in the same step (D130).
     song.edit(Edit::ClipsMove { clips: vec![clip], by: 25.0, rows: 0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move audio clip song"));
+    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("audio.move", "Move audio clip song to beat 29.5 on perc"));
     assert_eq!((audio(&u, 1)[0].at, u.arrangement.length_beats), (29.5, 36.0));
     assert!(u.touched.contains(&touch(Part::Session, 0, Delta::Changed)));
     song.undo().unwrap();
     let u = update(&seen);
     assert_eq!((audio(&u, 1)[0].at, u.arrangement.length_beats), (4.5, 32.0));
-    // Ending on the song's end is not past it.
+    // The end is the next whole bar after the clip's sound, with its tail.
     song.edit(Edit::ClipsMove { clips: vec![clip], by: 23.5, rows: 0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!((u.change.op.as_str(), audio(&u, 1)[0].at, u.arrangement.length_beats), ("audio.move", 28.0, 32.0));
+    assert_eq!((u.change.op.as_str(), audio(&u, 1)[0].at, u.arrangement.length_beats), ("audio.move", 28.0, 36.0));
     song.undo().unwrap();
     update(&seen);
 
@@ -1290,10 +1299,11 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     assert_eq!(audio(&update(&seen), 1)[0].fade_curve, "linear");
     set("stretch", text("preserve_pitch")).unwrap();
     assert_eq!(audio(&update(&seen), 1)[0].stretch, "preserve_pitch");
-    // At half the song's tempo of its own, its five seconds are five beats.
+    // At half the song's tempo of its own, its five seconds are five beats,
+    // and the song ends at the bar after them.
     set("source_bpm", number(60.0)).unwrap();
     let u = update(&seen);
-    assert_eq!((audio(&u, 1)[0].source_bpm, audio(&u, 1)[0].length_beats, u.arrangement.length_beats), (Some(60.0), 5.0, 48.0));
+    assert_eq!((audio(&u, 1)[0].source_bpm, audio(&u, 1)[0].length_beats, u.arrangement.length_beats), (Some(60.0), 5.0, 40.0));
     // At four times it they are forty, and the song grows to hold them.
     set("source_bpm", number(240.0)).unwrap();
     let u = update(&seen);
@@ -1728,10 +1738,13 @@ fn a_pattern_s_length_grid_and_swing_change_with_its_steps() {
     assert_eq!(pattern(&u.arrangement, "line").events.iter().map(|e| e.at).collect::<Vec<_>>(), [0.0, 4.0 / 3.0]);
     song.undo().unwrap();
     assert_eq!(pattern(&update(&seen).arrangement, "line").events.len(), 3);
-    // A length that is not a whole number of steps cannot hold step rows, and
-    // clips must still fit the song.
+    // A length that is not a whole number of steps cannot hold step rows; a
+    // clip made longer than the song takes the song's end with it (D130).
     assert!(song.edit(length("fill", "1.1"), None).unwrap_err().to_string().contains("whole number of steps"));
-    assert_eq!(song.edit(length("beat", "16"), None).unwrap_err().to_string(), "drums: clip exceeds session");
+    song.edit(length("beat", "16"), None).unwrap();
+    assert_eq!(update(&seen).arrangement.length_beats, 64.0);
+    song.undo().unwrap();
+    assert_eq!(update(&seen).arrangement.length_beats, 32.0);
     assert!(song.edit(length("fill", "3/2"), None).unwrap().is_empty());
 
     // A finer grid spreads the steps out; a coarser one takes them if they fall on it.
@@ -1974,7 +1987,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     let (song, seen) = open_at(&folder.to_string_lossy());
     transport(&seen);
     let a = song.arrangement();
-    assert_eq!((a.title.as_str(), a.tempo, a.length_beats, a.tracks.len()), ("Untitled", 120.0, 128.0, 0));
+    assert_eq!((a.title.as_str(), a.tempo, a.length_beats, a.tracks.len()), ("Untitled", 120.0, 4.0, 0));
     // The project the app made has its notes, and still holds nothing.
     assert!(std::fs::read_to_string(folder.join("SONG.md")).unwrap().starts_with("## Vision\n"));
     assert_eq!((song.path(), song.is_untitled(), song.untouched()), (first.clone(), true, true));
@@ -2635,9 +2648,10 @@ fn the_person_leaves_moves_rewords_and_removes_markers() {
     update(&seen);
     let u = update(&seen);
     assert_eq!((u.arrangement.markers[1].at, u.arrangement.markers[1].text.as_str()), (9.417, "too busy"));
-    // Nothing to remove is no edit, and a marker past the end is refused.
+    // Nothing to remove is no edit; a marker past the end moves the end to it (D130).
     assert!(song.edit(Edit::MarkersRemove { markers: vec![] }, None).unwrap().is_empty());
-    assert!(song.edit(Edit::MarkerAdd { at: 400.0, text: String::new() }, None).unwrap_err().to_string().contains("past the session's end"));
+    song.edit(Edit::MarkerAdd { at: 400.0, text: String::new() }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.length_beats, 400.0);
     assert!(std::fs::read_to_string(&path).unwrap().contains("markers:"));
     song.close();
 }

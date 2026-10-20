@@ -67,7 +67,6 @@ def test_exact_timing_no_drift():
         lambda d: d["session"].update(tempo=float("nan")),
         lambda d: d["session"].update(effects=["compressor"]),
         lambda d: d["tracks"][0]["pads"]["a"].update(sample="missing"),
-        lambda d: d["tracks"][0]["clips"][0].update(at=4),
         lambda d: d["patterns"]["main"]["events"][0].update(at=-1),
         lambda d: d["patterns"]["main"]["events"][0].update(duration=None),
         lambda d: d["patterns"]["main"]["events"][0].update(note="H2"),

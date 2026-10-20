@@ -165,7 +165,7 @@ uv run daw samples analyze SAMPLE_ID
 uv run daw samples audition SAMPLE_ID --output /tmp/candidate.wav
 uv run daw samples beats SONG.wav --near 0:41
 
-uv run daw init projects/my-beat --tempo 160 --bars 20   # song.yaml, and SONG.md for what the song is for
+uv run daw init projects/my-beat --tempo 160             # song.yaml, and SONG.md for what the song is for
 uv run daw samples import SAMPLE_ID --project projects/my-beat/song.yaml --id kick
 uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub --root-note auto
 uv run daw samples import ~/Music/song.m4a --project projects/my-beat/song.yaml --id song

@@ -52,7 +52,6 @@ length in seconds, which an audio clip without an end needs.
 | `clips-stacked` | Two or more clips of a track start on the same beat with the same music: the same pattern, the same playing notes, or the same file from the same second. One warning a group |
 | `clips-overlap` | Two clips of a track sound at once, as information. A pair already stacked is not reported again |
 | `note-retriggered` | A note starts while one of the same pitch on its track still sounds. One warning a clip, with the count and the first |
-| `song-ends-inside` | An audio clip sounds past `session.length_beats`. Validation refuses a pattern or note clip that would, or any clip that starts at or after the end |
 | `track-empty` | An instrument and no notes, notes and no instrument, pads and no clips, or nothing |
 | `register-crowded` | Two unmuted tracks hold notes in the same octave below C3 in the same bars. One warning a pair of tracks and an octave, the bars listed |
 | `pad-far-from-root` | A hit repitches its sample more than 24 semitones: the note against the sample's root (middle C without one), plus the event's and the pad's transpose. One warning a pad |

@@ -227,7 +227,7 @@ public final class SongModel {
     @ObservationIgnored private(set) var analysisReadTimes = DrawTimes()
     /// True for a moment after each change by the agent.
     public private(set) var agentWorking = false
-    /// True for a moment after the tempo, title or length changed.
+    /// True for a moment after the tempo, title or time signature changed.
     public private(set) var sessionChanged = false
     /// The host shut down, as after `daw close`.
     public private(set) var closed = false
@@ -371,6 +371,7 @@ public final class SongModel {
     // MARK: What the host reports
 
     fileprivate func apply(_ update: Update) {
+        let was = arrangement
         arrangement = update.arrangement
         revisionShown = CACurrentMediaTime()
         undoStep = update.undo
@@ -391,7 +392,10 @@ public final class SongModel {
             agentTimer?.cancel()
             agentTimer = after(1.6) { $0.agentWorking = false }
         }
-        if update.touched.contains(where: { $0.part == .session }) {
+        // The fields the transport bar shows: the length is the song's content
+        // and changes with any edit, so it does not light them (D130).
+        let shown = { (a: Arrangement) in (a.tempo, a.title, a.barBeats, a.beatUnit) }
+        if shown(was) != shown(arrangement) {
             sessionChanged = true
             sessionTimer?.cancel()
             sessionTimer = after(1.6) { $0.sessionChanged = false }

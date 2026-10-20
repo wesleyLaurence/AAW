@@ -190,7 +190,7 @@ Python, in `src/agent_daw`:
   environment, not the checkout's, and drives audio-separator; see
   [stem-separation.md](features/stem-separation.md).
 - `timeline.py`: a song's places in beats and seconds, where each track's sound is,
-  the start of a sound that ends on a beat, and fitting the session's length; see
+  and the start of a sound that ends on a beat; see
   [timeline.md](features/timeline.md).
 - `cli.py`: `samples`, `reference`, `listen`, `compare`, `check`, `timeline`,
   `joins`, `export` and `separate`. `check` is `inspect` with measured root notes and the
@@ -218,7 +218,12 @@ Session: `title`, `tempo`, `time_signature` (`N/D`, 1 to 32 beats over 1, 2, 4,
 8 or 16, `4/4` by default, one for the whole song; see
 [time-signature.md](features/time-signature.md)), `sample_rate` (44100 or 48000),
 `length_beats`, `master_gain_db`, `end_fade_ms`, and `stretcher` (`signalsmith` or
-`rubberband`; see [time-stretch.md](features/time-stretch.md)).
+`rubberband`; see [time-stretch.md](features/time-stretch.md)). `length_beats` is
+the song's content, not a setting: after every edit the host sets it to the next
+whole bar after the last clip's sound, automation point, section or marker, one
+bar at the least (`aaw_model::fitted_length`), so nothing lies past the end and
+`daw set session.length_beats` is refused; a song saved longer keeps its length
+until its next edit; see [song-length.md](features/song-length.md).
 
 Sample: relative `path`, optional `sha256`, original `source`, optional
 `source_sha256` and optional `root_note` with octave. Selected assets are copied
@@ -349,11 +354,12 @@ retain their exact times. Explicit events: `at`, `pad`, `velocity` (1…127), op
 `note`, `duration`, `transpose`. Gate mode requires a positive duration.
 
 Clip: `pattern`, `at`, positive integer `repeats`, `velocity_scale`. Repetitions
-use the pattern's declared length. Clips must fit the session, but sample tails may
-cross pattern boundaries. Sections have unique `id`, `at`, `length_beats`.
+use the pattern's declared length. A clip may lie anywhere from the song's start,
+and sample tails may cross pattern boundaries. Sections have unique `id`, `at`,
+`length_beats`.
 
 Marker: `id` (unique among the markers; left out, the next free `mN`), `at` from
-0 to the song's end, and `text`, up to 200 characters. A marker is a note the
+0, and `text`, up to 200 characters. A marker is a note the
 person left at a beat while listening, with M in the app; it plays nothing and
 is in no render, and the agent reads the markers with `daw marker list`, each
 with the bar it is in, the section over it and the clips sounding there. An

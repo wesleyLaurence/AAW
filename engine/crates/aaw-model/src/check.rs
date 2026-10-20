@@ -30,7 +30,6 @@ pub const CODES: &[(&str, &str)] = &[
     ("clips-stacked", "Two or more clips on one track start on the same beat with the same music, so it plays twice at once. Almost always a mistake: remove all but one, or move the others."),
     ("clips-overlap", "Information: two clips on one track sound at once, from the beat given. Sometimes deliberate, as a kick clip and a hat clip on one drum track."),
     ("note-retriggered", "Notes start while a note of the same pitch on the same track is still sounding, so the pitch is struck again before it ends. Shorten the earlier note or remove the later."),
-    ("song-ends-inside", "An audio clip runs past session.length_beats and its end is cut off. daw timeline SONG --fit sets the length to the last sound."),
     ("track-empty", "A track has an instrument and nothing to play, notes and no instrument, or nothing at all."),
     ("register-crowded", "Two tracks hold notes in the same octave below C3 in the same bars, listed. Two low parts in one register are the most common cause of a muddy mix: move one an octave, or give those bars to one."),
     ("pad-far-from-root", "A sample is repitched more than two octaves from its root, by the note, the event's and the pad's transpose, where it sounds artificial."),
@@ -165,7 +164,6 @@ pub fn check(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
         let spans = spans(p, ti, seconds);
         let stacked = stacked(t, &spans, &mut out);
         overlaps(t, &spans, &stacked, &mut out);
-        ends(p, &spans, &mut out);
         if let Some(midi) = &t.midi {
             retriggered(t, midi, &spans, &stacked, &mut out);
         }
@@ -504,31 +502,6 @@ fn overlaps(t: &Track, spans: &[Span], stacked: &HashSet<(usize, usize)>, out: &
                     .info(),
                 );
             }
-        }
-    }
-}
-
-/// `song-ends-inside`: an audio clip that sounds past the song's end. A
-/// pattern or note clip that would is refused by validation.
-fn ends(p: &Project, spans: &[Span], out: &mut Vec<Warning>) {
-    let length = p.session.length_exact();
-    for s in spans.iter().filter(|s| s.audio) {
-        let Some(end) = s.end else { continue };
-        if end > f(&length) + EPS {
-            out.push(
-                Warning::new(
-                    "song-ends-inside",
-                    format!(
-                        "{} runs to beat {} and the song ends at {}, so its last {} beats are cut off",
-                        s.path,
-                        number(end),
-                        beat_text(&length),
-                        number(end - f(&length))
-                    ),
-                    vec![s.path.clone()],
-                )
-                .at(length.clone()),
-            );
         }
     }
 }

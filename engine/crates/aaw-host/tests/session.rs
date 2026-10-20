@@ -88,8 +88,6 @@ fn invalid_edits_are_refused_with_the_models_message_and_change_nothing() {
         e,
         "1 validation error for Project\nsession.tempo\n  Input should be less than or equal to 400 [type=less_than_equal]"
     );
-    let e = edit(&mut s, json!({"op": "clip.move", "clip": "tracks.bass.clips.2", "at": 30})).unwrap_err();
-    assert!(e.contains("bass: clip exceeds session"), "{e}");
     let e = edit(&mut s, json!({"op": "set", "path": "tracks.drums.volume", "value": 1})).unwrap_err();
     assert!(e.contains("Extra inputs are not permitted"), "{e}");
     assert_eq!(s.doc().sha, before);
@@ -180,7 +178,6 @@ fn clips_add_repeat_and_duplicate() {
 #[test]
 fn duplicating_again_lays_the_copies_in_a_row() {
     let (_d, mut s) = open(false);
-    edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 64})).unwrap();
     edit(&mut s, json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": 40})).unwrap();
     let starts = |s: &Session| -> Vec<Json> {
         let clips = get(s, "tracks.drums.clips");
@@ -209,8 +206,11 @@ fn duplicating_again_lays_the_copies_in_a_row() {
     let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "at": "1/3", "times": 2})).unwrap();
     let ats: Vec<Json> = r["paths"].as_array().unwrap().iter().map(|p| get(&s, &format!("{}.at", p.as_str().unwrap()))).collect();
     assert_eq!(ats, [json!("1/3"), json!("13/3")]);
-    // Copies that would run past the song are refused, and so is an ID for several.
-    assert!(edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2})).unwrap_err().contains("exceeds session"));
+    // Copies that run past the song take its end with them (D130); an ID for several is refused.
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2})).unwrap();
+    assert_eq!(r["paths"].as_array().unwrap().len(), 2);
+    assert!(get(&s, "session.length_beats").as_f64().unwrap() > 64.0);
+    s.undo(Origin::Agent, false).unwrap();
     let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2, "id": "x"})).unwrap_err();
     assert!(e.contains("id names one copy"), "{e}");
     let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 0})).unwrap_err();
@@ -293,8 +293,9 @@ fn an_audio_clip_moves_to_a_beat_and_a_track_with_its_handle() {
     assert_eq!(edit(&mut s, json!({"op": "audio.move", "clip": clip})).unwrap_err(), "Move needs a beat or a track");
     assert!(edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "nobody"})).is_err());
     assert!(edit(&mut s, json!({"op": "audio.move", "clip": "tracks.drums.clips.0", "at": 2})).is_err());
-    let late = edit(&mut s, json!({"op": "audio.move", "clip": clip, "at": 400})).unwrap_err();
-    assert!(late.contains("audio clip starts past the session"), "{late}");
+    edit(&mut s, json!({"op": "audio.move", "clip": clip, "at": 400})).unwrap();
+    assert!(get(&s, "session.length_beats").as_f64().unwrap() > 400.0);
+    s.undo(Origin::Agent, false).unwrap();
     // One undo puts it back on its track.
     s.undo(Origin::User, false).unwrap();
     assert_eq!(get(&s, "tracks.song.audio.0.at"), json!("25/3"));
@@ -364,8 +365,9 @@ fn a_crossfade_sets_the_fades_of_a_join() {
     // What the model refuses, a command is refused for: a sample the song lacks.
     let unknown = edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "nothing"})).unwrap_err();
     assert!(unknown.contains("unknown sample nothing"), "{unknown}");
-    let late = edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 32})).unwrap_err();
-    assert!(late.contains("audio clip starts past the session"), "{late}");
+    // A clip past the end moves the end to hold it (D130).
+    edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 32})).unwrap();
+    assert!(get(&s, "session.length_beats").as_f64().unwrap() > 32.0);
 }
 
 #[test]
@@ -439,7 +441,11 @@ fn sections() {
     let (_d, mut s) = open(true);
     edit(&mut s, json!({"op": "section.add", "id": "drop", "at": 16, "length_beats": 8})).unwrap();
     edit(&mut s, json!({"op": "section.move", "section": "drop", "at": 24})).unwrap();
-    assert!(edit(&mut s, json!({"op": "section.move", "section": "drop", "at": 28})).unwrap_err().contains("Section drop exceeds session"));
+    // A section past the content moves the end to hold it, and back (D130).
+    edit(&mut s, json!({"op": "section.move", "section": "drop", "at": 28})).unwrap();
+    assert_eq!(get(&s, "session.length_beats"), json!(36));
+    edit(&mut s, json!({"op": "section.move", "section": "drop", "at": 24})).unwrap();
+    assert_eq!(get(&s, "session.length_beats"), json!(32));
     edit(&mut s, json!({"op": "section.remove", "section": "intro"})).unwrap();
     assert_eq!(get(&s, "sections"), json!([{"id": "drop", "at": 24, "length_beats": 8}]));
 }
@@ -450,7 +456,7 @@ fn a_batch_is_one_step_and_all_or_nothing() {
     let before = s.doc().sha.clone();
     let bad = json!({"op": "batch", "commands": [
         {"op": "set", "path": "tracks.drums.gain_db", "value": -3},
-        {"op": "clip.move", "clip": "tracks.drums.clips.0", "at": 31},
+        {"op": "set", "path": "tracks.drums.volume", "value": 1},
     ]});
     assert!(edit(&mut s, bad).is_err());
     assert_eq!(s.doc().sha, before);
