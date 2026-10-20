@@ -63,9 +63,9 @@ go. The panel takes file URLs from the Finder; a sample's path from the
 browser, which drags its path as text, with what the browser knows of the
 sample it dragged; and the browser's patch and rack types. ⌘V in the field
 attaches file URLs or an image on the pasteboard and pastes text as
-text. `+` opens a menu: Attach File…, the open panel as a sheet, several
-files and folders allowed; Attach Selected Clips, gray with none
-selected.
+text. `+`, at the left of the field and centered on its height (D132),
+opens a menu: Attach File…, the open panel as a sheet, several files and
+folders allowed; Attach Selected Clips, gray with none selected.
 
 **What the message carries.** With nothing attached the message is the
 string it was. With attachments, `content` is an array: the images as

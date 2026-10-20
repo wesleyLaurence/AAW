@@ -59,10 +59,12 @@ scrolling past that, a placeholder while it is empty, no smart quotes or
 dashes, since the person types commands. Return and Enter send; Shift-Return
 starts a new line; Escape gives the keys back to the arrangement. A
 composition under way with an input method takes Return itself. At the
-well's right, `+` for attachments ([files and clips in the
-conversation](agent-attachments.md), built after this), the microphone
-([speaking to the agent](voice-input.md), built after this too), and
-Send, gray until there is something to send and while the agent works. Under the well, in the faint color, "Return sends ·
+well's left, `+` for attachments ([files and clips in the
+conversation](agent-attachments.md), built after this), centered on the
+field's height, at the left since October 20, 2026 (D132); at the well's
+right, the microphone ([speaking to the agent](voice-input.md), built
+after this too), and Send, gray until there is something to send and
+while the agent works. Under the well, in the faint color, "Return sends ·
 Shift-Return starts a new line", until the conversation has a row.
 Option-Return no longer breaks the line.
 
