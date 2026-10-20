@@ -69,6 +69,16 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.grid, 1.0 / 16, "and still snapped to")
     }
 
+    func testTheResizeCursorShowsAtTheEdgesADragTrimsOrResizes() {
+        let rect = CGRect(x: 300, y: 72, width: 100, height: 41)
+        // A note clip trims at either edge, a pattern clip resizes at its end.
+        XCTAssertEqual(TimelineLayout.edgeRects(of: rect, start: true, end: true),
+                       [CGRect(x: 300, y: 72, width: 6, height: 41), CGRect(x: 394, y: 72, width: 6, height: 41)])
+        XCTAssertEqual(TimelineLayout.edgeRects(of: rect, start: false, end: true), [CGRect(x: 394, y: 72, width: 6, height: 41)])
+        // A clip too narrow for its parts only moves, so the pointer stays an arrow.
+        XCTAssertEqual(TimelineLayout.edgeRects(of: CGRect(x: 300, y: 72, width: 15, height: 41), start: true, end: true), [])
+    }
+
     func testAClickSnapsToTheGridAndStaysInTheSong() {
         let l = layout()
         XCTAssertEqual(l.target(atX: l.x(17.9), free: false), 16)

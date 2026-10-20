@@ -57,6 +57,26 @@ final class AudioClipLayoutTests: XCTestCase {
         XCTAssertEqual(plain.part(at: CGPoint(x: 101, y: 54), in: CGRect(x: 100, y: 50, width: 12, height: 27)), .body)
     }
 
+    func testTheResizeCursorShowsWhereverAPressTakesAnEdgeOrAHandle() {
+        let shape = AudioClipLayout(clip(), tempo: 120, seconds: 40)
+        // The clip's rectangle, with its title strip of 15 points over the body.
+        let rect = CGRect(x: 100, y: 35, width: 340, height: 43)
+        let body = CGRect(x: 100, y: 50, width: 340, height: 27)
+        let rects = shape.grabRects(in: body, clip: rect)
+        XCTAssertEqual(rects, [
+            CGRect(x: 100, y: 35, width: 5, height: 43), CGRect(x: 435, y: 35, width: 5, height: 43),
+            CGRect(x: 104, y: 35, width: 12, height: 24), CGRect(x: 414, y: 35, width: 12, height: 24),
+        ], "the edges the clip's whole height, the handles' reach to the bottom of the body's top third")
+        // Over every point of the body, the cursor says what the press takes.
+        for x in stride(from: body.minX + 0.5, to: body.maxX, by: 1) {
+            for y in stride(from: body.minY + 0.5, to: body.maxY, by: 1) {
+                let p = CGPoint(x: x, y: y)
+                XCTAssertEqual(rects.contains { $0.contains(p) }, shape.part(at: p, in: body) != .body, "at \(p)")
+            }
+        }
+        XCTAssertEqual(shape.grabRects(in: CGRect(x: 100, y: 50, width: 12, height: 27), clip: rect), [], "a narrow clip only moves")
+    }
+
     func testAnEdgeGoesNoFurtherThanTheFileAndAFadeNoFurtherThanTheOther() {
         let shape = AudioClipLayout(clip(), tempo: 120, seconds: 40)
         XCTAssertEqual(shape.start(draggedTo: 4), 4)

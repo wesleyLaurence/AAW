@@ -23,6 +23,8 @@ public struct TimelineLayout: Equatable {
     /// The gap between the tracks and the returns.
     public static let busGap: CGFloat = 10
     public static let maxPixelsPerBeat: CGFloat = 240
+    /// How far in from a clip's edge a press resizes or trims it.
+    public static let resizeEdge: CGFloat = 6
 
     public var pixelsPerBeat: CGFloat = 16
     public var scroll: CGPoint = .zero
@@ -47,6 +49,18 @@ public struct TimelineLayout: Equatable {
 
     public func x(_ beat: Double) -> CGFloat {
         Self.headerWidth + CGFloat(beat) * pixelsPerBeat - scroll.x
+    }
+
+    /// Where the pointer becomes the resize cursor over a clip drawn in
+    /// `rect`: its start when a drag trims it, and its end, each a strip
+    /// `resizeEdge` wide; none for a clip too narrow for its parts, which
+    /// only moves.
+    public static func edgeRects(of rect: CGRect, start: Bool, end: Bool) -> [CGRect] {
+        guard rect.width >= 16 else { return [] }
+        var rects: [CGRect] = []
+        if start { rects.append(CGRect(x: rect.minX, y: rect.minY, width: resizeEdge, height: rect.height)) }
+        if end { rects.append(CGRect(x: rect.maxX - resizeEdge, y: rect.minY, width: resizeEdge, height: rect.height)) }
+        return rects
     }
 
     public func beat(atX x: CGFloat) -> Double {
