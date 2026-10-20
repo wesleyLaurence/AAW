@@ -1341,8 +1341,11 @@ public final class SongModel {
     /// Plays a note now through the Synth on a MIDI track and the track's
     /// chain, as the panel's keys do: outside the timeline and the undo
     /// history. `velocity` is 1 to 127.
-    func previewNote(track: UInt64, pitch: Int, velocity: Int, lengthBeats: Double) {
-        send { try $0.previewNote(track: track, pitch: Int32(pitch), velocity: UInt32(velocity), lengthBeats: lengthBeats) }
+    /// `replace` lets go the track's earlier previews first, each through
+    /// its release, so one is heard at a time: the piano roll's way. The
+    /// Synth panel's keys leave it off and sound together.
+    func previewNote(track: UInt64, pitch: Int, velocity: Int, lengthBeats: Double, replace: Bool = false) {
+        send { try $0.previewNote(track: track, pitch: Int32(pitch), velocity: UInt32(velocity), lengthBeats: lengthBeats, replace: replace) }
     }
 
     /// Sets the root note of the Sampler's sample to the pitch `daw samples

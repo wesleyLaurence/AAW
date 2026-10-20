@@ -12,7 +12,12 @@ removed. This file is what was added for writing parts by hand, as in Ableton.
   a drag or an arrow key, and when its key at the left is pressed or dragged
   across. A preview lasts the note's length, from an eighth of a beat to a
   beat, at its velocity. The headphones beside the grid turn it off. A track
-  with no instrument plays nothing.
+  with no instrument plays nothing. One is heard at a time (since October 20,
+  2026): a preview lets go the note previewed before it on the track, which
+  rings out through its release, so a note moved quickly with the arrow keys
+  or dragged across pitches is heard alone rather than over every earlier
+  one still sounding. The Synth panel's keys are not changed: a chord played
+  there sounds together.
 - **A velocity lane.** Under the notes, each note's velocity is a stalk at its
   start. Dragging one selects its note, as a click on the note does, and moves
   every selected note's velocity by as much, each within 1 to 127, as one
@@ -47,6 +52,15 @@ removed. This file is what was added for writing parts by hand, as in Ableton.
   still neither allocates nor frees. Previews carry on through an edit, and
   through a change of structure on a track that is still there. A pitch the
   map leaves silent is silent here, and the reply's `sounds` is false.
+- `note.preview` takes `replace` (false unless given). With it the track's
+  earlier previews are let go first, as if their keys were lifted: a Synth's
+  voice goes to its amp release from where it is, and a Sampler's voice ends
+  through its pad's release from where it is, or over the player's 10 ms
+  fade when the pad's is shorter; a note already releasing is left to it,
+  and a silent pitch that replaces still lets the sounding ones go. The
+  piano roll sends `replace: true` on every preview (`Song.preview_note`'s
+  `replace`); the Synth panel's keys and `daw synth audition --play` send
+  nothing and sound together.
 - Three edits through the FFI: `NotesStart` (the start of the grabbed note to
   a beat, the others as far, ends kept), `NotesCopy` (copies as far as
   `NotesMove` would move the notes, within one clip, inside MIDI notes 0 to
@@ -61,6 +75,8 @@ removed. This file is what was added for writing parts by hand, as in Ableton.
 - A preview has a fixed length; a note held while the mouse is down, as a
   MIDI keyboard's is, waits for the MIDI keyboard on the backlog.
 - Only the grabbed note is heard while a chord is moved.
+- A preview's release is the patch's or the pad's: a pad with a long release
+  still overlaps the note after it, as it would under a hand on a keyboard.
 - The velocity lane's height is fixed, and velocity is not drawn by sweeping
   across stalks.
 - Option-drag copied notes only until [selecting several things](selection.md)

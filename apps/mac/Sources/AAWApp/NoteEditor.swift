@@ -147,10 +147,13 @@ final class NoteEditor: NSView {
     }
 
     /// Plays a note through the track's instrument, as the Synth panel's keys
-    /// do: as long as the note, from an eighth of a beat to a beat.
+    /// do: as long as the note, from an eighth of a beat to a beat. One at a
+    /// time: it replaces the note previewed before it on the track, which is
+    /// let go through its release, so a note moved quickly with the arrow
+    /// keys or dragged across pitches is heard alone.
     private func preview(pitch: Int, velocity: Int, duration: Double) {
         guard model.notePreview, let track = context?.track, track.instrument != nil else { return }
-        model.previewNote(track: track.key, pitch: pitch, velocity: min(max(velocity, 1), 127), lengthBeats: min(max(duration, 0.125), 1))
+        model.previewNote(track: track.key, pitch: pitch, velocity: min(max(velocity, 1), 127), lengthBeats: min(max(duration, 0.125), 1), replace: true)
     }
 
     // MARK: Frames
@@ -870,7 +873,7 @@ struct NoteClipHeader: View {
                 }
                 .toggleStyle(.button)
                 .controlSize(.mini)
-                .help("Preview: hear a note as it is drawn, clicked or moved, and as its key is pressed")
+                .help("Preview: hear a note as it is drawn, clicked or moved, and as its key is pressed, one at a time")
             }
             Divider().padding(.vertical, 2)
             let notes = model.selectedNoteViews

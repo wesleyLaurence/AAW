@@ -113,6 +113,11 @@ fn a_note_preview_is_a_transport_command() {
     let c: Command = serde_json::from_value(json!({"op": "note.preview", "track": "lead", "pitch": "C4"})).unwrap();
     assert_eq!(c.kind(), Kind::Transport);
     assert_eq!(c.op(), "note.preview");
+    // `replace`, the piano roll's one note at a time, is read and is not written back when absent.
+    let c: Command = serde_json::from_value(json!({"op": "note.preview", "track": "lead", "pitch": 60, "replace": true})).unwrap();
+    assert!(matches!(c, Command::NotePreview { replace: Some(true), .. }));
+    let c: Command = serde_json::from_value(json!({"op": "note.preview", "track": "lead", "pitch": 60})).unwrap();
+    assert!(!serde_json::to_value(&c).unwrap().as_object().unwrap().contains_key("replace"));
 }
 
 #[test]

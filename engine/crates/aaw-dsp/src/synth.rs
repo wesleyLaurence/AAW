@@ -1075,6 +1075,17 @@ impl Synth {
         self.preview.push(v);
     }
 
+    /// Lets go the previewed notes still held, as if their keys were lifted
+    /// now: each rings out through the amp release from where it is, so the
+    /// next preview sounds alone. A note already released is left to it.
+    pub fn let_go_previews(&mut self) {
+        for v in self.preview.iter_mut() {
+            if !v.releasing() {
+                v.off = v.frames as f64;
+            }
+        }
+    }
+
     /// Whether a previewed note is sounding.
     pub fn previewing(&self) -> bool {
         !self.preview.is_empty()
@@ -1542,6 +1553,34 @@ mod tests {
         assert!(tail[..1000].iter().any(|f| f[0].abs() > 0.05), "still sounding after the take-over");
         assert!(tail[6000..].iter().all(|f| f[0] == 0.0), "silent 100 ms after the note was let go");
         assert!(!new.previewing());
+    }
+
+    #[test]
+    fn a_preview_let_go_rings_out_through_its_release_and_the_next_sounds_alone() {
+        let p = patch("{oscillators: {a: {wave: sine, phase: 0}}, envelopes: {amp: {attack_ms: 0, release_ms: 100}}}");
+        let notes = Arc::new(vec![]);
+        let mut s = Synth::new(p, notes, 4096, 240);
+        // A note held for a second, let go after a tenth of it.
+        s.preview(69.0, 1.0, 48000);
+        let mut out = vec![[0.0; 2]; 4800];
+        s.render(&mut out, 0, 1 << 30, false, 0);
+        s.let_go_previews();
+        let mut tail = vec![[0.0; 2]; 8000];
+        s.render(&mut tail, 4800, 1 << 30, false, 0);
+        assert!(tail[..1000].iter().any(|f| f[0].abs() > 0.05), "still ringing just after it was let go");
+        assert!(tail[5000..].iter().all(|f| f[0] == 0.0), "silent 100 ms after it was let go, not after its second");
+        assert!(!s.previewing());
+        // Let go again while it rings, the release is not restarted.
+        s.preview(60.0, 1.0, 48000);
+        let mut out = vec![[0.0; 2]; 4800];
+        s.render(&mut out, 12800, 1 << 30, false, 0);
+        s.let_go_previews();
+        let mut a = vec![[0.0; 2]; 2400];
+        s.render(&mut a, 17600, 1 << 30, false, 0);
+        s.let_go_previews();
+        let mut b = vec![[0.0; 2]; 4800];
+        s.render(&mut b, 20000, 1 << 30, false, 0);
+        assert!(b[2500..].iter().all(|f| f[0] == 0.0), "the first let-go counts");
     }
 
     #[test]

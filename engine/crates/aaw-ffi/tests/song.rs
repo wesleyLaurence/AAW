@@ -2871,7 +2871,7 @@ fn the_panel_adds_parts_and_entries_sets_several_fields_saves_a_patch_and_previe
     assert_eq!(aaw_ffi::library::library_patches("panel".into())[0].description, "From the panel");
     // A note previewed on a track without an instrument is refused before anything opens.
     let drums = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().key;
-    let e = song.preview_note(drums, 60, 100, 1.0).unwrap_err();
+    let e = song.preview_note(drums, 60, 100, 1.0, true).unwrap_err();
     assert!(e.to_string().contains("no instrument"), "{e}");
 }
 

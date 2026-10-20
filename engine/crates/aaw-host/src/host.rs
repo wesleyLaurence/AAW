@@ -476,8 +476,10 @@ impl Host {
     /// its Synth or its Sampler, and its chain, from where the stream stands,
     /// outside the timeline and the history. Opens the output if no play has
     /// yet. A Sampler plays it as the same note in a clip would; a pitch its
-    /// map leaves silent is silent here too, and the reply says so.
-    fn preview(&mut self, track: &str, pitch: &Json, velocity: Option<i64>, length_beats: Option<&Json>) -> Result<Json> {
+    /// map leaves silent is silent here too, and the reply says so. With
+    /// `replace` the track's earlier previews are let go first, each through
+    /// its release, so one is heard at a time, as the piano roll asks.
+    fn preview(&mut self, track: &str, pitch: &Json, velocity: Option<i64>, length_beats: Option<&Json>, replace: bool) -> Result<Json> {
         let pitch = match pitch {
             Json::Number(n) => n.as_i64().ok_or_else(|| format!("pitch {n} is not a whole number"))?,
             Json::String(s) => s.parse::<i64>().or_else(|_| aaw_model::rules::midi(s))?,
@@ -527,14 +529,20 @@ impl Host {
             .ok_or_else(|| format!("{track} is not yet playing its instrument; playback keeps the previous version"))?;
         let sounds = match voice {
             None => {
-                t.control.preview(index, pitch as f64, velocity as f64 / 127.0, frames)?;
+                t.control.preview(index, pitch as f64, velocity as f64 / 127.0, frames, replace)?;
                 true
             }
             Some(Some(voice)) => {
-                t.control.preview_voice(index, voice)?;
+                t.control.preview_voice(index, voice, replace)?;
                 true
             }
-            Some(None) => false,
+            Some(None) => {
+                // A silent pitch still takes the place of what was sounding.
+                if replace {
+                    t.control.let_go_previews(index)?;
+                }
+                false
+            }
         };
         Ok(json!({
             "sounds": sounds,
@@ -563,7 +571,9 @@ impl Host {
                 }
                 Ok(self.status())
             }
-            Command::NotePreview { track, pitch, velocity, length_beats } => self.preview(track, pitch, *velocity, length_beats.as_ref()),
+            Command::NotePreview { track, pitch, velocity, length_beats, replace } => {
+                self.preview(track, pitch, *velocity, length_beats.as_ref(), replace.unwrap_or(false))
+            }
             Command::Locate { at } => {
                 let at = beat(at)?;
                 self.check_in_song(&at, "locate")?;
