@@ -46,7 +46,7 @@ public enum ContextMenu {
     /// and Delete. The master has no name of its own, no mute mark and cannot
     /// go; a return has no solo. A track offers Group Tracks, or Remove from
     /// Group when it is in one (`grouped`); a group offers Ungroup.
-    public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, lanesShown: Bool, grouped: Bool = false) -> [Item<RowAction>] {
+    public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
             items.append(Item(title: "Rename", action: .rename, key: "r"))
@@ -56,7 +56,7 @@ public enum ContextMenu {
         if kind == .track || kind == .group {
             items.append(Item(title: soloed ? "Unsolo" : "Solo", action: .solo))
         }
-        items.append(Item(title: lanesShown ? "Hide Automation" : "Show Automation", action: .automation))
+        items.append(Item(title: automationShown ? "Hide Automation" : "Show Automation", action: .automation))
         items.append(.separator)
         switch kind {
         case .track:

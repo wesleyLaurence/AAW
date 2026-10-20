@@ -49,8 +49,7 @@ with their tracks, and `daw describe project` and `daw describe effects` say
 what a group is.
 
 In the app a group is a row above its tracks with a track's header: name,
-chain, mute, solo, volume, pan, the A mark, and its sends under the mark by
-its name. Before the name a mark folds its tracks away under it and shows them
+chain, mute, solo, volume, pan, and its sends under the mark by its name. Before the name a mark folds its tracks away under it and shows them
 again, with Option for every group. Its lane draws its tracks' clips small, a
 strip a track, folded or not. The tracks in a group sit in from the edge.
 Group Tracks (⌘G) groups the selected track or the tracks of the selected

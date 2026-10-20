@@ -17,8 +17,6 @@ public struct HeaderLayout: Equatable {
         case name, mute, solo, volume, pan
         /// The send to the return at this place among the returns.
         case send(Int)
-        /// The mark that shows or hides the row's automation lanes.
-        case auto
         /// The header of the lane at this place among the row's lanes, and
         /// the mark that removes that lane.
         case lane(Int)
@@ -47,7 +45,7 @@ public struct HeaderLayout: Equatable {
     /// Whether the row has a fold mark for its sends, which it has when the
     /// song has returns.
     public var folds: Bool
-    /// The row's automation lanes while they are shown; nil while folded away.
+    /// The row's automation lanes while they are shown; nil while hidden.
     public var lanes: Int?
     /// Whether a group's tracks are folded away under it.
     public var collapsed: Bool
@@ -115,17 +113,9 @@ public struct HeaderLayout: Equatable {
         switch kind {
         case .track, .group:
             let left: CGFloat = left + (folds ? 15 : 6)
-            return CGRect(x: left, y: top + 5, width: auto.minX - 6 - left, height: 16)
+            return CGRect(x: left, y: top + 5, width: mute.minX - 6 - left, height: 16)
         case .bus, .master:
-            return CGRect(x: 14, y: top + 7, width: auto.minX - 6 - 14, height: 16)
-        }
-    }
-
-    /// The mark that shows or hides the row's automation lanes.
-    public var auto: CGRect {
-        switch kind {
-        case .track, .group: CGRect(x: Self.width - 64, y: top + 6, width: 16, height: 14)
-        case .bus, .master: CGRect(x: volume.minX - 20, y: top + 9, width: 16, height: 14)
+            return CGRect(x: 14, y: top + 7, width: volume.minX - 6 - 14, height: 16)
         }
     }
 
@@ -209,7 +199,6 @@ public struct HeaderLayout: Equatable {
 
     /// What of the header is at a point of the view.
     public func part(at p: CGPoint) -> Part {
-        if auto.insetBy(dx: -1, dy: -2).contains(p) { return .auto }
         if let lanes, p.y >= top + baseHeight {
             for index in 0..<lanes where lane(index).contains(p) {
                 return laneRemove(index).insetBy(dx: -3, dy: -3).contains(p) ? .laneRemove(index) : .lane(index)
