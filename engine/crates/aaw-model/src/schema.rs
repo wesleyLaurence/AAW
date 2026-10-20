@@ -2160,6 +2160,19 @@ pub struct Saturation {
     pub bypass: bool,
 }
 
+/// An overdrive: the signal driven by `drive_db` into a curve harder than
+/// the saturation's soft one, a lowpass at `tone_hz` after it, trimmed by
+/// `output_db` and mixed under the dry signal.
+#[derive(Clone, Debug)]
+pub struct Overdrive {
+    pub id: Option<String>,
+    pub drive_db: f64,
+    pub tone_hz: f64,
+    pub output_db: f64,
+    pub mix_percent: f64,
+    pub bypass: bool,
+}
+
 /// Which channels a utility flips the polarity of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Invert {
@@ -2215,11 +2228,12 @@ pub enum Effect {
     Reverb(Reverb),
     Chorus(Chorus),
     Saturation(Saturation),
+    Overdrive(Overdrive),
     Utility(Utility),
     Analyzer(Analyzer),
 }
 
-pub const EFFECT_TYPES: [&str; 11] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "utility", "analyzer"];
+pub const EFFECT_TYPES: [&str; 12] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer"];
 
 impl PartialEq for Effect {
     /// Two effects are equal when the song would write them the same.
@@ -2240,6 +2254,7 @@ impl Effect {
             Effect::Reverb(_) => "reverb",
             Effect::Chorus(_) => "chorus",
             Effect::Saturation(_) => "saturation",
+            Effect::Overdrive(_) => "overdrive",
             Effect::Utility(_) => "utility",
             Effect::Analyzer(_) => "analyzer",
         }
@@ -2256,6 +2271,7 @@ impl Effect {
             Effect::Reverb(e) => e.id.as_deref(),
             Effect::Chorus(e) => e.id.as_deref(),
             Effect::Saturation(e) => e.id.as_deref(),
+            Effect::Overdrive(e) => e.id.as_deref(),
             Effect::Utility(e) => e.id.as_deref(),
             Effect::Analyzer(e) => e.id.as_deref(),
         }
@@ -2272,6 +2288,7 @@ impl Effect {
             Effect::Reverb(e) => e.bypass,
             Effect::Chorus(e) => e.bypass,
             Effect::Saturation(e) => e.bypass,
+            Effect::Overdrive(e) => e.bypass,
             Effect::Utility(e) => e.bypass,
             Effect::Analyzer(e) => e.bypass,
         }
@@ -2325,7 +2342,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'utility', 'analyzer'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'overdrive', 'utility', 'analyzer'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2352,6 +2369,7 @@ impl Effect {
             ],
             "chorus" => &["type", "id", "rate_hz", "depth_ms", "delay_ms", "mix_percent", "bypass"],
             "saturation" => &["type", "id", "mode", "drive_db", "output_db", "mix_percent", "bypass"],
+            "overdrive" => &["type", "id", "drive_db", "tone_hz", "output_db", "mix_percent", "bypass"],
             "utility" => &["type", "id", "gain_db", "pan", "width_percent", "mono", "mono_below_hz", "invert", "bypass"],
             "analyzer" => &["type", "id", "bypass"],
             _ => &[
@@ -2522,6 +2540,23 @@ impl Effect {
                     }))
                 })()
             }
+            "overdrive" => {
+                let drive_db = float(ctx, "drive_db", 24.0, Bounds::ge_le("0", "60"));
+                let tone_hz = float(ctx, "tone_hz", 6000.0, Bounds::ge_le("200", "20000"));
+                let output_db = float(ctx, "output_db", 0.0, Bounds::ge_le("-24", "24"));
+                let mix_percent = float(ctx, "mix_percent", 100.0, Bounds::ge_le("0", "100"));
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    Some(Effect::Overdrive(Overdrive {
+                        id: id?,
+                        drive_db: drive_db?,
+                        tone_hz: tone_hz?,
+                        output_db: output_db?,
+                        mix_percent: mix_percent?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
             "utility" => {
                 let gain_db = float(ctx, "gain_db", 0.0, Bounds::ge_le("-96", "24"));
                 let pan = float(ctx, "pan", 0.0, Bounds::ge_le("-1", "1"));
@@ -2671,6 +2706,12 @@ impl Effect {
             Effect::Saturation(e) => {
                 o.str("mode", e.mode.as_str(), "soft");
                 o.float("drive_db", e.drive_db, 12.0);
+                o.float("output_db", e.output_db, 0.0);
+                o.float("mix_percent", e.mix_percent, 100.0);
+            }
+            Effect::Overdrive(e) => {
+                o.float("drive_db", e.drive_db, 24.0);
+                o.float("tone_hz", e.tone_hz, 6000.0);
                 o.float("output_db", e.output_db, 0.0);
                 o.float("mix_percent", e.mix_percent, 100.0);
             }

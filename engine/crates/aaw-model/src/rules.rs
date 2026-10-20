@@ -548,6 +548,7 @@ pub fn effect_params(kind: &str) -> &'static [(&'static str, Domain)] {
         "reverb" => &[("mix_percent", Domain::Linear)],
         "chorus" => &[("rate_hz", Domain::Log), ("depth_ms", Domain::Linear), ("delay_ms", Domain::Linear), ("mix_percent", Domain::Linear)],
         "saturation" => &[("drive_db", Domain::Linear), ("output_db", Domain::Linear), ("mix_percent", Domain::Linear)],
+        "overdrive" => &[("drive_db", Domain::Linear), ("tone_hz", Domain::Log), ("output_db", Domain::Linear), ("mix_percent", Domain::Linear)],
         "utility" => &[("gain_db", Domain::Linear), ("pan", Domain::Linear), ("width_percent", Domain::Linear)],
         _ => &[],
     }
@@ -571,6 +572,9 @@ pub fn effect_range(kind: &str, field: &str) -> Range {
         ("chorus", "delay_ms") => Range::closed(1.0, 40.0),
         ("saturation", "drive_db") => Range::closed(0.0, 36.0),
         ("saturation", "output_db") => Range::closed(-24.0, 24.0),
+        ("overdrive", "drive_db") => Range::closed(0.0, 60.0),
+        ("overdrive", "tone_hz") => Range::closed(200.0, 20000.0),
+        ("overdrive", "output_db") => Range::closed(-24.0, 24.0),
         ("utility", "gain_db") => Range::closed(-96.0, 24.0),
         ("utility", "pan") => Range::closed(-1.0, 1.0),
         ("utility", "width_percent") => Range::closed(0.0, 400.0),

@@ -31,6 +31,7 @@ tracks:
       - {type: reverb}
       - {type: chorus}
       - {type: saturation}
+      - {type: overdrive}
       - {type: utility}
       - {type: analyzer}
     sends: [{to: r}]

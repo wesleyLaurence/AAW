@@ -65,6 +65,7 @@ render with and without it and use `daw compare`.
 | `reverb` | `decay_seconds` 0.1–12, `predelay_ms` 0–250, `damping_hz` 500–20000, `lowcut_hz` 20–2000, `width_percent`, `mix_percent`, `seed` |
 | `chorus` | `rate_hz` 0.05–10, `depth_ms` 0–20, `delay_ms` 1–40, `mix_percent` (50 unless given) |
 | `saturation` | `mode` soft/hard/tube, `drive_db` 0–36, `output_db` ±24, `mix_percent` |
+| `overdrive` | `drive_db` 0–60 (24 unless given), `tone_hz` 200–20000 (6000 unless given), `output_db` ±24, `mix_percent` ([overdrive.md](overdrive.md)) |
 | `utility` | `gain_db` −96…24, `pan` ±1, `width_percent` 0–400, `mono`, `mono_below_hz` 20–1000 or left out, `invert` none/left/right/both ([utility.md](utility.md)) |
 | `analyzer` | No fields: changes nothing, and the app shows the sound through it ([analyzer.md](analyzer.md)); not inside a Synth patch |
 
@@ -149,6 +150,13 @@ render with and without it and use `daw compare`.
   too, with its offset removed by a one-pole highpass at 10 Hz. `output_db`
   trims the result and `mix_percent` blends it under the dry signal. No
   oversampling: a hard clip high up aliases a little.
+- **overdrive**: a distortion, added October 20, 2026: the signal driven by
+  `drive_db`, up to 60, into the cubic soft clip `1.5x − 0.5x³`, flat at full
+  scale, harder than the saturation's `tanh` and rounder than its hard clip,
+  odd harmonics only; then a second-order lowpass at `tone_hz`, which takes
+  the fizz off the top and which a lane moves; then `output_db`, near which a
+  driven signal comes out, and `mix_percent`. No latency and no oversampling.
+  See [overdrive.md](overdrive.md).
 - **utility**: the channel moves that need no other device, added October 7,
   2026, in this order: `invert` flips the polarity of the left, the right or
   both channels; `mono` sums the channels to their average; `mono_below_hz`
@@ -163,8 +171,8 @@ render with and without it and use `daw compare`.
   the levels, the loudness, the spectrum and the stereo field. Bypassed, it
   measures nothing. Not offered inside a Synth's patch. See
   [analyzer.md](analyzer.md).
-- **mix_percent**: delay, reverb, chorus and saturation output `input × (1 −
-  mix) + wet × mix`. The default is 100, fully wet, which is what a return
+- **mix_percent**: delay, reverb, chorus, saturation and overdrive output
+  `input × (1 − mix) + wet × mix`. The default is 100, fully wet, which is what a return
   needs, and 50 for the chorus. When using a delay or reverb as a track insert,
   set it lower. `mix_percent: 0` passes the input through bit-identical.
 
@@ -257,7 +265,8 @@ Tests use generated audio. In Rust they cover each device: filter designs
 against scipy's, the cookbook bands, the compressor's curve, a keyed compressor,
 the limiter's ceiling and look-ahead, and on a true peak the level between
 the samples of tones and noise, the clipper's ceiling, knee, latency
-and what folds back at each oversampling, exact echo frames and feedback gains,
+and what folds back at each oversampling, the overdrive's curve, harmonics,
+tone and trim, exact echo frames and feedback gains,
 ping-pong and darkening repeats, the reverb's decay, damping, predelay, energy,
 seeding, width, low cut, equality with direct convolution and steady-noise level,
 and block-partition invariance of each. Through `daw render` the Python suite
@@ -265,7 +274,8 @@ covers filter attenuation at each slope, bell and shelf gains, the compressor's
 steady-state curve and reduction report, below-threshold transparency, limiter
 ceiling and latency compensation, the report's true peak held by a limiter on
 a true peak, the clipper's ceiling, knee, drive, lane and
-latency compensation, bypass, sidechain ducking, pre-fader keys,
+latency compensation, the overdrive's harmonics, tone, trim, mix and lane,
+bypass, sidechain ducking, pre-fader keys,
 preview/stem equivalence, hot mixes rescued by a master limiter, validation
 errors and round-trip formatting; pre- and post-fader sends, mute and solo,
 return stems summing with track stems to the mix, return previews, section

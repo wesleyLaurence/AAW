@@ -10,7 +10,7 @@ reads songs through `aaw-py`.
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule and what each track plays, the schema `daw describe` prints, the warnings `daw check` gives |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the eleven effects, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the twelve effects, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
@@ -80,7 +80,7 @@ project's folder or the song file in it. It implements:
 | `daw undo`, `daw redo`, `daw batch PROJECT FILE [--label TEXT]` | History of a running host; a JSON list of commands as one step, which a label names in the change log and for undo |
 
 The engine covers the whole song: the sampler (scheduling, choke groups, gates,
-repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the eleven effects on tracks, groups, returns
+repitch, trim, reverse, downmix, pan laws), the Synth on MIDI tracks, the twelve effects on tracks, groups, returns
 and the master, sidechains, pre- and post-fader sends, automation lanes, track
 and group gain, pan, mute and solo, master gain and the end fade. `render` writes the
 mix, a stem for each track, group and return, the snapshot and `report.json` with what

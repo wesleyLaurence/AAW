@@ -220,6 +220,15 @@ const SATURATION: &[Field] = &[
     number("mix_percent", "Mix", 0.0, 100.0, 100.0, "%"),
 ];
 
+/// An overdrive's fields. Its curve's top is full scale, so a driven signal
+/// comes out near `output_db`, up to 2 dB over it through a low tone.
+const OVERDRIVE: &[Field] = &[
+    number("drive_db", "Drive", 0.0, 60.0, 24.0, "dB"),
+    log(number("tone_hz", "Tone", 200.0, 20000.0, 6000.0, "Hz")),
+    number("output_db", "Output", -24.0, 24.0, 0.0, "dB"),
+    number("mix_percent", "Mix", 0.0, 100.0, 100.0, "%"),
+];
+
 /// A utility's fields. `mono`, `mono_below_hz` and `invert` change the
 /// device's structure, so a playing song fades through them.
 const UTILITY: &[Field] = &[
@@ -373,6 +382,7 @@ pub fn effect(kind: &str) -> &'static [Field] {
         "reverb" => REVERB,
         "chorus" => CHORUS,
         "saturation" => SATURATION,
+        "overdrive" => OVERDRIVE,
         "utility" => UTILITY,
         _ => &[],
     }
