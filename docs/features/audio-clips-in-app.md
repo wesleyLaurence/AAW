@@ -39,14 +39,11 @@ lands. An `.m4a` or `.mp3` is decoded into the project first.
 
 ## The song grows
 
-A blank project is 32 bars. When a drop, a move, a trim, a copy or a new tempo of
-its own would end an audio clip's sound past the song's end, the same undo step
-lengthens the song to the end of that bar. A sound that runs past the end by
-less than the song's end fade (20 ms unless set) does not: that fade takes it,
-as it takes the short fade out after a clip an agent ended on the last beat.
-
-`daw` commands leave the length alone, as before: an agent sets it. Pattern
-clips still stop at the song's end.
+A blank project is one bar. When a drop, a move, a trim, a copy or a new tempo
+of its own ends an audio clip's sound past the song's end, the host moves the
+end to the next whole bar after it in the same step, as it does for every edit
+of any clip ([song-length.md](song-length.md), D130); the app sends no command
+of its own for it. Pattern and note clips move the end the same way.
 
 ## A clip on the lane
 

@@ -96,7 +96,7 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.step(atX: l.x(19.9), free: false), 16)
         XCTAssertEqual(l.step(atX: l.x(20.1), free: false), 20)
         XCTAssertEqual(l.step(atX: l.x(19.9), free: true), 19.9, accuracy: 1e-9)
-        XCTAssertEqual(l.step(atX: l.x(66), free: false), 60, "the last bar of the song")
+        XCTAssertEqual(l.step(atX: l.x(66), free: false), 64, "past the end, which moves to hold the clip")
         XCTAssertEqual(l.step(atX: 0, free: false), 0)
     }
 
@@ -119,7 +119,8 @@ final class TimelineLayoutTests: XCTestCase {
         l.zoom(by: 3, anchorX: x)
         XCTAssertEqual(l.pixelsPerBeat, 30)
         XCTAssertEqual(l.x(32), x, accuracy: 1e-6)
-        // Zoom and scroll stay within the song.
+        // The zoom stays between half the fitted zoom and the most; the view
+        // scrolls a screen past the song's end, where a clip may be put.
         l.zoom(by: 1000, anchorX: x)
         XCTAssertEqual(l.pixelsPerBeat, TimelineLayout.maxPixelsPerBeat)
         l.zoom(by: 1e-6, anchorX: x)
@@ -127,7 +128,8 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.scroll.x, 0)
         l.scroll = CGPoint(x: 1e6, y: 1e6)
         l.clamp()
-        XCTAssertEqual(l.scroll, .zero, "everything fits, so nothing scrolls")
+        XCTAssertEqual(l.tailBeats, 136, "a screen of beats at 5 points a beat")
+        XCTAssertEqual(l.scroll, CGPoint(x: 320, y: 0), "the end can be scrolled to the left edge")
     }
 
     func testThePlayheadIsKeptInView() {
@@ -179,13 +181,13 @@ final class TimelineLayoutTests: XCTestCase {
     func testPointsMoveTogetherNoFurtherThanThePointsThatStay() {
         let range = TimelineLayout.pointRange
         // One point: between its neighbors.
-        XCTAssertEqual(range([[(0, false), (8, true), (16, false)]], 32), -8...8)
+        XCTAssertEqual(range([[(0, false), (8, true), (16, false)]]), -8...8)
         // Two of a lane: the first's left neighbor and the second's right one.
-        XCTAssertEqual(range([[(0, false), (4, true), (6, true), (10, false)]], 32), -4...4)
-        // Lanes together: the tightest of each; the song's start and end.
-        XCTAssertEqual(range([[(2, true), (20, true)], [(0, false), (12, true), (13, false)]], 32), -2...1)
-        XCTAssertEqual(range([[(30, true)]], 32), -30...2)
-        XCTAssertEqual(range([], 32), 0...0, "nothing moves")
+        XCTAssertEqual(range([[(0, false), (4, true), (6, true), (10, false)]]), -4...4)
+        // Lanes together: the tightest of each; the song's start, and no end.
+        XCTAssertEqual(range([[(2, true), (20, true)], [(0, false), (12, true), (13, false)]]), -2...1)
+        XCTAssertEqual(range([[(30, true)]]), -30...Double.infinity)
+        XCTAssertEqual(range([]), 0...0, "nothing moves")
     }
 
     func testPointsGoUpTogetherInsideTheirLanes() {

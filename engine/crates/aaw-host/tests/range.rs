@@ -121,7 +121,6 @@ fn insert_then_delete_gives_the_song_back() {
 fn a_copy_replaces_what_is_at_its_destination_and_owns_its_notes() {
     let (_d, mut s) = open();
     with_keys(&mut s);
-    edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 48})).unwrap();
     // Beats 4 to 12, the keys' phrase and the drums and bass under it, again
     // at 28, over the drums there.
     let r = edit(&mut s, json!({"op": "range.copy", "start": 4, "length": 8, "to": 28})).unwrap();
@@ -205,7 +204,6 @@ fn a_copy_can_insert_and_a_copy_past_the_end_grows_the_song() {
 #[test]
 fn clear_removes_the_range_and_moves_nothing_and_tracks_limit_a_range() {
     let (_d, mut s) = open();
-    edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 48})).unwrap();
     // The drums alone, out for bars 5 and 6: their clip is cut either side,
     // the bass and the lane untouched.
     let r = edit(&mut s, json!({"op": "range.clear", "start": 16, "length": 8, "tracks": ["drums"]})).unwrap();
@@ -214,7 +212,7 @@ fn clear_removes_the_range_and_moves_nothing_and_tracks_limit_a_range() {
     assert_eq!(get(&s, "tracks.bass.clips").as_array().unwrap().len(), 3);
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -24.0}, {"at": 16, "value": -6.0}]));
     assert_eq!(r["removed"], json!(["tracks.drums.clips.1"]));
-    assert_eq!(get(&s, "session.length_beats"), json!(48));
+    assert_eq!(get(&s, "session.length_beats"), json!(32));
     // Cleared across the song, the lane loses the point inside the range,
     // keeps its values at the edges and runs straight between them; a
     // range that holds no point leaves a lane as it was; the sections stay.
@@ -225,13 +223,13 @@ fn clear_removes_the_range_and_moves_nothing_and_tracks_limit_a_range() {
     assert_eq!(get(&s, "sections"), json!([{"id": "intro", "at": 0, "length_beats": 8}]));
     edit(&mut s, json!({"op": "range.clear", "start": 4, "length": 4})).unwrap();
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -24.0}, {"at": 12, "value": -10.5}, {"at": 20, "value": -6.0}]));
-    // Deleted on one track, the song keeps its length and the other tracks
-    // their places; the lane begins with the value it had after the range.
+    // Deleted on one track, the other tracks keep their places, so the song
+    // its length; the lane begins with the value it had after the range.
     let r = edit(&mut s, json!({"op": "range.delete", "start": 0, "length": 16, "tracks": ["bass"]})).unwrap();
     assert_eq!(r["label"], json!("Delete beats 0–16 on bass"));
     assert_eq!(get(&s, "tracks.bass.clips"), json!([{"pattern": "bass", "at": 4}]));
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -8.25}, {"at": 4, "value": -6.0}]));
-    assert_eq!(get(&s, "session.length_beats"), json!(48));
+    assert_eq!(get(&s, "session.length_beats"), json!(32));
     assert_eq!(get(&s, "tracks.drums.clips.0"), json!({"pattern": "beat"}));
 }
 
@@ -245,10 +243,10 @@ fn a_pattern_clip_cut_inside_a_repeat_is_refused_and_ranges_are_checked() {
     );
     // Nothing of a refused command lands.
     assert_eq!(get(&s, "session.length_beats"), json!(32));
-    assert_eq!(edit(&mut s, json!({"op": "range.delete", "start": 24, "length": 16})).unwrap_err(), "Beats 24–40 reach past the song's end at 32");
-    assert_eq!(edit(&mut s, json!({"op": "range.clear", "start": 32, "length": 4})).unwrap_err(), "Beats 32–36 are past the song's end at 32");
+    // A range past the end holds nothing, and is not refused (D130).
+    assert_eq!(edit(&mut s, json!({"op": "range.clear", "start": 32, "length": 4})).unwrap()["changed"], json!(false));
     assert_eq!(edit(&mut s, json!({"op": "range.copy", "start": 0, "length": 0, "to": 8})).unwrap_err(), "LENGTH is a number of beats above zero");
-    assert_eq!(edit(&mut s, json!({"op": "range.insert", "at": 40, "length": 4})).unwrap_err(), "Beat 40 is past the song's end at 32");
+    assert_eq!(edit(&mut s, json!({"op": "range.insert", "at": 40, "length": 4})).unwrap()["changed"], json!(false));
     assert!(edit(&mut s, json!({"op": "range.clear", "start": 0, "length": 4, "tracks": ["nobody"]})).is_err());
 }
 
@@ -318,7 +316,6 @@ fn a_copied_range_renders_as_the_clips_it_stands_for() {
     // clip and editing the lane by hand would, and renders to the same bytes.
     let (_d, mut s) = open();
     with_keys(&mut s);
-    edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 48})).unwrap();
     let dir = s.path().parent().unwrap().to_path_buf();
     let render = |s: &mut Session, name: &str| -> Vec<u8> {
         s.save().unwrap();

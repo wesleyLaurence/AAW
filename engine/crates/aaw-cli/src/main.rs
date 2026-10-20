@@ -115,14 +115,12 @@ enum Topic {
 #[derive(Subcommand)]
 enum Top {
     /// Create DIRECTORY/song.yaml, an empty song, and SONG.md beside it for
-    /// what the song is for, where it is heading and what was decided.
+    /// what the song is for, where it is heading and what was decided. The
+    /// song is as long as what is in it, so it has no length to give.
     Init {
         directory: PathBuf,
         #[arg(long, default_value_t = 144.0)]
         tempo: f64,
-        /// How many bars long, in the time signature.
-        #[arg(long, default_value_t = 16)]
-        bars: i64,
         /// The song's time signature, such as 3/4 or 6/8; 4/4 unless given.
         #[arg(long, value_name = "N/D")]
         time_signature: Option<String>,
@@ -1544,8 +1542,8 @@ fn run(cli: &Cli) -> Result<Json> {
     use Command as C;
     let edit = |project: &Song, c: Command| route(cli, project, c, None);
     match &cli.command {
-        Top::Init { directory, tempo, bars, time_signature } => {
-            let path = project::create(directory, *tempo, *bars, None, time_signature.as_deref())?;
+        Top::Init { directory, tempo, time_signature } => {
+            let path = project::create(directory, *tempo, None, time_signature.as_deref())?;
             let path = std::fs::canonicalize(&path).map_err(text)?;
             Ok(json!({"notes": path.with_file_name(project::NOTES_FILE), "project": path}))
         }

@@ -120,7 +120,7 @@ def stand_in(tmp_path, monkeypatch):
 def song(tmp_path, stand_in):
     """A project at 120 BPM, with the plan's tier already read once."""
     folder = tmp_path / "project"
-    daw("init", folder, "--tempo", 120, "--bars", 8)
+    daw("init", folder, "--tempo", 120)
     assert daw("keys", "status")["tier"] == "pro"
     stand_in.seen.clear()
     return folder / "song.yaml"

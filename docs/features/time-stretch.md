@@ -39,8 +39,8 @@ uv run daw check SONG                          # warns past about 8%
 
 `--tempo-for` gives the tempo, the change in percent and the pads that follow the
 tempo with their stretch mode. Sounds that do not follow it keep their seconds, so
-one that starts after the last beat takes more beats at a faster tempo; fit the
-length again (`daw timeline --fit`) and ask for the tempo once more if it matters.
+one that starts after the last beat takes more beats at a faster tempo, and the
+song's end follows it; ask for the tempo once more if it matters.
 
 ## The stretchers
 

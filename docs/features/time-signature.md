@@ -10,9 +10,9 @@ four.
 - **One time signature for the song**, `session.time_signature`: `N/D`, 1 to
   32 beats over 1, 2, 4, 8 or 16, `4/4` unless set. The agent sets it with
   `daw set PROJECT session.time_signature 3/4`, and `daw init --time-signature
-  3/4 --bars 8` makes a song of eight such bars. A value the model does not
-  read is refused with the form it wants, and `meter` or `signature` as a
-  field name is answered with the field.
+  3/4` makes a song in it, one such bar long until something is put in it. A
+  value the model does not read is refused with the form it wants, and `meter`
+  or `signature` as a field name is answered with the field.
 - **Positions stay quarter-note beats.** Every `at`, `duration` and
   `length_beats` is as it was, whatever the meter; a bar of 3/4 is 3 beats
   long, a bar of 6/8 3 and a bar of 7/8 3.5. A song in 4/4 saves byte for byte

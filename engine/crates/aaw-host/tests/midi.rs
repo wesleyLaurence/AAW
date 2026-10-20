@@ -198,8 +198,9 @@ fn clips_move_resize_and_keep_to_their_kind_of_track() {
     let outside: Vec<&str> = read["clips"][0]["notes"].as_array().unwrap().iter().filter(|n| n["outside"] == json!(true)).map(|n| n["id"].as_str().unwrap()).collect();
     assert_eq!(outside, ["n5", "n6"]);
     assert_eq!(get(&s, clip)["notes"].as_array().unwrap().len(), 6);
-    let e = edit(&mut s, json!({"op": "clip.resize", "clip": clip, "length_beats": 24})).unwrap_err();
-    assert!(e.contains("keys: clip clip1 exceeds session"), "{e}");
+    // Made longer than the song, the clip takes the song's end with it (D130).
+    edit(&mut s, json!({"op": "clip.resize", "clip": clip, "length_beats": 24})).unwrap();
+    assert_eq!(get(&s, "session.length_beats"), json!(36));
     edit(&mut s, json!({"op": "clip.remove", "clip": clip})).unwrap();
     assert_eq!(clips(&s), json!([]));
 }

@@ -110,9 +110,9 @@ Each is one step of the host's undo history, like any command.
 
 ## Limits
 
-- A command leaves the song's length alone: a clip must start inside the song,
-  and what it plays past the song's end is not heard. The Mac app lengthens the
-  song for a clip placed there ([audio-clips-in-app.md](audio-clips-in-app.md)).
+- The song's end follows its content: a clip placed or lengthened past it
+  moves the end to the next whole bar after the clip's sound, its fade out
+  counted ([song-length.md](song-length.md)).
 - A cut is of one track. A sound on another track that should move with it is
   moved by hand.
 - A split of a clip that is stretched in time is two regions stretched apart, so

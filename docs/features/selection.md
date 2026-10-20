@@ -18,8 +18,8 @@ automation lanes work the same way, as the piano roll does.
   read while the drag goes on and at its end, as in the Finder and the piano
   roll, and with Option held a press on an edge or a fade's handle copies
   too. Copies follow the rules of ⌘D: a pattern clip's copy plays the same
-  pattern, a note clip's has notes of its own, and an audio clip that ends
-  past the song's end makes the song longer.
+  pattern, a note clip's has notes of its own, and a copy that ends past the
+  song's end makes the song longer.
 - **Events in the pattern editor.** Shift-click adds an event to the
   selection or takes it out; a drag in the clear of a row of held hits or of
   notes selects the events a rectangle touches, in any row; ⌘A selects every

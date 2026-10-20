@@ -1,93 +1,103 @@
-# A song with no end to hit — proposed October 19, 2026
+# A song with no end to hit — implemented 2026-10-20
 
-Status: proposed, not built. Backlog: Next, A song with no end to hit. Asked
-for by the person on October 19, 2026: "I don't like the hard boundary of how
-long a track is ... I like how Ableton works where you can just add more clips
-and it kind of hides the concept of a length ... I don't ever want to see a
-message about a clip being outside the boundary of the song. I see a place
-where the number of bars in song is in the UI but it is not editable, I would
-prefer to not even see that and to have it all managed in the background."
+Status: implemented (D130). Asked for by the person on October 19, 2026: "I
+don't like the hard boundary of how long a track is ... I like how Ableton
+works where you can just add more clips and it kind of hides the concept of a
+length ... I don't ever want to see a message about a clip being outside the
+boundary of the song. I see a place where the number of bars in song is in the
+UI but it is not editable, I would prefer to not even see that and to have it
+all managed in the background."
 
 ## What
 
-The song's length stops being something a person sets or sees. A clip placed,
-dragged, lengthened or looped past the end extends the song to hold it; a clip
-removed from the end lets it shrink back; the lighter bars inside the song and
-the darker bars outside it go, and the bars field leaves the transport bar.
-Nothing is refused or warned for lying past the end, because nothing can.
+The song's length is its content. Nobody sets it: after every edit the host
+sets `session.length_beats` to the next whole bar after the last sound, one
+bar at the least, so a clip placed, dragged, copied, lengthened or looped past
+the end moves the end to hold it, and a clip taken away from the end lets the
+song shrink back. Nothing is refused or warned for lying past the end, because
+nothing can lie there.
 
-What still reads an end: the loop brace when it is set to the whole song,
-Play from the start to where it stops, `daw render`, `daw export` and
-`daw timeline`, and the agent's `daw map`. Each reads the end of the last sound.
+What still reads an end: the loop brace when it is set to the whole song, Play
+from the start to where it stops, `daw render`, `daw export`, `daw timeline`
+and the agent's `daw map`. Each reads the computed end.
 
-## Why
-
-Today `session.length_beats` is a field of the song: a blank project is 32
-bars, the model refuses a pattern or note clip that would sound past it or
-start at or after it, `daw check` warns `song-ends-inside` for an audio clip
-that does, an audio clip dragged past the end grows the song and a pattern clip
-cannot be dragged further, and the number sits in the transport bar where the
-person cannot type it (Next, D81). The person met the refusal and the two
-shades of bar and wants neither. Ableton's arrangement has no length: the song
-ends where the last clip or automation does, and the export asks for a range.
-
-## Design
+## How it works
 
 - **The field stays in the file, computed.** `session.length_beats` remains
-  the one place every reader gets the end from, and the model sets it rather
-  than the person: after every edit it is the next whole bar after the last
-  sound, where the last sound is the latest of every clip's end (an audio
-  clip's with its tail, a looped clip's with its loop), every automation
-  point and every section's end, with a floor of one bar so an empty song
-  still has a ruler. A song saved with a longer length than its content keeps
-  it until its next edit, so old projects open unchanged and then settle.
-  A `--fit` on `daw timeline` becomes what always happens.
-- **Nothing refused.** The model's checks that a clip must lie inside the
-  length go, and with them `song-ends-inside`; `daw check` keeps
-  `clips-overlap` and the rest. A clip that starts past the old end is a clip
-  that extends the song.
-- **The end fade.** `session.end_fade_ms` still fades the last milliseconds,
-  now of the computed end, which is a bar after the last sound at most; the
-  render's tail past the last clip is what the fade works on. If the fade is
-  wanted longer than the tail, the last clip's own fade is the tool.
-- **Sections** keep their own `at` and `length_beats`; a section past the
-  content extends the song, since a person may lay out a form before filling
-  it. `daw range insert` and `delete` move the end with the content as now.
-- **The window.** The ruler draws bars as far as the view scrolls, one shade;
-  the end of the song is a thin line at the computed end, where the loop
-  brace snaps when set to all; scrolling and zooming are not bounded by it; a
-  drop or a drag past it extends it when the edit lands, and the window
-  follows (Later › The app, the window following the song's end, is answered
-  by this). The transport bar loses the bars field; the position field keeps
-  its bar.beat.sixteenth.
-- **The agent.** `daw map`'s length line reads the computed end; `daw set
-  session.length_beats` is refused with "the length is the song's content"
-  and `daw describe project` says so. `daw render --section` and `daw export`
-  are unchanged; a render is the whole computed length.
-- **The beat map and audio clips.** An audio clip dragged past the end
-  already extends the song; the same code path serves pattern and note clips.
+  the one place every reader gets the end from. `aaw_model::content_end` is
+  the latest of every clip's end (a pattern clip's last repeat, a note clip's
+  length, an audio clip's sound with its fade-out tail, a looped clip's
+  length), every automation point, every section's end and every marker;
+  `fitted_length` rounds it up to a whole bar of the time signature, one bar
+  at the least, so an empty song still has a ruler. The host settles it in
+  `Session::edit` after validation (`Session::settle`), reading the length of
+  a sample's file from the project's folder for an audio clip that plays to
+  its file's end; a clip whose file cannot be read counts from its start. A
+  merge patch (`daw apply`) is settled the same way.
+- **An old project.** A song saved with a longer length than its content
+  opens unchanged, and settles at its next edit: a project with
+  `length_beats: 128` and content to bar 64 reads 128 until something is
+  edited, then 64.
+- **Nothing refused.** The model's rules that a clip, a section, a marker or
+  an automation point must lie inside the length are gone, and so is the
+  `song-ends-inside` check; `daw check` keeps `clips-overlap` and the rest,
+  and `release-cut`, which is a Synth's release past the computed end, not a
+  clip. A range command past the end (`daw range clear 32 4` on a 32-beat
+  song) changes nothing rather than refusing.
+- **The end fade.** `session.end_fade_ms` fades the last milliseconds of the
+  computed end, which is at most a bar after the last sound. A longer fade is
+  the last clip's own.
+- **Sections and markers** extend the song, since a form is laid out before it
+  is filled and a marker is left where something was heard; a marker past
+  the end holds the end there until it is moved or removed.
+- **The agent.** `daw set session.length_beats` is refused: "The length is the
+  song's content: the next whole bar after the last clip, automation point,
+  section or marker, set after every edit. Place something where the song
+  should reach". `daw describe project` says so under `length`; `daw timeline
+  --fit` (and `--tail`) is kept for old scripts and does nothing, which its
+  reply says under `fitted`. `daw init` has no `--bars`: a new song is one
+  bar long. `daw map`'s grid runs to the computed end. `daw midi import` and
+  a range copy still say the song grows, which it does, as after any edit.
+- **The window.** The ruler draws bars as far as the view scrolls, one shade,
+  and the view scrolls a screen past the end (two bars at the least), so that
+  a clip can be dropped or dragged there; the end is a thin line, where the
+  loop brace snaps when set to all; zooming to fit shows the song and one bar
+  more. A drop, a drag, ⌘D, a nudge, a note clip's end dragged, a pattern
+  clip's repeats and an automation point may all go past the end, which
+  moves when the edit lands. The transport bar has no bars field; the
+  position field keeps its bar.beat.sixteenth, and the tempo and meter light
+  for a change of their own, not for the end moving. A click on the ruler still
+  places the start position inside the song, and the loop brace stays inside
+  it, since that is where there is something to play. The app no longer puts
+  a `set session.length_beats` before an audio clip's edit: the host settles
+  every edit.
 
-## Done when
+## Done
 
-- A note clip placed at bar 40 of a 32-bar song extends it to bar 41 or the
-  clip's end, whichever is later, in a Rust test; removing it shrinks the song
-  back to its content; an empty song is one bar.
-- No validation path mentions the length, and the `song-ends-inside` code is
-  gone from `daw check`, `daw describe check` and
-  [musical checks](musical-checks.md).
-- An old project with `length_beats: 128` and content to bar 64 opens at 128
-  and reads 64 after its first edit.
-- A scripted run drags a pattern clip past the end and the picture shows one
-  shade of bar, no bars field, the clip in place and the end line after it.
-- `daw timeline --fit` is a no-op and says so; `daw set session.length_beats`
-  is refused with the reason.
+- A note clip resized past the end moves the end to the bar after it; a
+  marker at beat 33 of a 32-beat song makes it 36 and moving the marker back
+  makes it 32 again; a section moved past the content and back does the same;
+  a pattern clip moved or copied past the end, a point added past it and a
+  marker at beat 400 move the end in the app's bridge, and undo brings it
+  back: Rust tests in `aaw-model`, `aaw-host` and `aaw-ffi`.
+- No validation rule reads the length; `song-ends-inside` is gone from the
+  code, `daw describe check` and [musical checks](musical-checks.md).
+- `daw timeline --fit` says it does nothing and leaves the file as it was;
+  `daw set session.length_beats` is refused with the reason: a Python test.
+- The app's layout tests hold the step past the end, the scroll a screen past
+  it, repeats and points past it, and a blank project one bar long.
+- A scripted run on a scratch song of two note clips, the last ending at bar
+  8: zoomed out, the clip dragged four bars past the end landed at bar 11 as
+  one step by the user, the song read 44 beats, and the picture showed one
+  shade of bar across the view, no bars field, the clip where it was dropped
+  and the thin end line at bar 12. The tempo and meter lit up after the drag,
+  since the host's length change touched the session; the transport bar now
+  lights them only when the tempo, title or time signature changed.
+- Nothing was tried by hand; see Verify.
 
-## Open questions
+## Open questions, answered alone (D130)
 
-1. Whether the end should be the next whole bar after the last sound, or the
-   last sound itself. A bar reads better on the ruler; the export's tail is
-   the difference.
-2. Whether the end fade should stay at all once the end is computed, or go
-   with the length, leaving fades to clips and the master lane.
-3. Whether a section past the content should extend the song, as proposed, or
-   sections should be clipped to content as a render reads them.
+1. The end is the next whole bar after the last sound, not the sound itself:
+   a bar reads on the ruler, and the export's tail is at most a bar.
+2. The end fade stays: one field that does what it did.
+3. A section past the content extends the song.

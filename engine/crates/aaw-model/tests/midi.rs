@@ -98,7 +98,6 @@ fn what_a_note_or_a_midi_track_cannot_be() {
         (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, at: x, duration: 1}"), "Invalid beat value 'x'"),
         (keys("{pitch: 60, duration: 1, velocity: 96}", "{pitch: 60, duration: 1, velocity: 0}"), "greater than or equal to 1"),
         (keys("length_beats: 4", "length_beats: 0"), "length must be positive"),
-        (keys("at: 16", "at: 30"), "keys: clip clip1 exceeds session"),
         (keys("type: midi", "type: midi\n    pads: {}"), "Extra inputs are not permitted"),
         (keys("type: midi", "type: audio"), "Input should be 'midi'"),
         (keys("- at: 16", "- pattern: p\n        at: 16"), "Extra inputs are not permitted"),

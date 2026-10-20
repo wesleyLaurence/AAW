@@ -28,7 +28,7 @@ def registry(monkeypatch):
 
 def song(tmp_path):
     project = tmp_path / "song"
-    daw("init", project, "--tempo", 120, "--bars", 16)
+    daw("init", project, "--tempo", 120)
     daw("synth", "add", project, "bass", "--patch", "Sub Bass")
     daw(
         "clip", "add", project, "bass", "--id", "line", "--at", 32, "--length-beats", 8,
@@ -77,7 +77,6 @@ def test_markers_are_left_read_and_removed_from_a_terminal(tmp_path):
 
     for args, said in [
         (("marker", "add", project), "needs a beat where no host is playing"),
-        (("marker", "add", project, 500), "past the session's end"),
         (("marker", "move", project, "m7", 4), "m7 is not a marker; the song has none"),
         (("marker", "remove", project), "Name the markers to remove"),
     ]:

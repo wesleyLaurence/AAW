@@ -37,8 +37,8 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(l.repeats(atX: l.x(19), clipAt: 8, patternBeats: 4), 3)
         XCTAssertEqual(l.repeats(atX: l.x(21), clipAt: 8, patternBeats: 4), 3)
         XCTAssertEqual(l.repeats(atX: l.x(2), clipAt: 8, patternBeats: 4), 1, "never none")
-        XCTAssertEqual(l.repeats(atX: l.x(90), clipAt: 8, patternBeats: 4), 14, "no further than the song")
-        XCTAssertEqual(l.repeats(atX: l.x(90), clipAt: 8, patternBeats: 24), 2)
+        XCTAssertEqual(l.repeats(atX: l.x(90), clipAt: 8, patternBeats: 4), 21, "past the end, which moves to hold them")
+        XCTAssertEqual(l.repeats(atX: l.x(90), clipAt: 8, patternBeats: 24), 3)
     }
 
     func testAHeadersPartsAreWhereTheyAreDrawn() {
@@ -160,11 +160,11 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(ValueScale.text(4, unit: ":1"), "4.0:1")
     }
 
-    func testAnAutomationPointSnapsToTheGridInsideTheSong() {
+    func testAnAutomationPointSnapsToTheGridNotBeforeTheSong() {
         var l = layout()
         XCTAssertEqual(l.snapped(9.7, free: false), 8, "a grid of bars")
         XCTAssertEqual(l.snapped(63.9, free: false), 64, "a point may be at the song's end")
-        XCTAssertEqual(l.snapped(80, free: false), 64)
+        XCTAssertEqual(l.snapped(80, free: false), 80, "or past it, where the end moves to it")
         XCTAssertEqual(l.snapped(-3, free: true), 0)
         XCTAssertEqual(l.snapped(9.70049, free: true), 9.7)
         l.pixelsPerBeat = 60

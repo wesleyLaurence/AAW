@@ -110,11 +110,11 @@ def test_an_edit_sped_up_keeps_its_joins(tmp_path):
     follow = {"sample": "song", "source_bpm": 120, "stretch": "preserve_pitch"}
     save(
         {
-            "session": {"tempo": 120, "sample_rate": 44100, "length_beats": 46, "master_gain_db": -3},
+            "session": {"tempo": 120, "sample_rate": 44100, "length_beats": 48, "master_gain_db": -3},
             "samples": {"song": {"path": "song.wav"}},
             "patterns": {
                 "edit": {
-                    "length_beats": 46,
+                    "length_beats": 48,
                     "events": [{"at": 4 - lead / beat, "pad": "first"}, {"at": 20 - lead / beat, "pad": "second"}],
                 }
             },
@@ -131,8 +131,8 @@ def test_an_edit_sped_up_keeps_its_joins(tmp_path):
         },
         folder / "song.yaml",
     )
-    # The tempo at which the 23-second song lasts 22.115 seconds: four percent more.
-    code, helper = cli("timeline", folder / "song.yaml", "--tempo-for", 23 / FASTER)
+    # The tempo at which the 24-second song lasts 23.077 seconds: four percent more.
+    code, helper = cli("timeline", folder / "song.yaml", "--tempo-for", 24 / FASTER)
     assert helper["tempo_for"]["tempo"] == pytest.approx(124.8, abs=0.001)
     assert helper["tempo_for"]["change_percent"] == pytest.approx(4, abs=0.001)
     assert [p["pad"] for p in helper["tempo_for"]["pads_that_follow_tempo"]] == ["song.first", "song.second"]
@@ -141,7 +141,7 @@ def test_an_edit_sped_up_keeps_its_joins(tmp_path):
     code, report = cli("joins", folder / "renders" / "latest.json", "--no-excerpts")
     assert code == 0, report
     join = report["joins"][0]
-    assert report["length"]["seconds"] == pytest.approx(23 / FASTER, abs=0.001)
+    assert report["length"]["seconds"] == pytest.approx(24 / FASTER, abs=0.001)
     # By the beat map the beat still carries across, eight beats skipped; by the
     # audio the stretched transients either side sit alike, to half a millisecond.
     assert abs(join["grid"]["interval_error_ms"]) < 0.1 and join["grid"]["source_beats_skipped"] == 8

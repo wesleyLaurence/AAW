@@ -1187,13 +1187,7 @@ pub fn seconds_per_beat(clip: &AudioClip, tempo: f64) -> f64 {
 /// How long an audio clip sounds after it leaves, in beats: its fade out, as
 /// far as its file goes. `file` is the file's length in seconds, when known.
 pub fn tail_beats(clip: &AudioClip, tempo: f64, file: Option<f64>) -> f64 {
-    let fade = clip.fade_out_ms / 1000.0 * tempo / 60.0;
-    match (clip.source_end_seconds, file) {
-        (Some(end), Some(file)) => fade.min(((file - end) / seconds_per_beat(clip, tempo)).max(0.0)),
-        (Some(_), None) => fade,
-        // It plays to its file's end, and fades over the last of it.
-        (None, _) => 0.0,
-    }
+    clip.tail_beats(tempo, file)
 }
 
 /// The arrangement of a revision of the song in `directory`.

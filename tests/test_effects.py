@@ -483,7 +483,7 @@ def test_an_analyzer_changes_nothing(tmp_path):
     assert np.array_equal(out, plain)
     assert report[0] == {"type": "analyzer", "id": "meter", "latency_frames": 0}
     assert report[2] == {"type": "analyzer", "latency_frames": 0}
-    song = daw("init", tmp_path / "song", "--bars", 4)["project"]
+    song = daw("init", tmp_path / "song")["project"]
     daw("synth", "add", song, "keys")
     with pytest.raises(ValueError, match="not offered inside a patch"):
         daw("effect", "add", song, "tracks.keys.instrument.synth", "--type", "analyzer")

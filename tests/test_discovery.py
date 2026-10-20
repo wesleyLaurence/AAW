@@ -76,7 +76,7 @@ def test_help_lists_what_a_command_takes():
 
 
 def test_errors_say_what_to_do(tmp_path):
-    song = daw("init", tmp_path / "song", "--bars", 4)["project"]
+    song = daw("init", tmp_path / "song")["project"]
     daw("track", "add", song, "drums")
 
     def error(*args):
@@ -124,7 +124,7 @@ def test_a_clipped_render_names_the_loud_stems_and_the_fix(tmp_path):
 
 
 def test_inspect_lists_clips_in_the_order_they_play(tmp_path):
-    song = daw("init", tmp_path / "song", "--bars", 4)["project"]
+    song = daw("init", tmp_path / "song")["project"]
     daw("track", "add", song, "drums")
     daw("pattern", "add", song, "p", "--length-beats", 4)
     daw("clip", "add", song, "drums", "p", "--at", 8)
@@ -140,7 +140,7 @@ def test_inspect_lists_clips_in_the_order_they_play(tmp_path):
 
 def test_duplicates_lay_out_in_a_row_and_a_stack_is_mapped_and_checked(tmp_path):
     # The agent's song of October 4, 2026: a clip duplicated three times.
-    song = daw("init", tmp_path / "song", "--bars", 8)["project"]
+    song = daw("init", tmp_path / "song")["project"]
     sf.write(tmp_path / "song" / "kick.wav", np.zeros(SR // 10), SR)
     daw("set", song, "samples.kick", '{"path": "kick.wav"}')
     daw("track", "add", song, "drums")

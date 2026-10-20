@@ -71,25 +71,23 @@ def test_a_sound_is_placed_to_end_on_a_beat(song):
         assert code == 1 and reason in result["error"]
 
 
-def test_the_length_is_fitted_to_where_the_sound_ends(song):
+def test_the_length_is_the_songs_content_and_fit_does_nothing(song):
+    # The length is the next whole bar after the last sound, set by the engine
+    # after every edit (D130): --fit says so and changes nothing.
+    before = song.read_text()
     code, report = cli("timeline", song, "--fit")
     assert code == 0, report
-    # Up to the next whole beat after the sound ends at beat 9.4.
-    assert report["fitted"] == {"length_beats": 10, "tail_beats": 0}
-    assert report["length"]["beats"] == 10 and load(song)["session"]["length_beats"] == 10
-    code, report = cli("timeline", song, "--fit", "--tail", 2)
-    assert report["fitted"]["length_beats"] == 12 and load(song)["session"]["length_beats"] == 12
-    # Fitting again changes nothing.
-    before = song.read_text()
-    code, report = cli("timeline", song, "--fit", "--tail", 2)
-    assert code == 0 and song.read_text() == before
-    code, result = cli("timeline", song, "--fit", "--tail", -1)
-    assert code == 1 and "tail must be" in result["error"]
-    # A session holds its clips whole: a longer pattern keeps the song longer.
-    daw("set", song, "session.length_beats", 32)
+    assert "the length is the song's content" in report["fitted"]["note"]
+    assert song.read_text() == before
+    code, result = cli("set", song, "session.length_beats", 32)
+    assert code == 1 and "the song's content" in result["error"]
+    # A longer pattern keeps the song longer; a shorter one lets it shrink,
+    # to the next whole bar after the last clip.
     daw("set", song, "patterns.b.length_beats", 16)
-    code, report = cli("timeline", song, "--fit")
-    assert report["fitted"]["length_beats"] == 16 and "a clip reaches beat 16" in report["fitted"]["held_by_clips"]
+    assert load(song)["session"]["length_beats"] == 16
+    daw("set", song, "patterns.b.length_beats", 10)
+    code, report = cli("timeline", song)
+    assert report["length"]["beats"] == load(song)["session"]["length_beats"] == 12
 
 
 def test_positions_count_the_time_signatures_beats():

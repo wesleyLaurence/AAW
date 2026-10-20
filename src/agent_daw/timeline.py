@@ -2,11 +2,9 @@
 
 Positions in a song are beats and a request names seconds. This converts between
 them at the session's tempo, says where each track's sound starts and ends, gives
-the beat a sound must start on to end on another, and fits the session's length to
-its content.
+and the beat a sound must start on to end on another.
 """
 
-import math
 from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
@@ -115,15 +113,6 @@ def track_pads(track) -> dict:
     return track["pads"]
 
 
-def clip_end(project, clip) -> Fraction:
-    """The beat a pattern clip's last repeat or a note clip ends on."""
-    if "pattern" in clip:
-        length = Fraction(str(project["patterns"][clip["pattern"]]["length_beats"])) * clip["repeats"]
-    else:
-        length = Fraction(str(clip["length_beats"]))
-    return Fraction(str(clip["at"])) + length
-
-
 def regions(project, root: Path):
     """Every forward hit and audio clip of the song as a region, by track, in
     time order."""
@@ -193,27 +182,13 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
     sound_ends = max(ends) * tempo / 60 if ends else 0.0
     result = {"tempo": tempo}
     if fit:
-        if tail < 0:
-            raise ValueError("tail must be 0 or more beats")
-        if not ends:
-            raise ValueError("The song has no sound to fit its length to")
-        # Whole beats, so the end is a place on the grid. A session holds its
-        # clips whole, so it cannot end before the last of them does.
-        clips = max(
-            (clip_end(project, c) for t in project["tracks"] for c in t["clips"]),
-            default=Fraction(0),
-        )
-        wanted = math.ceil(round(sound_ends + tail, 6))
-        length = max(wanted, math.ceil(clips))
-        if Fraction(str(project["session"]["length_beats"])) != length:
-            run_engine("set", path, "session.length_beats", length)
-            project = load(path)
-        result["fitted"] = {"length_beats": length, "tail_beats": tail}
-        if length > wanted:
-            result["fitted"]["held_by_clips"] = (
-                f"The sound and its tail end by beat {wanted}, but a clip reaches beat "
-                f"{float(clips):g}; shorten its pattern to end the song there"
-            )
+        # The length is the song's content, the next whole bar after the last
+        # sound, set by the engine after every edit (D130): there is nothing
+        # to fit.
+        result["fitted"] = {
+            "note": "Nothing to do: the length is the song's content, the next whole bar "
+            "after the last sound, and follows every edit"
+        }
     length = float(Fraction(str(project["session"]["length_beats"])))
     result["length"] = position(length, tempo, bar)
     result["sound_ends"] = position(sound_ends, tempo, bar)
@@ -242,7 +217,7 @@ def report(path: Path, seconds=(), beats=(), end_at=None, pad=None, fit=False, t
             "change_percent": round((faster / tempo - 1) * 100, 3),
             "pads_that_follow_tempo": follows,
             "note": "Pads without source_bpm keep their length in seconds, so a sound after "
-            "the last beat takes more beats at a faster tempo; fit the length again.",
+            "the last beat takes more beats at a faster tempo.",
         }
     if seconds:
         result["seconds"] = [position(parse(text) * tempo / 60, tempo, bar) for text in seconds]

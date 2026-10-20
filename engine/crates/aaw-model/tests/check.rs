@@ -106,22 +106,15 @@ fn a_note_struck_again_while_it_sounds() {
 }
 
 #[test]
-fn an_audio_clip_the_song_ends_inside() {
+fn nothing_is_said_of_an_audio_clip_past_the_song_s_length() {
+    // The length is the song's content, which a host settles after every
+    // edit (D130); a file saved longer or shorter than its content is not
+    // warned about, and no code is about the end.
     let audio = |clip: &str| with_track(&format!("  - id: edit\n    pads: {{}}\n    audio: [{clip}]\n"));
-    let long = audio("{sample: song, at: 24, source_end_seconds: 6}");
-    let w = found(&long, "song-ends-inside");
-    assert_eq!(w.len(), 1, "{w:?}");
-    assert_eq!(w[0].message, "tracks.edit.audio.0 runs to beat 36 and the song ends at 32, so its last 4 beats are cut off");
-    assert_eq!(w[0].to_json()["at"], json!(32));
-    assert_eq!(found(&audio("{sample: song, at: 24, source_end_seconds: 4}"), "song-ends-inside"), []);
-    // A clip to the end of its file needs the file's length.
-    let open = song(&audio("{sample: song, at: 24}"));
+    let long = song(&audio("{sample: song, at: 24, source_end_seconds: 6}"));
     let seconds = HashMap::from([("song".to_string(), 6.0)]);
-    assert_eq!(check(&open, &seconds).iter().filter(|w| w.code == "song-ends-inside").count(), 1);
-    assert!(check(&open, &HashMap::new()).iter().all(|w| w.code != "song-ends-inside"));
-    // A clip from its file's second 2 at 60 BPM is six beats of eight seconds.
-    let slow = song(&audio("{sample: song, at: 24, source_start_seconds: 2, source_bpm: 60}"));
-    assert!(check(&slow, &HashMap::from([("song".to_string(), 8.0)])).iter().all(|w| w.code != "song-ends-inside"));
+    assert!(check(&long, &seconds).iter().all(|w| !w.code.contains("ends") && !w.message.contains("cut off")), "{:?}", check(&long, &seconds));
+    assert!(aaw_model::check::CODES.iter().all(|(code, _)| *code != "song-ends-inside"));
 }
 
 #[test]

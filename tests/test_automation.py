@@ -466,7 +466,6 @@ def automate(where, param, pts):
             automate("tracks", "effects.sweep.cutoff_hz", points((0, 5))),
             "outside 10 to 20000",
         ),
-        (automate("tracks", "pan", points((9, 0))), "after the session end"),
         (automate("tracks", "pan", points((2, 0), (1, 0))), "time order"),
         (automate("tracks", "pan", points((1, 0), (1, 1), (1, 0))), "at most two"),
         (automate("tracks", "gain_db", points((0, 0))), "more than one lane"),
