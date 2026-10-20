@@ -55,8 +55,9 @@ scrolling.
 
 An AppKit text view, `ComposerTextView` in `AgentComposer.swift`, in a
 rounded well: one line to start, growing with the text to eight lines and
-scrolling past that, a placeholder while it is empty, no smart quotes or
-dashes, since the person types commands. Return and Enter send; Shift-Return
+scrolling past that, "Create or edit this session" in the placeholder's
+color while it is empty, no smart quotes or dashes, since the person types
+commands. Return and Enter send; Shift-Return
 starts a new line; Escape gives the keys back to the arrangement. A
 composition under way with an input method takes Return itself. At the
 well's left, `+` for attachments ([files and clips in the
@@ -64,9 +65,11 @@ conversation](agent-attachments.md), built after this), centered on the
 field's height, at the left since October 20, 2026 (D132); at the well's
 right, the microphone ([speaking to the agent](voice-input.md), built
 after this too), and Send, gray until there is something to send and
-while the agent works. Under the well, in the faint color, "Return sends ·
-Shift-Return starts a new line", until the conversation has a row.
-Option-Return no longer breaks the line.
+while the agent works. Nothing is written under the well, and an empty
+conversation is blank above it: the paragraph that said what the agent
+could do and the line of keys under the field went on October 20, 2026
+(D133), the two refusals when Claude Code is missing or signed out staying,
+since they say what to do. Option-Return no longer breaks the line.
 
 ## The header and the conversations
 

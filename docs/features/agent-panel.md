@@ -115,7 +115,8 @@ the turn. How the rows, the field and the width are drawn is in
 **Being missing or signed out.** With no Claude Code found, the panel says
 so and what to do. A session that ends saying it is not logged in, or whose
 first result does, is shown as signed out, with the way back: run `claude` in
-a terminal and sign in.
+a terminal and sign in. These two are the only words an empty conversation
+shows (D133).
 
 ## In the window
 

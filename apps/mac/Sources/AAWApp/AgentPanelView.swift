@@ -30,12 +30,16 @@ struct AgentPanelView: View {
             Divider()
             ZStack(alignment: .bottom) {
                 if agent.entries.isEmpty {
+                    // An empty conversation is blank (D133), except for
+                    // the two refusals that say what to do.
                     VStack(spacing: 0) {
-                        Text(hint(agent))
-                            .font(.system(size: Self.textSize))
-                            .foregroundStyle(.secondary)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if let refusal = refusal(agent) {
+                            Text(refusal)
+                                .font(.system(size: Self.textSize))
+                                .foregroundStyle(.secondary)
+                                .padding(14)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                         Spacer(minLength: 0)
                     }
                 } else {
@@ -132,14 +136,16 @@ struct AgentPanelView: View {
         return taken
     }
 
-    private func hint(_ agent: AgentPanel) -> String {
+    /// What an empty conversation says when the agent cannot answer; nil
+    /// when it can, and the conversation is blank.
+    private func refusal(_ agent: AgentPanel) -> String? {
         switch agent.status {
         case .missing:
             "Claude Code was not found on this Mac. Install it, sign in by running `claude` in a terminal, and choose View › Agent again."
         case .signedOut:
             "Claude Code is signed out. Run `claude` in a terminal and sign in, then ask again."
         default:
-            "Ask the agent about this song, or for a change: it works in this project's folder with your instructions, taste and skills, and its daw commands land in the window. Each conversation is kept with the project."
+            nil
         }
     }
 
@@ -852,59 +858,51 @@ private struct Composer: View {
 
     var body: some View {
         let empty = agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && agent.attachments.isEmpty
-        VStack(alignment: .leading, spacing: 4) {
-            VStack(alignment: .leading, spacing: 0) {
-                if !agent.attachments.isEmpty {
-                    AttachmentChips(attachments: agent.attachments, remove: { agent.removeAttachment($0) })
-                        .padding(.horizontal, 8)
-                        .padding(.top, 8)
-                        .padding(.bottom, 2)
+        VStack(alignment: .leading, spacing: 0) {
+            if !agent.attachments.isEmpty {
+                AttachmentChips(attachments: agent.attachments, remove: { agent.removeAttachment($0) })
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+            }
+            HStack(alignment: .bottom, spacing: 2) {
+                // The `+` at the left, centered on the field's height (D132).
+                Menu {
+                    Button("Attach File…") { Self.chooseFiles(for: agent) }
+                    Button("Attach Selected Clips") { agent.attachSelectedClips() }
+                        .disabled(!agent.canAttachClips)
+                } label: {
+                    Image(systemName: "plus.circle").font(.system(size: 17))
                 }
-                HStack(alignment: .bottom, spacing: 2) {
-                    // The `+` at the left, centered on the field's height (D132).
-                    Menu {
-                        Button("Attach File…") { Self.chooseFiles(for: agent) }
-                        Button("Attach Selected Clips") { agent.attachSelectedClips() }
-                            .disabled(!agent.canAttachClips)
-                    } label: {
-                        Image(systemName: "plus.circle").font(.system(size: 17))
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .fixedSize()
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .frame(height: height)
+                .help("Attach a file, or the selected clips, to the message; a file dropped or pasted here attaches too")
+                .accessibilityLabel("Attach")
+                ComposerField(agent: agent, model: model, height: $height)
                     .frame(height: height)
-                    .help("Attach a file, or the selected clips, to the message; a file dropped or pasted here attaches too")
-                    .accessibilityLabel("Attach")
-                    ComposerField(agent: agent, model: model, height: $height)
-                        .frame(height: height)
-                        .accessibilityLabel("Message to the agent")
-                        .help("What to ask or change. Return sends; Shift-Return starts a new line.")
-                    MicrophoneButton(agent: agent)
-                    Button {
-                        agent.send()
-                    } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 20))
-                            .foregroundStyle(agent.working || empty ? Color.secondary : Who.user.color)
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(agent.working || empty)
-                    .help("Send (Return)")
-                    .accessibilityLabel("Send")
-                    .padding(.trailing, 2)
+                    .accessibilityLabel("Message to the agent")
+                    .help("What to ask or change. Return sends; Shift-Return starts a new line.")
+                MicrophoneButton(agent: agent)
+                Button {
+                    agent.send()
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(agent.working || empty ? Color.secondary : Who.user.color)
                 }
-                .padding(.horizontal, 4)
-                .padding(.vertical, 3)
+                .buttonStyle(.borderless)
+                .disabled(agent.working || empty)
+                .help("Send (Return)")
+                .accessibilityLabel("Send")
+                .padding(.trailing, 2)
             }
-            .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 10))
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08)))
-            if agent.entries.isEmpty {
-                Text("Return sends · Shift-Return starts a new line · / lists your skills · drop a file to attach it")
-                    .font(.system(size: AgentPanelView.smallSize))
-                    .foregroundStyle(Color(nsColor: Theme.faintText))
-                    .padding(.leading, 4)
-            }
+            .padding(.horizontal, 4)
+            .padding(.vertical, 3)
         }
+        .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.08)))
         .padding(10)
     }
 
