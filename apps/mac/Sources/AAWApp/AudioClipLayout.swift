@@ -94,6 +94,23 @@ public struct AudioClipLayout: Equatable {
         return .body
     }
 
+    /// Where the pointer becomes the resize cursor: wherever a press takes
+    /// an edge or a handle, as `part(at:in:)` reads it. The edges run the
+    /// height of the clip's whole rectangle `rect`, title strip included, and
+    /// each handle's reach runs from the clip's top to the bottom of the
+    /// body's top third. Nothing for a clip too narrow for its parts.
+    public func grabRects(in body: CGRect, clip rect: CGRect) -> [CGRect] {
+        guard body.width >= 16 else { return [] }
+        let handles = handles(in: body)
+        let band = body.minY + max(Self.handle, body.height / 3) - rect.minY
+        return [
+            CGRect(x: body.minX, y: rect.minY, width: Self.edge, height: rect.height),
+            CGRect(x: body.maxX - Self.edge, y: rect.minY, width: Self.edge, height: rect.height),
+            CGRect(x: handles.fadeIn.x - Self.reach, y: rect.minY, width: 2 * Self.reach, height: band),
+            CGRect(x: handles.fadeOut.x - Self.reach, y: rect.minY, width: 2 * Self.reach, height: band),
+        ]
+    }
+
     /// Where the start can be dragged to: no earlier than the file starts or
     /// the song does, and short of where the fade out begins.
     public func start(draggedTo beat: Double) -> Double {

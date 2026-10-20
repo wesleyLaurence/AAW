@@ -374,7 +374,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private static let moveTime: CFTimeInterval = 0.3
     private static let glowTime: CFTimeInterval = 1.8
     /// How near a clip's end a press resizes it, in points.
-    private static let resizeEdge: CGFloat = 6
 
     private let model: SongModel
     private var layout = TimelineLayout()
@@ -484,6 +483,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         layout.clamp()
         needsDisplay = true
+        cursorRectsChanged()
     }
 
     // MARK: Revisions
@@ -734,6 +734,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         layout.clamp()
         needsDisplay = true
         link?.isPaused = false
+        cursorRectsChanged()
     }
 
     private func apply(_ update: Update) {
@@ -920,6 +921,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         endRename(commit: true)
         needsDisplay = true
+        cursorRectsChanged()
     }
 
     override func scrollWheel(with event: NSEvent) {
@@ -933,12 +935,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         endRename(commit: true)
         needsDisplay = true
+        cursorRectsChanged()
     }
 
     override func magnify(with event: NSEvent) {
         let x = convert(event.locationInWindow, from: nil).x
         layout.zoom(by: 1 + event.magnification, anchorX: max(x, TimelineLayout.headerWidth))
         needsDisplay = true
+        cursorRectsChanged()
     }
 
     // MARK: What is where
@@ -1093,12 +1097,50 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     /// Whether a point is on the end of a clip, where a drag changes its repeats.
     private func onResizeEdge(_ p: CGPoint, of rect: CGRect) -> Bool {
-        rect.width >= 16 && p.x >= rect.maxX - Self.resizeEdge
+        rect.width >= 16 && p.x >= rect.maxX - TimelineLayout.resizeEdge
     }
 
     /// Whether a point is on the start of a clip, where a drag trims a note clip.
     private func onStartEdge(_ p: CGPoint, of rect: CGRect) -> Bool {
-        rect.width >= 16 && p.x <= rect.minX + Self.resizeEdge
+        rect.width >= 16 && p.x <= rect.minX + TimelineLayout.resizeEdge
+    }
+
+    /// Where the pointer becomes the resize cursor, so a trim is told from a
+    /// move before the drag begins: a pattern clip's end, a note clip's
+    /// either edge, and an audio clip's edges and fade handles, of the clips
+    /// in the lanes. These are cursor rects rather than a cursor set as the
+    /// pointer moves: under the SwiftUI window a cursor set in `mouseMoved`
+    /// is put back to the arrow at once, while the window keeps its cursor
+    /// rects, as the dividers' and the panels' are kept.
+    private func cursorRects() -> [CGRect] {
+        let lanes = CGRect(x: TimelineLayout.headerWidth, y: TimelineLayout.rulerHeight, width: layout.lanesWidth, height: layout.lanesHeight)
+        var rects: [CGRect] = []
+        for track in model.arrangement.tracks {
+            guard let frame = frame(of: .track(track.key)) else { continue }
+            for clip in track.clips {
+                let rect = clipRect(at: clip.at, length: clip.patternBeats * Double(clip.repeats), top: frame.top)
+                rects += TimelineLayout.edgeRects(of: rect, start: false, end: true)
+            }
+            for clip in track.audio {
+                let shape = audioLayout(clip)
+                let rect = clipRect(at: shape.start, length: shape.length, top: frame.top)
+                rects += shape.grabRects(in: body(of: rect), clip: rect)
+            }
+            for clip in track.noteClips {
+                rects += TimelineLayout.edgeRects(of: clipRect(at: clip.at, length: clip.lengthBeats, top: frame.top), start: true, end: true)
+            }
+        }
+        return rects.map { $0.intersection(lanes) }.filter { !$0.isEmpty }
+    }
+
+    override func resetCursorRects() {
+        for rect in cursorRects() { addCursorRect(rect, cursor: .resizeLeftRight) }
+    }
+
+    /// The clips' edges moved under the pointer: the window asks for the
+    /// cursor rects again.
+    private func cursorRectsChanged() {
+        window?.invalidateCursorRects(for: self)
     }
 
     /// The rows of a row's kind in their order: the tracks, the groups or
@@ -1870,20 +1912,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseMoved(with event: NSEvent) {
+        // The cursor is the cursor rects' (`resetCursorRects`); the pointer's
+        // place only decides which audio clip shows its fades' handles.
         let p = convert(event.locationInWindow, from: nil)
-        var resize = false
         var hover: UInt64?
-        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight, lane(at: p) == nil, let hit = clip(at: p) {
-            switch hit.hit {
-            case .pattern: resize = onResizeEdge(p, of: hit.rect)
-            case .audio(let clip):
-                hover = clip.key
-                resize = part(of: clip, at: p, in: hit.rect) != .body
-            case .notes: resize = onResizeEdge(p, of: hit.rect) || onStartEdge(p, of: hit.rect)
-            }
+        if p.x >= TimelineLayout.headerWidth, p.y >= TimelineLayout.rulerHeight, lane(at: p) == nil,
+           case .audio(let clip)? = clip(at: p)?.hit {
+            hover = clip.key
         }
-        (resize ? NSCursor.resizeLeftRight : NSCursor.arrow).set()
-        // An audio clip under the pointer shows its fades' handles.
         if hover != hoverClip {
             hoverClip = hover
             needsDisplay = true

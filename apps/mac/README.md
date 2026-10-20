@@ -208,6 +208,7 @@ front first.
 | Drag in the clear of the timeline | Selects the clips a rectangle touches, across tracks; with Shift, as well as those selected. The press sets the start position |
 | Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in; on a MIDI track, an empty note clip a bar long |
 | Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid; with Option, copies them there, outlined on the way, and leaves them, whichever part of the clip was pressed. An audio clip can pass the song's end, which grows with it |
+| Point at a clip's edge | The pointer becomes the resize cursor where a drag trims or resizes instead of moving: a pattern clip's end, a note clip's either edge, and an audio clip's edges and the handles at its top corners |
 | Drag a pattern clip's end | Changes its repeats |
 | Drag a note clip's start or end | Moves that edge, on the grid or with ⌘ off it. The notes stay where they are in the song: those an edge passes are kept outside the clip and do not play, and come back when it moves back. A looped clip's end sets how many times its loop plays |
 | Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid |
