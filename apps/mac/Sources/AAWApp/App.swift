@@ -731,7 +731,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Browser", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
             item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
-            item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]),
             item("Agent", #selector(SongWindowController.toggleAgent(_:)), "c", [.command, .option]),
             .separator(),
             item("Analyzer Window", #selector(SongWindowController.openAnalyzer(_:)), "l", [.command, .option]),
@@ -739,6 +738,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let window = NSMenu(title: "Window")
         window.addItem(item("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"))
         window.addItem(item("Zoom", #selector(NSWindow.performZoom(_:))))
+        window.addItem(.separator())
+        // The changes with who made them: a record, not a view of the song,
+        // so it is here and not in View or the transport bar.
+        window.addItem(item("Activity", #selector(SongWindowController.toggleActivity(_:)), "a", [.command, .option]))
         let holder = NSMenuItem()
         holder.submenu = window
         main.addItem(holder)

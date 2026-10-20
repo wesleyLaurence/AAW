@@ -10,7 +10,7 @@ what nobody has tried.
 ## What
 
 Each project's window has a panel at its right, shown with View › Agent
-(⌥⌘C) or the speech mark in the transport bar, with the project's
+(⌥⌘C) or the sidebar mark in the transport bar, with the project's
 conversations in a menu at its top, the conversation shown as it streams,
 each tool the agent runs with what it returned, each request the agent makes
 that the person answers, and a field to type in at the foot. The agent is the
@@ -121,7 +121,7 @@ a terminal and sign in.
 
 | Part | Does |
 |---|---|
-| View › Agent, ⌥⌘C, the speech mark in the transport bar | Shows or hides the panel, at the right, over the activity panel when both show; kept between projects. The line at its left edge drags its width from 280 to 640 points, 320 to start, kept too |
+| View › Agent, ⌥⌘C, the sidebar mark in the transport bar | Shows or hides the panel, at the right, over the activity panel when Window › Activity shows that too; the column's one mark, in the agent's color while it works; kept between projects. The line at its left edge drags its width from 280 to 640 points, 320 to start, kept too |
 | `+` and the clock at the panel's top | A new conversation; a popover of the project's conversations, most recent first, each with when it was last used, Rename and Delete in its menu |
 | The field at the foot | Grows to eight lines. Return sends; Shift-Return starts a new line; Escape gives the keys back. `/` first lists the skills, and the one chosen is a chip ([skill commands](skill-commands.md)). Send is gray while there is nothing to send or the agent works; the microphone listens and puts the words in the field ([speaking to the agent](voice-input.md)) |
 | A drop on the panel, ⌘V in the field, `+` | Attaches a file, an image or the selected clips to the next message, as chips above the field ([files and clips in the conversation](agent-attachments.md)) |

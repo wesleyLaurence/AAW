@@ -42,7 +42,7 @@ struct SongView: View {
                     SideResizer(model: model)
                         .frame(width: SideResizerView.thickness)
                     // The agent's conversation over the activity, which is
-                    // what its commands do.
+                    // what its commands do, when Window › Activity shows it.
                     VStack(spacing: 0) {
                         if model.showsAgent {
                             AgentPanelView(model: model)
@@ -371,22 +371,17 @@ struct TransportBar: View {
             .opacity(model.agentWorking ? 1 : 0)
             .animation(.easeOut(duration: 0.3), value: model.agentWorking)
 
+            // The column's one mark: the agent panel's, as a sidebar. The
+            // activity opens from the Window menu alone.
             Button {
                 model.showsAgent.toggle()
             } label: {
-                Image(systemName: model.agent.working ? "bubble.left.and.text.bubble.right.fill" : "bubble.left.and.text.bubble.right")
+                Image(systemName: "sidebar.right")
                     .frame(width: 18, height: 18)
                     .foregroundStyle(model.agent.working ? Who.agent.color : Color.primary)
             }
             .help("Show or hide the agent panel (⌥⌘C)")
             .accessibilityLabel("Agent panel")
-
-            Button {
-                model.showsActivity.toggle()
-            } label: {
-                Image(systemName: "sidebar.right").frame(width: 18, height: 18)
-            }
-            .help("Show or hide the activity panel")
         }
         .buttonStyle(.borderless)
         .focusable(false)

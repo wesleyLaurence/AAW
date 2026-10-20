@@ -237,7 +237,9 @@ public final class SongModel {
     private(set) var exportOutcome: ExportOutcome?
     /// The position the transport bar shows.
     public var position: Double = 0
-    public var showsActivity = true
+    /// Whether the activity panel shows, under the agent panel or in its
+    /// place: Window › Activity, hidden when a project opens.
+    public var showsActivity = false
     /// Whether every row's automation lanes are shown, as A sets it. The
     /// window's, not the song's.
     public private(set) var showsAutomation = false
