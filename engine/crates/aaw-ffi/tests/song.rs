@@ -3066,7 +3066,7 @@ fn groups_are_rows_over_their_tracks() {
     let start = song.arrangement();
     assert!(start.groups.is_empty() && start.tracks.iter().all(|t| t.group.is_none()));
     // ⌘G on the two tracks: a group under a free name, holding them.
-    let made = song.edit(Edit::GroupAdd { tracks: vec![start.tracks[1].key, start.tracks[0].key] }, None).unwrap();
+    let made = song.edit(Edit::GroupAdd { tracks: vec![start.tracks[1].key, start.tracks[0].key], groups: vec![] }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Group perc, drums as group-1");
     let a = &u.arrangement;
@@ -3194,4 +3194,44 @@ fn an_analyzer_s_measurements_are_read_for_its_window() {
     let keys = song.edit(Edit::SynthAdd { track: None, patch: None }, None).unwrap()[0];
     let refused = song.edit(Edit::SynthEffectAdd { track: keys, kind: "analyzer".into(), index: None }, None).unwrap_err();
     assert!(refused.to_string().contains("not offered inside a patch"), "{refused}");
+}
+
+#[test]
+fn a_group_of_groups_is_a_row_over_their_rows() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    // A group of each track, then ⌘G on the two groups: a group of them,
+    // with no tracks of its own and the two in it.
+    let drums = song.edit(Edit::GroupAdd { tracks: vec![start.tracks[0].key], groups: vec![] }, None).unwrap()[0];
+    update(&seen);
+    let perc = song.edit(Edit::GroupAdd { tracks: vec![start.tracks[1].key], groups: vec![] }, None).unwrap()[0];
+    update(&seen);
+    let made = song.edit(Edit::GroupAdd { tracks: vec![], groups: vec![drums, perc] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Group group-1, group-2 as group-3");
+    let a = &u.arrangement;
+    let outer = a.groups.iter().find(|g| g.key == made[0]).unwrap();
+    assert_eq!((outer.groups.as_slice(), outer.tracks.len(), outer.group), (&[drums, perc][..], 0, None));
+    assert_eq!(a.groups.iter().find(|g| g.key == drums).unwrap().group, Some(made[0]));
+    assert_eq!(a.groups.iter().find(|g| g.key == perc).unwrap().group, Some(made[0]));
+    // A track in one group and a group in another are not grouped together.
+    let e = song.edit(Edit::GroupAdd { tracks: vec![start.tracks[0].key], groups: vec![perc] }, None).unwrap_err().to_string();
+    assert!(e.contains("in the same group"), "{e}");
+    // Remove from Group on a group takes it to the master, and back.
+    song.edit(Edit::GroupParent { group: perc, parent: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Take group-2 out of its group");
+    assert_eq!(u.arrangement.groups.iter().find(|g| g.key == perc).unwrap().group, None);
+    assert_eq!(u.arrangement.groups.iter().find(|g| g.key == made[0]).unwrap().groups, [drums]);
+    song.edit(Edit::GroupParent { group: perc, parent: Some(made[0]) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Put group-2 in group group-3");
+    assert_eq!(u.arrangement.groups.iter().find(|g| g.key == made[0]).unwrap().groups, [drums, perc]);
+    // Ungrouping the outer group leaves the two groups, on the master.
+    song.edit(Edit::Ungroup { group: made[0] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.groups.len(), 2);
+    assert!(u.arrangement.groups.iter().all(|g| g.group.is_none()));
+    assert!(u.arrangement.tracks.iter().all(|t| t.group.is_some()));
 }

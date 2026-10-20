@@ -398,12 +398,14 @@ enum ReturnCmd {
     Move { project: Song, id: String, index: usize },
 }
 
-/// Groups: tracks summed through a chain, gain and pan of their own, as a
-/// drum bus. A track names its group with group; daw set tracks.T.group G
-/// moves one track, and daw remove tracks.T.group takes it out.
+/// Groups: tracks and groups summed through a chain, gain and pan of their
+/// own, as a drum bus. A track names its group with group; daw set
+/// tracks.T.group G moves one track, and daw remove tracks.T.group takes it
+/// out. A group names its own group the same way: daw set groups.G.group P
+/// puts a group in another, daw remove groups.G.group takes it out.
 #[derive(Subcommand)]
 enum GroupCmd {
-    /// Add a group; --tracks a,b puts those tracks in it, moved together.
+    /// Add a group; --tracks a,b and --groups c,d put those in it, moved together.
     #[command(after_help = group_help())]
     Add {
         project: Song,
@@ -411,12 +413,15 @@ enum GroupCmd {
         /// The tracks in the group, by ID, comma-separated.
         #[arg(long, value_delimiter = ',')]
         tracks: Vec<String>,
+        /// The groups in the group, by ID, comma-separated.
+        #[arg(long, value_delimiter = ',')]
+        groups: Vec<String>,
         #[command(flatten)]
         f: FieldArgs,
     },
-    /// Remove a group; its tracks go to the master again.
+    /// Remove a group; its tracks and groups go to its own group, or the master.
     Remove { project: Song, group: String },
-    /// Rename a group and the tracks' group naming it.
+    /// Rename a group and the tracks' and groups' group naming it.
     Rename { project: Song, group: String, to: String },
     Move { project: Song, group: String, index: usize },
 }
@@ -1154,8 +1159,9 @@ fn track_help() -> String {
 
 fn group_help() -> String {
     format!(
-        "Fields:\n{}{}{}",
+        "Fields:\n{}{}{}{}",
         flag_line("tracks", "the tracks in it, comma-separated; moved together to where the first of them is"),
+        flag_line("groups", "the groups in it, comma-separated; their tracks move with the others"),
         flag_line("index", "where among the groups, 0 first; last unless given"),
         takes("Group", &["id"])
     )
@@ -1807,7 +1813,7 @@ fn run(cli: &Cli) -> Result<Json> {
             ),
         },
         Top::Group(g) => match g {
-            GroupCmd::Add { project, id, tracks, f } => {
+            GroupCmd::Add { project, id, tracks, groups, f } => {
                 let mut fields = fields(f)?;
                 let index = take_index(&mut fields)?;
                 edit(
@@ -1816,6 +1822,7 @@ fn run(cli: &Cli) -> Result<Json> {
                         id: id.clone(),
                         index,
                         tracks: tracks.clone(),
+                        groups: groups.clone(),
                         fields,
                     },
                 )

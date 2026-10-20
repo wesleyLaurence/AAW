@@ -49,26 +49,32 @@ public struct HeaderLayout: Equatable {
     public var lanes: Int?
     /// Whether a group's tracks are folded away under it.
     public var collapsed: Bool
-    /// Whether the track is in a group, and its name sits in from the edge.
-    public var grouped: Bool
+    /// How many groups the row is in: its marks and name sit in from the
+    /// edge by `indent` for each.
+    public var depth: Int
+    /// Whether the row is in a group.
+    public var grouped: Bool { depth > 0 }
 
     public init(kind: Kind, top: CGFloat, sends: Int = 0, folds: Bool = false, lanes: Int? = nil,
-                collapsed: Bool = false, grouped: Bool = false) {
+                collapsed: Bool = false, depth: Int = 0) {
         self.kind = kind
         self.top = top
         self.sends = sends
         self.folds = folds
         self.lanes = lanes
         self.collapsed = collapsed
-        self.grouped = grouped
+        self.depth = depth
     }
 
     /// Whether the header is a track's or a group's: two lines, with a
     /// volume bar, solo and sends.
     public var strip: Bool { kind == .track || kind == .group }
 
-    /// How far in a grouped track's marks and name sit.
+    /// How far in a grouped row's marks and name sit, for each group it is in.
     public static let indent: CGFloat = 12
+
+    /// How far in the row's marks sit for the groups it is in.
+    private var inset: CGFloat { CGFloat(depth) * Self.indent }
 
     /// How much taller a track's header is with `sends` sends shown.
     public static func extraHeight(sends: Int) -> CGFloat {
@@ -90,19 +96,19 @@ public struct HeaderLayout: Equatable {
         baseHeight + Self.extraHeight(lanes: lanes)
     }
 
-    /// Where a track's or a group's marks start: in from the edge for a
-    /// grouped track, and after the members mark on a group.
+    /// Where a track's or a group's marks start: in from the edge for each
+    /// group the row is in, and after the members mark on a group.
     private var left: CGFloat {
         switch kind {
-        case .group: 8 + 16
-        case .track: 8 + (grouped ? Self.indent : 0)
+        case .group: 8 + inset + 16
+        case .track: 8 + inset
         case .bus, .master: 8
         }
     }
 
-    /// The mark on a group that folds its tracks away.
+    /// The mark on a group that folds what is under it away.
     public var members: CGRect {
-        CGRect(x: 8, y: top + 7, width: 12, height: 12)
+        CGRect(x: 8 + inset, y: top + 7, width: 12, height: 12)
     }
 
     public var fold: CGRect {

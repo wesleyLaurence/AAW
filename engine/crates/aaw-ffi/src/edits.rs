@@ -80,14 +80,18 @@ pub enum Edit {
     /// row has none there.
     Send { row: Row, to: String, db: f64 },
     SendRemove { row: Row, to: String },
-    /// Groups tracks, as ⌘G does: a new group under a free name holding the
+    /// Groups tracks and groups, as ⌘G does: a new group under a free name
+    /// holding them, in the group they are all in, if they are in one; the
     /// tracks, which are moved together to where the first of them is. The
     /// group is what the edit makes.
-    GroupAdd { tracks: Vec<u64> },
-    /// Takes a group away, as ⇧⌘G does; its tracks go to the master again.
+    GroupAdd { tracks: Vec<u64>, groups: Vec<u64> },
+    /// Takes a group away, as ⇧⌘G does; its tracks and groups go to its own
+    /// group, or to the master again.
     Ungroup { group: u64 },
     /// Puts a track in a group, or with none takes it out of its group.
     TrackGroup { track: u64, group: Option<u64> },
+    /// Puts a group in a group, or with none takes it out of its group.
+    GroupParent { group: u64, parent: Option<u64> },
     /// Moves clips later by `by` beats and down by `rows` tracks: pattern
     /// clips and audio clips alike. The song grows to hold an audio clip
     /// that would end past its end, here and in the edits below.
@@ -1095,18 +1099,38 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             "op": "send.set", "track": handle_text(sender(row)?), "to": to, "gain_db": number(*db),
         })]),
         Edit::SendRemove { row, to } => Ok(vec![json!({"op": "send.remove", "track": handle_text(sender(row)?), "to": to})]),
-        Edit::GroupAdd { tracks } => {
+        Edit::GroupAdd { tracks, groups } => {
             let tree = doc.tree();
-            let names: Vec<&str> = tracks
-                .iter()
-                .map(|key| items(&tree, "tracks").iter().find(|i| i.handle == *key).and_then(|i| i.node.field("id")).ok_or_else(|| "A track is no longer in the song".to_string()))
-                .collect::<Result<_>>()?;
+            let item = |list: &str, key: u64, what: &str| {
+                items(&tree, list).iter().find(|i| i.handle == key).map(|i| i.node.clone()).ok_or_else(|| format!("A {what} is no longer in the song"))
+            };
+            let mut names: Vec<String> = Vec::new();
+            let mut parents: Vec<Option<String>> = Vec::new();
+            for key in tracks {
+                let node = item("tracks", *key, "track")?;
+                names.push(node.field("id").unwrap_or_default().to_string());
+                parents.push(node.field("group").map(str::to_string));
+            }
+            for key in groups {
+                let node = item("groups", *key, "group")?;
+                names.push(node.field("id").unwrap_or_default().to_string());
+                parents.push(node.field("group").map(str::to_string));
+            }
+            if names.is_empty() {
+                return Err("Nothing to group".into());
+            }
+            // The new group goes where they all are: in the group they
+            // share, or on the master.
+            let parent = parents[0].clone();
+            if parents.iter().any(|p| *p != parent) {
+                return Err("Group tracks and groups that are in the same group".into());
+            }
             let id = free_name(project, "group");
-            let handles: Vec<String> = tracks.iter().map(|k| handle_text(*k)).collect();
-            Ok(batch(
-                vec![json!({"op": "group.add", "id": id, "tracks": handles})],
-                format!("Group {} as {id}", names.join(", ")),
-            ))
+            let mut op = json!({"op": "group.add", "id": id, "tracks": tracks.iter().map(|k| handle_text(*k)).collect::<Vec<_>>(), "groups": groups.iter().map(|k| handle_text(*k)).collect::<Vec<_>>()});
+            if let Some(parent) = parent {
+                op["group"] = json!(parent);
+            }
+            Ok(batch(vec![op], format!("Group {} as {id}", names.join(", "))))
         }
         Edit::Ungroup { group } => Ok(vec![json!({"op": "group.remove", "group": handle_text(*group)})]),
         Edit::TrackGroup { track, group } => {
@@ -1120,6 +1144,19 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                     Ok(batch(vec![json!({"op": "set", "path": path, "value": id})], format!("Put {track_name} in group {id}")))
                 }
                 None => Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Take {track_name} out of its group"))),
+            }
+        }
+        Edit::GroupParent { group, parent } => {
+            let tree = doc.tree();
+            let name = |key: u64| items(&tree, "groups").iter().find(|i| i.handle == key).and_then(|i| i.node.field("id").map(str::to_string));
+            let group_name = name(*group).ok_or("The group is no longer in the song")?;
+            let path = format!("groups.{}.group", handle_text(*group));
+            match parent {
+                Some(key) => {
+                    let id = name(*key).ok_or("The group is no longer in the song")?;
+                    Ok(batch(vec![json!({"op": "set", "path": path, "value": id})], format!("Put {group_name} in group {id}")))
+                }
+                None => Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Take {group_name} out of its group"))),
             }
         }
         Edit::ClipsMove { clips, by, rows } => {

@@ -187,3 +187,127 @@ fn stems_of_the_ungrouped_tracks_the_groups_and_the_returns_sum_to_the_mix() {
         assert!((sum * env - m[0]).abs() < 1e-9, "frame {f}: {} is not {}", sum * env, m[0]);
     }
 }
+
+/// The mix song with the hats in a group `top`, the bass and the layer in a
+/// group `low`, and both groups in a group `all`, written with `low_fields`
+/// and `all_fields` under those groups' ids.
+fn write_nested_song(dir: &Path, low_fields: &str, all_fields: &str) -> PathBuf {
+    let path = write_mix_song(dir);
+    let yaml = std::fs::read_to_string(&path).unwrap();
+    let yaml = yaml
+        .replace("- id: hats\n", "- id: hats\n  group: top\n")
+        .replace("- id: bass\n", "- id: bass\n  group: low\n")
+        .replace("- id: layer\n", "- id: layer\n  group: low\n")
+        .replace(
+            "returns:\n",
+            &format!("groups:\n- id: all\n{all_fields}- id: top\n  group: all\n- id: low\n  group: all\n{low_fields}returns:\n"),
+        );
+    std::fs::write(&path, yaml).unwrap();
+    path
+}
+
+#[test]
+fn a_group_of_groups_at_rest_is_their_sum_and_comes_after_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let plain = program(&write_mix_song(dir.path()), |_| {});
+    let nested = program(&write_nested_song(dir.path(), "", ""), |_| {});
+    // The groups in a group come before it, whatever the document's order.
+    assert_eq!(
+        nested.stems().iter().map(|(n, k)| (*n, *k)).collect::<Vec<_>>(),
+        [("hats", StemKind::Track), ("bass", StemKind::Track), ("layer", StemKind::Track), ("top", StemKind::Group), ("low", StemKind::Group), ("all", StemKind::Group), ("room", StemKind::Return), ("echo", StemKind::Return)]
+    );
+    let all = &nested.groups[2];
+    assert_eq!((all.members.len(), all.groups.as_slice(), all.group), (0, &["top".to_string(), "low".to_string()][..], None));
+    assert_eq!((nested.groups[0].group, nested.groups[1].group), (Some(2), Some(2)));
+    assert!(nested.groups.iter().all(|g| g.lead == 0));
+    assert_eq!((nested.track_offset, nested.latency), (plain.track_offset, plain.latency));
+    let (mix, stems) = render(&plain, &mut || 512);
+    let (mix_n, stems_n) = render(&nested, &mut || 512);
+    close(&mix, &mix_n, 1e-12, "mix");
+    for name in ["hats", "bass", "layer", "room", "echo"] {
+        assert_eq!(stem(&plain, &stems, name), stem(&nested, &stems_n, name), "{name}");
+    }
+    let (top, low) = (stem(&nested, &stems_n, "top"), stem(&nested, &stems_n, "low"));
+    let summed: Vec<Frame> = top.iter().zip(low).map(|(a, b)| [a[0] + b[0], a[1] + b[1]]).collect();
+    close(stem(&nested, &stems_n, "all"), &summed, 1e-15, "the outer group's stem");
+    assert!(top.iter().any(|f| f[0] != 0.0) && low.iter().any(|f| f[0] != 0.0));
+}
+
+#[test]
+fn latency_down_two_levels_leaves_the_mix_and_the_sends_aligned() {
+    let dir = tempfile::tempdir().unwrap();
+    let at_rest = program(&write_nested_song(dir.path(), "", ""), |_| {});
+    let limiter = "  effects: [{type: limiter, ceiling_db: -0.1}]\n";
+    let limited = program(&write_nested_song(dir.path(), limiter, limiter), |_| {});
+    // The inner group's lead is its own look-ahead over its group's.
+    let leads: Vec<(&str, usize)> = limited.groups.iter().map(|g| (g.id.as_str(), g.lead)).collect();
+    assert_eq!(leads, [("top", 144), ("low", 288), ("all", 144)]);
+    // The bass limiter's 72, then low's 144, then all's 144.
+    assert_eq!((limited.track_offset, limited.latency), (360, 504));
+    let (mix, stems) = render(&at_rest, &mut || 512);
+    let (mix_l, stems_l) = render(&limited, &mut || 512);
+    close(&mix, &mix_l, 1e-9, "mix");
+    for name in ["hats", "bass", "layer", "top", "low", "all", "room", "echo"] {
+        close(stem(&at_rest, &stems, name), stem(&limited, &stems_l, name), 1e-9, name);
+    }
+    let random = render(&limited, &mut random_sizes(9));
+    assert_eq!(mix_l, random.0);
+    assert_eq!(stems_l, random.1);
+}
+
+#[test]
+fn mute_and_solo_reach_down_the_tree() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_nested_song(dir.path(), "", "");
+    let silent = |x: &[Frame]| x.iter().all(|f| f[0] == 0.0 && f[1] == 0.0);
+    let heard = |p: &Program, stems: &[Vec<Frame>]| -> Vec<String> { p.stems().iter().map(|(n, _)| *n).filter(|n| !silent(stem(p, stems, n))).map(str::to_string).collect() };
+    // A muted outer group silences everything under it and their sends.
+    let muted = program(&path, |p| p.groups[0].mute = true);
+    let (_, stems) = render(&muted, &mut || 512);
+    assert!(heard(&muted, &stems).is_empty());
+    // A soloed outer group is heard with everything under it.
+    let outer = program(&path, |p| p.groups[0].solo = true);
+    let (_, stems) = render(&outer, &mut || 512);
+    assert_eq!(heard(&outer, &stems), ["hats", "bass", "layer", "top", "low", "all", "room", "echo"]);
+    // A soloed inner group is heard with its tracks, through its group.
+    let inner = program(&path, |p| p.groups[2].solo = true);
+    let (_, stems) = render(&inner, &mut || 512);
+    assert_eq!(heard(&inner, &stems), ["bass", "layer", "low", "all", "room"]);
+    // A soloed track is heard through both groups, alone.
+    let bass = program(&path, |p| p.tracks[1].solo = true);
+    let (_, stems) = render(&bass, &mut || 512);
+    assert_eq!(heard(&bass, &stems), ["bass", "low", "all", "room"]);
+    assert_eq!(stem(&bass, &stems, "all"), stem(&bass, &stems, "bass"));
+    // A mute over a solo wins.
+    let both = program(&path, |p| {
+        p.groups[0].mute = true;
+        p.tracks[1].solo = true;
+    });
+    let (_, stems) = render(&both, &mut || 512);
+    assert!(heard(&both, &stems).is_empty());
+}
+
+#[test]
+fn a_nested_group_s_preview_is_its_stem_and_the_outermost_stems_sum_to_the_mix() {
+    let dir = tempfile::tempdir().unwrap();
+    let limiter = "  effects: [{type: limiter, ceiling_db: -0.1}]\n";
+    let path = write_nested_song(dir.path(), &format!("  sends: [{{to: echo, gain_db: -6}}]\n{limiter}"), limiter);
+    let p = aaw_model::load(&path, true).unwrap();
+    let full = program(&path, |_| {});
+    let (_, stems) = render(&full, &mut || 512);
+    for name in ["all", "low", "top", "bass", "echo"] {
+        let scoped = Arc::new(compile_scoped(&p, dir.path(), &mut Cache::default(), Scope::Channel(name)).unwrap());
+        assert_eq!(scoped.stems().len(), 1, "{name}");
+        let (_, preview) = render(&scoped, &mut || 512);
+        close(&preview[0], stem(&full, &stems, name), 1e-12, name);
+    }
+    // The outermost group, the returns and nothing else sum to the mix
+    // without master effects.
+    let p = program(&path, |p| p.master.effects.clear());
+    let (mix, stems) = render(&p, &mut || 1000);
+    for (f, m) in mix.iter().enumerate() {
+        let env = p.envelope(f);
+        let sum: f64 = ["all", "room", "echo"].iter().map(|n| stem(&p, &stems, n)[f][0]).sum();
+        assert!((sum * env - m[0]).abs() < 1e-9, "frame {f}: {} is not {}", sum * env, m[0]);
+    }
+}

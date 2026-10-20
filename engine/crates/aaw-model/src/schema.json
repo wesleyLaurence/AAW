@@ -602,7 +602,7 @@
     },
     "Group": {
       "additionalProperties": false,
-      "description": "A group: the tracks that name it summed through its own chain, gain and pan, then to the master and to the returns it sends to, as a drum bus.",
+      "description": "A group: the tracks and groups that name it summed through its own chain, gain and pan, then to its own group or the master and to the returns it sends to, as a drum bus.",
       "properties": {
         "id": {
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
@@ -632,6 +632,20 @@
           "default": false,
           "title": "Solo",
           "type": "boolean"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The group this group's output goes into instead of the master sum, one of groups[]; its tracks, with those of the groups in it, are next to each other.",
+          "title": "Group"
         },
         "effects": {
           "items": {

@@ -742,18 +742,36 @@ pub fn references(p: &Project) -> Result<(), String> {
     if all.len() != with_groups.len() + return_ids.len() {
         return Err("Return IDs must be unique and distinct from track and group IDs".into());
     }
-    // A track's group exists, and a group's tracks are next to each other,
-    // so that the group's row can sit above them in the window.
+    // A group's group exists, is another group, and is not under it: the
+    // groups are a tree whose root is the master.
+    for g in &p.groups {
+        if let Some(parent) = g.group.as_deref() {
+            if parent == g.id {
+                return Err(format!("{}: a group cannot be in itself", g.id));
+            }
+            if !group_ids.contains(&parent) {
+                return Err(format!("{}: unknown group {parent}", g.id));
+            }
+            if p.ancestors(parent).iter().any(|a| a.id == g.id) {
+                return Err(format!("{}: cannot be in group {parent}, which is in {}", g.id, g.id));
+            }
+        }
+    }
+    // A track's group exists, and the tracks under a group, its own and
+    // those of the groups in it, are next to each other, so that the
+    // group's row can sit above them in the window.
     let mut seen: Vec<&str> = Vec::new();
-    let mut previous: Option<&str> = None;
+    let mut previous: Vec<&str> = Vec::new();
     for t in &p.tracks {
-        let group = t.group.as_deref();
-        if let Some(g) = group {
+        if let Some(g) = t.group.as_deref() {
             if !group_ids.contains(&g) {
                 return Err(format!("{}: unknown group {g}", t.id));
             }
-            if previous != Some(g) {
-                if seen.contains(&g) {
+        }
+        let path: Vec<&str> = p.track_ancestors(t).iter().map(|g| g.id.as_str()).collect();
+        for g in &path {
+            if !previous.contains(g) {
+                if seen.contains(g) {
                     return Err(format!(
                         "{}: the tracks of group {g} must be next to each other; move it beside them with daw track move",
                         t.id
@@ -762,7 +780,7 @@ pub fn references(p: &Project) -> Result<(), String> {
                 seen.push(g);
             }
         }
-        previous = group;
+        previous = path;
     }
     let channels = p
         .tracks

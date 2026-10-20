@@ -33,6 +33,7 @@ groups:
 |---|---|
 | `tracks[].group` | The group the track is summed into, or left out for the master |
 | `groups[].id` | Unique across tracks, groups and returns |
+| `groups[].group` | The group this group is summed into, or left out for the master ([groups within groups](nested-groups.md), 2026-10-20) |
 | `gain_db`, `pan`, `mute`, `solo` | As a track's; lanes move `gain_db` and `pan` |
 | `effects` | A chain run on the sum of the tracks, before the gain and pan; an equalizer in it draws its spectrum as any does |
 | `sends` | To returns, post-fader or pre-fader, as a track's; `sends.R.gain_db` is a lane target |
@@ -98,10 +99,13 @@ wants to fold to the few things it is made of.
 - **The fold is the window's.** Which groups are folded is kept by the app,
   not the song, as the sends' fold is: folding is not an edit, and a fresh
   window opens with every group shown.
-- **No nesting.** A group cannot be in a group, and a group does not send to
-  another group. Nesting is Next, asked for on October 19, 2026
-  ([groups within groups](nested-groups.md)). A track dragged in the window out of the run of its group's
-  tracks is refused by the host, and the row goes back.
+- **Nesting** came on October 20, 2026: a group names its own group as a
+  track does, is summed into it through the same chain, fader, mute, solo
+  and sends, and runs ahead by the sum of the latencies down the path. The
+  contiguity rule holds the tracks under a group, its own and those of the
+  groups in it. See [groups within groups](nested-groups.md). A group does
+  not send to another group. A track dragged in the window out of the run of
+  its group's tracks is refused by the host, and the row goes back.
 
 ## Limits
 

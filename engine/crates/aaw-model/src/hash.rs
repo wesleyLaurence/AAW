@@ -23,17 +23,23 @@ pub fn project_hash(project: &Project) -> String {
 struct Added {
     key: &'static str,
     default: Value,
+    /// Dropped only from a mapping that has this key too.
     beside: Option<&'static str>,
+    /// Dropped only from a mapping without this key.
+    unless: Option<&'static str>,
 }
 
 fn added(key: &'static str, default: Value) -> Added {
-    Added { key, default, beside: None }
+    Added { key, default, beside: None, unless: None }
 }
 
 /// Newest first: the fields each schema change added, at
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // A group's own group. A track has the key too, and clips, so only
+        // a group's is dropped: a song without nesting keeps its hash.
+        vec![Added { key: "group", default: Value::None, beside: None, unless: Some("clips") }],
         // A limiter's switch to hold the level between the samples.
         vec![added("true_peak", Value::Bool(false))],
         // Markers: the person's notes at beats.
@@ -42,7 +48,7 @@ fn legacy_fields() -> Vec<Vec<Added>> {
         vec![added("groups", Value::List(vec![])), added("group", Value::None)],
         // An equalizer band's slope; the filter has the key too, so only a
         // mapping with a band's shape loses it.
-        vec![Added { key: "slope_db_per_octave", default: Value::int(12), beside: Some("shape") }],
+        vec![Added { key: "slope_db_per_octave", default: Value::int(12), beside: Some("shape"), unless: None }],
         // An equalizer band's shape is a word, so only a point's is dropped.
         vec![added("shape", Value::Float(0.0))],
         vec![added("audio", Value::List(vec![]))],
@@ -63,7 +69,10 @@ fn without(data: &Value, fields: &[Added]) -> Value {
                 .map(|(k, v)| (k.clone(), without(v, fields)))
                 .filter(|(k, v)| {
                     !fields.iter().any(|f| {
-                        k.as_str() == Some(f.key) && py_eq(v, &f.default) && f.beside.is_none_or(|sibling| d.get(&crate::value::Key::str(sibling)).is_some())
+                        k.as_str() == Some(f.key)
+                            && py_eq(v, &f.default)
+                            && f.beside.is_none_or(|sibling| d.get(&crate::value::Key::str(sibling)).is_some())
+                            && f.unless.is_none_or(|sibling| d.get(&crate::value::Key::str(sibling)).is_none())
                     })
                 })
                 .collect(),

@@ -761,6 +761,8 @@ impl Session {
                 json!({
                     "id": g.id,
                     "tracks": p.members(&g.id).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+                    "groups": p.child_groups(&g.id).iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
+                    "group": g.group,
                     "gain_db": g.gain_db,
                     "mute": g.mute,
                     "solo": g.solo,

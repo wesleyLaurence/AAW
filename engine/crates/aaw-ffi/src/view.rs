@@ -239,8 +239,9 @@ pub struct TrackView {
     pub group: Option<u64>,
 }
 
-/// A group: the tracks that name it summed through its own chain, gain and
-/// pan, drawn as a row above them.
+/// A group: the tracks and groups that name it summed through its own
+/// chain, gain and pan, drawn as a row above them, set in under the group
+/// it is in.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct GroupView {
     pub key: u64,
@@ -253,8 +254,12 @@ pub struct GroupView {
     pub sends: Vec<SendView>,
     pub lanes: Vec<LaneView>,
     pub lane_targets: Vec<LaneTarget>,
-    /// The keys of its tracks, in their order.
+    /// The keys of its tracks, in their order: the ones that name it.
     pub tracks: Vec<u64>,
+    /// The keys of the groups in it, in their order.
+    pub groups: Vec<u64>,
+    /// The key of the group it is in, if any.
+    pub group: Option<u64>,
 }
 
 /// A MIDI track's Synth as the panel draws it: every part's fields as
@@ -1379,6 +1384,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 lanes,
                 lane_targets,
                 tracks: tracks.iter().filter(|t| t.group == Some(handle(group_items, i))).map(|t| t.key).collect(),
+                groups: p.groups.iter().enumerate().filter(|(_, c)| c.group.as_deref() == Some(&g.id)).map(|(j, _)| handle(group_items, j)).collect(),
+                group: g.group.as_deref().and_then(|parent| p.groups.iter().position(|x| x.id == parent)).map(|j| handle(group_items, j)),
             }
         })
         .collect();

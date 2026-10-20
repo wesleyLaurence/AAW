@@ -3014,8 +3014,9 @@ impl Track {
     }
 }
 
-/// A group: the tracks that name it summed through its own chain, gain and
-/// pan, then to the master and to the returns it sends to, as a drum bus.
+/// A group: the tracks and groups that name it summed through its own
+/// chain, gain and pan, then to its own group or the master and to the
+/// returns it sends to, as a drum bus.
 #[derive(Clone, Debug)]
 pub struct Group {
     pub id: String,
@@ -3023,13 +3024,16 @@ pub struct Group {
     pub pan: f64,
     pub mute: bool,
     pub solo: bool,
+    /// The group this group's output goes into instead of the master sum,
+    /// one of `groups[]`; None for a group that goes to the master.
+    pub group: Option<String>,
     pub effects: Vec<Effect>,
     pub sends: Vec<Send>,
     pub automation: Vec<Lane>,
 }
 
 impl Group {
-    const FIELDS: &'static [&'static str] = &["id", "gain_db", "pan", "mute", "solo", "effects", "sends", "automation"];
+    const FIELDS: &'static [&'static str] = &["id", "gain_db", "pan", "mute", "solo", "group", "effects", "sends", "automation"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Group> {
         let f = Fields::of(ctx, x, "Group", Self::FIELDS)?;
@@ -3039,6 +3043,7 @@ impl Group {
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
         let solo = f.opt(ctx, "solo", false, v::boolean);
+        let group = f.opt(ctx, "group", None, opt_id);
         let effects = effects_field(ctx, &f);
         let sends = f.opt(ctx, "sends", Vec::new(), |c, x| v::list(c, x, 0, Some(16), Send::validate));
         let automation = automation_field(ctx, &f);
@@ -3052,6 +3057,7 @@ impl Group {
             pan: pan?,
             mute: mute?,
             solo: solo?,
+            group: group?,
             effects: effects?,
             sends: sends?,
             automation: automation?,
@@ -3069,6 +3075,7 @@ impl Group {
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
         o.bool("solo", self.solo, false);
+        o.opt("group", self.group.as_ref().map(|g| Value::str(g)));
         o.coll("effects", list(&self.effects, saved, Effect::dump));
         o.coll("sends", list(&self.sends, saved, Send::dump));
         o.coll("automation", list(&self.automation, saved, Lane::dump));
@@ -3492,9 +3499,89 @@ impl Project {
         self.groups.iter().find(|g| g.id == id)
     }
 
-    /// The tracks in a group, in document order.
+    /// The tracks in a group, in document order: the ones that name it,
+    /// not those of the groups in it.
     pub fn members(&self, group_id: &str) -> Vec<&Track> {
         self.tracks.iter().filter(|t| t.group.as_deref() == Some(group_id)).collect()
+    }
+
+    /// The groups in a group, in document order.
+    pub fn child_groups(&self, group_id: &str) -> Vec<&Group> {
+        self.groups.iter().filter(|g| g.group.as_deref() == Some(group_id)).collect()
+    }
+
+    /// The groups a group is in, nearest first, up to the one that goes to
+    /// the master. Stops where a group comes round again, so a cycle ends.
+    pub fn ancestors(&self, group_id: &str) -> Vec<&Group> {
+        let mut out: Vec<&Group> = Vec::new();
+        let mut at = self.group(group_id).and_then(|g| g.group.as_deref());
+        while let Some(id) = at {
+            if id == group_id || out.iter().any(|g| g.id == id) {
+                break;
+            }
+            match self.group(id) {
+                Some(g) => {
+                    out.push(g);
+                    at = g.group.as_deref();
+                }
+                None => break,
+            }
+        }
+        out
+    }
+
+    /// The groups a track is in, nearest first.
+    pub fn track_ancestors(&self, track: &Track) -> Vec<&Group> {
+        match track.group.as_deref().and_then(|g| self.group(g)) {
+            Some(g) => std::iter::once(g).chain(self.ancestors(&g.id)).collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// Every group under a group, the nearest first, in document order
+    /// within a level.
+    pub fn descendant_groups(&self, group_id: &str) -> Vec<&Group> {
+        let mut out: Vec<&Group> = Vec::new();
+        let mut front: Vec<&str> = vec![group_id];
+        let mut i = 0;
+        while i < front.len() {
+            for g in self.child_groups(front[i]) {
+                if g.id != group_id && !out.iter().any(|x| x.id == g.id) {
+                    out.push(g);
+                    front.push(&g.id);
+                }
+            }
+            i += 1;
+        }
+        out
+    }
+
+    /// Every track under a group, its own and those of the groups in it,
+    /// in document order.
+    pub fn tracks_under(&self, group_id: &str) -> Vec<&Track> {
+        self.tracks.iter().filter(|t| self.track_ancestors(t).iter().any(|g| g.id == group_id)).collect()
+    }
+
+    /// The groups with every group after the groups in it, so that a
+    /// group's sum is made before it is summed into its own group;
+    /// document order otherwise.
+    pub fn group_order(&self) -> Vec<&Group> {
+        let mut order: Vec<&Group> = Vec::new();
+        while order.len() < self.groups.len() {
+            let before = order.len();
+            for g in &self.groups {
+                let placed = |id: &str| order.iter().any(|x| x.id == id);
+                if !placed(&g.id) && self.child_groups(&g.id).iter().all(|c| placed(&c.id)) {
+                    order.push(g);
+                }
+            }
+            if order.len() == before {
+                // A cycle, which the rules refuse: the rest in document order.
+                let rest: Vec<&Group> = self.groups.iter().filter(|g| !order.iter().any(|x| x.id == g.id)).collect();
+                order.extend(rest);
+            }
+        }
+        order
     }
 
     /// Groups with a send to `return_id`, in document order.

@@ -251,13 +251,17 @@ group the track's output goes into instead of the master sum. A send is `{to, ga
 one per return.
 
 Group: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
-`solo`, `effects`, `sends` and `automation`, as a track has them. A group sums the
-tracks that name it, runs its effects, then its gain and pan, and joins the master
-sum and the returns it sends to, as a drum bus. Its tracks are next to each other
-in `tracks[]`, so that the app draws the group's row above them. A muted group
-silences its tracks and their sends; a soloed group is heard with its tracks, and a
-soloed track is heard through its group. A group cannot be in a group, and a
-sidechain cannot name one. See [groups.md](features/groups.md).
+`solo`, `effects`, `sends` and `automation`, as a track has them, and an optional
+`group`, the group this group is summed into. A group sums the tracks and groups
+that name it, runs its effects, then its gain and pan, and joins its own group or
+the master sum and the returns it sends to, as a drum bus. Groups nest to any
+depth; the model refuses a cycle. The tracks under a group, its own and those of
+the groups in it, are next to each other in `tracks[]`, so that the app draws the
+group's row above them, set in by its depth. A muted group silences everything
+under it and their sends; a soloed group is heard with everything under it, and a
+soloed track or group is heard through its groups. A sidechain cannot name a
+group. See [groups.md](features/groups.md) and
+[nested-groups.md](features/nested-groups.md).
 
 Return: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
 `effects` and `automation`. A return sums the sends of tracks and groups, runs its effects and joins the stereo master.
@@ -382,9 +386,10 @@ center stereo levels. Mono conversion averages source channels. Tracks sum in
 float64; master gain is `session.master_gain_db` unless a master `gain_db` lane
 replaces it. Sidechain keys are the source track after its
 inserts and before its gain, pan, mute and solo. Mute takes precedence over solo.
-A grouped track's output enters its group early by the group's latency, and every
-other track waits for the slowest group, so the faders, sends, group outputs and
-return inputs share one timeline; a grouped track's sends are delayed to it. Session end is
+A grouped track's output enters its group early by the group's lead, its chain's
+latency over its own group's lead, and every other track waits for the slowest
+path, so the faders, sends, the outermost groups' outputs and return inputs share
+one timeline; a grouped track's or group's sends are delayed to it. Session end is
 finite and applies an explicit final fade; tails beyond it are discarded.
 
 The 4× oversampled peak reported by the engine is an estimate, not a certified

@@ -169,7 +169,7 @@ front first.
 |---|---|
 | Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, length in bars, the timeline's grid as a note value with its menu, "Exporting NAME…" while File › Export Audio… writes a file, and "Agent editing" while an agent's changes land |
 | Ruler | Four strips: the loop brace, the sections, the person's markers, each a yellow flag at its beat with what it says in it as far as the next marker leaves room, and the bar numbers, with the start position as an orange flag. A marker has a faint line down the lanes under it |
-| Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; then the returns and the master |
+| Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; a group in a group set in once more, with everything under it; then the returns and the master |
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track, or of a track in a muted group, are gray, and selected clips are outlined. A group's lane shows its tracks' clips small, a strip a track, folded or not |
 | Automation | Under every row while A has shown them: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
 | Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
@@ -218,11 +218,11 @@ front first.
 | Arrow keys | Move the selected clips a grid step, or to the next track |
 | ⌘D, Delete | Copies the selected clips to right after them; deletes them, or else the selected track, group or return; a deleted group leaves its tracks. In the piano roll, the selected notes |
 | ⌘C, ⌘X, ⌘V | Copies or cuts the selected clips, and pastes them at the start position, on the track whose lane was clicked last or else the tracks they came from; the start position moves to their end. In the piano roll, notes, pasted where the clip was last clicked in the clear, or else right after themselves. A copy is its own: changing it changes nothing else |
-| Click a header; drag it up or down | Selects the track, group or return; moves it among the others. A track in a group stays beside the others: the host refuses a move out of the run |
-| Click the mark before a group's name | Folds the group's tracks away under its row, or shows them again; with Option, every group. The fold is the window's, not the song's |
-| ⌘G, ⇧⌘G | Groups the selected track, or the tracks of the selected clips, into a new group above them and asks for its name; takes the selected group, or the selected track's, away, leaving its tracks |
+| Click a header; drag it up or down | Selects the track, group or return; moves it among the others. A track in a group stays beside the others: the host refuses a move out of the run. Shift-click on a track's or a group's header adds it to the selected rows, for ⌘G |
+| Click the mark before a group's name | Folds everything under the group away under its row, tracks and groups, or shows them again; with Option, every group. The fold is the window's, not the song's |
+| ⌘G, ⇧⌘G | Groups the selected rows, tracks and groups, or the tracks of the selected clips, into a new group above them and asks for its name, when they are all in the same group or all in none, where the new group goes; takes the selected group, or the selected track's, away, leaving what was in it on the group's own group or the master |
 | Double-click a header | Selects the row and shows its devices in the detail panel, shown if it was hidden |
-| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Show Automation, Add Track, Add MIDI Track, Add Return, Group Tracks or Remove from Group on a track, Ungroup on a group, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
+| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Show Automation, Add Track, Add MIDI Track, Add Return, Group Tracks or Remove from Group on a track, Ungroup on a group and Remove from Group on a group in a group, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
 | Rename in that menu, or ⌘R | Renames the track, group or return where its name is: Return keeps the name, Escape drops it. With a marker selected, ⌘R types what the marker says |
 | ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, a MIDI track with no instrument, or a return, and asks for its name |
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
@@ -573,7 +573,7 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
   there whether or not the song has markers.
 - Save As… does not replace a folder that is already there.
 - Which groups are folded is kept by the window, not saved with the project,
-  and a group is not dragged into another: a group is not in a group.
+  and a group is not dragged into another: ⌘G and Remove from Group move it.
 - The analyzer's panes are arranged by hand each time rather than from a
   saved set; the agent cannot read its numbers.
 - The agent panel drives the person's own Claude Code, found through their

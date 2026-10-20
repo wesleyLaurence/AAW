@@ -163,6 +163,9 @@ public final class SongModel {
     /// The selected clips, or else the selected row or automation points.
     private(set) var selectedClips: Set<UInt64> = []
     private(set) var selectedRow: RowID?
+    /// Tracks and groups selected beside the selected row with Shift, for
+    /// Group Tracks over several rows. Cleared with the next selection.
+    private(set) var selectedRows: Set<RowID> = []
     private(set) var selectedPoints: Set<UInt64> = []
     /// The selected marker, clicked in the ruler, in place of the clips,
     /// rows and points: what Delete and Rename act on.
@@ -693,6 +696,43 @@ public final class SongModel {
         setSelection(clips: [], row: row)
     }
 
+    /// Shift-click on a track's or a group's header: the row joins the
+    /// selected rows, or leaves them; with no row selected yet it is
+    /// selected.
+    func toggleSelection(row: RowID) {
+        guard row.strip else { return }
+        guard let current = selectedRow, current.strip else {
+            select(row: row)
+            return
+        }
+        guard row != current else { return }
+        if selectedRows.contains(row) { selectedRows.remove(row) } else { selectedRows.insert(row) }
+        onSelection?()
+    }
+
+    /// Whether the row is the selected row or one selected beside it.
+    func isSelected(row: RowID) -> Bool {
+        selectedRow == row || selectedRows.contains(row)
+    }
+
+    /// The groups a track or a group is in, by the key of the group it
+    /// names, the nearest first.
+    func groups(over group: UInt64?) -> [GroupView] {
+        var out: [GroupView] = []
+        var at = group
+        while let key = at, let g = arrangement.groups.first(where: { $0.key == key }), !out.contains(where: { $0.key == key }) {
+            out.append(g)
+            at = g.group
+        }
+        return out
+    }
+
+    /// The tracks under a group: its own and those of the groups in it, in
+    /// their order.
+    func tracks(under group: UInt64) -> [TrackView] {
+        arrangement.tracks.filter { track in groups(over: track.group).contains { $0.key == group } }
+    }
+
     /// Selects automation points, in place of clips, rows and events.
     func select(points: Set<UInt64>) {
         if !points.isEmpty {
@@ -834,9 +874,10 @@ public final class SongModel {
     }
 
     private func setSelection(clips: Set<UInt64>, row: RowID?) {
-        guard clips != selectedClips || row != selectedRow else { return }
+        guard clips != selectedClips || row != selectedRow || !selectedRows.isEmpty else { return }
         selectedClips = clips
         selectedRow = row
+        selectedRows = []
         selectedEvents = []
         selectedNotes = []
         selectedEffect = nil
@@ -883,10 +924,18 @@ public final class SongModel {
         }
         var points = selectedPoints
         if !points.isEmpty { points.formIntersection(pointLanes().keys) }
-        if clips != selectedClips || row != selectedRow || points != selectedPoints {
+        let rows = selectedRows.filter { beside in
+            switch beside {
+            case .track(let key): arrangement.tracks.contains { $0.key == key }
+            case .group(let key): arrangement.groups.contains { $0.key == key }
+            case .bus, .master: false
+            }
+        }
+        if clips != selectedClips || row != selectedRow || points != selectedPoints || rows != selectedRows {
             selectedClips = clips
             selectedRow = row
             selectedPoints = points
+            selectedRows = rows
             onSelection?()
         }
         switch deviceRow {
@@ -1216,31 +1265,35 @@ public final class SongModel {
         add(.returnAdd(index: UInt32(arrangement.returns.count))) { .bus($0) }
     }
 
-    /// The tracks Group Tracks would group: the selected track, or the
-    /// tracks of the selected clips, in their order.
-    private var tracksToGroup: [TrackView] {
-        if case .track(let key) = selectedRow {
-            return arrangement.tracks.filter { $0.key == key }
+    /// What Group Tracks would group: the selected rows, tracks and groups,
+    /// or the tracks of the selected clips, in their order.
+    private var rowsToGroup: (tracks: [TrackView], groups: [GroupView]) {
+        let rows = selectedRows.union(selectedRow.map { [$0] } ?? [])
+        if rows.contains(where: \.strip) {
+            return (arrangement.tracks.filter { rows.contains(.track($0.key)) }, arrangement.groups.filter { rows.contains(.group($0.key)) })
         }
         var places: [Int] = []
         for clip in placedClips() where selectedClips.contains(clip.key) && !places.contains(clip.track) {
             places.append(clip.track)
         }
-        return places.sorted().map { arrangement.tracks[$0] }
+        return (places.sorted().map { arrangement.tracks[$0] }, [])
     }
 
-    /// Whether Group Tracks has tracks to group: ones in no group yet, since
-    /// a group is not in a group.
+    /// Whether Group Tracks has rows to group: tracks and groups that are
+    /// all in the same group, or all in none, where the new group goes.
     public var canGroup: Bool {
-        let tracks = tracksToGroup
-        return !tracks.isEmpty && tracks.allSatisfy { $0.group == nil }
+        let (tracks, groups) = rowsToGroup
+        let parents = tracks.map(\.group) + groups.map(\.group)
+        guard let first = parents.first else { return false }
+        return parents.allSatisfy { $0 == first }
     }
 
-    /// Groups the selected track, or the tracks of the selected clips, as
-    /// ⌘G does, and selects the group under its first name to rename.
+    /// Groups the selected rows, or the tracks of the selected clips, as ⌘G
+    /// does, and selects the group under its first name to rename.
     public func groupSelection() {
         guard canGroup else { return }
-        add(.groupAdd(tracks: tracksToGroup.map(\.key))) { .group($0) }
+        let (tracks, groups) = rowsToGroup
+        add(.groupAdd(tracks: tracks.map(\.key), groups: groups.map(\.key))) { .group($0) }
     }
 
     /// The group Ungroup would take away: the selected group, or the group
@@ -1263,6 +1316,11 @@ public final class SongModel {
     /// Takes a track out of its group.
     func leaveGroup(track: UInt64) {
         edit(.trackGroup(track: track, group: nil))
+    }
+
+    /// Takes a group out of its group.
+    func leaveGroup(group: UInt64) {
+        edit(.groupParent(group: group, parent: nil))
     }
 
     private func add(_ edit: Edit, row: @escaping @MainActor (UInt64) -> RowID) {

@@ -194,8 +194,9 @@ def test_mix_and_snapshot_tamper_rejected(rendered):
 
 
 def test_reports_from_earlier_engines_still_verify(rendered):
-    # Earlier engines hashed the full dump before markers, before groups,
-    # before points had a shape, before tracks had audio clips, before pads
+    # Earlier engines hashed the full dump before a group could be in a
+    # group, before markers, before groups, before points had a shape,
+    # before tracks had audio clips, before pads
     # could stretch, before a sample recorded its source's hash, before
     # automation, before sends and returns, and before effects existed. Their
     # reports must keep verifying.
@@ -210,6 +211,9 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     dump = copy.deepcopy(p)
     track = dump["tracks"][0]
     forms = [copy.deepcopy(dump)]
+    for each in dump["groups"]:
+        del each["group"]
+    forms.append(copy.deepcopy(dump))
     del dump["markers"]
     forms.append(copy.deepcopy(dump))
     del dump["groups"]

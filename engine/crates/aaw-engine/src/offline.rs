@@ -396,12 +396,24 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         stem(&t.id, fields)?;
     }
     for (gi, g) in program.groups.iter().enumerate().filter(|(_, g)| g.in_mix) {
+        // Its tracks are every track under it, whose sound its stem holds;
+        // its groups are the ones in it.
+        let under: Vec<Value> = p
+            .tracks_under(&g.id)
+            .iter()
+            .filter(|t| program.tracks.iter().any(|x| x.id == t.id))
+            .map(|t| Value::str(&t.id))
+            .collect();
         let mut fields = vec![
-            ("tracks", Value::List(g.members.iter().map(|s| Value::str(s)).collect())),
+            ("tracks", Value::List(under)),
+            ("groups", Value::List(g.groups.iter().map(|s| Value::str(s)).collect())),
             ("effects", effects(&reports.groups[gi], p.group(&g.id).map_or(&[], |g| &g.effects))),
         ];
         if !g.automation.is_empty() {
             fields.push(("automation", params(&g.automation)));
+        }
+        if let Some(parent) = g.group {
+            fields.push(("group", Value::str(&program.groups[parent].id)));
         }
         stem(&g.id, fields)?;
     }
@@ -417,8 +429,9 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     }
     let track_reports: Vec<(&str, Value)> = track_reports.iter().map(|(name, v)| (name.as_str(), v.clone())).collect();
     // Every stem sums to the mix without master effects, unless a grouped
-    // track's stem would count twice beside its group's.
-    let grouped = program.tracks.iter().any(|t| t.in_mix && t.group.is_some_and(|g| program.groups[g].in_mix));
+    // track's or group's stem would count twice beside its group's.
+    let grouped = program.tracks.iter().any(|t| t.in_mix && t.group.is_some_and(|g| program.groups[g].in_mix))
+        || program.groups.iter().any(|g| g.in_mix && g.group.is_some_and(|parent| program.groups[parent].in_mix));
     let stems_sum = program.master.chain.devices.is_empty() && !grouped;
     let master_effects = reports.master;
     let region_value = match region {
