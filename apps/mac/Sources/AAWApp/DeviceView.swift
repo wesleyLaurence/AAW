@@ -254,16 +254,17 @@ struct DeviceView: View {
     }
 
     var body: some View {
-        ScrollView(.horizontal) {
+        let keys = chain.effects.map(\.key)
+        return ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 8) {
                 if let track = chain.track, track.midi {
                     InstrumentPanel(model: model, track: track)
                 }
                 ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
-                    DeviceInsertion(model: model, row: chain.row, index: UInt32(index))
+                    DeviceInsertion(model: model, row: chain.row, index: UInt32(index), keys: keys)
                     DevicePanel(model: model, chain: chain, effect: effect, index: index)
                 }
-                DeviceInsertion(model: model, row: chain.row, index: UInt32(chain.effects.count))
+                DeviceInsertion(model: model, row: chain.row, index: UInt32(chain.effects.count), keys: keys)
                 if chain.effects.isEmpty {
                     Text("No effects on \(chain.name). Drag an effect here, or use Add Effect.")
                         .font(.system(size: 12))
@@ -304,12 +305,14 @@ struct DeviceView: View {
 }
 
 /// The strip between two devices: an effect or a rack from the browser
-/// dropped here goes in at this place, and so does a copy of an effect
-/// dragged by its title with Option held.
+/// dropped here goes in at this place, an effect of the chain dragged by its
+/// title moves here, and a copy of one dragged with Option held goes in here.
 private struct DeviceInsertion: View {
     let model: SongModel
     let row: RowID
     let index: UInt32
+    /// The chain's effects, for where one dragged out of it goes.
+    let keys: [UInt64]
     @State private var targeted = false
 
     var body: some View {
@@ -317,19 +320,21 @@ private struct DeviceInsertion: View {
             .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
             .frame(width: 12, height: model.detailHeight - 54)
             .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [Browser.rackType, DeviceChain.effectType],
-                    delegate: InsertionDrop(model: model, row: row, index: index, targeted: $targeted))
-            .help("Drop an effect or a rack here; with Option, a copy of one dragged from its title")
+                    delegate: InsertionDrop(model: model, row: row, index: index, keys: keys, targeted: $targeted))
+            .help("Drop an effect or a rack here, or one of the chain's effects dragged from its title to move it; with Option, a copy of one")
     }
 }
 
-/// What lands on an insertion strip: a kind or a rack from the browser, or
-/// with Option a copy of an effect dragged from the device panel. Without
-/// Option that drag is refused, so that the strip does not light up for a
-/// move nothing makes.
+/// What lands on an insertion strip: a kind or a rack from the browser, an
+/// effect of the chain dragged from its title, moved here as the ◂ ▸ marks
+/// move it, or with Option a copy of an effect dragged from the device panel.
+/// The strips on either side of the dragged effect refuse it, so that a strip
+/// does not light up for a move nothing makes.
 private struct InsertionDrop: DropDelegate {
     let model: SongModel
     let row: RowID
     let index: UInt32
+    let keys: [UInt64]
     @Binding var targeted: Bool
 
     private func kind(of info: DropInfo) -> String? {
@@ -344,8 +349,16 @@ private struct InsertionDrop: DropDelegate {
         NSEvent.modifierFlags.contains(.option)
     }
 
+    /// The effect of this chain being dragged without Option, and where it
+    /// goes; nil when it is another row's or would stay where it is.
+    private var move: (key: UInt64, to: Int)? {
+        guard !copying, let key = model.draggedEffect, let from = keys.firstIndex(of: key),
+              let to = DeviceChain.moveTarget(from: from, strip: Int(index)) else { return nil }
+        return (key, to)
+    }
+
     private func accepts(_ info: DropInfo) -> Bool {
-        kind(of: info) != nil || isRack(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && copying)
+        kind(of: info) != nil || isRack(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && (copying || move != nil))
     }
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -359,7 +372,8 @@ private struct InsertionDrop: DropDelegate {
     func dropUpdated(info: DropInfo) -> DropProposal? {
         let ok = accepts(info)
         if targeted != ok { targeted = ok }
-        return DropProposal(operation: ok ? .copy : .cancel)
+        guard ok else { return DropProposal(operation: .cancel) }
+        return DropProposal(operation: move != nil ? .move : .copy)
     }
 
     func dropExited(info: DropInfo) {
@@ -378,6 +392,10 @@ private struct InsertionDrop: DropDelegate {
                 guard let data, let name = String(data: data, encoding: .utf8) else { return }
                 DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, index: index, rack: name) }
             }
+            return true
+        }
+        if let move {
+            model.edit(.effectMove(effect: move.key, index: UInt32(move.to)))
             return true
         }
         guard copying, let provider = info.itemProviders(for: [DeviceChain.effectType]).first else { return false }
@@ -619,8 +637,9 @@ private struct InstrumentPanel: View {
 
 /// One effect: its name, the marks that bypass, move and remove it, and a
 /// control for each of its fields. A click on its title selects it, for
-/// Copy, Duplicate and Delete; a drag from the title with Option copies it
-/// onto a header or an insertion strip; a right click offers the same.
+/// Copy, Duplicate and Delete; a drag from the title onto an insertion strip
+/// moves it there, and with Option copies it onto a header or a strip; a
+/// right click offers the same as the menus.
 private struct DevicePanel: View {
     let model: SongModel
     let chain: DeviceChain
@@ -700,6 +719,7 @@ private struct DevicePanel: View {
             .onDrag {
                 let provider = NSItemProvider()
                 let key = effect.key
+                model.draggedEffect = key
                 provider.registerDataRepresentation(forTypeIdentifier: DeviceChain.effectType, visibility: .ownProcess) { completion in
                     completion(Data(String(key).utf8), nil)
                     return nil
@@ -715,7 +735,7 @@ private struct DevicePanel: View {
                     }
                 }
             }
-            .help("Click to select the effect; drag with Option to copy it onto a header or between devices")
+            .help("Click to select the effect; drag it onto a strip between devices to move it there, with Option to copy it there or onto a header")
 
             Group {
                 if effect.kind == "eq" {
