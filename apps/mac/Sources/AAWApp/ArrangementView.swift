@@ -81,6 +81,9 @@ private struct RowVisual {
     var color: NSColor?
     var mute = false
     var solo = false
+    /// A track armed to record, and whether it has an input to record from.
+    var armed = false
+    var hasInput = false
     /// Whether the row has automation lanes.
     var kind: HeaderLayout.Kind
     var y: Animated
@@ -420,6 +423,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// When AppKit last asked for a context menu, so that a Control-click it
     /// handled is not handled again.
     private var contextMenuEvent: TimeInterval?
+    /// The tracks drawn armed, to place the rows again when they change.
+    private var shownArmed: Set<UInt64> = []
     private var dropTarget: DropTarget?
     /// The file being dragged over the view and its length, in seconds for an
     /// audio file and in beats for a MIDI file, read once for the outline of
@@ -576,7 +581,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
         func place(_ id: RowID, name: String, detail: String, color: NSColor?, mute: Bool, solo: Bool,
                    gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = [],
-                   depth: Int = 0, collapsed: Bool = false) {
+                   depth: Int = 0, collapsed: Bool = false, armed: Bool = false, hasInput: Bool = false) {
             liveRows.insert(id)
             var row: RowVisual
             if let old = rows[id], !old.removing {
@@ -595,6 +600,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             row.detail = detail
             row.mute = mute
             row.solo = solo
+            row.armed = armed
+            row.hasInput = hasInput
             row.depth = depth
             row.collapsed = collapsed
             row.gain = level(.gain(id), from: row.gain, to: gain)
@@ -661,7 +668,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 : Self.chain(track.effects)
             place(.track(track.key), name: track.id, detail: chain, color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
-                  kind: .track, height: height, sends: track.sends, depth: path.count)
+                  kind: .track, height: height, sends: track.sends, depth: path.count,
+                  armed: model.isArmed(track: track.key), hasInput: track.input != nil)
             for clip in track.clips {
                 liveClips.insert(clip.key)
                 let length = clip.patternBeats * Double(clip.repeats)
@@ -825,6 +833,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private func transportChanged() {
         needsDisplay = true
         link?.isPaused = false
+        // The arms are drawn in the headers, so a change of them places the
+        // rows again.
+        let armed = Set(model.transport.armed)
+        if armed != shownArmed {
+            shownArmed = armed
+            show(model.arrangement, animated: false)
+        }
     }
 
     private func dropRemoved(at now: CFTimeInterval) {
@@ -1386,6 +1401,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .mute:
             rows[id]?.mute.toggle()
             model.edit(.mute(row: id.row, on: !row.mute))
+        case .arm:
+            guard case .track(let key) = id else { return }
+            if row.hasInput {
+                model.arm(track: key, on: !row.armed)
+            } else {
+                // Nothing to arm yet: the input is chosen first.
+                model.select(row: id)
+                let items = model.inputMenu(track: key)
+                let menu = menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
+                let arm = self.header(id, row, top: layout.y(CGFloat(row.y.value(at: CACurrentMediaTime())))).arm
+                menu.popUp(positioning: nil, at: CGPoint(x: arm.minX, y: arm.maxY), in: self)
+            }
         case .solo:
             guard id.strip else { return }
             rows[id]?.solo.toggle()
@@ -1513,7 +1540,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             model.select(row: id)
             needsDisplay = true
-            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.depth > 0)
+            // An audio track's Input submenu; a MIDI track has none.
+            var inputs: [ContextMenu.Item<ContextMenu.RowAction>]?
+            if case .track(let key) = id, model.arrangement.tracks.first(where: { $0.key == key })?.midi == false {
+                inputs = model.inputMenu(track: key)
+            }
+            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.depth > 0, inputs: inputs)
             return menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
         }
         guard let hit = clip(at: p) else { return nil }
@@ -1541,6 +1573,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             entry.keyEquivalentModifierMask = item.command ? .command : []
             entry.target = self
             entry.representedObject = choice(what)
+            entry.state = item.checked ? .on : .off
+            if let children = item.children {
+                entry.action = nil
+                entry.submenu = self.menu(of: children, action, choice)
+            }
             menu.addItem(entry)
         }
         return menu
@@ -1575,6 +1612,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             case .bus, .master: break
             }
         case .automation: model.toggleAutomation()
+        case .input(let choice):
+            if case .track(let key) = id { model.setInput(track: key, choice) }
         case .addTrack: model.addTrack()
         case .addMIDITrack: model.addTrack(midi: true)
         case .addReturn: model.addReturn()
@@ -2255,6 +2294,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             switch event.charactersIgnoringModifiers {
             case " ": model.togglePlay()
             case "l": model.toggleLoop()
+            // Record the armed tracks, or end the take.
+            case "r": model.toggleRecord()
             // Every row's automation lanes, as Ableton's A.
             case "a": model.toggleAutomation()
             // A marker where the song is playing; with Shift, one to name.
@@ -2998,6 +3039,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
             badge("M", on: row.mute, color: Theme.mute, in: header.mute, alpha: alpha)
             badge("S", on: row.solo, color: Theme.solo, in: header.solo, alpha: alpha)
+            if row.kind == .track {
+                // The record arm: a dot, red while armed, faint without an input.
+                let box = header.arm
+                fill(rounded: box, (row.armed ? Theme.record : Theme.gray(1)).withAlphaComponent((row.armed ? 1 : 0.07) * alpha))
+                let dot = CGRect(x: box.midX - 3, y: box.midY - 3, width: 6, height: 6)
+                let color = row.armed ? Theme.gray(0.08) : row.hasInput ? Theme.dimText : Theme.faintText.withAlphaComponent(0.5)
+                color.withAlphaComponent(alpha).setFill()
+                NSBezierPath(ovalIn: dot).fill()
+            }
             if row.kind == .group {
                 // A mark that points down while the group's tracks are shown,
                 // and right while they are folded away.

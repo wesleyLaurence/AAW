@@ -333,3 +333,116 @@ def test_a_song_at_44_1_khz_plays_through_a_device_at_48_khz(rust_daw, tmp_path,
     assert played["callbacks"] > 0 and played["stream_errors"] == 0
     own = daw(rust_daw, "play", path, "--output", "BlackHole", "--seconds", "0.3")
     assert own["device_sample_rate"] == 44100 and own["resampled"] is False
+
+
+def burst_song(directory, rate=48000):
+    """Silence but for a tenth of a second of noise at beat 2, at 120 BPM."""
+    burst = np.random.default_rng(5).uniform(-0.8, 0.8, rate // 10).astype(np.float32)
+    sf.write(directory / "burst.wav", burst, rate, subtype="FLOAT")
+    song = {
+        "session": {"tempo": 120, "sample_rate": rate, "length_beats": 8},
+        "samples": {"burst": {"path": "burst.wav"}},
+        "patterns": {"one": {"length_beats": 4, "events": [{"at": 2, "pad": "b"}]}},
+        "tracks": [{"id": "hit", "pads": {"b": {"sample": "burst"}}, "clips": [{"pattern": "one"}]}],
+    }
+    path = directory / "song.yaml"
+    path.write_text(yaml.safe_dump(song))
+    return path
+
+
+def test_a_track_records_the_songs_own_sound_as_its_stem(rust_daw, tmp_path, registry):
+    """Resampling, through BlackHole where the Mac has it: a track whose input
+    is another track records that track's stem, frame for frame, as one
+    undoable edit; the arm, the status and the names of the takes."""
+    if output_device(rust_daw, "BlackHole") is None:
+        pytest.skip("no BlackHole device on this Mac")
+    path = make_song(random.Random(41), tmp_path)
+    song = yaml.safe_load(path.read_text())
+    first = song["tracks"][0]["id"]
+    song["tracks"].append({"id": "bounce", "pads": {}, "input": {"track": first}})
+    path.write_text(yaml.safe_dump(song))
+    host = subprocess.Popen([str(rust_daw), "host", str(path), "--output", "BlackHole"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        wait_for_host(rust_daw, path, host)
+        revision = daw(rust_daw, "status", path)["revision"]
+        started = daw(rust_daw, "record", "start", path, "bounce", "--count-in", "0")
+        assert started["armed"] == ["bounce"]
+        assert started["recording"]["tracks"] == ["bounce"] and started["recording"]["count_in_frames"] == 0
+        assert "Already recording" in daw(rust_daw, "record", "start", path, check=False)["error"]
+        time.sleep(1.2)
+        # The song rolls, and the take with it.
+        running = daw(rust_daw, "status", path)
+        assert running["playing"] is True and running["recording"]["seconds"] > 1
+        stopped = daw(rust_daw, "record", "stop", path)
+        assert stopped["recording"] is None and stopped["playing"] is True
+        (take,) = stopped["recorded"]
+        assert take["track"] == "bounce" and take["sample"] == "bounce-take-1" and take["path"] == "samples/bounce-take-1.wav"
+        assert take["input"] == f"track {first}" and take["device"] is None
+        assert take["at_beat"] == 0 and take["pulled_ms"] == 0 and take["lost_frames"] == 0
+        assert 0.9 < take["seconds"] < 2.5
+        project = load(path)
+        sample = project["samples"]["bounce-take-1"]
+        assert sample["path"] == take["path"] and sample["source"] == f"recorded from track {first}" and len(sample["sha256"]) == 64
+        (clip,) = project["tracks"][-1]["audio"]
+        assert clip["sample"] == "bounce-take-1" and clip["at"] == 0
+        status = daw(rust_daw, "status", path)
+        assert status["revision"] == revision + 1
+        assert status["undo"]["label"].startswith("Record bounce-take-1 on bounce (") and status["undo"]["origin"] == "user"
+        # The take is the stem, frame for frame.
+        audio, rate = sf.read(path.parent / take["path"], dtype="float32", always_2d=True)
+        assert rate == project["session"]["sample_rate"] and audio.shape[1] == 2
+        rendered = tmp_path / "render"
+        daw(rust_daw, "render", path, "--output", rendered)
+        stem = sf.read(rendered / "stems" / f"{first}.wav", dtype="float32", always_2d=True)[0]
+        assert len(audio) <= len(stem)
+        assert np.array_equal(audio, stem[: len(audio)])
+        assert np.abs(audio).max() > 0
+        # One undo brings the song back; the file stays, so the next take is numbered past it.
+        daw(rust_daw, "undo", path)
+        assert "bounce-take-1" not in load(path)["samples"]
+        daw(rust_daw, "record", "start", path, "--count-in", "0")
+        time.sleep(0.4)
+        # Stop ends the take with the song.
+        stopped = daw(rust_daw, "stop", path)
+        assert stopped["recording"] is None and stopped["recorded"][0]["sample"] == "bounce-take-2"
+        assert "bounce-take-2" in load(path)["samples"]
+        time.sleep(0.2)
+        assert daw(rust_daw, "status", path)["playing"] is False
+        assert daw(rust_daw, "record", "arm", path, "bounce", "--off")["armed"] == []
+    finally:
+        daw(rust_daw, "close", path, check=False)
+        host.wait(timeout=10)
+
+
+def test_a_take_through_the_loopback_lands_on_its_beat_after_a_count_in(rust_daw, tmp_path, registry):
+    """Through BlackHole as both output and input: a burst played at beat 2
+    is recorded on a track whose input is the device, after a bar of
+    count-in, and sits at beat 2 of the take within a millisecond."""
+    virtual = output_device(rust_daw, "BlackHole")
+    if virtual is None or virtual["input_channels"] < 1:
+        pytest.skip("no BlackHole device on this Mac")
+    path = burst_song(tmp_path)
+    song = yaml.safe_load(path.read_text())
+    song["tracks"].append({"id": "mic", "pads": {}, "input": {"device": "BlackHole", "channels": [1]}})
+    path.write_text(yaml.safe_dump(song))
+    host = subprocess.Popen([str(rust_daw), "host", str(path), "--output", "BlackHole"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        wait_for_host(rust_daw, path, host)
+        started = daw(rust_daw, "record", "start", path, "mic")
+        assert started["recording"]["count_in_frames"] == 2 * 48000
+        time.sleep(3.2)
+        stopped = daw(rust_daw, "record", "stop", path)
+        (take,) = stopped["recorded"]
+        assert take["device"] == virtual["name"] and take["input"] == "BlackHole channel 1"
+        assert take["at_beat"] == 0 and take["lost_frames"] == 0
+        audio, rate = sf.read(path.parent / take["path"], dtype="float32", always_2d=True)
+        assert rate == 48000 and audio.shape[1] == 1
+        onset = int(np.argmax(np.abs(audio[:, 0]) > 0.05))
+        assert np.abs(audio[:, 0]).max() > 0.05, "the burst came back through the device"
+        error_ms = (onset - 48000) / 48
+        assert abs(error_ms) < 1.0, f"the burst landed {error_ms:+.2f} ms from its beat (pulled {take['pulled_ms']} ms)"
+        (clip,) = load(path)["tracks"][-1]["audio"]
+        assert clip["sample"] == "mic-take-1" and clip["at"] == 0
+    finally:
+        daw(rust_daw, "close", path, check=False)
+        host.wait(timeout=10)

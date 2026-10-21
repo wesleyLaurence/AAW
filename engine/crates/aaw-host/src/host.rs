@@ -6,13 +6,15 @@
 
 use crate::client::Request;
 use crate::command::{beat_value, json_value, Command, Kind, Origin};
+use crate::record::{Recording, Take};
 use crate::registry;
 use crate::session::{Change, Doc, History, Session};
+use aaw_engine::capture::{Tap, TapSource};
 use aaw_engine::player::Shared;
 use aaw_engine::program::Taps;
 use aaw_engine::program::{compile_cached, Cache, Program};
 use aaw_engine::realtime::Transport;
-use aaw_model::Beat;
+use aaw_model::{Beat, Input};
 use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive, Zero};
 use serde_json::{json, Map, Value as Json};
@@ -191,6 +193,10 @@ pub struct TransportState {
     pub cue: f64,
     /// Loop start and length.
     pub region: Option<(f64, f64)>,
+    /// Whether armed tracks are recording, the count-in included.
+    pub recording: bool,
+    /// The tracks armed to record, by ID.
+    pub armed: Vec<String>,
 }
 
 /// The playhead, readable from any thread without waiting for the host.
@@ -259,6 +265,10 @@ struct Host {
     /// failing is tried once a second and not in a loop.
     revived_at: Option<Instant>,
     metronome: bool,
+    /// The tracks armed to record, by ID. Host state, as the loop is.
+    armed: Vec<String>,
+    /// The takes being recorded, from Record to their end.
+    recording: Option<Recording>,
     /// Where play starts, in beats.
     cue: BigRational,
     /// Loop start and length, in beats.
@@ -577,6 +587,8 @@ impl Host {
             playing: self.transport.as_ref().is_some_and(|t| t.control.playing()),
             cue: beats(&self.cue),
             region: self.region.as_ref().map(|(start, length)| (beats(start), beats(length))),
+            recording: self.recording.is_some(),
+            armed: self.armed.clone(),
         }
     }
 
@@ -598,6 +610,8 @@ impl Host {
             None => self.cue.clone(),
         };
         self.check_in_song(&cue, "--from")?;
+        // A play from elsewhere ends the take where it stands.
+        let recorded = self.end_recording(None);
         self.cue = cue;
         let program = self.program()?;
         if self.transport.is_none() {
@@ -606,7 +620,239 @@ impl Host {
         let f = self.frame(&self.cue);
         self.from = self.cue.clone();
         self.transport.as_mut().expect("transport").control.play(f)?;
+        Ok(self.status_with(recorded))
+    }
+
+    /// The status, with the takes a recording that just ended made.
+    fn status_with(&mut self, recorded: Option<Json>) -> Json {
+        let mut status = self.status();
+        if let (Some(takes), Json::Object(m)) = (recorded, &mut status) {
+            m.insert("recorded".into(), takes);
+        }
+        status
+    }
+
+    /// The track with `id` that can record: an audio track with an input.
+    fn recordable(&self, id: &str) -> Result<Input> {
+        let p = self.session.project();
+        let track = p
+            .tracks
+            .iter()
+            .find(|t| t.id == id)
+            .ok_or_else(|| format!("No track {id}; daw inspect lists them"))?;
+        if track.midi.is_some() {
+            return Err(format!("{id} is a MIDI track, which records no audio"));
+        }
+        track
+            .input
+            .clone()
+            .ok_or_else(|| format!("{id} has no input; daw set PROJECT tracks.{id}.input names a device, a track, a group or the mix"))
+    }
+
+    /// `arm`: a track with an input armed to record, or disarmed.
+    fn arm(&mut self, track: &str, armed: bool) -> Result<Json> {
+        if armed {
+            self.recordable(track)?;
+            if !self.armed.iter().any(|t| t == track) {
+                self.armed.push(track.to_string());
+            }
+        } else {
+            self.armed.retain(|t| t != track);
+        }
         Ok(self.status())
+    }
+
+    /// The device `input` names in a track's input: the audio settings'
+    /// input for `default`, else `AAW_INPUT_DEVICE`, else the Mac's.
+    fn input_device(&self, device: &str) -> Option<String> {
+        let blank = |n: &String| n.trim().is_empty();
+        match device.trim() {
+            "default" | "" => self
+                .audio
+                .input
+                .clone()
+                .filter(|n| !blank(n))
+                .or_else(|| std::env::var("AAW_INPUT_DEVICE").ok().filter(|n| !blank(n))),
+            name => Some(name.to_string()),
+        }
+    }
+
+    /// `record.start`: the tracks named armed, then every armed track
+    /// recording after a count-in of `count_in` bars.
+    fn record_start(&mut self, tracks: &[String], count_in: Option<u32>) -> Result<Json> {
+        if self.recording.is_some() {
+            return Err("Already recording; daw record stop ends the take".into());
+        }
+        for track in tracks {
+            self.arm(track, true)?;
+        }
+        // A track armed earlier that lost its input or went is left out.
+        let armed: Vec<(String, Input)> = self
+            .armed
+            .clone()
+            .iter()
+            .filter_map(|t| self.recordable(t).ok().map(|i| (t.clone(), i)))
+            .collect();
+        self.armed = armed.iter().map(|(t, _)| t.clone()).collect();
+        if armed.is_empty() {
+            return Err("No track is armed; daw record arm PROJECT TRACK arms one with an input, or name the tracks".into());
+        }
+        let program = self.program()?;
+        // A source that is not heard has nothing to record: said before the
+        // output is opened.
+        for (track, input) in &armed {
+            let (kind, id) = match input {
+                Input::Track(id) => (aaw_engine::program::StemKind::Track, id),
+                Input::Group(id) => (aaw_engine::program::StemKind::Group, id),
+                _ => continue,
+            };
+            let silent = match kind {
+                aaw_engine::program::StemKind::Track => program.tracks.iter().find(|t| &t.id == id).map(|t| t.silent),
+                _ => program.groups.iter().find(|g| &g.id == id).map(|g| g.silent),
+            };
+            if silent != Some(false) || program.stem_index(kind, id).is_none() {
+                return Err(format!("{id} is muted or silenced by a solo, so {track} would record nothing"));
+            }
+        }
+        if self.transport.is_none() {
+            self.open_transport(program.clone())?;
+        }
+        let rate = program.rate;
+        let bar = (rate as f64 * 60.0 / program.tempo * program.click_beats * program.beats_per_bar.max(1) as f64).round().max(1.0) as usize;
+        let preroll = count_in.unwrap_or(1) as usize * bar;
+        // The output's hardware latency, in the song's frames: what the
+        // person heard the song late by. The driver's own lead is already in
+        // the anchor, which is where each block plays.
+        let (output_latency, shared) = {
+            let t = self.transport.as_ref().expect("transport");
+            let device = aaw_engine::devices::latency_frames(&t.device, false).unwrap_or(0) as f64 * rate as f64 / t.device_rate as f64;
+            (device.round() as u32, t.control.shared().clone())
+        };
+        let mut takes = Vec::new();
+        let mut tapped = 0;
+        let mut open = || -> Result<()> {
+            for (track, input) in &armed {
+                let take = match input {
+                    Input::Device { device, channels } => {
+                        let name = self.input_device(device);
+                        Take::from_device(track, input, name.as_deref(), channels, rate, output_latency)?
+                    }
+                    Input::Track(_) | Input::Group(_) | Input::Master => {
+                        let source = match input {
+                            Input::Track(id) => TapSource::Stem {
+                                kind: aaw_engine::program::StemKind::Track,
+                                id: id.clone(),
+                            },
+                            Input::Group(id) => TapSource::Stem {
+                                kind: aaw_engine::program::StemKind::Group,
+                                id: id.clone(),
+                            },
+                            _ => TapSource::Master,
+                        };
+                        if tapped >= aaw_engine::player::MAX_TAPS {
+                            return Err(format!("At most {} tracks record the song's own sound at once", aaw_engine::player::MAX_TAPS));
+                        }
+                        let (feed, capture) = aaw_engine::capture::feed(2, rate, crate::record::RING_SECONDS);
+                        self.transport.as_mut().expect("transport").control.tap(Box::new(Tap { source, feed }))?;
+                        tapped += 1;
+                        Take::from_tap(track, input, capture, rate)
+                    }
+                };
+                takes.push(take);
+            }
+            Ok(())
+        };
+        if let Err(e) = open() {
+            if tapped > 0 {
+                let _ = self.transport.as_mut().expect("transport").control.untap();
+            }
+            return Err(e);
+        }
+        let start = self.frame(&self.cue);
+        let loop_end = self.loop_frames().map(|(_, end)| end);
+        self.from = self.cue.clone();
+        self.transport.as_mut().expect("transport").control.play_after(start, preroll)?;
+        self.recording = Some(Recording::new(takes, start as i64, preroll, loop_end, shared));
+        Ok(self.status())
+    }
+
+    /// Ends the recording, if one runs: each take written and added to the
+    /// song with its clip as one edit by the person, ending at `end`, a
+    /// song frame, or at each take's last frame. What was recorded, or
+    /// None when nothing was.
+    fn end_recording(&mut self, end: Option<i64>) -> Option<Json> {
+        let recording = self.recording.take()?;
+        // The player hands its taps back at its next block; their last
+        // frames are drained once they have.
+        if let Some(t) = &mut self.transport {
+            let tapped = recording.takes.iter().filter(|take| take.device().is_none()).count();
+            if tapped > 0 {
+                let _ = t.control.untap();
+                let waited = Instant::now();
+                let mut back = 0;
+                while back < tapped && waited.elapsed() < Duration::from_millis(300) {
+                    std::thread::sleep(Duration::from_millis(5));
+                    back += t.control.collect_taps().len();
+                }
+            }
+        }
+        let project = self.session.project().clone();
+        let rate = project.session.sample_rate as u32;
+        let tempo = project.session.tempo;
+        let dir = self.session.dir().to_path_buf();
+        let mut commands = Vec::new();
+        let mut reports = Vec::new();
+        let mut labels = Vec::new();
+        for result in recording.finish(&dir, &project, rate, end) {
+            match result {
+                Ok(take) => {
+                    if take.lost > 0 {
+                        self.warn(format!("{}: {} frames were lost on the way to the take", take.track, take.lost));
+                    }
+                    let beat = BigRational::from_float(take.at as f64 * tempo / 60.0 / rate as f64).unwrap_or_default();
+                    commands.push(Command::Set {
+                        path: format!("samples.{}", take.id),
+                        value: take.sample(),
+                    });
+                    let mut fields = Map::new();
+                    fields.insert("sample".into(), json!(take.id));
+                    fields.insert("at".into(), crate::session::value_json(&beat_value(&beat)));
+                    commands.push(Command::AudioAdd {
+                        track: take.track.clone(),
+                        fields,
+                    });
+                    labels.push(format!("{} on {}", take.id, take.track));
+                    reports.push(take.report(rate, tempo));
+                }
+                Err(e) => self.warn(format!("the take was not kept: {e}")),
+            }
+        }
+        if commands.is_empty() {
+            return Some(json!([]));
+        }
+        let seconds = reports.first().and_then(|r| r["seconds"].as_f64()).unwrap_or(0.0);
+        let label = format!("Record {} ({seconds:.1} s)", labels.join(", "));
+        let batch = Command::Batch {
+            commands,
+            label: Some(label),
+        };
+        let edited = (|| -> Result<()> {
+            let _lock = lock(self.session.path())?;
+            self.sync();
+            let before = self.session.doc().clone();
+            let (_, change) = self.session.edit(&batch, Origin::User, None, None)?;
+            self.session.save()?;
+            self.save_at = None;
+            if let Some(c) = change {
+                self.changed(&c);
+            }
+            self.note_markers(&before);
+            Ok(())
+        })();
+        if let Err(e) = edited {
+            self.warn(format!("the takes were written under samples/ but not added to the song: {e}"));
+        }
+        Some(Json::Array(reports))
     }
 
     /// `note.preview`: a note played now through a MIDI track's instrument,
@@ -703,10 +949,20 @@ impl Host {
                 Ok(self.status())
             }
             Command::Stop => {
+                let recorded = self.end_recording(None);
                 if let Some(t) = &mut self.transport {
                     t.control.stop()?;
                 }
-                Ok(self.status())
+                Ok(self.status_with(recorded))
+            }
+            Command::Arm { track, armed } => self.arm(track, *armed),
+            Command::RecordStart { tracks, count_in } => self.record_start(tracks, *count_in),
+            Command::RecordStop => {
+                if self.recording.is_none() {
+                    return Err("Nothing is recording".into());
+                }
+                let recorded = self.end_recording(None);
+                Ok(self.status_with(recorded))
             }
             Command::Audio { output, input, buffer } => {
                 let named = |d: &Option<String>| d.clone().filter(|n| !n.trim().is_empty() && n.trim() != "default");
@@ -730,6 +986,9 @@ impl Host {
                 }
                 let changed = audio != self.audio;
                 self.audio = audio;
+                if changed && self.recording.is_some() {
+                    self.end_recording(None);
+                }
                 if changed && self.transport.is_some() {
                     if let Some(program) = self.program.as_ref().map(|(_, p)| p.clone()) {
                         self.reopen(program)?;
@@ -743,12 +1002,14 @@ impl Host {
             Command::Locate { at } => {
                 let at = beat(at)?;
                 self.check_in_song(&at, "locate")?;
+                // A locate ends the take where it stands.
+                let recorded = self.end_recording(None);
                 self.cue = at;
                 let f = self.frame(&self.cue);
                 if let Some(t) = &mut self.transport {
                     t.control.locate(f)?;
                 }
-                Ok(self.status())
+                Ok(self.status_with(recorded))
             }
             Command::Loop { start, length } => {
                 self.region = match (start, length) {
@@ -794,6 +1055,20 @@ impl Host {
             json!({"frame": frame, "beat": round3(frame as f64 * tempo / 60.0 / rate), "seconds": round3(frame as f64 / rate)}),
         );
         m.insert("cue".into(), crate::session::value_json(&beat_value(&self.cue)));
+        m.insert("armed".into(), json!(self.armed));
+        m.insert(
+            "recording".into(),
+            match &self.recording {
+                Some(r) => json!({
+                    "tracks": r.tracks(),
+                    "from": crate::session::value_json(&beat_value(&self.from)),
+                    "count_in_frames": r.count_in,
+                    "seconds": round3(r.began.elapsed().as_secs_f64()),
+                    "loop_end_frame": r.loop_end,
+                }),
+                None => Json::Null,
+            },
+        );
         m.insert(
             "loop".into(),
             match &self.region {
@@ -1058,10 +1333,38 @@ impl Host {
         }
     }
 
+    /// Takes a recording's frames in, and ends it where the loop wraps, where
+    /// the song ends, or when its device stopped.
+    fn record_tick(&mut self) {
+        let Some(recording) = &mut self.recording else { return };
+        recording.drain();
+        let playing = self.transport.as_ref().is_some_and(|t| t.control.playing());
+        recording.rolled |= playing;
+        let (wrapped, loop_end) = (recording.wrapped(), recording.loop_end);
+        let dead = recording.takes.iter().find(|t| t.dead()).map(|t| t.track.clone());
+        // The player starts at its next block; until then a stopped
+        // transport has not started, unless the output is not running.
+        let stalled = !recording.rolled && recording.began.elapsed() > Duration::from_secs(2);
+        if wrapped {
+            self.end_recording(loop_end.map(|f| f as i64));
+        } else if !playing && recording.rolled {
+            // The song reached its end.
+            let total = self.program.as_ref().map(|(_, p)| p.total as i64);
+            self.end_recording(total);
+        } else if stalled {
+            self.warn("the output never started, so the take ends".into());
+            self.end_recording(None);
+        } else if let Some(track) = dead {
+            self.warn(format!("{track}'s input device stopped; the take ends here"));
+            self.end_recording(None);
+        }
+    }
+
     /// Housekeeping between requests. True when the host should exit.
     fn tick(&mut self) -> bool {
         self.save_due();
         self.follow_devices();
+        self.record_tick();
         if let Some(t) = &mut self.transport {
             t.control.collect();
             let played = t.control.shared().played.load(Relaxed);
@@ -1153,6 +1456,8 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         devices_seen: aaw_engine::devices::generation(),
         revived_at: None,
         metronome: false,
+        armed: Vec::new(),
+        recording: None,
         cue: BigRational::zero(),
         region: None,
         playback_error: None,
@@ -1214,6 +1519,8 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
             break;
         }
     }
+    // A take still running is kept.
+    host.end_recording(None);
     host.done.store(true, Relaxed);
     let doors = std::mem::take(&mut host.doors);
     let claims: Vec<registry::Claim> = doors

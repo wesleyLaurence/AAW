@@ -15,6 +15,8 @@ public struct HeaderLayout: Equatable {
         /// The mark on a group that folds its tracks away or shows them.
         case members
         case name, mute, solo, volume, pan
+        /// A track's record arm, before its mute.
+        case arm
         /// The send to the return at this place among the returns.
         case send(Int)
         /// The header of the lane at this place among the row's lanes, and
@@ -119,7 +121,8 @@ public struct HeaderLayout: Equatable {
         switch kind {
         case .track, .group:
             let left: CGFloat = left + (folds ? 15 : 6)
-            return CGRect(x: left, y: top + 5, width: mute.minX - 6 - left, height: 16)
+            let right = kind == .track ? arm.minX : mute.minX
+            return CGRect(x: left, y: top + 5, width: right - 6 - left, height: 16)
         case .bus, .master:
             return CGRect(x: 14, y: top + 7, width: volume.minX - 6 - 14, height: 16)
         }
@@ -134,6 +137,11 @@ public struct HeaderLayout: Equatable {
 
     public var solo: CGRect {
         CGRect(x: Self.width - 28, y: top + 6, width: 16, height: 14)
+    }
+
+    /// A track's record arm, before its mute: red while the track is armed.
+    public var arm: CGRect {
+        CGRect(x: Self.width - 66, y: top + 6, width: 16, height: 14)
     }
 
     /// What a drag on the volume starts from: a track's bar with its value, or
@@ -215,6 +223,7 @@ public struct HeaderLayout: Equatable {
         case .track, .group:
             if kind == .group, members.insetBy(dx: -4, dy: -4).contains(p) { return .members }
             if folds, fold.insetBy(dx: -4, dy: -4).contains(p) { return .fold }
+            if kind == .track, arm.contains(p) { return .arm }
             if mute.contains(p) { return .mute }
             if solo.contains(p) { return .solo }
             if pan.contains(p) { return .pan }

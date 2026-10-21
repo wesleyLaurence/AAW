@@ -198,12 +198,18 @@ impl Transport {
                             .output_latency
                             .store((ahead.as_secs_f64() * rate as f64 + held).round() as u64, Relaxed);
                         let frames = data.len() / channels;
+                        // When the first frame written here plays, on the audio
+                        // clock, for the anchor a recording maps its input by;
+                        // what the resampler holds plays first, so the renderer's
+                        // next frame plays that much later.
+                        let plays = crate::capture::instant_ns(info.timestamp().callback) + (held / rate as f64 * 1e9) as u64;
+                        let mut at = Some(plays);
                         let mut done = 0;
                         while done < frames {
                             let n = (frames - done).min(MAX_BLOCK);
                             match &mut stream_resampler {
-                                None => player.render(&mut block[..n]),
-                                Some(s) => s.run(&mut block[..n], &mut |b| player.render(b)),
+                                None => player.render_at(&mut block[..n], at.take()),
+                                Some(s) => s.run(&mut block[..n], &mut |b| player.render_at(b, at.take())),
                             }
                             for (k, f) in block[..n].iter().enumerate() {
                                 let out = &mut data[(done + k) * channels..(done + k + 1) * channels];

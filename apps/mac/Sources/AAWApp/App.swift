@@ -720,10 +720,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator(),
             item("Rename", #selector(SongWindowController.renameSelection(_:)), "r"),
         ])
+        // The count-in Record leads with, kept across launches.
+        let countIn = NSMenu(title: "Count-In")
+        for bars in RecordPreferences.countIns {
+            let entry = item(RecordPreferences.name(bars), #selector(SongWindowController.chooseCountIn(_:)))
+            entry.representedObject = Int(bars)
+            countIn.addItem(entry)
+        }
+        let countInHolder = NSMenuItem(title: "Count-In", action: nil, keyEquivalent: "")
+        countInHolder.submenu = countIn
         add("Transport", [
             item("Play or Stop", #selector(SongWindowController.togglePlay(_:)), " ", []),
             item("Return to Start Position", #selector(SongWindowController.returnToStart(_:)), "\r", []),
             item("Loop", #selector(SongWindowController.toggleLoop(_:)), "l", []),
+            .separator(),
+            item("Record", #selector(SongWindowController.toggleRecord(_:)), "r", []),
+            countInHolder,
             .separator(),
             // A note left where the song is playing, for the agent to read.
             item("Add Marker", #selector(SongWindowController.addMarker(_:)), "m", []),
@@ -999,6 +1011,10 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func togglePlay(_ sender: Any?) { model.togglePlay() }
     @objc func returnToStart(_ sender: Any?) { model.returnToStart() }
     @objc func toggleLoop(_ sender: Any?) { model.toggleLoop() }
+    @objc func toggleRecord(_ sender: Any?) { model.toggleRecord() }
+    @objc func chooseCountIn(_ sender: NSMenuItem) {
+        if let bars = sender.representedObject as? Int { RecordPreferences.shared.countIn = UInt32(bars) }
+    }
     @objc func addMarker(_ sender: Any?) { model.addMarker() }
     @objc func addNamedMarker(_ sender: Any?) { model.addMarker(ask: true) }
     @objc func deleteAllMarkers(_ sender: Any?) { model.removeAllMarkers() }
@@ -1136,6 +1152,12 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(deleteAllMarkers(_:)): return !model.arrangement.markers.isEmpty && !typing
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
         case #selector(togglePlay(_:)): return !typing
+        case #selector(toggleRecord(_:)):
+            item.title = model.transport.recording ? "Stop Recording" : "Record"
+            return (model.transport.recording || model.canRecord) && !typing
+        case #selector(chooseCountIn(_:)):
+            item.state = (item.representedObject as? Int).map(UInt32.init) == RecordPreferences.shared.countIn ? .on : .off
+            return !typing
         case #selector(undoEdit(_:)):
             item.title = Self.title("Undo", model.undoStep)
             return model.undoStep != nil && !typing

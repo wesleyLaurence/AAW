@@ -782,6 +782,25 @@ pub fn references(p: &Project) -> Result<(), String> {
         }
         previous = path;
     }
+    // A track's input names a track or a group of the song, and not itself.
+    for t in &p.tracks {
+        match &t.input {
+            Some(crate::schema::Input::Track(source)) => {
+                if source == &t.id {
+                    return Err(format!("{}: a track cannot record itself", t.id));
+                }
+                if !track_ids.contains(&source.as_str()) {
+                    return Err(format!("{}: input names unknown track {source}", t.id));
+                }
+            }
+            Some(crate::schema::Input::Group(source)) => {
+                if !group_ids.contains(&source.as_str()) {
+                    return Err(format!("{}: input names unknown group {source}", t.id));
+                }
+            }
+            _ => {}
+        }
+    }
     let channels = p
         .tracks
         .iter()

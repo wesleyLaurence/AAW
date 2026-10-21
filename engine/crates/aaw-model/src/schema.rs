@@ -2883,6 +2883,112 @@ fn automation_field(ctx: &mut Ctx, f: &Fields) -> Option<Vec<Lane>> {
     f.opt(ctx, "automation", Vec::new(), |c, x| v::list(c, x, 0, Some(64), Lane::validate))
 }
 
+/// Where an audio track records from: an input device's channel or pair,
+/// or the song's own sound, a track, a group or the mix, which is
+/// resampling. Kept in the song, since a session's input setup is part of
+/// it; whether the track is armed is the host's.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Input {
+    /// `{device: NAME, channels: [1]}`: part of an input device's name,
+    /// ignoring case, or `default` for the input chosen in the audio
+    /// settings, else the Mac's default; one channel for a mono take or two
+    /// for a stereo one, counted from 1. `{}` is `{device: default}`.
+    Device { device: String, channels: Vec<i64> },
+    /// `{track: ID}`: another track's sound after its fader, its stem.
+    Track(String),
+    /// `{group: ID}`: a group's sound after its chain, gain and pan.
+    Group(String),
+    /// `{master: true}`: the mix after the master's effects.
+    Master,
+}
+
+impl Input {
+    const FIELDS: &'static [&'static str] = &["device", "channels", "track", "group", "master"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Input> {
+        let f = Fields::of(ctx, x, "Input", Self::FIELDS)?;
+        let before = ctx.count();
+        let device = f.opt(ctx, "device", None, opt_string);
+        let channels = f.opt(ctx, "channels", None, |c, x| {
+            v::optional(c, x, |c, x| v::list(c, x, 1, Some(2), |c, x| v::int(c, x, Bounds::ge_le("1", "64"))))
+        });
+        let track = f.opt(ctx, "track", None, opt_id);
+        let group = f.opt(ctx, "group", None, opt_id);
+        let master = f.opt(ctx, "master", false, v::boolean);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        let (device, channels, track, group, master) = (device?, channels?, track?, group?, master?);
+        let given = [device.is_some(), track.is_some(), group.is_some(), master].iter().filter(|g| **g).count();
+        if given > 1 {
+            ctx.value_error("An input is one of device, track, group or master: true");
+            return None;
+        }
+        // Nothing given is the input device chosen in the audio settings.
+        let device = if given == 0 { Some("default".to_string()) } else { device };
+        if channels.is_some() && device.is_none() {
+            ctx.value_error("channels go with a device");
+            return None;
+        }
+        Some(match (device, track, group) {
+            (Some(device), _, _) => {
+                let channels = channels.unwrap_or_else(|| vec![1]);
+                if channels.len() == 2 && channels[0] == channels[1] {
+                    ctx.value_error("A stereo input is two different channels");
+                    return None;
+                }
+                Input::Device { device, channels }
+            }
+            (_, Some(track), _) => Input::Track(track),
+            (_, _, Some(group)) => Input::Group(group),
+            _ => Input::Master,
+        })
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        let (device, channels, track, group, master) = match self {
+            Input::Device { device, channels } => (Some(device.as_str()), Some(channels), None, None, false),
+            Input::Track(id) => (None, None, Some(id.as_str()), None, false),
+            Input::Group(id) => (None, None, None, Some(id.as_str()), false),
+            Input::Master => (None, None, None, None, true),
+        };
+        o.opt("device", device.map(Value::str));
+        // One channel, the first, is what an input has unless told otherwise.
+        o.opt(
+            "channels",
+            channels.filter(|c| c.as_slice() != [1]).map(|c| Value::List(c.iter().map(|n| Value::int(*n)).collect())),
+        );
+        o.opt("track", track.map(Value::str));
+        o.opt("group", group.map(Value::str));
+        o.bool("master", master, false);
+        o.done()
+    }
+
+    /// The input in a few words, as a header or a reply names it.
+    pub fn label(&self) -> String {
+        match self {
+            Input::Device { device, channels } => {
+                let name = if device == "default" { "the input device".to_string() } else { device.clone() };
+                match channels.as_slice() {
+                    [c] => format!("{name} channel {c}"),
+                    [a, b] => format!("{name} channels {a}+{b}"),
+                    _ => name,
+                }
+            }
+            Input::Track(id) => format!("track {id}"),
+            Input::Group(id) => format!("group {id}"),
+            Input::Master => "the mix".into(),
+        }
+    }
+
+    /// Whether the input is the song's own sound rather than a device.
+    pub fn resamples(&self) -> bool {
+        !matches!(self, Input::Device { .. })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Track {
     pub id: String,
@@ -2903,13 +3009,16 @@ pub struct Track {
     /// The group the track's output goes into instead of the master sum,
     /// one of `groups[]`; None for a track that goes to the master.
     pub group: Option<String>,
+    /// Where an audio track records from; None for a track that records
+    /// nothing. A MIDI track has none.
+    pub input: Option<Input>,
 }
 
 static NO_PADS: LazyLock<IndexMap<String, Pad>> = LazyLock::new(IndexMap::new);
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
-        "id", "gain_db", "pan", "mute", "solo", "group", "pads", "clips", "audio", "effects", "sends", "automation",
+        "id", "gain_db", "pan", "mute", "solo", "group", "input", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
     const MIDI_FIELDS: &'static [&'static str] = &[
         "id", "type", "gain_db", "pan", "mute", "solo", "group", "instrument", "clips", "effects", "sends", "automation",
@@ -2935,6 +3044,7 @@ impl Track {
         let mute = f.opt(ctx, "mute", false, v::boolean);
         let solo = f.opt(ctx, "solo", false, v::boolean);
         let group = f.opt(ctx, "group", None, opt_id);
+        let input = if midi { Some(None) } else { f.opt(ctx, "input", None, |c, x| v::optional(c, x, Input::validate)) };
         let (pads, clips, audio, notes) = if midi {
             let instrument = f.opt(ctx, "instrument", None, |c, x| v::optional(c, x, Instrument::validate));
             let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, NoteClip::validate));
@@ -2970,6 +3080,7 @@ impl Track {
             automation: automation?,
             midi: notes?,
             group: group?,
+            input: input?,
         })
     }
 
@@ -2996,6 +3107,9 @@ impl Track {
         o.bool("mute", self.mute, false);
         o.bool("solo", self.solo, false);
         o.opt("group", self.group.as_ref().map(|g| Value::str(g)));
+        if self.midi.is_none() {
+            o.opt("input", self.input.as_ref().map(|i| i.dump(saved)));
+        }
         match &self.midi {
             Some(m) => {
                 o.opt("instrument", m.instrument.as_ref().map(|i| i.dump(saved)));

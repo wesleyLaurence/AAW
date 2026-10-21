@@ -379,6 +379,8 @@ fn an_embedded_host_reports_what_changes() {
             playing: false,
             cue,
             region,
+            recording: false,
+            armed: vec![],
         })
     };
     let transport = |e: Event| match e {

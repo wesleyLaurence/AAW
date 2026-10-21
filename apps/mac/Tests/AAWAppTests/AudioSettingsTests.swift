@@ -67,6 +67,25 @@ final class AudioSettingsTests: XCTestCase {
                        "Scarlett 2i2 is not connected; playing through MacBook Air Speakers at 48 kHz. Output latency 2.7 ms.")
     }
 
+    /// The count-in is kept across launches, one bar unless chosen, and the
+    /// Record button's words say what it would do.
+    func testTheCountInIsKeptAndRecordSaysWhatItDoes() {
+        let defaults = fresh()
+        let first = RecordPreferences(defaults: defaults)
+        XCTAssertEqual(first.countIn, 1)
+        first.countIn = 2
+        XCTAssertEqual(RecordPreferences(defaults: defaults).countIn, 2)
+        defaults.set(7, forKey: "record.countIn")
+        XCTAssertEqual(RecordPreferences(defaults: defaults).countIn, 1, "a count-in the menu does not offer is the usual one")
+        XCTAssertEqual(RecordPreferences.countIns.map(RecordPreferences.name), ["None", "1 Bar", "2 Bars", "4 Bars"])
+        XCTAssertTrue(RecordWords.record(recording: true, armed: 1, countIn: 1).hasPrefix("Stop recording"))
+        XCTAssertTrue(RecordWords.record(recording: false, armed: 0, countIn: 1).contains("Arm a track first"))
+        XCTAssertEqual(RecordWords.record(recording: false, armed: 1, countIn: 2), "Record the armed track from the start position after a count-in of 2 bars (R).")
+        XCTAssertEqual(RecordWords.record(recording: false, armed: 3, countIn: 0), "Record the 3 armed tracks from the start position at once (R).")
+        XCTAssertEqual(RecordWords.arm(armed: false, input: "Scarlett 2i2 channel 1"), "Arm to record from Scarlett 2i2 channel 1.")
+        XCTAssertTrue(RecordWords.arm(armed: false, input: nil).hasPrefix("No input."))
+    }
+
     func testTheLaunchFlagOpensSettings() {
         XCTAssertTrue(Launch(arguments: ["--settings"]).settings)
         XCTAssertFalse(Launch(arguments: ["song.yaml"]).settings)

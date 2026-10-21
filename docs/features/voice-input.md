@@ -43,7 +43,8 @@ refused the microphone or speech recognition in System Settings › Privacy,
 the refusal says which. Two usage descriptions are in `Info.plist`, and
 `AAW.entitlements`, passed to `codesign` for the app by `build.sh`, carries
 `com.apple.security.device.audio-input` for the hardened runtime a
-Developer ID signs with.
+Developer ID signs with; [recording](recording.md) takes an audio track from
+the same microphone under the same entitlement and usage description.
 
 **The field while listening.** The panel keeps the draft as it was when
 listening began, with a space after it when it ends in none, and sets the

@@ -104,9 +104,13 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   [analyzer.md](features/analyzer.md) and [synth.md](features/synth.md).
 - `aaw-engine`: compiles a song into a program of voices, chains, groups,
   routing and latency-aligning delays, and runs it as one stream for real-time
-  playback and for WAV/stem export.
+  playback and for WAV/stem export; opens an input device and taps a stem or
+  the mix in the player for a take, each block headed by when it is
+  (`capture`); see [recording.md](features/recording.md).
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
+  It arms tracks and records them, each take laid on the timeline, written
+  under `samples/` and added with its clip as one edit (`record`).
   It also makes a blank project, moves or copies a project's folder,
   reads and writes Standard MIDI files of one part (`midi_file`), draws the
   song as a grid of tracks by bars for `daw map` (`map`), tells an agent's
@@ -254,8 +258,13 @@ Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `cl
 [audio-clips.md](features/audio-clips.md); one with `loop_beats` and
 `length_beats` plays its first beats again at each wrap until its length, each
 repetition a copy with the clip's fades, see
-[looping-clips.md](features/looping-clips.md)), `effects`, `sends`, `automation` and an optional `group`, the
-group the track's output goes into instead of the master sum. A send is `{to, gain_db, pre_fader}`, at most
+[looping-clips.md](features/looping-clips.md)), `effects`, `sends`, `automation`, an optional `group`, the
+group the track's output goes into instead of the master sum, and an optional
+`input`, where the track records from: `{device: NAME, channels: [1]}` an
+input device by part of its name or `default` for the one chosen in the audio
+settings, with one channel or two, or `{track: ID}`, `{group: ID}` or
+`{master: true}` the song's own sound, which is resampling; see
+[recording.md](features/recording.md). A send is `{to, gain_db, pre_fader}`, at most
 one per return.
 
 Group: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,

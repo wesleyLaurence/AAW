@@ -49,6 +49,10 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(part(track.name), .name)
         XCTAssertEqual(part(track.mute), .mute)
         XCTAssertEqual(part(track.solo), .solo)
+        // The record arm sits before the mute, on a track alone.
+        XCTAssertEqual(part(track.arm), .arm)
+        XCTAssertLessThan(track.arm.maxX, track.mute.minX)
+        XCTAssertFalse(track.name.intersects(track.arm))
         XCTAssertEqual(part(track.volumeBar), .volume)
         XCTAssertEqual(part(track.volumeText), .volume)
         XCTAssertEqual(part(track.pan), .pan)
@@ -80,6 +84,7 @@ final class EditingTests: XCTestCase {
         // away before the mark that shows its sends; a grouped track's marks
         // and name sit in from the edge.
         let group = HeaderLayout(kind: .group, top: 100, sends: 2, folds: true, collapsed: true)
+        XCTAssertEqual(group.part(at: CGPoint(x: group.arm.midX, y: group.arm.midY)), .name, "a group has no arm")
         XCTAssertEqual(group.height, track.height)
         XCTAssertEqual(group.part(at: CGPoint(x: group.members.midX, y: group.members.midY)), .members)
         XCTAssertEqual(group.part(at: CGPoint(x: group.fold.midX, y: group.fold.midY)), .fold)
