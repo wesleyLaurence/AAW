@@ -2989,6 +2989,38 @@ impl Input {
     }
 }
 
+/// A track frozen to audio: its instrument and effects rendered to a file
+/// that plays in their place, before its fader, until it is unfrozen. What
+/// the file was rendered from stays in the song and cannot be edited while
+/// it is frozen; the fader, pan, mute, solo and sends stay live.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frozen {
+    /// The rendered file, relative to the project: `frozen/TRACK.wav`,
+    /// stereo 32-bit float at the song's rate.
+    pub path: String,
+}
+
+impl Frozen {
+    const FIELDS: &'static [&'static str] = &["path"];
+
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Frozen> {
+        let f = Fields::of(ctx, x, "Frozen", Self::FIELDS)?;
+        let before = ctx.count();
+        let path = f.req(ctx, "path", v::string);
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        Some(Frozen { path: path? })
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("path", Value::str(&self.path));
+        o.done()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Track {
     pub id: String,
@@ -3012,16 +3044,18 @@ pub struct Track {
     /// Where an audio track records from; None for a track that records
     /// nothing. A MIDI track has none.
     pub input: Option<Input>,
+    /// The track frozen to audio, or None while it plays its own content.
+    pub frozen: Option<Frozen>,
 }
 
 static NO_PADS: LazyLock<IndexMap<String, Pad>> = LazyLock::new(IndexMap::new);
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
-        "id", "gain_db", "pan", "mute", "solo", "group", "input", "pads", "clips", "audio", "effects", "sends", "automation",
+        "id", "gain_db", "pan", "mute", "solo", "group", "input", "frozen", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
     const MIDI_FIELDS: &'static [&'static str] = &[
-        "id", "type", "gain_db", "pan", "mute", "solo", "group", "instrument", "clips", "effects", "sends", "automation",
+        "id", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "clips", "effects", "sends", "automation",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
@@ -3045,6 +3079,7 @@ impl Track {
         let solo = f.opt(ctx, "solo", false, v::boolean);
         let group = f.opt(ctx, "group", None, opt_id);
         let input = if midi { Some(None) } else { f.opt(ctx, "input", None, |c, x| v::optional(c, x, Input::validate)) };
+        let frozen = f.opt(ctx, "frozen", None, |c, x| v::optional(c, x, Frozen::validate));
         let (pads, clips, audio, notes) = if midi {
             let instrument = f.opt(ctx, "instrument", None, |c, x| v::optional(c, x, Instrument::validate));
             let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, NoteClip::validate));
@@ -3081,6 +3116,7 @@ impl Track {
             midi: notes?,
             group: group?,
             input: input?,
+            frozen: frozen?,
         })
     }
 
@@ -3110,6 +3146,7 @@ impl Track {
         if self.midi.is_none() {
             o.opt("input", self.input.as_ref().map(|i| i.dump(saved)));
         }
+        o.opt("frozen", self.frozen.as_ref().map(|z| z.dump(saved)));
         match &self.midi {
             Some(m) => {
                 o.opt("instrument", m.instrument.as_ref().map(|i| i.dump(saved)));
@@ -3607,6 +3644,48 @@ impl Project {
 
     pub fn track(&self, id: &str) -> Option<&Track> {
         self.tracks.iter().find(|t| t.id == id)
+    }
+
+    /// What a track's frozen file was rendered from, as a value: its pads,
+    /// clips and audio clips or its instrument and note clips, its effects,
+    /// the lanes on them, the patterns its clips play and the samples they
+    /// name. The fader, pan, mute, solo, sends and their lanes are not in
+    /// it: they stay live while the track is frozen. What keys its
+    /// sidechains from other tracks is not in it either.
+    pub fn frozen_content(&self, track: &Track) -> Value {
+        let mixer = |lane: &Lane| lane.param == "gain_db" || lane.param == "pan" || lane.param.starts_with("sends.");
+        let mut d = Dict::new();
+        match &track.midi {
+            Some(m) => {
+                d.insert(Key::str("instrument"), m.instrument.as_ref().map_or(Value::None, |i| i.dump(false)));
+                d.insert(Key::str("clips"), Value::List(m.clips.iter().map(|c| c.dump(false)).collect()));
+            }
+            None => {
+                d.insert(Key::str("pads"), Value::Dict(track.pads.iter().map(|(k, p)| (Key::str(k), p.dump(false))).collect()));
+                d.insert(Key::str("clips"), Value::List(track.clips.iter().map(|c| c.dump(false)).collect()));
+                d.insert(Key::str("audio"), Value::List(track.audio.iter().map(|c| c.dump(false)).collect()));
+            }
+        }
+        d.insert(Key::str("effects"), Value::List(track.effects.iter().map(|e| e.dump(false)).collect()));
+        d.insert(
+            Key::str("automation"),
+            Value::List(track.automation.iter().filter(|l| !mixer(l)).map(|l| l.dump(false)).collect()),
+        );
+        let mut patterns = Dict::new();
+        for c in &track.clips {
+            if let Some(p) = self.patterns.get(&c.pattern) {
+                patterns.entry(Key::str(&c.pattern)).or_insert_with(|| p.dump(false));
+            }
+        }
+        d.insert(Key::str("patterns"), Value::Dict(patterns));
+        let mut samples = Dict::new();
+        for name in track.sound_pads().values().map(|p| &p.sample).chain(track.audio.iter().map(|c| &c.sample)) {
+            if let Some(s) = self.samples.get(name) {
+                samples.entry(Key::str(name)).or_insert_with(|| s.dump(false));
+            }
+        }
+        d.insert(Key::str("samples"), Value::Dict(samples));
+        Value::Dict(d)
     }
 
     pub fn group(&self, id: &str) -> Option<&Group> {

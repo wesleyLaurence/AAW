@@ -3319,3 +3319,33 @@ fn a_tracks_input_is_set_from_the_header_and_the_arm_is_shared_transport_state()
     assert!(song.stop_recording().unwrap_err().to_string().contains("Nothing is recording"));
     song.close();
 }
+
+#[test]
+fn a_track_is_frozen_from_the_header_and_its_clips_are_held() {
+    let (dir, _path, song, seen) = open();
+    transport(&seen);
+    let a = song.arrangement();
+    let (perc, perc_id) = (a.tracks[1].key, a.tracks[1].id.clone());
+    let clip = a.tracks[1].clips[0].key;
+    assert!(!a.tracks[1].frozen);
+    song.edit(Edit::TrackFreeze { track: perc }, None).unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.tracks[1].frozen);
+    assert_eq!(u.change.label, format!("Freeze {perc_id}"));
+    assert!(dir.path().join("frozen").join(format!("{perc_id}.wav")).is_file());
+    // The clips and devices stay in the view, and a drag of a clip is refused
+    // in the host's words; the fader is not.
+    assert_eq!(u.arrangement.tracks[1].clips.len(), 1);
+    assert_eq!(u.arrangement.tracks[1].effects.len(), 2);
+    let e = song.edit(Edit::ClipsMove { clips: vec![clip], by: 4.0, rows: 0 }, None).unwrap_err();
+    assert!(e.to_string().contains(&format!("{perc_id} is frozen")), "{e}");
+    song.edit(Edit::Gain { row: Row::Track { key: perc }, db: -6.0 }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].gain_db, -6.0);
+    song.edit(Edit::TrackUnfreeze { track: perc }, None).unwrap();
+    let u = update(&seen);
+    assert!(!u.arrangement.tracks[1].frozen);
+    assert_eq!(u.change.label, format!("Unfreeze {perc_id}"));
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: 4.0, rows: 0 }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].clips[0].at, 12.0);
+    song.close();
+}

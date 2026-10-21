@@ -27,7 +27,7 @@ def test_describe_is_short_and_keeps_the_schema_for_the_asking():
         assert short["semantics"] == full["semantics"], topic
         assert "schema" not in short
     midi = run("describe", "midi").stdout
-    assert len(midi.encode()) < 8000
+    assert len(midi.encode()) < 8200
     fields = json.loads(midi)["fields"]
     assert fields["tracks[].clips[].notes[].velocity"] == "integer 1..127, default 100"
     assert fields["tracks[].clips[].length_beats"] == "beats, required"

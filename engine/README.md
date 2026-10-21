@@ -231,6 +231,23 @@ asked, the reply's `captured` giving the file, the peak and `at_beat`, the
 beat its first frame was heard against while the song played
 ([a sound recorded into the conversation](../docs/features/agent-record-audio.md)).
 
+A host freezes a track ([freezing](../docs/features/freezing.md)).
+`track.freeze {track}` renders what the track's instrument, effects and
+their lanes make before its fader over the whole song, the tracks that key
+it playing along, through the renderer's tap before the faders
+(`aaw-engine`'s `freeze`), writes it as `frozen/TRACK.wav`, stereo float at
+the song's rate, and sets `tracks[].frozen` to `{path}` as one edit, "Freeze
+TRACK"; the track then compiles as one voice of its file with no synth, no
+inserts and no lanes on them, its fader, pan, mute, solo and sends live. The
+session refuses an edit of what the file was rendered from while it is
+frozen, by comparing that content before and after every edit: the pads,
+clips, audio clips, instrument, note clips, effects and the lanes on them,
+the patterns the clips play and the samples they name, and, while any track
+is frozen, the tempo, the rate and the stretcher. `arm` and `note.preview`
+on a frozen track are refused in the same words. `track.unfreeze {track}`
+removes the field and leaves the file. `daw track freeze` and `daw track
+unfreeze` are the terminal's way.
+
 - **Commands** validate the whole resulting song before they apply and carry an
   origin, `agent` by default or `--origin user`. `--expect SHA` refuses an edit
   over an unseen change. A host saves canonical `song.yaml` before it replies.

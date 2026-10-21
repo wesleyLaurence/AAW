@@ -290,17 +290,26 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     }
     let dependencies = dict(dependencies);
     let opt_str = |s: &Option<String>| s.as_deref().map_or(Value::None, Value::str);
-    let render_id = hex(&Sha256::digest(
-        json_dumps(&dict(vec![
-            ("project", Value::str(&fingerprint)),
-            ("engine", Value::str(&engine)),
-            ("samples", sample_hashes.clone()),
-            ("dependencies", dependencies.clone()),
-            ("track", opt_str(&opts.track)),
-            ("section", opt_str(&opts.section)),
-        ]))
-        .as_bytes(),
-    ));
+    let mut identity = vec![
+        ("project", Value::str(&fingerprint)),
+        ("engine", Value::str(&engine)),
+        ("samples", sample_hashes.clone()),
+        ("dependencies", dependencies.clone()),
+        ("track", opt_str(&opts.track)),
+        ("section", opt_str(&opts.section)),
+    ];
+    // A frozen track's file is part of what the render is of; a song with
+    // none keeps the identity it had.
+    let mut frozen = Vec::new();
+    for t in p.tracks.iter().filter(|t| t.frozen.is_some()) {
+        let path = &t.frozen.as_ref().expect("frozen").path;
+        let digest = aaw_model::digest(&directory.join(path)).map_err(|e| format!("{}: frozen file {path}: {e}", t.id))?;
+        frozen.push((t.id.as_str(), Value::str(&digest)));
+    }
+    if !frozen.is_empty() {
+        identity.push(("frozen", dict(frozen)));
+    }
+    let render_id = hex(&Sha256::digest(json_dumps(&dict(identity)).as_bytes()));
     let output = opts
         .output
         .clone()

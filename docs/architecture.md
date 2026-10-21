@@ -107,13 +107,17 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   routing and latency-aligning delays, and runs it as one stream for real-time
   playback and for WAV/stem export; opens an input device and taps a stem or
   the mix in the player for a take, each block headed by when it is
-  (`capture`); see [recording.md](features/recording.md).
+  (`capture`); see [recording.md](features/recording.md); renders a track
+  before its fader for a freeze, and plays a frozen track as its file
+  (`freeze`); see [freezing.md](features/freezing.md).
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It arms tracks and records them, each take laid on the timeline, written
   under `samples/` and added with its clip as one edit (`record`), and
   captures a sound from an input with no track for the agent panel, written
-  where it was asked for with the beat it began at (`capture`).
+  where it was asked for with the beat it began at (`capture`), and freezes
+  a track to a file of what its devices make, holding what the file was
+  rendered from until the track is unfrozen (`track.freeze`).
   It also makes a blank project, moves or copies a project's folder,
   reads and writes Standard MIDI files of one part (`midi_file`), draws the
   song as a grid of tracks by bars for `daw map` (`map`), tells an agent's
@@ -267,8 +271,12 @@ group the track's output goes into instead of the master sum, and an optional
 input device by part of its name or `default` for the one chosen in the audio
 settings, with one channel or two, or `{track: ID}`, `{group: ID}` or
 `{master: true}` the song's own sound, which is resampling; see
-[recording.md](features/recording.md). A send is `{to, gain_db, pre_fader}`, at most
-one per return.
+[recording.md](features/recording.md). An optional `frozen`, `{path:
+frozen/TRACK.wav}`, is the track frozen: the file of what its instrument,
+effects and their lanes make before its fader, which plays in their place,
+with its fader, pan, mute, solo and sends live and what the file was rendered
+from held until `track.unfreeze`; see [freezing.md](features/freezing.md). A
+send is `{to, gain_db, pre_fader}`, at most one per return.
 
 Group: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
 `solo`, `effects`, `sends` and `automation`, as a track has them, and an optional

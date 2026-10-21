@@ -61,6 +61,19 @@ pub enum Command {
     TrackRename { track: String, to: String },
     #[serde(rename = "track.move")]
     TrackMove { track: String, index: usize },
+    /// Freezes a track: what its instrument, inserts and their lanes make,
+    /// rendered before its fader over the whole song to `frozen/TRACK.wav`
+    /// at the song's rate, which plays in their place until
+    /// `track.unfreeze`. While it is frozen, an edit of its clips, pads,
+    /// instrument, effects or their lanes, of the patterns its clips play
+    /// or the samples they name, or of the tempo, the rate or the
+    /// stretcher is refused; the fader, pan, mute, solo, sends and their
+    /// lanes are live. A frozen track renders again from its content.
+    #[serde(rename = "track.freeze")]
+    TrackFreeze { track: String },
+    /// Unfreezes a track: its content plays again. The file is left.
+    #[serde(rename = "track.unfreeze")]
+    TrackUnfreeze { track: String },
     #[serde(rename = "return.add")]
     ReturnAdd {
         id: String,
@@ -1410,6 +1423,8 @@ impl<'a> Edit<'a> {
         use Command::*;
         let mut out = Outcome::default();
         match cmd {
+            // The session renders the file and sets the field, or removes it.
+            TrackFreeze { .. } | TrackUnfreeze { .. } => return Err("a freeze is the session's".into()),
             Set { path, value } => {
                 if path == "session.length_beats" {
                     return Err("The length is the song's content: the next whole bar after the last clip, automation point, section or marker, set after every edit. Place something where the song should reach".into());

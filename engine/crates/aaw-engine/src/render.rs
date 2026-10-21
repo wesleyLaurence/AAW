@@ -452,6 +452,9 @@ pub struct Renderer {
     previewed: u64,
     /// The stretches of the timeline a render reports reduction over apart.
     spans: Vec<(i64, i64)>,
+    /// Whether `stem` is given each track's block before its fader, pan,
+    /// mute and solo instead of after them, for a freeze.
+    before_faders: bool,
 }
 
 /// A frame of one program at the same beat in another.
@@ -667,10 +670,18 @@ impl Renderer {
             previews: (0..PREVIEWS).map(|_| None).collect(),
             previewed: 0,
             spans: Vec::new(),
+            before_faders: false,
             program,
         };
         r.seek(from, false);
         r
+    }
+
+    /// Has `stem` given each track's block as its inserts leave it, aligned
+    /// to the timeline but before its gain, pan, mute and solo: what a
+    /// freeze keeps. Groups' and returns' blocks are as they were.
+    pub fn tap_before_faders(&mut self) {
+        self.before_faders = true;
     }
 
     /// Moves the transport to `to` and picks up the voices sounding there,
@@ -906,7 +917,7 @@ impl Renderer {
                 }
             }
             if t.in_mix {
-                stem(stems, post, aligned + lead);
+                stem(stems, if self.before_faders { &*x } else { &*post }, aligned + lead);
                 stems += 1;
             }
         }

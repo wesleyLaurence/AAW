@@ -243,6 +243,9 @@ pub struct TrackView {
     pub input: Option<crate::edits::InputChoice>,
     /// The input in a few words, for the header.
     pub input_label: Option<String>,
+    /// Whether the track is frozen: its file plays in its devices' place,
+    /// and its clips and devices cannot be edited until it is unfrozen.
+    pub frozen: bool,
 }
 
 /// A group: the tracks and groups that name it summed through its own
@@ -1376,6 +1379,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     aaw_model::Input::Master => crate::edits::InputChoice::Master,
                 }),
                 input_label: t.input.as_ref().map(aaw_model::Input::label),
+                frozen: t.frozen.is_some(),
             }
         })
         .collect();

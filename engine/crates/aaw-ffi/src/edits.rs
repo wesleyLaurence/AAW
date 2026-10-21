@@ -114,6 +114,12 @@ pub enum Edit {
     /// Where a track records from, or with none nothing: an audio track's
     /// `input`, set from the header's Input menu.
     TrackInput { track: u64, input: Option<InputChoice> },
+    /// Freezes a track: its instrument, effects and their lanes rendered
+    /// before its fader to a file that plays in their place, until it is
+    /// unfrozen; the host refuses edits of what the file was rendered from
+    /// meanwhile.
+    TrackFreeze { track: u64 },
+    TrackUnfreeze { track: u64 },
     /// Moves clips later by `by` beats and down by `rows` tracks: pattern
     /// clips and audio clips alike. The song grows to hold an audio clip
     /// that would end past its end, here and in the edits below.
@@ -1180,6 +1186,13 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 Some(InputChoice::Master) => json!({"master": true}),
             };
             Ok(batch(vec![json!({"op": "set", "path": path, "value": value})], format!("Record {track_name} from {}", input_words(&value))))
+        }
+        Edit::TrackFreeze { track } | Edit::TrackUnfreeze { track } => {
+            let tree = doc.tree();
+            let name = items(&tree, "tracks").iter().find(|i| i.handle == *track).and_then(|i| i.node.field("id").map(str::to_string));
+            let name = name.ok_or("The track is no longer in the song")?;
+            let op = if matches!(edit, Edit::TrackFreeze { .. }) { "track.freeze" } else { "track.unfreeze" };
+            Ok(vec![json!({"op": op, "track": name})])
         }
         Edit::GroupParent { group, parent } => {
             let tree = doc.tree();
