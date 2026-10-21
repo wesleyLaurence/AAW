@@ -124,14 +124,20 @@ final class ContextMenuTests: XCTestCase {
 
     func testAnEffectsMenuPastesOnlyWhatWasCopiedAndNamesItsBypass() {
         let items = ContextMenu.effect(bypassed: false, copied: nil)
-        XCTAssertEqual(actions(items), [.cut, .copy, .paste, .duplicate, nil, .bypass, nil, .delete])
-        XCTAssertEqual(titles(items), ["Cut", "Copy", "Paste After", "Duplicate", "Bypass", "Delete"])
+        XCTAssertEqual(actions(items), [.cut, .copy, .paste, .duplicate, nil, .bypass, .makeRack, nil, .delete])
+        XCTAssertEqual(titles(items), ["Cut", "Copy", "Paste After", "Duplicate", "Bypass", "Make Rack", "Delete"])
         XCTAssertEqual(items.first { $0.action == .paste }?.enabled, false)
         XCTAssertEqual(items.first { $0.action == .duplicate }?.key, "d")
         XCTAssertEqual(items.first { $0.action == .delete }?.command, false)
         let copied = ContextMenu.effect(bypassed: true, copied: "Compressor")
-        XCTAssertEqual(titles(copied), ["Cut", "Copy", "Paste Compressor After", "Duplicate", "Enable", "Delete"])
+        XCTAssertEqual(titles(copied), ["Cut", "Copy", "Paste Compressor After", "Duplicate", "Enable", "Make Rack", "Delete"])
         XCTAssertEqual(copied.first { $0.action == .paste }?.enabled, true)
+        // A rack offers Unrack in its place; an effect inside a rack cannot be made one.
+        let rack = ContextMenu.effect(bypassed: false, copied: nil, rack: true)
+        XCTAssertEqual(actions(rack), [.cut, .copy, .paste, .duplicate, nil, .bypass, .unrack, nil, .delete])
+        XCTAssertEqual(rack.first { $0.action == .unrack }?.title, "Unrack")
+        let inside = ContextMenu.effect(bypassed: false, copied: nil, inRack: true)
+        XCTAssertEqual(inside.first { $0.action == .makeRack }?.enabled, false)
     }
 
     func testTheMarkerStripsMenuActsOnAMarkerOrAddsOneInTheClear() {

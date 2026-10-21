@@ -433,7 +433,7 @@ impl Session {
                     Command::TrackUnfreeze { track } => (self.unfreeze(track)?, Some(format!("Unfreeze {track}"))),
                     other => (other.clone(), None),
                 };
-                let mut outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).run(&effective)?;
+                let mut outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).in_dir(self.dir.clone()).run(&effective)?;
                 if let Some(label) = label {
                     outcome = Outcome {
                         label,

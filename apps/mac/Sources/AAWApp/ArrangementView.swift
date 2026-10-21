@@ -467,7 +467,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onWaveforms = { [weak self] in self?.takeWaveforms() }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
-            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
+            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
                 + (DeviceChain.kinds + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
@@ -2201,12 +2201,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// The device being dragged from the browser: its kind, for a Synth
-    /// patch the patch's name, and for a rack (kind "rack") the rack's.
+    /// patch the patch's name, and for a rack (kind "rack") or an
+    /// instrument rack the rack's.
     private func device(of sender: NSDraggingInfo) -> (kind: String, patch: String?, rack: String?)? {
         let board = sender.draggingPasteboard
         if board.types?.contains(NSPasteboard.PasteboardType(Browser.patchType)) == true {
             let name = board.data(forType: NSPasteboard.PasteboardType(Browser.patchType)).flatMap { String(data: $0, encoding: .utf8) }
             return ("synth", name, nil)
+        }
+        if board.types?.contains(NSPasteboard.PasteboardType(Browser.instrumentRackType)) == true {
+            let name = board.data(forType: NSPasteboard.PasteboardType(Browser.instrumentRackType)).flatMap { String(data: $0, encoding: .utf8) }
+            return (Browser.instrumentRackKind, nil, name)
         }
         if board.types?.contains(NSPasteboard.PasteboardType(Browser.rackType)) == true {
             let name = board.data(forType: NSPasteboard.PasteboardType(Browser.rackType)).flatMap { String(data: $0, encoding: .utf8) }
@@ -2222,7 +2227,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if let (row, _) = row(atY: point.y) {
             return (point.x < TimelineLayout.headerWidth && model.canAddBrowserDevice(kind, to: row), row)
         }
-        return (Browser.instruments.contains(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
+        return (Browser.isInstrument(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
     }
 
     /// The effect being dragged by its title out of the device panel.

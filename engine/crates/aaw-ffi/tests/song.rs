@@ -692,7 +692,7 @@ fn the_person_builds_a_chain_and_turns_its_knobs() {
     let kinds = |a: &aaw_ffi::Arrangement, track: usize| a.tracks[track].effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>();
 
     // An effect is added with its required fields at a place to start.
-    let made = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "compressor".into(), index: None }, None).unwrap();
+    let made = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "compressor".into(), index: None, rack: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Add compressor to tracks.drums"));
     let compressor = &u.arrangement.tracks[0].effects[0];
@@ -704,16 +704,16 @@ fn the_person_builds_a_chain_and_turns_its_knobs() {
     assert_eq!(field(&update(&seen).arrangement.tracks[0].effects[0], "sidechain").value, text("perc"));
 
     // A delay or reverb as an insert starts under the dry signal; on a return it is all wet.
-    let delay = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "delay".into(), index: Some(0) }, None).unwrap()[0];
+    let delay = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "delay".into(), index: Some(0), rack: None }, None).unwrap()[0];
     let u = update(&seen);
     assert_eq!(kinds(&u.arrangement, 0), ["delay", "compressor"]);
     assert_eq!(field(&u.arrangement.tracks[0].effects[0], "mix_percent").value, number(25.0));
     assert_eq!(field(&u.arrangement.tracks[0].effects[0], "time_beats").value, text("1/2"));
     let plate = Row::Return { key: start.returns[0].key };
-    song.edit(Edit::EffectAdd { row: plate, kind: "delay".into(), index: None }, None).unwrap();
+    song.edit(Edit::EffectAdd { row: plate, kind: "delay".into(), index: None, rack: None }, None).unwrap();
     assert_eq!(field(&update(&seen).arrangement.returns[0].effects[1], "mix_percent").value, number(100.0));
     for kind in ["filter", "eq", "limiter", "reverb"] {
-        song.edit(Edit::EffectAdd { row: Row::Master, kind: kind.into(), index: None }, None).unwrap();
+        song.edit(Edit::EffectAdd { row: Row::Master, kind: kind.into(), index: None, rack: None }, None).unwrap();
         update(&seen);
     }
     assert_eq!(song.arrangement().master.effects.len(), 4);
@@ -764,7 +764,7 @@ fn an_effect_is_duplicated_copied_and_pasted() {
     let kinds = |a: &aaw_ffi::Arrangement, track: usize| a.tracks[track].effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>();
 
     // A compressor set up on the drums, keyed from the percussion and named.
-    let compressor = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "compressor".into(), index: None }, None).unwrap()[0];
+    let compressor = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "compressor".into(), index: None, rack: None }, None).unwrap()[0];
     update(&seen);
     song.edit(Edit::EffectSet { effect: compressor, field: "threshold_db".into(), value: number(-24.0) }, None).unwrap();
     update(&seen);
@@ -786,20 +786,20 @@ fn an_effect_is_duplicated_copied_and_pasted() {
     assert_eq!(u.arrangement.tracks[0].effects[0].id.as_deref(), Some("duck"));
 
     // An Option-drag onto a return's header: the copy keeps its id where it is free.
-    let made = song.edit(Edit::EffectCopy { effect: compressor, row: plate.clone(), index: None }, None).unwrap();
+    let made = song.edit(Edit::EffectCopy { effect: compressor, row: plate.clone(), index: None, rack: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Copy compressor to returns.plate");
     let on_plate = u.arrangement.returns[0].effects.last().unwrap();
     assert_eq!((made.as_slice(), on_plate.id.as_deref()), ([on_plate.key].as_slice(), Some("duck")));
     assert_eq!(field(on_plate, "threshold_db").value, number(-24.0));
     // At a place in the chain; the id is taken there now, so the copy has none.
-    song.edit(Edit::EffectCopy { effect: compressor, row: plate.clone(), index: Some(0) }, None).unwrap();
+    song.edit(Edit::EffectCopy { effect: compressor, row: plate.clone(), index: Some(0), rack: None }, None).unwrap();
     let u = update(&seen);
     let first = &u.arrangement.returns[0].effects[0];
     assert_eq!((first.kind.as_str(), first.id.as_deref()), ("compressor", None));
     // Onto the track that keys it, the host refuses the copy and says why.
     let before = kinds(&song.arrangement(), 1);
-    let e = song.edit(Edit::EffectCopy { effect: compressor, row: perc.clone(), index: None }, None).unwrap_err().to_string();
+    let e = song.edit(Edit::EffectCopy { effect: compressor, row: perc.clone(), index: None, rack: None }, None).unwrap_err().to_string();
     assert!(e.contains("sidechain"), "{e}");
     assert_eq!(kinds(&song.arrangement(), 1), before);
 
@@ -809,18 +809,18 @@ fn an_effect_is_duplicated_copied_and_pasted() {
     update(&seen);
     song.edit(Edit::EffectRemove { effect: compressor }, None).unwrap();
     update(&seen);
-    let made = song.edit(Edit::EffectPaste { copied: copied.clone(), row: drums.clone(), index: Some(0) }, None).unwrap();
+    let made = song.edit(Edit::EffectPaste { copied: copied.clone(), row: drums.clone(), index: Some(0), rack: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Paste compressor on tracks.drums");
     let pasted = &u.arrangement.tracks[0].effects[0];
     assert_eq!(made, [pasted.key]);
     assert_eq!((pasted.id.as_deref(), field(pasted, "threshold_db").value.clone()), (Some("duck"), number(-24.0)));
     // An index past the chain's end is its end.
-    song.edit(Edit::EffectPaste { copied, row: drums.clone(), index: Some(9) }, None).unwrap();
+    song.edit(Edit::EffectPaste { copied, row: drums.clone(), index: Some(9), rack: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(kinds(&u.arrangement, 0), ["compressor", "compressor", "compressor"]);
     assert_eq!(u.arrangement.tracks[0].effects[2].id, None);
-    assert_eq!(song.edit(Edit::EffectPaste { copied: "[]".into(), row: drums.clone(), index: None }, None).unwrap_err().to_string(), "Nothing was copied");
+    assert_eq!(song.edit(Edit::EffectPaste { copied: "[]".into(), row: drums.clone(), index: None, rack: None }, None).unwrap_err().to_string(), "Nothing was copied");
 
     // A Synth's own effects are not copied this way, and an undo takes a paste back whole.
     let synth = song.edit(Edit::SynthAdd { track: None, patch: None }, None).unwrap()[0];
@@ -929,7 +929,7 @@ fn equalizer_bands_come_and_go_with_their_lanes() {
     transport(&seen);
     let start = song.arrangement();
     let drums = Row::Track { key: start.tracks[0].key };
-    let eq = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "eq".into(), index: None }, None).unwrap()[0];
+    let eq = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "eq".into(), index: None, rack: None }, None).unwrap()[0];
     let u = update(&seen);
     let e = &u.arrangement.tracks[0].effects[0];
     assert_eq!((e.bands, e.fields.len()), (1, 5));
@@ -2728,8 +2728,7 @@ fn browser_instruments_are_atomic_and_effects_insert_at_the_drop() {
             Edit::EffectAdd {
                 row: row.clone(),
                 kind: "delay".into(),
-                index: Some(0),
-            },
+                index: Some(0), rack: None },
             None,
         )
         .unwrap();
@@ -2738,8 +2737,7 @@ fn browser_instruments_are_atomic_and_effects_insert_at_the_drop() {
             Edit::EffectAdd {
                 row: row.clone(),
                 kind: "filter".into(),
-                index: Some(0),
-            },
+                index: Some(0), rack: None },
             None,
         )
         .unwrap();
@@ -3048,7 +3046,7 @@ fn an_equalizer_s_spectrum_is_read_for_its_panel() {
     let start = song.arrangement();
     assert_eq!(start.sample_rate, 48000);
     let drums = Row::Track { key: start.tracks[0].key };
-    let eq = song.edit(Edit::EffectAdd { row: drums, kind: "eq".into(), index: None }, None).unwrap()[0];
+    let eq = song.edit(Edit::EffectAdd { row: drums, kind: "eq".into(), index: None, rack: None }, None).unwrap()[0];
     // Nothing has played: every bin is silent, and the frames count is 0.
     let spectrum = song.spectrum(eq).expect("an equalizer on a track has a spectrum");
     assert_eq!((spectrum.sample_rate, spectrum.written, spectrum.levels.len()), (48000, 0, 2049));
@@ -3114,7 +3112,7 @@ fn groups_are_rows_over_their_tracks() {
     assert_eq!((g.gain_db, g.solo), (-4.0, true));
     assert_eq!(g.sends, [SendView { to: "plate".into(), gain_db: -9.0 }]);
     assert!(g.lane_targets.iter().any(|t| t.param == "sends.plate.gain_db"));
-    song.edit(Edit::EffectAdd { row: row.clone(), kind: "compressor".into(), index: None }, None).unwrap();
+    song.edit(Edit::EffectAdd { row: row.clone(), kind: "compressor".into(), index: None, rack: None }, None).unwrap();
     assert_eq!(update(&seen).arrangement.groups[0].effects[0].kind, "compressor");
     assert!(song.edit(Edit::Solo { row: Row::Return { key: start.returns[0].key }, on: true }, None).is_err());
     // Renamed, its tracks follow; a track taken out goes to the master.
@@ -3148,37 +3146,162 @@ fn the_browsers_racks_are_saved_from_a_chain_and_dropped_on_rows() {
     let plate = a.returns[0].key;
     let name = format!("Panel Rack {}", std::process::id());
     // Save Rack… on perc's chain: a filter and a bypassed delay, listed in the browser.
-    song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: Some("From the panel".into()), tags: vec!["perc".into()], replace: false }, None).unwrap();
+    song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: Some("From the panel".into()), tags: vec!["perc".into()], replace: false, rack: None }, None).unwrap();
     let mine: Vec<_> = aaw_ffi::library::library_racks("panel".into()).into_iter().filter(|r| r.name == name).collect();
     assert_eq!(mine.len(), 1);
     assert_eq!((mine[0].kinds.clone(), mine[0].description.as_str(), mine[0].tags.clone()), (vec!["filter".to_string(), "delay".to_string()], "From the panel", vec!["perc".to_string()]));
     assert!(aaw_ffi::library::library_racks("delay".into()).iter().any(|r| r.name == name), "searched by kind");
     assert!(aaw_ffi::library::library_racks("reverb".into()).iter().all(|r| r.name != name));
     // Saved again under the name only with replace, which keeps the words; the song did not change.
-    assert!(song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: None, tags: vec![], replace: false }, None).is_err());
-    song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: None, tags: vec![], replace: true }, None).unwrap();
+    assert!(song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: None, tags: vec![], replace: false, rack: None }, None).is_err());
+    song.edit(Edit::RackSave { row: Row::Track { key: perc }, name: name.clone(), description: None, tags: vec![], replace: true, rack: None }, None).unwrap();
     assert_eq!(aaw_ffi::library::library_racks(name.clone()).iter().find(|r| r.name == name).unwrap().description, "From the panel");
     // An empty chain has nothing to save.
-    let e = song.edit(Edit::RackSave { row: Row::Track { key: drums }, name: "Nothing".into(), description: None, tags: vec![], replace: false }, None).unwrap_err();
+    let e = song.edit(Edit::RackSave { row: Row::Track { key: drums }, name: "Nothing".into(), description: None, tags: vec![], replace: false, rack: None }, None).unwrap_err();
     assert!(e.to_string().contains("no effects to save"), "{e}");
-    // Dropped on the drums' header: the effects at the chain's end, one undo step.
-    song.edit(Edit::RackAdd { row: Row::Track { key: drums }, rack: name.clone(), index: None }, None).unwrap();
+    // Dropped on the drums' header: one rack at the chain's end, named for
+    // the file, with the effects inside, one undo step.
+    song.edit(Edit::RackAdd { row: Row::Track { key: drums }, rack: name.clone(), index: None, into: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, format!("Add rack {name} to tracks.drums"));
-    let chain: Vec<_> = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().effects.iter().map(|e| (e.kind.clone(), e.bypass)).collect();
-    assert_eq!(chain, [("filter".to_string(), false), ("delay".to_string(), true)]);
-    // Dropped on an insertion strip of the return, in front of its reverb; an index past the end lands last.
-    song.edit(Edit::RackAdd { row: Row::Return { key: plate }, rack: name.clone(), index: Some(0) }, None).unwrap();
+    let chain = &u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().effects;
+    assert_eq!(chain.iter().map(|e| (e.kind.as_str(), e.name.as_deref())).collect::<Vec<_>>(), [("rack", Some(name.as_str()))]);
+    assert_eq!(chain[0].effects.iter().map(|e| (e.kind.clone(), e.bypass)).collect::<Vec<_>>(), [("filter".to_string(), false), ("delay".to_string(), true)]);
+    // Dropped on an insertion strip of the return, in front of its reverb;
+    // an index past the end lands last; dropped into a rack, the effects
+    // are laid in it, since a rack holds no rack.
+    song.edit(Edit::RackAdd { row: Row::Return { key: plate }, rack: name.clone(), index: Some(0), into: None }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.arrangement.returns[0].effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["filter", "delay", "reverb"]);
-    song.edit(Edit::RackAdd { row: Row::Master, rack: name.clone(), index: Some(99) }, None).unwrap();
+    assert_eq!(u.arrangement.returns[0].effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["rack", "reverb"]);
+    song.edit(Edit::RackAdd { row: Row::Master, rack: name.clone(), index: Some(99), into: None }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.arrangement.master.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["filter", "delay"]);
+    assert_eq!(u.arrangement.master.effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["rack"]);
+    let on_master = u.arrangement.master.effects[0].key;
+    song.edit(Edit::RackAdd { row: Row::Master, rack: name.clone(), index: Some(0), into: Some(on_master) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.master.effects[0].effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["filter", "delay", "filter", "delay"]);
+    song.undo().unwrap();
+    update(&seen);
     song.undo().unwrap();
     assert!(update(&seen).arrangement.master.effects.is_empty());
-    let e = song.edit(Edit::RackAdd { row: Row::Master, rack: "no-such".into(), index: None }, None).unwrap_err();
+    let e = song.edit(Edit::RackAdd { row: Row::Master, rack: "no-such".into(), index: None, into: None }, None).unwrap_err();
     assert!(e.to_string().contains("No rack named"), "{e}");
     let _ = agent(&path, json!({"op": "status"}));
+}
+
+#[test]
+fn a_rack_is_one_device_with_its_effects_inside_it() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let a = song.arrangement();
+    let perc = Row::Track { key: a.tracks.iter().find(|t| t.id == "perc").unwrap().key };
+    let kinds = |effects: &[EffectView]| effects.iter().map(|e| e.kind.clone()).collect::<Vec<_>>();
+    // Make Rack on perc's filter: a rack where the filter was, with it inside.
+    let filter = a.tracks[1].effects[0].key;
+    let delay = a.tracks[1].effects[1].key;
+    let made = song.edit(Edit::RackWrap { effects: vec![filter] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Wrap 1 effect of tracks.perc in a rack");
+    let chain = &u.arrangement.tracks[1].effects;
+    assert_eq!(kinds(chain), ["rack", "delay"]);
+    let rack = chain[0].clone();
+    assert_eq!((made.as_slice(), rack.name.as_deref(), rack.effects.len()), ([rack.key].as_slice(), None, 1));
+    assert_eq!((rack.effects[0].key, rack.effects[0].kind.as_str()), (filter, "filter"), "the filter keeps its key inside");
+    assert!(rack.fields.is_empty(), "a rack has no fields of its own");
+    // Its field's lane is the track's, addressed through the rack: offered
+    // among the targets, and the field's once added.
+    assert_eq!(field(&rack.effects[0], "cutoff_hz").param.as_deref(), Some("effects.0.effects.0.cutoff_hz"));
+    assert!(u.arrangement.tracks[1].lane_targets.iter().any(|t| t.param == "effects.0.effects.0.cutoff_hz"), "{:?}", u.arrangement.tracks[1].lane_targets.iter().map(|t| &t.param).collect::<Vec<_>>());
+    song.edit(Edit::LaneAdd { row: perc.clone(), param: "effects.0.effects.0.cutoff_hz".into() }, None).unwrap();
+    let u = update(&seen);
+    let lane = u.arrangement.tracks[1].lanes.iter().find(|l| l.param == "effects.0.effects.0.cutoff_hz").expect("a lane through the rack");
+    assert_eq!(lane.label, "Rack › filter Cutoff");
+    assert_eq!(field(&u.arrangement.tracks[1].effects[0].effects[0], "cutoff_hz").lane, Some(lane.key));
+    assert!(u.arrangement.tracks[1].lane_targets.iter().all(|t| t.param != "effects.0.effects.0.cutoff_hz"), "driven now");
+    // The delay dragged onto the rack's strip moves in, after the filter; an
+    // effect from the browser dropped there goes in too.
+    song.edit(Edit::EffectMoveTo { effect: delay, row: perc.clone(), rack: Some(rack.key), index: 1 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move effect tracks.perc.effects.0.effects.1 into tracks.perc.effects.0");
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects), ["rack"]);
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects[0].effects), ["filter", "delay"]);
+    let made = song.edit(Edit::EffectAdd { row: perc.clone(), kind: "analyzer".into(), index: Some(1), rack: Some(rack.key) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects[0].effects), ["filter", "analyzer", "delay"]);
+    assert_eq!(made, [u.arrangement.tracks[1].effects[0].effects[1].key]);
+    assert!(song.analysis(made[0]).is_some(), "an analyzer inside a rack is measured");
+    // A rack cannot go into a rack, from the browser or from the chain.
+    let e = song.edit(Edit::EffectAdd { row: perc.clone(), kind: "rack".into(), index: None, rack: Some(rack.key) }, None).unwrap_err().to_string();
+    assert!(e.contains("holds no rack"), "{e}");
+    // Duplicate and Paste inside the rack land after the effect, in the rack.
+    song.edit(Edit::EffectDuplicate { effect: delay }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Duplicate delay on tracks.perc.effects.0");
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects[0].effects), ["filter", "analyzer", "delay", "delay"]);
+    let copied = song.copy_effect(filter).unwrap();
+    song.edit(Edit::EffectPaste { copied, row: perc.clone(), index: Some(0), rack: Some(rack.key) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects[0].effects), ["filter", "filter", "analyzer", "delay", "delay"]);
+    // Out again to the chain's end, then Unrack lays the rest out where the rack was.
+    song.edit(Edit::EffectMoveTo { effect: delay, row: perc.clone(), rack: None, index: 9 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects), ["rack", "delay"]);
+    assert_eq!(u.arrangement.tracks[1].effects[1].key, delay);
+    let made = song.edit(Edit::RackUnwrap { effect: rack.key }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Unwrap rack tracks.perc.effects.0 on tracks.perc");
+    assert_eq!(kinds(&u.arrangement.tracks[1].effects), ["filter", "filter", "analyzer", "delay", "delay"]);
+    assert_eq!(made.len(), 4);
+    assert_eq!(u.arrangement.tracks[1].effects[1].key, filter, "the filter keeps its key out again");
+    assert!(u.arrangement.tracks[1].lanes.iter().any(|l| l.param == "effects.1.cutoff_hz"), "{:?}", u.arrangement.tracks[1].lanes.iter().map(|l| &l.param).collect::<Vec<_>>());
+    // A saved rack dropped from the browser is one device, named for it.
+    let name = format!("Panel Device {}", std::process::id());
+    song.edit(Edit::RackSave { row: perc.clone(), name: name.clone(), description: None, tags: vec![], replace: false, rack: None }, None).unwrap();
+    song.edit(Edit::RackAdd { row: Row::Master, rack: name.clone(), index: None, into: None }, None).unwrap();
+    let u = update(&seen);
+    let device = &u.arrangement.master.effects[0];
+    assert_eq!((device.kind.as_str(), device.name.as_deref(), kinds(&device.effects).len()), ("rack", Some(name.as_str()), 5));
+    // The rack saved from the panel's own Save…: its effects alone.
+    let inner = format!("Panel Inner {}", std::process::id());
+    song.edit(Edit::RackSave { row: Row::Master, name: inner.clone(), description: None, tags: vec![], replace: false, rack: Some(device.key) }, None).unwrap();
+    assert_eq!(aaw_ffi::library::library_racks(inner.clone()).iter().find(|r| r.name == inner).unwrap().kinds.len(), 5);
+    let _ = agent(&path, json!({"op": "status"}));
+    song.close();
+}
+
+#[test]
+fn an_instrument_rack_is_listed_and_loaded_from_the_browser() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    // A Synth track with a chorus on its chain, saved as an instrument rack.
+    let track = song.edit(Edit::SynthAdd { track: None, patch: Some("Pluck".into()) }, None).unwrap()[0];
+    update(&seen);
+    song.edit(Edit::EffectAdd { row: Row::Track { key: track }, kind: "chorus".into(), index: None, rack: None }, None).unwrap();
+    update(&seen);
+    let name = format!("Panel Pluck {}", std::process::id());
+    song.edit(Edit::InstrumentRackSave { track, name: name.clone(), description: Some("Plucked".into()), tags: vec!["keys".into()], replace: false }, None).unwrap();
+    let listed = aaw_ffi::library::library_instrument_racks("pluck".into());
+    let mine = listed.iter().find(|r| r.name == name).expect("listed");
+    assert_eq!((mine.instrument.as_str(), mine.kinds.clone(), mine.description.as_str()), ("synth", vec!["chorus".to_string()], "Plucked"));
+    assert!(aaw_ffi::library::library_instrument_racks("synth chorus keys".into()).iter().any(|r| r.name == name));
+    assert!(song.edit(Edit::InstrumentRackSave { track, name: name.clone(), description: None, tags: vec![], replace: false }, None).is_err());
+    // Dropped below the tracks: a new MIDI track named for it, with the
+    // Synth and one rack; onto a MIDI track: its instrument and a rack first.
+    let made = song.edit(Edit::InstrumentRackAdd { track: None, rack: name.clone() }, None).unwrap();
+    let u = update(&seen);
+    let new = u.arrangement.tracks.iter().find(|t| t.key == made[0]).expect("a new track");
+    assert_eq!((new.midi, new.instrument.as_deref(), new.synth.as_ref().and_then(|s| s.patch.as_deref())), (true, Some("synth"), Some("Pluck")));
+    assert_eq!(new.effects.iter().map(|e| (e.kind.as_str(), e.name.as_deref())).collect::<Vec<_>>(), [("rack", Some(name.as_str()))]);
+    assert_eq!(new.effects[0].effects.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(), ["chorus"]);
+    let sampler = song.edit(Edit::InstrumentAdd { track: None }, None).unwrap()[0];
+    update(&seen);
+    song.edit(Edit::InstrumentRackAdd { track: Some(sampler), rack: name.clone() }, None).unwrap();
+    let u = update(&seen);
+    let t = u.arrangement.tracks.iter().find(|t| t.key == sampler).unwrap();
+    assert_eq!((t.instrument.as_deref(), t.effects[0].kind.as_str()), (Some("synth"), "rack"));
+    let e = song.edit(Edit::InstrumentRackAdd { track: Some(u.arrangement.tracks[0].key), rack: name }, None).unwrap_err().to_string();
+    assert!(e.contains("MIDI"), "{e}");
+    song.close();
 }
 
 #[test]
@@ -3186,7 +3309,7 @@ fn an_analyzer_s_measurements_are_read_for_its_window() {
     let (_dir, _path, song, _seen) = open();
     let start = song.arrangement();
     let drums = Row::Track { key: start.tracks[0].key };
-    let analyzer = song.edit(Edit::EffectAdd { row: drums, kind: "analyzer".into(), index: None }, None).unwrap()[0];
+    let analyzer = song.edit(Edit::EffectAdd { row: drums, kind: "analyzer".into(), index: None, rack: None }, None).unwrap()[0];
     let e = song.arrangement().tracks[0].effects.iter().find(|e| e.kind == "analyzer").cloned().unwrap();
     assert!(e.fields.is_empty() && e.bands == 0, "nothing to set: {:?}", e.fields);
     // Nothing has played: silence everywhere, and the frames count is 0.

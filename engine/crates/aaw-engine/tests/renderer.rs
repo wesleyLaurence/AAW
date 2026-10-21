@@ -113,6 +113,38 @@ fn a_bypassed_effect_is_not_there() {
 }
 
 #[test]
+fn a_rack_renders_as_its_effects_laid_in_the_chain() {
+    use aaw_model::{Effect, Rack};
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_mix_song(dir.path());
+    // The bass's compressor, filter and limiter wrapped in a rack after the
+    // eq, the lane on the filter addressed through it.
+    let racked = |bypass: bool| {
+        program(&path, move |p| {
+            let bass = &mut p.tracks[1];
+            let inner: Vec<Effect> = bass.effects.drain(1..).collect();
+            bass.effects.push(Effect::Rack(Rack { id: Some("glue".into()), name: Some("Glue".into()), effects: inner, bypass }));
+            bass.automation[0].param = "effects.glue.effects.sweep.cutoff_hz".into();
+        })
+    };
+    let flat = program(&path, |_| {});
+    let in_rack = racked(false);
+    assert_eq!((in_rack.latency, in_rack.track_offset), (flat.latency, flat.track_offset), "a rack's latency is its effects'");
+    assert_eq!(render(&in_rack, 0, &mut || 512), render(&flat, 0, &mut || 512), "the same sound, lane included");
+    // Bypassed, the rack is not there: the bass is the eq alone, and the
+    // layer it keyed waits for nothing.
+    let without = program(&path, |p| {
+        p.tracks[1].effects.truncate(1);
+        p.tracks[1].automation.remove(0);
+    });
+    assert_eq!(racked(true).latency, without.latency);
+    assert_eq!(render(&racked(true), 0, &mut || 512), render(&without, 0, &mut || 512));
+    // The chain's devices are the rack's, one by one, in the report's order.
+    let effects: Vec<&str> = in_rack.tracks.iter().find(|t| t.id == "bass").unwrap().chain.effects.iter().map(|(k, _)| *k).collect();
+    assert_eq!(effects, ["eq", "compressor", "filter", "limiter"]);
+}
+
+#[test]
 fn playing_from_the_middle_picks_up_sounding_voices() {
     let dir = tempfile::tempdir().unwrap();
     let program = song(dir.path());

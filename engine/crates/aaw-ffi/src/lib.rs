@@ -383,16 +383,24 @@ impl Song {
         let tree = doc.tree();
         let loc = tree::find(&tree, effect)?;
         let p = &doc.project;
-        let (owner, index) = match loc.as_slice() {
-            [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => match list.as_str() {
-                "tracks" => (p.tracks.get(*i)?.id.clone(), *j),
-                "groups" => (p.groups.get(*i)?.id.clone(), *j),
-                "returns" => (p.returns.get(*i)?.id.clone(), *j),
+        // The taps are numbered over the effects the chain runs, a rack's
+        // one by one.
+        let (owner, chain, rest): (String, &[aaw_model::Effect], &[Step]) = match loc.as_slice() {
+            [Step::Key(list), Step::Index(i), rest @ ..] => match list.as_str() {
+                "tracks" => (p.tracks.get(*i)?.id.clone(), &p.tracks[*i].effects, rest),
+                "groups" => (p.groups.get(*i)?.id.clone(), &p.groups[*i].effects, rest),
+                "returns" => (p.returns.get(*i)?.id.clone(), &p.returns[*i].effects, rest),
                 _ => return None,
             },
-            [Step::Key(m), Step::Key(l), Step::Index(j)] if m == "master" && l == "effects" => ("master".to_string(), *j),
+            [Step::Key(m), rest @ ..] if m == "master" => ("master".to_string(), &p.master.effects, rest),
             _ => return None,
         };
+        let place = match rest {
+            [Step::Key(l), Step::Index(j)] if l == "effects" => aaw_model::Place::new(*j, None),
+            [Step::Key(l), Step::Index(j), Step::Key(m), Step::Index(k)] if l == "effects" && m == "effects" => aaw_model::Place::new(*j, Some(*k)),
+            _ => return None,
+        };
+        let index = aaw_model::Effect::flat_index(chain, place)?;
         Some((owner, index, p.session.sample_rate as u32))
     }
 }

@@ -157,7 +157,8 @@ def effects(manifest, project) -> dict:
     """`effects` of a listen report: every compressor, limiter and clipper of the
     render, by channel, with what it took off over the song and in each
     section, as the engine measured while it rendered. `path` is where the
-    device is in the song; the ID and the key are read from the snapshot."""
+    device is in the song, through its rack for one inside a rack; the ID and
+    the key are read from the snapshot."""
     owners = {
         owner["id"]: (kind, owner)
         for kind in ("tracks", "groups", "returns")
@@ -167,10 +168,14 @@ def effects(manifest, project) -> dict:
     def chain(entries, written, base) -> list[dict]:
         out = []
         for at, entry in enumerate(entries):
-            if entry["type"] not in DEVICES:
-                continue
             song = written[at] if at < len(written) else {}
             ident = song.get("id")
+            if entry["type"] == "rack":
+                # A rack's effects are reported under it, and addressed through it.
+                out.extend(chain(entry.get("effects", []), song.get("effects", []), f"{base}.{ident if ident else at}.effects"))
+                continue
+            if entry["type"] not in DEVICES:
+                continue
             one = {"path": f"{base}.{ident if ident else at}", "type": entry["type"]}
             if ident:
                 one["id"] = ident

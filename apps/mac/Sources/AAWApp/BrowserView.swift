@@ -31,8 +31,35 @@ final class Browser {
     static let patchType = "org.aaw.browser-patch"
     /// An effect rack dragged out of the browser; the data is its name.
     static let rackType = "org.aaw.browser-rack"
+    /// An instrument rack dragged out of the browser; the data is its name.
+    static let instrumentRackType = "org.aaw.browser-instrument-rack"
+    /// The kind an instrument rack goes by where a device's kind is asked.
+    static let instrumentRackKind = "instrument-rack"
     /// The instruments the browser offers, by kind.
     static let instruments = ["sampler", "synth"]
+
+    /// Whether a kind is an instrument, which goes on a MIDI track: a
+    /// Sampler, a Synth or an instrument rack.
+    static func isInstrument(_ kind: String) -> Bool {
+        instruments.contains(kind) || kind == instrumentRackKind
+    }
+
+    /// The person's instrument racks, as `daw instrument rack list` lists
+    /// them; read again when the browser is shown.
+    private(set) var instrumentRacks: [InstrumentRackInfo] = []
+
+    func refreshInstrumentRacks() {
+        instrumentRacks = libraryInstrumentRacks(query: "")
+    }
+
+    /// Whether every word of `query` is in the instrument rack's name, a
+    /// tag, its instrument's kind or an effect's kind.
+    nonisolated static func matches(_ rack: InstrumentRackInfo, _ query: String) -> Bool {
+        query.split(separator: " ").allSatisfy { word in
+            rack.name.localizedCaseInsensitiveContains(word) || rack.tags.contains { $0.localizedCaseInsensitiveContains(word) }
+                || rack.instrument.localizedCaseInsensitiveContains(word) || rack.kinds.contains { $0.localizedCaseInsensitiveContains(word) }
+        }
+    }
 
     /// The Synth's patches, factory and the person's, as `daw patch list`
     /// lists them; read again when the browser is shown.
@@ -332,15 +359,16 @@ struct BrowserView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks() }
+        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks() }
         .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             // A patch or a rack saved from the terminal shows when the window comes back.
             if browser.section == "Instruments" { browser.refreshPatches() }
             if browser.section == "Audio Effects" { browser.refreshRacks() }
+            if browser.section == "Instruments" { browser.refreshInstrumentRacks() }
         }
         .onChange(of: browser.section) { _, section in
-            if section == "Instruments" { browser.refreshPatches() }
+            if section == "Instruments" { browser.refreshPatches(); browser.refreshInstrumentRacks() }
             if section == "Audio Effects" { browser.refreshRacks() }
         }
     }
@@ -357,6 +385,7 @@ struct BrowserView: View {
         let factory = patches.filter(\.factory)
         let mine = patches.filter { !$0.factory }
         let racks = instruments ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
+        let instrumentRacks = instruments ? browser.instrumentRacks.filter { Browser.matches($0, browser.query) } : []
         return ScrollView {
             VStack(spacing: 0) {
                 ForEach(kinds, id: \.self) { kind in
@@ -379,6 +408,17 @@ struct BrowserView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(10)
                 }
+                if instruments && !instrumentRacks.isEmpty {
+                    heading("Racks")
+                    ForEach(instrumentRacks, id: \.slug) { rack in row(rack) }
+                }
+                if instruments && browser.query.isEmpty && browser.instrumentRacks.isEmpty {
+                    Text("An instrument with its effects, saved with Save Instrument… in the device panel, or daw instrument rack save, is listed here under Racks and dropped on any MIDI track.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                }
                 if !instruments && !racks.isEmpty {
                     heading("Racks")
                     ForEach(racks, id: \.slug) { rack in row(rack) }
@@ -391,6 +431,49 @@ struct BrowserView: View {
                         .padding(10)
                 }
             }
+        }
+    }
+
+    /// An instrument rack: its name, its instrument and the kinds of its
+    /// effects, + to load it onto the selected MIDI track or a new one, and
+    /// dragged by its name.
+    private func row(_ rack: InstrumentRackInfo) -> some View {
+        let line = ([readable(rack.instrument)] + rack.kinds.map(readable)).joined(separator: " · ")
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(rack.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(line)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                model.addBrowserDevice(Browser.instrumentRackKind, to: model.selectedRow, rack: rack.name)
+            } label: {
+                Image(systemName: "plus").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .disabled(!model.canAddBrowserDevice(Browser.instrumentRackKind, to: model.selectedRow))
+            .help(target.map { "Load \(rack.name) onto \($0.id)" } ?? "Add a new MIDI track playing \(rack.name)")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 6)
+        .frame(height: 34)
+        .contentShape(Rectangle())
+        .help(rack.description.isEmpty ? line : rack.description)
+        .onTapGesture(count: 2) { model.addBrowserDevice(Browser.instrumentRackKind, to: model.selectedRow, rack: rack.name) }
+        .onDrag {
+            browser.dragged = nil
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(forTypeIdentifier: Browser.instrumentRackType, visibility: .all) { completion in
+                completion(Data(rack.name.utf8), nil)
+                return nil
+            }
+            return provider
         }
     }
 

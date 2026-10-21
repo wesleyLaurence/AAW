@@ -124,6 +124,8 @@ impl Plan {
             // fades through rather than gliding.
             Effect::Utility(u) => hash(("utility", u.invert, u.mono, u.mono_below_hz.map(f64::to_bits))),
             Effect::Analyzer(_) => hash("analyzer"),
+            // A rack is laid out into its effects before any plan is made.
+            Effect::Rack(_) => hash("rack"),
         };
         Plan {
             effect: effect.clone(),
@@ -293,6 +295,9 @@ impl Unit {
                 max_block,
             )),
             Effect::Analyzer(_) => Device::Analyzer,
+            // The program lays a rack out into its effects; a rack itself
+            // changes nothing.
+            Effect::Rack(_) => Device::Analyzer,
         };
         Unit {
             device,

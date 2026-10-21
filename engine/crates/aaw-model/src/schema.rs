@@ -1745,6 +1745,9 @@ impl Synth {
             if synth.effects.iter().any(|e| matches!(e, Effect::Analyzer(_))) {
                 return Err("An analyzer is not offered inside a patch: put it on the track's own chain, where the app draws it".into());
             }
+            if synth.effects.iter().any(|e| matches!(e, Effect::Rack(_))) {
+                return Err("A rack is not offered inside a patch: the patch's chain is the synth's own; put the rack on the track's chain".into());
+            }
             let ids: Vec<&str> = synth.effects.iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
             if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
                 return Err("The patch's effect IDs must be unique".into());
@@ -2217,6 +2220,25 @@ pub struct Analyzer {
     pub bypass: bool,
 }
 
+/// A rack: a device that holds a chain of effects, one title and one bypass
+/// over them, in a track's, a group's, a return's or the master's chain. The
+/// engine runs its effects as if they were laid in the chain where it is,
+/// so the sound of a rack is the sound of its effects and its latency is
+/// their sum; its bypass bypasses them all. `name` is what the rack is
+/// called in the window, such as the saved rack it was loaded from. An
+/// effect inside is addressed as `effects.RACK.effects.REF.FIELD`. A rack
+/// holds no rack, and a Synth patch's chain holds none.
+#[derive(Clone, Debug)]
+pub struct Rack {
+    pub id: Option<String>,
+    pub name: Option<String>,
+    pub effects: Vec<Effect>,
+    pub bypass: bool,
+}
+
+/// The most effects a chain holds, a rack's included.
+pub const MAX_CHAIN: usize = 32;
+
 #[derive(Clone, Debug)]
 pub enum Effect {
     Filter(Filter),
@@ -2231,9 +2253,24 @@ pub enum Effect {
     Overdrive(Overdrive),
     Utility(Utility),
     Analyzer(Analyzer),
+    Rack(Rack),
 }
 
-pub const EFFECT_TYPES: [&str; 12] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer"];
+pub const EFFECT_TYPES: [&str; 13] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer", "rack"];
+
+/// An effect of a chain with where it is: its place in the chain, and for an
+/// effect inside a rack, the rack's place and its own within the rack.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Place {
+    pub index: usize,
+    pub inner: Option<usize>,
+}
+
+impl Place {
+    pub fn new(index: usize, inner: Option<usize>) -> Place {
+        Place { index, inner }
+    }
+}
 
 impl PartialEq for Effect {
     /// Two effects are equal when the song would write them the same.
@@ -2257,7 +2294,93 @@ impl Effect {
             Effect::Overdrive(_) => "overdrive",
             Effect::Utility(_) => "utility",
             Effect::Analyzer(_) => "analyzer",
+            Effect::Rack(_) => "rack",
         }
+    }
+
+    /// The effect with its bypass set.
+    pub fn with_bypass(&self, bypass: bool) -> Effect {
+        let mut e = self.clone();
+        match &mut e {
+            Effect::Filter(x) => x.bypass = bypass,
+            Effect::Eq(x) => x.bypass = bypass,
+            Effect::Compressor(x) => x.bypass = bypass,
+            Effect::Limiter(x) => x.bypass = bypass,
+            Effect::Clipper(x) => x.bypass = bypass,
+            Effect::Delay(x) => x.bypass = bypass,
+            Effect::Reverb(x) => x.bypass = bypass,
+            Effect::Chorus(x) => x.bypass = bypass,
+            Effect::Saturation(x) => x.bypass = bypass,
+            Effect::Overdrive(x) => x.bypass = bypass,
+            Effect::Utility(x) => x.bypass = bypass,
+            Effect::Analyzer(x) => x.bypass = bypass,
+            Effect::Rack(x) => x.bypass = bypass,
+        }
+        e
+    }
+
+    /// The chain with every rack laid out into its effects where it was,
+    /// each bypassed where the rack was: what a file saves of a chain, since
+    /// a rack loaded from a file is one rack.
+    pub fn laid_out(chain: &[Effect]) -> Vec<Effect> {
+        Self::flat(chain).into_iter().map(|(_, e, silent)| if silent { e.with_bypass(true) } else { e.clone() }).collect()
+    }
+
+    /// The rack this effect is, if it is one.
+    pub fn rack(&self) -> Option<&Rack> {
+        match self {
+            Effect::Rack(r) => Some(r),
+            _ => None,
+        }
+    }
+
+    /// A rack's title, for one that has one.
+    pub fn name(&self) -> Option<&str> {
+        self.rack().and_then(|r| r.name.as_deref()).filter(|n| !n.is_empty())
+    }
+
+    /// The effects a chain runs, in order, each with its place: a rack's
+    /// effects where the rack is, each bypassed when the rack is. What the
+    /// engine builds devices from.
+    pub fn flat(chain: &[Effect]) -> Vec<(Place, &Effect, bool)> {
+        let mut out = Vec::new();
+        for (i, e) in chain.iter().enumerate() {
+            match e {
+                Effect::Rack(r) => {
+                    for (j, inner) in r.effects.iter().enumerate() {
+                        out.push((Place::new(i, Some(j)), inner, r.bypass || inner.bypass()));
+                    }
+                }
+                other => out.push((Place::new(i, None), other, other.bypass())),
+            }
+        }
+        out
+    }
+
+    /// The effect at a place in a chain, if there is one.
+    pub fn at(chain: &[Effect], place: Place) -> Option<&Effect> {
+        let outer = chain.get(place.index)?;
+        match place.inner {
+            None => Some(outer),
+            Some(j) => outer.rack()?.effects.get(j),
+        }
+    }
+
+    /// Whether the effect at a place is heard: not bypassed, nor inside a
+    /// bypassed rack.
+    pub fn silent_at(chain: &[Effect], place: Place) -> bool {
+        let Some(outer) = chain.get(place.index) else { return true };
+        match place.inner {
+            None => outer.bypass(),
+            Some(j) => outer.bypass() || outer.rack().and_then(|r| r.effects.get(j)).is_none_or(Effect::bypass),
+        }
+    }
+
+    /// Where an effect of a chain sits among the effects the chain runs,
+    /// counting a rack's effects one by one: the index the engine's taps
+    /// and reports use.
+    pub fn flat_index(chain: &[Effect], place: Place) -> Option<usize> {
+        Self::flat(chain).iter().position(|(p, _, _)| *p == place)
     }
 
     pub fn id(&self) -> Option<&str> {
@@ -2274,6 +2397,7 @@ impl Effect {
             Effect::Overdrive(e) => e.id.as_deref(),
             Effect::Utility(e) => e.id.as_deref(),
             Effect::Analyzer(e) => e.id.as_deref(),
+            Effect::Rack(e) => e.id.as_deref(),
         }
     }
 
@@ -2291,6 +2415,7 @@ impl Effect {
             Effect::Overdrive(e) => e.bypass,
             Effect::Utility(e) => e.bypass,
             Effect::Analyzer(e) => e.bypass,
+            Effect::Rack(e) => e.bypass,
         }
     }
 
@@ -2342,7 +2467,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'overdrive', 'utility', 'analyzer'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'overdrive', 'utility', 'analyzer', 'rack'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2372,6 +2497,7 @@ impl Effect {
             "overdrive" => &["type", "id", "drive_db", "tone_hz", "output_db", "mix_percent", "bypass"],
             "utility" => &["type", "id", "gain_db", "pan", "width_percent", "mono", "mono_below_hz", "invert", "bypass"],
             "analyzer" => &["type", "id", "bypass"],
+            "rack" => &["type", "id", "name", "effects", "bypass"],
             _ => &[
                 "type", "id", "decay_seconds", "predelay_ms", "damping_hz", "lowcut_hz",
                 "width_percent", "mix_percent", "seed", "bypass",
@@ -2591,6 +2717,34 @@ impl Effect {
                 let bypass = f.opt(ctx, "bypass", false, v::boolean);
                 (|| Some(Effect::Analyzer(Analyzer { id: id?, bypass: bypass? })))()
             }
+            "rack" => {
+                let name = f.opt(ctx, "name", None, opt_string);
+                let effects = f.opt(ctx, "effects", Vec::new(), |c, x| {
+                    v::list(c, x, 0, Some(MAX_CHAIN), |c, x| {
+                        let e = Effect::validate(c, x)?;
+                        if matches!(e, Effect::Rack(_)) {
+                            c.value_error("A rack holds no rack: lay its effects in the rack");
+                            return None;
+                        }
+                        Some(e)
+                    })
+                });
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    let effects = effects?;
+                    let ids: Vec<&str> = effects.iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
+                    if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
+                        ctx.value_error("effect IDs must be unique within the rack");
+                        return None;
+                    }
+                    Some(Effect::Rack(Rack {
+                        id: id?,
+                        name: name?.filter(|n| !n.trim().is_empty()),
+                        effects,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
             _ => {
                 let decay_seconds = float(ctx, "decay_seconds", 1.5, Bounds::ge_le("0.1", "12"));
                 let predelay_ms = float(ctx, "predelay_ms", 10.0, Bounds::ge_le("0", "250"));
@@ -2724,6 +2878,10 @@ impl Effect {
                 o.str("invert", e.invert.as_str(), "none");
             }
             Effect::Analyzer(_) => {}
+            Effect::Rack(e) => {
+                o.opt("name", opt_str(&e.name));
+                o.coll("effects", list(&e.effects, saved, Effect::dump));
+            }
         }
         o.bool("bypass", self.bypass(), false);
         o.done()

@@ -740,6 +740,9 @@ enum InstrumentCmd {
         #[arg(long)]
         pitched: bool,
     },
+    /// Instrument racks: an instrument with its chain, saved and loaded as one.
+    #[command(subcommand)]
+    Rack(InstrumentRackCmd),
 }
 
 /// The Synth on a MIDI track: a polyphonic synthesizer whose sound is a
@@ -923,10 +926,14 @@ enum RackCmd {
         #[arg(long)]
         replace: bool,
     },
-    /// Add a rack's effects to a chain, at --index or its end, as one undo
-    /// step. RACK is a name from `daw rack list` or a .yaml file. An effect
-    /// whose id the chain has is given a number; a compressor's sidechain is
-    /// kept only where the song allows it and the track is there.
+    /// Add a saved rack to a chain, at --index or its end, as one rack
+    /// device named for it with its effects inside, or with --flat its
+    /// effects laid in the chain, as one undo step. RACK is a name from
+    /// `daw rack list` or a .yaml file. Laid in, an effect whose id the
+    /// chain has is given a number; a compressor's sidechain is kept only
+    /// where the song allows it and the track is there. Into a rack
+    /// (OWNER tracks.T.effects.RACK) or a Synth patch the effects are laid
+    /// in, since a rack holds no rack.
     Load {
         project: Song,
         owner: String,
@@ -934,7 +941,66 @@ enum RackCmd {
         /// Where in the chain, 0 first; last unless given.
         #[arg(long)]
         index: Option<usize>,
+        /// Lay the effects in the chain rather than adding one rack.
+        #[arg(long)]
+        flat: bool,
     },
+    /// Wrap effects of one chain in a new rack where the first of them was,
+    /// in their order; the lanes on them follow. EFFECT is
+    /// tracks.T.effects.REF or @N.
+    Wrap {
+        project: Song,
+        #[arg(required = true)]
+        effects: Vec<String>,
+        /// The rack's title.
+        #[arg(long)]
+        name: Option<String>,
+        /// The rack's id, to address it by.
+        #[arg(long)]
+        id: Option<String>,
+    },
+    /// Lay a rack's effects out in its chain where it was, each bypassed if
+    /// the rack was; the lanes on them follow, and an id the chain has is
+    /// given a number.
+    Unwrap { project: Song, effect: String },
+}
+
+/// Instrument racks: a MIDI track's instrument with its chain as a YAML
+/// file, saved in the workspace library (~/Music/AAW/library/instruments,
+/// or under AAW_WORKSPACE), loaded onto a MIDI track in any song.
+#[derive(Subcommand)]
+enum InstrumentRackCmd {
+    /// The saved instrument racks, with their names, tags, instrument,
+    /// effects and files; WORDS keep those with every word in the name, a
+    /// tag, the instrument's kind or an effect's kind.
+    List {
+        #[arg(trailing_var_arg = true)]
+        words: Vec<String>,
+    },
+    /// An instrument rack as its file holds it.
+    Show { rack: String },
+    /// Save a MIDI track's instrument with its chain as an instrument rack
+    /// named NAME, the files its sampler's pads play named by where they
+    /// are; a rack in the chain is saved as its effects. Over one already
+    /// saved under that name only with --replace.
+    Save {
+        project: Song,
+        track: String,
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        /// Words, separated by commas.
+        #[arg(long, value_delimiter = ',')]
+        tags: Vec<String>,
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Load an instrument rack onto a MIDI track, as one undo step: its
+    /// samples brought into the project where the song does not have them,
+    /// its instrument in place of the track's, and its effects as one rack
+    /// first in the track's chain. RACK is a name from `daw instrument rack
+    /// list` or a .yaml file.
+    Load { project: Song, track: String, rack: String },
 }
 
 /// Standard MIDI files of one part: its notes and velocities, as a note clip.
@@ -1045,8 +1111,17 @@ enum EffectCmd {
     },
     /// Remove an effect and the lanes that automate it.
     Remove { project: Song, effect: String },
-    /// Move an effect in its chain; lanes addressing effects by index follow.
-    Move { project: Song, effect: String, index: usize },
+    /// Move an effect in its chain, or with --to into a rack of its row
+    /// (tracks.T.effects.RACK) or out of one into the row's chain (tracks.T);
+    /// the lanes on it follow.
+    Move {
+        project: Song,
+        effect: String,
+        index: usize,
+        /// The chain to move it into: the row's, or a rack of it.
+        #[arg(long)]
+        to: Option<String>,
+    },
     Bypass {
         project: Song,
         effect: String,
@@ -1438,6 +1513,22 @@ fn rack_json(r: &aaw_host::racks::Rack) -> Json {
         "description": r.description,
         "tags": r.tags,
         "kinds": r.kinds(),
+        "file": r.file,
+        "saved_by": r.saved_by,
+        "saved_at": r.saved_at,
+    })
+}
+
+/// An instrument rack as `daw instrument rack list` prints it: everything
+/// but the instrument, its samples and the effects' fields.
+fn instrument_rack_json(r: &aaw_host::instruments::InstrumentRack) -> Json {
+    json!({
+        "name": r.name,
+        "slug": r.slug,
+        "description": r.description,
+        "tags": r.tags,
+        "instrument": r.kind(),
+        "kinds": r.effect_kinds(),
         "file": r.file,
         "saved_by": r.saved_by,
         "saved_at": r.saved_at,
@@ -2225,14 +2316,24 @@ fn run(cli: &Cli) -> Result<Json> {
                     replace: *replace,
                 },
             ),
-            RackCmd::Load { project, owner, rack, index } => edit(
+            RackCmd::Load { project, owner, rack, index, flat } => edit(
                 project,
                 C::RackLoad {
                     owner: owner.clone(),
                     rack: rack.clone(),
                     index: *index,
+                    flat: *flat,
                 },
             ),
+            RackCmd::Wrap { project, effects, name, id } => edit(
+                project,
+                C::RackWrap {
+                    effects: effects.clone(),
+                    name: name.clone(),
+                    id: id.clone(),
+                },
+            ),
+            RackCmd::Unwrap { project, effect } => edit(project, C::RackUnwrap { effect: effect.clone() }),
         },
         Top::Midi(m) => match m {
             MidiCmd::Import { project, file, track, at } => edit(
@@ -2315,6 +2416,45 @@ fn run(cli: &Cli) -> Result<Json> {
                 }
                 edit(project, C::InstrumentMap { track: track.clone(), fields })
             }
+            InstrumentCmd::Rack(r) => match r {
+                InstrumentRackCmd::List { words } => {
+                    let query = words.join(" ");
+                    let listing = aaw_host::instruments::list();
+                    let mut out = json!({
+                        "directory": aaw_host::instruments::dir(),
+                        "racks": listing.racks.iter().filter(|r| aaw_host::instruments::matches(r, &query)).map(instrument_rack_json).collect::<Vec<_>>(),
+                    });
+                    if !listing.problems.is_empty() {
+                        out["problems"] = json!(listing.problems);
+                    }
+                    Ok(out)
+                }
+                InstrumentRackCmd::Show { rack } => {
+                    let r = aaw_host::instruments::find(rack)?;
+                    let mut out = instrument_rack_json(&r);
+                    out["instrument"] = value(r.instrument.clone());
+                    out["samples"] = value(aaw_model::value::Value::Dict(r.samples.clone()));
+                    out["effects"] = value(r.effects.clone());
+                    Ok(out)
+                }
+                InstrumentRackCmd::Save { project, track, name, description, tags, replace } => edit(
+                    project,
+                    C::InstrumentRackSave {
+                        track: track.clone(),
+                        name: name.clone(),
+                        description: description.clone(),
+                        tags: tags.clone(),
+                        replace: *replace,
+                    },
+                ),
+                InstrumentRackCmd::Load { project, track, rack } => edit(
+                    project,
+                    C::InstrumentRackLoad {
+                        track: track.clone(),
+                        rack: rack.clone(),
+                    },
+                ),
+            },
         },
         Top::Pattern(p) => match p {
             PatternCmd::Add { project, pattern, f } => edit(
@@ -2410,11 +2550,12 @@ fn run(cli: &Cli) -> Result<Json> {
                 )
             }
             EffectCmd::Remove { project, effect } => edit(project, C::EffectRemove { effect: effect.clone() }),
-            EffectCmd::Move { project, effect, index } => edit(
+            EffectCmd::Move { project, effect, index, to } => edit(
                 project,
                 C::EffectMove {
                     effect: effect.clone(),
                     index: *index,
+                    owner: to.clone(),
                 },
             ),
             EffectCmd::Bypass { project, effect, state } => edit(

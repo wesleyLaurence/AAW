@@ -317,16 +317,26 @@ within its chain. A patch's effects come before the track's inserts, which
 come before track gain and pan; a group's effects run on the sum of its tracks
 and precede its gain and pan; return effects precede return gain and pan;
 master effects follow `master_gain_db` and precede the end fade. See
-[effects.md](features/effects.md) for parameters and semantics. A rack is a
-chain as a YAML file in the workspace library, `~/Music/AAW/library/racks/`
-(or `AAW_WORKSPACE`), which `daw rack save` writes from any chain and `daw
-rack load` and the browser add to a chain in any song, an `id` the chain has
-numbered and a sidechain kept only where the song allows it; see
+[effects.md](features/effects.md) for parameters and semantics. A `rack` is
+an effect that holds a chain of its own, in a track's, a group's, a return's
+or the master's chain and not in a patch or in a rack: the engine runs its
+effects where it is, as if laid in the chain, and bypass on it bypasses them
+all; an effect inside is addressed through it as
+`effects.RACK.effects.REF.FIELD`, for `daw set`, a lane and `daw effect`
+alike, and the rack is a chain owner for `daw effect add` and `daw rack`
+(`daw rack wrap|unwrap`, `daw effect move --to`). A saved rack is a chain as
+a YAML file in the workspace library, `~/Music/AAW/library/racks/` (or
+`AAW_WORKSPACE`), which `daw rack save` writes from any chain and `daw rack
+load` and the browser add to a chain in any song as one rack device, or with
+`--flat` laid in, an `id` the chain has numbered and a sidechain kept only
+where the song allows it; an instrument rack is a MIDI track's instrument
+with its chain, and a Sampler's files, as a file in `library/instruments/`,
+`daw instrument rack save|load`, loaded as the instrument and one rack; see
 [effect-racks.md](features/effect-racks.md).
 
 Automation: `tracks[].automation`, `groups[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` (tracks and groups),
-`effects.REF.FIELD` or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
+`effects.REF.FIELD`, `effects.RACK.effects.REF.FIELD` for an effect inside a rack, or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).

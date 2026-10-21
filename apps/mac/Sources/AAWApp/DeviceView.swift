@@ -244,12 +244,12 @@ struct DeviceView: View {
     let chain: DeviceChain
 
     /// What the panel takes: every effect kind and a rack, and on a MIDI
-    /// track the instruments and a Synth patch.
+    /// track the instruments, a Synth patch and an instrument rack.
     private var droppable: [String] {
         let midi = chain.track?.midi == true
         var types = (DeviceChain.kinds + (midi ? Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
         types.append(Browser.rackType)
-        if midi { types.append(Browser.patchType) }
+        if midi { types.append(Browser.patchType); types.append(Browser.instrumentRackType) }
         return types
     }
 
@@ -271,7 +271,7 @@ struct DeviceView: View {
                 }
                 ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
                     DeviceInsertion(model: model, row: chain.row, index: UInt32(index), keys: keys)
-                    DevicePanel(model: model, chain: chain, effect: effect, index: index)
+                    DevicePanel(model: model, chain: chain, effect: effect, index: index, count: chain.effects.count)
                 }
                 DeviceInsertion(model: model, row: chain.row, index: UInt32(chain.effects.count), keys: keys)
                 if chain.effects.isEmpty {
@@ -287,11 +287,21 @@ struct DeviceView: View {
         .onDrop(of: droppable, isTargeted: nil) { providers in
             guard let provider = providers.first else { return false }
             if provider.hasItemConformingToTypeIdentifier(Browser.rackType) {
-                // A rack: its effects at the end of the shown row's chain.
+                // A saved rack: one device at the end of the shown row's chain.
                 let row = chain.row
                 provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
                     guard let data, let name = String(data: data, encoding: .utf8) else { return }
                     DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, rack: name) }
+                }
+                return true
+            }
+            if provider.hasItemConformingToTypeIdentifier(Browser.instrumentRackType) {
+                // An instrument rack: the track's instrument and a rack first in its chain.
+                guard model.canAddBrowserDevice(Browser.instrumentRackKind, to: chain.row) else { return false }
+                let row = chain.row
+                provider.loadDataRepresentation(forTypeIdentifier: Browser.instrumentRackType) { data, _ in
+                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
+                    DispatchQueue.main.async { model.addBrowserDevice(Browser.instrumentRackKind, to: row, rack: name) }
                 }
                 return true
             }
@@ -313,41 +323,51 @@ struct DeviceView: View {
     }
 }
 
-/// The strip between two devices: an effect or a rack from the browser
-/// dropped here goes in at this place, an effect of the chain dragged by its
-/// title moves here, and a copy of one dragged with Option held goes in here.
+/// The strip between two devices of a chain, or between two effects of a
+/// rack (`rack`): an effect or a rack from the browser dropped here goes in
+/// at this place, an effect of the list dragged by its title moves here,
+/// one of the row's other list, the chain's or a rack's, moves in here,
+/// and a copy of one dragged with Option held goes in here.
 private struct DeviceInsertion: View {
     let model: SongModel
     let row: RowID
     let index: UInt32
-    /// The chain's effects, for where one dragged out of it goes.
+    /// The list's effects, for where one dragged out of it goes.
     let keys: [UInt64]
+    /// The rack whose effects the strip is between, for a rack's strip.
+    var rack: UInt64? = nil
     @State private var targeted = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: 2)
             .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
-            .frame(width: 12, height: model.detailHeight - 54)
+            .frame(width: 12, height: model.detailHeight - 54 - (rack == nil ? 0 : RackLayout.inset))
             .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [Browser.rackType, DeviceChain.effectType],
-                    delegate: InsertionDrop(model: model, row: row, index: index, keys: keys, targeted: $targeted))
-            .help("Drop an effect or a rack here, or one of the chain's effects dragged from its title to move it; with Option, a copy of one")
+                    delegate: InsertionDrop(model: model, row: row, index: index, keys: keys, rack: rack, targeted: $targeted))
+            .help(rack == nil
+                  ? "Drop an effect or a rack here, or one of the chain's effects dragged from its title to move it; with Option, a copy of one"
+                  : "Drop an effect here, or one of the row's effects dragged from its title to move it into the rack; with Option, a copy of one")
     }
 }
 
 /// What lands on an insertion strip: a kind or a rack from the browser, an
-/// effect of the chain dragged from its title, moved here as the ◂ ▸ marks
-/// move it, or with Option a copy of an effect dragged from the device panel.
-/// The strips on either side of the dragged effect refuse it, so that a strip
-/// does not light up for a move nothing makes.
+/// effect of the list dragged from its title, moved here as the ◂ ▸ marks
+/// move it, an effect of the row's other list moved in here, or with
+/// Option a copy of an effect dragged from the device panel. The strips on
+/// either side of the dragged effect refuse it, so that a strip does not
+/// light up for a move nothing makes; a rack's strip refuses a rack, since
+/// a rack holds no rack, and lays a saved rack's effects in.
 private struct InsertionDrop: DropDelegate {
     let model: SongModel
     let row: RowID
     let index: UInt32
     let keys: [UInt64]
+    let rack: UInt64?
     @Binding var targeted: Bool
 
+    /// A kind from the browser that can go here: any, but a rack inside a rack.
     private func kind(of info: DropInfo) -> String? {
-        DeviceChain.kinds.first { info.hasItemsConforming(to: [Browser.deviceType + "." + $0]) }
+        DeviceChain.kinds.first { info.hasItemsConforming(to: [Browser.deviceType + "." + $0]) }.flatMap { $0 != "rack" || rack == nil ? $0 : nil }
     }
 
     private func isRack(_ info: DropInfo) -> Bool {
@@ -358,16 +378,24 @@ private struct InsertionDrop: DropDelegate {
         NSEvent.modifierFlags.contains(.option)
     }
 
-    /// The effect of this chain being dragged without Option, and where it
-    /// goes; nil when it is another row's or would stay where it is.
+    /// The effect of this list being dragged without Option, and where it
+    /// goes; nil when it is another list's or would stay where it is.
     private var move: (key: UInt64, to: Int)? {
         guard !copying, let key = model.draggedEffect, let from = keys.firstIndex(of: key),
               let to = DeviceChain.moveTarget(from: from, strip: Int(index)) else { return nil }
         return (key, to)
     }
 
+    /// An effect of the row's other list being dragged without Option, the
+    /// chain's onto a rack's strip or a rack's onto the chain's.
+    private var crossing: UInt64? {
+        guard !copying, let key = model.draggedEffect, !keys.contains(key), let chain = model.deviceChain, chain.row == row,
+              DeviceChain.crosses(key, in: chain.effects, to: rack) else { return nil }
+        return key
+    }
+
     private func accepts(_ info: DropInfo) -> Bool {
-        kind(of: info) != nil || isRack(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && (copying || move != nil))
+        kind(of: info) != nil || isRack(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && (copying || move != nil || crossing != nil))
     }
 
     func validateDrop(info: DropInfo) -> Bool {
@@ -382,7 +410,7 @@ private struct InsertionDrop: DropDelegate {
         let ok = accepts(info)
         if targeted != ok { targeted = ok }
         guard ok else { return DropProposal(operation: .cancel) }
-        return DropProposal(operation: move != nil ? .move : .copy)
+        return DropProposal(operation: move != nil || crossing != nil ? .move : .copy)
     }
 
     func dropExited(info: DropInfo) {
@@ -392,14 +420,14 @@ private struct InsertionDrop: DropDelegate {
     func performDrop(info: DropInfo) -> Bool {
         targeted = false
         if let kind = kind(of: info) {
-            model.addBrowserDevice(kind, to: row, index: index)
+            model.addBrowserDevice(kind, to: row, index: index, into: rack)
             return true
         }
         if let provider = info.itemProviders(for: [Browser.rackType]).first {
-            let (model, row, index) = (model, row, index)
+            let (model, row, index, rack) = (model, row, index, rack)
             provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
                 guard let data, let name = String(data: data, encoding: .utf8) else { return }
-                DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, index: index, rack: name) }
+                DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, index: index, rack: name, into: rack) }
             }
             return true
         }
@@ -407,11 +435,15 @@ private struct InsertionDrop: DropDelegate {
             model.edit(.effectMove(effect: move.key, index: UInt32(move.to)))
             return true
         }
+        if let crossing {
+            model.moveEffect(crossing, in: row, to: rack, index: index)
+            return true
+        }
         guard copying, let provider = info.itemProviders(for: [DeviceChain.effectType]).first else { return false }
-        let (model, row, index) = (model, row, index)
+        let (model, row, index, rack) = (model, row, index, rack)
         provider.loadDataRepresentation(forTypeIdentifier: DeviceChain.effectType) { data, _ in
             guard let data, let key = String(data: data, encoding: .utf8).flatMap(UInt64.init) else { return }
-            DispatchQueue.main.async { model.copyEffect(key, to: row, index: index) }
+            DispatchQueue.main.async { model.copyEffect(key, to: row, index: index, into: rack) }
         }
         return true
     }
@@ -423,19 +455,30 @@ func readable(_ name: String) -> String {
     return words.prefix(1).uppercased() + words.dropFirst()
 }
 
-/// The row's name, the menu that adds an effect, Save Rack…, and a track's
-/// pads.
+/// The row's name, the menu that adds an effect, Save Rack…, on a MIDI
+/// track with an instrument Save Instrument…, and a track's pads.
 private struct ChainHeader: View {
     let model: SongModel
     let chain: DeviceChain
     @State private var saving: RackSave?
 
-    /// What Save Rack… asks for.
+    /// What Save Rack…, a rack's Save… or Save Instrument… asks for, and
+    /// what it saves.
     struct RackSave: Identifiable {
         var id = UUID()
         var name = ""
         var description = ""
         var tags = ""
+        var what = What.chain
+
+        enum What: Equatable {
+            /// The row's whole chain, as a rack.
+            case chain
+            /// One rack of the chain, by its key and under its title.
+            case rack(UInt64, String)
+            /// The track's instrument with its chain, as an instrument rack.
+            case instrument
+        }
     }
 
     private var kind: String {
@@ -456,7 +499,7 @@ private struct ChainHeader: View {
             Menu {
                 ForEach(DeviceChain.kinds, id: \.self) { kind in
                     Button(readable(kind)) {
-                        model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil))
+                        model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil, rack: nil))
                     }
                 }
             } label: {
@@ -474,6 +517,17 @@ private struct ChainHeader: View {
             .controlSize(.small)
             .disabled(chain.effects.isEmpty)
             .help("Save this chain to the library as a rack, to drop on a track in any song")
+            if let track = chain.track, track.midi {
+                Button {
+                    saving = RackSave(name: track.synth?.patch ?? chain.name, what: .instrument)
+                } label: {
+                    Label("Save Instrument…", systemImage: "pianokeys").font(.system(size: 11))
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+                .disabled(track.instrument == nil)
+                .help("Save the instrument with this chain to the library as an instrument rack, to drop on a MIDI track in any song")
+            }
             if !chain.pads.isEmpty, chain.track?.midi != true {
                 Divider()
                 Text("Pads").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
@@ -502,8 +556,8 @@ private struct ChainHeader: View {
     }
 }
 
-/// Save Rack…: a name, a description and tags for the rack, written to the
-/// library over a rack of the name only when asked.
+/// Save Rack…, a rack's Save… and Save Instrument…: a name, a description
+/// and tags, written to the library over one of the name only when asked.
 private struct RackSaveSheet: View {
     let model: SongModel
     let chain: DeviceChain
@@ -511,15 +565,47 @@ private struct RackSaveSheet: View {
     let done: () -> Void
     @State private var replace = false
 
+    private var slug: String {
+        save.name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: "-")
+    }
+
     private var taken: Bool {
-        let slug = save.name.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).joined(separator: "-")
-        return model.browser.racks.contains { $0.slug == slug }
+        switch save.what {
+        case .instrument: model.browser.instrumentRacks.contains { $0.slug == slug }
+        case .chain, .rack: model.browser.racks.contains { $0.slug == slug }
+        }
+    }
+
+    private var title: String {
+        switch save.what {
+        case .chain: "Save the effects of \(chain.name) as a rack"
+        case .rack(_, let name): "Save the rack \(name) to the library"
+        case .instrument: "Save the instrument of \(chain.name) with its effects"
+        }
+    }
+
+    private var kinds: String {
+        let effects: [EffectView] = switch save.what {
+        case .rack(let key, _): DeviceChain.find(key, in: chain.effects)?.effects ?? []
+        default: chain.effects
+        }
+        return effects.map { $0.kind == "rack" ? ($0.name ?? "Rack") : readable($0.kind) }.joined(separator: ", ")
+    }
+
+    private var line: String {
+        switch save.what {
+        case .instrument:
+            let instrument = chain.track?.sampler != nil ? "Sampler" : chain.track?.synth != nil ? "Synth" : "instrument"
+            return "An instrument rack is a file in the library, ~/Music/AAW/library/instruments, dropped on a MIDI track in any song as its instrument and one rack of effects: the \(instrument)\(kinds.isEmpty ? "" : " with \(kinds)")."
+        default:
+            return "A rack is a file in the library, ~/Music/AAW/library/racks, dropped on a track in any song as one device: \(kinds)."
+        }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Save the effects of \(chain.name) as a rack").font(.headline)
-            Text("A rack is a file in the library, ~/Music/AAW/library/racks, whose effects are dropped on a track in any song: \(chain.effects.map { readable($0.kind) }.joined(separator: ", ")).")
+            Text(title).font(.headline)
+            Text(line)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -528,7 +614,7 @@ private struct RackSaveSheet: View {
                 TextField("Description", text: $save.description)
                 TextField("Tags", text: $save.tags, prompt: Text("drums, bus"))
                 if taken {
-                    Toggle("Write over the rack saved under this name", isOn: $replace)
+                    Toggle("Write over the one saved under this name", isOn: $replace)
                 }
             }
             HStack {
@@ -536,7 +622,16 @@ private struct RackSaveSheet: View {
                 Button("Cancel", role: .cancel) { done() }.keyboardShortcut(.cancelAction)
                 Button("Save") {
                     let tags = save.tags.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                    model.saveRack(row: chain.row, name: save.name, description: save.description, tags: tags, replace: replace)
+                    switch save.what {
+                    case .chain:
+                        model.saveRack(row: chain.row, name: save.name, description: save.description, tags: tags, replace: replace)
+                    case .rack(let key, _):
+                        model.saveRack(row: chain.row, name: save.name, description: save.description, tags: tags, replace: replace, rack: key)
+                    case .instrument:
+                        if let track = chain.track {
+                            model.saveInstrumentRack(track: track.key, name: save.name, description: save.description, tags: tags, replace: replace)
+                        }
+                    }
                     done()
                 }
                 .keyboardShortcut(.defaultAction)
@@ -644,16 +739,26 @@ private struct InstrumentPanel: View {
     }
 }
 
-/// One effect: its name, the marks that bypass, move and remove it, and a
-/// control for each of its fields. A click on its title selects it, for
-/// Copy, Duplicate and Delete; a drag from the title onto an insertion strip
-/// moves it there, and with Option copies it onto a header or a strip; a
-/// right click offers the same as the menus.
+/// One effect: its name, the marks that bypass, fold, move and remove it,
+/// and a control for each of its fields; a rack as a frame around its
+/// effects' panels; an effect folded to a strip with its name along it. A
+/// click on its title selects it, for Copy, Duplicate and Delete; a drag
+/// from the title onto an insertion strip moves it there, into or out of
+/// a rack too, and with Option copies it onto a header or a strip; a right
+/// click offers the same as the menus, with Make Rack and Unrack.
 private struct DevicePanel: View {
     let model: SongModel
     let chain: DeviceChain
     let effect: EffectView
+    /// Its place in its list, the chain or a rack, and how many that holds.
     let index: Int
+    let count: Int
+    /// The rack it is in, if any.
+    var rack: UInt64? = nil
+
+    /// The width of an effect's panel, and of one folded to a strip.
+    static let width: CGFloat = 216
+    static let folded: CGFloat = 28
 
     private var title: String {
         let kind = readable(effect.kind)
@@ -662,6 +767,15 @@ private struct DevicePanel: View {
 
     private var selected: Bool {
         model.selectedEffect == effect.key
+    }
+
+    private var folded: Bool {
+        model.foldedEffects.contains(effect.key)
+    }
+
+    /// The panel's height: a rack's effects sit under the rack's title.
+    private var height: CGFloat {
+        model.detailHeight - 16 - (rack == nil ? 0 : RackLayout.inset)
     }
 
     /// Does what an item of the effect's menu says, to this effect.
@@ -673,11 +787,74 @@ private struct DevicePanel: View {
         case .paste: model.paste(in: .clips)
         case .duplicate: model.duplicateSelection()
         case .bypass: model.edit(.effectBypass(effect: effect.key, on: !effect.bypass))
+        case .makeRack: model.makeRack(of: effect.key)
+        case .unrack: model.unwrapRack(effect.key)
         case .delete: model.deleteSelection()
         }
     }
 
+    @ViewBuilder private var menu: some View {
+        ForEach(Array(ContextMenu.effect(bypassed: effect.bypass, copied: model.copiedEffectKind.map(readable), rack: effect.kind == "rack", inRack: rack != nil).enumerated()), id: \.offset) { _, item in
+            if let action = item.action {
+                Button(item.title) { act(action) }.disabled(!item.enabled)
+            } else {
+                Divider()
+            }
+        }
+    }
+
+    private func drag() -> NSItemProvider {
+        let provider = NSItemProvider()
+        let key = effect.key
+        model.draggedEffect = key
+        provider.registerDataRepresentation(forTypeIdentifier: DeviceChain.effectType, visibility: .ownProcess) { completion in
+            completion(Data(String(key).utf8), nil)
+            return nil
+        }
+        return provider
+    }
+
     var body: some View {
+        if effect.kind == "rack" {
+            RackPanel(model: model, chain: chain, effect: effect, index: index, count: count, menu: { menu }, drag: drag)
+        } else if folded {
+            strip
+        } else {
+            panel
+        }
+    }
+
+    /// The effect folded to a strip: its name along it, a click opening it out.
+    private var strip: some View {
+        VStack(spacing: 4) {
+            Image(systemName: "power")
+                .font(.system(size: 9))
+                .foregroundStyle(effect.bypass ? Color.secondary : Color.green)
+                .padding(.top, 7)
+            Text(title)
+                .font(.system(size: 10, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize()
+                .rotationEffect(.degrees(-90))
+                .frame(width: Self.folded, height: height - 40)
+                .clipped()
+            Spacer(minLength: 0)
+        }
+        .frame(width: Self.folded, height: height, alignment: .top)
+        .background(Color(nsColor: selected ? Theme.gray(0.3) : Theme.gray(0.24)))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            model.select(effect: effect.key)
+            model.toggleFold(effect.key)
+        }
+        .onDrag(drag)
+        .contextMenu { menu }
+        .help("\(title), folded: click to open it out")
+    }
+
+    private var panel: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 5) {
                 Button {
@@ -698,6 +875,12 @@ private struct DevicePanel: View {
                     .disabled(effect.bands >= 16)
                 }
                 Button {
+                    model.toggleFold(effect.key)
+                } label: {
+                    Image(systemName: "arrow.left.and.line.vertical.and.arrow.right")
+                }
+                .help("Fold the panel to a strip")
+                Button {
                     model.edit(.effectMove(effect: effect.key, index: UInt32(index - 1)))
                 } label: {
                     Image(systemName: "chevron.left")
@@ -710,7 +893,7 @@ private struct DevicePanel: View {
                     Image(systemName: "chevron.right")
                 }
                 .help("Move later in the chain")
-                .disabled(index == chain.effects.count - 1)
+                .disabled(index == count - 1)
                 Button {
                     model.edit(.effectRemove(effect: effect.key))
                 } label: {
@@ -725,26 +908,9 @@ private struct DevicePanel: View {
             .background(Color(nsColor: selected ? Theme.gray(0.3) : Theme.gray(0.24)))
             .contentShape(Rectangle())
             .onTapGesture { model.select(effect: effect.key) }
-            .onDrag {
-                let provider = NSItemProvider()
-                let key = effect.key
-                model.draggedEffect = key
-                provider.registerDataRepresentation(forTypeIdentifier: DeviceChain.effectType, visibility: .ownProcess) { completion in
-                    completion(Data(String(key).utf8), nil)
-                    return nil
-                }
-                return provider
-            }
-            .contextMenu {
-                ForEach(Array(ContextMenu.effect(bypassed: effect.bypass, copied: model.copiedEffectKind.map(readable)).enumerated()), id: \.offset) { _, item in
-                    if let action = item.action {
-                        Button(item.title) { act(action) }.disabled(!item.enabled)
-                    } else {
-                        Divider()
-                    }
-                }
-            }
-            .help("Click to select the effect; drag it onto a strip between devices to move it there, with Option to copy it there or onto a header")
+            .onDrag(drag)
+            .contextMenu { menu }
+            .help("Click to select the effect; drag it onto a strip between devices to move it there, into a rack or out of one, with Option to copy it there or onto a header")
 
             Group {
                 if effect.kind == "eq" {
@@ -771,10 +937,145 @@ private struct DevicePanel: View {
             .opacity(effect.bypass ? 0.5 : 1)
             Spacer(minLength: 0)
         }
-        .frame(width: effect.kind == "eq" ? EqPanel.width : 216, height: model.detailHeight - 16, alignment: .top)
+        .frame(width: effect.kind == "eq" ? EqPanel.width : Self.width, height: height, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))
+    }
+}
+
+/// A rack: a frame around its effects' panels, each with a strip before it
+/// and one after the last, under a title bar with the rack's name, its
+/// bypass, a mark that folds every effect to a strip or opens them all
+/// out, Save…, Unrack, the moves and ×. An effect or a saved rack dropped
+/// on the frame goes in at its end; on a strip, at that place. An effect
+/// of the chain dragged onto a strip moves into the rack, and one of the
+/// rack dragged onto the chain's strip leaves it.
+/// How a rack's frame is laid out.
+enum RackLayout {
+    /// How much shorter a rack's effects are than the chain's: the rack's
+    /// title bar and the frame around them.
+    static let inset: CGFloat = 24 + 16
+}
+
+private struct RackPanel<Menu: View>: View {
+    let model: SongModel
+    let chain: DeviceChain
+    let effect: EffectView
+    let index: Int
+    let count: Int
+    @ViewBuilder let menu: () -> Menu
+    let drag: () -> NSItemProvider
+    @State private var saving: ChainHeader.RackSave?
+    @State private var targeted = false
+
+    private var title: String {
+        effect.name ?? effect.id.map { "Rack · \($0)" } ?? "Rack"
+    }
+
+    private var selected: Bool {
+        model.selectedEffect == effect.key
+    }
+
+    private var allFolded: Bool {
+        !effect.effects.isEmpty && effect.effects.allSatisfy { model.foldedEffects.contains($0.key) }
+    }
+
+    var body: some View {
+        let keys = effect.effects.map(\.key)
+        let inner = effect.effects.count
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                Button {
+                    model.edit(.effectBypass(effect: effect.key, on: !effect.bypass))
+                } label: {
+                    Image(systemName: "power").foregroundStyle(effect.bypass ? Color.secondary : Color.green)
+                }
+                .help(effect.bypass ? "Bypassed: none of the rack's effects process" : "Bypass the rack and every effect in it")
+                Image(systemName: "square.stack.3d.up").foregroundStyle(.secondary)
+                Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                // The marks sit by the name, since a rack's frame can be
+                // wider than the panel and its far edge off the screen.
+                Spacer().frame(width: 8)
+                Button {
+                    model.toggleFold(rack: effect)
+                } label: {
+                    Image(systemName: allFolded ? "arrow.left.and.right" : "arrow.right.and.line.vertical.and.arrow.left")
+                }
+                .help(allFolded ? "Open every effect out" : "Fold every effect to a strip")
+                .disabled(effect.effects.isEmpty)
+                Button {
+                    saving = ChainHeader.RackSave(name: effect.name ?? "", what: .rack(effect.key, title))
+                } label: {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .help("Save the rack to the library, to drop on a track in any song")
+                .disabled(effect.effects.isEmpty)
+                Button {
+                    model.unwrapRack(effect.key)
+                } label: {
+                    Image(systemName: "rectangle.split.3x1")
+                }
+                .help("Unrack: lay its effects in the chain where it is")
+                Button {
+                    model.edit(.effectMove(effect: effect.key, index: UInt32(index - 1)))
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Move earlier in the chain")
+                .disabled(index == 0)
+                Button {
+                    model.edit(.effectMove(effect: effect.key, index: UInt32(index + 1)))
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .help("Move later in the chain")
+                .disabled(index == count - 1)
+                Button {
+                    model.edit(.effectRemove(effect: effect.key))
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .help("Remove the rack with every effect in it, and the lanes that automate them")
+                Spacer(minLength: 2)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+            .background(Color(nsColor: selected ? Theme.gray(0.3) : Theme.gray(0.26)))
+            .contentShape(Rectangle())
+            .onTapGesture { model.select(effect: effect.key) }
+            .onDrag(drag)
+            .contextMenu { menu() }
+            .help("Click to select the rack; drag it onto a strip between devices to move it there")
+
+            HStack(alignment: .top, spacing: 8) {
+                ForEach(Array(effect.effects.enumerated()), id: \.element.key) { j, one in
+                    DeviceInsertion(model: model, row: chain.row, index: UInt32(j), keys: keys, rack: effect.key)
+                    DevicePanel(model: model, chain: chain, effect: one, index: j, count: inner, rack: effect.key)
+                }
+                DeviceInsertion(model: model, row: chain.row, index: UInt32(inner), keys: keys, rack: effect.key)
+                if effect.effects.isEmpty {
+                    Text("An empty rack. Drop effects here, or drag the chain's into it.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 150, alignment: .leading)
+                        .padding(.top, 4)
+                }
+            }
+            .padding(8)
+            .opacity(effect.bypass ? 0.5 : 1)
+        }
+        .frame(height: model.detailHeight - 16, alignment: .top)
+        .background(Color(nsColor: Theme.gray(0.15)))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected || targeted ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: selected || targeted ? 2 : 1))
+        .onDrop(of: DeviceChain.kinds.filter { $0 != "rack" }.map { Browser.deviceType + "." + $0 } + [Browser.rackType, DeviceChain.effectType],
+                delegate: InsertionDrop(model: model, row: chain.row, index: UInt32(inner), keys: keys, rack: effect.key, targeted: $targeted))
+        .sheet(item: $saving) { save in
+            RackSaveSheet(model: model, chain: chain, save: save) { saving = nil }
+        }
     }
 }
 

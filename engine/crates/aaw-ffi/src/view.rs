@@ -110,6 +110,11 @@ pub struct EffectView {
     pub fields: Vec<FieldView>,
     /// An equalizer's bands.
     pub bands: u32,
+    /// A rack's title.
+    pub name: Option<String>,
+    /// A rack's effects, in order, each drawn as its own panel inside the
+    /// rack's frame; empty for any other effect.
+    pub effects: Vec<EffectView>,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -570,10 +575,8 @@ fn initial(i: Initial) -> FieldValue {
     }
 }
 
-/// How an effect is addressed within its chain: its ID, else its place.
-fn effect_ref(e: &Effect, index: usize) -> String {
-    e.id().filter(|id| !id.is_empty()).map_or_else(|| index.to_string(), str::to_string)
-}
+use aaw_model::rules::effect_ref;
+use aaw_model::Place;
 
 /// An owner's lanes by what they drive, as (effect index, field name) for an
 /// effect's and the lane's own parameter otherwise, with each lane's handle.
@@ -613,10 +616,16 @@ impl Driven {
 
 /// An effect's fields, drawn from the model's description of its type.
 /// `instrument` is set for an effect of a Synth's patch, whose lanes are the
-/// track's on `instrument.effects.REF.FIELD`.
-fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrument: bool) -> Vec<FieldView> {
+/// track's on `instrument.effects.REF.FIELD`. `within` is the rack the
+/// effect is in, for one inside a rack: the rack's place and its
+/// reference, so that the field's lane is the owner's on
+/// `effects.RACK.effects.REF.FIELD`.
+fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrument: bool, within: Option<(usize, &str)>) -> Vec<FieldView> {
     let dump = e.dump(false);
-    let reference = effect_ref(e, index);
+    let reference = match within {
+        Some((_, rack)) => format!("{rack}.effects.{}", effect_ref(e, index)),
+        None => effect_ref(e, index),
+    };
     let prefix = if instrument { "instrument." } else { "" };
     let field = |f: &describe::Field, value: Option<&Value>, name: String, band: Option<u32>| {
         let kind = if matches!(e, Effect::Eq(_)) { "eq" } else { e.kind() };
@@ -624,7 +633,10 @@ fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrume
         let lane = if instrument {
             driven.instrument.get(&format!("effects.{index}.{name}")).copied()
         } else {
-            driven.effects.get(&(index, name.clone())).copied()
+            match within {
+                Some((rack, _)) => driven.effects.get(&(rack, format!("effects.{index}.{name}"))).copied(),
+                None => driven.effects.get(&(index, name.clone())).copied(),
+            }
         };
         FieldView {
             label: f.label.to_string(),
@@ -667,8 +679,12 @@ fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrume
 }
 
 /// `tracks` are the tracks that may key the chain's compressors; a patch's
-/// chain (`instrument`) has none.
+/// chain (`instrument`) has none. A rack's effects are drawn under it.
 fn effects(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Driven, instrument: bool) -> Vec<EffectView> {
+    effects_within(chain, handles, tracks, driven, instrument, None)
+}
+
+fn effects_within(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Driven, instrument: bool, within: Option<(usize, &str)>) -> Vec<EffectView> {
     chain
         .iter()
         .enumerate()
@@ -677,10 +693,19 @@ fn effects(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Drive
             kind: e.kind().to_string(),
             id: e.id().filter(|id| !id.is_empty()).map(str::to_string),
             bypass: e.bypass(),
-            fields: fields(e, i, tracks, driven, instrument),
+            fields: fields(e, i, tracks, driven, instrument, within),
             bands: match e {
                 Effect::Eq(eq) => eq.bands.len() as u32,
                 _ => 0,
+            },
+            name: e.name().map(str::to_string),
+            effects: match e {
+                Effect::Rack(r) => {
+                    let inner = handles.get(i).map(|item| items(&item.node, "effects")).unwrap_or(&[]);
+                    let reference = effect_ref(e, i);
+                    effects_within(&r.effects, inner, tracks, driven, instrument, Some((i, &reference)))
+                }
+                _ => Vec::new(),
             },
         })
         .collect()
@@ -747,21 +772,30 @@ fn lane_label(owner: Owner, kind: &TargetKind, field: &str) -> (String, String) 
             };
             (format!("Synth {}", label.to_lowercase()), unit)
         }
-        TargetKind::Effect { index, band } => {
-            let e = &owner.effects()[*index];
+        TargetKind::Effect { index, inner, band } => {
+            let chain = owner.effects();
+            let Some(e) = Effect::at(chain, Place::new(*index, *inner)) else {
+                return (field.to_string(), String::new());
+            };
+            // An effect inside a rack is named after the rack: "Drum Glue
+            // › duck threshold".
+            let rack = match inner {
+                Some(_) => chain.get(*index).map(|r| format!("{} › ", r.name().or_else(|| r.id()).unwrap_or("Rack"))).unwrap_or_default(),
+                None => String::new(),
+            };
             let spec = |fields: &'static [describe::Field]| fields.iter().find(|f| f.name == field);
             match band {
                 Some(b) => {
                     let f = spec(describe::BAND);
                     (
-                        format!("{} band {} {}", effect_name(e), b + 1, f.map_or(field, |f| f.label)),
+                        format!("{rack}{} band {} {}", effect_name(e), b + 1, f.map_or(field, |f| f.label)),
                         f.map_or("", |f| f.unit).to_string(),
                     )
                 }
                 None => {
                     let f = spec(describe::effect(e.kind()));
                     (
-                        format!("{} {}", effect_name(e), f.map_or(field, |f| f.label)),
+                        format!("{rack}{} {}", effect_name(e), f.map_or(field, |f| f.label)),
                         f.map_or("", |f| f.unit).to_string(),
                     )
                 }
@@ -844,8 +878,15 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
             }
         }
     }
-    for (i, e) in owner.effects().iter().enumerate() {
-        let reference = effect_ref(e, i);
+    let chain = owner.effects();
+    for (place, e, _) in Effect::flat(chain) {
+        let (reference, lane_key) = match place.inner {
+            Some(j) => {
+                let rack = &chain[place.index];
+                (format!("{}.effects.{}", effect_ref(rack, place.index), effect_ref(e, j)), format!("effects.{j}."))
+            }
+            None => (effect_ref(e, place.index), String::new()),
+        };
         let names: Vec<String> = match e {
             Effect::Eq(eq) => (0..eq.bands.len())
                 .flat_map(|j| describe::BAND.iter().map(move |f| (j, f)))
@@ -859,7 +900,7 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
                 .collect(),
         };
         for name in names {
-            if driven.effects.contains_key(&(i, name.clone())) {
+            if driven.effects.contains_key(&(place.index, format!("{lane_key}{name}"))) {
                 continue;
             }
             let param = format!("effects.{reference}.{name}");

@@ -38,7 +38,7 @@ public enum ContextMenu {
     /// What an item of an effect's menu does, to the effect that was clicked
     /// in the device panel.
     public enum EffectAction: Equatable {
-        case cut, copy, paste, duplicate, bypass, delete
+        case cut, copy, paste, duplicate, bypass, makeRack, unrack, delete
     }
 
     /// What an item of the marker strip's menu does: to the marker that was
@@ -192,9 +192,12 @@ public enum ContextMenu {
     }
 
     /// An effect's menu, on its title in the device panel: what the Edit menu
-    /// does to it, Paste after it when an effect was copied, its bypass and
-    /// Delete. `copied` is the kind of the effect on the clipboard, if any.
-    public static func effect(bypassed: Bool, copied: String?) -> [Item<EffectAction>] {
+    /// does to it, Paste after it when an effect was copied, its bypass,
+    /// Make Rack for an effect of the chain or Unrack for a rack, and
+    /// Delete. `copied` is the kind of the effect on the clipboard, if any;
+    /// `rack` whether the effect is a rack, and `inRack` whether it is
+    /// inside one, where Make Rack is not offered.
+    public static func effect(bypassed: Bool, copied: String?, rack: Bool = false, inRack: Bool = false) -> [Item<EffectAction>] {
         [
             Item(title: "Cut", action: .cut, key: "x"),
             Item(title: "Copy", action: .copy, key: "c"),
@@ -202,6 +205,7 @@ public enum ContextMenu {
             Item(title: "Duplicate", action: .duplicate, key: "d"),
             .separator,
             Item(title: bypassed ? "Enable" : "Bypass", action: .bypass),
+            rack ? Item(title: "Unrack", action: .unrack) : Item(title: "Make Rack", action: .makeRack, enabled: !inRack),
             .separator,
             Item(title: "Delete", action: .delete, key: "\u{8}", command: false),
         ]

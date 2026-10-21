@@ -279,15 +279,35 @@ def test_racks_are_saved_from_a_chain_listed_and_added_to_a_chain_in_another_son
     assert shown["effects"][0] == {"type": "utility", "id": "trim", "gain_db": -3} and shown["description"] == "Trim, a highpass and a lid"
     with pytest.raises(ValueError, match="--replace"):
         daw("rack", "save", path, "tracks.keys", "Keys Chain")
-    # Added to another song's master, in one undo step, with the same effects.
+    # Laid into another song's master with --flat, in one undo step, with the same effects.
     other = tmp_path / "other"
     daw("init", other, "--tempo", 100)
-    added = daw("rack", "load", other, "master", "Keys Chain")
+    added = daw("rack", "load", other, "master", "Keys Chain", "--flat")
     assert added["label"] == "Add rack Keys Chain to master" and added["effects"] == ["utility", "eq", "limiter"]
+    assert added["device"] is False
     assert [e["type"] for e in load(other / "song.yaml")["master"]["effects"]] == ["utility", "eq", "limiter"]
     assert load(other / "song.yaml")["master"]["effects"][0]["id"] == "trim"
-    # Added again where the id is taken, the effect is numbered.
-    again = daw("rack", "load", other, "master", "Keys Chain", "--index", 0)
+    # Laid in again where the id is taken, the effect is numbered.
+    again = daw("rack", "load", other, "master", "Keys Chain", "--index", 0, "--flat")
     assert again["also"] == ["master: effect trim of the rack is trim-2 here, since the chain has trim"]
     assert [e.get("id") for e in load(other / "song.yaml")["master"]["effects"]] == ["trim-2", None, None, "trim", None, None]
-    assert "racks" in daw("describe", "effects")["semantics"]
+    # Without --flat it is one rack device named for the file, its effects
+    # inside with their own ids, addressed through it.
+    device = daw("rack", "load", other, "master", "Keys Chain")
+    assert device["device"] is True and device["path"] == "master.effects.keys-chain"
+    rack = load(other / "song.yaml")["master"]["effects"][6]
+    assert (rack["type"], rack["id"], rack["name"]) == ("rack", "keys-chain", "Keys Chain")
+    assert [e["type"] for e in rack["effects"]] == ["utility", "eq", "limiter"] and rack["effects"][0]["id"] == "trim"
+    assert daw("get", other, "master.effects.keys-chain.effects.trim.gain_db") == -3
+    daw("set", other, "master.effects.keys-chain.effects.trim.gain_db", -6)
+    assert load(other / "song.yaml")["master"]["effects"][6]["effects"][0]["gain_db"] == -6
+    # Wrapped and unwrapped from the terminal, and a rack in a rack refused.
+    wrapped = daw("rack", "wrap", other, "master.effects.0", "master.effects.1", "--name", "Front")
+    assert wrapped["label"] == "Wrap 2 effects of master in a rack" and wrapped["path"] == "master.effects.0"
+    assert [e["type"] for e in load(other / "song.yaml")["master"]["effects"]] == ["rack", "limiter", "utility", "eq", "limiter", "rack"]
+    with pytest.raises(ValueError, match="holds no rack"):
+        daw("effect", "add", other, "master.effects.0", "--type", "rack")
+    daw("rack", "unwrap", other, "master.effects.0")
+    assert [e["type"] for e in load(other / "song.yaml")["master"]["effects"]][:3] == ["utility", "eq", "limiter"]
+    for topic in ("rack", "racks", "instrument_racks"):
+        assert topic in daw("describe", "effects")["semantics"]
