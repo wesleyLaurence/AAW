@@ -7,11 +7,15 @@ import SwiftUI
 /// that a chip and a picture can be put in it. A skill chosen under `/` is
 /// a chip: its `/name` at the start drawn on a rounded fill in the person's
 /// color, taken whole by Backspace, the caret kept after it, and the
-/// skill's argument hint after it until the person types.
+/// skill's argument hint after it until the person types. A thing of the
+/// song named under `@` is a chip the same way, `@drums`, wherever it
+/// stands in the text.
 final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
     var onEscape: (() -> Void)?
     var onChange: ((String) -> Void)?
+    /// Where the caret is, in UTF-16 units, after each change and move.
+    var onCaret: ((Int) -> Void)?
     /// A key for the list of skills over the field; true when the list
     /// took it.
     var onListKey: ((ListKey) -> Bool)?
@@ -37,6 +41,15 @@ final class ComposerTextView: NSTextView {
         }
     }
     var hint = ""
+    /// The names of the song's things the text mentions with `@`, each
+    /// `@name` drawn as a chip.
+    var mentions: Set<String> = [] {
+        didSet {
+            guard mentions != oldValue else { return }
+            colorText()
+            needsDisplay = true
+        }
+    }
     /// The characters still uncertain while the person speaks, drawn in
     /// the faint color until the recognizer firms them up.
     var faintRange: NSRange? {
@@ -137,6 +150,7 @@ final class ComposerTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         onChange?(string)
+        onCaret?(selectedRange().location)
         colorText()
         reportHeight()
     }
@@ -153,50 +167,64 @@ final class ComposerTextView: NSTextView {
     }
 
     /// Sets the text from outside, as when a sent message clears it or a
-    /// skill is chosen, with the caret at its end.
-    func set(_ text: String) {
-        guard string != text else { return }
+    /// skill is chosen, with the caret at its end, or where `caret` says.
+    func set(_ text: String, caret: Int? = nil) {
+        guard string != text else {
+            if let caret { setSelectedRange(NSRange(location: min(caret, (text as NSString).length), length: 0)) }
+            return
+        }
         string = text
-        setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+        setSelectedRange(NSRange(location: min(caret ?? Int.max, (text as NSString).length), length: 0))
         colorText()
         reportHeight()
     }
 
-    // MARK: The chip
+    // MARK: The chips
 
-    /// The characters of the chip: `/name` at the start, while the text
-    /// goes on with a space, a line or nothing.
+    /// The characters of the skill's chip: `/name` at the start, while the
+    /// text goes on with a space, a line or nothing.
     var chipRange: NSRange? {
         guard let chip, AgentCommands.split(string)?.name == chip else { return nil }
         return NSRange(location: 0, length: ("/" + chip as NSString).length)
     }
 
-    /// Backspace at the chip's end takes the whole chip.
+    /// The characters of every `@name` chip.
+    var mentionRanges: [NSRange] {
+        AgentMentions.found(in: string, among: mentions).map(\.range)
+    }
+
+    /// Every chip's characters: the skill's, then the mentions in order.
+    var chipRanges: [NSRange] {
+        (chipRange.map { [$0] } ?? []) + mentionRanges
+    }
+
+    /// Backspace at a chip's end takes the whole chip.
     override func deleteBackward(_ sender: Any?) {
-        if let range = chipRange, selectedRange() == NSRange(location: range.upperBound, length: 0) {
+        if let range = chipRanges.first(where: { selectedRange() == NSRange(location: $0.upperBound, length: 0) }) {
             setSelectedRange(range)
         }
         super.deleteBackward(sender)
     }
 
-    /// A caret put inside the chip lands after it.
+    /// A caret put inside a chip lands after it.
     override func setSelectedRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool) {
         var ranges = ranges
-        if let range = chipRange, ranges.count == 1, let caret = ranges.first?.rangeValue,
-           caret.length == 0, caret.location < range.upperBound {
+        if ranges.count == 1, let caret = ranges.first?.rangeValue, caret.length == 0,
+           let range = chipRanges.first(where: { caret.location > $0.location && caret.location < $0.upperBound }) {
             ranges = [NSValue(range: NSRange(location: range.upperBound, length: 0))]
         }
         super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        if !stillSelecting { onCaret?(selectedRange().location) }
     }
 
-    /// The chip's text in white and the uncertain spoken tail in the faint
+    /// The chips' text in white and the uncertain spoken tail in the faint
     /// color, as temporary attributes the storage does not keep.
     private func colorText() {
         guard let layoutManager else { return }
         let length = (string as NSString).length
         let whole = NSRange(location: 0, length: length)
         layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: whole)
-        if let range = chipRange {
+        for range in chipRanges {
             layoutManager.addTemporaryAttribute(.foregroundColor, value: Self.chipText, forCharacterRange: range)
         }
         if let range = faintRange {
@@ -214,9 +242,18 @@ final class ComposerTextView: NSTextView {
         return layoutManager.temporaryAttribute(.foregroundColor, atCharacterIndex: index, effectiveRange: nil) as? NSColor ?? textColor
     }
 
-    /// Where the chip is drawn, in the view.
+    /// Where the skill's chip is drawn, in the view.
     var chipRect: NSRect? {
-        guard let range = chipRange, let layoutManager, let textContainer else { return nil }
+        chipRange.map(rect)
+    }
+
+    /// Where every chip is drawn, in the view.
+    var chipRects: [NSRect] {
+        chipRanges.map(rect)
+    }
+
+    private func rect(_ range: NSRange) -> NSRect {
+        guard let layoutManager, let textContainer else { return .zero }
         let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
         var rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
         rect.origin.x += textContainerOrigin.x
@@ -248,11 +285,11 @@ final class ComposerTextView: NSTextView {
         onHeight?(height)
     }
 
-    /// The chip's fill goes under the text, which the view draws over
+    /// The chips' fills go under the text, which the view draws over
     /// nothing of its own.
     override func draw(_ dirtyRect: NSRect) {
-        if let rect = chipRect {
-            Self.chipFill.setFill()
+        Self.chipFill.setFill()
+        for rect in chipRects {
             NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4).fill()
         }
         super.draw(dirtyRect)
@@ -287,6 +324,7 @@ struct ComposerField: NSViewRepresentable {
             model?.onFocus?()
         }
         text.onChange = { [weak agent] string in agent?.draft = string }
+        text.onCaret = { [weak agent] caret in agent?.caret = caret }
         text.onListKey = { [weak agent] key in
             guard let agent else { return false }
             switch key {
@@ -300,18 +338,32 @@ struct ComposerField: NSViewRepresentable {
         text.onHeight = { height in
             DispatchQueue.main.async { self.height = height }
         }
-        apply(to: text)
+        apply(to: text, context.coordinator)
         return scroll
     }
 
     func updateNSView(_ scroll: NSScrollView, context: Context) {
-        if let text = scroll.documentView as? ComposerTextView { apply(to: text) }
+        if let text = scroll.documentView as? ComposerTextView { apply(to: text, context.coordinator) }
     }
 
-    private func apply(to text: ComposerTextView) {
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    /// Remembers which caret request the field has put, so that one is
+    /// put once.
+    final class Coordinator {
+        var appliedCaret = 0
+    }
+
+    private func apply(to text: ComposerTextView, _ coordinator: Coordinator) {
         text.hint = agent.chip?.hint ?? ""
         text.chip = agent.chip?.name
-        text.set(agent.draft)
+        var caret: Int?
+        if let request = agent.caretRequest, request.id != coordinator.appliedCaret {
+            caret = request.caret
+            coordinator.appliedCaret = request.id
+        }
+        text.set(agent.draft, caret: caret)
+        text.mentions = agent.mentionNames
         text.faintRange = agent.uncertainRange
     }
 }

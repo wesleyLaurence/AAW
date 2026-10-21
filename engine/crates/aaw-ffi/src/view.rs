@@ -39,6 +39,8 @@ pub struct Arrangement {
     pub patterns: Vec<PatternView>,
     /// The files the tracks' audio clips play.
     pub files: Vec<FileView>,
+    /// The song's samples by ID, placed or not, in the song's order.
+    pub samples: Vec<SampleView>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, uniffi::Enum)]
@@ -492,6 +494,15 @@ pub struct SectionView {
     pub id: String,
     pub at: f64,
     pub length_beats: f64,
+}
+
+/// A sample the song lists, as `samples.ID` names it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct SampleView {
+    pub id: String,
+    /// Its file, relative to the song's folder.
+    pub path: String,
+    pub root_note: Option<String>,
 }
 
 /// A note the person left at a beat while listening.
@@ -1454,6 +1465,11 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         markers,
         patterns: patterns(p, &tree),
         files: used,
+        samples: p
+            .samples
+            .iter()
+            .map(|(id, s)| SampleView { id: id.clone(), path: s.path.clone(), root_note: s.root_note.clone() })
+            .collect(),
     }
 }
 

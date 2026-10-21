@@ -523,7 +523,7 @@ final class AgentPanelTests: XCTestCase {
         agent.newThread()
         XCTAssertEqual(agent.attachedPaths, [])
         agent.open(id)
-        XCTAssertEqual(agent.entries.map(\.description), ["you: use these short + shot.png, kick.wav, two.mid, \(clip.notes?.reference ?? "")"])
+        XCTAssertEqual(agent.entries.map(\.description), ["you: use these short + shot.png, kick.wav, two.mid, lead1"], "the clip's chip is named from the record's line")
         XCTAssertEqual(agent.attachedPaths, [files.png.path, files.wav.path, files.mid.path])
         try FileManager.default.removeItem(at: record.deletingLastPathComponent())
     }
@@ -565,6 +565,181 @@ final class AgentPanelTests: XCTestCase {
             (heard, level, self.ended) = (nil, nil, nil)
             ended(nil)
         }
+    }
+
+    /// `@` in the field lists the song's things: the rows, the clips by
+    /// their names, the samples, the sections, the markers, the library's
+    /// references and the project's files, filtered as the person types;
+    /// the one chosen is `@name` in the draft with the caret after it, and
+    /// each thing the words name goes with the message as a line of the
+    /// list with the reference `daw` takes, the chips on the person's row.
+    func testTheSongsThingsAreListedUnderAtAndSent() throws {
+        let song = scratch.appendingPathComponent("projects/My Song/song.yaml")
+        let project = song.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("samples"), withIntermediateDirectories: true)
+        let files = try AgentAttachmentsTests.files(in: project.appendingPathComponent("samples"))
+        try "What the song is for.\n".write(to: project.appendingPathComponent("SONG.md"), atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: Self.folders.appendingPathComponent("workspace/library/references/Night Drive"), withIntermediateDirectories: true)
+        try """
+        session: {length_beats: 16}
+        samples:
+          kick: {path: samples/kick.wav}
+          snare: {path: samples/kick.wav, root_note: C2}
+        patterns:
+          hook:
+            length_beats: 4
+            steps: {k: x...x...x...x...}
+        tracks:
+        - id: drums
+          pads: {k: {sample: kick}}
+          clips:
+          - {pattern: hook}
+          - {pattern: hook, at: 4}
+        - id: keys
+          type: midi
+          clips:
+          - at: 8
+            length_beats: 4
+            id: lead1
+            notes:
+            - {pitch: 60, duration: 1}
+        sections:
+        - {id: verse, at: 0, length_beats: 8}
+        markers:
+        - {id: m1, at: 4, text: too busy}
+
+        """.write(to: song, atomically: true, encoding: .utf8)
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+
+        // Everything the song and the project offer, in the list's groups.
+        let all = agent.mentionables
+        XCTAssertEqual(all.filter { $0.group == .tracks }.map(\.name), ["drums", "keys"])
+        XCTAssertEqual(all.filter { $0.group == .tracks }.map(\.reference), ["tracks.drums", "tracks.keys"])
+        XCTAssertEqual(all.first { $0.name == "drums" }?.detail, "sample track, 2 clips")
+        XCTAssertEqual(all.first { $0.name == "keys" }?.detail, "MIDI track with no instrument, 1 clip")
+        let clips = all.filter { $0.group == .clips }
+        XCTAssertEqual(clips.map(\.name), ["hook.1", "hook.2", "lead1"], "two clips of one pattern are told apart, in time order")
+        XCTAssertEqual(clips.map(\.kind), [.clip, .clip, .clip])
+        XCTAssertEqual(clips[1].reference, model.placedClips().first { $0.at == 4 }?.clip?.reference)
+        XCTAssertEqual(clips[1].detail, "pattern clip of hook on drums at 2.1.1, 1 repeat")
+        XCTAssertEqual(clips[2].detail, "note clip lead1 on keys at 3.1.1, 4 beats, 1 note")
+        XCTAssertEqual(all.filter { $0.group == .samples }.map(\.name), ["kick", "snare"])
+        XCTAssertEqual(all.first { $0.name == "kick" }?.detail, "sample at samples/kick.wav, on drums")
+        XCTAssertEqual(all.first { $0.name == "snare" }?.detail, "sample at samples/kick.wav, root C2, on no track")
+        XCTAssertEqual(all.first { $0.name == "verse" }?.detail, "section from 1.1.1 to 3.1.1, 8 beats")
+        XCTAssertEqual(all.first { $0.name == "verse" }?.reference, "sections.verse")
+        XCTAssertEqual(all.first { $0.name == "m1" }?.detail, "marker at 2.1.1: too busy")
+        XCTAssertEqual(all.first { $0.name == "m1" }?.reference, "markers.m1")
+        XCTAssertEqual(all.filter { $0.group == .references }.map(\.name), ["Night Drive"])
+        let names = all.filter { $0.group == .files }.map(\.name)
+        XCTAssertEqual(names.filter { $0 != "AGENTS.md" }, ["samples", "samples/clip.mov", "samples/kick.wav", "samples/shot.png", "samples/two.mid", "SONG.md", "song.yaml"], "the host's own files left out")
+        XCTAssertEqual(all.first { $0.name == "samples/kick.wav" }?.path, files.wav.path)
+        XCTAssertTrue(agent.mentionNames.contains("hook.2"))
+
+        // `@` lists all; typing filters; the caret says which `@`.
+        XCTAssertNil(agent.mentionQuery)
+        agent.draft = "make "
+        agent.caret = 5
+        XCTAssertNil(agent.mentionQuery)
+        agent.draft = "make @"
+        agent.caret = 6
+        XCTAssertEqual(agent.mentionQuery, "")
+        XCTAssertEqual(agent.listedMentions.map(\.group), [.tracks, .clips, .samples, .sections, .markers, .references, .files])
+        agent.draft = "make @ho"
+        agent.caret = 8
+        XCTAssertEqual(agent.mentionQuery, "ho")
+        XCTAssertEqual(agent.listedMentions.flatMap(\.mentions).map(\.name), ["hook.1", "hook.2", "samples/shot.png"], "a name that starts with it, then one that has it")
+        agent.draft = "make @hoo"
+        agent.caret = 9
+        XCTAssertEqual(agent.listedMentions.flatMap(\.mentions).map(\.name), ["hook.1", "hook.2"])
+        XCTAssertTrue(agent.moveSelection(by: 1))
+        XCTAssertEqual(agent.mentionSelection, 1)
+        XCTAssertTrue(agent.moveSelection(by: 1))
+        XCTAssertEqual(agent.mentionSelection, 0, "the selection wraps")
+        XCTAssertTrue(agent.moveSelection(by: 1))
+        XCTAssertTrue(agent.chooseSelected())
+        XCTAssertEqual(agent.draft, "make @hook.2 ")
+        XCTAssertEqual(agent.caretRequest?.caret, 13, "the caret goes after the name and its space")
+        XCTAssertEqual(agent.caret, 13)
+        XCTAssertNil(agent.mentionQuery)
+        XCTAssertNil(agent.chip, "no skill chip")
+
+        // Escape closes the list and leaves the text; a caret moved alone
+        // does not open it; the next key does.
+        agent.draft = "make @hook.2 quieter @ve"
+        agent.caret = 24
+        XCTAssertEqual(agent.mentionQuery, "ve")
+        XCTAssertTrue(agent.closeList())
+        XCTAssertNil(agent.mentionQuery)
+        XCTAssertFalse(agent.closeList())
+        XCTAssertFalse(agent.moveSelection(by: 1))
+        XCTAssertFalse(agent.chooseSelected())
+        agent.caret = 23
+        XCTAssertNil(agent.mentionQuery)
+        agent.draft = "make @hook.2 quieter @ver"
+        agent.caret = 25
+        XCTAssertEqual(agent.mentionQuery, "ver")
+        XCTAssertEqual(agent.listedMentions.flatMap(\.mentions).map(\.name), ["verse"])
+        XCTAssertTrue(agent.chooseSelected())
+        XCTAssertEqual(agent.draft, "make @hook.2 quieter @verse ")
+        agent.caret = 5
+        XCTAssertNil(agent.mentionQuery, "the caret before a chip is in no mention")
+
+        // A chip at the start, in the middle of a word nothing, and the
+        // skills' list first.
+        agent.draft = "@"
+        agent.caret = 1
+        XCTAssertEqual(agent.mentionQuery, "")
+        agent.draft = "a@b"
+        agent.caret = 3
+        XCTAssertNil(agent.mentionQuery)
+        agent.draft = "/"
+        agent.caret = 1
+        XCTAssertEqual(agent.commandQuery, "")
+        XCTAssertNil(agent.mentionQuery)
+        XCTAssertTrue(agent.closeList())
+
+        // What is sent: the words as typed, and a line for each thing
+        // named, with the reference; a file by its path and kind.
+        agent.draft = "make @hook.2 quieter in @verse, as @kick and @samples/kick.wav sound, see @m1 and @SONG.md and @Night Drive short"
+        agent.caret = (agent.draft as NSString).length
+        agent.send()
+        XCTAssertEqual(agent.draft, "")
+        XCTAssertEqual(agent.attachments, [])
+        wait("the turn") { !agent.working }
+        // With a file among them the content is blocks; the text is one.
+        func texts() throws -> [String] {
+            try logged().compactMap { ($0["message"] as? [String: Any])?["content"] as? [[String: Any]] }
+                .compactMap { blocks in blocks.first { $0["type"] as? String == "text" }?["text"] as? String }
+        }
+        let message = try XCTUnwrap(try texts().first)
+        XCTAssertEqual(AppContext.strip(message), "make @hook.2 quieter in @verse, as @kick and @samples/kick.wav sound, see @m1 and @SONG.md and @Night Drive short")
+        let listed = AgentAttachments.listed(in: message)
+        XCTAssertEqual(listed.map(\.kind), [.clip, .section, .sample, .sound, .marker, .document, .reference])
+        XCTAssertEqual(listed.map(\.name), ["hook", "verse", "kick", "kick.wav", "m1", "SONG.md", "Night Drive"])
+        XCTAssertEqual(listed.map(\.reference), [clips[1].reference, "sections.verse", "samples.kick", nil, "markers.m1", nil, "Night Drive"])
+        XCTAssertEqual(listed[3].path, files.wav.path)
+        XCTAssertEqual(listed[3].detail, "0.50 s, mono, 44.1 kHz", "a file named goes as a dropped one does")
+        XCTAssertEqual(listed[5].path, project.appendingPathComponent("SONG.md").path)
+        XCTAssertEqual(listed[0].detail, "pattern clip of hook on drums at 2.1.1, 1 repeat")
+        guard case .person(_, let text, let attached)? = agent.entries.first else { return XCTFail("no person row") }
+        XCTAssertTrue(text.hasPrefix("make @hook.2"))
+        XCTAssertEqual(attached.map(\.name), ["hook.2", "verse", "kick", "samples/kick.wav", "m1", "SONG.md", "Night Drive"], "the chips keep the names as mentioned")
+        XCTAssertTrue(agent.threads.first?.title.hasPrefix("make @hook.2 quieter") == true, agent.threads.first?.title ?? "")
+
+        // A thing attached with `+` and named too goes once; a name that
+        // is nothing in the song is a word.
+        model.select(clips: [try XCTUnwrap(model.placedClips().first { $0.at == 4 }?.key)])
+        agent.attachSelectedClips()
+        XCTAssertEqual(agent.attachments.count, 1)
+        agent.draft = "@hook.2 and @nothing short"
+        agent.caret = 26
+        agent.send()
+        wait("the second turn") { !agent.working }
+        let second = try XCTUnwrap(try texts().last)
+        XCTAssertEqual(AgentAttachments.listed(in: second).map(\.reference), [clips[1].reference])
     }
 
     /// Speaking into the field: the words go on after what was typed as
