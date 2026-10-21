@@ -187,6 +187,38 @@ pub struct AudioStatus {
     pub fallback: Option<String>,
 }
 
+/// A sound being captured from the input with no track, for the agent
+/// panel's Record Audio: how long so far and how loud now.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct CaptureStatus {
+    pub file: String,
+    pub device: String,
+    pub seconds: f64,
+    /// The peak of the latest frames, 0 to 1.
+    pub level: f32,
+    pub lost_frames: u64,
+    /// The driver stopped the input: what came is kept by a stop.
+    pub device_stopped: bool,
+}
+
+/// A captured sound written to its file.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct Captured {
+    /// The file's absolute path.
+    pub file: String,
+    pub device: String,
+    pub channels: u32,
+    pub sample_rate: u32,
+    pub seconds: f64,
+    /// None for silence.
+    pub peak_dbfs: Option<f64>,
+    pub lost_frames: u64,
+    /// The beat the sound's first frame was heard against, when the song
+    /// was playing as it began; None when it was stopped.
+    pub at_beat: Option<f64>,
+    pub tempo: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Playhead {
     pub playing: bool,
@@ -715,6 +747,58 @@ impl Song {
     /// tracks as one edit by the person.
     pub fn stop_recording(&self) -> Result<(), SongError> {
         self.transport(json!({"op": "record.stop"}))
+    }
+
+    /// Captures a sound from the input chosen in Settings › Audio, or the
+    /// Mac's default, into `file`, an absolute path that must not exist,
+    /// until `stop_capture`: the agent panel's Record Audio.
+    pub fn start_capture(&self, file: String) -> Result<(), SongError> {
+        self.transport(json!({"op": "capture.start", "file": file}))
+    }
+
+    /// How the capture is going, or None when none runs.
+    pub fn capture_status(&self) -> Result<Option<CaptureStatus>, SongError> {
+        let status = self.request(json!({"op": "status"}), None)?;
+        let c = &status["capture"];
+        if c.is_null() {
+            return Ok(None);
+        }
+        Ok(Some(CaptureStatus {
+            file: c["file"].as_str().unwrap_or_default().to_string(),
+            device: c["device"].as_str().unwrap_or_default().to_string(),
+            seconds: c["seconds"].as_f64().unwrap_or(0.0),
+            level: c["level"].as_f64().unwrap_or(0.0) as f32,
+            lost_frames: c["lost_frames"].as_u64().unwrap_or(0),
+            device_stopped: c["device_stopped"].as_bool().unwrap_or(false),
+        }))
+    }
+
+    /// Ends the capture: the sound written at the song's rate and
+    /// reported, or with `discard` dropped, which reports None.
+    pub fn stop_capture(&self, discard: bool) -> Result<Option<Captured>, SongError> {
+        let reply = self.request(json!({"op": "capture.stop", "discard": discard}), None)?;
+        let c = &reply["captured"];
+        if c.is_null() {
+            return Ok(None);
+        }
+        let file = c["file"].as_str().unwrap_or_default();
+        let path = std::path::Path::new(file);
+        let absolute = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            locked(&self.path).parent().map(|d| d.join(path)).unwrap_or_else(|| path.to_path_buf())
+        };
+        Ok(Some(Captured {
+            file: absolute.to_string_lossy().into_owned(),
+            device: c["device"].as_str().unwrap_or_default().to_string(),
+            channels: c["channels"].as_u64().unwrap_or(1) as u32,
+            sample_rate: c["sample_rate"].as_u64().unwrap_or(0) as u32,
+            seconds: c["seconds"].as_f64().unwrap_or(0.0),
+            peak_dbfs: c["peak_dbfs"].as_f64(),
+            lost_frames: c["lost_frames"].as_u64().unwrap_or(0),
+            at_beat: c["at_beat"].as_f64(),
+            tempo: c["tempo"].as_f64().unwrap_or(120.0),
+        }))
     }
 
     /// Changes the devices and the buffer the host plays through; an open

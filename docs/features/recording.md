@@ -6,8 +6,8 @@ interface", and "support for resampling which is basically recording audio
 from an internal source like another track, group or all sounds". The
 concept had said "No recording of new audio"; the person's request revised
 it (D123). Built as D136; the proposal of October 19 is what this replaces.
-A sound recorded into the conversation, the third way in that proposal,
-is the next item and builds on this.
+[A sound recorded into the conversation](agent-record-audio.md), the third
+way in that proposal, is built on this (D137).
 
 ## What
 
@@ -96,8 +96,11 @@ capture` records an input to a file with no song.
   before each track's M, red while armed, faint on a track with no input.
 - **`daw record capture FILE --input NAME --seconds N [--channels 1,2]
   [--sample-rate 48000]`** records an input to a float WAV with no song and
-  no host, for the panel's recording to come and an agent's quick capture;
-  the reply gives the device, rate, channels, frames and peak.
+  no host, for an agent's quick capture; the reply gives the device, rate,
+  channels, frames and peak. The panel's recording goes through a running
+  host instead, `capture.start` and `capture.stop`, so that it knows the
+  beat it began at ([a sound recorded into the
+  conversation](agent-record-audio.md)).
 
 ## Checked
 

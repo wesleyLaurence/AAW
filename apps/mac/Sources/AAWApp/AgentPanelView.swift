@@ -878,6 +878,12 @@ private struct Composer: View {
     var body: some View {
         let empty = agent.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && agent.attachments.isEmpty
         VStack(alignment: .leading, spacing: 0) {
+            if agent.recording {
+                RecordingStrip(agent: agent)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 8)
+                    .padding(.bottom, 2)
+            }
             if !agent.attachments.isEmpty {
                 AttachmentChips(attachments: agent.attachments, remove: { agent.removeAttachment($0) })
                     .padding(.horizontal, 8)
@@ -890,6 +896,8 @@ private struct Composer: View {
                     Button("Attach File…") { Self.chooseFiles(for: agent) }
                     Button("Attach Selected Clips") { agent.attachSelectedClips() }
                         .disabled(!agent.canAttachClips)
+                    Divider()
+                    Button(agent.recording ? "Stop Recording" : "Record Audio") { agent.toggleRecording() }
                 } label: {
                     Image(systemName: "plus.circle").font(.system(size: 17))
                 }
@@ -897,7 +905,7 @@ private struct Composer: View {
                 .menuIndicator(.hidden)
                 .fixedSize()
                 .frame(height: height)
-                .help("Attach a file, or the selected clips, to the message; a file dropped or pasted here attaches too")
+                .help("Attach a file or the selected clips to the message, or record a sound for it through the input chosen in Settings › Audio; a file dropped or pasted here attaches too")
                 .accessibilityLabel("Attach")
                 ComposerField(agent: agent, model: model, height: $height)
                     .frame(height: height)
@@ -942,6 +950,51 @@ private struct Composer: View {
         } else {
             panel.begin(completionHandler: handler)
         }
+    }
+}
+
+/// While a sound is recorded for the message: a red dot that follows the
+/// input's level, the seconds, Stop, and × to drop the sound.
+private struct RecordingStrip: View {
+    let agent: AgentPanel
+
+    var body: some View {
+        let level = CGFloat(min(1, agent.recordingLevel * 2))
+        HStack(spacing: 8) {
+            Circle()
+                .fill(Color.red.opacity(0.55 + 0.45 * level))
+                .frame(width: 10, height: 10)
+                .scaleEffect(1 + level * 0.4)
+                .animation(.easeOut(duration: 0.08), value: agent.recordingLevel)
+                .frame(width: 14, height: 14)
+            Text("Recording")
+                .font(.system(size: AgentPanelView.smallSize, weight: .semibold))
+            Text(Self.clock(agent.recordingSeconds))
+                .font(.system(size: AgentPanelView.smallSize, design: .monospaced))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Button("Stop") { agent.stopRecording() }
+                .buttonStyle(.borderedProminent)
+                .tint(.red)
+                .controlSize(.small)
+                .help("Stop recording: the sound attaches to the message (Return)")
+            Button { agent.cancelRecording() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+            .help("Drop the recording (Escape)")
+            .accessibilityLabel("Discard recording")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recording")
+    }
+
+    /// Seconds as m:ss.
+    static func clock(_ seconds: Double) -> String {
+        let whole = Int(max(0, seconds).rounded(.down))
+        return String(format: "%d:%02d", whole / 60, whole % 60)
     }
 }
 

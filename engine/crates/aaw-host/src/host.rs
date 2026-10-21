@@ -6,6 +6,7 @@
 
 use crate::client::Request;
 use crate::command::{beat_value, json_value, Command, Kind, Origin};
+use crate::capture::Capture;
 use crate::record::{Recording, Take};
 use crate::registry;
 use crate::session::{Change, Doc, History, Session};
@@ -269,6 +270,9 @@ struct Host {
     armed: Vec<String>,
     /// The takes being recorded, from Record to their end.
     recording: Option<Recording>,
+    /// A sound being captured from an input with no track, for the agent
+    /// panel's Record Audio.
+    capture: Option<Capture>,
     /// Where play starts, in beats.
     cue: BigRational,
     /// Loop start and length, in beats.
@@ -723,11 +727,8 @@ impl Host {
         // The output's hardware latency, in the song's frames: what the
         // person heard the song late by. The driver's own lead is already in
         // the anchor, which is where each block plays.
-        let (output_latency, shared) = {
-            let t = self.transport.as_ref().expect("transport");
-            let device = aaw_engine::devices::latency_frames(&t.device, false).unwrap_or(0) as f64 * rate as f64 / t.device_rate as f64;
-            (device.round() as u32, t.control.shared().clone())
-        };
+        let output_latency = self.output_latency(rate);
+        let shared = self.transport.as_ref().expect("transport").control.shared().clone();
         let mut takes = Vec::new();
         let mut tapped = 0;
         let mut open = || -> Result<()> {
@@ -938,6 +939,74 @@ impl Host {
         }))
     }
 
+    /// The output's hardware latency in the song's frames, what the person
+    /// hears the song late by; 0 with no output open.
+    fn output_latency(&self, rate: u32) -> u32 {
+        match &self.transport {
+            Some(t) => (aaw_engine::devices::latency_frames(&t.device, false).unwrap_or(0) as f64 * rate as f64 / t.device_rate as f64).round() as u32,
+            None => 0,
+        }
+    }
+
+    /// `capture.start`: a sound from an input with no track, into `file`.
+    fn capture_start(&mut self, file: &str, input: Option<&str>, channels: &[i64]) -> Result<Json> {
+        if self.capture.is_some() {
+            return Err("Already capturing; capture.stop ends it".into());
+        }
+        if file.trim().is_empty() {
+            return Err("file names where the sound is written".into());
+        }
+        let path = {
+            let given = std::path::Path::new(file);
+            if given.is_absolute() {
+                given.to_path_buf()
+            } else {
+                self.session.dir().join(given)
+            }
+        };
+        let channels: Vec<i64> = if channels.is_empty() { vec![1] } else { channels.to_vec() };
+        if channels.iter().any(|c| *c < 1) || channels.len() > 2 {
+            return Err("channels are one or two numbers counted from 1".into());
+        }
+        let rate = self.session.project().session.sample_rate as u32;
+        let name = self.input_device(input.unwrap_or("default"));
+        let output_latency = self.output_latency(rate);
+        self.capture = Some(Capture::open(path, name.as_deref(), &channels, rate, output_latency)?);
+        self.capture_tick();
+        Ok(self.status())
+    }
+
+    /// `capture.stop`: the sound written and reported, or dropped.
+    fn capture_stop(&mut self, discard: bool) -> Result<Json> {
+        let capture = self.capture.take().ok_or("Nothing is being captured; capture.start begins a sound")?;
+        if discard {
+            return Ok(self.status());
+        }
+        let s = self.session.project().session.clone();
+        let captured = capture.finish(s.sample_rate as u32)?;
+        if captured.lost > 0 {
+            self.warn(format!("{} frames were lost on the way to the sound", captured.lost));
+        }
+        let report = captured.report(self.session.dir(), s.tempo);
+        let mut status = self.status();
+        if let Json::Object(m) = &mut status {
+            m.insert("captured".into(), report);
+        }
+        Ok(status)
+    }
+
+    /// Takes a capture's frames in, and fixes where its first frame was
+    /// heard once the song plays.
+    fn capture_tick(&mut self) {
+        let Some(capture) = &mut self.capture else { return };
+        let rate = self.session.project().session.sample_rate as u32;
+        let (anchor, playing) = match &self.transport {
+            Some(t) => (t.control.shared().anchor(), t.control.playing()),
+            None => (None, false),
+        };
+        capture.drain(rate, anchor, playing);
+    }
+
     fn transport(&mut self, cmd: &Command) -> Result<Json> {
         match cmd {
             Command::Play { from } => self.play(from.as_ref()),
@@ -964,6 +1033,8 @@ impl Host {
                 let recorded = self.end_recording(None);
                 Ok(self.status_with(recorded))
             }
+            Command::CaptureStart { file, input, channels } => self.capture_start(file, input.as_deref(), channels),
+            Command::CaptureStop { discard } => self.capture_stop(*discard),
             Command::Audio { output, input, buffer } => {
                 let named = |d: &Option<String>| d.clone().filter(|n| !n.trim().is_empty() && n.trim() != "default");
                 let mut audio = self.audio.clone();
@@ -1065,6 +1136,21 @@ impl Host {
                     "count_in_frames": r.count_in,
                     "seconds": round3(r.began.elapsed().as_secs_f64()),
                     "loop_end_frame": r.loop_end,
+                }),
+                None => Json::Null,
+            },
+        );
+        m.insert(
+            "capture".into(),
+            match &self.capture {
+                Some(c) => json!({
+                    "file": c.file.strip_prefix(self.session.dir()).unwrap_or(&c.file).to_string_lossy(),
+                    "device": c.device(),
+                    "seconds": round3(c.seconds()),
+                    "level": (c.level as f64 * 1000.0).round() / 1000.0,
+                    "lost_frames": c.lost(),
+                    "device_stopped": c.dead(),
+                    "at_beat": c.first_frame().map(|f| round3(f * tempo / 60.0 / rate)),
                 }),
                 None => Json::Null,
             },
@@ -1365,6 +1451,7 @@ impl Host {
         self.save_due();
         self.follow_devices();
         self.record_tick();
+        self.capture_tick();
         if let Some(t) = &mut self.transport {
             t.control.collect();
             let played = t.control.shared().played.load(Relaxed);
@@ -1458,6 +1545,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         metronome: false,
         armed: Vec::new(),
         recording: None,
+        capture: None,
         cue: BigRational::zero(),
         region: None,
         playback_error: None,
@@ -1519,8 +1607,14 @@ fn serve(mut host: Host, serving: Serving, interrupted: Arc<AtomicBool>) -> Resu
             break;
         }
     }
-    // A take still running is kept.
+    // A take still running is kept, and so is a sound being captured.
     host.end_recording(None);
+    if let Some(capture) = host.capture.take() {
+        let rate = host.session.project().session.sample_rate as u32;
+        if let Err(e) = capture.finish(rate) {
+            host.warn(format!("the sound was not kept: {e}"));
+        }
+    }
     host.done.store(true, Relaxed);
     let doors = std::mem::take(&mut host.doors);
     let claims: Vec<registry::Claim> = doors

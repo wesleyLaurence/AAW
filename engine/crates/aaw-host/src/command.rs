@@ -639,6 +639,30 @@ pub enum Command {
     /// song as one undoable edit.
     #[serde(rename = "record.stop")]
     RecordStop,
+    /// Captures a sound from an input with no track, for the agent panel's
+    /// Record Audio and a quick capture: `input` part of an input device's
+    /// name or `default` for the audio settings' input, which it is when
+    /// left out, `channels` counted from 1 (the first unless given), into
+    /// `file`, a path under the project's folder unless absolute, which
+    /// must not exist. Drained every tick until `capture.stop`; while the
+    /// song plays, the beat the first frame was heard against is kept.
+    /// Never an edit of the song.
+    #[serde(rename = "capture.start")]
+    CaptureStart {
+        file: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        channels: Vec<i64>,
+    },
+    /// Ends the capture: the sound written at the song's rate as a 32-bit
+    /// float WAV, reported in the reply's `captured`; with `discard`
+    /// nothing is written.
+    #[serde(rename = "capture.stop")]
+    CaptureStop {
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        discard: bool,
+    },
     /// The devices the host plays and records through and its buffer, each
     /// kept as it is when left out: `output` and `input` part of a device's
     /// name, ignoring case, or `default` for the system's; `buffer` in
@@ -762,7 +786,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } | Audio { .. } => Kind::Transport,
-            Arm { .. } | RecordStart { .. } | RecordStop => Kind::Transport,
+            Arm { .. } | RecordStart { .. } | RecordStop | CaptureStart { .. } | CaptureStop { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,

@@ -133,6 +133,31 @@ final class AgentAttachmentsTests: XCTestCase {
         XCTAssertTrue(second.name.hasSuffix("-2.png"), second.name)
     }
 
+    /// A sound recorded in the panel is written under `.daw/attachments/`,
+    /// named apart within a second, and its line says the song's tempo,
+    /// where the song was heard from or that it was stopped, and its peak.
+    func testARecordedSoundIsNamedAndItsLineSaysWhereTheSongWas() throws {
+        let now = Date(timeIntervalSince1970: 1_760_050_000)
+        let first = AgentAttachments.recordingFile(project: scratch, now: now)
+        XCTAssertEqual(first.deletingLastPathComponent().path, scratch.appendingPathComponent(".daw/attachments").path)
+        XCTAssertTrue(first.lastPathComponent.hasPrefix("recorded-2025-10-09-") && first.pathExtension == "wav", first.lastPathComponent)
+        try FileManager.default.createDirectory(at: first.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let files = try Self.files(in: scratch)
+        try FileManager.default.copyItem(at: files.wav, to: first)
+        XCTAssertTrue(AgentAttachments.recordingFile(project: scratch, now: now).lastPathComponent.hasSuffix("-2.wav"))
+
+        let played = AgentAttachments.make(recorded: first, tempo: 120, atBeat: 16.25, peakDbfs: -12.34) { "bar \($0)" }
+        XCTAssertEqual(played.kind, .sound)
+        XCTAssertEqual(played.name, first.lastPathComponent)
+        XCTAssertEqual(played.detail, "0.50 s, mono, 44.1 kHz, recorded at 120 BPM while the song played from bar 16.25, beat 16.250, peak -12.3 dBFS")
+        let stopped = AgentAttachments.make(recorded: first, tempo: 92.5, atBeat: nil, peakDbfs: nil) { "bar \($0)" }
+        XCTAssertEqual(stopped.detail, "0.50 s, mono, 44.1 kHz, recorded at 92.5 BPM with the song stopped, silent")
+        let back = try XCTUnwrap(AgentAttachment(line: played.line))
+        XCTAssertEqual(back.kind, .sound)
+        XCTAssertEqual(back.path, first.path)
+        XCTAssertEqual(back.detail, played.detail)
+    }
+
     func testAMIDIFileIsSummedUp() {
         let summary = MIDISummary(Self.midi())
         XCTAssertTrue(summary.read)

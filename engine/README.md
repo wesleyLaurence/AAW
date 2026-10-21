@@ -223,6 +223,13 @@ the song with its audio clip in one batch by the person, which one undo
 takes back; the reply's `recorded` says what landed. `daw record arm`,
 `daw record start`, `daw record stop` and, with no song, `daw record capture`
 are the terminal's way, and `daw status` reports `armed` and `recording`.
+`capture.start {file, input?, channels?}` and `capture.stop {discard?}`
+record a sound from an input with no track, for the agent panel's Record
+Audio: the host drains it every tick, `daw status` reports `capture` with
+its seconds and level, and the stop writes it at the song's rate where
+asked, the reply's `captured` giving the file, the peak and `at_beat`, the
+beat its first frame was heard against while the song played
+([a sound recorded into the conversation](../docs/features/agent-record-audio.md)).
 
 - **Commands** validate the whole resulting song before they apply and carry an
   origin, `agent` by default or `--origin user`. `--expect SHA` refuses an edit

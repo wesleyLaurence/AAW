@@ -39,6 +39,7 @@ reads each one; the kind is told by the extension.
 | A document (PDF, text, Markdown, YAML, JSON, CSV, RTF, HTML, XML, TOML) | The Finder | Its path and size |
 | A folder | The Finder, or chosen | Its path and how many items it holds |
 | A video, or anything else | The Finder | Its path, size and "not read" |
+| A sound recorded in the panel | `+` › Record Audio, then Stop or Return | As a sound, by its path under `.daw/attachments/` with its length, channels and rate, then "recorded at 120 BPM while the song played from 5.1.1, beat 16.000" or "recorded at 120 BPM with the song stopped", and its peak ([a sound recorded into the conversation](agent-record-audio.md)) |
 | A clip on the timeline | `+` › Attach Selected Clips, with clips selected | Its reference as `daw` takes it, `@12`; its kind, track and bar, a pattern clip's repeats, a note clip's length and notes, an audio clip's sample name |
 | A patch or a rack | The browser | Its name and its file's path, or "factory" |
 | A track, a group, a return, a clip, a sample, a section, a marker, a reference or a project file | `@name` in the words ([`@` mentions](agent-mentions.md)) | The reference `daw` takes, `tracks.drums`, `@12`, `samples.kick`, `sections.verse`, `markers.m1`, a reference's name; a file as a dropped one goes |
@@ -66,7 +67,8 @@ sample it dragged; and the browser's patch and rack types. ⌘V in the field
 attaches file URLs or an image on the pasteboard and pastes text as
 text. `+`, at the left of the field and centered on its height (D132),
 opens a menu: Attach File…, the open panel as a sheet, several files and
-folders allowed; Attach Selected Clips, gray with none selected.
+folders allowed; Attach Selected Clips, gray with none selected; and Record
+Audio, which reads Stop Recording while a sound records (D137).
 
 **What the message carries.** With nothing attached the message is the
 string it was. With attachments, `content` is an array: the images as

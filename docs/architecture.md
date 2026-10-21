@@ -53,10 +53,11 @@ by name, the song's tracks, clips, samples, sections and markers, the
 library's references and the project's files are listed under `@` and go
 with the message by the reference `daw` takes, a file dropped on the panel
 goes with the next message, an image as a picture it sees and the rest by
-path, a selected clip by its reference, the person's words spoken into the
-field are recognized on the
-Mac and sent as text, and the
-project's conversations are kept in `.daw/threads.json` beside the song. A
+path, a selected clip by its reference, a sound recorded in the panel
+through the host's input goes under `.daw/attachments/` with the song's
+tempo and the beat it began at, the person's words spoken into the field
+are recognized on the Mac and sent as text, and the project's conversations
+are kept in `.daw/threads.json` beside the song. A
 terminal started in the project's folder has the same by location. See
 [agent-panel.md](features/agent-panel.md).
 
@@ -110,7 +111,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It arms tracks and records them, each take laid on the timeline, written
-  under `samples/` and added with its clip as one edit (`record`).
+  under `samples/` and added with its clip as one edit (`record`), and
+  captures a sound from an input with no track for the agent panel, written
+  where it was asked for with the beat it began at (`capture`).
   It also makes a blank project, moves or copies a project's folder,
   reads and writes Standard MIDI files of one part (`midi_file`), draws the
   song as a grid of tracks by bars for `daw map` (`map`), tells an agent's
