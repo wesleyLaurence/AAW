@@ -309,6 +309,115 @@ fn upfirdn(h_trans_flip: &[f64], x: &[f64], up: usize, down: usize, len_out: usi
     out
 }
 
+/// The same resampling for a stream of stereo frames, pulled block by
+/// block: `Resampler`'s Kaiser sinc as polyphase taps over a ring of the
+/// input, so output frame `m` is the input at `m * down / up`, as
+/// `resample_poly` places it, and nothing is allocated after `new`. The
+/// real-time player runs one when the output device plays at another rate
+/// than the song's.
+pub struct Stream {
+    up: usize,
+    down: usize,
+    /// Phase `p`'s taps are `h[p]`, `h[p + up]`, …, `per_phase` of them.
+    phases: Vec<f64>,
+    per_phase: usize,
+    ring: Vec<[f64; 2]>,
+    mask: usize,
+    stage: Vec<[f64; 2]>,
+    /// Input frames written to the ring so far.
+    written: usize,
+    /// The next output's place in the input: frame `n`, and `phase` of `up`.
+    n: usize,
+    phase: usize,
+    /// How far `n` is past the output's time: the taps' center, in input frames.
+    look: f64,
+}
+
+impl Stream {
+    /// The most input frames one pull asks for.
+    pub const PULL: usize = 4096;
+    /// Output frames made between pulls.
+    const PIECE: usize = 512;
+
+    /// A stream from `from` frames a second to `to`, which must differ.
+    pub fn new(from: u32, to: u32) -> Stream {
+        let g = (from as usize).gcd(&(to as usize));
+        let (up, down) = (to as usize / g, from as usize / g);
+        let max_rate = up.max(down);
+        let half_len = 10 * max_rate;
+        let mut h = firwin_kaiser(2 * half_len + 1, 1.0 / max_rate as f64, 5.0);
+        for x in &mut h {
+            *x *= up as f64;
+        }
+        let per_phase = h.len().div_ceil(up);
+        let mut phases = vec![0.0; up * per_phase];
+        for p in 0..up {
+            for k in 0..per_phase {
+                if let Some(v) = h.get(p + k * up) {
+                    phases[p * per_phase + k] = *v;
+                }
+            }
+        }
+        // A piece's input, the taps' history and the frames ahead must fit;
+        // rates from 44.1 to 192 kHz against one another stay well inside.
+        let cap = (Self::PIECE * down / up + per_phase + Self::PULL + 2).next_power_of_two();
+        Stream {
+            up,
+            down,
+            phases,
+            per_phase,
+            ring: vec![[0.0; 2]; cap],
+            mask: cap - 1,
+            stage: vec![[0.0; 2]; Self::PULL],
+            written: 0,
+            // Output 0 is input time 0: the taps' center looks that far ahead.
+            n: half_len / up,
+            phase: half_len % up,
+            look: half_len as f64 / up as f64,
+        }
+    }
+
+    pub fn ratio(&self) -> (usize, usize) {
+        (self.up, self.down)
+    }
+
+    /// Input frames pulled and not yet put out: what the output trails the
+    /// source by, including the taps' look ahead.
+    pub fn ahead(&self) -> f64 {
+        self.written as f64 - (self.n as f64 + self.phase as f64 / self.up as f64 - self.look)
+    }
+
+    /// Fills `out` at the output rate, pulling the input it needs from
+    /// `pull` in blocks of at most `PULL` frames, each filled whole.
+    pub fn run(&mut self, out: &mut [[f64; 2]], pull: &mut dyn FnMut(&mut [[f64; 2]])) {
+        for piece in out.chunks_mut(Self::PIECE) {
+            // The last frame of the piece reaches this far into the input.
+            let last = (self.n * self.up + self.phase + (piece.len() - 1) * self.down) / self.up;
+            while self.written <= last {
+                let take = (last + 1 - self.written).min(Self::PULL);
+                pull(&mut self.stage[..take]);
+                for f in &self.stage[..take] {
+                    self.ring[self.written & self.mask] = *f;
+                    self.written += 1;
+                }
+            }
+            for o in piece.iter_mut() {
+                let taps = &self.phases[self.phase * self.per_phase..(self.phase + 1) * self.per_phase];
+                let mut acc = [0.0; 2];
+                for (k, h) in taps.iter().enumerate() {
+                    let f = self.ring[self.n.wrapping_sub(k) & self.mask];
+                    acc[0] += h * f[0];
+                    acc[1] += h * f[1];
+                }
+                *o = acc;
+                self.phase += self.down;
+                self.n += self.phase / self.up;
+                self.phase %= self.up;
+            }
+        }
+    }
+}
+
 /// `resample_poly(x, up, down, axis=0)` for interleaved frames.
 pub fn resample_poly(interleaved: &[f64], channels: usize, up: usize, down: usize) -> Vec<f64> {
     let g = up.gcd(&down);
@@ -410,5 +519,65 @@ mod tests {
         // A 440 Hz tone keeps its amplitude away from the edges.
         let peak = y[200..y.len() - 200].iter().fold(0.0f64, |m, v| m.max(v.abs()));
         assert!((peak - 1.0).abs() < 1e-3, "{peak}");
+    }
+
+    /// The stream agrees with `resample_poly` frame for frame, whatever
+    /// block sizes it is pulled and run in.
+    fn stream_matches(from: u32, to: u32) {
+        let (g, up, down) = {
+            let g = (from as usize).gcd(&(to as usize));
+            (g, to as usize / g, from as usize / g)
+        };
+        let _ = g;
+        let n = 20000;
+        let x: Vec<[f64; 2]> = (0..n)
+            .map(|i| {
+                let t = i as f64 / from as f64;
+                [(2.0 * PI * 1000.0 * t).sin(), 0.5 * (2.0 * PI * 3000.0 * t + 1.0).sin()]
+            })
+            .collect();
+        let interleaved: Vec<f64> = x.iter().flatten().copied().collect();
+        let want = resample_poly(&interleaved, 2, up, down);
+        let mut s = Stream::new(from, to);
+        let mut fed = 0usize;
+        let mut pull = |b: &mut [[f64; 2]]| {
+            for f in b.iter_mut() {
+                *f = x.get(fed).copied().unwrap_or([0.0; 2]);
+                fed += 1;
+            }
+        };
+        let n_out = want.len() / 2;
+        let mut got = vec![[0.0; 2]; n_out];
+        let mut at = 0;
+        let mut seed = 12345u64;
+        while at < n_out {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            let size = (1 + (seed >> 33) % 1500) as usize;
+            let end = (at + size).min(n_out);
+            s.run(&mut got[at..end], &mut pull);
+            at = end;
+        }
+        // The stream's zero history is the zero padding the offline one assumes.
+        let mut worst = 0.0f64;
+        for (m, f) in got.iter().enumerate().take(n_out - 100) {
+            for c in 0..2 {
+                worst = worst.max((f[c] - want[m * 2 + c]).abs());
+            }
+        }
+        assert!(worst < 1e-9, "{from}->{to}: {worst}");
+        // The taps look ahead ten frames at the lower of the two rates, and
+        // the next output is a step past the last.
+        let look = 10.0 * (from as f64 / to as f64).max(1.0);
+        let step = from as f64 / to as f64;
+        assert!(s.ahead() >= look - step - 1.0 && s.ahead() <= look + 2.0, "{from}->{to}: {} ahead", s.ahead());
+    }
+
+    #[test]
+    fn stream_resampling_matches_the_offline_resampler() {
+        stream_matches(44100, 48000);
+        stream_matches(48000, 44100);
+        stream_matches(48000, 96000);
+        stream_matches(44100, 192000);
+        stream_matches(192000, 44100);
     }
 }

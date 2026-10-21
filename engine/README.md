@@ -193,11 +193,16 @@ socket registered under `~/Library/Application Support/AAW/hosts` (or
 `AAW_HOST_DIR`), outside the project because projects may be synced. With no
 host, commands run headless: load, apply, save, exit, under the project's
 `.daw.lock`. Edits behave the same either way; undo, redo, the change
-log, handles and the transport need a host. A host plays through the default
-output device, or through the output device whose name contains
-`AAW_OUTPUT_DEVICE` when that is set, which a scripted run that must not be
-heard points at a virtual device; a device that cannot play the song's rate
-in stereo is refused with its name.
+log, handles and the transport need a host. A host plays through the system's
+default output device, or through the output device whose name contains what
+`--output` or `daw device use` named, or `AAW_OUTPUT_DEVICE` when that is set
+and nothing was named, which a scripted run that must not be heard points at
+a virtual device; a device named this way that is not there is refused, where
+one chosen in the app gives way to the default. The device is opened at the
+song's rate when it offers it, and else at its own rate with the song
+resampled to it; one that offers neither in stereo is refused with its name. The host follows the Mac's
+default as it changes and reports `devices` and `audio` in `daw status`
+([audio settings](../docs/features/audio-settings.md)).
 
 - **Commands** validate the whole resulting song before they apply and carry an
   origin, `agent` by default or `--origin user`. `--expect SHA` refuses an edit

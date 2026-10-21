@@ -86,7 +86,7 @@ Proposed, in the order of Next in the backlog:
 | [the agent's engine for other people](features/agent-engine.md) | Later › Shipping |
 | [groups within groups](features/nested-groups.md) | Next; proposed |
 | [a song with no end to hit](features/song-length.md) | Next; proposed |
-| [audio settings](features/audio-settings.md) | Next; proposed |
+| [audio settings](features/audio-settings.md) | Built |
 | [recording audio](features/recording.md) | Next; proposed, with a sound recorded into the conversation |
 | [a rack as a device, and an instrument rack](features/rack-devices.md) | Next; proposed |
 | [devices anyone builds, to a spec](features/custom-devices.md) | Next; proposed as a direction |

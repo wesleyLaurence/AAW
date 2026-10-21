@@ -104,6 +104,8 @@ struct Launch {
     /// The level of that export: `peak=-1`, `lufs=-14`, `gain=-3` or
     /// `rendered`.
     var exportLevel: ExportOptions.Level?
+    /// Open the Settings window, as AAW › Settings… does.
+    var settings = false
 
     init(arguments: [String]) {
         var rest = arguments[...]
@@ -149,6 +151,8 @@ struct Launch {
                 actions.append(.attachClips)
             case "--listen":
                 actions.append(.listen)
+            case "--settings":
+                settings = true
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
             case "--measure":
@@ -199,6 +203,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private weak var launched: SongWindowController?
     /// The project whose window is in front, as its host is told.
     private weak var front: SongWindowController?
+    /// The Settings window, made when first opened.
+    private var settings: SettingsWindowController?
     private var recentMenu = NSMenu(title: "Open Recent")
     /// A scripted run asks nothing: nobody is there to answer.
     private var scripted: Bool { launch.snapshot != nil || launch.measure != nil || launch.export != nil }
@@ -220,8 +226,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         restoreIndex()
+        // A device or buffer chosen in Settings reaches every open song.
+        AudioPreferences.shared.onChange = { [weak self] settings in
+            self?.songs.forEach { $0.model.applyAudio(settings) }
+        }
         for url in launch.songs { openSong(url) }
         if songs.isEmpty { launched = newProject() }
+        if launch.settings { later(0.3) { $0.openSettings(nil) } }
         if !scripted || !launch.actions.isEmpty {
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -447,6 +458,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CommandLineTool.offer()
     }
 
+    /// Shows the Settings window, made the first time.
+    @objc func openSettings(_ sender: Any?) {
+        if settings == nil {
+            settings = SettingsWindowController { [weak self] in
+                guard let self else { return nil }
+                return (front ?? songs.first)?.model
+            }
+        }
+        settings?.showWindow(nil)
+        settings?.window?.makeKeyAndOrderFront(nil)
+    }
+
     @objc private func openRecent(_ sender: NSMenuItem) {
         if let url = sender.representedObject as? URL { openSong(url) }
     }
@@ -607,6 +630,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         var pictures = [(view, url)]
+        // The Settings window, when open, as `NAME-settings.png`.
+        if let window = settings?.window, window.isVisible, let content = window.contentView {
+            let name = url.deletingPathExtension().lastPathComponent + "-settings"
+            pictures.append((content, url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension(url.pathExtension)))
+        }
         for (i, analyzer) in controller.model.openAnalyzerWindows.enumerated() {
             guard let content = analyzer.window?.contentView else { continue }
             let name = url.deletingPathExtension().lastPathComponent + "-analyzer" + (i == 0 ? "" : "-\(i + 1)")
@@ -644,6 +672,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         add("AAW", [
             item("About AAW", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
+            .separator(),
+            item("Settings…", #selector(openSettings(_:)), ","),
             item("Install Command Line Tool…", #selector(installCommandLineTool(_:))),
             .separator(),
             item("Hide AAW", #selector(NSApplication.hide(_:)), "h"),

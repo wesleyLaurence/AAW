@@ -54,7 +54,7 @@ fn start(path: &Path) -> (Arc<AtomicBool>, JoinHandle<Result<Json, String>>) {
         host::run(
             &p,
             Options {
-                buffer: 128,
+                audio: aaw_host::host::Audio::default(),
                 play: None,
                 exit_on_stop: false,
                 seconds: None,
@@ -291,7 +291,7 @@ fn a_copy_leaves_the_original_which_its_path_cannot_reach_until_released() {
     // The original cannot have a host of its own while the copy answers for it.
     let stop = Arc::new(AtomicBool::new(false));
     let options = || Options {
-        buffer: 128,
+        audio: aaw_host::host::Audio::default(),
         play: None,
         exit_on_stop: false,
         seconds: None,

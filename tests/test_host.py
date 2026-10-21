@@ -257,3 +257,79 @@ def test_a_host_takes_commands_from_other_processes(rust_daw, tmp_path, registry
     finally:
         if host.poll() is None:
             host.kill()
+
+
+def output_device(binary, part):
+    """The Mac's output device whose name contains `part`, or None."""
+    listed = daw(binary, "device", "list")
+    for device in listed["devices"]:
+        if part.lower() in device["name"].lower() and device["output_channels"] >= 2:
+            return device
+    return None
+
+
+def test_device_list_names_the_macs_devices(rust_daw):
+    listed = daw(rust_daw, "device", "list")
+    assert isinstance(listed["devices"], list)
+    for device in listed["devices"]:
+        assert device["name"]
+        assert device["input_channels"] > 0 or device["output_channels"] > 0
+        assert all(isinstance(r, int) for r in device["sample_rates"])
+    defaults = [d for d in listed["devices"] if d["default_output"]]
+    assert len(defaults) <= 1
+    if defaults:
+        assert listed["default_output"] == defaults[0]["name"]
+    virtual = output_device(rust_daw, "BlackHole")
+    if virtual:
+        assert {44100, 48000} <= set(virtual["sample_rates"])
+        assert virtual["current_rate"] in virtual["sample_rates"]
+
+
+def test_device_use_changes_a_running_hosts_devices(rust_daw, tmp_path, registry):
+    path = make_song(random.Random(31), tmp_path)
+    # Without a host the devices exist only while one runs.
+    refused = daw(rust_daw, "device", "use", path, "--buffer", "256", check=False)
+    assert "No host" in refused["error"]
+    host = subprocess.Popen([str(rust_daw), "host", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        status = wait_for_host(rust_daw, path, host)
+        assert status["devices"] == {"output": "default", "input": "default", "buffer_frames": 128, "fallback": None}
+        assert status["audio"] is None
+        assert status["sample_rate"] == load(path)["session"]["sample_rate"]
+
+        changed = daw(rust_daw, "device", "use", path, "--buffer", "256", "--input", "Microphone")
+        assert changed["devices"] == {"output": "default", "input": "Microphone", "buffer_frames": 256, "fallback": None}
+        # Each left out stays; `default` clears one.
+        back = daw(rust_daw, "device", "use", path, "--input", "default")
+        assert back["devices"]["input"] == "default" and back["devices"]["buffer_frames"] == 256
+        assert "16 to 8192" in daw(rust_daw, "device", "use", path, "--buffer", "5", check=False)["error"]
+        assert "--output" in daw(rust_daw, "device", "use", path, check=False)["error"]
+        # Never an edit: the song's revision stands.
+        assert daw(rust_daw, "status", path)["revision"] == 0
+    finally:
+        daw(rust_daw, "close", path, check=False)
+        host.wait(timeout=10)
+
+
+def test_a_song_at_44_1_khz_plays_through_a_device_at_48_khz(rust_daw, tmp_path, registry):
+    """Through a virtual device nobody hears; without one the output stays shut."""
+    virtual = output_device(rust_daw, "BlackHole")
+    if virtual is None:
+        pytest.skip("no BlackHole device on this Mac")
+    path = make_song(random.Random(32), tmp_path)
+    song = yaml.safe_load(path.read_text())
+    song["session"]["sample_rate"] = 44100
+    path.write_text(yaml.safe_dump(song))
+    # Named on the terminal, a device that is not there is refused: the run
+    # must not fall through to the speakers. The host's own line comes first.
+    missing = subprocess.run([str(rust_daw), "play", str(path), "--output", "no such device", "--seconds", "0.2"], capture_output=True, text=True)
+    assert missing.returncode == 1
+    assert "no such device" in json.loads(missing.stderr.strip().splitlines()[-1])["error"]
+    played = daw(rust_daw, "play", path, "--output", "BlackHole", "--device-rate", "48000", "--seconds", "0.3")
+    assert played["device"] == virtual["name"]
+    assert played["sample_rate"] == 44100
+    assert played["device_sample_rate"] == 48000
+    assert played["resampled"] is True
+    assert played["callbacks"] > 0 and played["stream_errors"] == 0
+    own = daw(rust_daw, "play", path, "--output", "BlackHole", "--seconds", "0.3")
+    assert own["device_sample_rate"] == 44100 and own["resampled"] is False

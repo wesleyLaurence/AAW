@@ -101,8 +101,8 @@ pub fn lock(project: &Path) -> Result<File> {
 }
 
 pub struct Options {
-    /// Output buffer in frames.
-    pub buffer: u32,
+    /// The devices to play and record through, and the buffer.
+    pub audio: Audio,
     /// Start playing from this beat.
     pub play: Option<Json>,
     /// Exit once playback stops: `daw play` hosting for its own duration.
@@ -116,6 +116,47 @@ pub struct Options {
     /// How long an agent may send nothing before its next edit's reply
     /// carries a hint to work in smaller steps; `PACE` outside tests.
     pub pace: Duration,
+}
+
+/// The devices a host plays and records through: a device by part of its
+/// name, ignoring case, or None for the system's default, which the host
+/// follows as it changes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Audio {
+    pub output: Option<String>,
+    /// Kept and reported until recording exists; nothing opens it yet.
+    pub input: Option<String>,
+    /// The output buffer, in frames.
+    pub buffer: u32,
+    /// Open the output at this rate whatever the song's, for checking.
+    pub device_rate: Option<u32>,
+    /// A named output that is not connected is refused rather than giving
+    /// way to the default: the terminal's way, since a scripted run that
+    /// must not be heard must never fall through to the speakers. The app's
+    /// kept choice falls back, and is taken up when the device returns.
+    pub strict_output: bool,
+}
+
+impl Default for Audio {
+    fn default() -> Audio {
+        Audio {
+            output: None,
+            input: None,
+            buffer: 128,
+            device_rate: None,
+            strict_output: false,
+        }
+    }
+}
+
+impl Audio {
+    fn settings(&self) -> aaw_engine::realtime::Settings {
+        aaw_engine::realtime::Settings {
+            output: self.output.clone(),
+            buffer: self.buffer,
+            device_rate: self.device_rate,
+        }
+    }
 }
 
 /// What a host tells the process that embeds it.
@@ -208,6 +249,15 @@ struct Host {
     /// The compiled song and the SHA it was compiled from.
     program: Option<(String, Arc<Program>)>,
     transport: Option<Transport>,
+    /// The devices as chosen now, from the options until `audio` changes them.
+    audio: Audio,
+    /// The chosen output while it is not connected and the default plays.
+    fallback: Option<String>,
+    /// The devices' generation when the output was opened.
+    devices_seen: u64,
+    /// When a stopped stream was last opened again, so a device that keeps
+    /// failing is tried once a second and not in a loop.
+    revived_at: Option<Instant>,
     metronome: bool,
     /// Where play starts, in beats.
     cue: BigRational,
@@ -346,13 +396,109 @@ impl Host {
             .map(|(start, length)| (self.frame(start), self.frame(&(start + length))))
     }
 
+    /// The output the settings name, or the one `AAW_OUTPUT_DEVICE` does,
+    /// and whether its absence is an error.
+    fn chosen_output_strictly(&self) -> (Option<String>, bool) {
+        let blank = |n: &String| n.trim().is_empty();
+        match self.audio.output.clone().filter(|n| !blank(n)) {
+            Some(name) => (Some(name), self.audio.strict_output),
+            None => (std::env::var("AAW_OUTPUT_DEVICE").ok().filter(|n| !blank(n)), true),
+        }
+    }
+
+    fn chosen_output(&self) -> Option<String> {
+        self.chosen_output_strictly().0
+    }
+
+    /// Opens the chosen output, or the default when the chosen one is not
+    /// connected, which the status then says; a device named strictly that
+    /// is not there is refused with its name.
     fn open_transport(&mut self, program: Arc<Program>) -> Result<()> {
-        let mut t = Transport::open(program, self.opts.buffer)?;
+        let mut settings = self.audio.settings();
+        self.devices_seen = aaw_engine::devices::generation();
+        let fallback = match self.chosen_output_strictly() {
+            (Some(name), strict) if aaw_engine::devices::find_output(&name)?.is_none() => {
+                if strict {
+                    return Err(format!("No audio output device named {}; daw device list names them", name.trim()));
+                }
+                Some(name)
+            }
+            _ => None,
+        };
+        if let Some(name) = &fallback {
+            settings.output = None;
+            if self.fallback.as_deref() != Some(name) {
+                self.warn(format!("{name} is not connected; playing through the default output"));
+            }
+        }
+        self.fallback = fallback;
+        let mut t = Transport::open(program, &settings)?;
         t.control.set_loop(self.loop_frames())?;
         t.control.set_metronome(self.metronome)?;
         self.transport = Some(t);
         self.publish_clock();
         Ok(())
+    }
+
+    /// Closes the output and opens it again for `program`, at the same beat
+    /// and still playing if it was: another rate or another device.
+    fn reopen(&mut self, program: Arc<Program>) -> Result<()> {
+        let old = self.transport.take().expect("transport");
+        let (playing, frame, old_program) = (old.control.playing(), old.control.position(), old.control.program().clone());
+        drop(old);
+        let beats = BigRational::from_float(frame as f64 * old_program.tempo / 60.0 / old_program.rate as f64).unwrap_or_default();
+        self.open_transport(program)?;
+        if playing {
+            let f = self.frame(&beats);
+            self.transport.as_mut().expect("transport").control.play(f)?;
+        }
+        self.publish_clock();
+        let region = self.loop_frames();
+        self.transport.as_mut().expect("transport").control.set_loop(region)
+    }
+
+    /// The device the chosen output means now: the chosen one when it is
+    /// connected, else the system's default.
+    fn output_now(&self) -> Option<String> {
+        match self.chosen_output() {
+            Some(name) => match aaw_engine::devices::output_name(&name) {
+                Ok(Some(full)) => Some(full),
+                _ => aaw_engine::devices::default_output_name(),
+            },
+            None => aaw_engine::devices::default_output_name(),
+        }
+    }
+
+    /// Follows the Mac's devices: when the default changes, or the chosen
+    /// output comes or goes, the song moves to the device that is now meant
+    /// without a break in the beat, as every Mac app follows the default.
+    fn follow_devices(&mut self) {
+        let generation = aaw_engine::devices::generation();
+        let Some(t) = &self.transport else {
+            self.devices_seen = generation;
+            return;
+        };
+        // A stream the driver stopped, as when its device changed rate under
+        // it or went away, is opened again on the device now meant.
+        let dead = t.dead() && self.revived_at.is_none_or(|at| at.elapsed() > Duration::from_secs(1));
+        if generation == self.devices_seen && !dead {
+            return;
+        }
+        self.devices_seen = generation;
+        let now = self.output_now();
+        if !dead && (now.is_none() || now.as_deref() == Some(t.device.as_str())) {
+            return;
+        }
+        if dead {
+            self.revived_at = Some(Instant::now());
+            self.warn(format!("{} stopped the stream; opening the output again", t.device));
+        }
+        if let Some(program) = self.program.as_ref().map(|(_, p)| p.clone()) {
+            if let Err(e) = self.reopen(program) {
+                self.playback_error = Some(e.clone());
+                self.warn(format!("the output could not be opened again: {e}"));
+            }
+        }
     }
 
     /// Points the clock at the open output and its program's tempo.
@@ -371,16 +517,7 @@ impl Host {
             t.control.load(p)?;
         } else {
             // Another sample rate needs another stream, at the same beat.
-            let old = self.transport.take().expect("transport");
-            let (playing, frame, old_program) = (old.control.playing(), old.control.position(), old.control.program().clone());
-            drop(old);
-            let beats =
-                BigRational::from_float(frame as f64 * old_program.tempo / 60.0 / old_program.rate as f64).unwrap_or_default();
-            self.open_transport(p)?;
-            if playing {
-                let f = self.frame(&beats);
-                self.transport.as_mut().expect("transport").control.play(f)?;
-            }
+            return self.reopen(p);
         }
         self.publish_clock();
         let region = self.loop_frames();
@@ -571,6 +708,35 @@ impl Host {
                 }
                 Ok(self.status())
             }
+            Command::Audio { output, input, buffer } => {
+                let named = |d: &Option<String>| d.clone().filter(|n| !n.trim().is_empty() && n.trim() != "default");
+                let mut audio = self.audio.clone();
+                if output.is_some() {
+                    audio.output = named(output);
+                }
+                if input.is_some() {
+                    audio.input = named(input);
+                }
+                if let Some(b) = buffer {
+                    if !(16..=8192).contains(b) {
+                        return Err("buffer is 16 to 8192 frames".into());
+                    }
+                    audio.buffer = *b;
+                }
+                if let (Some(name), true) = (&audio.output, audio.strict_output) {
+                    if aaw_engine::devices::find_output(name)?.is_none() {
+                        return Err(format!("No audio output device named {name}; daw device list names them"));
+                    }
+                }
+                let changed = audio != self.audio;
+                self.audio = audio;
+                if changed && self.transport.is_some() {
+                    if let Some(program) = self.program.as_ref().map(|(_, p)| p.clone()) {
+                        self.reopen(program)?;
+                    }
+                }
+                Ok(self.status())
+            }
             Command::NotePreview { track, pitch, velocity, length_beats, replace } => {
                 self.preview(track, pitch, *velocity, length_beats.as_ref(), replace.unwrap_or(false))
             }
@@ -621,6 +787,7 @@ impl Host {
             None => (false, self.frame(&self.cue), s.tempo, s.sample_rate as f64),
         };
         m.insert("playing".into(), json!(playing));
+        m.insert("sample_rate".into(), json!(s.sample_rate));
         m.insert("metronome".into(), json!(self.metronome));
         m.insert(
             "position".into(),
@@ -645,6 +812,8 @@ impl Host {
                     json!({
                         "device": r["device"],
                         "sample_rate": r["sample_rate"],
+                        "device_sample_rate": r["device_sample_rate"],
+                        "resampled": r["resampled"],
                         "buffer_frames": r["buffer_frames"],
                         "output_latency_frames": r["output_latency_frames"],
                         "budget_ms": r["budget_ms"],
@@ -656,6 +825,15 @@ impl Host {
                 }
                 None => Json::Null,
             },
+        );
+        m.insert(
+            "devices".into(),
+            json!({
+                "output": self.chosen_output().unwrap_or_else(|| "default".into()),
+                "input": self.audio.input.clone().unwrap_or_else(|| "default".into()),
+                "buffer_frames": self.audio.buffer,
+                "fallback": self.fallback,
+            }),
         );
         if let Some((_, p)) = &self.program {
             m.insert("latency_frames".into(), json!(p.latency));
@@ -883,6 +1061,7 @@ impl Host {
     /// Housekeeping between requests. True when the host should exit.
     fn tick(&mut self) -> bool {
         self.save_due();
+        self.follow_devices();
         if let Some(t) = &mut self.transport {
             t.control.collect();
             let played = t.control.shared().played.load(Relaxed);
@@ -954,6 +1133,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
     let (listener, claim) = registry::claim(&entry)?;
     let session = Session::open(project, true)?;
     let (tx, rx) = mpsc::channel::<(Request, mpsc::Sender<Json>)>();
+    let opts_audio = opts.audio.clone();
     let mut host = Host {
         session,
         canonical: entry.project.clone(),
@@ -968,6 +1148,10 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         cache: Cache::with_taps(taps),
         program: None,
         transport: None,
+        audio: opts_audio,
+        fallback: None,
+        devices_seen: aaw_engine::devices::generation(),
+        revived_at: None,
         metronome: false,
         cue: BigRational::zero(),
         region: None,

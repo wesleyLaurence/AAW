@@ -359,7 +359,7 @@ public final class SongModel {
     /// load or another host has it open.
     public init(url: URL) throws {
         let relay = Relay()
-        song = try Song.open(path: url.path, observer: relay)
+        song = try Song.open(path: url.path, observer: relay, audio: AudioPreferences.shared.settings)
         self.url = url
         untitled = song.isUntitled()
         browser = Browser(library: libraryPath(song: url.path))
@@ -1695,6 +1695,27 @@ public final class SongModel {
         let bar = arrangement.barBeats
         let start = (cue / bar).rounded(.down) * bar
         return LoopRegion(start: start, length: min(bar, arrangement.lengthBeats - start))
+    }
+
+    /// Gives the host the devices and the buffer chosen in Settings › Audio;
+    /// an open output is opened again at the same beat.
+    func applyAudio(_ settings: AudioSettings) {
+        send { try $0.setAudio(audio: settings) }
+    }
+
+    /// What the host plays through now, for Settings › Audio.
+    func audioStatus(_ done: @escaping @MainActor (AudioStatus?) -> Void) {
+        commands.async { [song] in
+            let status = try? song.audioStatus()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { done(status) }
+            }
+        }
+    }
+
+    /// Sets the song's sample rate from Settings › Audio: an edit, undoable.
+    func setSampleRate(_ rate: UInt32) {
+        if rate != arrangement.sampleRate { edit(.sampleRate(rate: rate)) }
     }
 
     private func send(_ command: @escaping @Sendable (Song) throws -> Void) {
