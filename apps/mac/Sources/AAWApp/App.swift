@@ -726,6 +726,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Group Tracks", #selector(SongWindowController.groupSelection(_:)), "g"),
             item("Ungroup", #selector(SongWindowController.ungroupSelection(_:)), "G"),
             .separator(),
+            item("Freeze Track", #selector(SongWindowController.freezeSelection(_:)), "F"),
+            .separator(),
             item("Rename", #selector(SongWindowController.renameSelection(_:)), "r"),
         ])
         // The count-in Record leads with, kept across launches.
@@ -1107,6 +1109,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func addReturn(_ sender: Any?) { model.addReturn() }
     @objc func groupSelection(_ sender: Any?) { model.groupSelection() }
     @objc func ungroupSelection(_ sender: Any?) { model.ungroupSelection() }
+    @objc func freezeSelection(_ sender: Any?) { model.freezeSelection() }
     @objc func renameSelection(_ sender: Any?) { model.renameSelection() }
 
     /// "Undo" with the step it would undo, and whose it is when not the
@@ -1182,6 +1185,9 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(renameSelection(_:)): return model.canRename && !typing
         case #selector(groupSelection(_:)): return model.canGroup && !typing
         case #selector(ungroupSelection(_:)): return model.canUngroup && !typing
+        case #selector(freezeSelection(_:)):
+            item.title = model.selectedTrackFrozen == true ? "Unfreeze Track" : "Freeze Track"
+            return model.selectedTrackFrozen != nil && !typing
         case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
         case #selector(exportMIDIClip(_:)): return model.exportableClip != nil && !typing
         case #selector(exportAudio(_:)): return model.exporting == nil && !typing

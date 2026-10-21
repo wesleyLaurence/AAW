@@ -15,6 +15,8 @@ public enum ContextMenu {
         /// Where a track records from, chosen in the Input submenu: a device
         /// and its channels, a track, a group, the mix, or nothing.
         case input(InputChoice?)
+        /// Freeze Track on a track, Unfreeze Track on a frozen one.
+        case freeze
     }
 
     /// One choice of an audio track's Input submenu.
@@ -100,9 +102,10 @@ public enum ContextMenu {
     /// and Delete. The master has no name of its own, no mute mark and cannot
     /// go; a return has no solo. A track offers Group Tracks, or Remove from
     /// Group when it is in one (`grouped`); a group offers Ungroup, and
-    /// Remove from Group when it is in a group.
+    /// Remove from Group when it is in a group. A track offers Freeze Track,
+    /// or Unfreeze Track while it is frozen (`frozen`).
     public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false,
-                           inputs: [Item<RowAction>]? = nil) -> [Item<RowAction>] {
+                           inputs: [Item<RowAction>]? = nil, frozen: Bool = false) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
             items.append(Item(title: "Rename", action: .rename, key: "r"))
@@ -115,6 +118,9 @@ public enum ContextMenu {
         // An audio track's input, as a submenu; a MIDI track records no audio.
         if kind == .track, let inputs {
             items.append(Item(title: "Input", action: .input(nil), children: inputs))
+        }
+        if kind == .track {
+            items.append(Item(title: frozen ? "Unfreeze Track" : "Freeze Track", action: .freeze, key: "F"))
         }
         items.append(Item(title: automationShown ? "Hide Automation" : "Show Automation", action: .automation))
         items.append(.separator)

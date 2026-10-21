@@ -600,6 +600,22 @@
       "title": "Filter",
       "type": "object"
     },
+    "Frozen": {
+      "additionalProperties": false,
+      "description": "A track frozen to audio: the file its instrument, effects and their automation were rendered to, stereo 32-bit float at the song's rate, which plays in their place before the fader. What was rendered is kept in the song and plays again when the track is unfrozen. What keyed its sidechains from other tracks is as it was at the freeze.",
+      "properties": {
+        "path": {
+          "description": "The file, relative to the project: frozen/TRACK.wav.",
+          "title": "Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "Frozen",
+      "type": "object"
+    },
     "Group": {
       "additionalProperties": false,
       "description": "A group: the tracks and groups that name it summed through its own chain, gain and pan, then to its own group or the master and to the returns it sends to, as a drum bus.",
@@ -1143,6 +1159,19 @@
           "default": null,
           "description": "The group the track's output goes into instead of the master sum, one of groups[]; its tracks are next to each other.",
           "title": "Group"
+        },
+        "frozen": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Frozen"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The track frozen to audio by daw track freeze: its instrument, effects and their lanes rendered to a file that plays in their place before the fader, until daw track unfreeze; null while it plays its own content. Frozen, its clips, devices and the tempo cannot change; the fader, pan, mute, solo and sends can.",
+          "title": "Frozen"
         },
         "instrument": {
           "anyOf": [
@@ -2563,6 +2592,19 @@
           "default": null,
           "description": "Where the track records from: an input device's channels, or a track, a group or the mix to resample; null records nothing.",
           "title": "Input"
+        },
+        "frozen": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Frozen"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The track frozen to audio by daw track freeze: its instrument, effects and their lanes rendered to a file that plays in their place before the fader, until daw track unfreeze; null while it plays its own content. Frozen, its clips, devices and the tempo cannot change; the fader, pan, mute, solo and sends can.",
+          "title": "Frozen"
         },
         "pads": {
           "additionalProperties": {

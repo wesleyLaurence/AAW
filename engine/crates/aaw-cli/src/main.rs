@@ -468,6 +468,10 @@ enum TrackCmd {
     /// Rename a track and the sidechains that name it.
     Rename { project: Song, track: String, to: String },
     Move { project: Song, track: String, index: usize },
+    /// Freeze a track: its instrument, effects and their lanes rendered before its fader to frozen/TRACK.wav, which plays in their place; its clips, devices and the tempo cannot change until it is unfrozen; its fader, pan, mute, solo and sends can. A frozen track is rendered again.
+    Freeze { project: Song, track: String },
+    /// Unfreeze a track: its instrument and effects play again. The file is left.
+    Unfreeze { project: Song, track: String },
 }
 
 /// Returns.
@@ -1897,6 +1901,8 @@ fn run(cli: &Cli) -> Result<Json> {
                     index: *index,
                 },
             ),
+            TrackCmd::Freeze { project, track } => edit(project, C::TrackFreeze { track: track.clone() }),
+            TrackCmd::Unfreeze { project, track } => edit(project, C::TrackUnfreeze { track: track.clone() }),
         },
         Top::Return(r) => match r {
             ReturnCmd::Add { project, id, f } => {

@@ -3,6 +3,7 @@
 pub mod audition;
 pub mod capture;
 pub mod devices;
+pub mod freeze;
 pub mod measure;
 pub mod offline;
 pub mod peaks;

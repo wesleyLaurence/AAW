@@ -88,6 +88,7 @@ Proposed, in the order of Next in the backlog:
 | [a song with no end to hit](features/song-length.md) | Next; proposed |
 | [audio settings](features/audio-settings.md) | Built |
 | [recording audio](features/recording.md) | Built |
+| [freezing a track](features/freezing.md) | Built |
 | [a rack as a device, and an instrument rack](features/rack-devices.md) | Next; proposed |
 | [devices anyone builds, to a spec](features/custom-devices.md) | Next; proposed as a direction |
 

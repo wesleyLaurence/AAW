@@ -13,11 +13,16 @@ final class ContextMenuTests: XCTestCase {
     func testATracksMenuHasRenameTheSettingsTheAddsAndDelete() {
         let items = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false)
         XCTAssertEqual(actions(items), [
-            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .group, nil, .delete,
+            .rename, nil, .mute, .solo, .freeze, .automation, nil, .addTrack, .addMIDITrack, nil, .group, nil, .delete,
         ])
         XCTAssertEqual(titles(items), [
-            "Rename", "Mute", "Solo", "Show Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
+            "Rename", "Mute", "Solo", "Freeze Track", "Show Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
         ])
+        // A frozen track offers to unfreeze; the Track menu's key is beside it.
+        let frozen = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, frozen: true)
+        XCTAssertEqual(frozen.first { $0.action == .freeze }?.title, "Unfreeze Track")
+        XCTAssertEqual(frozen.first { $0.action == .freeze }?.key, "F")
+        XCTAssertNil(ContextMenu.row(kind: .group, muted: false, soloed: false, automationShown: false).first { $0.action == .freeze })
         XCTAssertEqual(items.first { $0.action == .group }?.key, "g")
         XCTAssertTrue(items.allSatisfy(\.enabled))
         // The keys the main menu has for the same things, shown beside them.
@@ -51,7 +56,7 @@ final class ContextMenuTests: XCTestCase {
         // The submenu sits after Solo in a track's menu.
         let items = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, inputs: inputs)
         XCTAssertEqual(titles(items), [
-            "Rename", "Mute", "Solo", "Input", "Show Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
+            "Rename", "Mute", "Solo", "Input", "Freeze Track", "Show Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
         ])
         XCTAssertEqual(items.first { $0.title == "Input" }?.children, inputs)
         XCTAssertNil(ContextMenu.row(kind: .group, muted: false, soloed: false, automationShown: false, inputs: inputs).first { $0.title == "Input" })
@@ -61,14 +66,14 @@ final class ContextMenuTests: XCTestCase {
     func testTheTitlesFollowWhatTheRowIsSetTo() {
         let items = ContextMenu.row(kind: .track, muted: true, soloed: true, automationShown: true)
         XCTAssertEqual(titles(items), [
-            "Rename", "Unmute", "Unsolo", "Hide Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
+            "Rename", "Unmute", "Unsolo", "Freeze Track", "Hide Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
         ])
     }
 
     func testAGroupedTrackLeavesItsGroupAndAGroupUngroups() {
         let grouped = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, grouped: true)
         XCTAssertEqual(actions(grouped), [
-            .rename, nil, .mute, .solo, .automation, nil, .addTrack, .addMIDITrack, nil, .leaveGroup, nil, .delete,
+            .rename, nil, .mute, .solo, .freeze, .automation, nil, .addTrack, .addMIDITrack, nil, .leaveGroup, nil, .delete,
         ])
         XCTAssertEqual(grouped.first { $0.action == .leaveGroup }?.title, "Remove from Group")
         let group = ContextMenu.row(kind: .group, muted: false, soloed: true, automationShown: false)

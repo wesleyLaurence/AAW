@@ -543,6 +543,9 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
     let mut sampler = Sampler::new(p, directory, cache);
     'tracks: for &ti in tracks {
         let t = &p.tracks[ti];
+        if t.frozen.is_some() {
+            continue;
+        }
         for tr in track_triggers(p, ti) {
             let Ok(job) = sampler.job(&t.sound_pads()[&tr.pad], &tr.event) else { break 'tracks };
             if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
@@ -773,6 +776,39 @@ impl<'a> Sampler<'a> {
         Ok(prepared)
     }
 
+    /// The one voice of a frozen track: its file as it is, stereo at the
+    /// song's rate, from frame 0 at full level, read here and kept with the
+    /// track's voices while the file is as it was.
+    fn frozen_voice(&mut self, path: &str, track: &str) -> Result<Voice, String> {
+        let full = self.directory.join(path);
+        let audio = sndfile::read(&full).map_err(|e| format!("{track}: frozen file {path}: {e}"))?;
+        if !(audio.channels == 1 || audio.channels == 2) || audio.frames() == 0 || !audio.data.iter().all(|x| x.is_finite()) {
+            return Err(format!("{track}: frozen file {path}: expected finite mono/stereo audio"));
+        }
+        let rate = self.project.session.sample_rate;
+        if audio.rate as i64 != rate {
+            return Err(format!(
+                "{track}: the frozen file is at {} Hz and the song at {rate}; unfreeze the track and freeze it again",
+                audio.rate
+            ));
+        }
+        let audio = Arc::new(Prepared {
+            channels: audio.channels,
+            data: audio.data,
+        });
+        Ok(Voice {
+            start: 0,
+            pan: [1.0, 1.0],
+            gain: 1.0,
+            velocity: 1.0,
+            attack: 0,
+            release: 0,
+            length: audio.frames(),
+            audio,
+            curve: FadeCurve::Linear,
+        })
+    }
+
     /// `Sampler.voice`: the voice a trigger plays.
     pub fn voice(&mut self, pad: &Pad, tr: &Trigger) -> Result<Voice, String> {
         let audio = self.prepare(pad, &tr.event)?;
@@ -837,6 +873,10 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
     use std::fmt::Write;
     let t = &p.tracks[ti];
     let session = &p.session;
+    // A frozen track's voices are its file, whatever else it holds.
+    if let Some(z) = &t.frozen {
+        return format!("frozen|{}|{:?}|{}", z.path, stamp(&directory.join(&z.path)).ok(), session.sample_rate);
+    }
     if t.midi.as_ref().is_some_and(|m| m.synth().is_some()) {
         return "synth".to_string();
     }
@@ -893,10 +933,15 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
     }
     let mut sampler = Sampler::new(p, directory, cache);
     let mut voices = Vec::new();
-    for tr in track_triggers(p, ti) {
-        voices.push(sampler.voice(&t.sound_pads()[&tr.pad], &tr)?);
+    // A frozen track's one voice is its file; its own content waits.
+    if let Some(z) = &t.frozen {
+        voices.push(sampler.frozen_voice(&z.path, &t.id)?);
+    } else {
+        for tr in track_triggers(p, ti) {
+            voices.push(sampler.voice(&t.sound_pads()[&tr.pad], &tr)?);
+        }
     }
-    if !t.audio.is_empty() {
+    if !t.audio.is_empty() && t.frozen.is_none() {
         let audio = played_audio(p, t);
         for clip in &audio {
             voices.push(sampler.clip_voice(&audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
@@ -1170,7 +1215,11 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         let voices = voices(p, index[t.id.as_str()], key, directory, cache)?;
         let mut lanes = Lanes::new(Owner::Track(t), &t.automation, p);
         let mut synth = None;
-        if let Some((midi, spec)) = t.midi.as_ref().and_then(|m| m.synth().map(|s| (m, s))) {
+        // A frozen track plays its file: no synth, no inserts, and no lanes
+        // on them; its fader, pan and sends are live.
+        let frozen = t.frozen.is_some();
+        let effects: &[Effect] = if frozen { &[] } else { &t.effects };
+        if let Some((midi, spec)) = t.midi.as_ref().and_then(|m| m.synth().map(|s| (m, s))).filter(|_| !frozen) {
             // Each wavetable oscillator's table: built in, or a sample's cycle.
             let mut tables = HashMap::new();
             for (id, o) in &spec.oscillators {
@@ -1193,7 +1242,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         // the patch chain's.
         let patch_latency = synth.as_ref().map_or(0, |s| s.chain.latency);
         let mut effect_lanes = std::mem::take(&mut lanes.effects);
-        let mut chain = chain(&t.effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some(&t.id), patch_latency);
+        let mut chain = chain(effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some(&t.id), patch_latency);
         // The track waits for the slowest of its keys.
         let delay = chain
             .devices

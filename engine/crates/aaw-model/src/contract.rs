@@ -404,7 +404,7 @@ const ABOUT: &[(&str, &str)] = &[
 fn home(model: &str) -> &'static str {
     match model {
         "Pad" | "Sample" | "Event" => "sampler",
-        "Input" => "project",
+        "Input" | "Frozen" => "project",
         "AudioClip" => "edit",
         "MidiTrack" | "NoteClip" | "Note" | "Instrument" | "Sampler" | "NoteMap" => "midi",
         "Synth" | "Oscillator" | "SynthFilter" | "SynthEnvelope" | "Lfo" | "Modulation" => "synth",
@@ -626,7 +626,7 @@ fn fields(topic: &str) -> Option<Json> {
     Some(match topic {
         "project" => listing(
             &[("", "Project")],
-            &["Session", "Sample", "Pattern", "Event", "Track", "Input", "Clip", "Section", "Marker", "Master", "Group", "Return", "Send"],
+            &["Session", "Sample", "Pattern", "Event", "Track", "Input", "Frozen", "Clip", "Section", "Marker", "Master", "Group", "Return", "Send"],
         ),
         "sampler" => listing(
             &[("samples.ID", "Sample"), ("tracks[].pads.ID", "Pad"), ("patterns.ID.events[]", "Event")],

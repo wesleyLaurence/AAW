@@ -1653,6 +1653,24 @@ public final class SongModel {
         edit(.trackInput(track: key, input: choice))
     }
 
+    /// Freezes a track, or unfreezes a frozen one: Freeze Track in the
+    /// header's menu and the Track menu.
+    func toggleFreeze(track key: UInt64) {
+        guard let track = arrangement.tracks.first(where: { $0.key == key }) else { return }
+        edit(track.frozen ? .trackUnfreeze(track: key) : .trackFreeze(track: key))
+    }
+
+    /// The selected track, for Freeze Track: whether it is frozen, or nil
+    /// when the selected row is not a track.
+    var selectedTrackFrozen: Bool? {
+        guard case .track(let key) = selectedRow else { return nil }
+        return arrangement.tracks.first { $0.key == key }?.frozen
+    }
+
+    public func freezeSelection() {
+        if case .track(let key) = selectedRow { toggleFreeze(track: key) }
+    }
+
     /// The Input submenu of a track: the Mac's input devices as Settings ›
     /// Audio lists them, the chosen one first, and the song's other tracks,
     /// its groups and the mix.

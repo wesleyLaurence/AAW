@@ -253,6 +253,70 @@ impl Session {
         Ok(())
     }
 
+    /// Refuses an edit of what a frozen track's file was rendered from, or
+    /// of the tempo, the rate or the stretcher while any track is frozen:
+    /// the file would no longer be the track. A track frozen or added
+    /// frozen by this edit is matched to none and passes; one renamed
+    /// keeps its file and is matched by it.
+    fn check_frozen(&self, new: &Project) -> Result<()> {
+        let old = &self.doc.project;
+        let frozen: Vec<&aaw_model::Track> = new.tracks.iter().filter(|t| t.frozen.is_some()).collect();
+        if frozen.is_empty() {
+            return Ok(());
+        }
+        for t in &frozen {
+            let Some(o) = old.tracks.iter().find(|o| o.frozen == t.frozen) else { continue };
+            if !aaw_model::value::py_eq(&old.frozen_content(o), &new.frozen_content(t)) {
+                return Err(format!(
+                    "{} is frozen: daw track unfreeze {} before changing its clips, pads, instrument, effects or their automation",
+                    t.id, t.id
+                ));
+            }
+        }
+        let (a, b) = (&old.session, &new.session);
+        if a.tempo != b.tempo || a.sample_rate != b.sample_rate || a.stretcher != b.stretcher {
+            let names: Vec<&str> = frozen.iter().map(|t| t.id.as_str()).collect();
+            return Err(format!(
+                "{} {} frozen: unfreeze before changing the tempo, the sample rate or the stretcher",
+                names.join(", "),
+                if names.len() == 1 { "is" } else { "are" }
+            ));
+        }
+        Ok(())
+    }
+
+    /// Renders a track frozen: its file written under `frozen/`, and the
+    /// `set` of its field. The track's content stays as it is.
+    fn freeze(&self, track: &str) -> Result<Command> {
+        let p = &self.doc.project;
+        if p.track(track).is_none() {
+            return Err(format!("No track {track}; daw inspect lists them"));
+        }
+        let frames = aaw_engine::freeze::freeze_track(p, &self.dir, track, 4096)?;
+        let relative = format!("frozen/{track}.wav");
+        let path = self.dir.join(&relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+        }
+        let bytes = aaw_engine::wav::float_wav_bytes(&frames, p.session.sample_rate as u32);
+        aaw_engine::wav::write_atomic(&path, &bytes)?;
+        Ok(Command::Set {
+            path: format!("tracks.{track}.frozen"),
+            value: json!({"path": relative}),
+        })
+    }
+
+    /// The `remove` of a frozen track's field; the file is left where it is.
+    fn unfreeze(&self, track: &str) -> Result<Command> {
+        match self.doc.project.track(track) {
+            None => Err(format!("No track {track}; daw inspect lists them")),
+            Some(t) if t.frozen.is_none() => Err(format!("{track} is not frozen")),
+            Some(_) => Ok(Command::Remove {
+                path: format!("tracks.{track}.frozen"),
+            }),
+        }
+    }
+
     fn record(&mut self, origin: Origin, op: &str, outcome: Outcome, command: Json, gesture: Option<&str>) -> Change {
         self.revision += 1;
         let change = Change {
@@ -362,7 +426,20 @@ impl Session {
             _ => {
                 let mut root = self.doc.tree();
                 let mut next = self.next;
-                let outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).run(cmd)?;
+                // A freeze renders the track's file, then is its field set; an
+                // unfreeze is the field removed.
+                let (effective, label) = match cmd {
+                    Command::TrackFreeze { track } => (self.freeze(track)?, Some(format!("Freeze {track}"))),
+                    Command::TrackUnfreeze { track } => (self.unfreeze(track)?, Some(format!("Unfreeze {track}"))),
+                    other => (other.clone(), None),
+                };
+                let mut outcome = Edit::new(&mut root, self.hosted, &mut next).by(origin).run(&effective)?;
+                if let Some(label) = label {
+                    outcome = Outcome {
+                        label,
+                        ..Outcome::default()
+                    };
+                }
                 let value = root.value();
                 let mut project = Project::validate(&value).map_err(|e| aaw_model::hint::explain(&value, &e))?;
                 self.settle(&mut project);
@@ -372,6 +449,7 @@ impl Session {
             }
         };
         self.verify_changed(&project)?;
+        self.check_frozen(&project)?;
         if outcome.report.contains_key("length_beats") {
             // A range command reports the song's length: as settled.
             outcome.report.insert("length_beats".into(), value_json(&project.session.length_beats.to_value()));

@@ -257,6 +257,15 @@ struct DeviceView: View {
         let keys = chain.effects.map(\.key)
         return ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: 8) {
+                if let track = chain.track, track.frozen {
+                    // The devices are rendered to the track's file; the host
+                    // refuses a change to them until the track is unfrozen.
+                    Text("\(track.id) is frozen: its devices are rendered to a file that plays in their place. Unfreeze the track to change them.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 220, alignment: .leading)
+                        .padding(.top, 4)
+                }
                 if let track = chain.track, track.midi {
                     InstrumentPanel(model: model, track: track)
                 }

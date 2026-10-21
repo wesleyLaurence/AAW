@@ -47,6 +47,8 @@ enum Theme {
     static let loop = rgb(0xc9ced6)
     static let mute = rgb(0xf2b134)
     static let solo = rgb(0x4aa8ff)
+    /// A frozen track's clips: iced, since its file plays in their place.
+    static let frozen = rgb(0x8fb8d8)
     /// A track's arm while it is armed, and Record while a take runs.
     static let record = rgb(0xe8503a)
     static let section = rgb(0x4c525d)

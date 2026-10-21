@@ -647,6 +647,9 @@ impl Host {
         if track.midi.is_some() {
             return Err(format!("{id} is a MIDI track, which records no audio"));
         }
+        if track.frozen.is_some() {
+            return Err(format!("{id} is frozen: daw track unfreeze {id} before recording into it"));
+        }
         track
             .input
             .clone()
@@ -885,6 +888,9 @@ impl Host {
         }
         let session = &self.session.project().session;
         let t = self.session.project().track(track).ok_or_else(|| format!("Unknown track: {track}"))?;
+        if t.frozen.is_some() {
+            return Err(format!("{track} is frozen: daw track unfreeze {track} before playing its instrument"));
+        }
         let midi = t.midi.as_ref();
         let synth = midi.and_then(|m| m.synth()).is_some();
         if !synth && midi.and_then(|m| m.sampler()).is_none() {
