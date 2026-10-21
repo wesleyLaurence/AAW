@@ -16,6 +16,22 @@ use num_traits::{Signed, ToPrimitive, Zero};
 use serde_json::{json, Value as Json};
 use std::path::Path;
 
+/// Where a track records from, as the song's `tracks[].input` has it and
+/// the header's Input menu offers it.
+#[derive(Clone, Debug, PartialEq, uniffi::Enum)]
+pub enum InputChoice {
+    /// An input device by part of its name, or None for the one chosen in
+    /// Settings › Audio, and its channels counted from 1: one for a mono
+    /// take, two for a stereo one.
+    Device { name: Option<String>, channels: Vec<u32> },
+    /// Another track's sound after its fader.
+    Track { key: u64 },
+    /// A group's sound after its chain and fader.
+    Group { key: u64 },
+    /// The mix after the master's effects.
+    Master,
+}
+
 /// A row of the arrangement.
 #[derive(Clone, Debug, PartialEq, uniffi::Enum)]
 pub enum Row {
@@ -95,6 +111,9 @@ pub enum Edit {
     TrackGroup { track: u64, group: Option<u64> },
     /// Puts a group in a group, or with none takes it out of its group.
     GroupParent { group: u64, parent: Option<u64> },
+    /// Where a track records from, or with none nothing: an audio track's
+    /// `input`, set from the header's Input menu.
+    TrackInput { track: u64, input: Option<InputChoice> },
     /// Moves clips later by `by` beats and down by `rows` tracks: pattern
     /// clips and audio clips alike. The song grows to hold an audio clip
     /// that would end past its end, here and in the edits below.
@@ -976,6 +995,29 @@ fn with_grabbed(notes: &[u64], grabbed: u64) -> Vec<u64> {
 
 /// The ID of the track at `key`, for a command that names tracks by ID,
 /// such as `note.preview`.
+/// The key of the track with `id`, while it is in the song.
+pub fn track_key(doc: &Doc, id: &str) -> Option<u64> {
+    let tree = doc.tree();
+    let place = doc.project.tracks.iter().position(|t| t.id == id)?;
+    items(&tree, "tracks").get(place).map(|i| i.handle)
+}
+
+/// An input's value in a few words, for a change's label.
+fn input_words(value: &Json) -> String {
+    if let Some(device) = value["device"].as_str() {
+        let channels: Vec<String> = value["channels"].as_array().into_iter().flatten().filter_map(Json::as_u64).map(|c| c.to_string()).collect();
+        let device = if device == "default" { "the input device" } else { device };
+        return format!("{device} channel{} {}", if channels.len() > 1 { "s" } else { "" }, channels.join("+"));
+    }
+    if let Some(track) = value["track"].as_str() {
+        return format!("track {track}");
+    }
+    if let Some(group) = value["group"].as_str() {
+        return format!("group {group}");
+    }
+    "the mix".into()
+}
+
 pub fn track_id(doc: &Doc, key: u64) -> Result<String> {
     let tree = doc.tree();
     let place = items(&tree, "tracks").iter().position(|i| i.handle == key).ok_or("The track is no longer in the song")?;
@@ -1121,6 +1163,23 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 }
                 None => Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Take {track_name} out of its group"))),
             }
+        }
+        Edit::TrackInput { track, input } => {
+            let tree = doc.tree();
+            let name = |list: &str, key: u64| items(&tree, list).iter().find(|i| i.handle == key).and_then(|i| i.node.field("id").map(str::to_string));
+            let track_name = name("tracks", *track).ok_or("The track is no longer in the song")?;
+            let path = format!("tracks.{}.input", handle_text(*track));
+            let value = match input {
+                None => return Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Record nothing on {track_name}"))),
+                Some(InputChoice::Device { name: device, channels }) => json!({
+                    "device": device.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "default".into()),
+                    "channels": if channels.is_empty() { vec![1] } else { channels.clone() },
+                }),
+                Some(InputChoice::Track { key }) => json!({"track": name("tracks", *key).ok_or("The track is no longer in the song")?}),
+                Some(InputChoice::Group { key }) => json!({"group": name("groups", *key).ok_or("The group is no longer in the song")?}),
+                Some(InputChoice::Master) => json!({"master": true}),
+            };
+            Ok(batch(vec![json!({"op": "set", "path": path, "value": value})], format!("Record {track_name} from {}", input_words(&value))))
         }
         Edit::GroupParent { group, parent } => {
             let tree = doc.tree();

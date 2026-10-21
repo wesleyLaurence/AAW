@@ -618,6 +618,27 @@ pub enum Command {
     /// Monitoring only; never an edit of the song.
     #[serde(rename = "metronome")]
     Metronome { enabled: bool },
+    /// Arms a track to record from its `input` when recording starts, or
+    /// disarms it. Host state, as the loop is: not saved, never an edit.
+    #[serde(rename = "arm")]
+    Arm { track: String, armed: bool },
+    /// Arms the tracks named, if any, and records every armed track: the
+    /// metronome counts `count_in` bars in from the start position (1
+    /// unless given, 0 for none), then the song plays and each take is
+    /// taken from the track's input, a device or the song's own sound, until
+    /// `record.stop`, `stop` or the end of the loop. The end makes one edit:
+    /// the takes as samples and audio clips from the start position.
+    #[serde(rename = "record.start")]
+    RecordStart {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tracks: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        count_in: Option<u32>,
+    },
+    /// Ends the recording, the song playing on, and adds the takes to the
+    /// song as one undoable edit.
+    #[serde(rename = "record.stop")]
+    RecordStop,
     /// The devices the host plays and records through and its buffer, each
     /// kept as it is when left out: `output` and `input` part of a device's
     /// name, ignoring case, or `default` for the system's; `buffer` in
@@ -741,6 +762,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } | Audio { .. } => Kind::Transport,
+            Arm { .. } | RecordStart { .. } | RecordStop => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,

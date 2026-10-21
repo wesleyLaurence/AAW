@@ -43,7 +43,8 @@ const PROJECT: &[(&str, &str)] = &[
     ("audio", "tracks[].audio lists audio clips: parts of a sample file placed on the track's timeline, for edits of finished songs; see daw describe edit."),
     ("stretch", "pad.source_bpm is the tempo of the pad's sample; the pad then follows session.tempo. An audio clip has the same two fields. pad.stretch says how: repitch (default) plays it faster or slower and its pitch moves; preserve_pitch stretches it in time at its own pitch, and transpose and event.note still repitch. Stretching happens when the pad's audio is prepared, not while it plays. session.stretcher is signalsmith (built in) or rubberband (the installed rubberband program). check warns past about 8%."),
     ("synth", "A MIDI track's instrument may be the Synth, {synth: {...}}, a polyphonic synthesizer whose whole sound is that mapping; see daw describe synth."),
-    ("limits", "No groups or recording."),
+    ("recording", "tracks[].input is where an audio track records from: {device: NAME, channels: [1]} an input device by part of its name, ignoring case, or default for the input chosen in the audio settings, which {} means too, with one channel for a mono take or two for a stereo one, counted from 1; {track: ID}, {group: ID} or {master: true} the song's own sound, the track after its fader, the group after its chain and fader, or the mix after the master's effects, which is resampling, the same frames the stem has. daw set PROJECT tracks.T.input '{\"device\": \"Scarlett\", \"channels\": [1]}' sets it and daw remove PROJECT tracks.T.input takes it off; a MIDI track has none. While a host runs, daw record arm PROJECT TRACK arms a track with an input (--off disarms), daw record start PROJECT [TRACK...] [--count-in BARS] arms the tracks named and starts: the metronome counts BARS bars in (1 unless given, 0 for none) from the start position, then the song plays and every armed track records, and daw record stop PROJECT, daw stop or the end of the loop ends the take and makes one undoable edit: a 32-bit float WAV under samples/, named for the track and the take, added to samples and an audio clip of it on the track from the start position, pulled earlier by the devices' reported latency. Recording and the arm are host state, not saved. daw record capture --input NAME --seconds N FILE records an input to a file with no song, for a quick capture."),
+    ("limits", "No input monitoring through the track's chain while recording, no punch in and out, no take lanes."),
 ];
 
 const SYNTH: &[(&str, &str)] = &[
@@ -403,6 +404,7 @@ const ABOUT: &[(&str, &str)] = &[
 fn home(model: &str) -> &'static str {
     match model {
         "Pad" | "Sample" | "Event" => "sampler",
+        "Input" => "project",
         "AudioClip" => "edit",
         "MidiTrack" | "NoteClip" | "Note" | "Instrument" | "Sampler" | "NoteMap" => "midi",
         "Synth" | "Oscillator" | "SynthFilter" | "SynthEnvelope" | "Lfo" | "Modulation" => "synth",
@@ -624,7 +626,7 @@ fn fields(topic: &str) -> Option<Json> {
     Some(match topic {
         "project" => listing(
             &[("", "Project")],
-            &["Session", "Sample", "Pattern", "Event", "Track", "Clip", "Section", "Marker", "Master", "Group", "Return", "Send"],
+            &["Session", "Sample", "Pattern", "Event", "Track", "Input", "Clip", "Section", "Marker", "Master", "Group", "Return", "Send"],
         ),
         "sampler" => listing(
             &[("samples.ID", "Sample"), ("tracks[].pads.ID", "Pad"), ("patterns.ID.events[]", "Event")],

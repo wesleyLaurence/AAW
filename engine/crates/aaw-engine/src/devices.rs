@@ -104,6 +104,119 @@ pub fn find_output(name: &str) -> Result<Option<cpal::Device>, String> {
         .find(|d| name_of(d).is_some_and(|n| n.to_lowercase().contains(&wanted))))
 }
 
+/// The input device whose name contains `name`, ignoring case: the first
+/// listed.
+pub fn find_input(name: &str) -> Result<Option<cpal::Device>, String> {
+    let wanted = name.trim().to_lowercase();
+    if wanted.is_empty() {
+        return Ok(None);
+    }
+    let host = cpal::default_host();
+    Ok(host
+        .input_devices()
+        .map_err(|e| e.to_string())?
+        .find(|d| name_of(d).is_some_and(|n| n.to_lowercase().contains(&wanted))))
+}
+
+/// The full name of the input device whose name contains `name`.
+pub fn input_name(name: &str) -> Result<Option<String>, String> {
+    Ok(find_input(name)?.and_then(|d| name_of(&d)))
+}
+
+/// The name of the system's default input device.
+pub fn default_input_name() -> Option<String> {
+    cpal::default_host().default_input_device().and_then(|d| name_of(&d))
+}
+
+/// The latency the Mac reports for the device named `name` in full, on its
+/// input or its output side, in the device's own frames: the device's
+/// latency, its safety offset and its first stream's latency, which is what
+/// a frame takes between the converter and the callback's timestamp. None
+/// when the Mac does not say, or off macOS.
+pub fn latency_frames(name: &str, input: bool) -> Option<u32> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_core_audio::{
+            kAudioDevicePropertyLatency, kAudioDevicePropertySafetyOffset, kAudioDevicePropertyStreams, kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyElementMain, kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
+            kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject, kAudioStreamPropertyLatency, AudioObjectGetPropertyData,
+            AudioObjectGetPropertyDataSize, AudioObjectID, AudioObjectPropertyAddress, AudioObjectPropertyScope,
+            AudioObjectPropertySelector,
+        };
+        use objc2_core_foundation::CFString;
+        use std::ptr::NonNull;
+
+        fn address(selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope) -> AudioObjectPropertyAddress {
+            AudioObjectPropertyAddress {
+                mSelector: selector,
+                mScope: scope,
+                mElement: kAudioObjectPropertyElementMain,
+            }
+        }
+        /// A property that is a list of object IDs.
+        fn ids(object: AudioObjectID, selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope) -> Vec<AudioObjectID> {
+            let address = address(selector, scope);
+            let mut size: u32 = 0;
+            // SAFETY: the address and size are valid for the call.
+            let status = unsafe { AudioObjectGetPropertyDataSize(object, NonNull::from(&address), 0, std::ptr::null(), NonNull::from(&mut size)) };
+            if status != 0 || size == 0 {
+                return Vec::new();
+            }
+            let mut out = vec![0 as AudioObjectID; size as usize / std::mem::size_of::<AudioObjectID>()];
+            // SAFETY: `out` holds `size` bytes.
+            let status = unsafe {
+                AudioObjectGetPropertyData(object, NonNull::from(&address), 0, std::ptr::null(), NonNull::from(&mut size), NonNull::new(out.as_mut_ptr().cast()).expect("vec"))
+            };
+            if status != 0 {
+                return Vec::new();
+            }
+            out
+        }
+        fn u32_of(object: AudioObjectID, selector: AudioObjectPropertySelector, scope: AudioObjectPropertyScope) -> Option<u32> {
+            let address = address(selector, scope);
+            let mut value: u32 = 0;
+            let mut size = std::mem::size_of::<u32>() as u32;
+            // SAFETY: `value` holds `size` bytes.
+            let status = unsafe {
+                AudioObjectGetPropertyData(object, NonNull::from(&address), 0, std::ptr::null(), NonNull::from(&mut size), NonNull::from(&mut value).cast())
+            };
+            (status == 0).then_some(value)
+        }
+        fn name_of_id(object: AudioObjectID) -> Option<String> {
+            let address = address(kAudioObjectPropertyName, kAudioObjectPropertyScopeGlobal);
+            let mut string: *const CFString = std::ptr::null();
+            let mut size = std::mem::size_of::<*const CFString>() as u32;
+            // SAFETY: `string` holds a CFStringRef, which the caller owns after the call.
+            let status = unsafe {
+                AudioObjectGetPropertyData(object, NonNull::from(&address), 0, std::ptr::null(), NonNull::from(&mut size), NonNull::from(&mut string).cast())
+            };
+            if status != 0 || string.is_null() {
+                return None;
+            }
+            // SAFETY: a valid CFStringRef the call handed over.
+            let owned = unsafe { objc2_core_foundation::CFRetained::from_raw(NonNull::new(string.cast_mut())?) };
+            Some(owned.to_string())
+        }
+
+        let scope = if input { kAudioObjectPropertyScopeInput } else { kAudioObjectPropertyScopeOutput };
+        let device = ids(kAudioObjectSystemObject as AudioObjectID, kAudioHardwarePropertyDevices, kAudioObjectPropertyScopeGlobal)
+            .into_iter()
+            .find(|id| name_of_id(*id).as_deref() == Some(name))?;
+        let device_latency = u32_of(device, kAudioDevicePropertyLatency, scope)?;
+        let safety = u32_of(device, kAudioDevicePropertySafetyOffset, scope).unwrap_or(0);
+        let stream = ids(device, kAudioDevicePropertyStreams, scope)
+            .first()
+            .and_then(|s| u32_of(*s, kAudioStreamPropertyLatency, kAudioObjectPropertyScopeGlobal))
+            .unwrap_or(0);
+        Some(device_latency + safety + stream)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (name, input);
+        None
+    }
+}
+
 /// The full name of the output device whose name contains `name`.
 pub fn output_name(name: &str) -> Result<Option<String>, String> {
     Ok(find_output(name)?.and_then(|d| name_of(&d)))

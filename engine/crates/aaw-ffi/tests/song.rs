@@ -193,7 +193,7 @@ fn the_arrangement_is_what_the_app_draws() {
 #[test]
 fn each_change_names_what_it_touched() {
     let (_dir, path, song, seen) = open();
-    assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 0.0, loop_region: None });
+    assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 0.0, loop_region: None, recording: false, armed: vec![] });
     let start = song.arrangement();
     let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
     let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
@@ -279,7 +279,7 @@ fn the_app_and_the_agent_share_the_transport() {
     let (_dir, path, song, seen) = open();
     assert_eq!(transport(&seen).cue, 0.0);
     song.locate(12.0).unwrap();
-    assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 12.0, loop_region: None });
+    assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 12.0, loop_region: None, recording: false, armed: vec![] });
     song.set_loop(8.0, 8.0).unwrap();
     assert_eq!(transport(&seen).loop_region.map(|l| (l.start, l.length)), Some((8.0, 8.0)));
     // The agent's transport commands show in the app.
@@ -3258,4 +3258,64 @@ fn a_group_of_groups_is_a_row_over_their_rows() {
     assert_eq!(u.arrangement.groups.len(), 2);
     assert!(u.arrangement.groups.iter().all(|g| g.group.is_none()));
     assert!(u.arrangement.tracks.iter().all(|t| t.group.is_some()));
+}
+
+#[test]
+fn a_tracks_input_is_set_from_the_header_and_the_arm_is_shared_transport_state() {
+    use aaw_ffi::edits::InputChoice;
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    let a = song.arrangement();
+    let (drums, bass) = (a.tracks[0].key, a.tracks[1].key);
+    let (drums_id, bass_id) = (a.tracks[0].id.clone(), a.tracks[1].id.clone());
+    assert!(a.tracks[0].input.is_none() && a.tracks[0].input_label.is_none());
+    // Nothing is armed without an input.
+    let e = song.arm(drums, true).unwrap_err();
+    assert!(e.to_string().contains("has no input"), "{e}");
+    song.edit(Edit::TrackInput { track: drums, input: Some(InputChoice::Track { key: bass }) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[0].input, Some(InputChoice::Track { key: bass }));
+    assert_eq!(u.arrangement.tracks[0].input_label.as_deref(), Some(format!("track {bass_id}").as_str()));
+    assert_eq!(u.change.label, format!("Record {drums_id} from track {bass_id}"));
+    let original = std::fs::read(&path).unwrap();
+    let revision = song.arrangement().revision;
+    song.arm(drums, true).unwrap();
+    let t = transport(&seen);
+    assert_eq!((t.armed, t.recording), (vec![drums], false));
+    assert_eq!(agent(&path, json!({"op": "status"}))["armed"], json!([drums_id]));
+    // The arm is the host's: no revision, no change to the file.
+    assert_eq!(song.arrangement().revision, revision);
+    assert_eq!(std::fs::read(&path).unwrap(), original);
+    song.edit(
+        Edit::TrackInput {
+            track: bass,
+            input: Some(InputChoice::Device { name: None, channels: vec![1, 2] }),
+        },
+        None,
+    )
+    .unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[1].input, Some(InputChoice::Device { name: None, channels: vec![1, 2] }));
+    assert_eq!(u.arrangement.tracks[1].input_label.as_deref(), Some("the input device channels 1+2"));
+    assert_eq!(u.change.label, format!("Record {bass_id} from the input device channels 1+2"));
+    song.edit(
+        Edit::TrackInput {
+            track: bass,
+            input: Some(InputChoice::Device { name: Some("Scarlett".into()), channels: vec![1] }),
+        },
+        None,
+    )
+    .unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[1].input_label.as_deref(), Some("Scarlett channel 1"));
+    song.edit(Edit::TrackInput { track: drums, input: None }, None).unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.tracks[0].input.is_none());
+    assert_eq!(u.change.label, format!("Record nothing on {drums_id}"));
+    song.arm(drums, false).unwrap();
+    assert_eq!(transport(&seen).armed, Vec::<u64>::new());
+    // Nothing armed: Record is refused before any output opens.
+    assert!(song.start_recording(1).unwrap_err().to_string().contains("No track is armed"));
+    assert!(song.stop_recording().unwrap_err().to_string().contains("Nothing is recording"));
+    song.close();
 }

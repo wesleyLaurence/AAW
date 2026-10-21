@@ -34,6 +34,8 @@ fn flow_mapping(keys: &[&str]) -> bool {
         || has("shape")
         || (has("to") && keys.iter().all(|k| ["to", "gain_db", "pre_fader"].contains(k)))
         || (has("at") && has("value"))
+        // A track's input: a device and its channels, or a source.
+        || (!keys.is_empty() && keys.iter().all(|k| ["device", "channels", "track", "group", "master"].contains(k)))
 }
 
 fn scalar(tag: &'static str, value: String) -> Event {

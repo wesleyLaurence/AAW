@@ -26,6 +26,38 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(items.first { $0.action == .delete }?.command, false)
     }
 
+    /// An audio track's menu has an Input submenu: No Input, each input
+    /// device mono and stereo where it has two channels, the song's other
+    /// tracks, its groups and the master, the choice in force checked; a
+    /// group's menu has none, and a track given no submenu, a MIDI track,
+    /// has none either.
+    func testATracksInputSubmenuOffersDevicesTracksGroupsAndTheMaster() {
+        let devices: [(name: String?, channels: UInt16)] = [(nil, 2), ("MacBook Pro Microphone", 1), ("Scarlett 2i2", 2)]
+        let tracks: [(key: UInt64, name: String)] = [(7, "bass")]
+        let groups: [(key: UInt64, name: String)] = [(9, "drums")]
+        let inputs = ContextMenu.inputs(current: .track(key: 7), devices: devices, tracks: tracks, groups: groups)
+        XCTAssertEqual(titles(inputs), [
+            "No Input", "Input Device · 1", "Input Device · 1+2", "MacBook Pro Microphone", "Scarlett 2i2 · 1", "Scarlett 2i2 · 1+2",
+            "Track bass", "Group drums", "Master",
+        ])
+        XCTAssertEqual(actions(inputs).compactMap { $0 }, [
+            .input(nil), .input(.device(name: nil, channels: [1])), .input(.device(name: nil, channels: [1, 2])),
+            .input(.device(name: "MacBook Pro Microphone", channels: [1])),
+            .input(.device(name: "Scarlett 2i2", channels: [1])), .input(.device(name: "Scarlett 2i2", channels: [1, 2])),
+            .input(.track(key: 7)), .input(.group(key: 9)), .input(.master),
+        ])
+        XCTAssertEqual(inputs.filter(\.checked).map(\.title), ["Track bass"])
+        XCTAssertEqual(ContextMenu.inputs(current: nil, devices: [], tracks: [], groups: []).filter(\.checked).map(\.title), ["No Input"])
+        // The submenu sits after Solo in a track's menu.
+        let items = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, inputs: inputs)
+        XCTAssertEqual(titles(items), [
+            "Rename", "Mute", "Solo", "Input", "Show Automation", "Add Track", "Add MIDI Track", "Group Tracks", "Delete",
+        ])
+        XCTAssertEqual(items.first { $0.title == "Input" }?.children, inputs)
+        XCTAssertNil(ContextMenu.row(kind: .group, muted: false, soloed: false, automationShown: false, inputs: inputs).first { $0.title == "Input" })
+        XCTAssertNil(ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false).first { $0.title == "Input" })
+    }
+
     func testTheTitlesFollowWhatTheRowIsSetTo() {
         let items = ContextMenu.row(kind: .track, muted: true, soloed: true, automationShown: true)
         XCTAssertEqual(titles(items), [

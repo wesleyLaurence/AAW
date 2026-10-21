@@ -37,6 +37,8 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // Where an audio track records from.
+        vec![added("input", Value::None)],
         // A group's own group. A track has the key too, and clips, so only
         // a group's is dropped: a song without nesting keeps its hash.
         vec![Added { key: "group", default: Value::None, beside: None, unless: Some("clips") }],

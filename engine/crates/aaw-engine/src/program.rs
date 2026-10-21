@@ -329,6 +329,25 @@ impl Program {
         self.fader(f) * amplitude(self.master.gain.at(f as i64))
     }
 
+    /// The place of a track's or a group's stem among the stems, as
+    /// `Renderer::process` numbers them; None for one that is not heard, a
+    /// muted track or one another's solo silences. Allocates nothing.
+    pub fn stem_index(&self, kind: StemKind, id: &str) -> Option<usize> {
+        let mut tracks = self.tracks.iter().filter(|t| t.in_mix);
+        let mut groups = self.groups.iter().filter(|g| g.in_mix);
+        match kind {
+            StemKind::Track => tracks.position(|t| t.id == id),
+            StemKind::Group => {
+                let n = tracks.count();
+                groups.position(|g| g.id == id).map(|i| n + i)
+            }
+            StemKind::Return => {
+                let n = tracks.count() + groups.count();
+                self.returns.iter().position(|r| r.id == id).map(|i| n + i)
+            }
+        }
+    }
+
     /// Where each stem is: tracks in render order, then groups in theirs,
     /// then returns. The name, and what it is of.
     pub fn stems(&self) -> Vec<(&str, StemKind)> {

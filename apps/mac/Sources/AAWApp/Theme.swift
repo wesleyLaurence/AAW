@@ -47,6 +47,8 @@ enum Theme {
     static let loop = rgb(0xc9ced6)
     static let mute = rgb(0xf2b134)
     static let solo = rgb(0x4aa8ff)
+    /// A track's arm while it is armed, and Record while a take runs.
+    static let record = rgb(0xe8503a)
     static let section = rgb(0x4c525d)
     /// A marker's flag in the ruler and its line down the lanes.
     static let marker = rgb(0xe6d25c)

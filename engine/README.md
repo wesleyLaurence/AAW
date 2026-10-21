@@ -11,8 +11,8 @@ reads songs through `aaw-py`.
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule and what each track plays, the schema `daw describe` prints, the warnings `daw check` gives |
 | `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the twelve effects, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
-| `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, waveform peaks |
-| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket; a project as a folder, made, moved and copied |
+| `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, input capture and taps for recording, waveform peaks |
+| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket, recording; a project as a folder, made, moved and copied |
 | `aaw-cli` | The `daw` binary |
 | `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, markers, devices, lanes, patterns, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
 | `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module, with the meter's loudness of saved audio |
@@ -203,6 +203,26 @@ song's rate when it offers it, and else at its own rate with the song
 resampled to it; one that offers neither in stereo is refused with its name. The host follows the Mac's
 default as it changes and reports `devices` and `audio` in `daw status`
 ([audio settings](../docs/features/audio-settings.md)).
+
+A host records too ([recording](../docs/features/recording.md)). An audio
+track's `input` names an input device's channels or the song's own sound, a
+track, a group or the mix; `arm` arms such a track, host state like the loop;
+`record.start` arms the tracks named and takes one of every armed track after
+a count-in of so many bars, the player's pre-roll, in which the song stands at
+the start position while the metronome clicks the bars before it whatever its
+toggle; `record.stop`, `stop`, a locate, the loop's end, the song's end, a
+change of devices or the host closing ends the take. An input device is
+opened by its own stream (`aaw-engine`'s `capture`), each block headed by
+the instant it was captured, and the output callback publishes an anchor,
+the instant its block plays against the timeline frame heard then, by which
+the host lays the take on the timeline, pulled earlier by the devices'
+reported latency; a stem or the mix is tapped in the player, each block
+headed by its timeline frame, so a resample equals the render's stem. The
+take is cut to its span, written as `samples/TRACK-take-N.wav` and added to
+the song with its audio clip in one batch by the person, which one undo
+takes back; the reply's `recorded` says what landed. `daw record arm`,
+`daw record start`, `daw record stop` and, with no song, `daw record capture`
+are the terminal's way, and `daw status` reports `armed` and `recording`.
 
 - **Commands** validate the whole resulting song before they apply and carry an
   origin, `agent` by default or `--origin user`. `--expect SHA` refuses an edit
@@ -407,6 +427,10 @@ sine's pitch and level, the envelope, a glide, stealing and a take-over.
 `crates/aaw-host/tests/patches.rs` renders every factory patch under full
 scale and holds a patch saved from one song and loaded into another to the
 same audition byte for byte.
+`crates/aaw-engine/tests/recording.rs` holds a tapped stem and the mix to the
+render frame for frame, the count-in's clicks and anchor, and, through
+BlackHole where the Mac has it, a burst played at beat 2 coming back through
+the input within a millisecond of its beat.
 `crates/aaw-host/tests` cover every command, handles, undo, batches, gestures,
 the selection, markers with what plays at each and through the range edits,
 the news of them in an agent's edit, external edits, concurrent clients, an embedded host, a project
@@ -416,7 +440,9 @@ real-time stress run: random edits compiled and
 swapped in while a thread renders 128-frame blocks on schedule under allocation
 checking. `tests/test_host.py` checks `inspect` and command results against
 the model as Python reads it, and drives a `daw host` process from outside,
-including a sample import that reaches the song through the host.
+including a sample import that reaches the song through the host, and, through
+BlackHole, a track recording another's stem frame for frame and a take
+through the device landing on its beat after a count-in.
 `tests/test_projects.py` does the same for a folder as PROJECT, `daw projects`,
 `daw move` and `daw copy`.
 `crates/aaw-ffi/tests` open a song as the app does and check the arrangement,

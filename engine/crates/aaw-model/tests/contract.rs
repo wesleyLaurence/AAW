@@ -18,6 +18,7 @@ samples: {s: {path: s.wav}}
 patterns: {p: {length_beats: 4, events: [{at: 0, pad: a}]}}
 tracks:
   - id: t
+    input: {}
     pads: {a: {sample: s}}
     clips: [{pattern: p}]
     audio: [{sample: s}]

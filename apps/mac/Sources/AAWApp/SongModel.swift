@@ -149,7 +149,7 @@ public final class SongModel {
     /// which `daw` commands still reach it.
     private(set) var formerURLs: [URL] = []
     public private(set) var arrangement: Arrangement
-    public private(set) var transport = TransportView(metronome: false, playing: false, cue: 0, loopRegion: nil)
+    public private(set) var transport = TransportView(metronome: false, playing: false, cue: 0, loopRegion: nil, recording: false, armed: [])
     /// Recent changes, newest first.
     public private(set) var activity: [ChangeInfo] = []
     /// Why song.yaml does not load after an edit outside the host.
@@ -1616,6 +1616,57 @@ public final class SongModel {
     public func toggleMetronome() {
         let enabled = !transport.metronome
         send { try $0.setMetronome(enabled: enabled) }
+    }
+
+    // MARK: Recording
+
+    /// Whether the track is armed to record.
+    func isArmed(track key: UInt64) -> Bool {
+        transport.armed.contains(key)
+    }
+
+    /// Arms a track with an input to record, or disarms it: the host's
+    /// state, as the loop is. The host refuses a track with no input.
+    public func arm(track key: UInt64, on: Bool) {
+        send { try $0.arm(track: key, on: on) }
+    }
+
+    /// Whether Record would record something: a track is armed.
+    var canRecord: Bool { !transport.armed.isEmpty }
+
+    /// Records the armed tracks after the chosen count-in, or ends the take
+    /// while one runs, the song playing on: the transport bar's Record and R.
+    public func toggleRecord() {
+        if transport.recording {
+            send { try $0.stopRecording() }
+        } else if canRecord {
+            let countIn = RecordPreferences.shared.countIn
+            send { try $0.startRecording(countIn: countIn) }
+        } else {
+            refuse("No track is armed. The dot before a track's M arms it, once its header's menu has given it an input.")
+        }
+    }
+
+    /// Sets where a track records from, or with nil nothing: the song's
+    /// `tracks[].input`, an edit.
+    func setInput(track key: UInt64, _ choice: InputChoice?) {
+        edit(.trackInput(track: key, input: choice))
+    }
+
+    /// The Input submenu of a track: the Mac's input devices as Settings ›
+    /// Audio lists them, the chosen one first, and the song's other tracks,
+    /// its groups and the mix.
+    func inputMenu(track key: UInt64) -> [ContextMenu.Item<ContextMenu.RowAction>] {
+        let preferences = AudioPreferences.shared
+        preferences.refreshDevices()
+        var devices: [(name: String?, channels: UInt16)] = []
+        let chosen = preferences.inputs.first { $0.name == preferences.input }
+        devices.append((name: nil, channels: chosen?.inputChannels ?? preferences.inputs.first { $0.defaultInput }?.inputChannels ?? 2))
+        devices += preferences.inputs.map { (name: Optional($0.name), channels: $0.inputChannels) }
+        let tracks = arrangement.tracks.filter { $0.key != key }.map { (key: $0.key, name: $0.id) }
+        let groups = arrangement.groups.map { (key: $0.key, name: $0.id) }
+        let current = arrangement.tracks.first { $0.key == key }?.input
+        return ContextMenu.inputs(current: current, devices: devices, tracks: tracks, groups: groups)
     }
 
     public func togglePlay() {

@@ -311,6 +311,19 @@ struct TransportBar: View {
             }
             .help(playing ? "Stop (Space)" : "Play from the start position (Space)")
 
+            // Record: red while a take runs, dim while nothing is armed.
+            let recording = model.transport.recording
+            Button {
+                model.toggleRecord()
+            } label: {
+                Image(systemName: recording ? "record.circle.fill" : "record.circle")
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(recording ? Color(nsColor: Theme.record) : model.canRecord ? Color.primary : Color.secondary)
+            }
+            .accessibilityLabel("Record")
+            .accessibilityValue(recording ? "Recording" : model.canRecord ? "Armed" : "Nothing armed")
+            .help(RecordWords.record(recording: recording, armed: model.transport.armed.count, countIn: RecordPreferences.shared.countIn))
+
             Button {
                 model.toggleLoop()
             } label: {

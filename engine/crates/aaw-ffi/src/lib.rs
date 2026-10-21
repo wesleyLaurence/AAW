@@ -137,6 +137,10 @@ pub struct TransportView {
     /// Where play starts.
     pub cue: f64,
     pub loop_region: Option<LoopRegion>,
+    /// Whether the armed tracks are recording, the count-in included.
+    pub recording: bool,
+    /// The tracks armed to record, by key.
+    pub armed: Vec<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -416,12 +420,20 @@ impl Song {
                     waveforms.compiled(revision, &program, doc, &known, &folder(&locked(&now)));
                 }
             }
-            Event::Transport(t) => observer.transport(TransportView {
-                metronome: t.metronome,
-                playing: t.playing,
-                cue: t.cue,
-                loop_region: t.region.map(|(start, length)| LoopRegion { start, length }),
-            }),
+            Event::Transport(t) => {
+                let armed = match locked(&current).as_ref() {
+                    Some(doc) => t.armed.iter().filter_map(|id| edits::track_key(doc, id)).collect(),
+                    None => Vec::new(),
+                };
+                observer.transport(TransportView {
+                    metronome: t.metronome,
+                    playing: t.playing,
+                    cue: t.cue,
+                    loop_region: t.region.map(|(start, length)| LoopRegion { start, length }),
+                    recording: t.recording,
+                    armed,
+                })
+            }
             Event::Invalid(error) => observer.invalid(error),
             Event::Moved(path) => {
                 *locked(&now) = path.clone();
@@ -681,6 +693,28 @@ impl Song {
     /// Toggles the playback monitor click without editing the song.
     pub fn set_metronome(&self, enabled: bool) -> Result<(), SongError> {
         self.transport(json!({"op": "metronome", "enabled": enabled}))
+    }
+
+    /// Arms the track at `track` to record from its input, or disarms it:
+    /// host state, as the loop is. Refused for a track with no input.
+    pub fn arm(&self, track: u64, on: bool) -> Result<(), SongError> {
+        let id = {
+            let doc = locked(&self.doc);
+            edits::track_id(doc.as_ref().ok_or_else(closed)?, track)?
+        };
+        self.transport(json!({"op": "arm", "track": id, "armed": on}))
+    }
+
+    /// Records every armed track from the start position after a count-in
+    /// of `count_in` bars, 0 for none: the transport bar's Record.
+    pub fn start_recording(&self, count_in: u32) -> Result<(), SongError> {
+        self.transport(json!({"op": "record.start", "count_in": count_in}))
+    }
+
+    /// Ends the recording, the song playing on; the takes land on their
+    /// tracks as one edit by the person.
+    pub fn stop_recording(&self) -> Result<(), SongError> {
+        self.transport(json!({"op": "record.stop"}))
     }
 
     /// Changes the devices and the buffer the host plays through; an open

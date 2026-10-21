@@ -42,6 +42,7 @@ dependencies = [
  "num-rational",
  "num-traits",
  "objc2-core-audio",
+ "objc2-core-foundation",
  "realfft",
  "rtrb",
  "sha2",
@@ -68,6 +69,7 @@ dependencies = [
 name = "aaw-host"
 version = "0.1.0"
 dependencies = [
+ "aaw-dsp",
  "aaw-engine",
  "aaw-model",
  "assert_no_alloc",

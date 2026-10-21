@@ -239,6 +239,10 @@ pub struct TrackView {
     /// The key of the group the track is in, if any. A group's tracks are
     /// next to each other among the tracks.
     pub group: Option<u64>,
+    /// Where the track records from, if anywhere.
+    pub input: Option<crate::edits::InputChoice>,
+    /// The input in a few words, for the header.
+    pub input_label: Option<String>,
 }
 
 /// A group: the tracks and groups that name it summed through its own
@@ -1358,6 +1362,20 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     })
                     .collect(),
                 group: t.group.as_deref().and_then(|g| p.groups.iter().position(|x| x.id == g)).map(|i| handle(items(&tree, "groups"), i)),
+                input: t.input.as_ref().map(|input| match input {
+                    aaw_model::Input::Device { device, channels } => crate::edits::InputChoice::Device {
+                        name: (device != "default").then(|| device.clone()),
+                        channels: channels.iter().map(|c| *c as u32).collect(),
+                    },
+                    aaw_model::Input::Track(id) => crate::edits::InputChoice::Track {
+                        key: p.tracks.iter().position(|x| &x.id == id).map_or(0, |i| handle(track_items, i)),
+                    },
+                    aaw_model::Input::Group(id) => crate::edits::InputChoice::Group {
+                        key: p.groups.iter().position(|x| &x.id == id).map_or(0, |i| handle(items(&tree, "groups"), i)),
+                    },
+                    aaw_model::Input::Master => crate::edits::InputChoice::Master,
+                }),
+                input_label: t.input.as_ref().map(aaw_model::Input::label),
             }
         })
         .collect();

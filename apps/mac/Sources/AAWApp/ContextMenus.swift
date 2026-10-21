@@ -1,3 +1,4 @@
+import AAWCore
 import Foundation
 
 /// What a right click, or a click with Control held, offers on a header or a
@@ -11,6 +12,20 @@ public enum ContextMenu {
         /// Group Tracks on a track, Ungroup on a group, and Remove from Group
         /// on a track in one.
         case group, ungroup, leaveGroup
+        /// Where a track records from, chosen in the Input submenu: a device
+        /// and its channels, a track, a group, the mix, or nothing.
+        case input(InputChoice?)
+    }
+
+    /// One choice of an audio track's Input submenu.
+    public struct InputOption: Equatable {
+        public var title: String
+        public var choice: InputChoice?
+
+        public init(title: String, choice: InputChoice?) {
+            self.title = title
+            self.choice = choice
+        }
     }
 
     /// What an item of a clip's menu does, to the selected clips.
@@ -38,8 +53,47 @@ public enum ContextMenu {
         /// The key the main menu has for the same thing, shown beside it.
         public var key = ""
         public var command = true
+        /// Shown with a check mark: the choice in force.
+        public var checked = false
+        /// A submenu's items, on an item that opens one instead of acting.
+        public var children: [Item<Action>]? = nil
 
         public static var separator: Item { Item(title: "", action: nil) }
+    }
+
+    /// The Input submenu of an audio track: No Input, each input device
+    /// mono and, where it has two channels, stereo, and the song's other
+    /// tracks, its groups and the mix to resample; the choice in force
+    /// checked. `devices` are the Mac's input devices with their channel
+    /// counts, the chosen one of Settings › Audio first as "the input
+    /// device"; `tracks` and `groups` the song's other rows by key and name.
+    public static func inputs(current: InputChoice?, devices: [(name: String?, channels: UInt16)],
+                              tracks: [(key: UInt64, name: String)], groups: [(key: UInt64, name: String)]) -> [Item<RowAction>] {
+        var items: [Item<RowAction>] = [Item(title: "No Input", action: .input(nil), checked: current == nil)]
+        items.append(.separator)
+        for device in devices {
+            let shown = device.name ?? "Input Device"
+            let mono = InputChoice.device(name: device.name, channels: [1])
+            items.append(Item(title: device.channels > 1 ? "\(shown) · 1" : shown, action: .input(mono), checked: current == mono))
+            if device.channels > 1 {
+                let stereo = InputChoice.device(name: device.name, channels: [1, 2])
+                items.append(Item(title: "\(shown) · 1+2", action: .input(stereo), checked: current == stereo))
+            }
+        }
+        if !tracks.isEmpty || !groups.isEmpty {
+            items.append(.separator)
+        }
+        for track in tracks {
+            let choice = InputChoice.track(key: track.key)
+            items.append(Item(title: "Track \(track.name)", action: .input(choice), checked: current == choice))
+        }
+        for group in groups {
+            let choice = InputChoice.group(key: group.key)
+            items.append(Item(title: "Group \(group.name)", action: .input(choice), checked: current == choice))
+        }
+        items.append(.separator)
+        items.append(Item(title: "Master", action: .input(.master), checked: current == .master))
+        return items
     }
 
     /// A header's menu: Rename, what a row is set to, a row added after it,
@@ -47,7 +101,8 @@ public enum ContextMenu {
     /// go; a return has no solo. A track offers Group Tracks, or Remove from
     /// Group when it is in one (`grouped`); a group offers Ungroup, and
     /// Remove from Group when it is in a group.
-    public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false) -> [Item<RowAction>] {
+    public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false,
+                           inputs: [Item<RowAction>]? = nil) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
             items.append(Item(title: "Rename", action: .rename, key: "r"))
@@ -56,6 +111,10 @@ public enum ContextMenu {
         }
         if kind == .track || kind == .group {
             items.append(Item(title: soloed ? "Unsolo" : "Solo", action: .solo))
+        }
+        // An audio track's input, as a submenu; a MIDI track records no audio.
+        if kind == .track, let inputs {
+            items.append(Item(title: "Input", action: .input(nil), children: inputs))
         }
         items.append(Item(title: automationShown ? "Hide Automation" : "Show Automation", action: .automation))
         items.append(.separator)

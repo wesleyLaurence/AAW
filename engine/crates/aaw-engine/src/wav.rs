@@ -20,8 +20,19 @@ fn chunk(name: &[u8; 4], payload: &[u8]) -> Vec<u8> {
 
 /// The file for stereo frames already converted to float32, as `astype("<f4")`.
 pub fn float_wav_bytes(frames: &[[f32; 2]], rate: u32) -> Vec<u8> {
-    let channels: u16 = 2;
-    let size = frames.len() as u32 * channels as u32 * 4;
+    let mut data = Vec::with_capacity(frames.len() * 2);
+    for f in frames {
+        data.extend_from_slice(f);
+    }
+    float_wav_interleaved(&data, 2, rate)
+}
+
+/// The same file for `channels` channels of interleaved float32 samples: a
+/// recorded take's, mono or stereo.
+pub fn float_wav_interleaved(data: &[f32], channels: u16, rate: u32) -> Vec<u8> {
+    let channels = channels.max(1);
+    let frames = data.len() / channels as usize;
+    let size = frames as u32 * channels as u32 * 4;
     let mut fmt = Vec::new();
     fmt.extend_from_slice(&3u16.to_le_bytes());
     fmt.extend_from_slice(&channels.to_le_bytes());
@@ -30,7 +41,7 @@ pub fn float_wav_bytes(frames: &[[f32; 2]], rate: u32) -> Vec<u8> {
     fmt.extend_from_slice(&(channels * 4).to_le_bytes());
     fmt.extend_from_slice(&32u16.to_le_bytes());
     let mut header = chunk(b"fmt ", &fmt);
-    header.extend(chunk(b"fact", &(frames.len() as u32).to_le_bytes()));
+    header.extend(chunk(b"fact", &(frames as u32).to_le_bytes()));
     header.extend(chunk(b"PAD ", &vec![0u8; 8 + 8 * channels as usize]));
     let mut out = Vec::with_capacity(12 + header.len() + 8 + size as usize);
     out.extend_from_slice(b"RIFF");
@@ -39,9 +50,8 @@ pub fn float_wav_bytes(frames: &[[f32; 2]], rate: u32) -> Vec<u8> {
     out.extend(header);
     out.extend_from_slice(b"data");
     out.extend_from_slice(&size.to_le_bytes());
-    for f in frames {
-        out.extend_from_slice(&f[0].to_le_bytes());
-        out.extend_from_slice(&f[1].to_le_bytes());
+    for x in &data[..frames * channels as usize] {
+        out.extend_from_slice(&x.to_le_bytes());
     }
     out
 }

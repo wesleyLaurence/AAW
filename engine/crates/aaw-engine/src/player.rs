@@ -17,9 +17,10 @@
 //! stop, and rests once its output has been silent for a second.
 //! `Player::render` never allocates, frees, locks or blocks.
 
+use crate::capture::{ChunkTime, Tap, TapSource};
 use crate::program::{Program, Voice};
 use crate::render::{Frame, Renderer};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering::{Acquire, Relaxed, Release}};
 use std::sync::Arc;
 
 pub use crate::render::FADE_SECONDS;
@@ -44,9 +45,15 @@ impl Deck {
     }
 }
 
+/// The most taps a player holds at once, one for each track recording the
+/// song's own sound.
+pub const MAX_TAPS: usize = 8;
+
 pub enum Message {
     Program(Box<Deck>),
-    Play(usize),
+    /// Play from a frame, after `preroll` frames of the metronome alone
+    /// with the song standing at that frame: a count-in.
+    Play { from: usize, preroll: usize },
     Stop,
     Metronome(bool),
     Locate(usize),
@@ -70,12 +77,18 @@ pub enum Message {
     /// Lets go the notes previewed through a track, each through its
     /// release, with nothing played in their place.
     LetGoPreviews { track: usize },
+    /// Records a stem or the mix into the tap's feed while the transport
+    /// rolls. Beyond `MAX_TAPS` the tap is handed straight back.
+    Tap(Box<Tap>),
+    /// Takes every tap out, each handed back to the host.
+    Untap,
 }
 
 /// What the audio thread hands back to the host to be freed.
 pub enum Garbage {
     Deck(Box<Deck>),
     Voice(Voice),
+    Tap(Box<Tap>),
 }
 
 enum Fade {
@@ -104,11 +117,57 @@ pub struct Shared {
     /// Decks and preview voices that could not be returned because the queue
     /// was full. They are leaked rather than freed on the audio thread.
     pub leaked: AtomicU64,
+    /// How many times playback has jumped back to the loop's start.
+    pub wraps: AtomicU64,
+    /// The anchor: the instant, in nanoseconds of the audio clock, at which
+    /// the first frame of the last block rendered plays, and the timeline
+    /// frame that plays then, a count-in's frames before the start counted
+    /// negative from it. Written under `anchor_seq`, odd while it changes.
+    anchor_seq: AtomicU64,
+    anchor_ns: AtomicU64,
+    anchor_frame: AtomicI64,
+}
+
+impl Shared {
+    fn publish_anchor(&self, ns: u64, frame: i64) {
+        let seq = self.anchor_seq.load(Relaxed);
+        self.anchor_seq.store(seq + 1, Release);
+        self.anchor_ns.store(ns, Relaxed);
+        self.anchor_frame.store(frame, Relaxed);
+        self.anchor_seq.store(seq + 2, Release);
+    }
+
+    /// The anchor as last published, `(ns, frame)`: None before the output
+    /// has rendered a timed block. A recording maps an input block captured
+    /// at `t` to timeline frame `frame + (t - ns) * rate`.
+    pub fn anchor(&self) -> Option<(u64, i64)> {
+        for _ in 0..1000 {
+            let before = self.anchor_seq.load(Acquire);
+            if before == 0 {
+                return None;
+            }
+            if before % 2 == 1 {
+                std::hint::spin_loop();
+                continue;
+            }
+            let (ns, frame) = (self.anchor_ns.load(Relaxed), self.anchor_frame.load(Relaxed));
+            if self.anchor_seq.load(Acquire) == before {
+                return Some((ns, frame));
+            }
+        }
+        None
+    }
 }
 
 pub struct Player {
     deck: Box<Deck>,
     playing: bool,
+    /// Frames of count-in left before the song rolls, the metronome alone
+    /// sounding, with the song standing where play was asked from.
+    preroll: usize,
+    /// Boxed, since each crosses the queue in a message and goes back whole.
+    #[allow(clippy::vec_box)]
+    taps: Vec<Box<Tap>>,
     metronome: bool,
     click_gain: f64,
     click_position: i64,
@@ -142,6 +201,8 @@ pub fn channel(program: Arc<Program>) -> (Control, Player) {
         fade_len: deck.renderer.fade(),
         deck,
         playing: false,
+        preroll: 0,
+        taps: Vec::with_capacity(MAX_TAPS),
         metronome: false,
         click_gain: 0.0,
         click_position: 0,
@@ -179,7 +240,26 @@ impl Control {
     }
 
     pub fn play(&mut self, from: usize) -> Result<(), String> {
-        self.send(Message::Play(from))
+        self.send(Message::Play { from, preroll: 0 })
+    }
+
+    /// Plays from `from` after `preroll` frames of count-in, the metronome
+    /// alone with the song standing at `from`, as a take starts.
+    pub fn play_after(&mut self, from: usize, preroll: usize) -> Result<(), String> {
+        self.send(Message::Play { from, preroll })
+    }
+
+    /// Records a stem or the mix into `tap` while the transport rolls, until
+    /// `untap`. Up to `MAX_TAPS` at once; more are handed back unused.
+    pub fn tap(&mut self, tap: Box<Tap>) -> Result<(), String> {
+        self.collect();
+        self.send(Message::Tap(tap))
+    }
+
+    /// Takes every tap out of the player; each comes back through `collect`
+    /// to be freed, its feed's last blocks drained first by the host.
+    pub fn untap(&mut self) -> Result<(), String> {
+        self.send(Message::Untap)
     }
 
     pub fn stop(&mut self) -> Result<(), String> {
@@ -254,6 +334,19 @@ impl Control {
             drop(garbage);
         }
     }
+
+    /// Frees what the audio thread has finished with, and hands over the
+    /// taps among it, whose feeds the host drains once more.
+    pub fn collect_taps(&mut self) -> Vec<Box<Tap>> {
+        let mut taps = Vec::new();
+        while let Ok(garbage) = self.garbage.pop() {
+            match garbage {
+                Garbage::Tap(t) => taps.push(t),
+                other => drop(other),
+            }
+        }
+        taps
+    }
 }
 
 impl Player {
@@ -268,13 +361,27 @@ impl Player {
 
     /// Fills `out` with the next frames of the stream.
     pub fn render(&mut self, out: &mut [Frame]) {
+        self.render_at(out, None);
+    }
+
+    /// Fills `out` with the next frames of the stream, and with `at`, the
+    /// instant its first frame plays on the audio clock, publishes the
+    /// anchor a recording maps its input by.
+    pub fn render_at(&mut self, out: &mut [Frame], at: Option<u64>) {
         while let Ok(m) = self.inbox.pop() {
             self.handle(m);
+        }
+        if let Some(ns) = at {
+            let frame = self.deck.renderer.heard() - self.preroll as i64;
+            self.shared.publish_anchor(ns, frame);
         }
         let mut done = 0;
         while done < out.len() {
             let mut n = (out.len() - done).min(MAX_BLOCK);
-            if self.playing {
+            if self.playing && self.preroll > 0 {
+                // The count-in ends on a block's edge, where the song rolls.
+                n = n.min(self.preroll);
+            } else if self.playing {
                 // A block ends where the loop does, and where the song does.
                 let pos = self.position();
                 let program = self.deck.renderer.program();
@@ -290,10 +397,15 @@ impl Player {
             }
             self.block(&mut out[done..done + n]);
             done += n;
-            if self.playing {
+            if self.playing && self.preroll > 0 {
+                self.preroll -= n;
+            } else if self.playing {
                 let pos = self.position();
                 match self.region {
-                    Some((start, end)) if pos == end => self.deck.renderer.jump(start),
+                    Some((start, end)) if pos == end => {
+                        self.deck.renderer.jump(start);
+                        self.shared.wraps.fetch_add(1, Relaxed);
+                    }
                     _ if self.deck.renderer.finished() => self.playing = false,
                     _ => {}
                 }
@@ -320,28 +432,43 @@ impl Player {
                     self.discard(older);
                 }
             }
-            Message::Play(from) => {
+            Message::Play { from, preroll } => {
                 self.resting = false;
                 self.quiet = 0;
-                if self.playing {
+                if self.playing && self.preroll == 0 {
                     self.deck.renderer.jump(from);
                 } else {
                     // Voices sounding at `from` fade in; hits at `from` play in full.
                     self.deck.renderer.seek(from, true);
                     self.playing = true;
                 }
+                self.preroll = preroll;
             }
             Message::Stop => {
                 if self.playing {
                     self.deck.renderer.release();
                     self.playing = false;
                 }
+                self.preroll = 0;
             }
             Message::Locate(to) => {
                 if self.playing {
                     self.deck.renderer.jump(to);
                 } else {
                     self.deck.renderer.seek(to, false);
+                }
+                self.preroll = 0;
+            }
+            Message::Tap(tap) => {
+                if self.taps.len() < MAX_TAPS {
+                    self.taps.push(tap);
+                } else {
+                    self.throw(Garbage::Tap(tap));
+                }
+            }
+            Message::Untap => {
+                while let Some(tap) = self.taps.pop() {
+                    self.throw(Garbage::Tap(tap));
                 }
             }
             Message::Loop(region) => self.region = region,
@@ -440,12 +567,41 @@ impl Player {
             return;
         }
         let heard = self.deck.renderer.heard();
+        // During a count-in the song stands still and only the click sounds.
+        let rolling = self.playing && self.preroll == 0;
         let old = match &mut self.fade {
             Fade::Cross { old, .. } => Some(&mut old.renderer),
             _ => None,
         };
-        self.deck.renderer.process(out, self.playing, old, |_, _, _| {});
-        if self.playing {
+        // Each tap's stem, by its place among the program's stems now.
+        let taps = &mut self.taps;
+        let program = self.deck.renderer.program().clone();
+        let mut places = [None; MAX_TAPS];
+        for (k, tap) in taps.iter().enumerate() {
+            if let TapSource::Stem { kind, id } = &tap.source {
+                places[k] = program.stem_index(*kind, id);
+            }
+        }
+        self.deck.renderer.process(out, rolling, old, |stem, block, at| {
+            if !rolling {
+                return;
+            }
+            for (k, tap) in taps.iter_mut().enumerate() {
+                if places[k] == Some(stem) {
+                    // A stem carries the master's gain and end fade, as the
+                    // render writes it.
+                    let p = &program;
+                    tap.feed.push_frames_scaled(ChunkTime::Frame(at), block, |i| {
+                        let f = at + i as i64;
+                        if f < 0 || f >= p.total as i64 { 0.0 } else { p.envelope(f as usize) }
+                    });
+                }
+            }
+        });
+        if rolling {
+            for tap in taps.iter_mut().filter(|t| t.source == TapSource::Master) {
+                tap.feed.push_frames(ChunkTime::Frame(heard), out);
+            }
             self.shared.played.fetch_add(n as u64, Relaxed);
         }
         let len = self.fade_len as f64;
@@ -469,16 +625,23 @@ impl Player {
         }
         // Monitor after all song processing, at the timeline heard from the
         // renderer (including its latency). No click reaches offline exports.
+        // A count-in clicks whatever the metronome, the bars before the
+        // start counted back from it.
         if self.playing || self.click_gain > 0.0 {
-            let p = self.deck.renderer.program();
-            let target = if self.metronome && self.playing { 1.0 } else { 0.0 };
-            let click_start = if self.playing { heard } else { self.click_position };
+            let p = &program;
+            let target = if (self.metronome && rolling) || (self.playing && self.preroll > 0) { 1.0 } else { 0.0 };
+            let click_start = if self.playing { heard - self.preroll as i64 } else { self.click_position };
             let step = 1.0 / self.fade_len.max(1) as f64;
             if target > 0.0 || self.click_gain > 0.0 {
+                let bar = (p.rate as f64 * 60.0 / p.tempo * p.click_beats * p.beats_per_bar.max(1) as f64).round().max(1.0) as i64;
                 for (k, frame) in out.iter_mut().enumerate() {
                     self.click_gain += (target - self.click_gain).clamp(-step, step);
-                    let at = click_start + k as i64;
-                    if at >= 0 && at < p.total as i64 {
+                    let mut at = click_start + k as i64;
+                    if at < 0 {
+                        // Before the song: the same bars, counted back.
+                        at += ((-at + bar - 1) / bar) * bar;
+                    }
+                    if at < p.total.max(bar as usize) as i64 {
                         let click = metronome_sample(at as usize, p.rate, p.tempo, p.click_beats, p.beats_per_bar) * self.click_gain;
                         frame[0] += click;
                         frame[1] += click;

@@ -23,6 +23,7 @@ realfft = "3.5.0"
 [target.'cfg(target_os = "macos")'.dependencies]
 # The listener for the default device changing, which cpal keeps to itself.
 objc2-core-audio = "0.3.2"
+objc2-core-foundation = "0.3.2"
 
 [dev-dependencies]
 assert_no_alloc = "1.1.2"

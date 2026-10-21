@@ -732,6 +732,76 @@
       "title": "Group",
       "type": "object"
     },
+    "Input": {
+      "additionalProperties": false,
+      "description": "Where an audio track records from: device, track, group or master, at most one. device is part of an input device's name, ignoring case, or default for the input chosen in the audio settings, which nothing given means, with channels one channel for a mono take or two for a stereo one, counted from 1 ([1] unless given); track or group names one of the song's, whose sound after its fader is recorded, and master: true the mix after the master's effects, which is resampling, the same frames the stem has.",
+      "properties": {
+        "device": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "default",
+          "title": "Device"
+        },
+        "channels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 64
+              },
+              "maxItems": 2,
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channels"
+        },
+        "track": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Track"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
+        },
+        "master": {
+          "default": false,
+          "title": "Master",
+          "type": "boolean"
+        }
+      },
+      "title": "Input",
+      "type": "object"
+    },
     "Instrument": {
       "additionalProperties": false,
       "description": "A sampler or the Synth: exactly one of the two.",
@@ -2480,6 +2550,19 @@
           "default": null,
           "description": "The group the track's output goes into instead of the master sum, one of groups[]; its tracks are next to each other.",
           "title": "Group"
+        },
+        "input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Input"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Where the track records from: an input device's channels, or a track, a group or the mix to resample; null records nothing.",
+          "title": "Input"
         },
         "pads": {
           "additionalProperties": {

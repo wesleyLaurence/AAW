@@ -376,6 +376,57 @@ enum Top {
     Range(RangeCmd),
     #[command(subcommand)]
     Device(DeviceCmd),
+    #[command(subcommand)]
+    Record(RecordCmd),
+}
+
+/// Recording: an armed track takes audio from its `input`, a device or the
+/// song's own sound, while the song plays, and the take lands on the track
+/// as an audio clip.
+#[derive(Subcommand)]
+enum RecordCmd {
+    /// Arm a track that has an input to record when recording starts, or
+    /// with --off disarm it. Host state, not saved.
+    Arm {
+        project: Song,
+        track: String,
+        #[arg(long)]
+        off: bool,
+    },
+    /// Arm the tracks named, if any, and record every armed track: the
+    /// metronome counts the bars in from the start position, then the song
+    /// plays and each take is taken until `record stop`, `stop` or the end
+    /// of the loop, when the takes become samples and audio clips as one
+    /// undoable edit.
+    Start {
+        project: Song,
+        tracks: Vec<String>,
+        /// Bars of count-in before the start position; 1 unless given, 0
+        /// for none.
+        #[arg(long)]
+        count_in: Option<u32>,
+    },
+    /// End the recording, the song playing on, and add the takes to the song.
+    Stop { project: Song },
+    /// Record an input device to a WAV file for so many seconds, with no
+    /// song: a quick capture for the agent or the panel.
+    Capture {
+        /// The file to write, 32-bit float WAV.
+        file: PathBuf,
+        /// Part of an input device's name, ignoring case; the Mac's default
+        /// input otherwise, or the device AAW_INPUT_DEVICE names.
+        #[arg(long)]
+        input: Option<String>,
+        /// How long to record.
+        #[arg(long, default_value_t = 5.0)]
+        seconds: f64,
+        /// The channels to take, counted from 1: one for mono, two for stereo.
+        #[arg(long, value_delimiter = ',', default_value = "1")]
+        channels: Vec<i64>,
+        /// The rate to record at when the device offers it; else its own.
+        #[arg(long, default_value_t = 48000)]
+        sample_rate: u32,
+    },
 }
 
 /// The Mac's audio devices: what it has, and which a running host plays
@@ -2458,6 +2509,69 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Record(r) => match r {
+            RecordCmd::Arm { project, track, off } => edit(
+                project,
+                C::Arm {
+                    track: track.clone(),
+                    armed: !off,
+                },
+            ),
+            RecordCmd::Start { project, tracks, count_in } => edit(
+                project,
+                C::RecordStart {
+                    tracks: tracks.clone(),
+                    count_in: *count_in,
+                },
+            ),
+            RecordCmd::Stop { project } => edit(project, C::RecordStop),
+            RecordCmd::Capture {
+                file,
+                input,
+                seconds,
+                channels,
+                sample_rate,
+            } => {
+                if !(0.1..=3600.0).contains(seconds) {
+                    return Err("--seconds is 0.1 to 3600".into());
+                }
+                if file.exists() {
+                    return Err(format!("{} exists; choose another file", file.display()));
+                }
+                let name = input
+                    .clone()
+                    .or_else(|| std::env::var("AAW_INPUT_DEVICE").ok())
+                    .filter(|n| !n.trim().is_empty());
+                let (stream, mut capture) = aaw_engine::capture::open_input(name.as_deref(), channels, *sample_rate, seconds + 2.0)?;
+                let wanted = (stream.rate as f64 * seconds).round() as usize;
+                let mut samples: Vec<f32> = Vec::new();
+                let started = std::time::Instant::now();
+                while samples.len() < wanted * capture.channels {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                    capture.drain(&mut samples);
+                    if stream.dead() {
+                        return Err(format!("{} stopped the stream", stream.device));
+                    }
+                    if started.elapsed().as_secs_f64() > seconds + 5.0 {
+                        return Err(format!("{} gave {} frames in {} seconds", stream.device, samples.len() / capture.channels, seconds + 5.0));
+                    }
+                }
+                samples.truncate(wanted * capture.channels);
+                let bytes = aaw_engine::wav::float_wav_interleaved(&samples, capture.channels as u16, stream.rate);
+                aaw_engine::wav::write_atomic(file, &bytes)?;
+                let peak = samples.iter().fold(0.0f32, |m, x| m.max(x.abs()));
+                Ok(json!({
+                    "file": file,
+                    "device": stream.device,
+                    "sample_rate": stream.rate,
+                    "channels": capture.channels,
+                    "seconds": seconds,
+                    "frames": wanted,
+                    "peak_dbfs": if peak > 0.0 { (20.0 * (peak as f64).log10() * 100.0).round() / 100.0 } else { f64::NEG_INFINITY },
+                    "lost_frames": capture.lost(),
+                }))
+            }
+        },
         Top::Device(d) => match d {
             DeviceCmd::List => {
                 let devices: Vec<Json> = aaw_engine::devices::list()?.iter().map(|d| value(d.to_value())).collect();
@@ -2616,6 +2730,7 @@ fn name(top: &Top) -> String {
         Top::Section(_) => group("section", ""),
         Top::Marker(_) => group("marker", ""),
         Top::Device(_) => group("device", ""),
+        Top::Record(_) => group("record", ""),
         Top::Range(_) => group("range", ""),
     }
     .trim()

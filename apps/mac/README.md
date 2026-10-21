@@ -167,9 +167,9 @@ front first.
 
 | Part | Shows |
 |---|---|
-| Transport bar | Play or stop, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, the timeline's grid as a note value with its menu, "Exporting NAME…" while File › Export Audio… writes a file, and "Agent editing" while an agent's changes land |
+| Transport bar | Play or stop, Record, red while a take runs and dim while no track is armed, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, the timeline's grid as a note value with its menu, "Exporting NAME…" while File › Export Audio… writes a file, and "Agent editing" while an agent's changes land |
 | Ruler | Four strips: the loop brace, the sections, the person's markers, each a yellow flag at its beat with what it says in it as far as the next marker leaves room, and the bar numbers, with the start position as an orange flag. A marker has a faint line down the lanes under it |
-| Headers | Each track's name, effect chain, mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; a group in a group set in once more, with everything under it; then the returns and the master |
+| Headers | Each track's name, effect chain, record arm (a dot, red while armed, faint on a track with no input), mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; a group in a group set in once more, with everything under it; then the returns and the master |
 | Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track, or of a track in a muted group, are gray, and selected clips are outlined. A group's lane shows its tracks' clips small, a strip a track, folded or not |
 | Automation | Under every row while A has shown them: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
 | Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
@@ -203,6 +203,9 @@ front first.
 | The Grid menu in the transport bar, or View › Grid | Chooses the grid of the editor that has the keys, the timeline's from the transport bar: Follow Zoom, a size from 1 Bar to 1/64, ⌘1 finer, ⌘2 coarser, ⌘3 triplets, ⌘4 Snap to Grid. A chosen grid holds whatever the zoom; the transport bar names it, gray while it follows the zoom, `no snap` while snapping is off, when every click and drag lands where the pointer is and ⌘ snaps instead |
 | Drag a volume, pan or send sideways | Changes it, heard as it moves; with Shift, ten times finer. Double-click sets volume to 0 dB and pan to center, and removes a send |
 | Click M or S | Mutes or solos |
+| Click the dot before a track's M | Arms the track to record from its input, or disarms it; on a track with no input, opens the Input menu to choose one. Red while armed |
+| Input in a track's menu | Where the track records from: No Input, each input device the Mac has, mono or as its first two channels, the one chosen in Settings › Audio first as Input Device, the song's other tracks, its groups and the master, the choice in force checked. An edit of the song's `tracks[].input`; a MIDI track has none |
+| R, Record in the transport bar, or Transport › Record | Records every armed track from the start position after the count-in, the metronome counting the bars in with the song standing still, then the song plays; pressed again, ends the takes with the song playing on, and Space ends them with the song. Each take lands on its track as an audio clip of a new sample under `samples/`, one undo step. Transport › Count-In chooses None, 1 Bar, 2 Bars or 4 Bars, kept across launches ([recording](../../docs/features/recording.md)) |
 | Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
 | Double-click a clip | Opens its editor in the detail panel, shown if it was hidden: a pattern clip's pattern, an audio clip's settings or a note clip's piano roll |
 | Right-click or Control-click a clip | Selects it, or keeps a selection it is part of, and offers its editor, Cut, Copy, Duplicate, Split at Start Position, Join, Loop Selection and Delete, each as the menus do them |
@@ -223,7 +226,7 @@ front first.
 | Click the mark before a group's name | Folds everything under the group away under its row, tracks and groups, or shows them again; with Option, every group. The fold is the window's, not the song's |
 | ⌘G, ⇧⌘G | Groups the selected rows, tracks and groups, or the tracks of the selected clips, into a new group above them and asks for its name, when they are all in the same group or all in none, where the new group goes; takes the selected group, or the selected track's, away, leaving what was in it on the group's own group or the master |
 | Double-click a header | Selects the row and shows its devices in the detail panel, shown if it was hidden |
-| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Show Automation, Add Track, Add MIDI Track, Add Return, Group Tracks or Remove from Group on a track, Ungroup on a group and Remove from Group on a group in a group, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
+| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Input on an audio track, Show Automation, Add Track, Add MIDI Track, Add Return, Group Tracks or Remove from Group on a track, Ungroup on a group and Remove from Group on a group in a group, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
 | Rename in that menu, or ⌘R | Renames the track, group or return where its name is: Return keeps the name, Escape drops it. With a marker selected, ⌘R types what the marker says |
 | ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, a MIDI track with no instrument, or a return, and asks for its name |
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
@@ -406,6 +409,9 @@ device Settings › Audio chose, or the default; `AAW_OUTPUT_DEVICE=NAME` plays
 through the output device whose name contains NAME when none was chosen, such
 as a virtual device nobody hears, and is refused when there is none. A device
 that does not offer the song's rate is opened at its own, the song resampled.
+A take recorded in such a run, `--key r` with a track armed, records from
+the input device chosen in Settings › Audio, or the one `AAW_INPUT_DEVICE`
+names when none is, such as the same virtual device.
 
 `--measure JSON [--frames N]` in place of the picture, or before it, scrolls and
 zooms the arrangement through the song for N frames (240 unless given) and
@@ -491,6 +497,7 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/TimelineLayout.swift` | Zoom, scroll, the grid, the ruler's strips, a marker's flag and what a click or drag means, tested in `Tests` |
 | `Sources/AAWApp/Grid.swift` | The grid values, their names as note values and the steps the Grid menu takes through them, tested in `Tests` |
 | `Sources/AAWApp/HeaderLayout.swift` | Where a header's controls and a row's lanes are, how a level reads a drag and how a lane or a knob maps its range, tested in `Tests` |
+| `Sources/AAWApp/Recording.swift` | The count-in kept across launches and the words of Record and the arm, tested in `Tests` |
 | `Sources/AAWApp/ContextMenus.swift` | What a right click on a header, a clip, an effect or the marker strip offers, as lists the views make menus from, tested in `Tests` |
 | `Sources/AAWApp/DeviceView.swift` | The detail panel, its devices and an audio clip's settings: a row's chain, a panel for each effect drawn from its fields, the equalizer's curve as an AppKit view where its points are dragged and its spectrum read, a MIDI track's instrument, and the bar a number is dragged with |
 | `Sources/AAWApp/AnalyzerWindow.swift` | An analyzer's window and its panes, an AppKit view drawn at the display's rate, with the dividers, the fill marks and the menu of panes; the analyzer's strip in the device panel |
@@ -528,6 +535,9 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 
 - The playhead is drawn where the output is: the audio thread's position less
   the song's latency and the delay the output device reports.
+- A take is not heard through the track's chain while it records: the input
+  is monitored by the Mac or the interface, not the app. The input's level is
+  not drawn ([recording](../../docs/features/recording.md)).
 - Track colors are given out in the order tracks are first seen and are not
   saved; the song format has no color.
 - A waveform shows a track's sampler before its effects, fader and sends, with
