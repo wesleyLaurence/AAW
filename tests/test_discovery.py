@@ -27,7 +27,7 @@ def test_describe_is_short_and_keeps_the_schema_for_the_asking():
         assert short["semantics"] == full["semantics"], topic
         assert "schema" not in short
     midi = run("describe", "midi").stdout
-    assert len(midi.encode()) < 8200
+    assert len(midi.encode()) < 12500
     fields = json.loads(midi)["fields"]
     assert fields["tracks[].clips[].notes[].velocity"] == "integer 1..127, default 100"
     assert fields["tracks[].clips[].length_beats"] == "beats, required"
@@ -61,8 +61,9 @@ def test_a_closed_pipe_ends_quietly():
 
 def test_help_lists_what_a_command_takes():
     effect = run("effect", "add", "--help").stdout
-    for kind in ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer", "rack"]:
+    for kind in ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer", "rack", "arpeggiator", "chord", "scale", "velocity"]:
         assert f"\n{kind}\n" in effect
+    assert "MIDI effects, on a MIDI track" in effect and "--gate-percent" in effect
     assert "--ceiling-db" in effect and "number -24..-0.1, default -1" in effect
     assert "number -60..24, default -1" in effect and "--oversample               1|2|4, default 4" in effect
     assert "--slope-db-per-octave      12|24|36|48, default 12" in effect

@@ -90,6 +90,7 @@ Proposed, in the order of Next in the backlog:
 | [recording audio](features/recording.md) | Built |
 | [freezing a track](features/freezing.md) | Built |
 | [effect racks and instrument racks](features/effect-racks.md) | Built |
+| [MIDI effects](features/midi-effects.md) | Built: an arpeggiator, a chord, a scale and a velocity before a MIDI track's instrument |
 | [devices anyone builds, to a spec](features/custom-devices.md) | Next; proposed as a direction |
 
 ## Archive

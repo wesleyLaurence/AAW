@@ -69,6 +69,9 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
     track.midi = Some(aaw_model::Midi {
         instrument: midi.instrument.clone(),
         clips: vec![clip],
+        // The audition is the patch's sound: the notes as given, through no
+        // MIDI effect.
+        midi_effects: Vec::new(),
     });
     track.sends.clear();
     track.automation.clear();

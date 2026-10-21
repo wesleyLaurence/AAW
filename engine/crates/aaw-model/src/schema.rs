@@ -1827,6 +1827,337 @@ fn id_dict<T>(ctx: &mut Ctx, x: &Value, item: impl FnMut(&mut Ctx, &Value) -> Op
     Some(out)
 }
 
+/// A MIDI effect: a device before a MIDI track's instrument that changes
+/// the notes as they play, in the schedule, so playback and export play the
+/// same notes. The notes in the clips stay as written; the piano roll's
+/// previews and `daw midi export` are the notes as written too.
+#[derive(Clone, Debug)]
+pub enum MidiEffect {
+    Arpeggiator(Arpeggiator),
+    Chord(Chord),
+    Scale(Scale),
+    Velocity(Velocity),
+}
+
+pub const MIDI_EFFECT_TYPES: [&str; 4] = ["arpeggiator", "chord", "scale", "velocity"];
+
+/// The most MIDI effects a track holds.
+pub const MAX_MIDI_CHAIN: usize = 16;
+
+/// An arpeggiator's rates: note values on the song's grid, `T` a triplet
+/// and `D` dotted, each with its length in quarter-note beats.
+pub const ARP_RATES: [(&str, (i64, i64)); 12] = [
+    ("1/1", (4, 1)),
+    ("1/2", (2, 1)),
+    ("1/4", (1, 1)),
+    ("1/4T", (2, 3)),
+    ("1/8", (1, 2)),
+    ("1/8D", (3, 4)),
+    ("1/8T", (1, 3)),
+    ("1/16", (1, 4)),
+    ("1/16D", (3, 8)),
+    ("1/16T", (1, 6)),
+    ("1/32", (1, 8)),
+    ("1/32T", (1, 12)),
+];
+
+pub const ARP_RATE_NAMES: [&str; 12] = ["1/1", "1/2", "1/4", "1/4T", "1/8", "1/8D", "1/8T", "1/16", "1/16D", "1/16T", "1/32", "1/32T"];
+
+/// The orders an arpeggiator walks the held notes in.
+pub const ARP_ORDERS: [&str; 8] = ["up", "down", "up_down", "down_up", "converge", "diverge", "played", "random"];
+
+/// An arpeggiator: the notes held at each step of a grid of `rate` played
+/// one at a time in `order`, over `octaves`, each `gate_percent` of a step
+/// long and no longer than the note it came from. The grid is the song's,
+/// from beat 0; the pattern starts over when a note begins, and a note
+/// shorter than a step that no step falls on is not heard.
+#[derive(Clone, Debug)]
+pub struct Arpeggiator {
+    pub id: Option<String>,
+    pub rate: String,
+    pub order: String,
+    pub octaves: i64,
+    pub gate_percent: f64,
+    /// Which notes `random` picks; the same seed picks the same notes.
+    pub seed: i64,
+    pub bypass: bool,
+}
+
+impl Arpeggiator {
+    /// The step, in quarter-note beats.
+    pub fn step(&self) -> num_rational::BigRational {
+        let (n, d) = ARP_RATES.iter().find(|(name, _)| *name == self.rate).map_or((1, 4), |(_, b)| *b);
+        num_rational::BigRational::new(n.into(), d.into())
+    }
+}
+
+/// A chord: each note played with up to six more at `shift_1` to
+/// `shift_6` semitones from it; 0 is off.
+#[derive(Clone, Debug)]
+pub struct Chord {
+    pub id: Option<String>,
+    pub shifts: [i64; 6],
+    pub bypass: bool,
+}
+
+pub const SCALE_ROOTS: [&str; 12] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+/// The scales, each as semitones from the root.
+pub const SCALES: [(&str, &[i64]); 14] = [
+    ("major", &[0, 2, 4, 5, 7, 9, 11]),
+    ("minor", &[0, 2, 3, 5, 7, 8, 10]),
+    ("harmonic_minor", &[0, 2, 3, 5, 7, 8, 11]),
+    ("melodic_minor", &[0, 2, 3, 5, 7, 9, 11]),
+    ("dorian", &[0, 2, 3, 5, 7, 9, 10]),
+    ("phrygian", &[0, 1, 3, 5, 7, 8, 10]),
+    ("lydian", &[0, 2, 4, 6, 7, 9, 11]),
+    ("mixolydian", &[0, 2, 4, 5, 7, 9, 10]),
+    ("locrian", &[0, 1, 3, 5, 6, 8, 10]),
+    ("major_pentatonic", &[0, 2, 4, 7, 9]),
+    ("minor_pentatonic", &[0, 3, 5, 7, 10]),
+    ("blues", &[0, 3, 5, 6, 7, 10]),
+    ("whole_tone", &[0, 2, 4, 6, 8, 10]),
+    ("chromatic", &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]),
+];
+
+pub const SCALE_NAMES: [&str; 14] = [
+    "major", "minor", "harmonic_minor", "melodic_minor", "dorian", "phrygian", "lydian", "mixolydian", "locrian",
+    "major_pentatonic", "minor_pentatonic", "blues", "whole_tone", "chromatic",
+];
+
+/// A scale: each note moved to the nearest note of `scale` on `root`, a
+/// note halfway between two going down, then moved by `transpose` semitones.
+#[derive(Clone, Debug)]
+pub struct Scale {
+    pub id: Option<String>,
+    pub root: String,
+    pub scale: String,
+    pub transpose: i64,
+    pub bypass: bool,
+}
+
+impl Scale {
+    /// The root as a pitch class, 0 for C.
+    pub fn root_class(&self) -> i64 {
+        SCALE_ROOTS.iter().position(|r| *r == self.root).unwrap_or(0) as i64
+    }
+
+    /// The scale's semitones from the root.
+    pub fn degrees(&self) -> &'static [i64] {
+        SCALES.iter().find(|(name, _)| *name == self.scale).map_or(SCALES[0].1, |(_, d)| d)
+    }
+}
+
+/// A velocity: each note's velocity scaled by `scale_percent`, moved by
+/// `offset`, spread by up to `random` either way, and held between `min`
+/// and `max`.
+#[derive(Clone, Debug)]
+pub struct Velocity {
+    pub id: Option<String>,
+    pub offset: i64,
+    pub scale_percent: f64,
+    pub random: i64,
+    /// Which way each note's spread goes; the same seed spreads the same.
+    pub seed: i64,
+    pub min: i64,
+    pub max: i64,
+    pub bypass: bool,
+}
+
+impl PartialEq for MidiEffect {
+    fn eq(&self, other: &MidiEffect) -> bool {
+        crate::value::py_eq(&self.dump(false), &other.dump(false))
+    }
+}
+
+impl MidiEffect {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            MidiEffect::Arpeggiator(_) => "arpeggiator",
+            MidiEffect::Chord(_) => "chord",
+            MidiEffect::Scale(_) => "scale",
+            MidiEffect::Velocity(_) => "velocity",
+        }
+    }
+
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            MidiEffect::Arpeggiator(e) => e.id.as_deref(),
+            MidiEffect::Chord(e) => e.id.as_deref(),
+            MidiEffect::Scale(e) => e.id.as_deref(),
+            MidiEffect::Velocity(e) => e.id.as_deref(),
+        }
+    }
+
+    pub fn bypass(&self) -> bool {
+        match self {
+            MidiEffect::Arpeggiator(e) => e.bypass,
+            MidiEffect::Chord(e) => e.bypass,
+            MidiEffect::Scale(e) => e.bypass,
+            MidiEffect::Velocity(e) => e.bypass,
+        }
+    }
+
+    /// The discriminated union on `type`.
+    fn validate(ctx: &mut Ctx, x: &Value) -> Option<MidiEffect> {
+        let Value::Dict(d) = x else {
+            ctx.error("model_attributes_type", "Input should be a valid dictionary or object to extract fields from");
+            return None;
+        };
+        let Some(tag) = d.get(&Key::str("type")) else {
+            ctx.error("union_tag_not_found", "Unable to extract tag using discriminator 'type'");
+            return None;
+        };
+        let kind = match tag {
+            Value::Str(s) if MIDI_EFFECT_TYPES.contains(&s.as_str()) => s.clone(),
+            Value::Str(s) if EFFECT_TYPES.contains(&s.as_str()) => {
+                ctx.error(
+                    "union_tag_invalid",
+                    format!("{s} is an audio effect: it goes under effects, after the instrument; midi_effects take 'arpeggiator', 'chord', 'scale', 'velocity'"),
+                );
+                return None;
+            }
+            other => {
+                ctx.error(
+                    "union_tag_invalid",
+                    format!(
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'arpeggiator', 'chord', 'scale', 'velocity'",
+                        crate::value::py_str(other)
+                    ),
+                );
+                return None;
+            }
+        };
+        ctx.at(Loc::Key(kind.clone()), |c| Self::member(c, x, &kind))
+    }
+
+    fn member(ctx: &mut Ctx, x: &Value, kind: &str) -> Option<MidiEffect> {
+        let before = ctx.count();
+        let fields: &'static [&'static str] = match kind {
+            "arpeggiator" => &["type", "id", "rate", "order", "octaves", "gate_percent", "seed", "bypass"],
+            "chord" => &["type", "id", "shift_1", "shift_2", "shift_3", "shift_4", "shift_5", "shift_6", "bypass"],
+            "scale" => &["type", "id", "root", "scale", "transpose", "bypass"],
+            _ => &["type", "id", "offset", "scale_percent", "random", "seed", "min", "max", "bypass"],
+        };
+        let f = Fields::member(x, fields);
+        let id = f.opt(ctx, "id", None, opt_id);
+        let int = |ctx: &mut Ctx, name: &str, default: i64, b: Bounds| f.opt(ctx, name, default, |c, x| v::int(c, x, b));
+        let bypass = f.opt(ctx, "bypass", false, v::boolean);
+        let effect = match kind {
+            "arpeggiator" => {
+                let rate = f.opt(ctx, "rate", "1/16", |c, x| v::literal_str(c, x, &ARP_RATE_NAMES));
+                let order = f.opt(ctx, "order", "up", |c, x| v::literal_str(c, x, &ARP_ORDERS));
+                let octaves = int(ctx, "octaves", 1, Bounds::ge_le("1", "4"));
+                let gate_percent = f.opt(ctx, "gate_percent", 50.0, |c, x| v::float(c, x, Bounds::ge_le("1", "200")));
+                let seed = int(ctx, "seed", 0, Bounds::ge_le("0", "4294967295"));
+                (|| {
+                    Some(MidiEffect::Arpeggiator(Arpeggiator {
+                        id: id?,
+                        rate: rate?.to_string(),
+                        order: order?.to_string(),
+                        octaves: octaves?,
+                        gate_percent: gate_percent?,
+                        seed: seed?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+            "chord" => {
+                let mut shifts = [Some(0); 6];
+                for (i, s) in shifts.iter_mut().enumerate() {
+                    *s = int(ctx, &format!("shift_{}", i + 1), 0, Bounds::ge_le("-36", "36"));
+                }
+                (|| {
+                    let mut out = [0; 6];
+                    for (o, s) in out.iter_mut().zip(shifts) {
+                        *o = s?;
+                    }
+                    Some(MidiEffect::Chord(Chord { id: id?, shifts: out, bypass: bypass? }))
+                })()
+            }
+            "scale" => {
+                let root = f.opt(ctx, "root", "C", |c, x| v::literal_str(c, x, &SCALE_ROOTS));
+                let scale = f.opt(ctx, "scale", "major", |c, x| v::literal_str(c, x, &SCALE_NAMES));
+                let transpose = int(ctx, "transpose", 0, Bounds::ge_le("-36", "36"));
+                (|| {
+                    Some(MidiEffect::Scale(Scale {
+                        id: id?,
+                        root: root?.to_string(),
+                        scale: scale?.to_string(),
+                        transpose: transpose?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+            _ => {
+                let offset = int(ctx, "offset", 0, Bounds::ge_le("-127", "127"));
+                let scale_percent = f.opt(ctx, "scale_percent", 100.0, |c, x| v::float(c, x, Bounds::ge_le("0", "400")));
+                let random = int(ctx, "random", 0, Bounds::ge_le("0", "127"));
+                let seed = int(ctx, "seed", 0, Bounds::ge_le("0", "4294967295"));
+                let min = int(ctx, "min", 1, Bounds::ge_le("1", "127"));
+                let max = int(ctx, "max", 127, Bounds::ge_le("1", "127"));
+                (|| {
+                    let (min, max) = (min?, max?);
+                    if min > max {
+                        ctx.value_error("A velocity's min is at most its max");
+                        return None;
+                    }
+                    Some(MidiEffect::Velocity(Velocity {
+                        id: id?,
+                        offset: offset?,
+                        scale_percent: scale_percent?,
+                        random: random?,
+                        seed: seed?,
+                        min,
+                        max,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+        };
+        f.finish(ctx);
+        if ctx.count() > before {
+            return None;
+        }
+        effect
+    }
+
+    pub fn dump(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("type", Value::str(self.kind()));
+        o.opt("id", self.id().map(Value::str));
+        match self {
+            MidiEffect::Arpeggiator(e) => {
+                o.str("rate", &e.rate, "1/16");
+                o.str("order", &e.order, "up");
+                o.int("octaves", e.octaves, 1);
+                o.float("gate_percent", e.gate_percent, 50.0);
+                o.int("seed", e.seed, 0);
+            }
+            MidiEffect::Chord(e) => {
+                for (i, s) in e.shifts.iter().enumerate() {
+                    o.int(&format!("shift_{}", i + 1), *s, 0);
+                }
+            }
+            MidiEffect::Scale(e) => {
+                o.str("root", &e.root, "C");
+                o.str("scale", &e.scale, "major");
+                o.int("transpose", e.transpose, 0);
+            }
+            MidiEffect::Velocity(e) => {
+                o.int("offset", e.offset, 0);
+                o.float("scale_percent", e.scale_percent, 100.0);
+                o.int("random", e.random, 0);
+                o.int("seed", e.seed, 0);
+                o.int("min", e.min, 1);
+                o.int("max", e.max, 127);
+            }
+        }
+        o.bool("bypass", self.bypass(), false);
+        o.done()
+    }
+}
+
 /// What a MIDI track's notes play: a sampler, or the Synth.
 #[derive(Clone, Debug)]
 pub enum Instrument {
@@ -1913,6 +2244,9 @@ pub struct Midi {
     /// None plays nothing; the notes are kept.
     pub instrument: Option<Instrument>,
     pub clips: Vec<NoteClip>,
+    /// The devices before the instrument, in order, that change the notes
+    /// as they play; written as `midi_effects`.
+    pub midi_effects: Vec<MidiEffect>,
 }
 
 impl Midi {
@@ -3213,7 +3547,7 @@ impl Track {
         "id", "gain_db", "pan", "mute", "solo", "group", "input", "frozen", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
     const MIDI_FIELDS: &'static [&'static str] = &[
-        "id", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "clips", "effects", "sends", "automation",
+        "id", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "midi_effects", "clips", "effects", "sends", "automation",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
@@ -3241,8 +3575,17 @@ impl Track {
         let (pads, clips, audio, notes) = if midi {
             let instrument = f.opt(ctx, "instrument", None, |c, x| v::optional(c, x, Instrument::validate));
             let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, NoteClip::validate));
-            let notes = match (instrument, clips) {
-                (Some(instrument), Some(clips)) => Some(Some(Midi { instrument, clips })),
+            let midi_effects = f.opt(ctx, "midi_effects", Vec::new(), |c, x| {
+                let list = v::list(c, x, 0, Some(MAX_MIDI_CHAIN), MidiEffect::validate)?;
+                let ids: Vec<&str> = list.iter().filter_map(MidiEffect::id).filter(|i| !i.is_empty()).collect();
+                if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
+                    c.value_error("MIDI effect IDs must be unique within the track");
+                    return None;
+                }
+                Some(list)
+            });
+            let notes = match (instrument, clips, midi_effects) {
+                (Some(instrument), Some(clips), Some(midi_effects)) => Some(Some(Midi { instrument, clips, midi_effects })),
                 _ => None,
             };
             (Some(IndexMap::new()), Some(Vec::new()), Some(Vec::new()), notes)
@@ -3308,6 +3651,7 @@ impl Track {
         match &self.midi {
             Some(m) => {
                 o.opt("instrument", m.instrument.as_ref().map(|i| i.dump(saved)));
+                o.coll("midi_effects", list(&m.midi_effects, saved, MidiEffect::dump));
                 o.coll("clips", list(&m.clips, saved, NoteClip::dump));
             }
             None => {
@@ -3816,6 +4160,7 @@ impl Project {
         match &track.midi {
             Some(m) => {
                 d.insert(Key::str("instrument"), m.instrument.as_ref().map_or(Value::None, |i| i.dump(false)));
+                d.insert(Key::str("midi_effects"), Value::List(m.midi_effects.iter().map(|e| e.dump(false)).collect()));
                 d.insert(Key::str("clips"), Value::List(m.clips.iter().map(|c| c.dump(false)).collect()));
             }
             None => {

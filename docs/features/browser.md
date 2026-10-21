@@ -14,6 +14,9 @@ the chosen category holds.
 - **Folders:** sample directories shared across projects and with the agent; select one or several to scope sample search.
 - **Instruments:** Sampler and Synth, and under Synth its patches, Factory
   and Mine ([the Synth](synth.md)).
+- **MIDI Effects:** an arpeggiator, a chord, a scale and a velocity, each
+  dropped before a MIDI track's instrument ([MIDI effects](midi-effects.md),
+  October 21, 2026).
 - **Audio Effects:** filter, equalizer, compressor, limiter, delay and reverb,
   and the effects that come after them; under them the person's racks, saved
   chains ([effect racks](effect-racks.md), October 7, 2026).
@@ -32,7 +35,7 @@ effects share one browser, and sample folders stay available when projects chang
 **The panel.** It is where the Samples panel is, opened and closed by ⌥⌘B and
 by the mark at the left of the transport bar, as now, and is 360 points wide to fit navigation and results. On
 its left a narrow column lists the categories, Samples,
-Instruments, Audio Effects and Folders. Clicking one shows its contents to the right. The category last
+Instruments, MIDI Effects, Audio Effects and Folders. Clicking one shows its contents to the right. The category last
 shown comes back when the panel is opened again.
 
 **What is listed comes from the engine.** The effects are the kinds the host

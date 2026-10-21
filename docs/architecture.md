@@ -342,8 +342,19 @@ for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).
 
 MIDI track: `type: midi`, with `id`, `gain_db`, `pan`, `mute`, `solo`,
-`effects`, `sends` and `automation` as any track, an `instrument`, and note
-clips under `clips`; no pads, pattern clips or audio clips. A note clip is
+`effects`, `sends` and `automation` as any track, an `instrument`, MIDI
+effects before it under `midi_effects`, and note clips under `clips`; no
+pads, pattern clips or audio clips. `midi_effects` list devices that change
+the notes as they play, in order: an `arpeggiator` (rate on the song's grid,
+order, octaves, gate), a `chord` (six shifts), a `scale` (root, scale,
+transpose) and a `velocity` (scale, offset, random by seed, min, max), each
+`{type, id, bypass, ...}`; the schedule applies them to a track's notes
+before the frames are computed, so playback, a render, a freeze and
+`sounded` play what they make while the clips keep the notes as written, a
+note played now and the audition are the notes as written, and no field of
+theirs takes a lane. `daw effect add|remove|move|bypass` reach them by the
+kind and as `tracks.T.midi_effects.REF`; see
+[midi-effects.md](features/midi-effects.md). A note clip is
 `{id, at, length_beats, loop_beats, notes}` and owns its notes, each `{id, pitch, at,
 duration, velocity}` with `pitch` a MIDI number (a name such as `C4` is taken
 and stored as 60) and `at` from the clip's start. A clip's ID is unique in the

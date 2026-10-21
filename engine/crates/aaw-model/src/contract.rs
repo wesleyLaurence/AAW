@@ -8,7 +8,7 @@
 //! change both.
 
 use crate::rules::{effect_params, Domain};
-use crate::EFFECT_TYPES;
+use crate::{EFFECT_TYPES, MIDI_EFFECT_TYPES};
 use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
@@ -81,11 +81,12 @@ const MIDI: &[(&str, &str)] = &[
     ("edges", "A note sounds from its start to the end of its duration or of its clip, whichever is first. A note that starts at or after its clip's end, or its loop's, is kept and does not play, and lengthening the clip or the loop brings it back. A note may start before its clip, at a negative at, as a clip shortened from its left edge (daw clip trim --start) leaves the notes it passed: it is kept and does not play, even where it would last into the clip, and moving the start back brings it back. daw check and daw note list name notes outside their clip."),
     ("instrument", "instrument is null, and the notes play nothing and are kept, or {sampler: {pads, map}}, or {synth: {...}}, the Synth of daw describe synth. pads are the pads of daw describe sampler, by name. map lists {notes, pad, pitched}: notes is one note or [LOW, HIGH], inclusive, and no note may be in two entries. A pitched entry plays its pad repitched from its sample's root_note to the note, or from middle C (C4, 60) when the sample has none, as Ableton's Simpler does; an entry that is not pitched plays its pad as it is, whatever the note, as a drum rack does. A note no entry maps is silent, and daw check names it. Replacing or removing the instrument leaves the notes as they are."),
     ("drums", "General MIDI drum notes are the usual map: 36 (C2) kick, 38 (D2) snare, 42 (F#2) closed hat, 46 (A#2) open hat, 49 (C#3) crash."),
+    ("midi_effects", "tracks[].midi_effects lists devices before the instrument that change the notes as they play, in order, each {type, id, bypass, ...}: arpeggiator (rate 1/16 unless given, a note value on the song's grid from beat 0, T triplet, D dotted; order up|down|up_down|down_up|converge|diverge|played|random; octaves 1-4; gate_percent of a step; seed for random), chord (shift_1..shift_6 semitones, 0 off), scale (root, scale, transpose: the nearest note of the scale, halfway going down) and velocity (scale_percent, offset, random by seed, min, max). The schedule applies them, so playback, a render, a freeze, sounded in daw listen and daw check play what they make; the clips keep the notes as written, and the piano roll's previews, daw synth audition and daw midi export are the notes as written. An arpeggiator plays the notes held at each step one at a time, starts its pattern over when a note begins, cuts a note where the held note it came from ends, and does not hear a note shorter than a step that no step falls on: hold a chord a step or longer. daw effect add SONG tracks.T --type arpeggiator --rate 1/8 --order up_down puts one on a MIDI track; daw effect remove|move|bypass SONG tracks.T.midi_effects.REF and daw set SONG tracks.T.midi_effects.REF.FIELD edit it; no lane moves a MIDI effect's field. In the app they sit before the instrument in the device panel and come from the browser's MIDI Effects."),
     ("voices", "Each note plays its own voice, overlapping notes of the same pitch included. A gate pad releases at the note-off over its release_ms; a one_shot pad plays its sample through. A voice never outlasts its sample: there is no sustain loop. Choke groups work as on any track."),
     ("commands", "daw clip add SONG TRACK --length-beats 4 [--at 16]; daw note add SONG CLIP --pitch C4 --duration 1 [--at 0 --velocity 96], or --notes '[{...}, ...]' for many; daw note set SONG NOTE --velocity 80; daw note move SONG NOTE... --by -1/48; daw note transpose SONG NOTE... --by 12; daw note remove SONG NOTE...; a clip given to move, transpose or remove stands for all its notes. daw clip duplicate, move, resize, trim, loop, join and remove place clips; daw clip trim SONG CLIP --start BEAT --end BEAT moves either edge to a song beat and leaves the notes where they are in the song; daw clip loop SONG CLIP BEATS|off sets how many of its first beats repeat. daw note list SONG CLIP|TRACK [--from BEAT --to BEAT] reads notes with their names and song beats. daw instrument set SONG TRACK JSON attaches or replaces the instrument, daw instrument remove takes it off, daw instrument map SONG TRACK NOTES PAD [--pitched] adds a map entry, and daw pad add/set/remove edit the sampler's pads. A labeled daw batch makes a phrase and its variations one undo step."),
     ("version", "A song with a MIDI track is saved with schema_version: 2, which an engine from before MIDI tracks refuses; one without is saved as version 1."),
     ("files", "daw midi import SONG FILE [--track TRACK] [--at BEAT] makes a note clip of a Standard MIDI file of one part, type 0 or 1, whose notes are in one file track and on one channel; a file of more parts is refused with them named. The clip goes on --track, a MIDI track, or else on a new MIDI track named after the file, at --at (0 unless given). It starts at the file's beat 0 and lasts to its last note's end in whole bars, and the song grows to hold it. Positions are exact. The file's tempo is not taken: the notes keep their beats, and the reply's file_tempo is for information. The reply's left_out counts what the song does not hold, by kind (sustain pedal, pitch bend, controllers, program changes, aftertouch and more), and adjusted counts notes with no note-off or no length. daw midi export SONG CLIP FILE writes the clip's notes that play as a type 0 file at 960 ticks a beat with the song's tempo, on channel 1; its reply counts notes outside the clip, notes shortened to its end, notes rounded to a tick, and a note inside a longer one of its pitch, whose lengths a MIDI file cannot keep apart."),
-    ("limits", "No controllers, pitch bend or pedal, and no recording. A loop starts at its clip's start, and a looped clip is cut by daw range only at a wrap. A MIDI file is one part; a file of several parts and its tempo are not read."),
+    ("limits", "No controllers, pitch bend or pedal, and no recording. A loop starts at its clip's start, and a looped clip is cut by daw range only at a wrap. A MIDI file is one part; a file of several parts and its tempo are not read. A MIDI effect's fields take no lane, a MIDI effect runs on the clips' notes only and not on a note played now, and there is no note-length, delay or randomizing MIDI device yet."),
 ];
 
 const EFFECT: &[(&str, &str)] = &[
@@ -284,6 +285,16 @@ pub fn model(name: &str) -> Json {
     Json::Object(out)
 }
 
+/// The model of a MIDI effect kind, by name.
+fn kind_model(kind: &str) -> &'static str {
+    match kind {
+        "arpeggiator" => "Arpeggiator",
+        "chord" => "Chord",
+        "scale" => "Scale",
+        _ => "Velocity",
+    }
+}
+
 fn title(kind: &str) -> String {
     let mut name = kind.to_string();
     name[..1].make_ascii_uppercase();
@@ -408,7 +419,7 @@ fn home(model: &str) -> &'static str {
         "Pad" | "Sample" | "Event" => "sampler",
         "Input" | "Frozen" => "project",
         "AudioClip" => "edit",
-        "MidiTrack" | "NoteClip" | "Note" | "Instrument" | "Sampler" | "NoteMap" => "midi",
+        "MidiTrack" | "NoteClip" | "Note" | "Instrument" | "Sampler" | "NoteMap" | "Arpeggiator" | "Chord" | "Scale" | "Velocity" => "midi",
         "Synth" | "Oscillator" | "SynthFilter" | "SynthEnvelope" | "Lfo" | "Modulation" => "synth",
         "Lane" | "Point" => "automation",
         "Send" | "Group" | "Return" | "EqBand" => "effects",
@@ -443,8 +454,9 @@ fn kind(node: &Json) -> String {
     if let Some(model) = ref_name(node) {
         return format!("{model} (daw describe {})", home(model));
     }
-    if node.get("discriminator").is_some() {
-        return "effect (daw describe effects)".into();
+    if let Some(d) = node.get("discriminator") {
+        let midi = d["mapping"].as_object().is_some_and(|m| m.contains_key("arpeggiator"));
+        return if midi { "MIDI effect: arpeggiator, chord, scale or velocity (daw describe midi)".into() } else { "effect (daw describe effects)".into() };
     }
     if let Some(alternatives) = node.get("anyOf").and_then(Json::as_array) {
         let null = alternatives.iter().any(|a| a["type"] == "null");
@@ -640,7 +652,11 @@ fn fields(topic: &str) -> Option<Json> {
             &[("", "Synth")],
             &["Synth", "Oscillator", "SynthFilter", "SynthEnvelope", "Lfo", "Modulation"],
         ),
-        "midi" => listing(&[("tracks[]", "MidiTrack")], &["MidiTrack", "NoteClip", "Note", "Instrument", "Sampler", "NoteMap"]),
+        "midi" => {
+            let mut roots = vec![("tracks[]", "MidiTrack")];
+            roots.extend(MIDI_EFFECT_TYPES.iter().map(|k| (*k, kind_model(k))));
+            listing(&roots, &["MidiTrack", "NoteClip", "Note", "Instrument", "Sampler", "NoteMap", "Arpeggiator", "Chord", "Scale", "Velocity"])
+        }
         "effects" => {
             let roots: Vec<(&str, String)> = EFFECT_TYPES.iter().map(|k| (*k, title(k))).collect();
             let mut roots: Vec<(&str, &str)> = roots.iter().map(|(k, m)| (*k, m.as_str())).collect();
@@ -780,7 +796,10 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
             "semantics": texts(SYNTH),
         }),
         "midi" => json!({
-            "schema": {"track": model("MidiTrack"), "clip": model("NoteClip"), "instrument": model("Instrument")},
+            "schema": {
+                "track": model("MidiTrack"), "clip": model("NoteClip"), "instrument": model("Instrument"),
+                "midi_effects": Json::Object(MIDI_EFFECT_TYPES.iter().map(|k| (k.to_string(), model(kind_model(k)))).collect()),
+            },
             "semantics": texts(MIDI),
         }),
         "effects" => json!({

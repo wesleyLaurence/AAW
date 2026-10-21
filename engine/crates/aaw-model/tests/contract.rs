@@ -42,6 +42,7 @@ tracks:
   - id: m
     type: midi
     instrument: {sampler: {pads: {a: {sample: s}}, map: [{notes: 60, pad: a}]}}
+    midi_effects: [{type: arpeggiator}, {type: chord}, {type: scale}, {type: velocity}]
     clips: [{length_beats: 4, notes: [{pitch: 60, duration: 1}]}]
     effects: [{type: limiter}]
     sends: [{to: r}]

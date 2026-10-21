@@ -1098,10 +1098,12 @@ enum OnOff {
     Off,
 }
 
-/// Effects on tracks.T, returns.R or master, addressed by path, id or reference.
+/// Effects on tracks.T, returns.R or master, addressed by path, id or reference;
+/// MIDI effects on a MIDI track, before its instrument, as tracks.T.midi_effects.REF.
 #[derive(Subcommand)]
 enum EffectCmd {
-    /// Add an effect: --type, optionally --id, --index and parameters.
+    /// Add an effect: --type, optionally --id, --index and parameters. A MIDI
+    /// effect type goes on a MIDI track under midi_effects.
     #[command(after_help = effect_help())]
     Add {
         project: Song,
@@ -1355,7 +1357,12 @@ fn effect_help() -> String {
             }
         }
     }
-    out.push_str("--index places it in the chain, 0 first; last unless given. daw describe effects says what each does.");
+    out.push_str("MIDI effects, on a MIDI track (tracks.T) before its instrument, under midi_effects:\n");
+    for kind in aaw_model::MIDI_EFFECT_TYPES {
+        let model = format!("{}{}", kind[..1].to_ascii_uppercase(), &kind[1..]);
+        out.push_str(&format!("{kind}\n{}", takes(&model, &["type"])));
+    }
+    out.push_str("--index places it in the chain, 0 first; last unless given. daw describe effects says what each does, and daw describe midi the MIDI effects.");
     out
 }
 
@@ -1438,7 +1445,7 @@ fn fields(f: &FieldArgs) -> Result<Fields> {
 /// The error for a word given where a `--FIELD VALUE` pair was wanted,
 /// naming the flag when the word is a value one takes.
 fn positional(word: &str) -> String {
-    if aaw_model::EFFECT_TYPES.contains(&word) {
+    if aaw_model::EFFECT_TYPES.contains(&word) || aaw_model::MIDI_EFFECT_TYPES.contains(&word) {
         return format!("`{word}` is an effect type; use --type {word}");
     }
     if word == "midi" {
