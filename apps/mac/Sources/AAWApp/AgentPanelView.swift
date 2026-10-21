@@ -46,9 +46,14 @@ struct AgentPanelView: View {
                     Conversation(agent: agent)
                 }
                 // The skills over the conversation's foot while `/` is
-                // typed, just above the field.
+                // typed, or the song's things while `@` is, just above
+                // the field.
                 if agent.commandQuery != nil {
                     CommandList(agent: agent)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 6)
+                } else if agent.mentionQuery != nil {
+                    MentionList(agent: agent)
                         .padding(.horizontal, 10)
                         .padding(.bottom, 6)
                 }
@@ -414,7 +419,8 @@ private struct RowView: View, Equatable {
 }
 
 /// The person's words on a rounded fill in their color, set in from the
-/// left; a skill they ran is its chip, then the words after it; what went
+/// left; a skill they ran is its chip, then the words after it; a thing of
+/// the song they named with `@` is on the color within the words; what went
 /// with the message is a row of chips under the words.
 private struct PersonRow: View {
     let text: String
@@ -428,17 +434,11 @@ private struct PersonRow: View {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         CommandChip(name: name)
                         if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text(rest.trimmingCharacters(in: .whitespacesAndNewlines))
-                                .font(.system(size: AgentPanelView.textSize))
-                                .textSelection(.enabled)
-                                .fixedSize(horizontal: false, vertical: true)
+                            words(rest.trimmingCharacters(in: .whitespacesAndNewlines))
                         }
                     }
                 } else {
-                    Text(text)
-                        .font(.system(size: AgentPanelView.textSize))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    words(text)
                 }
                 if !attachments.isEmpty {
                     AttachmentChips(attachments: attachments, remove: nil)
@@ -450,6 +450,25 @@ private struct PersonRow: View {
         }
         .padding(.horizontal, 12)
         .accessibilityLabel("You")
+    }
+
+    private func words(_ text: String) -> some View {
+        Text(Self.styled(text, mentions: attachments.map(\.name)))
+            .font(.system(size: AgentPanelView.textSize))
+            .textSelection(.enabled)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The words with each `@name` of something attached in white on the
+    /// person's color, as the field drew it.
+    static func styled(_ text: String, mentions names: [String]) -> AttributedString {
+        var out = AttributedString(text)
+        for (range, _) in AgentMentions.found(in: text, among: Set(names)) {
+            guard let r = Range(range, in: out) else { continue }
+            out[r].foregroundColor = .white
+            out[r].backgroundColor = Who.user.color
+        }
+        return out
     }
 }
 
@@ -960,63 +979,29 @@ private struct MicrophoneButton: View {
     }
 }
 
+/// A row of a list over the field: what the keys choose.
+private struct PickRow: Identifiable, Equatable {
+    var id: String
+    /// The name in monospace: `/roar-edit`, `@drums`.
+    var lead: String
+    /// After the name in the faint color: a skill's hint, a mention's reference.
+    var hint: String
+    /// The gray line under them.
+    var description: String
+}
+
 /// The skills the agent runs by name, in their groups, filtered by what
-/// was typed after `/`: each a name, its hint and a line of description,
-/// the keys' row on a fill, twelve rows tall at the most and scrolling.
+/// was typed after `/`: each a name, its hint and a line of description.
 private struct CommandList: View {
     let agent: AgentPanel
 
-    static let rowHeight: CGFloat = 38
-    static let headingHeight: CGFloat = 22
-    static let mostRows = 12
-
     var body: some View {
         let sections = agent.listed
-        let commands = sections.flatMap(\.commands)
-        let selected = commands.indices.contains(agent.commandSelection) ? commands[agent.commandSelection] : nil
-        let rows = CGFloat(min(commands.count, Self.mostRows)) * Self.rowHeight + CGFloat(sections.count) * Self.headingHeight
-        VStack(alignment: .leading, spacing: 0) {
-            if commands.isEmpty {
-                Text(empty)
-                    .font(.system(size: AgentPanelView.smallSize))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .frame(height: Self.rowHeight)
-            } else {
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(sections, id: \.group) { section in
-                                Text(section.group.title)
-                                    .font(.system(size: 10, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 12)
-                                    .frame(height: Self.headingHeight, alignment: .bottomLeading)
-                                    .padding(.bottom, 2)
-                                ForEach(section.commands) { command in
-                                    row(command, selected: command == selected)
-                                        .id(command.name)
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    // No taller than its rows, twelve at the most, nor
-                    // than the room over the field, which a fixed height
-                    // would push the window out for.
-                    .frame(maxHeight: min(rows + 8, CGFloat(Self.mostRows) * Self.rowHeight))
-                    .onChange(of: agent.commandSelection, initial: true) {
-                        if let selected { proxy.scrollTo(selected.name) }
-                    }
-                }
-            }
+        PickList(sections: sections.map { section in
+            (section.group.title, section.commands.map { PickRow(id: $0.name, lead: "/" + $0.name, hint: $0.hint, description: $0.description) })
+        }, selection: agent.commandSelection, empty: empty, label: "Skills") { row in
+            if let command = sections.flatMap(\.commands).first(where: { $0.name == row.id }) { agent.choose(command) }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(nsColor: Theme.header), in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
-        .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Skills")
     }
 
     /// What an empty list says: the handshake not yet answered, no engine,
@@ -1028,22 +1013,103 @@ private struct CommandList: View {
         default: agent.commands.isEmpty && !agent.handshook ? "Loading skills…" : "No skill matches."
         }
     }
+}
 
-    private func row(_ command: AgentCommand, selected: Bool) -> some View {
+/// The song's things under `@`, in their groups, filtered by what was
+/// typed: each `@name`, the reference `daw` takes after it and a line of
+/// what the app knows.
+private struct MentionList: View {
+    let agent: AgentPanel
+
+    var body: some View {
+        let sections = agent.listedMentions
+        PickList(sections: sections.map { section in
+            (section.group.title, section.mentions.map { PickRow(id: $0.id, lead: "@" + $0.name, hint: $0.reference ?? $0.kind.rawValue, description: $0.detail) })
+        }, selection: agent.mentionSelection, empty: agent.mentionables.isEmpty ? "Nothing in the song to name yet." : "Nothing in the song matches.", label: "Mentions") { row in
+            if let mention = sections.flatMap(\.mentions).first(where: { $0.id == row.id }) { agent.choose(mention) }
+        }
+    }
+}
+
+/// The list over the conversation's foot while `/` or `@` is typed: rows
+/// in groups under small headings, the keys' row on a fill, twelve rows
+/// tall at the most and scrolling.
+private struct PickList: View {
+    let sections: [(title: String, rows: [PickRow])]
+    let selection: Int
+    let empty: String
+    let label: String
+    let choose: (PickRow) -> Void
+
+    static let rowHeight: CGFloat = 38
+    static let headingHeight: CGFloat = 22
+    static let mostRows = 12
+
+    var body: some View {
+        let rows = sections.flatMap(\.rows)
+        let selected = rows.indices.contains(selection) ? rows[selection] : nil
+        let height = CGFloat(min(rows.count, Self.mostRows)) * Self.rowHeight + CGFloat(sections.count) * Self.headingHeight
+        VStack(alignment: .leading, spacing: 0) {
+            if rows.isEmpty {
+                Text(empty)
+                    .font(.system(size: AgentPanelView.smallSize))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 12)
+                    .frame(height: Self.rowHeight)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections, id: \.title) { section in
+                                Text(section.title)
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: Self.headingHeight, alignment: .bottomLeading)
+                                    .padding(.bottom, 2)
+                                ForEach(section.rows) { row in
+                                    self.row(row, selected: row == selected)
+                                        .id(row.id)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    // No taller than its rows, twelve at the most, nor
+                    // than the room over the field, which a fixed height
+                    // would push the window out for.
+                    .frame(maxHeight: min(height + 8, CGFloat(Self.mostRows) * Self.rowHeight))
+                    .onChange(of: selection, initial: true) {
+                        if let selected { proxy.scrollTo(selected.id) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(nsColor: Theme.header), in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.white.opacity(0.1)))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(label)
+    }
+
+    private func row(_ row: PickRow, selected: Bool) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("/" + command.name)
+                Text(row.lead)
                     .font(.system(size: 12, design: .monospaced))
                     .foregroundStyle(selected ? Color.primary : Color(nsColor: Theme.text))
-                if !command.hint.isEmpty {
-                    Text(command.hint)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !row.hint.isEmpty {
+                    Text(row.hint)
                         .font(.system(size: AgentPanelView.smallSize))
                         .foregroundStyle(Color(nsColor: Theme.faintText))
                         .lineLimit(1)
                 }
             }
-            if !command.description.isEmpty {
-                Text(command.description)
+            if !row.description.isEmpty {
+                Text(row.description)
                     .font(.system(size: AgentPanelView.smallSize))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -1054,7 +1120,7 @@ private struct CommandList: View {
         .frame(maxWidth: .infinity, minHeight: Self.rowHeight, maxHeight: Self.rowHeight, alignment: .leading)
         .background(selected ? Color(nsColor: Theme.selectedRow) : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture { agent.choose(command) }
-        .accessibilityLabel(command.name)
+        .onTapGesture { choose(row) }
+        .accessibilityLabel(row.lead)
     }
 }

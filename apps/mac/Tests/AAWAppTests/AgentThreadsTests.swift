@@ -102,7 +102,7 @@ final class AgentThreadsTests: XCTestCase {
         XCTAssertEqual(AppContext.strip(message), "use these")
         let read = AgentAttachments.listed(in: message)
         XCTAssertEqual(read.map(\.kind), [.image, .sound, .clip, .patch, .folder])
-        XCTAssertEqual(read.map(\.name), ["shot.png", "kick (1).wav", "@12", "Soft Pad", "takes"])
+        XCTAssertEqual(read.map(\.name), ["shot.png", "kick (1).wav", "lead1", "Soft Pad", "takes"], "a clip is named from its detail")
         XCTAssertEqual(read.map(\.path), ["/Users/x/Desktop/shot.png", "/Users/x/kick (1).wav", nil, nil, "/Users/x/takes"])
         XCTAssertEqual(read[2].reference, "@12")
         XCTAssertEqual(read.map(\.detail), ["1024×768; seen", "0.40 s, mono, 44.1 kHz", "note clip lead1 on keys at 5.1.1", "", ""])

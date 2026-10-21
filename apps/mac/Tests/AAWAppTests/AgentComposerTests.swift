@@ -118,4 +118,48 @@ final class AgentComposerTests: XCTestCase {
         text.set("/roar-edit\nmore")
         XCTAssertEqual(text.chipRange, NSRange(location: 0, length: 10))
     }
+
+    /// A thing of the song named with `@` is a chip wherever it stands:
+    /// white on the fill, taken whole by Backspace, the caret kept out of
+    /// it; the field tells where the caret is, and puts it where asked.
+    func testMentionsAreChips() throws {
+        let (_, text) = ComposerTextView.make()
+        text.frame = NSRect(x: 0, y: 0, width: 320, height: 40)
+        var carets: [Int] = []
+        text.onCaret = { carets.append($0) }
+        text.mentions = ["drums", "hook.2", "kick.wav"]
+        text.set("make @drums louder than @hook.2, not @hook")
+        XCTAssertEqual(text.mentionRanges, [NSRange(location: 5, length: 6), NSRange(location: 24, length: 7)])
+        XCTAssertEqual(text.chipRanges, text.mentionRanges, "no skill chip")
+        XCTAssertEqual(text.chipRects.count, 2)
+        XCTAssertEqual(text.color(at: 6), ComposerTextView.chipText)
+        XCTAssertEqual(text.color(at: 0), text.textColor)
+        XCTAssertEqual(text.color(at: 38), text.textColor, "@hook names nothing")
+        XCTAssertEqual(carets.last, (text.string as NSString).length, "the caret at the end was told")
+
+        text.setSelectedRange(NSRange(location: 8, length: 0))
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 11, length: 0), "a caret put inside a chip lands after it")
+        XCTAssertEqual(carets.last, 11)
+        text.setSelectedRange(NSRange(location: 5, length: 0))
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 5, length: 0), "before the chip is fine")
+        text.deleteBackward(nil)
+        XCTAssertEqual(text.string, "make@drums louder than @hook.2, not @hook", "Backspace before a chip takes the character before it")
+        XCTAssertEqual(text.mentionRanges, [NSRange(location: 23, length: 7)], "an @ inside a word is no chip")
+        text.setSelectedRange(NSRange(location: 30, length: 0))
+        text.deleteBackward(nil)
+        XCTAssertEqual(text.string, "make@drums louder than , not @hook", "Backspace at a chip's end took it whole")
+        XCTAssertEqual(text.mentionRanges, [])
+
+        // Both kinds of chip together, and the caret put where asked.
+        text.chip = "roar-edit"
+        text.set("/roar-edit @drums ", caret: 7)
+        XCTAssertEqual(text.chipRanges, [NSRange(location: 0, length: 10), NSRange(location: 11, length: 6)])
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 10, length: 0), "asked for inside the skill's chip, lands after it")
+        text.set("/roar-edit @drums ", caret: 18)
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 18, length: 0), "the same text, the caret moved")
+        text.set("/roar-edit @drums ", caret: 99)
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 18, length: 0))
+        text.mentions = []
+        XCTAssertEqual(text.chipRanges, [NSRange(location: 0, length: 10)])
+    }
 }

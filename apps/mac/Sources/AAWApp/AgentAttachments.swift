@@ -9,6 +9,9 @@ import AVFoundation
 struct AgentAttachment: Equatable, Identifiable {
     enum Kind: String, CaseIterable {
         case image, sound, midi, document, folder, video, other, clip, patch, rack
+        /// What `@` names in the field: a row of the song, a sample, a
+        /// section, a marker or a reference in the library.
+        case track, group, bus = "return", sample, section, marker, reference
 
         /// The chip's symbol.
         var symbol: String {
@@ -23,6 +26,22 @@ struct AgentAttachment: Equatable, Identifiable {
             case .clip: "rectangle.on.rectangle"
             case .patch: "slider.horizontal.3"
             case .rack: "square.stack.3d.up"
+            case .track: "waveform.path"
+            case .group: "rectangle.3.group"
+            case .bus: "arrow.turn.up.right"
+            case .sample: "waveform.circle"
+            case .section: "text.alignleft"
+            case .marker: "bookmark"
+            case .reference: "star"
+            }
+        }
+
+        /// Whether a thing of the kind goes by a reference `daw` takes,
+        /// rather than by a file's path.
+        var byReference: Bool {
+            switch self {
+            case .clip, .track, .group, .bus, .sample, .section, .marker, .reference: true
+            default: false
             }
         }
     }
@@ -91,6 +110,13 @@ struct AgentAttachment: Equatable, Identifiable {
         switch kind {
         case .clip:
             reference = rest
+            name = Self.clipName(in: detail) ?? rest
+        case .track, .group, .bus, .sample, .section, .marker:
+            reference = rest
+            // `tracks.drums` was mentioned as `@drums`.
+            name = rest.range(of: ".").map { String(rest[$0.upperBound...]) } ?? rest
+        case .reference:
+            reference = rest
             name = rest
         case .patch, .rack:
             name = rest
@@ -98,6 +124,18 @@ struct AgentAttachment: Equatable, Identifiable {
             path = rest
             name = (rest as NSString).lastPathComponent
         }
+    }
+
+    /// A clip's name from its line's detail, "note clip lead1 on…", "pattern
+    /// clip of hook on…" or "audio clip of sample kick on…", so that a row
+    /// read from the record shows the name rather than `@12`.
+    static func clipName(in detail: String) -> String? {
+        for lead in ["note clip ", "pattern clip of ", "audio clip of sample "] where detail.hasPrefix(lead) {
+            let rest = detail.dropFirst(lead.count)
+            let name = rest[..<(rest.range(of: " on ")?.lowerBound ?? rest.endIndex)]
+            return name.isEmpty ? nil : String(name)
+        }
+        return nil
     }
 }
 
@@ -170,7 +208,7 @@ enum AgentAttachments {
             return AgentAttachment(kind: .folder, name: name, path: url.path, detail: "\(count) item\(count == 1 ? "" : "s")")
         case .video:
             return AgentAttachment(kind: .video, name: name, path: url.path, detail: [size(of: url), "not read"].compactMap { $0 }.joined(separator: ", "))
-        case .document, .other, .clip, .patch, .rack:
+        case .document, .other, .clip, .patch, .rack, .track, .group, .bus, .sample, .section, .marker, .reference:
             return AgentAttachment(kind: kind, name: name, path: url.path, detail: size(of: url) ?? "")
         }
     }

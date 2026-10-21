@@ -119,6 +119,32 @@ final class AgentPanel {
     /// process answers.
     @ObservationIgnored private static var lastCommands: [String: [AgentCommand]] = [:]
 
+    // The song's things under `@`.
+
+    /// What the person typed after `@`, while the list of the song's things
+    /// shows; nil when it does not.
+    private(set) var mentionQuery: String?
+    /// The characters of `@` and the query in the draft, while the list shows.
+    @ObservationIgnored private var mentionRange: NSRange?
+    /// The row the keys are on, over the sections' mentions in order.
+    private(set) var mentionSelection = 0
+    /// Where the caret is in the draft, in UTF-16 units, as the field tells it.
+    var caret = 0 {
+        didSet {
+            guard caret != oldValue else { return }
+            mentionChanged()
+        }
+    }
+    /// Where the field puts the caret once, after a mention is chosen.
+    struct CaretRequest: Equatable {
+        var id: Int
+        var caret: Int
+    }
+    private(set) var caretRequest: CaretRequest?
+    /// What can be mentioned, read for the arrangement's revision and the
+    /// project's folder, and again when the list opens.
+    @ObservationIgnored private var cachedMentions: (revision: UInt64, folder: String, list: [AgentMention])?
+
     // What goes with the next message.
 
     /// The files and clips attached since the last message, as chips above
@@ -347,7 +373,15 @@ final class AgentPanel {
             guard !attachments.isEmpty, !working else { return }
             text = "Here is what I attached."
         }
-        let attached = attachments
+        // What the words name with `@` goes with them, each thing once.
+        var attached = attachments
+        for mention in AgentMentions.mentioned(in: text, among: mentionables) {
+            let attachment = mention.attachment
+            if attached.contains(where: { ($0.reference != nil && $0.reference == attachment.reference) || ($0.path != nil && $0.path == attachment.path) }) { continue }
+            var stamped = attachment
+            stamped.id = next()
+            attached.append(stamped)
+        }
         draft = ""
         chip = nil
         attachments = []
@@ -470,22 +504,34 @@ final class AgentPanel {
             commandQuery = query
             commandSelection = 0
         }
+        mentionChanged()
     }
 
     /// Moves the list's selection; false when no list shows.
     func moveSelection(by step: Int) -> Bool {
-        guard commandQuery != nil else { return false }
-        let count = listedCommands.count
+        if commandQuery != nil {
+            let count = listedCommands.count
+            guard count > 0 else { return true }
+            commandSelection = (commandSelection + step + count) % count
+            return true
+        }
+        guard mentionQuery != nil else { return false }
+        let count = listedMentionRows.count
         guard count > 0 else { return true }
-        commandSelection = (commandSelection + step + count) % count
+        mentionSelection = (mentionSelection + step + count) % count
         return true
     }
 
     /// Chooses the selected row; false when no list shows.
     func chooseSelected() -> Bool {
-        guard commandQuery != nil else { return false }
-        let commands = listedCommands
-        if commands.indices.contains(commandSelection) { choose(commands[commandSelection]) }
+        if commandQuery != nil {
+            let commands = listedCommands
+            if commands.indices.contains(commandSelection) { choose(commands[commandSelection]) }
+            return true
+        }
+        guard mentionQuery != nil else { return false }
+        let rows = listedMentionRows
+        if rows.indices.contains(mentionSelection) { choose(rows[mentionSelection]) }
         return true
     }
 
@@ -498,10 +544,78 @@ final class AgentPanel {
 
     /// Closes the list and leaves what was typed; false when no list shows.
     func closeList() -> Bool {
-        guard commandQuery != nil else { return false }
-        commandQuery = nil
+        if commandQuery != nil {
+            commandQuery = nil
+            listClosed = true
+            return true
+        }
+        guard mentionQuery != nil else { return false }
+        mentionQuery = nil
         listClosed = true
         return true
+    }
+
+    // MARK: The song's things under `@`
+
+    /// Everything `@` can name now: the song's rows, clips, samples,
+    /// sections and markers, the library's references and the project's
+    /// files, read once a revision and when the list opens.
+    var mentionables: [AgentMention] {
+        guard let song else { return [] }
+        if let cached = cachedMentions, cached.revision == song.arrangement.revision, cached.folder == folder?.path ?? "" { return cached.list }
+        return refreshMentionables()
+    }
+
+    @discardableResult
+    private func refreshMentionables() -> [AgentMention] {
+        guard let song else { return [] }
+        let a = song.arrangement
+        let list = AgentMentions.candidates(arrangement: a, project: folder, references: AgentMentions.references()) {
+            TimelineLayout.position($0, beatsPerBar: a.barBeats, beatUnit: a.beatUnit)
+        }
+        cachedMentions = (a.revision, folder?.path ?? "", list)
+        return list
+    }
+
+    /// The names the field draws as chips where the draft has `@name`.
+    var mentionNames: Set<String> { Set(mentionables.map(\.name)) }
+
+    /// The list's rows in order: the filtered sections' mentions.
+    var listedMentions: [AgentMentions.Section] {
+        AgentMentions.filter(AgentMentions.sections(mentionables), query: mentionQuery ?? "")
+    }
+
+    private var listedMentionRows: [AgentMention] { listedMentions.flatMap(\.mentions) }
+
+    /// The draft or the caret changed: an `@` the caret is in, with the name
+    /// typed so far, shows the list; the skills' list comes first.
+    private func mentionChanged() {
+        var query: String?
+        var range: NSRange?
+        if commandQuery == nil, !listClosed, let found = AgentMentions.query(in: draft, caret: caret) {
+            range = found
+            query = (draft as NSString).substring(with: NSRange(location: found.location + 1, length: found.length - 1))
+        }
+        mentionRange = range
+        guard query != mentionQuery else { return }
+        // The list opening reads the project's files again.
+        if query != nil, mentionQuery == nil { refreshMentionables() }
+        mentionQuery = query
+        mentionSelection = 0
+    }
+
+    /// Puts `@name` in the draft in place of `@` and what was typed after
+    /// it, a space after it, and asks the field to put the caret there.
+    func choose(_ mention: AgentMention) {
+        guard let range = mentionRange ?? AgentMentions.query(in: draft, caret: caret) else { return }
+        let insert = "@\(mention.name) "
+        let text = (draft as NSString).replacingCharacters(in: range, with: insert)
+        let after = range.location + (insert as NSString).length
+        mentionQuery = nil
+        mentionRange = nil
+        caretRequest = CaretRequest(id: (caretRequest?.id ?? 0) + 1, caret: after)
+        caret = after
+        draft = text
     }
 
     // MARK: Speaking

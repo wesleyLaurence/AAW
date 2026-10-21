@@ -41,6 +41,7 @@ reads each one; the kind is told by the extension.
 | A video, or anything else | The Finder | Its path, size and "not read" |
 | A clip on the timeline | `+` › Attach Selected Clips, with clips selected | Its reference as `daw` takes it, `@12`; its kind, track and bar, a pattern clip's repeats, a note clip's length and notes, an audio clip's sample name |
 | A patch or a rack | The browser | Its name and its file's path, or "factory" |
+| A track, a group, a return, a clip, a sample, a section, a marker, a reference or a project file | `@name` in the words ([`@` mentions](agent-mentions.md)) | The reference `daw` takes, `tracks.drums`, `@12`, `samples.kick`, `sections.verse`, `markers.m1`, a reference's name; a file as a dropped one goes |
 
 A pasted image has no file, so it is written as PNG under the project's
 `.daw/attachments/`, named `pasted-DATE-TIME.png`, and attached by that
@@ -164,6 +165,9 @@ mono WAV, and a MIDI file of two named tracks; nothing by hand:
   handling, and its own pull request; Attach Selected Clips stands in.
 - An audio clip's line names its sample, not the sample's file; the
   agent reads the file through `daw inspect` or `daw get`.
+- A clip's chip on a resumed thread is named from its line's detail, "note
+  clip lead1…", "pattern clip of hook…", "audio clip of sample kick…"; a
+  line with none of these shows the reference.
 - A `daw` command that writes into an attached folder, such as an
   export with `--to` under it, is allowed as any `daw` command naming an
   attached path is.

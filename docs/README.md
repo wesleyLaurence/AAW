@@ -78,6 +78,7 @@ Proposed, in the order of Next in the backlog:
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
 | [files and clips in the conversation](features/agent-attachments.md) | Built |
+| [`@` mentions](features/agent-mentions.md) | Built |
 | [speaking to the agent](features/voice-input.md) | Built |
 | [stem separation](features/stem-separation.md) | Built: `daw separate`; more splits, the app and a reference's stems are Later |
 | [generated audio](features/generated-audio.md) | Built: `daw generate sound` and `daw keys`; whole songs and the app are Next |

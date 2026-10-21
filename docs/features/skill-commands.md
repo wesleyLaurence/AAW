@@ -181,4 +181,4 @@ AAW in front the whole time; nothing by hand:
    they miss or want gone.
 2. **`@` mentions** of a track, a clip, a section or a reference, which the
    concept lists beside `/`: the same list over `@`, with the song's
-   names. Later, under The app.
+   names. Built on October 20, 2026 ([`@` mentions](agent-mentions.md)).
