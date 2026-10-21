@@ -54,7 +54,7 @@ impl Running {
             host::run(
                 &p,
                 Options {
-                    buffer: 128,
+                    audio: aaw_host::host::Audio::default(),
                     play: None,
                     exit_on_stop: false,
                     seconds: None,
@@ -286,7 +286,7 @@ fn one_host_per_project_and_stale_sockets_are_cleared() {
     let e = host::run(
         &h.path,
         Options {
-            buffer: 128,
+            audio: aaw_host::host::Audio::default(),
             play: None,
             exit_on_stop: false,
             seconds: None,
@@ -355,7 +355,7 @@ fn an_embedded_host_reports_what_changes() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
     let options = || Options {
-        buffer: 128,
+        audio: aaw_host::host::Audio::default(),
         play: None,
         exit_on_stop: false,
         seconds: None,

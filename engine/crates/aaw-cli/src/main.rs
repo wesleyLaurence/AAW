@@ -223,6 +223,13 @@ enum Top {
         /// Output buffer in frames.
         #[arg(long, default_value_t = 128)]
         buffer: u32,
+        /// Play through the output device whose name contains this, ignoring
+        /// case; the system's default otherwise. `daw device list` names them.
+        #[arg(long)]
+        output: Option<String>,
+        /// Open the device at this rate whatever the song's, for checking.
+        #[arg(long, hide = true)]
+        device_rate: Option<u32>,
     },
     /// Ask the project's host to save and exit.
     Close { project: Song },
@@ -239,6 +246,13 @@ enum Top {
         /// Output buffer in frames (without a running host).
         #[arg(long, default_value_t = 128)]
         buffer: u32,
+        /// Play through the output device whose name contains this, ignoring
+        /// case (without a running host); `daw device list` names them.
+        #[arg(long)]
+        output: Option<String>,
+        /// Open the device at this rate whatever the song's, for checking.
+        #[arg(long, hide = true)]
+        device_rate: Option<u32>,
         /// Time the playback path without a device instead of playing.
         #[arg(long)]
         benchmark: bool,
@@ -360,6 +374,32 @@ enum Top {
     Marker(MarkerCmd),
     #[command(subcommand)]
     Range(RangeCmd),
+    #[command(subcommand)]
+    Device(DeviceCmd),
+}
+
+/// The Mac's audio devices: what it has, and which a running host plays
+/// and records through.
+#[derive(Subcommand)]
+enum DeviceCmd {
+    /// Every audio device the Mac has: its name, input and output channels,
+    /// the sample rates it offers and the one it runs at, the buffers it
+    /// takes, and which are the system's defaults.
+    List,
+    /// Choose the devices of the project's running host: each left out stays
+    /// as it is; an open output is opened again at the same beat.
+    Use {
+        project: Song,
+        /// Part of an output device's name, ignoring case, or `default`.
+        #[arg(long)]
+        output: Option<String>,
+        /// Part of an input device's name, or `default`; kept for recording.
+        #[arg(long)]
+        input: Option<String>,
+        /// The output buffer in frames, 16 to 8192.
+        #[arg(long)]
+        buffer: Option<u32>,
+    },
 }
 
 /// Tracks.
@@ -1355,7 +1395,7 @@ fn value(v: aaw_model::value::Value) -> Json {
 
 struct PlayArgs {
     seconds: Option<f64>,
-    buffer: u32,
+    audio: host::Audio,
 }
 
 fn interrupted() -> Result<Arc<AtomicBool>> {
@@ -1407,7 +1447,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
             (Command::Play { from }, Some(p)) => host::run(
                 project,
                 host::Options {
-                    buffer: p.buffer,
+                    audio: p.audio,
                     play: Some(from.unwrap_or(json!(0))),
                     exit_on_stop: true,
                     seconds: p.seconds,
@@ -1624,10 +1664,21 @@ fn run(cli: &Cli) -> Result<Json> {
             }
             Ok(Json::Object(out))
         }
-        Top::Host { project, buffer } => host::run(
+        Top::Host {
+            project,
+            buffer,
+            output,
+            device_rate,
+        } => host::run(
             project,
             host::Options {
-                buffer: *buffer,
+                audio: host::Audio {
+                    output: output.clone(),
+                    input: None,
+                    buffer: *buffer,
+                    device_rate: *device_rate,
+                    strict_output: true,
+                },
                 play: None,
                 exit_on_stop: false,
                 seconds: None,
@@ -1643,6 +1694,8 @@ fn run(cli: &Cli) -> Result<Json> {
             from,
             seconds,
             buffer,
+            output,
+            device_rate,
             benchmark: bench,
         } => {
             if *bench {
@@ -1696,7 +1749,13 @@ fn run(cli: &Cli) -> Result<Json> {
             }
             let play = PlayArgs {
                 seconds: *seconds,
-                buffer: *buffer,
+                audio: host::Audio {
+                    output: output.clone(),
+                    input: None,
+                    buffer: *buffer,
+                    device_rate: *device_rate,
+                    strict_output: true,
+                },
             };
             route(cli, project, C::Play { from: from.as_deref().map(parse_value) }, Some(play))
         }
@@ -2399,6 +2458,33 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Device(d) => match d {
+            DeviceCmd::List => {
+                let devices: Vec<Json> = aaw_engine::devices::list()?.iter().map(|d| value(d.to_value())).collect();
+                Ok(json!({
+                    "devices": devices,
+                    "default_output": aaw_engine::devices::default_output_name(),
+                }))
+            }
+            DeviceCmd::Use {
+                project,
+                output,
+                input,
+                buffer,
+            } => {
+                if output.is_none() && input.is_none() && buffer.is_none() {
+                    return Err("Give --output, --input or --buffer".into());
+                }
+                edit(
+                    project,
+                    C::Audio {
+                        output: output.clone(),
+                        input: input.clone(),
+                        buffer: *buffer,
+                    },
+                )
+            }
+        },
         Top::Marker(m) => match m {
             MarkerCmd::List { project } => edit(project, C::Markers),
             MarkerCmd::Add { project, at, text, id } => edit(
@@ -2529,6 +2615,7 @@ fn name(top: &Top) -> String {
         Top::Lane(_) => group("lane", ""),
         Top::Section(_) => group("section", ""),
         Top::Marker(_) => group("marker", ""),
+        Top::Device(_) => group("device", ""),
         Top::Range(_) => group("range", ""),
     }
     .trim()

@@ -7,9 +7,9 @@ use crate::program::Program;
 use crate::render::Renderer;
 use aaw_model::value::{dict, Value};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::atomic::{AtomicU64, Ordering::Relaxed};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub struct PlayOptions {
     /// The first frame to play.
@@ -29,6 +29,9 @@ struct Stats {
     over_budget: AtomicU64,
     xruns: AtomicU64,
     errors: AtomicU64,
+    /// The driver stopped the stream: the device went away or changed its
+    /// rate under it. Nothing more will be heard from it.
+    dead: AtomicBool,
 }
 
 fn ms(ns: f64) -> Value {
@@ -42,13 +45,42 @@ fn last_frame(program: &Program, opts: &PlayOptions) -> usize {
     limit.min(program.total)
 }
 
+/// How the output is opened: which device, how large a buffer, and for
+/// checking, the rate to open the device at whatever the song's is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Settings {
+    /// Part of an output device's name, ignoring case; None is the system's
+    /// default output, or the device `AAW_OUTPUT_DEVICE` names when that
+    /// is set, as a scripted run that must not be heard sets it.
+    pub output: Option<String>,
+    /// The requested hardware buffer, in frames.
+    pub buffer: u32,
+    /// Open the device at this rate rather than the song's, as a device
+    /// that offers only this rate would be opened; None picks as described
+    /// at `Transport::open`.
+    pub device_rate: Option<u32>,
+}
+
+impl Default for Settings {
+    fn default() -> Settings {
+        Settings {
+            output: None,
+            buffer: 128,
+            device_rate: None,
+        }
+    }
+}
+
 /// An open output stream running a player. The stream runs until dropped and
 /// is silent while the transport is stopped.
 pub struct Transport {
     pub control: Control,
     stream: cpal::Stream,
     pub device: String,
+    /// The song's rate, which the player renders at.
     pub rate: u32,
+    /// The device's rate: the song's unless the device could not take it.
+    pub device_rate: u32,
     pub channels: usize,
     pub buffer: u32,
     stats: Arc<Stats>,
@@ -56,38 +88,83 @@ pub struct Transport {
 }
 
 impl Transport {
-    /// Opens the default output at the program's rate with a fixed buffer,
-    /// or the output device whose name contains `AAW_OUTPUT_DEVICE` when
-    /// that is set, as a scripted run that must not be heard sets it.
-    pub fn open(program: Arc<Program>, buffer: u32) -> Result<Transport, String> {
+    /// Opens the output `settings` names with a fixed buffer: at the song's
+    /// rate when the device offers it, so what is heard is the render bit
+    /// for bit; otherwise at the rate the device runs at now, with the
+    /// song resampled to it in the callback, as AirPods at 48 kHz play a
+    /// song made at 44.1. A device that offers neither in stereo is refused
+    /// with its name.
+    pub fn open(program: Arc<Program>, settings: &Settings) -> Result<Transport, String> {
+        let first = Self::open_once(program.clone(), settings)?;
+        if first.running_soon() {
+            return Ok(first);
+        }
+        // The driver pauses a stream born as the device changes its rate,
+        // late from setting that rate; built again now that the device has
+        // settled, it runs.
+        drop(first);
+        Self::open_once(program, settings)
+    }
+
+    /// Whether the stream has run a callback, waiting a moment for the
+    /// first; false once the driver has stopped it.
+    fn running_soon(&self) -> bool {
+        let started = Instant::now();
+        while self.stats.callbacks.load(Relaxed) == 0 && !self.stats.dead.load(Relaxed) && started.elapsed() < Duration::from_millis(600) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        self.stats.callbacks.load(Relaxed) > 0
+    }
+
+    /// Whether the driver has stopped the stream: the device went away or
+    /// changed its rate under it. The host opens the output again.
+    pub fn dead(&self) -> bool {
+        self.stats.dead.load(Relaxed)
+    }
+
+    fn open_once(program: Arc<Program>, settings: &Settings) -> Result<Transport, String> {
         let text = |e: cpal::Error| e.to_string();
+        crate::devices::watch();
         let host = cpal::default_host();
-        let device = match std::env::var("AAW_OUTPUT_DEVICE") {
-            Ok(wanted) if !wanted.trim().is_empty() => {
-                let lower = wanted.trim().to_lowercase();
-                host.output_devices()
-                    .map_err(text)?
-                    .find(|d| d.description().map(|d| d.name().to_lowercase().contains(&lower)).unwrap_or(false))
-                    .ok_or_else(|| format!("No audio output device named {} (AAW_OUTPUT_DEVICE)", wanted.trim()))?
-            }
-            _ => host.default_output_device().ok_or("No audio output device")?,
+        let wanted = settings
+            .output
+            .clone()
+            .filter(|n| !n.trim().is_empty())
+            .or_else(|| std::env::var("AAW_OUTPUT_DEVICE").ok().filter(|n| !n.trim().is_empty()));
+        let device = match wanted {
+            Some(name) => crate::devices::find_output(&name)?
+                .ok_or_else(|| format!("No audio output device named {}; daw device list names them", name.trim()))?,
+            None => host.default_output_device().ok_or("No audio output device")?,
         };
         let name = device
             .description()
             .map(|d| d.name().to_string())
             .unwrap_or_else(|_| "output".into());
         let rate = program.rate;
-        let range = device
+        let configs: Vec<cpal::SupportedStreamConfigRange> = device
             .supported_output_configs()
             .map_err(text)?
-            .filter(|c| {
-                c.sample_format() == cpal::SampleFormat::F32
-                    && c.channels() >= 2
-                    && c.min_sample_rate() <= rate
-                    && rate <= c.max_sample_rate()
-            })
-            .min_by_key(|c| c.channels())
-            .ok_or_else(|| format!("{name} cannot play {rate} Hz stereo audio"))?;
+            .filter(|c| c.sample_format() == cpal::SampleFormat::F32 && c.channels() >= 2)
+            .collect();
+        let offering = |at: u32| {
+            configs
+                .iter()
+                .filter(|c| c.min_sample_rate() <= at && at <= c.max_sample_rate())
+                .min_by_key(|c| c.channels())
+                .cloned()
+        };
+        let (device_rate, range) = match settings.device_rate {
+            Some(at) => (at, offering(at).ok_or_else(|| format!("{name} cannot play {at} Hz stereo audio"))?),
+            None => match offering(rate) {
+                Some(range) => (rate, range),
+                None => {
+                    let now = device.default_output_config().map_err(text)?.sample_rate();
+                    let range = offering(now).ok_or_else(|| format!("{name} cannot play {rate} Hz stereo audio, nor its own {now} Hz"))?;
+                    (now, range)
+                }
+            },
+        };
+        let buffer = settings.buffer;
         if let cpal::SupportedBufferSize::Range { min, max } = range.buffer_size() {
             if buffer < *min || buffer > *max {
                 return Err(format!("{name} supports buffers of {min} to {max} frames"));
@@ -96,14 +173,15 @@ impl Transport {
         let channels = range.channels() as usize;
         let config = cpal::StreamConfig {
             channels: range.channels(),
-            sample_rate: rate,
+            sample_rate: device_rate,
             buffer_size: cpal::BufferSize::Fixed(buffer),
         };
         let stats = Arc::new(Stats::default());
         let (control, mut player) = channel(program);
         let shared = control.shared().clone();
         let mut block = vec![[0.0f64; 2]; MAX_BLOCK];
-        let ns_per_frame = 1e9 / rate as f64;
+        let mut stream_resampler = (device_rate != rate).then(|| aaw_dsp::resample::Stream::new(rate, device_rate));
+        let ns_per_frame = 1e9 / device_rate as f64;
         let callback_stats = stats.clone();
         let error_stats = stats.clone();
         let stream = device
@@ -113,12 +191,20 @@ impl Transport {
                     assert_no_alloc::assert_no_alloc(|| {
                         let started = Instant::now();
                         let ahead = info.timestamp().playback.duration_since(info.timestamp().callback);
-                        shared.output_latency.store((ahead.as_secs_f64() * rate as f64).round() as u64, Relaxed);
+                        // What the output trails the renderer by, in the song's
+                        // frames: the driver's lead, and what the resampler holds.
+                        let held = stream_resampler.as_ref().map_or(0.0, |s| s.ahead());
+                        shared
+                            .output_latency
+                            .store((ahead.as_secs_f64() * rate as f64 + held).round() as u64, Relaxed);
                         let frames = data.len() / channels;
                         let mut done = 0;
                         while done < frames {
                             let n = (frames - done).min(MAX_BLOCK);
-                            player.render(&mut block[..n]);
+                            match &mut stream_resampler {
+                                None => player.render(&mut block[..n]),
+                                Some(s) => s.run(&mut block[..n], &mut |b| player.render(b)),
+                            }
                             for (k, f) in block[..n].iter().enumerate() {
                                 let out = &mut data[(done + k) * channels..(done + k + 1) * channels];
                                 out[0] = f[0] as f32;
@@ -143,6 +229,7 @@ impl Transport {
                         error_stats.xruns.fetch_add(1, Relaxed);
                     } else {
                         error_stats.errors.fetch_add(1, Relaxed);
+                        error_stats.dead.store(true, Relaxed);
                     }
                 },
                 None,
@@ -154,6 +241,7 @@ impl Transport {
             stream,
             device: name,
             rate,
+            device_rate,
             channels,
             buffer,
             stats,
@@ -161,16 +249,23 @@ impl Transport {
         })
     }
 
+    /// Whether the song is resampled to the device's rate.
+    pub fn resampled(&self) -> bool {
+        self.device_rate != self.rate
+    }
+
     /// Callback timing and dropouts since the stream opened.
     pub fn report(&self) -> Value {
         let s = &self.stats;
         let callbacks = s.callbacks.load(Relaxed).max(1) as f64;
         let frames = s.frames.load(Relaxed);
-        let ns_per_frame = 1e9 / self.rate as f64;
+        let ns_per_frame = 1e9 / self.device_rate as f64;
         let shared = self.control.shared();
         dict(vec![
             ("device", Value::str(&self.device)),
             ("sample_rate", Value::int(self.rate as i64)),
+            ("device_sample_rate", Value::int(self.device_rate as i64)),
+            ("resampled", Value::Bool(self.resampled())),
             ("channels", Value::int(self.channels as i64)),
             ("buffer_frames", Value::int(self.buffer as i64)),
             ("output_latency_frames", Value::int(shared.output_latency.load(Relaxed) as i64)),

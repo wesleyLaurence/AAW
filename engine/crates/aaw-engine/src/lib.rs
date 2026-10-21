@@ -1,6 +1,7 @@
 //! Compiles a song into a program and runs it offline or in real time.
 
 pub mod audition;
+pub mod devices;
 pub mod measure;
 pub mod offline;
 pub mod peaks;

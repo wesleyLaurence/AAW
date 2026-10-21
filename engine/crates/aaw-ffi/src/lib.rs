@@ -145,6 +145,44 @@ pub struct LoopRegion {
     pub length: f64,
 }
 
+/// The devices the app plays and records through, as its preferences keep
+/// them: part of a device's name, or None for the system's default, and the
+/// output buffer in frames, 0 for the usual.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct AudioSettings {
+    pub output: Option<String>,
+    pub input: Option<String>,
+    pub buffer: u32,
+}
+
+/// One of the Mac's audio devices, as `daw device list` prints it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct AudioDevice {
+    pub name: String,
+    pub input_channels: u16,
+    pub output_channels: u16,
+    pub sample_rates: Vec<u32>,
+    pub current_rate: Option<u32>,
+    pub min_buffer: Option<u32>,
+    pub max_buffer: Option<u32>,
+    pub default_input: bool,
+    pub default_output: bool,
+}
+
+/// What the host plays through now, for Settings › Audio.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct AudioStatus {
+    /// The device the output is open on, or None before anything played.
+    pub device: Option<String>,
+    pub song_sample_rate: u32,
+    pub device_sample_rate: Option<u32>,
+    pub resampled: bool,
+    pub buffer_frames: u32,
+    pub output_latency_ms: Option<f64>,
+    /// The chosen output while it is not connected and the default plays.
+    pub fallback: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Playhead {
     pub playing: bool,
@@ -329,7 +367,7 @@ impl Song {
     /// `song.yaml`, and becomes its host. Fails when the song does not load
     /// or another host has it open.
     #[uniffi::constructor]
-    pub fn open(path: String, observer: Arc<dyn SongObserver>) -> Result<Arc<Song>, SongError> {
+    pub fn open(path: String, observer: Arc<dyn SongObserver>, audio: AudioSettings) -> Result<Arc<Song>, SongError> {
         let file = project::song_file(Path::new(&path));
         let at = Arc::new(Mutex::new(file.clone()));
         let now = at.clone();
@@ -341,7 +379,13 @@ impl Song {
         let files = Arc::new(files::Files::default());
         let known = files.clone();
         let options = Options {
-            buffer: BUFFER,
+            audio: aaw_host::host::Audio {
+                output: audio.output.clone().filter(|n| !n.trim().is_empty()),
+                input: audio.input.clone().filter(|n| !n.trim().is_empty()),
+                buffer: if audio.buffer == 0 { BUFFER } else { audio.buffer },
+                device_rate: None,
+                strict_output: false,
+            },
             play: None,
             exit_on_stop: false,
             seconds: None,
@@ -639,6 +683,39 @@ impl Song {
         self.transport(json!({"op": "metronome", "enabled": enabled}))
     }
 
+    /// Changes the devices and the buffer the host plays through; an open
+    /// output is opened again at the same beat. Never an edit of the song.
+    pub fn set_audio(&self, audio: AudioSettings) -> Result<(), SongError> {
+        let name = |d: &Option<String>| d.clone().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "default".into());
+        self.transport(json!({
+            "op": "audio",
+            "output": name(&audio.output),
+            "input": name(&audio.input),
+            "buffer": if audio.buffer == 0 { BUFFER } else { audio.buffer },
+        }))
+    }
+
+    /// What the host plays through now.
+    pub fn audio_status(&self) -> Result<AudioStatus, SongError> {
+        let status = self.request(json!({"op": "status"}), None)?;
+        let audio = &status["audio"];
+        let song_rate = status["sample_rate"].as_u64().unwrap_or(48000) as u32;
+        let as_u32 = |v: &Json| v.as_u64().map(|n| n as u32);
+        let latency = match (as_u32(&audio["output_latency_frames"]), as_u32(&audio["sample_rate"])) {
+            (Some(frames), Some(rate)) if rate > 0 => Some((frames as f64 / rate as f64 * 1e4).round() / 10.0),
+            _ => None,
+        };
+        Ok(AudioStatus {
+            device: audio["device"].as_str().map(str::to_string),
+            song_sample_rate: as_u32(&audio["sample_rate"]).unwrap_or(song_rate),
+            device_sample_rate: as_u32(&audio["device_sample_rate"]),
+            resampled: audio["resampled"].as_bool().unwrap_or(false),
+            buffer_frames: as_u32(&status["devices"]["buffer_frames"]).unwrap_or(BUFFER),
+            output_latency_ms: latency,
+            fallback: status["devices"]["fallback"].as_str().map(str::to_string),
+        })
+    }
+
     pub fn stop(&self) -> Result<(), SongError> {
         self.transport(json!({"op": "stop"}))
     }
@@ -668,6 +745,25 @@ impl Song {
 
 fn closed() -> String {
     "The song is closed".into()
+}
+
+/// Every audio device the Mac has, for the menus of Settings › Audio.
+#[uniffi::export]
+pub fn audio_devices() -> Result<Vec<AudioDevice>, SongError> {
+    Ok(aaw_engine::devices::list()?
+        .into_iter()
+        .map(|d| AudioDevice {
+            name: d.name,
+            input_channels: d.input_channels,
+            output_channels: d.output_channels,
+            sample_rates: d.sample_rates,
+            current_rate: d.current_rate,
+            min_buffer: d.buffer_frames.map(|b| b.0),
+            max_buffer: d.buffer_frames.map(|b| b.1),
+            default_input: d.default_input,
+            default_output: d.default_output,
+        })
+        .collect())
 }
 
 /// A MIDI number as a note name, such as `C3`, for a row of a pattern's notes.

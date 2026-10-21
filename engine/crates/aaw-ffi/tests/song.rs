@@ -116,7 +116,7 @@ fn open_with_waveforms() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<See
     let (tx, rx) = channel();
     let (waves_tx, waves) = channel();
     let watcher = Watcher(Mutex::new(tx), Mutex::new(waves_tx));
-    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(watcher)).unwrap();
+    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(watcher), no_audio()).unwrap();
     (dir, path, song, rx, waves)
 }
 
@@ -146,6 +146,16 @@ fn transport(seen: &Receiver<Seen>) -> TransportView {
 
 fn touch(part: Part, key: u64, delta: Delta) -> Touch {
     Touch { part, key, delta }
+}
+
+
+/// The app's audio settings as a fresh install has them.
+fn no_audio() -> aaw_ffi::AudioSettings {
+    aaw_ffi::AudioSettings {
+        output: None,
+        input: None,
+        buffer: 0,
+    }
 }
 
 #[test]
@@ -1970,7 +1980,7 @@ fn the_library_is_searched_and_a_sample_copied_in() {
 fn open_at(path: &str) -> (Arc<Song>, Receiver<Seen>) {
     let (tx, rx) = channel();
     let (waves_tx, _) = channel();
-    let song = Song::open(path.into(), Arc::new(Watcher(Mutex::new(tx), Mutex::new(waves_tx)))).unwrap();
+    let song = Song::open(path.into(), Arc::new(Watcher(Mutex::new(tx), Mutex::new(waves_tx))), no_audio()).unwrap();
     (song, rx)
 }
 
@@ -2052,7 +2062,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     assert_eq!(song.path(), second);
 
     // The original opens once its path is released, beside the copy.
-    assert!(Song::open(at.clone(), Arc::new(Watcher(Mutex::new(channel().0), Mutex::new(channel().0)))).is_err());
+    assert!(Song::open(at.clone(), Arc::new(Watcher(Mutex::new(channel().0), Mutex::new(channel().0))), no_audio()).is_err());
     song.release(at.clone()).unwrap();
     let (original, _seen) = open_at(&at);
     assert_eq!((original.arrangement().title.as_str(), original.arrangement().tracks.len()), ("My Beat", 1));
@@ -2240,7 +2250,7 @@ fn the_app_makes_a_midi_track_and_draws_and_edits_its_notes() {
     song.close();
     let (tx, rx) = channel();
     let (waves_tx, _waves) = channel();
-    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(Watcher(Mutex::new(tx), Mutex::new(waves_tx)))).unwrap();
+    let song = Song::open(path.to_string_lossy().into_owned(), Arc::new(Watcher(Mutex::new(tx), Mutex::new(waves_tx))), no_audio()).unwrap();
     assert_eq!(notes_of(&song.arrangement().tracks[2], 0), before);
     drop(rx);
     song.close();

@@ -70,6 +70,9 @@ pub enum Edit {
     /// The song's time signature as written, `3/4`; the host refuses one
     /// the model does not read.
     TimeSignature { text: String },
+    /// The song's sample rate, 44100 or 48000: what it renders at and plays
+    /// at where the device offers it, from Settings › Audio.
+    SampleRate { rate: u32 },
     /// Volume in dB: of a track, a group, a return or, for the master, the song.
     Gain { row: Row, db: f64 },
     Pan { row: Row, pan: f64 },
@@ -1059,6 +1062,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
     match edit {
         Edit::Tempo { bpm } => Ok(vec![json!({"op": "set", "path": "session.tempo", "value": number(*bpm)})]),
         Edit::TimeSignature { text } => Ok(vec![json!({"op": "set", "path": "session.time_signature", "value": text.trim()})]),
+        Edit::SampleRate { rate } => Ok(vec![json!({"op": "set", "path": "session.sample_rate", "value": rate})]),
         Edit::Gain { row, db } => set(row, "gain_db", number(*db)),
         Edit::Pan { row, pan } => set(row, "pan", number(*pan)),
         Edit::Mute { row, on } => set(row, "mute", json!(on)),

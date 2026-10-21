@@ -618,6 +618,20 @@ pub enum Command {
     /// Monitoring only; never an edit of the song.
     #[serde(rename = "metronome")]
     Metronome { enabled: bool },
+    /// The devices the host plays and records through and its buffer, each
+    /// kept as it is when left out: `output` and `input` part of a device's
+    /// name, ignoring case, or `default` for the system's; `buffer` in
+    /// frames. An open output is opened again at the same beat. Never an
+    /// edit of the song.
+    #[serde(rename = "audio")]
+    Audio {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        output: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        input: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        buffer: Option<u32>,
+    },
     #[serde(rename = "locate")]
     Locate { at: Json },
     /// Without `start` and `length`, turns the loop off.
@@ -726,7 +740,7 @@ impl Command {
         use Command::*;
         match self {
             Undo | Redo => Kind::History,
-            Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } => Kind::Transport,
+            Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } | Audio { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
