@@ -329,7 +329,7 @@ pub enum Edit {
     /// Adds an effect of a type to a row's chain, at `index` or last, with
     /// its required fields at a place to start. The effect is what the edit
     /// makes.
-    EffectAdd { row: Row, kind: String, index: Option<u32> },
+    EffectAdd { row: Row, kind: String, index: Option<u32>, rack: Option<u64> },
     /// Adds a copy of an effect right after it in its chain, with every
     /// field it has and no id, as ⌘D does. The copy is what the edit makes.
     /// Only an effect of a track, a return or the master; a Synth's own
@@ -338,15 +338,43 @@ pub enum Edit {
     /// Adds a copy of an effect to a row's chain, at `index` or its end, as an
     /// Option-drag onto a header does. The copy keeps the effect's id unless
     /// that chain has it already. The copy is what the edit makes.
-    EffectCopy { effect: u64, row: Row, index: Option<u32> },
+    EffectCopy { effect: u64, row: Row, index: Option<u32>, rack: Option<u64> },
     /// Adds the effect `copied` took, at `index` of a row's chain or its end,
     /// as `EffectCopy` does; it works after the effect is changed or gone.
     /// The effect is what the edit makes.
-    EffectPaste { copied: String, row: Row, index: Option<u32> },
-    /// Adds the effects of a saved rack to a row's chain, at `index` or its
-    /// end, as `daw rack load` does: what a rack dragged from the browser
-    /// does when dropped. The effects are what the edit makes.
-    RackAdd { row: Row, rack: String, index: Option<u32> },
+    EffectPaste { copied: String, row: Row, index: Option<u32>, rack: Option<u64> },
+    /// Adds a saved rack to a row's chain, at `index` or its end, as one
+    /// rack device with its effects inside, as `daw rack load` does: what a
+    /// rack dragged from the browser does when dropped. Into a rack of the
+    /// chain (`into`), its effects are laid in, since a rack holds no rack.
+    /// What is added is what the edit makes.
+    RackAdd { row: Row, rack: String, index: Option<u32>, into: Option<u64> },
+    /// Moves an effect into a rack of its row's chain (`rack`), or out of
+    /// one into the row's chain (None), at `index` there; the lanes on it
+    /// follow. A move within one chain is `EffectMove`.
+    EffectMoveTo { effect: u64, row: Row, rack: Option<u64>, index: u32 },
+    /// Wraps effects of one chain in a new rack where the first of them
+    /// was, as Make Rack does. The rack is what the edit makes.
+    RackWrap { effects: Vec<u64> },
+    /// Lays a rack's effects out in its chain where it was, as Unrack does.
+    /// The effects are what the edit makes.
+    RackUnwrap { effect: u64 },
+    /// Loads an instrument rack from the library onto a MIDI track, or
+    /// onto a new MIDI track named after it: its instrument in place of the
+    /// track's, with the samples its pads play brought into the project,
+    /// and its effects as one rack first in the track's chain. The track
+    /// made, if any, and the rack are what the edit makes.
+    InstrumentRackAdd { track: Option<u64>, rack: String },
+    /// Saves a MIDI track's instrument and chain to the library as an
+    /// instrument rack, as `daw instrument rack save` does. The song does
+    /// not change.
+    InstrumentRackSave {
+        track: u64,
+        name: String,
+        description: Option<String>,
+        tags: Vec<String>,
+        replace: bool,
+    },
     /// Saves a row's chain to the library as a rack named `name`, as `daw
     /// rack save` does; over a rack already saved under that name only with
     /// `replace`, which keeps the file's description and tags unless new
@@ -357,6 +385,9 @@ pub enum Edit {
         description: Option<String>,
         tags: Vec<String>,
         replace: bool,
+        /// A rack of the row's chain whose effects are saved, in place of
+        /// the whole chain.
+        rack: Option<u64>,
     },
     EffectRemove { effect: u64 },
     /// Moves an effect within its chain.
@@ -753,16 +784,22 @@ fn owner<'a>(project: &'a Project, tree: &Node, row: &Row) -> Result<Owner<'a>> 
     .ok_or_else(|| "The row is no longer in the song".to_string())
 }
 
-/// The owner whose list `list` holds the item at `loc`, with the item's place.
-fn owner_of<'a>(project: &'a Project, loc: &[Step], list: &str) -> Option<(Owner<'a>, usize)> {
-    match loc {
-        [Step::Key(k), Step::Index(i), Step::Key(l), Step::Index(j), ..] if l == list => match k.as_str() {
-            "tracks" => Some((Owner::Track(project.tracks.get(*i)?), *j)),
-            "groups" => Some((Owner::Group(project.groups.get(*i)?), *j)),
-            "returns" => Some((Owner::Return(project.returns.get(*i)?), *j)),
-            _ => None,
+/// The owner whose chain holds the effect at `loc`, with the effect's
+/// place in the chain: inside a rack, the rack's place and its own.
+fn owner_of<'a>(project: &'a Project, loc: &[Step]) -> Option<(Owner<'a>, aaw_model::Place)> {
+    let (owner, rest): (Owner<'a>, &[Step]) = match loc {
+        [Step::Key(k), Step::Index(i), rest @ ..] => match k.as_str() {
+            "tracks" => (Owner::Track(project.tracks.get(*i)?), rest),
+            "groups" => (Owner::Group(project.groups.get(*i)?), rest),
+            "returns" => (Owner::Return(project.returns.get(*i)?), rest),
+            _ => return None,
         },
-        [Step::Key(k), Step::Key(l), Step::Index(j), ..] if k == "master" && l == list => Some((Owner::Master(&project.master), *j)),
+        [Step::Key(k), rest @ ..] if k == "master" => (Owner::Master(&project.master), rest),
+        _ => return None,
+    };
+    match rest {
+        [Step::Key(l), Step::Index(j), Step::Key(m), Step::Index(k), ..] if l == "effects" && m == "effects" => Some((owner, aaw_model::Place::new(*j, Some(*k)))),
+        [Step::Key(l), Step::Index(j), ..] if l == "effects" => Some((owner, aaw_model::Place::new(*j, None))),
         _ => None,
     }
 }
@@ -811,8 +848,8 @@ fn static_value(project: &Project, owner: Owner, param: &str) -> Result<f64> {
             .and_then(|m| m.synth())
             .and_then(|s| aaw_model::rules::synth_value(s, &t.field))
             .ok_or_else(missing),
-        (TargetKind::Effect { index, band }, _) => {
-            let dump = owner.effects()[*index].dump(false);
+        (TargetKind::Effect { index, inner, band }, _) => {
+            let dump = Effect::at(owner.effects(), aaw_model::Place::new(*index, *inner)).ok_or_else(missing)?.dump(false);
             let holder = match band {
                 Some(b) => match dump.get("bands") {
                     Some(aaw_model::value::Value::List(bands)) => bands.get(*b).cloned(),
@@ -1965,8 +2002,8 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Row::Return { key } => Ok(vec![json!({"op": "return.move", "return": handle_text(*key), "index": index})]),
             Row::Master => Err("The master cannot be moved".into()),
         },
-        Edit::EffectAdd { row, kind, index } => {
-            let mut command = json!({"op": "effect.add", "owner": owner_path(row), "type": kind});
+        Edit::EffectAdd { row, kind, index, rack } => {
+            let mut command = json!({"op": "effect.add", "owner": chain_path(row, *rack), "type": kind});
             if let Some(i) = index {
                 command["index"] = json!(i);
             }
@@ -1986,38 +2023,84 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         }
         Edit::EffectDuplicate { effect } => {
             let tree = doc.tree();
-            let (mut fields, row, index) = effect_taken(&tree, *effect)?;
+            let (mut fields, row, rack, index) = effect_taken(&tree, *effect)?;
             fields.as_object_mut().expect("an object").remove("id");
-            effect_copy(project, &tree, fields, &row, Some(index as u32 + 1), "Duplicate")
+            effect_copy(project, &tree, fields, &row, rack, Some(index as u32 + 1), "Duplicate")
         }
-        Edit::EffectCopy { effect, row, index } => {
+        Edit::EffectCopy { effect, row, index, rack } => {
             let tree = doc.tree();
-            let (fields, _, _) = effect_taken(&tree, *effect)?;
-            effect_copy(project, &tree, fields, row, *index, "Copy")
+            let (fields, _, _, _) = effect_taken(&tree, *effect)?;
+            effect_copy(project, &tree, fields, row, *rack, *index, "Copy")
         }
-        Edit::EffectPaste { copied, row, index } => {
+        Edit::EffectPaste { copied, row, index, rack } => {
             let tree = doc.tree();
             let fields: Json = serde_json::from_str(copied).map_err(|e| e.to_string())?;
             if !fields.is_object() {
                 return Err("Nothing was copied".into());
             }
-            effect_copy(project, &tree, fields, row, *index, "Paste")
+            effect_copy(project, &tree, fields, row, *rack, *index, "Paste")
         }
-        Edit::RackAdd { row, rack, index } => {
+        Edit::RackAdd { row, rack, index, into } => {
             let tree = doc.tree();
-            let chain = owner(project, &tree, row)?.effects();
-            let mut command = json!({"op": "rack.load", "owner": owner_path(row), "rack": rack});
+            let chain = chain_of(project, &tree, row, *into)?;
+            let mut command = json!({"op": "rack.load", "owner": chain_path(row, *into), "rack": rack});
             if let Some(i) = index {
                 command["index"] = json!((*i).min(chain.len() as u32));
             }
             Ok(vec![command])
         }
-        Edit::RackSave { row, name, description, tags, replace } => {
+        Edit::EffectMoveTo { effect, row, rack, index } => {
             let tree = doc.tree();
-            if owner(project, &tree, row)?.effects().is_empty() {
+            let chain = chain_of(project, &tree, row, *rack)?;
+            Ok(vec![json!({"op": "effect.move", "effect": handle_text(*effect), "owner": chain_path(row, *rack), "index": (*index).min(chain.len() as u32)})])
+        }
+        Edit::RackWrap { effects } => {
+            if effects.is_empty() {
+                return Err("Select an effect to make a rack of".into());
+            }
+            Ok(vec![json!({"op": "rack.wrap", "effects": effects.iter().map(|e| handle_text(*e)).collect::<Vec<_>>()})])
+        }
+        Edit::RackUnwrap { effect } => Ok(vec![json!({"op": "rack.unwrap", "effect": handle_text(*effect)})]),
+        Edit::InstrumentRackAdd { track, rack } => {
+            let r = aaw_host::instruments::find(rack)?;
+            Ok(match track {
+                Some(key) => {
+                    let t = midi_track(project, &doc.tree(), *key)?;
+                    batch(
+                        vec![json!({"op": "instrument.rack.load", "track": handle_text(*key), "rack": r.name})],
+                        format!("Load instrument rack {} into {}", r.name, t.id),
+                    )
+                }
+                None => {
+                    let taken = |name: &str| taken(project, name);
+                    let id = unique(&ident(&r.name, "instrument"), taken);
+                    batch(
+                        vec![
+                            json!({"op": "track.add", "id": id, "type": "midi"}),
+                            json!({"op": "instrument.rack.load", "track": id, "rack": r.name}),
+                        ],
+                        format!("Add track {id} with {}", r.name),
+                    )
+                }
+            })
+        }
+        Edit::InstrumentRackSave { track, name, description, tags, replace } => {
+            let t = midi_track(project, &doc.tree(), *track)?;
+            if t.midi.as_ref().is_none_or(|m| m.instrument.is_none()) {
+                return Err(format!("{} has no instrument to save", t.id));
+            }
+            let mut command = json!({"op": "instrument.rack.save", "track": handle_text(*track), "name": name, "tags": tags, "replace": replace});
+            if let Some(d) = description {
+                command["description"] = json!(d);
+            }
+            Ok(vec![command])
+        }
+        Edit::RackSave { row, name, description, tags, replace, rack } => {
+            let tree = doc.tree();
+            if chain_of(project, &tree, row, *rack)?.is_empty() {
                 return Err("The chain has no effects to save".into());
             }
-            let mut command = json!({"op": "rack.save", "owner": owner_path(row), "name": name, "tags": tags, "replace": replace});
+            let mut command = json!({"op": "rack.save", "owner": chain_path(row, *rack), "name": name, "tags": tags, "replace": replace});
             if let Some(d) = description {
                 command["description"] = json!(d);
             }
@@ -2053,32 +2136,34 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         Edit::BandRemove { effect, band } => {
             let tree = doc.tree();
             let loc = tree::find(&tree, *effect).ok_or("The effect is no longer in the song")?;
-            let (owner, index) = owner_of(project, &loc, "effects").ok_or("The effect is no longer in the song")?;
-            let Effect::Eq(eq) = &owner.effects()[index] else {
+            let (owner, place) = owner_of(project, &loc).ok_or("The effect is no longer in the song")?;
+            let Some(Effect::Eq(eq)) = Effect::at(owner.effects(), place) else {
                 return Err("Only an equalizer has bands".into());
             };
             let band = *band as usize;
             if band >= eq.bands.len() {
                 return Err(format!("The equalizer has {} bands", eq.bands.len()));
             }
-            let owner_path = tree::path_text(&tree, &loc[..loc.len() - 2]);
+            let depth = if place.inner.is_some() { 4 } else { 2 };
+            let owner_path = tree::path_text(&tree, &loc[..loc.len() - depth]);
             let mut commands = Vec::new();
             // Lanes on the band go; lanes on later bands are named for their
             // bands' new places. They are set aside while the bands change.
             let mut moved = Vec::new();
             for lane in owner.automation() {
                 let Ok(t) = target(owner, &lane.param) else { continue };
-                let TargetKind::Effect { index: i, band: Some(b) } = t.kind else { continue };
-                if i != index || b < band {
+                let TargetKind::Effect { band: Some(b), .. } = t.kind else { continue };
+                if t.place() != Some(place) || b < band {
                     continue;
                 }
                 commands.push(json!({"op": "lane.remove", "owner": owner_path, "param": lane.param}));
                 if b > band {
-                    let reference = lane.param.split('.').nth(1).unwrap_or_default();
+                    // The effect's reference as the lane wrote it: up to its bands.
+                    let reference = lane.param.split(".bands.").next().unwrap_or_default();
                     let points: Vec<Json> = lane.points.iter().map(|p| value_json(&p.dump(true))).collect();
                     moved.push(json!({
                         "op": "lane.set", "owner": owner_path,
-                        "param": format!("effects.{reference}.bands.{}.{}", b - 1, t.field), "points": points,
+                        "param": format!("{reference}.bands.{}.{}", b - 1, t.field), "points": points,
                     }));
                 }
             }
@@ -2543,14 +2628,15 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
     }
 }
 
-/// An effect's fields as Copy takes them, as JSON, with the row it is on and
-/// its place in the chain. Only an effect of a track, a return or the
-/// master: a Synth's own effects live in its patch.
-fn effect_taken(tree: &Node, effect: u64) -> Result<(Json, Row, usize)> {
+/// An effect's fields as Copy takes them, as JSON, with the row it is on,
+/// the rack of that row it is in, if any, and its place in that chain.
+/// Only an effect of a track, a group, a return or the master: a Synth's
+/// own effects live in its patch.
+fn effect_taken(tree: &Node, effect: u64) -> Result<(Json, Row, Option<u64>, usize)> {
     let loc = tree::find(tree, effect).ok_or("The effect is no longer in the song")?;
     let elsewhere = || "Only an effect on a track, a return or the master is copied; a Synth's own effects stay in its patch".to_string();
-    let (row, index) = match loc.as_slice() {
-        [Step::Key(list), Step::Index(i), Step::Key(l), Step::Index(j)] if l == "effects" => {
+    let (row, rest): (Row, &[Step]) = match loc.as_slice() {
+        [Step::Key(list), Step::Index(i), rest @ ..] => {
             let key = items(tree, list).get(*i).ok_or_else(elsewhere)?.handle;
             let row = match list.as_str() {
                 "tracks" => Row::Track { key },
@@ -2558,21 +2644,57 @@ fn effect_taken(tree: &Node, effect: u64) -> Result<(Json, Row, usize)> {
                 "returns" => Row::Return { key },
                 _ => return Err(elsewhere()),
             };
-            (row, *j)
+            (row, rest)
         }
-        [Step::Key(m), Step::Key(l), Step::Index(j)] if m == "master" && l == "effects" => (Row::Master, *j),
+        [Step::Key(m), rest @ ..] if m == "master" => (Row::Master, rest),
+        _ => return Err(elsewhere()),
+    };
+    let (rack, index) = match rest {
+        [Step::Key(l), Step::Index(j)] if l == "effects" => (None, *j),
+        [Step::Key(l), Step::Index(j), Step::Key(m), Step::Index(k)] if l == "effects" && m == "effects" => {
+            let rack = tree::handle_at(tree, &loc[..loc.len() - 2]);
+            let _ = j;
+            (Some(rack), *k)
+        }
         _ => return Err(elsewhere()),
     };
     let mut fields = node_json(tree::get(tree, &loc));
     fields.as_object_mut().ok_or("An effect is an object")?.retain(|_, value| !value.is_null());
-    Ok((fields, row, index))
+    Ok((fields, row, rack, index))
 }
 
-/// The command that adds an effect with `fields` to a row's chain, at
-/// `index` or its end, as a copy: its id goes when the chain has it already.
-/// Named for `verb`, as "Duplicate compressor on tracks.drums".
-fn effect_copy(project: &Project, tree: &Node, mut fields: Json, row: &Row, index: Option<u32>, verb: &str) -> Result<Vec<Json>> {
-    let chain = owner(project, tree, row)?.effects();
+/// The host's path for a chain: a row's own, or a rack of it by its key.
+fn chain_path(row: &Row, rack: Option<u64>) -> String {
+    match rack {
+        Some(key) => handle_text(key),
+        None => owner_path(row),
+    }
+}
+
+/// The effects of a row's chain, or of a rack of it.
+fn chain_of<'a>(project: &'a Project, tree: &Node, row: &Row, rack: Option<u64>) -> Result<&'a [Effect]> {
+    let own = owner(project, tree, row)?;
+    match rack {
+        None => Ok(own.effects()),
+        Some(key) => {
+            let loc = tree::find(tree, key).ok_or("The rack is no longer in the song")?;
+            match owner_of(project, &loc) {
+                Some((_, place)) if place.inner.is_none() => match own.effects().get(place.index) {
+                    Some(Effect::Rack(r)) => Ok(&r.effects),
+                    _ => Err("That is not a rack".into()),
+                },
+                _ => Err("That is not a rack of this row".into()),
+            }
+        }
+    }
+}
+
+/// The command that adds an effect with `fields` to a row's chain, or to a
+/// rack of it, at `index` or its end, as a copy: its id goes when the chain
+/// has it already. Named for `verb`, as "Duplicate compressor on
+/// tracks.drums".
+fn effect_copy(project: &Project, tree: &Node, mut fields: Json, row: &Row, rack: Option<u64>, index: Option<u32>, verb: &str) -> Result<Vec<Json>> {
+    let chain = chain_of(project, tree, row, rack)?;
     let map = fields.as_object_mut().expect("an object");
     if let Some(id) = map.get("id").and_then(Json::as_str) {
         if chain.iter().any(|e| e.id() == Some(id)) {
@@ -2580,14 +2702,20 @@ fn effect_copy(project: &Project, tree: &Node, mut fields: Json, row: &Row, inde
         }
     }
     let kind = map.get("type").and_then(Json::as_str).unwrap_or("effect").to_string();
+    if kind == "rack" && rack.is_some() {
+        return Err("A rack holds no rack".into());
+    }
     map.insert("op".into(), json!("effect.add"));
-    map.insert("owner".into(), json!(owner_path(row)));
+    map.insert("owner".into(), json!(chain_path(row, rack)));
     if let Some(i) = index {
         map.insert("index".into(), json!(i.min(chain.len() as u32)));
     }
-    let place = match row {
-        Row::Master => "master".to_string(),
-        Row::Track { key } | Row::Group { key } | Row::Return { key } => tree::path_text(tree, &tree::find(tree, *key).ok_or("The row is no longer in the song")?),
+    let place = match rack {
+        Some(key) => tree::path_text(tree, &tree::find(tree, key).ok_or("The rack is no longer in the song")?),
+        None => match row {
+            Row::Master => "master".to_string(),
+            Row::Track { key } | Row::Group { key } | Row::Return { key } => tree::path_text(tree, &tree::find(tree, *key).ok_or("The row is no longer in the song")?),
+        },
     };
     let on = if verb == "Copy" { "to" } else { "on" };
     Ok(batch(vec![fields], format!("{verb} {kind} {on} {place}")))
@@ -2596,7 +2724,7 @@ fn effect_copy(project: &Project, tree: &Node, mut fields: Json, row: &Row, inde
 /// What Copy takes of an effect, for `Edit::EffectPaste`: its fields as
 /// JSON, so that a paste adds an effect like it after it is changed or gone.
 pub fn copied_effect(doc: &Doc, effect: u64) -> Result<String> {
-    let (fields, _, _) = effect_taken(&doc.tree(), effect)?;
+    let (fields, _, _, _) = effect_taken(&doc.tree(), effect)?;
     Ok(fields.to_string())
 }
 

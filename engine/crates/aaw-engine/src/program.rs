@@ -130,8 +130,9 @@ pub struct DeviceProgram {
 #[derive(Debug, Default)]
 pub struct ChainProgram {
     pub devices: Vec<DeviceProgram>,
-    /// For each effect of the document, its type and its place among
-    /// `devices`, or None when it is bypassed.
+    /// For each effect the chain runs, in order, a rack's effects one by
+    /// one where the rack is, its type and its place among `devices`, or
+    /// None when it is bypassed, or inside a bypassed rack.
     pub effects: Vec<(&'static str, Option<usize>)>,
     pub latency: usize,
 }
@@ -1052,15 +1053,29 @@ fn chain(
         latency: upstream,
         ..ChainProgram::default()
     };
-    for (i, effect) in effects.iter().enumerate() {
-        if effect.bypass() {
+    // A rack's effects run where the rack is, each with the lanes on it
+    // under the rack's, `effects.J.FIELD` of the rack's lanes; every effect
+    // the chain runs is numbered on, a rack's one by one, for the taps and
+    // the report.
+    let mut outer: Option<(usize, BTreeMap<String, Arc<Envelope>>)> = None;
+    for (flat, (place, effect, silent)) in Effect::flat(effects).into_iter().enumerate() {
+        if silent {
             out.effects.push((effect.kind(), None));
             continue;
         }
-        let mut plan = Plan::new(effect, lanes(i), p.session.sample_rate, p.session.tempo, &mut cache.kernels);
+        let own = match place.inner {
+            None => lanes(place.index),
+            Some(j) => {
+                if outer.as_ref().is_none_or(|(i, _)| *i != place.index) {
+                    outer = Some((place.index, lanes(place.index)));
+                }
+                patch_effect_lanes(&outer.as_ref().expect("the rack's lanes").1, j)
+            }
+        };
+        let mut plan = Plan::new(effect, own, p.session.sample_rate, p.session.tempo, &mut cache.kernels);
         match (taps, effect) {
-            (Some(owner), Effect::Eq(_)) => plan.tap = Some(cache.taps.get(owner, i)),
-            (Some(owner), Effect::Analyzer(_)) => plan.ring = Some(cache.taps.ring(owner, i)),
+            (Some(owner), Effect::Eq(_)) => plan.tap = Some(cache.taps.get(owner, flat)),
+            (Some(owner), Effect::Analyzer(_)) => plan.ring = Some(cache.taps.ring(owner, flat)),
             _ => {}
         }
         out.effects.push((effect.kind(), Some(out.devices.len())));
@@ -1076,7 +1091,8 @@ fn chain(
 }
 
 /// The lanes on a patch's effect `i`, by field, out of the track's lanes
-/// on `instrument.effects.i.FIELD`.
+/// on `instrument.effects.i.FIELD`; and the lanes on an effect `i` of a
+/// rack, out of the lanes on the rack as `effects.i.FIELD`.
 fn patch_effect_lanes(instrument: &BTreeMap<String, Arc<Envelope>>, i: usize) -> BTreeMap<String, Arc<Envelope>> {
     let prefix = format!("effects.{i}.");
     instrument

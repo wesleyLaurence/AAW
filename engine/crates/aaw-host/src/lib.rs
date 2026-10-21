@@ -9,6 +9,7 @@ pub mod client;
 pub mod command;
 pub mod generate;
 pub mod host;
+pub mod instruments;
 pub mod keys;
 pub mod map;
 pub mod midi_file;

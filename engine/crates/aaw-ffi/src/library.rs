@@ -192,6 +192,43 @@ pub fn library_racks(query: String) -> Vec<RackInfo> {
         .collect()
 }
 
+/// An instrument rack as the browser lists it: an instrument with its
+/// chain, saved in the workspace library.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct InstrumentRackInfo {
+    pub name: String,
+    /// The file's stem, `warm-bass` for Warm Bass.
+    pub slug: String,
+    pub description: String,
+    pub tags: Vec<String>,
+    /// `synth` or `sampler`.
+    pub instrument: String,
+    /// The kinds of its effects, in order.
+    pub kinds: Vec<String>,
+    pub file: Option<String>,
+}
+
+/// The instrument racks, by name, that have every word of `query` in their
+/// name, a tag, their instrument's kind or an effect's kind; all of them
+/// for an empty query. What `daw instrument rack list` lists.
+#[uniffi::export]
+pub fn library_instrument_racks(query: String) -> Vec<InstrumentRackInfo> {
+    aaw_host::instruments::list()
+        .racks
+        .iter()
+        .filter(|r| aaw_host::instruments::matches(r, &query))
+        .map(|r| InstrumentRackInfo {
+            name: r.name.clone(),
+            slug: r.slug.clone(),
+            description: r.description.clone(),
+            tags: r.tags.clone(),
+            instrument: r.kind().to_string(),
+            kinds: r.effect_kinds(),
+            file: r.file.as_ref().map(|f| f.to_string_lossy().into_owned()),
+        })
+        .collect()
+}
+
 /// The categories the browser offers.
 #[uniffi::export]
 pub fn library_categories() -> Vec<String> {

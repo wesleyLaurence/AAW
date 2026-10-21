@@ -98,6 +98,39 @@ fn reduction(r: &Reduction) -> Vec<(&'static str, Value)> {
 /// A device's entry in the report, as `Device.report`: its ID if the song
 /// gives it one, and a compressor's, limiter's or clipper's reduction over the song and
 /// over each of its `sections` that holds a frame.
+/// A chain's effects as the report lists them, in the document's order: a
+/// rack as an entry of its own with its effects under it, each read from
+/// the devices the chain ran, which a rack's effects are one by one.
+fn chain_report(ran: &[DeviceReport], of: &[Effect], sections: &[&str]) -> Value {
+    let mut devices = ran.iter();
+    let mut out = Vec::new();
+    for effect in of {
+        match effect {
+            Effect::Rack(r) => {
+                let mut entry = vec![("type", Value::str("rack"))];
+                if let Some(id) = effect.id() {
+                    entry.push(("id", Value::str(id)));
+                }
+                if let Some(name) = effect.name() {
+                    entry.push(("name", Value::str(name)));
+                }
+                if r.bypass {
+                    entry.push(("bypass", Value::Bool(true)));
+                }
+                let inner: Vec<Value> = r.effects.iter().filter_map(|e| devices.next().map(|d| device_report(d, e, sections))).collect();
+                entry.push(("effects", Value::List(inner)));
+                out.push(dict(entry));
+            }
+            _ => {
+                if let Some(d) = devices.next() {
+                    out.push(device_report(d, effect, sections));
+                }
+            }
+        }
+    }
+    Value::List(out)
+}
+
 fn device_report(d: &DeviceReport, effect: &Effect, sections: &[&str]) -> Value {
     let mut out = vec![("type", Value::str(d.kind))];
     if let Some(id) = effect.id() {
@@ -366,9 +399,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     });
     written?;
     let reports = renderer.report();
-    let effects = |chain: &[DeviceReport], of: &[Effect]| {
-        Value::List(chain.iter().zip(of).map(|(d, effect)| device_report(d, effect, &section_ids)).collect())
-    };
+    let effects = |chain: &[DeviceReport], of: &[Effect]| chain_report(chain, of, &section_ids);
     let params = |lanes: &[String]| Value::List(lanes.iter().map(|l| Value::str(l)).collect());
     let mut track_reports = Vec::new();
     let mut stem = |name: &str, fields: Vec<(&str, Value)>| -> Result<(), String> {

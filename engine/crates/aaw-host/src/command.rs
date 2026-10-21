@@ -415,14 +415,24 @@ pub enum Command {
     },
     #[serde(rename = "effect.remove")]
     EffectRemove { effect: String },
+    /// Moves an effect to `index` of its chain, or with `owner` into another
+    /// chain of its row at `index`: a rack of the chain, or the chain out
+    /// of a rack. The lanes on it follow; an id the chain has is numbered.
     #[serde(rename = "effect.move")]
-    EffectMove { effect: String, index: usize },
+    EffectMove {
+        effect: String,
+        index: usize,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        owner: Option<String>,
+    },
     #[serde(rename = "effect.bypass")]
     EffectBypass { effect: String, bypass: bool },
-    /// Adds the effects of a rack to a chain, at `index` or its end, as one
-    /// step: each keeps its ID unless the chain has it, when a number is
-    /// added; a compressor's sidechain is kept when the chain is a track's,
-    /// a group's or a return's and it names another track of the song, and
+    /// Adds a saved rack to a chain, at `index` or its end, as one rack
+    /// device named for it, with its effects inside; or with `flat`, and
+    /// into a rack or a patch, its effects laid in the chain, each keeping
+    /// its ID unless the chain has it, when a number is added. A
+    /// compressor's sidechain is kept when the chain is a track's, a
+    /// group's or a return's and it names another track of the song, and
     /// dropped otherwise. `rack` is a rack's name or slug, or a `.yaml` file.
     #[serde(rename = "rack.load")]
     RackLoad {
@@ -430,7 +440,47 @@ pub enum Command {
         rack: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         index: Option<usize>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        flat: bool,
     },
+    /// Wraps effects of one chain in a new rack where the first of them
+    /// was, in their order, the lanes on them following; `name` and `id`
+    /// are the rack's. The rack is what the command makes.
+    #[serde(rename = "rack.wrap")]
+    RackWrap {
+        effects: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+    },
+    /// Lays a rack's effects out in its chain where it was, each bypassed
+    /// if the rack was, the lanes on them following; an id the chain has
+    /// is numbered. The effects are what the command makes.
+    #[serde(rename = "rack.unwrap")]
+    RackUnwrap { effect: String },
+    /// Saves a MIDI track's instrument with its chain to the library as an
+    /// instrument rack named `name`, the files its sampler's pads play
+    /// named by their place in the project. Over one already saved under
+    /// that name only with `replace`. The song does not change.
+    #[serde(rename = "instrument.rack.save")]
+    InstrumentRackSave {
+        track: String,
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        tags: Vec<String>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replace: bool,
+    },
+    /// Loads an instrument rack onto a MIDI track: its samples brought into
+    /// the project where the song does not have them, its instrument in
+    /// place of the track's, and its effects as one rack device first in
+    /// the track's chain, as one step. `rack` is a name or slug, or a
+    /// `.yaml` file.
+    #[serde(rename = "instrument.rack.load")]
+    InstrumentRackLoad { track: String, rack: String },
     /// Saves a chain to the library as a rack named `name`, with a
     /// description and tags. Over a rack already saved under that name only
     /// with `replace`. The song does not change.
@@ -842,6 +892,8 @@ pub struct Edit<'a> {
     pub next: &'a mut u64,
     /// Who is editing, for what an edit writes outside the song.
     pub origin: Origin,
+    /// The project's folder, for an edit that reads or writes its files.
+    pub dir: Option<std::path::PathBuf>,
     pub(crate) also: Vec<String>,
 }
 
@@ -1063,11 +1115,18 @@ impl<'a> Edit<'a> {
             next,
             origin: Origin::Agent,
             also: Vec::new(),
+            dir: None,
         }
     }
 
     pub fn by(mut self, origin: Origin) -> Self {
         self.origin = origin;
+        self
+    }
+
+    /// Tells the edit where the project's files are.
+    pub fn in_dir(mut self, dir: std::path::PathBuf) -> Self {
+        self.dir = Some(dir);
         self
     }
 
@@ -1148,25 +1207,51 @@ impl<'a> Edit<'a> {
         Ok(())
     }
 
-    /// A chain's owner: a track, a return, the master, or a MIDI track's
-    /// synth, whose patch has a chain of its own.
+    /// A chain's owner: a track, a group, a return, the master, a MIDI
+    /// track's synth, whose patch has a chain of its own, or a rack in one
+    /// of their chains.
     fn owner(&self, path: &str) -> Result<Loc> {
         let loc = self.at(path)?;
         if self.node(&loc).get("effects").is_none() || self.lane_owner(&loc).is_none() {
-            return Err(format!("{path} is not a track, return, master or synth"));
+            return Err(format!("{path} is not a track, group, return, master, synth or rack"));
         }
         Ok(loc)
     }
 
-    /// Where the lanes on a chain owner's effects live, and the prefix they
-    /// address the chain by: an owner's own lanes as `effects.REF.FIELD`, or
-    /// for a synth the track's as `instrument.effects.REF.FIELD`.
-    fn lane_owner(&self, owner: &[Step]) -> Option<(Loc, &'static str)> {
+    /// Whether a chain owner is a rack.
+    fn is_rack(&self, owner: &[Step]) -> bool {
+        matches!(owner, [.., Step::Key(e), Step::Index(_)] if e == "effects") && self.node(owner).field("type") == Some("rack")
+    }
+
+    /// Whether a chain owner is a Synth's patch.
+    fn is_synth(&self, owner: &[Step]) -> bool {
+        matches!(owner, [.., Step::Key(i), Step::Key(s)] if i == "instrument" && s == "synth")
+    }
+
+    /// Where the lanes on a chain owner's effects live, and the prefixes
+    /// they address the chain by: an owner's own lanes as
+    /// `effects.REF.FIELD`, for a synth the track's as
+    /// `instrument.effects.REF.FIELD`, and for a rack its chain's owner's
+    /// through the rack, by its id and by its index, as
+    /// `effects.RACK.effects.REF.FIELD`. The first prefix is the one a
+    /// lane is written with.
+    fn lane_owner(&self, owner: &[Step]) -> Option<(Loc, Vec<String>)> {
         if self.node(owner).get("automation").is_some() {
-            return Some((owner.to_vec(), ""));
+            return Some((owner.to_vec(), vec![String::new()]));
         }
         match owner {
-            [track @ .., Step::Key(i), Step::Key(s)] if i == "instrument" && s == "synth" => Some((track.to_vec(), "instrument.")),
+            [track @ .., Step::Key(i), Step::Key(s)] if i == "instrument" && s == "synth" => Some((track.to_vec(), vec!["instrument.".into()])),
+            [chain @ .., Step::Key(e), Step::Index(i)] if e == "effects" && self.node(owner).field("type") == Some("rack") => {
+                let (lane_owner, outer) = self.lane_owner(chain)?;
+                let mut prefixes = Vec::new();
+                for p in &outer {
+                    if let Some(id) = self.node(owner).field("id").filter(|id| !id.is_empty()) {
+                        prefixes.push(format!("{p}effects.{id}."));
+                    }
+                    prefixes.push(format!("{p}effects.{i}."));
+                }
+                Some((lane_owner, prefixes))
+            }
             _ => None,
         }
     }
@@ -1179,7 +1264,7 @@ impl<'a> Edit<'a> {
     /// `index` maps old effect positions to new ones, None where removed.
     /// A synth's chain is automated from its track, as `instrument.effects`.
     fn remap_lanes(&mut self, owner: &[Step], index: impl Fn(usize) -> Option<usize>, removed_id: Option<&str>) -> Result<()> {
-        let (lane_owner, prefix) = self.lane_owner(owner).ok_or_else(|| format!("{} has no chain", self.text(owner)))?;
+        let (lane_owner, prefixes) = self.lane_owner(owner).ok_or_else(|| format!("{} has no chain", self.text(owner)))?;
         let name = self.text(&lane_owner);
         let lanes = self.list(&lane_owner, "automation")?;
         let mut notes = Vec::new();
@@ -1187,7 +1272,7 @@ impl<'a> Edit<'a> {
             let Some(param) = lane.node.field("param").map(str::to_string) else {
                 return true;
             };
-            let Some(own) = param.strip_prefix(prefix) else {
+            let Some((prefix, own)) = prefixes.iter().find_map(|p| param.strip_prefix(p.as_str()).map(|own| (p.as_str(), own))) else {
                 return true;
             };
             let Some((r, rest)) = effect_ref(own) else {
@@ -1213,6 +1298,188 @@ impl<'a> Edit<'a> {
         });
         self.also.extend(notes);
         Ok(())
+    }
+
+    /// Takes the lanes on the effects of a chain owner that `which` names
+    /// by their reference, as the lanes address them, out of the owner's
+    /// automation: each with its reference and the rest of its parameter
+    /// after it, for `attach_lanes` to put back under another reference.
+    fn detach_lanes(&mut self, owner: &[Step], which: &dyn Fn(&str) -> bool) -> Result<Vec<(Item, String, String)>> {
+        let (lane_owner, prefixes) = self.lane_owner(owner).ok_or_else(|| format!("{} has no chain", self.text(owner)))?;
+        let lanes = self.list(&lane_owner, "automation")?;
+        let mut taken = Vec::new();
+        let mut kept = Vec::new();
+        for lane in lanes.drain(..) {
+            let found = lane.node.field("param").and_then(|param| {
+                let own = prefixes.iter().find_map(|p| param.strip_prefix(p.as_str()))?;
+                let (r, rest) = effect_ref(own)?;
+                which(r).then(|| (r.to_string(), rest.to_string()))
+            });
+            match found {
+                Some((r, rest)) => taken.push((lane, r, rest)),
+                None => kept.push(lane),
+            }
+        }
+        *lanes = kept;
+        Ok(taken)
+    }
+
+    /// Puts lanes `detach_lanes` took back into the automation of a chain
+    /// owner, on the effect `reference` names there, with their parameters
+    /// rewritten, each change noted.
+    fn attach_lanes(&mut self, owner: &[Step], reference: &str, lanes: Vec<(Item, String, String)>) -> Result<()> {
+        let (lane_owner, prefixes) = self.lane_owner(owner).ok_or_else(|| format!("{} has no chain", self.text(owner)))?;
+        let name = self.text(&lane_owner);
+        let prefix = prefixes.first().cloned().unwrap_or_default();
+        let list = self.list(&lane_owner, "automation")?;
+        let mut notes = Vec::new();
+        for (mut lane, _, rest) in lanes {
+            let was = lane.node.field("param").unwrap_or_default().to_string();
+            let now = format!("{prefix}effects.{reference}.{rest}");
+            if now != was {
+                notes.push(format!("{name}: lane {was} is now {now}"));
+                *lane.node.get_mut("param").expect("param") = Node::Leaf(Value::Str(now));
+            }
+            list.push(lane);
+        }
+        self.also.extend(notes);
+        Ok(())
+    }
+
+    /// The ids of a chain owner's effects.
+    fn chain_ids(&self, owner: &[Step]) -> Vec<String> {
+        self.node(owner).get("effects").map(|e| e.items().iter().filter_map(|i| i.node.field("id")).map(str::to_string).collect()).unwrap_or_default()
+    }
+
+    /// Puts an item with its handle into a list at `index`, as `insert`
+    /// does a new node.
+    fn insert_item(&mut self, owner: &[Step], key: &str, index: usize, item: Item) -> Result<u64> {
+        let handle = item.handle;
+        let list = self.list(owner, key)?;
+        if index > list.len() {
+            return Err(format!("{key} index {index} is past the end ({} items)", list.len()));
+        }
+        list.insert(index, item);
+        Ok(handle)
+    }
+
+    /// Moves effect `from` of one chain into another chain of the same row
+    /// at `index`, the lanes on it following and an id the chain has
+    /// numbered: the chain it landed in, as it is afterwards, and where.
+    fn move_between(&mut self, from_owner: &[Step], from: usize, to_owner: &[Step], index: usize) -> Result<(Loc, usize)> {
+        let (a, _) = self.lane_owner(from_owner).ok_or_else(|| format!("{} has no chain", self.text(from_owner)))?;
+        let (b, _) = self.lane_owner(to_owner).ok_or_else(|| format!("{} has no chain", self.text(to_owner)))?;
+        if a != b {
+            return Err("An effect is moved within its row; daw effect add puts one like it on another row".into());
+        }
+        let loc = [from_owner.to_vec(), vec![Step::Key("effects".into()), Step::Index(from)]].concat();
+        if self.node(&loc).field("type") == Some("rack") {
+            if self.is_rack(to_owner) {
+                return Err("A rack holds no rack: unwrap it first".into());
+            }
+            if self.is_synth(to_owner) {
+                return Err("A rack is not offered inside a patch: the patch's chain is the synth's own".into());
+            }
+        }
+        let id = self.node(&loc).field("id").map(str::to_string);
+        let detached = self.detach_lanes(from_owner, &|r| index_ref(r) == Some(from) || Some(r) == id.as_deref())?;
+        let mut item = self.take(from_owner, "effects", from)?;
+        self.remap_lanes(
+            from_owner,
+            |j| match j.cmp(&from) {
+                std::cmp::Ordering::Less => Some(j),
+                std::cmp::Ordering::Equal => None,
+                std::cmp::Ordering::Greater => Some(j - 1),
+            },
+            None,
+        )?;
+        // A rack of the same chain after the effect moved up one.
+        let mut to_owner = to_owner.to_vec();
+        if to_owner.len() == from_owner.len() + 2 && to_owner[..from_owner.len()] == *from_owner {
+            if let Step::Index(k) = &mut to_owner[from_owner.len() + 1] {
+                if *k > from {
+                    *k -= 1;
+                }
+            }
+        }
+        let to_owner = &to_owner[..];
+        let mut id = id;
+        if let Some(had) = &id {
+            let ids = self.chain_ids(to_owner);
+            if ids.contains(had) {
+                let fresh = numbered(had, &ids);
+                self.also.push(format!("{}: effect {had} is {fresh} here, since the chain has {had}", self.text(to_owner)));
+                if let Some(m) = item.node.map_mut() {
+                    m.insert("id".into(), Node::Leaf(Value::str(&fresh)));
+                }
+                id = Some(fresh);
+            }
+        }
+        let count = self.node(to_owner).get("effects").map_or(0, |e| e.items().len());
+        let to = index.min(count);
+        self.insert_item(to_owner, "effects", to, item)?;
+        self.remap_lanes(to_owner, |j| Some(if j >= to { j + 1 } else { j }), None)?;
+        let reference = id.unwrap_or_else(|| to.to_string());
+        self.attach_lanes(to_owner, &reference, detached)?;
+        Ok((to_owner.to_vec(), to))
+    }
+
+    /// A saved rack's effects as they go into a chain: an id the chain has
+    /// numbered when `number_ids`, as laid-in effects need and a rack's own
+    /// do not, and a compressor's sidechain kept only where the song allows
+    /// one and it names another track that is there. With what was changed.
+    fn rack_effects(&self, owner: &[Step], effects: &[Value], number_ids: bool) -> Result<(Vec<Json>, Vec<String>)> {
+        let name = self.text(owner);
+        let chain_owner = match owner {
+            [chain @ .., Step::Key(e), Step::Index(_)] if e == "effects" => chain.to_vec(),
+            _ => owner.to_vec(),
+        };
+        let keyed = matches!(&chain_owner[..], [Step::Key(list), Step::Index(_)] if list == "tracks" || list == "groups" || list == "returns");
+        let own_id = self.node(&chain_owner).field("id").map(str::to_string);
+        let tracks: Vec<String> =
+            self.root.get("tracks").map(|t| t.items().iter().filter_map(|i| i.node.field("id")).map(str::to_string).collect()).unwrap_or_default();
+        let mut ids = if number_ids { self.chain_ids(owner) } else { Vec::new() };
+        let mut notes = Vec::new();
+        let mut out = Vec::new();
+        for effect in effects {
+            let mut fields = to_json(effect);
+            let map = fields.as_object_mut().ok_or("an effect is a mapping")?;
+            if number_ids {
+                if let Some(id) = map.get("id").and_then(Json::as_str).map(str::to_string) {
+                    if ids.contains(&id) {
+                        let fresh = numbered(&id, &ids);
+                        notes.push(format!("{name}: effect {id} of the rack is {fresh} here, since the chain has {id}"));
+                        map.insert("id".into(), Json::String(fresh.clone()));
+                        ids.push(fresh);
+                    } else {
+                        ids.push(id);
+                    }
+                }
+            }
+            if let Some(side) = map.get("sidechain").and_then(Json::as_str).map(str::to_string) {
+                let allowed = keyed && tracks.contains(&side) && own_id.as_deref() != Some(side.as_str());
+                if !allowed {
+                    map.remove("sidechain");
+                    notes.push(format!("{name}: the rack's compressor was keyed by {side}, which this chain cannot be; set its sidechain"));
+                }
+            }
+            out.push(fields);
+        }
+        Ok((out, notes))
+    }
+
+    /// Adds a rack device named `name` with `effects` inside to a chain at
+    /// `at`, its id the slug of the name, numbered when the chain has it:
+    /// the device's handle.
+    fn add_rack_device(&mut self, owner: &[Step], name: &str, effects: Vec<Json>, at: usize) -> Result<u64> {
+        let ids = self.chain_ids(owner);
+        let slug = crate::patches::slug(name);
+        let id = if slug.is_empty() { "rack".to_string() } else { slug };
+        let id = if ids.contains(&id) { numbered(&id, &ids) } else { id };
+        let device = json!({"type": "rack", "id": id, "name": name, "effects": effects});
+        let handle = self.insert(owner, "effects", Some(at), Node::new(&json_value(&device)?))?;
+        self.remap_lanes(owner, |j| Some(if j >= at { j + 1 } else { j }), None)?;
+        Ok(handle)
     }
 
     /// Removes lanes whose parameter is `param` exactly.
@@ -2446,6 +2713,14 @@ impl<'a> Edit<'a> {
             }
             EffectAdd { owner, index, fields } => {
                 let loc = self.owner(owner)?;
+                if fields.get("type").and_then(Json::as_str) == Some("rack") {
+                    if self.is_rack(&loc) {
+                        return Err("A rack holds no rack: add the effect to the rack itself".into());
+                    }
+                    if self.is_synth(&loc) {
+                        return Err("A rack is not offered inside a patch: the patch's chain is the synth's own; put the rack on the track's chain".into());
+                    }
+                }
                 let at = index.unwrap_or(self.node(&loc).get("effects").map_or(0, |e| e.items().len()));
                 out.made.push(self.insert(&loc, "effects", Some(at), map_node(fields)?)?);
                 self.remap_lanes(&loc, |j| Some(if j >= at { j + 1 } else { j }), None)?;
@@ -2457,9 +2732,15 @@ impl<'a> Edit<'a> {
                 let loc = [owner, vec![Step::Key("effects".into()), Step::Index(i)]].concat();
                 out.label = format!("Remove effect {}", self.remove_at(&loc)?);
             }
-            EffectMove { effect, index } => {
+            EffectMove { effect, index, owner: into } => {
                 let (owner, from) = self.member(effect, "effects", "an effect")?;
                 let to = *index;
+                if let Some(target) = into.as_deref().map(|o| self.owner(o)).transpose()?.filter(|t| *t != owner) {
+                    let (target, landed) = self.move_between(&owner, from, &target, to)?;
+                    let loc = [target.clone(), vec![Step::Key("effects".into()), Step::Index(landed)]].concat();
+                    out.label = format!("Move effect {} into {}", self.text(&loc), self.text(&target));
+                    return Ok(out);
+                }
                 self.move_item(&owner, "effects", from, to)?;
                 self.remap_lanes(
                     &owner,
@@ -2485,65 +2766,47 @@ impl<'a> Edit<'a> {
                 self.set_leaf(&loc, "bypass", Value::Bool(*bypass));
                 out.label = format!("{} effect {}", if *bypass { "Bypass" } else { "Enable" }, self.text(&loc));
             }
-            RackLoad { owner, rack, index } => {
+            RackLoad { owner, rack, index, flat } => {
                 let loc = self.owner(owner)?;
                 let r = crate::racks::find(rack)?;
                 let name = self.text(&loc);
-                let mut ids: Vec<String> =
-                    self.node(&loc).get("effects").map(|e| e.items().iter().filter_map(|i| i.node.field("id")).map(str::to_string).collect()).unwrap_or_default();
                 let count = self.node(&loc).get("effects").map_or(0, |e| e.items().len());
                 let at = index.unwrap_or(count);
                 if at > count {
                     return Err(format!("effects index {at} is past the end ({count} items)"));
                 }
-                // A sidechain is kept where the song allows one and it names
-                // another track that is there.
-                let keyed = matches!(&loc[..], [Step::Key(list), Step::Index(_)] if list == "tracks" || list == "groups" || list == "returns");
-                let own_id = self.node(&loc).field("id").map(str::to_string);
-                let tracks: Vec<String> =
-                    self.root.get("tracks").map(|t| t.items().iter().filter_map(|i| i.node.field("id")).map(str::to_string).collect()).unwrap_or_default();
                 let effects = match &r.effects {
                     Value::List(items) => items.clone(),
                     _ => Vec::new(),
                 };
-                let mut notes = Vec::new();
-                for (k, effect) in effects.iter().enumerate() {
-                    let mut fields = to_json(effect);
-                    let map = fields.as_object_mut().ok_or("an effect is a mapping")?;
-                    if let Some(id) = map.get("id").and_then(Json::as_str).map(str::to_string) {
-                        if ids.contains(&id) {
-                            let mut n = 2;
-                            while ids.contains(&format!("{id}-{n}")) {
-                                n += 1;
-                            }
-                            let fresh = format!("{id}-{n}");
-                            notes.push(format!("{name}: effect {id} of the rack is {fresh} here, since the chain has {id}"));
-                            map.insert("id".into(), Json::String(fresh.clone()));
-                            ids.push(fresh);
-                        } else {
-                            ids.push(id);
-                        }
-                    }
-                    if let Some(side) = map.get("sidechain").and_then(Json::as_str).map(str::to_string) {
-                        let allowed = keyed && tracks.contains(&side) && own_id.as_deref() != Some(side.as_str());
-                        if !allowed {
-                            map.remove("sidechain");
-                            notes.push(format!("{name}: the rack's compressor was keyed by {side}, which this chain cannot be; set its sidechain"));
-                        }
-                    }
-                    out.made.push(self.insert(&loc, "effects", Some(at + k), Node::new(&json_value(&fields)?))?);
+                // Into a rack or a patch the effects are laid in, since a
+                // rack holds no rack.
+                let laid = *flat || self.is_rack(&loc) || self.is_synth(&loc);
+                if laid && !*flat {
+                    self.also.push(format!("{name}: the rack's effects are laid in, since a rack holds no rack"));
                 }
-                let n = effects.len();
-                self.remap_lanes(&loc, |j| Some(if j >= at { j + n } else { j }), None)?;
+                let (effects, notes) = self.rack_effects(&loc, &effects, laid)?;
                 self.also.extend(notes);
+                if laid {
+                    let n = effects.len();
+                    for (k, fields) in effects.into_iter().enumerate() {
+                        out.made.push(self.insert(&loc, "effects", Some(at + k), Node::new(&json_value(&fields)?))?);
+                    }
+                    self.remap_lanes(&loc, |j| Some(if j >= at { j + n } else { j }), None)?;
+                } else {
+                    out.made.push(self.add_rack_device(&loc, &r.name, effects, at)?);
+                }
                 out.label = format!("Add rack {} to {name}", r.name);
                 out.report.insert("rack".into(), json!(r.name));
                 out.report.insert("effects".into(), json!(r.kinds()));
+                out.report.insert("device".into(), json!(!laid));
             }
             RackSave { owner, name, description, tags, replace } => {
                 let loc = self.owner(owner)?;
                 let effects = self.node(&loc).get("effects").map(node_json).unwrap_or(Json::Array(Vec::new()));
-                let chain = crate::racks::validate(&json_value(&effects)?)?;
+                // A rack in the chain is saved as its effects: the file is
+                // one rack when it is loaded.
+                let chain = aaw_model::Effect::laid_out(&crate::racks::validate(&json_value(&effects)?)?);
                 if chain.is_empty() {
                     return Err(format!("{} has no effects to save", self.text(&loc)));
                 }
@@ -2563,6 +2826,216 @@ impl<'a> Edit<'a> {
                 out.report.insert("rack".into(), json!(r.name));
                 out.report.insert("file".into(), json!(r.file.clone().unwrap_or_default()));
                 out.report.insert("effects".into(), json!(r.kinds()));
+            }
+            RackWrap { effects, name, id } => {
+                if effects.is_empty() {
+                    return Err("Name the effects to wrap".into());
+                }
+                let mut places = Vec::new();
+                for e in effects {
+                    places.push(self.member(e, "effects", "an effect")?);
+                }
+                let owner = places[0].0.clone();
+                if places.iter().any(|(o, _)| *o != owner) {
+                    return Err("The effects of a rack come from one chain".into());
+                }
+                if self.is_rack(&owner) {
+                    return Err(format!("{} is a rack already: unwrap it, or move the effects out of it first", self.text(&owner)));
+                }
+                if self.is_synth(&owner) {
+                    return Err("A rack is not offered inside a patch: the patch's chain is the synth's own".into());
+                }
+                let mut indices: Vec<usize> = places.iter().map(|p| p.1).collect();
+                indices.sort_unstable();
+                indices.dedup();
+                for &i in &indices {
+                    let loc = [owner.clone(), vec![Step::Key("effects".into()), Step::Index(i)]].concat();
+                    if self.node(&loc).field("type") == Some("rack") {
+                        return Err(format!("A rack holds no rack: unwrap {} first", self.text(&loc)));
+                    }
+                }
+                if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
+                    if self.chain_ids(&owner).contains(&id.to_string()) {
+                        return Err(format!("{} has an effect with id {id} already", self.text(&owner)));
+                    }
+                }
+                let first = indices[0];
+                // The lanes on each wrapped effect, keyed by its reference
+                // inside the rack: its id, or its place there.
+                let mut carried = Vec::new();
+                for (k, &i) in indices.iter().enumerate() {
+                    let loc = [owner.clone(), vec![Step::Key("effects".into()), Step::Index(i)]].concat();
+                    let eid = self.node(&loc).field("id").map(str::to_string);
+                    let lanes = self.detach_lanes(&owner, &|r| index_ref(r) == Some(i) || Some(r) == eid.as_deref())?;
+                    carried.push((eid.unwrap_or_else(|| k.to_string()), lanes));
+                }
+                let mut items = Vec::new();
+                for &i in indices.iter().rev() {
+                    items.push(self.take(&owner, "effects", i)?);
+                }
+                items.reverse();
+                let mut rack = indexmap::IndexMap::new();
+                rack.insert("type".to_string(), Node::Leaf(Value::str("rack")));
+                if let Some(id) = id.as_deref().filter(|id| !id.is_empty()) {
+                    rack.insert("id".to_string(), Node::Leaf(Value::str(id)));
+                }
+                if let Some(name) = name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+                    rack.insert("name".to_string(), Node::Leaf(Value::str(name)));
+                }
+                rack.insert("effects".to_string(), Node::List(items));
+                let handle = self.fresh();
+                self.insert_item(&owner, "effects", first, Item { handle, node: Node::Map(rack) })?;
+                out.made.push(handle);
+                let wrapped = indices.clone();
+                self.remap_lanes(
+                    &owner,
+                    |j| {
+                        if wrapped.contains(&j) {
+                            return None;
+                        }
+                        let below = wrapped.iter().filter(|w| **w < j).count();
+                        Some(j - below + usize::from(j > first))
+                    },
+                    None,
+                )?;
+                let rack_loc = [owner.clone(), vec![Step::Key("effects".into()), Step::Index(first)]].concat();
+                for (reference, lanes) in carried {
+                    self.attach_lanes(&rack_loc, &reference, lanes)?;
+                }
+                out.label = format!("Wrap {} of {} in a rack", count(indices.len(), "effect"), self.text(&owner));
+                out.report.insert("rack".into(), json!(self.text(&rack_loc)));
+            }
+            RackUnwrap { effect } => {
+                let (owner, i) = self.member(effect, "effects", "an effect")?;
+                let rack_loc = [owner.clone(), vec![Step::Key("effects".into()), Step::Index(i)]].concat();
+                if self.node(&rack_loc).field("type") != Some("rack") {
+                    return Err(format!("{} is not a rack", self.text(&rack_loc)));
+                }
+                let rack_name = self.text(&rack_loc);
+                let bypassed = matches!(self.node(&rack_loc).get("bypass"), Some(Node::Leaf(Value::Bool(true))));
+                let carried = self.detach_lanes(&rack_loc, &|_| true)?;
+                let rack = self.take(&owner, "effects", i)?;
+                let inner: Vec<Item> = rack.node.get("effects").map(|n| n.items().to_vec()).unwrap_or_default();
+                let n = inner.len();
+                let was_ids: Vec<Option<String>> = inner.iter().map(|it| it.node.field("id").map(str::to_string)).collect();
+                let mut ids = self.chain_ids(&owner);
+                let mut references = Vec::new();
+                for (k, mut item) in inner.into_iter().enumerate() {
+                    let mut id = was_ids[k].clone();
+                    if let Some(had) = &id {
+                        if ids.contains(had) {
+                            let fresh = numbered(had, &ids);
+                            self.also.push(format!("{}: effect {had} of the rack is {fresh} here, since the chain has {had}", self.text(&owner)));
+                            if let Some(m) = item.node.map_mut() {
+                                m.insert("id".into(), Node::Leaf(Value::str(&fresh)));
+                            }
+                            id = Some(fresh);
+                        }
+                        ids.push(id.clone().expect("an id"));
+                    }
+                    if bypassed {
+                        if let Some(m) = item.node.map_mut() {
+                            m.insert("bypass".into(), Node::Leaf(Value::Bool(true)));
+                        }
+                    }
+                    references.push(id.unwrap_or_else(|| (i + k).to_string()));
+                    out.made.push(self.insert_item(&owner, "effects", i + k, item)?);
+                }
+                if bypassed && n > 0 {
+                    self.also.push(format!("{}: the rack was bypassed, so its effects come out bypassed", self.text(&owner)));
+                }
+                self.remap_lanes(
+                    &owner,
+                    |j| match j.cmp(&i) {
+                        std::cmp::Ordering::Less => Some(j),
+                        std::cmp::Ordering::Equal => None,
+                        std::cmp::Ordering::Greater => Some(j + n - 1),
+                    },
+                    None,
+                )?;
+                for (item, r, rest) in carried {
+                    let k = index_ref(&r).filter(|k| *k < n).or_else(|| was_ids.iter().position(|x| x.as_deref() == Some(r.as_str())));
+                    match k {
+                        Some(k) => self.attach_lanes(&owner, &references[k].clone(), vec![(item, r, rest)])?,
+                        None => self.also.push(format!("{}: removed lane on {r}, which the rack did not have", self.text(&owner))),
+                    }
+                }
+                out.label = format!("Unwrap rack {rack_name} on {}", self.text(&owner));
+            }
+            InstrumentRackSave { track, name, description, tags, replace } => {
+                let loc = self.midi_track(track)?;
+                let dir = self.dir.clone().ok_or("The project's folder is not known to this edit")?;
+                let instrument = match self.node(&loc).get("instrument") {
+                    Some(n) if !matches!(n, Node::Leaf(Value::None)) => n.value(),
+                    _ => return Err(format!("{track} has no instrument to save; attach a Sampler or a Synth first")),
+                };
+                let effects = self.node(&loc).get("effects").map(Node::value).unwrap_or(Value::List(Vec::new()));
+                let samples = self.root.get("samples").map(Node::value).unwrap_or(Value::Dict(Default::default()));
+                // Written over, a rack keeps its description and tags unless new ones are given.
+                let before = if *replace { crate::instruments::find(name).ok() } else { None };
+                let description = match (description, &before) {
+                    (Some(d), _) => d.clone(),
+                    (None, Some(b)) => b.description.clone(),
+                    (None, None) => String::new(),
+                };
+                let tags = match (tags.is_empty(), &before) {
+                    (true, Some(b)) => b.tags.clone(),
+                    _ => tags.clone(),
+                };
+                let r = crate::instruments::save(name, &description, &tags, &instrument, &effects, &samples, &dir, self.origin.as_str(), *replace)?;
+                out.label = format!("Save instrument rack {} from {}", r.name, self.name(&loc));
+                out.report.insert("rack".into(), json!(r.name));
+                out.report.insert("file".into(), json!(r.file.clone().unwrap_or_default()));
+                out.report.insert("instrument".into(), json!(r.kind()));
+                out.report.insert("effects".into(), json!(r.effect_kinds()));
+            }
+            InstrumentRackLoad { track, rack } => {
+                let loc = self.midi_track(track)?;
+                let dir = self.dir.clone().ok_or("The project's folder is not known to this edit")?;
+                let r = crate::instruments::find(rack)?;
+                let name = self.name(&loc);
+                // The samples its pads play, brought into the project
+                // where the song does not have them already.
+                let have: Vec<crate::instruments::Have> = self
+                    .root
+                    .get("samples")
+                    .and_then(Node::map_mut_ref)
+                    .map(|m| {
+                        m.iter()
+                            .map(|(id, n)| crate::instruments::Have {
+                                id: id.clone(),
+                                sha256: n.field("sha256").map(str::to_string),
+                                path: n.field("path").unwrap_or_default().to_string(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let brought = crate::instruments::bring_samples(&r, &dir, &have)?;
+                for b in &brought {
+                    if let Some(entry) = &b.entry {
+                        let o = self.run(&Set { path: format!("samples.{}", b.id), value: entry.clone() })?;
+                        out.also.extend(o.also);
+                        self.also.push(format!("samples.{}: brought in from {}", b.id, b.from));
+                    } else {
+                        self.also.push(format!("samples.{}: the song has the file {} plays already", b.id, b.was));
+                    }
+                }
+                let instrument = crate::instruments::instrument_for(&r, &brought);
+                let o = self.run(&InstrumentSet { track: track.clone(), instrument })?;
+                out.also.extend(o.also);
+                let effects = match &r.effects {
+                    Value::List(items) => items.clone(),
+                    _ => Vec::new(),
+                };
+                if !effects.is_empty() {
+                    let (effects, notes) = self.rack_effects(&loc, &effects, false)?;
+                    self.also.extend(notes);
+                    out.made.push(self.add_rack_device(&loc, &r.name, effects, 0)?);
+                }
+                out.label = format!("Load instrument rack {} into {name}", r.name);
+                out.report.insert("rack".into(), json!(r.name));
+                out.report.insert("instrument".into(), json!(r.kind()));
+                out.report.insert("effects".into(), json!(r.effect_kinds()));
             }
             SendSet { track, to, fields } => {
                 let loc = self.sender(track)?;
@@ -3169,6 +3642,15 @@ impl<'a> Edit<'a> {
 }
 
 /// `prefix` and one more than the highest number among IDs of that form.
+/// `id` with a number on it that `ids` does not have: `glue-2`, then `glue-3`.
+fn numbered(id: &str, ids: &[String]) -> String {
+    let mut n = 2;
+    while ids.contains(&format!("{id}-{n}")) {
+        n += 1;
+    }
+    format!("{id}-{n}")
+}
+
 fn next_id(ids: &[&str], prefix: &str) -> String {
     let n = ids
         .iter()

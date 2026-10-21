@@ -109,7 +109,10 @@ impl fmt::Display for Range {
 pub enum TargetKind {
     Channel,
     Send(String),
-    Effect { index: usize, band: Option<usize> },
+    /// A field of an effect of the owner's chain, at `index`; `inner` is
+    /// its place within a rack at `index`, for an effect inside one; `band`
+    /// an equalizer's band.
+    Effect { index: usize, inner: Option<usize>, band: Option<usize> },
     /// A field of a MIDI track's synth, `field` being its path in the patch,
     /// such as `filter.cutoff_hz` or `macros.tone`.
     Instrument,
@@ -125,11 +128,31 @@ pub struct Target {
 }
 
 impl Target {
-    /// Parameter name within its effect, e.g. cutoff_hz or bands.0.gain_db.
+    /// Parameter name within the chain's effect, e.g. cutoff_hz or
+    /// bands.0.gain_db, and for an effect inside a rack its place in the
+    /// rack first: effects.1.cutoff_hz.
     pub fn name(&self) -> String {
         match &self.kind {
-            TargetKind::Effect { band: Some(b), .. } => format!("bands.{b}.{}", self.field),
+            TargetKind::Effect { inner, band, .. } => {
+                let mut name = String::new();
+                if let Some(j) = inner {
+                    name.push_str(&format!("effects.{j}."));
+                }
+                if let Some(b) = band {
+                    name.push_str(&format!("bands.{b}."));
+                }
+                name.push_str(&self.field);
+                name
+            }
             _ => self.field.clone(),
+        }
+    }
+
+    /// The effect's place in the chain, for an effect's field.
+    pub fn place(&self) -> Option<crate::schema::Place> {
+        match &self.kind {
+            TargetKind::Effect { index, inner, .. } => Some(crate::schema::Place::new(*index, *inner)),
+            _ => None,
         }
     }
 
@@ -587,6 +610,17 @@ fn is_ascii_digits(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|c| c.is_ascii_digit())
 }
 
+/// The place of an effect in a chain by its reference, its ID or its index.
+pub fn chain_ref(effects: &[Effect], r: &str) -> Option<usize> {
+    let by_index = is_ascii_digits(r).then(|| r.parse::<usize>().ok()).flatten().filter(|i| *i < effects.len());
+    by_index.or_else(|| effects.iter().position(|e| e.id() == Some(r)))
+}
+
+/// How an effect is addressed within its chain: its ID, else its place.
+pub fn effect_ref(e: &Effect, index: usize) -> String {
+    e.id().filter(|id| !id.is_empty()).map_or_else(|| index.to_string(), str::to_string)
+}
+
 /// A lane's target: resolves gain_db, pan, sends.RETURN.gain_db,
 /// effects.REF.FIELD or effects.REF.bands.N.FIELD for an owner.
 pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
@@ -656,35 +690,37 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
     }
     if parts[0] == "effects" && parts.len() >= 3 {
         let effects = owner.effects();
-        let by_index = is_ascii_digits(parts[1])
-            .then(|| parts[1].parse::<usize>().ok())
-            .flatten()
-            .filter(|i| *i < effects.len());
-        let index = match by_index {
-            Some(i) => i,
-            None => effects
-                .iter()
-                .position(|e| e.id() == Some(parts[1]))
-                .ok_or_else(|| format!("{param}: no effect with id or index {}", parts[1]))?,
-        };
-        let spec = &effects[index];
+        let index = chain_ref(effects, parts[1]).ok_or_else(|| format!("{param}: no effect with id or index {}", parts[1]))?;
+        let mut spec = &effects[index];
+        let mut inner = None;
+        let mut rest = &parts[2..];
+        if let Effect::Rack(r) = spec {
+            // An effect inside a rack: effects.RACK.effects.REF.FIELD.
+            if rest.len() < 3 || rest[0] != "effects" {
+                return Err(format!("{param}: a rack has no field of its own to automate; address an effect inside it as effects.{}.effects.REF.FIELD", parts[1]));
+            }
+            let j = chain_ref(&r.effects, rest[1]).ok_or_else(|| format!("{param}: the rack has no effect with id or index {}", rest[1]))?;
+            inner = Some(j);
+            spec = &r.effects[j];
+            rest = &rest[2..];
+        }
         let allowed = effect_params(spec.kind());
         let mut band = None;
         if let Effect::Eq(eq) = spec {
-            if parts.len() != 5 || parts[2] != "bands" || !is_ascii_digits(parts[3]) {
+            if rest.len() != 3 || rest[0] != "bands" || !is_ascii_digits(rest[1]) {
                 return Err(format!(
                     "{param}: address eq bands as effects.REF.bands.N.FIELD"
                 ));
             }
-            let b: usize = parts[3].parse().unwrap_or(usize::MAX);
+            let b: usize = rest[1].parse().unwrap_or(usize::MAX);
             if b >= eq.bands.len() {
                 return Err(format!("{param}: eq has {} bands", eq.bands.len()));
             }
             band = Some(b);
-        } else if parts.len() != 3 {
+        } else if rest.len() != 1 {
             return Err(format!("{param}: expected effects.REF.FIELD"));
         }
-        let field = parts[parts.len() - 1];
+        let field = rest[rest.len() - 1];
         let Some((_, domain)) = allowed.iter().find(|(name, _)| *name == field) else {
             let names: Vec<&str> = allowed.iter().map(|(n, _)| *n).collect();
             let list = if names.is_empty() {
@@ -698,7 +734,7 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
             ));
         };
         return Ok(Target {
-            kind: TargetKind::Effect { index, band },
+            kind: TargetKind::Effect { index, inner, band },
             field: field.to_string(),
             domain: *domain,
             range: effect_range(spec.kind(), field),
@@ -868,7 +904,7 @@ pub fn references(p: &Project) -> Result<(), String> {
     let ten = BigRational::from_integer(10.into());
     let synth_effects = p.tracks.iter().filter_map(|t| t.midi.as_ref().and_then(|m| m.synth()).map(|s| (t.id.as_str(), &s.effects[..])));
     for (name, effects) in owners(p).iter().map(|o| (o.name(), o.effects())).chain(synth_effects) {
-        for e in effects {
+        for (_, e, _) in Effect::flat(effects) {
             if let Effect::Delay(d) = e {
                 let seconds = d.time_exact() * BigRational::from_integer(60.into()) / &tempo;
                 if !(ms <= seconds && seconds <= ten) {
@@ -885,6 +921,10 @@ pub fn references(p: &Project) -> Result<(), String> {
         let ids: Vec<&str> = owner.effects().iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
         if ids.iter().collect::<HashSet<_>>().len() != ids.len() {
             return Err(format!("{name}: effect IDs must be unique"));
+        }
+        // A rack holds no rack, so a chain is at most two deep.
+        if let Some(rack) = owner.effects().iter().filter_map(Effect::rack).find(|r| r.effects.len() > crate::schema::MAX_CHAIN) {
+            return Err(format!("{name}: a rack holds at most {} effects, not {}", crate::schema::MAX_CHAIN, rack.effects.len()));
         }
         let mut keys = HashSet::new();
         for lane in owner.automation() {

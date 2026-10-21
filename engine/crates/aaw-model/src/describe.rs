@@ -229,6 +229,10 @@ const OVERDRIVE: &[Field] = &[
     number("mix_percent", "Mix", 0.0, 100.0, 100.0, "%"),
 ];
 
+/// A rack's fields: none of its own. Its name and its effects are not
+/// controls; the window draws the effects inside it as their own panels.
+const RACK: &[Field] = &[];
+
 /// A utility's fields. `mono`, `mono_below_hz` and `invert` change the
 /// device's structure, so a playing song fades through them.
 const UTILITY: &[Field] = &[
@@ -384,6 +388,7 @@ pub fn effect(kind: &str) -> &'static [Field] {
         "saturation" => SATURATION,
         "overdrive" => OVERDRIVE,
         "utility" => UTILITY,
+        "rack" => RACK,
         _ => &[],
     }
 }
@@ -459,8 +464,9 @@ mod tests {
     fn fields_agree_with_validation_and_defaults() {
         for kind in crate::EFFECT_TYPES {
             let fields = if kind == "eq" { BAND } else { effect(kind) };
-            // An analyzer has nothing to set: the song's `type`, `id` and `bypass` alone.
-            assert!(!fields.is_empty() || kind == "analyzer", "{kind}");
+            // An analyzer has nothing to set: the song's `type`, `id` and
+            // `bypass` alone; a rack's name and effects are not controls.
+            assert!(!fields.is_empty() || kind == "analyzer" || kind == "rack", "{kind}");
             // The suggested start is valid, and its dump has every field.
             let project = check(effect_value(kind, &[])).unwrap_or_else(|e| panic!("{kind}: {e}"));
             let dumped = project.master.effects[0].dump(false);
@@ -472,7 +478,7 @@ mod tests {
                 _ => dumped,
             };
             let Value::Dict(d) = &dumped else { panic!() };
-            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass"].contains(k)).collect();
+            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass", "name", "effects"].contains(k)).collect();
             assert_eq!(names, fields.iter().map(|f| f.name).collect::<Vec<_>>(), "{kind}");
             for f in fields {
                 let got = dumped.get(f.name).unwrap();

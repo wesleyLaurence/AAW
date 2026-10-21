@@ -218,12 +218,21 @@ class Grid:
             for kind in ("tracks", "groups", "returns")
             for owner in self.project.get(kind, [])
         }
+        def effects(chain):
+            # A rack's effects are heard where it is, unless it is bypassed.
+            for effect in chain:
+                if effect["type"] == "rack":
+                    if not effect.get("bypass"):
+                        yield from effects(effect.get("effects", []))
+                else:
+                    yield effect
+
         return any(
             effect["type"] == "compressor"
             and effect.get("sidechain") == key
             and not effect.get("bypass")
             for one, key in ((a, b), (b, a))
-            for effect in owners.get(one, {}).get("effects", [])
+            for effect in effects(owners.get(one, {}).get("effects", []))
         )
 
     def over(self, contested, ha, hb, first, last, cells=slice(None)):

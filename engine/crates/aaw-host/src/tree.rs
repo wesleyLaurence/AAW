@@ -74,6 +74,13 @@ impl Node {
         }
     }
 
+    pub fn map_mut_ref(&self) -> Option<&IndexMap<String, Node>> {
+        match self {
+            Node::Map(m) => Some(m),
+            _ => None,
+        }
+    }
+
     pub fn map_mut(&mut self) -> Option<&mut IndexMap<String, Node>> {
         match self {
             Node::Map(m) => Some(m),

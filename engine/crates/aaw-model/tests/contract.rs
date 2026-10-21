@@ -36,6 +36,7 @@ tracks:
       - {type: overdrive}
       - {type: utility}
       - {type: analyzer}
+      - {type: rack, effects: [{type: utility}]}
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
   - id: m

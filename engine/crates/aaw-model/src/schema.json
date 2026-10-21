@@ -678,7 +678,8 @@
                 "saturation": "#/$defs/Saturation",
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
-                "analyzer": "#/$defs/Analyzer"
+                "analyzer": "#/$defs/Analyzer",
+                "rack": "#/$defs/Rack"
               },
               "propertyName": "type"
             },
@@ -718,6 +719,9 @@
               },
               {
                 "$ref": "#/$defs/Analyzer"
+              },
+              {
+                "$ref": "#/$defs/Rack"
               }
             ]
           },
@@ -1050,7 +1054,8 @@
                 "saturation": "#/$defs/Saturation",
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
-                "analyzer": "#/$defs/Analyzer"
+                "analyzer": "#/$defs/Analyzer",
+                "rack": "#/$defs/Rack"
               },
               "propertyName": "type"
             },
@@ -1090,6 +1095,9 @@
               },
               {
                 "$ref": "#/$defs/Analyzer"
+              },
+              {
+                "$ref": "#/$defs/Rack"
               }
             ]
           },
@@ -1208,7 +1216,8 @@
                 "saturation": "#/$defs/Saturation",
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
-                "analyzer": "#/$defs/Analyzer"
+                "analyzer": "#/$defs/Analyzer",
+                "rack": "#/$defs/Rack"
               },
               "propertyName": "type"
             },
@@ -1248,6 +1257,9 @@
               },
               {
                 "$ref": "#/$defs/Analyzer"
+              },
+              {
+                "$ref": "#/$defs/Rack"
               }
             ]
           },
@@ -1886,7 +1898,8 @@
                 "saturation": "#/$defs/Saturation",
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
-                "analyzer": "#/$defs/Analyzer"
+                "analyzer": "#/$defs/Analyzer",
+                "rack": "#/$defs/Rack"
               },
               "propertyName": "type"
             },
@@ -1926,6 +1939,9 @@
               },
               {
                 "$ref": "#/$defs/Analyzer"
+              },
+              {
+                "$ref": "#/$defs/Rack"
               }
             ]
           },
@@ -2642,7 +2658,8 @@
                 "saturation": "#/$defs/Saturation",
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
-                "analyzer": "#/$defs/Analyzer"
+                "analyzer": "#/$defs/Analyzer",
+                "rack": "#/$defs/Rack"
               },
               "propertyName": "type"
             },
@@ -2682,6 +2699,9 @@
               },
               {
                 "$ref": "#/$defs/Analyzer"
+              },
+              {
+                "$ref": "#/$defs/Rack"
               }
             ]
           },
@@ -3078,6 +3098,113 @@
         "type"
       ],
       "title": "Clipper",
+      "type": "object"
+    },
+    "Rack": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "rack",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "effects": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "compressor": "#/$defs/Compressor",
+                "delay": "#/$defs/Delay",
+                "eq": "#/$defs/Eq",
+                "filter": "#/$defs/Filter",
+                "limiter": "#/$defs/Limiter",
+                "clipper": "#/$defs/Clipper",
+                "reverb": "#/$defs/Reverb",
+                "chorus": "#/$defs/Chorus",
+                "saturation": "#/$defs/Saturation",
+                "overdrive": "#/$defs/Overdrive",
+                "utility": "#/$defs/Utility",
+                "analyzer": "#/$defs/Analyzer"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Filter"
+              },
+              {
+                "$ref": "#/$defs/Eq"
+              },
+              {
+                "$ref": "#/$defs/Compressor"
+              },
+              {
+                "$ref": "#/$defs/Limiter"
+              },
+              {
+                "$ref": "#/$defs/Clipper"
+              },
+              {
+                "$ref": "#/$defs/Delay"
+              },
+              {
+                "$ref": "#/$defs/Reverb"
+              },
+              {
+                "$ref": "#/$defs/Chorus"
+              },
+              {
+                "$ref": "#/$defs/Saturation"
+              },
+              {
+                "$ref": "#/$defs/Overdrive"
+              },
+              {
+                "$ref": "#/$defs/Utility"
+              },
+              {
+                "$ref": "#/$defs/Analyzer"
+              }
+            ]
+          },
+          "maxItems": 32,
+          "title": "Effects",
+          "type": "array"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Rack",
       "type": "object"
     }
   },

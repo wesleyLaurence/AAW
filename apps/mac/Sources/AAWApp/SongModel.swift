@@ -62,6 +62,33 @@ struct DeviceChain {
         return strip < from ? strip : strip - 1
     }
 
+    /// The effect with `key` in a chain, a rack's effects searched too.
+    static func find(_ key: UInt64, in effects: [EffectView]) -> EffectView? {
+        for effect in effects {
+            if effect.key == key { return effect }
+            if let inner = effect.effects.first(where: { $0.key == key }) { return inner }
+        }
+        return nil
+    }
+
+    /// Where an effect is in a chain: the rack it is in, if any, and its
+    /// place in that list; nil when the chain does not have it.
+    static func place(of key: UInt64, in effects: [EffectView]) -> (rack: UInt64?, index: Int)? {
+        for (i, effect) in effects.enumerated() {
+            if effect.key == key { return (nil, i) }
+            if let j = effect.effects.firstIndex(where: { $0.key == key }) { return (effect.key, j) }
+        }
+        return nil
+    }
+
+    /// Whether an effect dragged from one list of a row's chain can be let
+    /// go on a strip of another list of it: into a rack (`rack` the rack's
+    /// key) or out to the chain (nil). A rack goes into no rack, and a
+    /// strip of the list the effect is in is a move within it, not this.
+    static func crosses(_ key: UInt64, in effects: [EffectView], to rack: UInt64?) -> Bool {
+        guard let place = place(of: key, in: effects), place.rack != rack else { return false }
+        return rack == nil || find(key, in: effects)?.kind != "rack"
+    }
 }
 
 /// What the detail panel shows: a row's devices, or the clip last selected,
@@ -181,6 +208,9 @@ public final class SongModel {
     /// is let go. It stays set after the drag, and is read only while a drag
     /// of an effect's type is over a strip.
     var draggedEffect: UInt64?
+    /// The effects whose panels are folded to a strip in the device panel,
+    /// by key: the window's, not the song's.
+    var foldedEffects: Set<UInt64> = []
     /// What the detail panel shows: devices after a row is selected, and a
     /// pattern after a clip is.
     var detail = Detail.devices
@@ -803,8 +833,47 @@ public final class SongModel {
 
     /// The selected effect, as the device panel shows it.
     var selectedEffectView: EffectView? {
-        guard let key = selectedEffect else { return nil }
-        return deviceChain?.effects.first { $0.key == key }
+        guard let key = selectedEffect, let chain = deviceChain else { return nil }
+        return DeviceChain.find(key, in: chain.effects)
+    }
+
+    /// Folds an effect's panel to a strip, or opens it out again.
+    func toggleFold(_ effect: UInt64) {
+        if foldedEffects.contains(effect) { foldedEffects.remove(effect) } else { foldedEffects.insert(effect) }
+    }
+
+    /// Folds every effect of a rack, or opens them all out when all are folded.
+    func toggleFold(rack: EffectView) {
+        let keys = rack.effects.map(\.key)
+        if keys.allSatisfy({ foldedEffects.contains($0) }) {
+            foldedEffects.subtract(keys)
+        } else {
+            foldedEffects.formUnion(keys)
+        }
+    }
+
+    /// Wraps an effect in a new rack where it was, as Make Rack does, and
+    /// selects the rack.
+    func makeRack(of effect: UInt64) {
+        guard let row = deviceRow else { return }
+        edit(.rackWrap(effects: [effect])) { [weak self] made in
+            self?.showEffect(made.first, on: row)
+        }
+    }
+
+    /// Lays a rack's effects out in its chain, as Unrack does.
+    func unwrapRack(_ rack: UInt64) {
+        guard let row = deviceRow else { return }
+        edit(.rackUnwrap(effect: rack)) { [weak self] made in
+            self?.foldedEffects.subtract(made)
+            self?.showEffect(made.first, on: row)
+        }
+    }
+
+    /// Moves an effect into a rack of its row's chain, or out of one to the
+    /// chain, at `index` there, as a drag onto a strip of another list does.
+    func moveEffect(_ effect: UInt64, in row: RowID, to rack: UInt64?, index: UInt32) {
+        edit(.effectMoveTo(effect: effect, row: row.row, rack: rack, index: index))
     }
 
     /// The row a copied effect is pasted on: the selected row, or else the
@@ -819,10 +888,11 @@ public final class SongModel {
         return nil
     }
 
-    /// Adds a copy of an effect to a row's chain, at `index` or its end, as
-    /// an Option-drag from the device panel does, and selects the copy.
-    func copyEffect(_ effect: UInt64, to row: RowID, index: UInt32? = nil) {
-        edit(.effectCopy(effect: effect, row: row.row, index: index)) { [weak self] made in
+    /// Adds a copy of an effect to a row's chain, or to a rack of it
+    /// (`into`), at `index` or its end, as an Option-drag from the device
+    /// panel does, and selects the copy.
+    func copyEffect(_ effect: UInt64, to row: RowID, index: UInt32? = nil, into rack: UInt64? = nil) {
+        edit(.effectCopy(effect: effect, row: row.row, index: index, rack: rack)) { [weak self] made in
             self?.showEffect(made.first, on: row)
         }
     }
@@ -1113,11 +1183,14 @@ public final class SongModel {
         switch clipboard {
         case .effect(let copied, _) where pastesEffect(in: place):
             guard let row = pasteRow else { return }
+            // After the selected effect, in its own list: a rack's, or the chain.
             var index: UInt32?
-            if row == deviceRow, let effect = selectedEffect, let i = deviceChain?.effects.firstIndex(where: { $0.key == effect }) {
-                index = UInt32(i + 1)
+            var rack: UInt64?
+            if row == deviceRow, let effect = selectedEffect, let chain = deviceChain, let place = DeviceChain.place(of: effect, in: chain.effects) {
+                index = UInt32(place.index + 1)
+                rack = place.rack
             }
-            edit(.effectPaste(copied: copied, row: row.row, index: index)) { [weak self] made in
+            edit(.effectPaste(copied: copied, row: row.row, index: index, rack: rack)) { [weak self] made in
                 self?.showEffect(made.first, on: row)
             }
         case .events(let events, let from) where place == .events:
@@ -1221,26 +1294,35 @@ public final class SongModel {
     }
 
     /// Whether a device from the browser can go on a row: an effect or a
-    /// rack (`kind` "rack") on any row, an instrument on a MIDI track or,
-    /// with no row, on a new track.
+    /// saved rack (`kind` "rack") on any row, an instrument or an instrument
+    /// rack on a MIDI track or, with no row, on a new track.
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
         if kind == "rack" { return row != nil }
-        if !Browser.instruments.contains(kind) { return DeviceChain.kinds.contains(kind) && row != nil }
+        if !Browser.isInstrument(kind) { return DeviceChain.kinds.contains(kind) && row != nil }
         guard let row else { return true }
         guard case .track(let key) = row else { return false }
         return arrangement.tracks.first { $0.key == key }?.midi == true
     }
 
     /// Adds a device from the browser: an effect at `index` of the row's
-    /// chain or its end, or with `kind` "rack" the effects of the rack
-    /// named; an empty Sampler, or a Synth with the plain saw or the patch
-    /// named, as the MIDI track's instrument or on a new track.
-    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil, patch: String? = nil, rack: String? = nil) {
+    /// chain, or of a rack of it (`into`), or its end; with `kind` "rack"
+    /// the saved rack named, as one device, or laid into a rack; an empty
+    /// Sampler, a Synth with the plain saw or the patch named, or the
+    /// instrument rack named (`rack`), as the MIDI track's instrument or on
+    /// a new track.
+    func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil, patch: String? = nil, rack: String? = nil, into: UInt64? = nil) {
         guard canAddBrowserDevice(kind, to: row) else { return }
-        if Browser.instruments.contains(kind) {
+        if Browser.isInstrument(kind) {
             let track: UInt64?
             if case .track(let key) = row { track = key } else { track = nil }
-            let edit: Edit = kind == "sampler" ? .instrumentAdd(track: track) : .synthAdd(track: track, patch: patch)
+            let edit: Edit
+            switch kind {
+            case "sampler": edit = .instrumentAdd(track: track)
+            case Browser.instrumentRackKind:
+                guard let rack else { return }
+                edit = .instrumentRackAdd(track: track, rack: rack)
+            default: edit = .synthAdd(track: track, patch: patch)
+            }
             self.edit(edit) { [weak self] made in
                 guard let self else { return }
                 if let key = track ?? made.first { self.select(row: .track(key)) }
@@ -1249,21 +1331,30 @@ public final class SongModel {
         } else if let row {
             if kind == "rack" {
                 guard let rack else { return }
-                edit(.rackAdd(row: row.row, rack: rack, index: index))
+                edit(.rackAdd(row: row.row, rack: rack, index: index, into: into))
             } else {
-                edit(.effectAdd(row: row.row, kind: kind, index: index))
+                edit(.effectAdd(row: row.row, kind: kind, index: index, rack: into))
             }
             select(row: row)
             detail = .devices
         }
     }
 
-    /// Saves a row's chain to the library as a rack, as `daw rack save`
-    /// does; over a rack already saved under the name only with `replace`.
-    /// The browser's list then shows it.
-    func saveRack(row: RowID, name: String, description: String?, tags: [String], replace: Bool) {
-        edit(.rackSave(row: row.row, name: name, description: description, tags: tags, replace: replace)) { [weak self] _ in
+    /// Saves a row's chain, or a rack of it (`rack`), to the library as a
+    /// rack, as `daw rack save` does; over a rack already saved under the
+    /// name only with `replace`. The browser's list then shows it.
+    func saveRack(row: RowID, name: String, description: String?, tags: [String], replace: Bool, rack: UInt64? = nil) {
+        edit(.rackSave(row: row.row, name: name, description: description, tags: tags, replace: replace, rack: rack)) { [weak self] _ in
             self?.browser.refreshRacks()
+        }
+    }
+
+    /// Saves a MIDI track's instrument with its chain to the library as an
+    /// instrument rack, as `daw instrument rack save` does. The browser's
+    /// Instruments then list it.
+    func saveInstrumentRack(track: UInt64, name: String, description: String?, tags: [String], replace: Bool) {
+        edit(.instrumentRackSave(track: track, name: name, description: description, tags: tags, replace: replace)) { [weak self] _ in
+            self?.browser.refreshInstrumentRacks()
         }
     }
 

@@ -7,7 +7,7 @@
 
 use crate::beat::signed_beat;
 use crate::pyfmt::{float_repr, format_g};
-use crate::rules::{note_name, owners, target, Owner, TargetKind, MIDDLE_C};
+use crate::rules::{note_name, owners, target, Owner, MIDDLE_C};
 use crate::schedule::track_notes;
 use crate::schema::{Instrument, Midi, Pad, Project, Stretch, Track, Wave};
 use crate::{fraction_str, Beat};
@@ -229,8 +229,8 @@ fn bypassed_lanes(p: &Project) -> Vec<Warning> {
         };
         for (i, lane) in owner.automation().iter().enumerate() {
             let Ok(t) = target(owner, &lane.param) else { continue };
-            if let TargetKind::Effect { index, .. } = t.kind {
-                if owner.effects()[index].bypass() {
+            if let Some(place) = t.place() {
+                if crate::Effect::silent_at(owner.effects(), place) {
                     out.push(Warning::new(
                         "lane-on-bypassed-effect",
                         format!("{}: {} automates a bypassed effect", owner.name(), lane.param),
