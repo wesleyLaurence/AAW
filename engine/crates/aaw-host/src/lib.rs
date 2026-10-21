@@ -4,6 +4,7 @@
 //! with edits heard as they land. The `daw` CLI reaches a running host through
 //! a per-user socket, or runs a session headless when no host owns the project.
 
+pub mod capture;
 pub mod client;
 pub mod command;
 pub mod generate;

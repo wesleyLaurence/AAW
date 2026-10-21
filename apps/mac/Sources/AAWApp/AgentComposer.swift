@@ -318,8 +318,10 @@ struct ComposerField: NSViewRepresentable {
         let (scroll, text) = ComposerTextView.make()
         text.onSend = { [weak agent] in agent?.send() }
         text.onEscape = { [weak agent, weak text, weak model] in
-            // While the person speaks, Escape takes the spoken words out.
+            // While the person speaks, Escape takes the spoken words out;
+            // while a sound records, it drops the sound.
             if agent?.cancelListening() == true { return }
+            if agent?.cancelRecording() == true { return }
             text?.window?.makeFirstResponder(nil)
             model?.onFocus?()
         }

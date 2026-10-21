@@ -184,6 +184,19 @@ final class AgentPanel {
     /// `AAW_SPEECH` names.
     @ObservationIgnored lazy var transcriber: any Transcriber = Transcribers.make(environment: environment)
 
+    // Recording a sound.
+
+    /// Whether a sound is being recorded for the next message, from the
+    /// moment Record Audio is chosen until the host has written it.
+    private(set) var recording = false
+    /// How long the sound is so far, and the input's level, 0 to 1, read
+    /// from the host several times a second for the strip.
+    private(set) var recordingSeconds: Double = 0
+    private(set) var recordingLevel: Float = 0
+    @ObservationIgnored private var recordingTimer: Timer?
+    /// The stop has been asked of the host and not yet answered.
+    @ObservationIgnored private var recordingEnding = false
+
     /// The song whose window this is; set once, after the model is made.
     @ObservationIgnored weak var song: SongModel?
 
@@ -363,9 +376,14 @@ final class AgentPanel {
     /// what they attached, to the thread shown, starting or resuming its
     /// process as needed. Attachments alone send with a word for them.
     func send() {
-        // Return while listening stops it; the next Return sends.
+        // Return while listening stops it, and while a sound records stops
+        // the recording; the next Return sends.
         if listening {
             stopListening()
+            return
+        }
+        if recording {
+            stopRecording()
             return
         }
         var text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -639,6 +657,8 @@ final class AgentPanel {
             song?.refuse(trouble)
             return
         }
+        // The microphone has one use at a time.
+        if recording { stopRecording() }
         var base = draft
         spokenOriginal = base
         if !base.isEmpty, base.last?.isWhitespace == false { base += " " }
@@ -704,6 +724,89 @@ final class AgentPanel {
         let after = spoken.isEmpty ? pauseAfterNothing : pauseAfterWords
         pauseTimer = Timer.scheduledTimer(withTimeInterval: after, repeats: false) { [weak self] _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { self?.stopListening() } }
+        }
+    }
+
+    // MARK: Recording a sound
+
+    /// `+` › Record Audio: starts recording a sound for the next message,
+    /// or stops and attaches it.
+    func toggleRecording() {
+        if recording { stopRecording() } else { startRecording() }
+    }
+
+    /// Starts recording from the input chosen in Settings › Audio into a
+    /// file under the project's `.daw/attachments/`, through the host, so
+    /// that a sound recorded while the song plays knows the beat it began
+    /// at; listening stops first.
+    func startRecording() {
+        guard !recording, !recordingEnding, let song, let folder else { return }
+        if listening { stopListening() }
+        let file = AgentAttachments.recordingFile(project: folder)
+        recording = true
+        recordingSeconds = 0
+        recordingLevel = 0
+        song.startCapture(to: file) { [weak self] refusal in
+            guard let self, let refusal else { return }
+            recording = false
+            recordingTimer?.invalidate()
+            recordingTimer = nil
+            self.song?.refuse(refusal)
+        }
+        recordingTimer?.invalidate()
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.pollRecording() } }
+        }
+    }
+
+    /// Reads the sound's seconds and level from the host; an input device
+    /// the driver stopped ends the recording with what it gave.
+    private func pollRecording() {
+        guard recording, !recordingEnding, let song else { return }
+        song.captureStatus { [weak self] status in
+            guard let self, recording, !recordingEnding, let status else { return }
+            recordingSeconds = status.seconds
+            recordingLevel = status.level
+            if status.deviceStopped {
+                self.song?.refuse("\(status.device) stopped; what it gave is attached")
+                stopRecording()
+            }
+        }
+    }
+
+    /// Stops the recording: the sound attaches to the next message with the
+    /// song's tempo and, when the song was playing, the beat it began at.
+    func stopRecording() {
+        endRecording(discard: false)
+    }
+
+    /// Escape, or the strip's ×, while recording: stops and drops the
+    /// sound. False when not recording, so that Escape does what it did.
+    @discardableResult
+    func cancelRecording() -> Bool {
+        guard recording, !recordingEnding else { return false }
+        endRecording(discard: true)
+        return true
+    }
+
+    private func endRecording(discard: Bool) {
+        guard recording, !recordingEnding, let song else { return }
+        recordingEnding = true
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        let a = song.arrangement
+        song.stopCapture(discard: discard) { [weak self] captured, refusal in
+            guard let self else { return }
+            recording = false
+            recordingEnding = false
+            recordingLevel = 0
+            if let refusal { self.song?.refuse(refusal) }
+            guard let captured else { return }
+            let sound = AgentAttachments.make(recorded: URL(fileURLWithPath: captured.file), tempo: captured.tempo,
+                                              atBeat: captured.atBeat, peakDbfs: captured.peakDbfs) {
+                TimelineLayout.position($0, beatsPerBar: a.barBeats, beatUnit: a.beatUnit)
+            }
+            attach(sound)
         }
     }
 
@@ -987,9 +1090,11 @@ final class AgentPanel {
         refreshThreads()
     }
 
-    /// The window is closing.
+    /// The window is closing: a sound still recording is dropped, since
+    /// nothing would attach it.
     func close() {
         stopListening()
+        cancelRecording()
         endProcess()
         locating?.cancel()
     }

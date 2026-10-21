@@ -1764,6 +1764,51 @@ public final class SongModel {
         }
     }
 
+    /// Records a sound from the input chosen in Settings › Audio into
+    /// `file` until `stopCapture`: the agent panel's Record Audio. `done`
+    /// gets the host's refusal, or nil when the capture began.
+    func startCapture(to file: URL, _ done: @escaping @MainActor (String?) -> Void) {
+        commands.async { [song] in
+            var refusal: String?
+            do {
+                try song.startCapture(file: file.path)
+            } catch {
+                refusal = Self.reason(error)
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { done(refusal) }
+            }
+        }
+    }
+
+    /// How the capture is going: its seconds and level; nil when none runs.
+    func captureStatus(_ done: @escaping @MainActor (CaptureStatus?) -> Void) {
+        commands.async { [song] in
+            let status = (try? song.captureStatus()) ?? nil
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { done(status) }
+            }
+        }
+    }
+
+    /// Ends the capture: the sound written at the song's rate and
+    /// described, or with `discard` dropped; `done` gets what was written,
+    /// or the host's refusal.
+    func stopCapture(discard: Bool, _ done: @escaping @MainActor (Captured?, String?) -> Void) {
+        commands.async { [song] in
+            var captured: Captured?
+            var refusal: String?
+            do {
+                captured = try song.stopCapture(discard: discard)
+            } catch {
+                refusal = Self.reason(error)
+            }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { done(captured, refusal) }
+            }
+        }
+    }
+
     /// Sets the song's sample rate from Settings › Audio: an edit, undoable.
     func setSampleRate(_ rate: UInt32) {
         if rate != arrangement.sampleRate { edit(.sampleRate(rate: rate)) }

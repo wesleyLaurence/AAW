@@ -218,17 +218,9 @@ enum AgentAttachments {
     /// record points at something.
     static func make(image: NSImage, project: URL, now: Date = Date()) -> AgentAttachment? {
         guard let picture = picture(of: image) else { return nil }
-        let folder = project.appendingPathComponent(".daw/attachments", isDirectory: true)
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
-        var file = folder.appendingPathComponent("pasted-\(formatter.string(from: now)).png")
-        var n = 1
-        while FileManager.default.fileExists(atPath: file.path) {
-            n += 1
-            file = folder.appendingPathComponent("pasted-\(formatter.string(from: now))-\(n).png")
-        }
+        let file = freshFile(project: project, prefix: "pasted", ext: "png", now: now)
         do {
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = picture.mediaType == "image/png" ? picture.data : (png(of: picture.image) ?? picture.data)
             try data.write(to: file)
         } catch {
@@ -236,6 +228,47 @@ enum AgentAttachments {
         }
         let size = picture.image.size
         return AgentAttachment(kind: .image, name: file.lastPathComponent, path: file.path, detail: "\(Int(size.width))×\(Int(size.height)); seen", picture: picture)
+    }
+
+    /// A file under the project's `.daw/attachments/` that is not there
+    /// yet: `PREFIX-DATE-TIME.EXT`, a second one in the same second
+    /// numbered.
+    static func freshFile(project: URL, prefix: String, ext: String, now: Date) -> URL {
+        let folder = project.appendingPathComponent(".daw/attachments", isDirectory: true)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd-HHmmss"
+        var file = folder.appendingPathComponent("\(prefix)-\(formatter.string(from: now)).\(ext)")
+        var n = 1
+        while FileManager.default.fileExists(atPath: file.path) {
+            n += 1
+            file = folder.appendingPathComponent("\(prefix)-\(formatter.string(from: now))-\(n).\(ext)")
+        }
+        return file
+    }
+
+    /// Where a sound recorded in the panel is written: `recorded-DATE-TIME.wav`
+    /// under the project's `.daw/attachments/`.
+    static func recordingFile(project: URL, now: Date = Date()) -> URL {
+        freshFile(project: project, prefix: "recorded", ext: "wav", now: now)
+    }
+
+    /// A sound recorded in the panel: a sound attachment whose line also
+    /// says the song's tempo and, when the song was playing, the bar and
+    /// the beat its first frame was heard against, so that the agent places
+    /// what it hears in it where the person heard the song, or that the
+    /// song was stopped; and its peak, or that it is silent.
+    static func make(recorded file: URL, tempo: Double, atBeat: Double?, peakDbfs: Double?, position: (Double) -> String) -> AgentAttachment {
+        var attachment = make(file: file)
+        var parts: [String] = attachment.detail.isEmpty ? [] : [attachment.detail]
+        let bpm = tempo == tempo.rounded() ? String(Int(tempo)) : String(format: "%.1f", tempo)
+        if let atBeat {
+            parts.append("recorded at \(bpm) BPM while the song played from \(position(atBeat)), beat \(String(format: "%.3f", atBeat))")
+        } else {
+            parts.append("recorded at \(bpm) BPM with the song stopped")
+        }
+        parts.append(peakDbfs.map { String(format: "peak %.1f dBFS", $0) } ?? "silent")
+        attachment.detail = parts.joined(separator: ", ")
+        return attachment
     }
 
     /// A patch or a rack from the browser, by its name and its file.

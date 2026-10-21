@@ -8,7 +8,7 @@ import UniformTypeIdentifiers
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
 /// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
-/// `--ask TEXT`, `--attach FILE`, `--attach-clips` and `--listen`
+/// `--ask TEXT`, `--attach FILE`, `--attach-clips`, `--listen` and `--record-audio`
 /// in the order to perform them, then `--export PATH [--export-level
 /// LEVEL]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
 /// `--after SECONDS` and `--size WxH`.
@@ -37,6 +37,9 @@ struct Launch {
         case attachClips
         /// The microphone's button: listening starts, or stops.
         case listen
+        /// `+` › Record Audio: a sound starts recording for the agent
+        /// panel's next message, or stops and attaches.
+        case recordAudio
     }
 
     /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
@@ -151,6 +154,8 @@ struct Launch {
                 actions.append(.attachClips)
             case "--listen":
                 actions.append(.listen)
+            case "--record-audio":
+                actions.append(.recordAudio)
             case "--settings":
                 settings = true
             case "--snapshot":
@@ -570,6 +575,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .listen:
             songs.first?.model.showsAgent = true
             songs.first?.model.agent.toggleListening()
+        case .recordAudio:
+            songs.first?.model.showsAgent = true
+            songs.first?.model.agent.toggleRecording()
         case .wait:
             break
         }

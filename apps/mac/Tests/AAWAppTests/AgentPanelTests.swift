@@ -400,6 +400,67 @@ final class AgentPanelTests: XCTestCase {
         wait("its handshake") { agent.handshook }
     }
 
+    /// Record Audio: refused with the input's name when the device is not
+    /// there; and through BlackHole where the Mac has it, a sound recorded
+    /// into the project and attached with the song's tempo, Return while
+    /// recording stopping it and sending nothing, a dropped one leaving
+    /// nothing, and the sound sent as a line of the list.
+    func testASoundIsRecordedIntoTheNextMessage() throws {
+        let song = scratch.appendingPathComponent("projects/Hum/song.yaml")
+        try FileManager.default.createDirectory(at: song.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "session: {tempo: 100, length_beats: 16}\ntracks: []\n".write(to: song, atomically: true, encoding: .utf8)
+        let attachments = song.deletingLastPathComponent().appendingPathComponent(".daw/attachments")
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+
+        setenv("AAW_INPUT_DEVICE", "no-such-device-xyz", 1)
+        defer { unsetenv("AAW_INPUT_DEVICE") }
+        agent.toggleRecording()
+        XCTAssertTrue(agent.recording, "recording until the host answers")
+        wait("the refusal") { !agent.recording }
+        XCTAssertEqual(model.refusal, "No audio input device named no-such-device-xyz; daw device list names them")
+        XCTAssertEqual(agent.attachments, [])
+        XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: attachments.path)) ?? [], [], "nothing is written for a refused start")
+
+        let hasBlackHole = ((try? audioDevices()) ?? []).contains { $0.name.contains("BlackHole") && $0.inputChannels > 0 }
+        try XCTSkipUnless(hasBlackHole, "no BlackHole device on this Mac")
+        setenv("AAW_INPUT_DEVICE", "BlackHole", 1)
+        agent.startRecording()
+        wait("half a second of sound") { agent.recordingSeconds > 0.5 }
+        XCTAssertTrue(agent.recording)
+        agent.draft = "program this short"
+        agent.send()
+        wait("the sound") { !agent.recording }
+        XCTAssertEqual(agent.entries.count, 0, "Return while recording stops it and sends nothing")
+        XCTAssertEqual(agent.draft, "program this short")
+        let sound = try XCTUnwrap(agent.attachments.first)
+        XCTAssertEqual(agent.attachments.count, 1)
+        XCTAssertEqual(sound.kind, .sound)
+        XCTAssertTrue(sound.name.hasPrefix("recorded-") && sound.name.hasSuffix(".wav"), sound.name)
+        let path = try XCTUnwrap(sound.path)
+        XCTAssertEqual(URL(fileURLWithPath: path).deletingLastPathComponent().path, attachments.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: path))
+        XCTAssertTrue(sound.detail.contains("mono, "), sound.detail)
+        XCTAssertTrue(sound.detail.contains(", recorded at 100 BPM with the song stopped, "), sound.detail)
+
+        // Dropped: nothing attached, nothing written.
+        agent.startRecording()
+        wait("a start") { agent.recordingSeconds > 0.1 }
+        XCTAssertTrue(agent.cancelRecording())
+        XCTAssertFalse(agent.cancelRecording(), "the stop is asked once")
+        wait("the end") { !agent.recording }
+        XCTAssertEqual(agent.attachments.count, 1)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: attachments.path).filter { $0.hasPrefix("recorded-") }.count, 1)
+
+        agent.send()
+        wait("the turn") { !agent.working }
+        XCTAssertEqual(agent.entries.first?.description, "you: program this short + \(sound.name)")
+        let content = try XCTUnwrap(try logged().compactMap { ($0["message"] as? [String: Any])?["content"] as? [[String: Any]] }.first)
+        let text = try XCTUnwrap(content.last?["text"] as? String)
+        XCTAssertTrue(text.contains("- sound: \(path) (") && text.contains("recorded at 100 BPM"), text)
+    }
+
     /// Files attached go with the next message: an image as a block the
     /// engine sees, scaled and typed, and every file as a line of the
     /// list after the context; the chips are on the person's row; a file
