@@ -454,6 +454,10 @@ pub struct AudioClipView {
     pub sample: String,
     /// The beat its start plays on.
     pub at: f64,
+    /// How long before that its sound starts, in beats: its lead, no earlier
+    /// than its file's start or the song's. A clip is drawn from where its
+    /// sound starts.
+    pub lead_beats: f64,
     /// How long it plays before it leaves, in beats: to its end, or to its
     /// file's; a looped clip's own length.
     pub length_beats: f64,
@@ -1443,6 +1447,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             reference: aaw_host::tree::handle_text(key),
                             sample: c.sample.clone(),
                             at: float(c.at_exact()),
+                            lead_beats: c.lead_beats(p.session.tempo),
                             length_beats: c.length_exact().map_or_else(|| ((end - c.source_start_seconds) / per_beat).max(0.0), &float),
                             loop_beats: c.loop_exact().map(&float),
                             tail_beats: tail_beats(c, p.session.tempo, (identity != 0).then_some(seconds)),

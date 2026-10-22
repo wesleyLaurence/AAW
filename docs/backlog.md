@@ -113,6 +113,10 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A clip's lead drawn, on Junior ROAR 2026:** whether Start the Party's block
+  now begins where its sound does, just after bar 43, with the pickup's
+  waveform under it; whether the start edge of a clip with a lead trims as
+  expected, the beat landing the lead after the edge.
 - **The `.aaw` project file, by the person at the Mac:** a `.aaw`
   double-clicked in the Finder with the app closed, whether it launches on
   the song with no Untitled window on the way and whether the Kind column

@@ -232,7 +232,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Point at a clip's edge | The pointer becomes the resize cursor where a drag trims or resizes instead of moving: a pattern clip's end, a note clip's either edge, and an audio clip's edges and the handles at its top corners |
 | Drag a pattern clip's end | Changes its repeats |
 | Drag a note clip's start or end | Moves that edge, on the grid or with ⌘ off it. The notes stay where they are in the song: those an edge passes are kept outside the clip and do not play, and come back when it moves back. A looped clip's end sets how many times its loop plays |
-| Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid |
+| Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid. The start is where the sound starts, and a clip's lead comes with it |
 | Drag the handle at an audio clip's top corner | Sets its fade in or its fade out. The clip still ends where it did: a longer fade out starts earlier |
 | ⌘E | Splits the selected audio clips at the start position, or with a track selected and no clip, that track's, and selects the later halves |
 | ⌘J | Joins the selected clips, two or more on one track, into one that plays what they played, and selects it: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a looped clip laid out as notes; pattern clips and audio clips only where they meet and are one music, the same pattern or the same file played on as a split left it, else refused with the reason. The first clip is the one kept |
@@ -352,9 +352,10 @@ shows a line.
 
 An audio clip's waveform is its file's, from where the clip starts in the file
 and at the clip's gain, so it is there while an edge is dragged outward. The
-host reads a file's peaks once. The clip is drawn to where its sound ends, with
-its fade out inside it, and the ticks at its foot are the beats `daw samples
-beats` measured, when its map is beside the file.
+host reads a file's peaks once. The clip is drawn from where its sound starts,
+its lead before its beat, to where its sound ends, with its fades inside it,
+and the ticks at its foot are the beats `daw samples beats` measured, when its
+map is beside the file.
 [docs/features/audio-clips-in-app.md](../../docs/features/audio-clips-in-app.md)
 has the rest: what each drag writes to the song, and when the song grows.
 
@@ -581,7 +582,8 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
   `daw pad set SONG TRACK PAD --source-bpm BPM`, and an audio clip with the
   Tempo in its panel.
 - Audio clips that overlap on a track both play, and nothing crossfades them. A
-  clip's lead is not shown. The window does not zoom out when the song grows.
+  clip's lead is drawn but set with `daw`. The window does not zoom out when the
+  song grows.
 - A trim or a fade out of a long file at another sample rate than the song's
   takes the engine a moment: about half a second for two minutes of audio.
 - Steps are not selected or copied, and an event's transpose is set with

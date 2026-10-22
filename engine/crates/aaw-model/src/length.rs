@@ -9,6 +9,16 @@ use num_rational::BigRational;
 use num_traits::{ToPrimitive, Zero};
 
 impl AudioClip {
+    /// Beats before its beat the clip's sound starts: its lead, as the engine
+    /// plays it, no earlier than its file's start or the song's.
+    pub fn lead_beats(&self, tempo: f64) -> f64 {
+        // All in seconds of the song, as the engine counts it.
+        let at = self.at_exact().to_f64().unwrap_or(0.0) * 60.0 / tempo;
+        let speed = self.seconds_per_beat(tempo) * tempo / 60.0;
+        let in_file = if speed > 0.0 { self.source_start_seconds / speed } else { 0.0 };
+        (self.lead_ms / 1000.0).min(in_file).min(at).max(0.0) * tempo / 60.0
+    }
+
     /// Beats of the clip's fade out that sound after its end: the fade, no
     /// more than the file holds past the end, and none for a clip that plays
     /// to its file's end and fades over the last of it. `file` is the file's

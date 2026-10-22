@@ -1848,7 +1848,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             if !d.copy {
                 let tracks = model.arrangement.tracks
                 for (key, origin) in d.origin {
-                    clips[key]?.at = Animated(origin.at + d.by)
+                    // An audio clip's block starts its lead before its beat.
+                    let lead = clips[key]?.audio.map { max(0, $0.leadBeats) } ?? 0
+                    clips[key]?.at = Animated(origin.at + d.by - lead)
                     if tracks.indices.contains(origin.track + d.rows), let row = rows[.track(tracks[origin.track + d.rows].key)] {
                         clips[key]?.y = Animated(row.y.to)
                     }
@@ -2011,7 +2013,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .trim(let d):
             // Sent when the drag ends, as a move is: each trim has the engine
             // prepare another part of the file.
-            if d.moved { model.edit(.audioTrim(clip: d.clip.key, start: d.start ? d.beat : nil, end: d.start ? nil : d.beat)) }
+            // The start dragged is where the sound starts; the clip's beat is
+            // its lead after that, so the lead stays with the clip.
+            if d.moved { model.edit(.audioTrim(clip: d.clip.key, start: d.start ? d.beat + d.layout.lead : nil, end: d.start ? nil : d.beat)) }
         case .noteTrim(let d):
             if d.moved { model.edit(.clipTrim(clip: d.clip.key, start: d.start ? d.beat : nil, end: d.start ? nil : d.beat)) }
         case .fade(let d):
@@ -2537,7 +2541,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         for (key, origin) in d.origin {
             guard let clip = clips[key], tracks.indices.contains(origin.track + d.rows),
                   let frame = frame(of: .track(tracks[origin.track + d.rows].key)) else { continue }
-            let rect = clipRect(at: origin.at + d.by, length: clip.length.to, top: frame.top)
+            // An audio clip's block starts its lead before its beat.
+            let lead = clip.audio.map { max(0, $0.leadBeats) } ?? 0
+            let rect = clipRect(at: origin.at + d.by - lead, length: clip.length.to, top: frame.top)
             let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
             clip.color.withAlphaComponent(0.3).setFill()
             shape.fill()
@@ -2760,10 +2766,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// each a loop later, as far as the clip goes.
     private static func wraps(of clip: ClipVisual, at now: CFTimeInterval) -> [Double] {
         guard let every = clip.loop, every > 0 else { return [] }
-        let start = clip.at.value(at: now)
-        let length = clip.length.value(at: now)
-        guard length / every <= 512 else { return [] }
-        return stride(from: start + every, to: start + length - 1e-9, by: every).map { $0 }
+        // An audio clip's loop wraps from its beat, which its lead is drawn before.
+        let start = clip.at.value(at: now) + (clip.audio.map { max(0, $0.leadBeats) } ?? 0)
+        let end = clip.at.value(at: now) + clip.length.value(at: now)
+        guard (end - start) / every <= 512 else { return [] }
+        return stride(from: start + every, to: end - 1e-9, by: every).map { $0 }
     }
 
     /// What a note clip shows under its title: its notes, each a bar from its

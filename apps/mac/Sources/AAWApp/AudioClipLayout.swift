@@ -2,15 +2,19 @@ import AAWCore
 import CoreGraphics
 import Foundation
 
-/// An audio clip as the arrangement draws and drags it: from its beat to where
-/// its sound ends, with its fades inside. The song writes a fade out after the
-/// place a clip leaves; here that place is the fade's length before the end,
-/// as other DAWs draw it. Geometry only: the host works out what a drag means
-/// for the song.
+/// An audio clip as the arrangement draws and drags it: from where its sound
+/// starts, its lead before its beat, to where its sound ends, with its fades
+/// inside. The song writes a lead before a clip's beat and a fade out after
+/// the place it leaves; here the block is the sound, and the fade out is the
+/// fade's length before the end, as other DAWs draw it. Geometry only: the
+/// host works out what a drag means for the song.
 public struct AudioClipLayout: Equatable {
-    /// The beat the clip starts on, and the beat its sound ends on.
+    /// The beat the clip's sound starts on, and the beat it ends on.
     public var start: Double
     public var end: Double
+    /// How long before its beat the sound starts, in beats: the clip's lead,
+    /// which a trim of the start keeps.
+    public var lead: Double
     /// The beats its file starts and ends on, where its edges can go no
     /// further; nil for a file that cannot be read.
     public var fileStart: Double
@@ -31,9 +35,10 @@ public struct AudioClipLayout: Equatable {
         case body, start, end, fadeIn, fadeOut
     }
 
-    public init(start: Double, end: Double, fileStart: Double, fileEnd: Double?, fadeIn: Double, fadeOut: Double) {
+    public init(start: Double, end: Double, lead: Double = 0, fileStart: Double, fileEnd: Double?, fadeIn: Double, fadeOut: Double) {
         self.start = start
         self.end = end
+        self.lead = lead
         self.fileStart = fileStart
         self.fileEnd = fileEnd
         self.fadeIn = fadeIn
@@ -54,10 +59,11 @@ public struct AudioClipLayout: Equatable {
     /// can be read.
     public init(_ clip: AudioClipView, tempo: Double, seconds: Double?) {
         let perBeat = clip.secondsPerBeat > 0 ? clip.secondsPerBeat : 1
-        let length = clip.lengthBeats + clip.tailBeats
+        let lead = max(0, clip.leadBeats)
+        let length = lead + clip.lengthBeats + clip.tailBeats
         let fileStart = clip.at - clip.sourceStartSeconds / perBeat
         self.init(
-            start: clip.at, end: clip.at + length, fileStart: fileStart,
+            start: clip.at - lead, end: clip.at + clip.lengthBeats + clip.tailBeats, lead: lead, fileStart: fileStart,
             fileEnd: seconds.map { fileStart + $0 / perBeat },
             fadeIn: min(Self.beats(ms: clip.fadeInMs, tempo: tempo), length),
             fadeOut: min(Self.beats(ms: clip.fadeOutMs, tempo: tempo), length)
@@ -65,6 +71,9 @@ public struct AudioClipLayout: Equatable {
     }
 
     public var length: Double { end - start }
+
+    /// The clip's beat: where its start in the file plays, after its lead.
+    public var beat: Double { start + lead }
 
     /// Where the fades' handles are, in a clip's rectangle: at the top, where
     /// the fade in ends and where the fade out begins.
@@ -112,15 +121,16 @@ public struct AudioClipLayout: Equatable {
     }
 
     /// Where the start can be dragged to: no earlier than the file starts or
-    /// the song does, and short of where the fade out begins.
+    /// the song does, and short of where the fade out begins. The lead comes
+    /// with it: the clip's beat lands the lead after the start dragged to.
     public func start(draggedTo beat: Double) -> Double {
-        min(max(beat, fileStart, 0), end - fadeOut - Self.least)
+        min(max(beat, fileStart, 0), end - fadeOut - lead - Self.least)
     }
 
     /// Where the end can be dragged to: no later than the file ends, and
-    /// after the start.
+    /// after the clip's beat.
     public func end(draggedTo beat: Double) -> Double {
-        max(min(beat, fileEnd ?? end), start + Self.least)
+        max(min(beat, fileEnd ?? end), self.beat + Self.least)
     }
 
     /// The fade in a handle dragged to `beat` gives, in beats: from none to
