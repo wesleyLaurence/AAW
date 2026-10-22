@@ -77,6 +77,12 @@ def parser():
     search.add_argument("query", nargs="?", default="")
     search.add_argument("--folder", type=Path, action="append", help="Search within this folder; repeat for multiple sources")
     search.add_argument(
+        "--path",
+        type=Path,
+        action="append",
+        help="Only the file at this path, as the index has it; repeat for several, such as the favorites",
+    )
+    search.add_argument(
         "--category",
         help="The category in a sample's name, or the one a sample named for none measures as",
     )
@@ -495,6 +501,7 @@ def execute(a):
             measured_kind=a.measured_type,
             measured_bpm=a.measured_bpm,
             roots=a.folder,
+            paths=a.path,
             sort=a.sort,
             reverse=a.reverse,
             words=a.words or (),

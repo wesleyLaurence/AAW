@@ -303,3 +303,79 @@ pub fn library_import(song: String, source: String, root_note: Option<String>) -
         root_note: optional(&copied, "root_note"),
     })
 }
+
+/// A favorite as the browser lists it: a sample by its file, a patch, a
+/// rack or an instrument rack by name, or a device kind, with whether the
+/// library still has it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct FavoriteInfo {
+    /// `sample`, `patch`, `rack`, `instrument_rack` or `device`.
+    pub kind: String,
+    /// The name as the library has it now, a sample's file name, a
+    /// device's kind.
+    pub name: String,
+    /// What the file names: a sample's path, a name, a device kind.
+    pub what: String,
+    /// A patch's, a rack's or an instrument rack's slug.
+    pub slug: String,
+    pub missing: bool,
+}
+
+fn favorite_info(l: &aaw_host::favorites::Listed) -> FavoriteInfo {
+    FavoriteInfo {
+        kind: l.favorite.kind.as_str().to_string(),
+        name: l.name.clone(),
+        what: l.favorite.what.clone(),
+        slug: l.slug.clone(),
+        missing: l.missing,
+    }
+}
+
+fn favorites_of(all: &[aaw_host::favorites::Favorite]) -> Vec<FavoriteInfo> {
+    aaw_host::favorites::listed(all).iter().map(favorite_info).collect()
+}
+
+/// The favorites, in the order they were added: what `daw favorite list`
+/// lists. Reads the library's folder; a file that cannot be read is an
+/// error.
+#[uniffi::export]
+pub fn library_favorites() -> Result<Vec<FavoriteInfo>, SongError> {
+    Ok(favorites_of(&aaw_host::favorites::read()?))
+}
+
+/// Adds a favorite of `kind` (`sample`, `patch`, `rack`, `instrument_rack`
+/// or `device`) naming `what`, checked against the library as `daw
+/// favorite add` checks it, and gives back all of them; one already there
+/// stays where it is.
+#[uniffi::export]
+pub fn library_favorite_add(kind: String, what: String) -> Result<Vec<FavoriteInfo>, SongError> {
+    let kind = aaw_host::favorites::Kind::parse(&kind)?;
+    let (all, _, _) = aaw_host::favorites::add(kind, &what)?;
+    Ok(favorites_of(&all))
+}
+
+/// Takes a favorite out, as `daw favorite remove` does, and gives back the
+/// rest.
+#[uniffi::export]
+pub fn library_favorite_remove(kind: String, what: String) -> Result<Vec<FavoriteInfo>, SongError> {
+    let kind = aaw_host::favorites::Kind::parse(&kind)?;
+    let (all, _) = aaw_host::favorites::remove(kind, &what)?;
+    Ok(favorites_of(&all))
+}
+
+/// The index's rows for the files at `paths`, those it has, by name: what
+/// `daw samples search --path P` finds. Blocks while Python runs, so call
+/// it off the main thread.
+#[uniffi::export]
+pub fn library_samples_at(db: String, paths: Vec<String>) -> Result<Vec<SampleInfo>, SongError> {
+    if paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let limit = paths.len().clamp(1, 1000).to_string();
+    let mut args = vec!["--db", db.as_str(), "search", "--limit", limit.as_str()];
+    for path in &paths {
+        args.extend(["--path", path.as_str()]);
+    }
+    let found = python::run("samples", &args)?;
+    Ok(found.as_array().map(|rows| rows.iter().map(sample).collect()).unwrap_or_default())
+}

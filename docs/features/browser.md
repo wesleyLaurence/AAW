@@ -9,6 +9,9 @@ The left panel is a browser:
 a panel that opens and closes, with a column of categories and, beside it, what
 the chosen category holds.
 
+- **Favorites:** what the person keeps at hand, anything of the sections
+  below put there from its row's menu, first ([favorites](favorites.md),
+  October 21, 2026).
 - **Samples:** the library's samples by search, category and kind, as the panel
   shows them today.
 - **Folders:** sample directories shared across projects and with the agent; select one or several to scope sample search.
@@ -34,7 +37,7 @@ effects share one browser, and sample folders stay available when projects chang
 
 **The panel.** It is where the Samples panel is, opened and closed by ⌥⌘B and
 by the mark at the left of the transport bar, as now, and is 360 points wide to fit navigation and results. On
-its left a narrow column lists the categories, Samples,
+its left a narrow column lists the categories, Favorites, Samples,
 Instruments, MIDI Effects, Audio Effects and Folders. Clicking one shows its contents to the right. The category last
 shown comes back when the panel is opened again.
 
@@ -143,7 +146,8 @@ sample too.
 
 - **Which categories after these four.** Ableton also lists Drums, Clips,
   MIDI Effects and Plug-ins. Clips would hold MIDI files and
-  saved clips. Folders already registers sample directories.
+  saved clips. Folders already registers sample directories. Favorites came
+  first, on October 21, 2026 ([favorites](favorites.md)).
 - **The person's own presets.** The concept puts the person's devices in
   `devices/` in the workspace. A chain saved with its settings is a rack,
   listed under Audio Effects since October 7, 2026 ([effect

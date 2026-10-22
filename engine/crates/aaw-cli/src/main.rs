@@ -347,6 +347,8 @@ enum Top {
     Patch(PatchCmd),
     #[command(subcommand)]
     Rack(RackCmd),
+    #[command(subcommand)]
+    Favorite(FavoriteCmd),
     /// Generated audio: a sound or a loop from a description through the
     /// ElevenLabs API at the person's own key, saved in the project as a
     /// sample and in the workspace's generated folder (daw describe generate).
@@ -838,6 +840,24 @@ enum PatchCmd {
     /// Load a patch into a MIDI track, in place of its whole synth; the
     /// notes stay. PATCH is a name from `daw patch list` or a .yaml file.
     Load { project: Song, track: String, patch: String },
+}
+
+/// Favorites: what the person keeps at hand, listed first in the app's
+/// browser, as one file in the workspace library
+/// (~/Music/AAW/library/favorites.yaml, or under AAW_WORKSPACE). KIND is
+/// sample, patch, rack, instrument-rack or device; WHAT a sample's file, a
+/// patch's, rack's or instrument rack's name, or a device kind (sampler,
+/// synth, an effect kind or a MIDI effect kind).
+#[derive(Subcommand)]
+enum FavoriteCmd {
+    /// The favorites in the order they were added, each with its kind and
+    /// whether the library still has it.
+    List,
+    /// Add one at the end, checked against the library; one already there
+    /// stays where it is.
+    Add { kind: String, what: String },
+    /// Take one out; the file, patch or rack is left as it is.
+    Remove { kind: String, what: String },
 }
 
 /// Generated audio: `daw describe generate` says what each kind is for, the
@@ -1540,6 +1560,19 @@ fn instrument_rack_json(r: &aaw_host::instruments::InstrumentRack) -> Json {
         "saved_by": r.saved_by,
         "saved_at": r.saved_at,
     })
+}
+
+/// A favorite as `daw favorite list` prints it: its kind, what it names and
+/// whether the library still has it.
+fn favorite_json(l: &aaw_host::favorites::Listed) -> Json {
+    use aaw_host::favorites::Kind;
+    let mut out = json!({"kind": l.favorite.kind.as_str(), "name": l.name, "missing": l.missing});
+    match l.favorite.kind {
+        Kind::Sample => out["path"] = json!(l.favorite.what),
+        Kind::Device => out["type"] = json!(l.favorite.what),
+        _ => out["slug"] = json!(l.slug),
+    }
+    out
 }
 
 fn value(v: aaw_model::value::Value) -> Json {
@@ -2294,6 +2327,28 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
         },
+        Top::Favorite(f) => {
+            use aaw_host::favorites as fav;
+            let listing = |all: &[fav::Favorite]| -> Vec<Json> { fav::listed(all).iter().map(favorite_json).collect() };
+            match f {
+                FavoriteCmd::List => {
+                    let all = fav::read()?;
+                    Ok(json!({"file": fav::file(), "favorites": listing(&all)}))
+                }
+                FavoriteCmd::Add { kind, what } => {
+                    let kind = fav::Kind::parse(kind)?;
+                    let (all, favorite, added) = fav::add(kind, what)?;
+                    let one = fav::listed(std::slice::from_ref(&favorite)).remove(0);
+                    Ok(json!({"added": added, "favorite": favorite_json(&one), "favorites": listing(&all)}))
+                }
+                FavoriteCmd::Remove { kind, what } => {
+                    let kind = fav::Kind::parse(kind)?;
+                    let (all, removed) = fav::remove(kind, what)?;
+                    let one = fav::listed(std::slice::from_ref(&removed)).remove(0);
+                    Ok(json!({"removed": favorite_json(&one), "favorites": listing(&all)}))
+                }
+            }
+        }
         Top::Rack(r) => match r {
             RackCmd::List { words } => {
                 let query = words.join(" ");
@@ -2874,6 +2929,7 @@ fn name(top: &Top) -> String {
         Top::Synth(_) => group("synth", ""),
         Top::Patch(_) => group("patch", ""),
         Top::Rack(_) => group("rack", ""),
+        Top::Favorite(_) => group("favorite", ""),
         Top::Generate(_) => group("generate", ""),
         Top::Keys(_) => group("keys", ""),
         Top::Pattern(_) => group("pattern", ""),

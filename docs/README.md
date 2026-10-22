@@ -45,7 +45,7 @@ Built:
 | [what every session is given](features/agent-context.md) | `SONG.md` in every project and the `AGENTS.md` that imports it, a project's own skills, the person's instructions and taste under the root's `.claude/rules/`, and what a session started in a project's folder or at the root has |
 | [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
 | [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
-| [the browser](features/browser.md) | Samples, instruments, effects and shared folders at the window's left |
+| [the browser](features/browser.md) | Favorites, samples, instruments, effects and shared folders at the window's left |
 | [the Sampler device](features/sampler-device.md) | A sample loaded onto an empty Sampler and shaped in its panel |
 | [learning the CLI quickly](features/cli-discovery.md) | Short `daw describe` topics, `daw describe start`, `--help` with fields, and errors that say what to do |
 | [the arrangement map](features/arrangement-map.md) | `daw map`: the song as a grid of tracks by bars, the same music under the same letter |
@@ -91,6 +91,7 @@ Proposed, in the order of Next in the backlog:
 | [freezing a track](features/freezing.md) | Built |
 | [effect racks and instrument racks](features/effect-racks.md) | Built |
 | [MIDI effects](features/midi-effects.md) | Built: an arpeggiator, a chord, a scale and a velocity before a MIDI track's instrument |
+| [favorites](features/favorites.md) | Built: the browser's first section and `daw favorite`, one file in the workspace library |
 | [devices anyone builds, to a spec](features/custom-devices.md) | Next; proposed as a direction |
 
 ## Archive

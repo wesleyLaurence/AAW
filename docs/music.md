@@ -129,7 +129,7 @@ the operation needs. A refused edit names the field it meant and the fix.
 
 | Task | Read or do |
 |---|---|
-| Find sounds | `daw describe samples`: `daw samples search` by name, sorted and filtered by what a sample measures as (`--sort punch`, `--short --bright`, `--max-decay 300`), and `daw samples like SAMPLE` for the nearest to one chosen; `daw samples analyze --all` measures the library once; filenames are hints, and a measurement is not a listen |
+| Find sounds | `daw describe samples`: `daw favorite list` first, what the person keeps at hand; `daw samples search` by name, sorted and filtered by what a sample measures as (`--sort punch`, `--short --bright`, `--max-decay 300`), and `daw samples like SAMPLE` for the nearest to one chosen; `daw samples analyze --all` measures the library once; filenames are hints, and a measurement is not a listen |
 | Use a sound | `daw samples import` copies it into the project; import compressed audio before measuring it |
 | A song's vocals, instrumental or stems | `daw describe separate`; `daw separate PROJECT SOURCE` for an a cappella and an instrumental, `--split stems` for drums, bass, vocals and the rest, each a sample in the project, `--tracks` to lay them under the source; `daw separate models` says what is downloaded, and a measurement is not a listen |
 | A sound the library lacks | `daw describe generate`; `daw generate sound PROJECT "TEXT" --seconds S`, or `--bars N --loop` for a loop at the song's tempo, makes it with ElevenLabs at the person's own key and imports it as a sample, placing nothing; `--estimate` first, within the agent's daily budget; without a key the person enters one with `daw keys set elevenlabs`; a prompt names no artist, and a measurement is not a listen |
