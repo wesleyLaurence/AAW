@@ -62,7 +62,10 @@ terminal started in the project's folder has the same by location. See
 [agent-panel.md](features/agent-panel.md).
 
 A project is a folder with `song.yaml`, its samples and its renders, and a
-command takes the folder or the file. Beside the song is `SONG.md`, what the
+command takes the folder or the file, or the `.aaw` named for the folder
+beside the song, the app's own file type, which names the format, the
+project's ID and the song file and which the Finder opens with the app
+([project-file.md](features/project-file.md)). Beside the song is `SONG.md`, what the
 song is for, where it is heading and what was decided, and an `AGENTS.md`
 that imports it; `daw init` and the app write both, and nothing reads them
 but the test of whether an Untitled project holds nothing: they are for the

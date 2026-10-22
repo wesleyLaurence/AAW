@@ -155,7 +155,9 @@ folder with an `.als` file:
 
 ```
 My Beat/
-  My Beat.aaw      the song, a readable text document
+  My Beat.aaw      the project file: the way in from outside, naming the format,
+                   the project's ID and the song file; readable text
+  song.yaml        the song, a readable text document
   SONG.md          what this song is and is for, the person's instructions for it,
                    where it is heading and what was decided
   skills/          skills for this project only
@@ -171,7 +173,9 @@ My Beat/
 - **`.aaw` is the app's own file type.** Double-clicking it opens the project,
   Finder shows the app's icon on it and on the project's folder, and Open…
   offers only projects. The file is still readable text that the agent and Git
-  can work with.
+  can work with. It is beside the song rather than the song itself (D142), so
+  the song's file keeps its name through Save As… and a rename, and the ID
+  stays out of the music.
 - **The folder stays a plain folder,** not a package Finder shows as one file, so
   the person and the agent can reach exports, renders and notes directly.
 - **A project is self-contained.** Sample paths are relative to the folder and
@@ -180,8 +184,8 @@ My Beat/
 - **A project can be kept anywhere.** Save As… opens at the workspace's
   `projects/` folder, which is only where it starts.
 - **Every `daw` command takes the folder** as well as the file.
-- **A project carries an ID** in its file, which is how it is recognized after it
-  has moved.
+- **A project carries an ID** in its `.aaw`, which is how it is recognized after
+  it has moved.
 - **Fixed places, free contents.** Every project has the same top-level folders
   and nobody invents new ones; anything can go inside `scripts/`. The tool creates
   the layout, and `daw check` flags files outside it. `SONG.md`, the song, the
@@ -551,8 +555,8 @@ open to this app one day; nothing is built on its existing.
 
 ## Open questions
 
-1. Is the project file named for the project (`My Beat.aaw`, renamed with it) or
-   fixed (`song.aaw`)?
+1. Named for the project, beside a fixed `song.yaml` (D142). Save As… names it
+   anew; a folder renamed in the Finder keeps its old `.aaw` name until then.
 2. On a project that already has a name, is Save As… a rename or a copy with a
    new ID? Probably both exist: Rename… and Save a Copy….
 3. How are the workspace's and the project's skills handed to an agent that looks

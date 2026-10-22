@@ -13,12 +13,13 @@ def test_init_and_describe_through_either_entry_point(tmp_path):
     assert code == 0, made
     path = tmp_path / "new" / "song.yaml"
     notes = path.with_name("SONG.md")
-    assert made == {"notes": str(notes.resolve()), "project": str(path.resolve())}
+    assert made == {"notes": str(notes.resolve()), "project": str(path.resolve()), "file": str(path.with_name("new.aaw").resolve())}
     assert path.read_text() == "schema_version: 1\nsession:\n  tempo: 120.0\n  length_beats: 4\n"
     # The song's notes start as four headings, and the project's AGENTS.md imports them.
     assert notes.read_text() == "## Vision\n\n## Instructions\n\n## Direction\n\n## Decisions\n"
     assert path.with_name("AGENTS.md").read_text().splitlines()[-1] == "@SONG.md"
-    assert sorted(p.name for p in path.parent.iterdir()) == ["AGENTS.md", "SONG.md", "song.yaml"]
+    assert sorted(p.name for p in path.parent.iterdir()) == ["AGENTS.md", "SONG.md", "new.aaw", "song.yaml"]
+    assert path.with_name("new.aaw").read_text().splitlines()[1:4:2] == ["format: 1", "song: song.yaml"]
     code, again = cli("init", tmp_path / "new")
     assert code == 1 and "already exists" in again["error"]
     # Notes that are already in the folder are kept.

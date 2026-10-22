@@ -1,4 +1,5 @@
-//! A project as a folder: the song file in it, a blank project and the notes
+//! A project as a folder: the song file in it, the `.aaw` file beside it
+//! that names the project from outside, a blank project and the notes
 //! written beside it, moving and copying one, and the Untitled projects the
 //! app keeps in its data folder.
 //!
@@ -7,7 +8,7 @@
 //! `projects.json`, the index of the projects the app knows, which the app
 //! writes and `daw projects --all` reads.
 
-use aaw_model::value::{dict, Value};
+use aaw_model::value::{dict, Key, Value};
 use aaw_model::Project;
 use serde_json::Value as Json;
 use std::io::ErrorKind;
@@ -17,6 +18,15 @@ type Result<T> = std::result::Result<T, String>;
 
 /// The song's file in a project's folder.
 pub const SONG_FILE: &str = "song.yaml";
+/// The extension of the project file beside the song, `My Beat/My Beat.aaw`:
+/// the way into the project from outside the app, which the Finder opens
+/// with it and every command takes as PROJECT. It names the format, the
+/// project's ID and the song's file; the song stays in `song.yaml`.
+pub const PROJECT_EXT: &str = "aaw";
+/// The format a `.aaw` written now says. One that says a later number was
+/// written by a newer AAW and is refused rather than guessed at.
+pub const PROJECT_FORMAT: u64 = 1;
+const PROJECT_COMMENT: &str = "# An AAW project. Open it with AAW; the song is in song.yaml beside it.";
 /// The song's notes, which the person and the agent keep: what the song is
 /// and is for, the person's instructions for it, where it is heading and what
 /// was decided. A project starts with the four headings and nothing under them.
@@ -31,8 +41,10 @@ const BESIDE: [(&str, &str); 2] = [(NOTES_FILE, NOTES), (AGENT_FILE, AGENT_TEXT)
 /// What a project made by the app starts with.
 pub const UNTITLED_TEMPO: f64 = 120.0;
 
-/// Files a host or the Finder leaves in a folder, which are not the project's.
-const IGNORED: [&str; 2] = [".daw.lock", ".DS_Store"];
+/// Files a host or the Finder leaves in a folder, which are not the project's:
+/// the host's lock, the Finder's, and the folder's custom icon, which the app
+/// sets so the Finder draws the project's folder with the app's icon.
+const IGNORED: [&str; 3] = [".daw.lock", ".DS_Store", "Icon\r"];
 
 pub fn data_dir() -> PathBuf {
     if let Some(dir) = std::env::var_os("AAW_DATA_DIR") {
@@ -42,18 +54,174 @@ pub fn data_dir() -> PathBuf {
     home.join("Library/Application Support/AAW")
 }
 
-/// The song file a command's PROJECT names: the file itself, or `song.yaml`
-/// in a folder. A path that is gone, as a project's is after it moved, is a
-/// folder unless it is written as a YAML file.
-pub fn song_file(project: &Path) -> PathBuf {
+/// The song file a command's PROJECT names: the file itself, `song.yaml` in
+/// a folder, or the song a `.aaw` names beside itself. A path that is gone,
+/// as a project's is after it moved, is a folder unless it is written as a
+/// YAML file, and a `.aaw` that is gone names its folder's `song.yaml`, which
+/// a host may still answer for. A `.aaw` that does not read is refused with
+/// what is wrong and the song file to use instead.
+pub fn song_file(project: &Path) -> Result<PathBuf> {
+    if is_project_file(project) {
+        let folder = project.parent().unwrap_or(Path::new(""));
+        if project.is_file() {
+            return Ok(folder.join(read_project_file(project)?.song));
+        }
+        return Ok(folder.join(SONG_FILE));
+    }
     let yaml = project
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("yaml") || e.eq_ignore_ascii_case("yml"));
-    if project.is_dir() || (!yaml && !project.exists()) {
+    Ok(if project.is_dir() || (!yaml && !project.exists()) {
         project.join(SONG_FILE)
     } else {
         project.to_path_buf()
+    })
+}
+
+// MARK: The project file
+
+/// What a project's `.aaw` says.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectFile {
+    pub path: PathBuf,
+    /// A random UUID written once, when the project was made; a copy gets
+    /// its own. It is about the folder, which it tells apart after a move.
+    pub id: String,
+    /// The song's file name in the same folder: a bare name, never a path.
+    pub song: String,
+}
+
+fn is_project_file(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case(PROJECT_EXT))
+}
+
+/// A new project ID: a random UUID (version 4), in lower case.
+pub fn new_id() -> String {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).expect("the system gives random bytes");
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: Vec<String> = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let hex = hex.concat();
+    format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
+}
+
+/// The `.aaw` files at the top of a folder, by name.
+pub fn project_files_in(folder: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| is_project_file(p) && p.is_file()).collect();
+    files.sort();
+    files
+}
+
+/// A folder's `.aaw`: the one named for the folder, else the first by name.
+pub fn project_file_in(folder: &Path) -> Option<PathBuf> {
+    let files = project_files_in(folder);
+    let named = named_project_file(folder);
+    files.iter().find(|f| f.file_name() == named.file_name()).or(files.first()).cloned()
+}
+
+/// Where a folder's `.aaw` named for it is: `My Beat/My Beat.aaw`.
+fn named_project_file(folder: &Path) -> PathBuf {
+    let name = resolved(folder).ok().map(|f| name_of(&f)).filter(|n| !n.is_empty()).unwrap_or_else(|| name_of(folder));
+    folder.join(format!("{name}.{PROJECT_EXT}"))
+}
+
+fn write_project_file(path: &Path, id: &str) -> Result<()> {
+    let text = format!("{PROJECT_COMMENT}\nformat: {PROJECT_FORMAT}\nid: {id}\nsong: {SONG_FILE}\n");
+    aaw_model::atomic_write(path, &text).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Reads a `.aaw`. One that does not read says what is wrong and names the
+/// song file to open instead.
+pub fn read_project_file(path: &Path) -> Result<ProjectFile> {
+    let instead = path.with_file_name(SONG_FILE);
+    let refuse = |why: String| format!("{} {why}; open {} instead", path.display(), instead.display());
+    let text = std::fs::read_to_string(path).map_err(|e| refuse(format!("does not read: {e}")))?;
+    let value = aaw_model::yaml_load::load(&text).map_err(|e| refuse(format!("is not an AAW project file: {e}")))?;
+    let Value::Dict(fields) = value else {
+        return Err(refuse("is not an AAW project file: not a mapping".into()));
+    };
+    let field = |name: &str| fields.get(&Key::str(name));
+    let string = |v: &Value| match v {
+        Value::Str(s) => Some(s.clone()),
+        _ => None,
+    };
+    let format = match field("format") {
+        Some(Value::Int(n)) => u64::try_from(n).map_err(|_| refuse("has a format that is not a whole number".into()))?,
+        Some(_) => return Err(refuse("has a format that is not a whole number".into())),
+        None => return Err(refuse("is not an AAW project file: no format".into())),
+    };
+    if format > PROJECT_FORMAT {
+        return Err(refuse(format!("is format {format}, written by a newer AAW than this one, which reads {PROJECT_FORMAT}")));
     }
+    let id = match field("id").and_then(string) {
+        Some(id) if !id.trim().is_empty() => id.trim().to_string(),
+        _ => return Err(refuse("has no id".into())),
+    };
+    let song = match field("song").and_then(string) {
+        Some(song) if !song.is_empty() && song != "." && song != ".." && !song.contains(['/', '\\']) => song,
+        Some(_) => return Err(refuse("names a song that is not a file in its folder".into())),
+        None => return Err(refuse("names no song".into())),
+    };
+    Ok(ProjectFile {
+        path: path.to_path_buf(),
+        id,
+        song,
+    })
+}
+
+/// A folder's `.aaw`, written named for the folder with a new ID when the
+/// folder has none: a project made before the file existed gets one the
+/// first time a host opens it.
+pub fn ensure_project_file(folder: &Path) -> Result<ProjectFile> {
+    if let Some(file) = project_file_in(folder) {
+        return read_project_file(&file);
+    }
+    let path = named_project_file(folder);
+    let id = new_id();
+    write_project_file(&path, &id)?;
+    Ok(ProjectFile {
+        path,
+        id,
+        song: SONG_FILE.into(),
+    })
+}
+
+/// A project's ID, as its folder's `.aaw` says; None without one that reads.
+pub fn id_of(song: &Path) -> Option<String> {
+    let folder = song.parent().filter(|f| !f.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    project_file_in(folder).and_then(|f| read_project_file(&f).ok()).map(|f| f.id)
+}
+
+/// Gives a project a new ID, in its `.aaw`, which is written when it has
+/// none: for a folder duplicated in the Finder, so that the two are told
+/// apart. Returns the ID.
+pub fn renew_id(song: &Path) -> Result<String> {
+    let folder = song.parent().filter(|f| !f.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let path = project_file_in(folder).unwrap_or_else(|| named_project_file(folder));
+    let id = new_id();
+    write_project_file(&path, &id)?;
+    Ok(id)
+}
+
+/// Names a folder's `.aaw` for the folder, as after a move, keeping its ID
+/// or with `renew` giving it a new one; a folder with none gets one. The
+/// file keeps saying `song.yaml`, which is where the song is.
+fn name_project_file(folder: &Path, renew: bool) -> Result<()> {
+    let named = named_project_file(folder);
+    let id = match project_file_in(folder) {
+        Some(file) if file.file_name() == named.file_name() && !renew => return Ok(()),
+        Some(file) => {
+            let id = read_project_file(&file).map(|f| f.id).ok().filter(|_| !renew).unwrap_or_else(new_id);
+            std::fs::remove_file(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            id
+        }
+        None => new_id(),
+    };
+    write_project_file(&named, &id)
 }
 
 /// How a project is named to a person or an agent: its folder, or its file
@@ -115,7 +283,8 @@ pub fn blank(tempo: f64, title: Option<&str>, meter: Option<&str>) -> Result<Pro
 
 /// Writes a blank project into a folder, which is made if it is not there,
 /// and returns its song file. The notes and the file that imports them are
-/// written beside the song; one that is already in the folder is left as it is.
+/// written beside the song, and the `.aaw` named for the folder with a new
+/// ID; one that is already in the folder is left as it is.
 pub fn create(directory: &Path, tempo: f64, title: Option<&str>, meter: Option<&str>) -> Result<PathBuf> {
     let path = directory.join(SONG_FILE);
     if path.exists() {
@@ -129,6 +298,7 @@ pub fn create(directory: &Path, tempo: f64, title: Option<&str>, meter: Option<&
             std::fs::write(&file, text).map_err(|e| format!("{}: {e}", file.display()))?;
         }
     }
+    ensure_project_file(directory)?;
     Ok(path)
 }
 
@@ -168,8 +338,8 @@ pub fn is_untitled(song: &Path) -> bool {
     song.parent().and_then(Path::parent) == Some(root.as_path())
 }
 
-/// Whether a folder has no file but the song and the files written beside
-/// it, each as it was written.
+/// Whether a folder has no file but the song, its `.aaw` and the files
+/// written beside it, each as it was written.
 fn only_song(folder: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return false;
@@ -177,6 +347,7 @@ fn only_song(folder: &Path) -> bool {
     entries.flatten().all(|entry| {
         let name = entry.file_name();
         name == SONG_FILE
+            || is_project_file(Path::new(&name))
             || IGNORED.iter().any(|i| name == *i)
             || BESIDE.iter().any(|(file, text)| name == *file && std::fs::read_to_string(entry.path()).is_ok_and(|t| t == *text))
     })
@@ -270,31 +441,39 @@ fn copy_into(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Copies a project's folder to `to`, which must not exist. A copy that
-/// fails leaves nothing behind.
+/// Copies a project's folder to `to`, which must not exist, and names the
+/// copy's `.aaw` for it with a new ID. A copy that fails leaves nothing
+/// behind.
 pub fn copy_folder(from: &Path, to: &Path) -> Result<()> {
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    copy_into(from, to).map_err(|e| {
-        let _ = std::fs::remove_dir_all(to);
-        format!("Copying to {}: {e}", to.display())
-    })
+    copy_into(from, to)
+        .map_err(|e| format!("Copying to {}: {e}", to.display()))
+        .and_then(|()| name_project_file(to, true))
+        .map_err(|e| {
+            let _ = std::fs::remove_dir_all(to);
+            e
+        })
 }
 
 /// Moves a project's folder to `to`, which must not exist: a rename, or
-/// across volumes a copy and then the removal of the original.
+/// across volumes a copy and then the removal of the original. The `.aaw`
+/// is named for the new folder and keeps its ID.
 pub fn move_folder(from: &Path, to: &Path) -> Result<()> {
     if let Some(parent) = to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
     match std::fs::rename(from, to) {
-        Ok(()) => Ok(()),
+        Ok(()) => name_project_file(to, false),
         Err(e) if e.kind() == ErrorKind::CrossesDevices => {
-            copy_folder(from, to)?;
+            copy_into(from, to).map_err(|e| {
+                let _ = std::fs::remove_dir_all(to);
+                format!("Copying to {}: {e}", to.display())
+            })?;
             // The project is at its new place; what is left of the old one is litter.
             let _ = std::fs::remove_dir_all(from);
-            Ok(())
+            name_project_file(to, false)
         }
         Err(e) => Err(format!("Moving to {}: {e}", to.display())),
     }
@@ -311,6 +490,8 @@ pub struct Known {
     pub untitled: bool,
     /// Unix time in seconds.
     pub opened: f64,
+    /// The project's ID as the app last read it from its `.aaw`.
+    pub id: Option<String>,
 }
 
 pub fn index_file() -> PathBuf {
@@ -333,6 +514,7 @@ pub fn known() -> Vec<Known> {
                         title: row["title"].as_str().unwrap_or_default().to_string(),
                         untitled: row["untitled"].as_bool().unwrap_or(false),
                         opened: row["opened"].as_f64().unwrap_or(0.0),
+                        id: row["id"].as_str().map(str::to_string),
                     })
                 })
                 .collect()

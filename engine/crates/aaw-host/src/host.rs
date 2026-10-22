@@ -1528,6 +1528,11 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
     let entry = registry::entry(project)?;
     let (listener, claim) = registry::claim(&entry)?;
     let session = Session::open(project, true)?;
+    // A project made before the `.aaw` existed gets one the first time a
+    // host opens it. A folder that cannot be written is hosted all the same.
+    if let Err(e) = crate::project::ensure_project_file(session.dir()) {
+        eprintln!("{}", json!({"warning": format!("The project file was not written: {e}")}));
+    }
     let (tx, rx) = mpsc::channel::<(Request, mpsc::Sender<Json>)>();
     let opts_audio = opts.audio.clone();
     let mut host = Host {

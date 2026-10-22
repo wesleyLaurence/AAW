@@ -12,10 +12,12 @@ and an agent can find any project the app knows.
 
 ## A project is a folder
 
-A project is a folder with `song.yaml` in it, its samples and its renders. Every
-`daw` command takes the folder or the file as PROJECT, in Rust and in Python
-alike, and so does the app. A path that is not there is taken as a folder unless
-it is written as a `.yaml` file.
+A project is a folder with `song.yaml` in it, its `.aaw` beside it, its samples
+and its renders. Every `daw` command takes the folder, the song file or the
+`.aaw` as PROJECT, in Rust and in Python alike, and so does the app. A path
+that is not there is taken as a folder unless it is written as a `.yaml` file,
+and a `.aaw` that is gone names its folder's song. See
+[the `.aaw` project file](project-file.md).
 
 The app's data folder is `~/Library/Application Support/AAW`, or what
 `AAW_DATA_DIR` names. It holds `Untitled/` and `projects.json`. The tests and the
@@ -161,8 +163,9 @@ projects that no host has open, with `missing` and `opened`.
 - Until the sample index moves into the app's data folder (An app that stands alone, under Shipping in the backlog), an
   Untitled project's browser is empty unless `AAW_LIBRARY` names an index,
   because the index is found by walking up from the project's folder.
-- A moved project is matched by its bookmark. Matching by an ID in the project
-  file comes with the `.aaw` file type (under Shipping in the backlog).
+- A moved project is matched by its bookmark at launch, and by the ID in its
+  `.aaw` when it is opened at a path the index does not know
+  ([the `.aaw` project file](project-file.md)).
 - A project made with `daw init` and never opened in the app is not in the
   index.
 - A copy of a large project is made while the window waits. On one APFS volume

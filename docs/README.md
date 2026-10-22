@@ -44,6 +44,7 @@ Built:
 | [skills](features/skills.md) | Where a skill and its sounds live, out of Git, and what goes in one |
 | [what every session is given](features/agent-context.md) | `SONG.md` in every project and the `AGENTS.md` that imports it, a project's own skills, the person's instructions and taste under the root's `.claude/rules/`, and what a session started in a project's folder or at the root has |
 | [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
+| [the `.aaw` project file](features/project-file.md) | The file beside the song that the Finder opens with the app, named for the folder, with the project's ID; the folder's icon; the file type; the index matching by ID |
 | [MIDI tracks and note clips](features/midi-clips.md) | Note clips that own their notes, the sampler as their instrument, the piano roll, and MIDI files of one part in and out |
 | [the browser](features/browser.md) | Favorites, samples, instruments, effects and shared folders at the window's left |
 | [the Sampler device](features/sampler-device.md) | A sample loaded onto an empty Sampler and shaped in its panel |
@@ -82,7 +83,6 @@ Proposed, in the order of Next in the backlog:
 | [speaking to the agent](features/voice-input.md) | Built |
 | [stem separation](features/stem-separation.md) | Built: `daw separate`; more splits, the app and a reference's stems are Later |
 | [generated audio](features/generated-audio.md) | Built: `daw generate sound` and `daw keys`; whole songs and the app are Next |
-| [the `.aaw` project file](features/project-file.md) | Next, with the folder's icon |
 | [the agent's engine for other people](features/agent-engine.md) | Later › Shipping |
 | [groups within groups](features/nested-groups.md) | Next; proposed |
 | [a song with no end to hit](features/song-length.md) | Next; proposed |

@@ -2,10 +2,11 @@ import AAWCore
 import AppKit
 
 /// The projects the app knows, in `projects.json` in its data folder: each
-/// one's song file, a bookmark that finds it after its folder moved, its
-/// title, whether it has a name yet and when it was last opened. Open Recent
-/// shows it, and `daw projects --all` reads it, so an agent in a terminal
-/// finds the same projects.
+/// one's song file, a bookmark that finds it after its folder moved, the ID
+/// its `.aaw` carries, which finds it where a bookmark cannot, its title,
+/// whether it has a name yet and when it was last opened. Open Recent shows
+/// it, and `daw projects --all` reads it, so an agent in a terminal finds
+/// the same projects.
 struct ProjectIndex {
     struct Entry: Codable, Equatable {
         /// The song file, where it was last seen.
@@ -18,15 +19,18 @@ struct ProjectIndex {
         var opened: Double
         /// Nothing is at the path, and the bookmark finds nothing.
         var missing = false
+        /// The project's ID, from its `.aaw`; none for a project opened
+        /// before the file existed and not since.
+        var id: String?
 
         var url: URL { URL(fileURLWithPath: path) }
 
         /// A project by its folder, which is how projects are told apart.
         var name: String { ProjectIndex.name(of: url) }
 
-        init(path: String, bookmark: Data? = nil, title: String, untitled: Bool, opened: Double, missing: Bool = false) {
+        init(path: String, bookmark: Data? = nil, title: String, untitled: Bool, opened: Double, missing: Bool = false, id: String? = nil) {
             (self.path, self.bookmark, self.title) = (path, bookmark, title)
-            (self.untitled, self.opened, self.missing) = (untitled, opened, missing)
+            (self.untitled, self.opened, self.missing, self.id) = (untitled, opened, missing, id)
         }
 
         init(from decoder: Decoder) throws {
@@ -37,6 +41,7 @@ struct ProjectIndex {
             untitled = try c.decodeIfPresent(Bool.self, forKey: .untitled) ?? false
             opened = try c.decodeIfPresent(Double.self, forKey: .opened) ?? 0
             missing = try c.decodeIfPresent(Bool.self, forKey: .missing) ?? false
+            id = try c.decodeIfPresent(String.self, forKey: .id)
         }
     }
 
@@ -78,13 +83,26 @@ struct ProjectIndex {
         try? song.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
     }
 
-    /// Adds a project, or brings what is known of it up to date, as opened now.
-    mutating func note(_ song: URL, title: String, untitled: Bool, at time: Date = Date()) {
+    /// Adds a project, or brings what is known of it up to date, as opened
+    /// now. A project known at another path by the same ID whose song is no
+    /// longer there is this one, moved while the app was closed: its entry
+    /// goes, so that it takes its old place rather than leaving a missing
+    /// row beside a new one.
+    mutating func note(_ song: URL, title: String, untitled: Bool, id: String? = nil, at time: Date = Date()) {
         let known = entries.first { $0.path == song.path }
         entries.removeAll { $0.path == song.path }
+        if let id {
+            entries.removeAll { $0.id == id && !FileManager.default.fileExists(atPath: $0.path) }
+        }
         entries.append(Entry(path: song.path, bookmark: Self.bookmark(song) ?? known?.bookmark, title: title,
-                             untitled: untitled, opened: time.timeIntervalSince1970))
+                             untitled: untitled, opened: time.timeIntervalSince1970, id: id ?? known?.id))
         sort()
+    }
+
+    /// Whether another project that is still there carries the ID: a folder
+    /// duplicated in the Finder, whose copy should be given an ID of its own.
+    func taken(_ id: String, byAnotherThan song: URL) -> Bool {
+        entries.contains { $0.id == id && $0.path != song.path && FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// A project the index should have without its having been opened, such

@@ -38,6 +38,7 @@ if [ -z "${SNDFILE_LIB_DIR:-}" ] && command -v brew >/dev/null; then
 fi
 
 (cd "$engine" && cargo build --release -p aaw-ffi)
+plutil -lint -s "$here/Info.plist"
 
 # Bindings come from the built library, so they cannot drift from it.
 bindings="$generated/bindings"
@@ -170,6 +171,11 @@ sign --identifier local.aaw.daw "$contents/Helpers/daw"
 sign --entitlements "$here/AAW.entitlements" "$app"
 codesign --verify --strict --deep "$app"
 "$contents/Helpers/daw" --help >/dev/null
+# Launch Services learns the app's own file type, `.aaw`, from the bundle it
+# built, so a double-click in the Finder opens it without the app having
+# been launched or copied into Applications first.
+lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+if [ -x "$lsregister" ]; then "$lsregister" -f "$app"; fi
 
 if [ "$mode" = dist ]; then
     version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$contents/Info.plist")

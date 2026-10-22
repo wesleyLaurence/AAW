@@ -34,7 +34,8 @@ targets macOS 14.
 ```sh
 ./build.sh                          # build/AAW.app
 open -a build/AAW.app               # a new Untitled project
-open -a build/AAW.app path/to/project   # its folder, or the song.yaml in it
+open -a build/AAW.app path/to/project   # its .aaw, its folder, or the song.yaml in it
+open "path/to/My Beat/My Beat.aaw"       # the same, by the app's own file type
 ./build.sh test                     # the Swift tests
 ./build.sh dist                     # build/AAW-0.1.0.zip, to share
 ```
@@ -145,15 +146,20 @@ before sharing a build:
 
 ## Projects
 
-A project is a folder with `song.yaml` in it.
+A project is a folder with `song.yaml` in it and, beside it, a `.aaw` named for
+the folder: the app's own file type, which a double-click in the Finder opens
+with the app and which carries the project's ID. The Finder draws the file and
+the project's folder with the app's icon.
 [docs/features/new-and-untitled-projects.md](../../docs/features/new-and-untitled-projects.md)
-describes all of this; in short:
+and [docs/features/project-file.md](../../docs/features/project-file.md)
+describe all of this; in short:
 
 | | |
 |---|---|
 | Launch | Opens a blank project called Untitled, 120 BPM and one bar long until something is put in it, kept in `Untitled/` of the app's data folder until it has a name, with a `SONG.md` for what the song is for and an `AGENTS.md` that hands it to an agent ([what every session is given](../../docs/features/agent-context.md)); the app shows neither. There is no welcome window, and closing the last window quits |
 | File › New (⌘N) | Another Untitled project, in a window of its own |
-| File › Open… (⌘O), Open Recent | A project's folder or its `song.yaml`. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there |
+| A `.aaw` double-clicked in the Finder, or `open NAME.aaw` | Opens the project, launching the app on it with no Untitled project shown on the way, or brings its window forward. A `.aaw` that does not read says why and names the song file to open instead |
+| File › Open… (⌘O), Open Recent | A project's `.aaw` or its folder. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again by its bookmark, or by its ID when it is opened at a path the index does not know, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there. A folder duplicated in the Finder is given an ID of its own when opened |
 | File › Export Audio… (⇧⌘R) | Asks for a name and a place, with the format (WAV 24- or 16-bit, AAC, MP3), the level (as rendered, a true peak, a loudness or a gain) and the ceiling under the name, and writes the mix there with the bundle's `daw export`, rendering first when the song has changed; the panel opens in the project's `exports` folder with the song's title as the name, asks about a file that is there, and offers the last format and level next time. The transport bar says "Exporting NAME…" while it runs and the window stays usable; a banner then shows the length, loudness, true peak, gain and warnings with Show in Finder, or the command's reason when nothing was written. The song does not change ([export in the app](../../docs/features/export-in-app.md)) |
 | File › Export MIDI Clip… (⇧⌘E) | With one note clip selected, asks for a name and a place and writes the notes that play as a MIDI file, as `daw midi export` does |
 | File › Save As… (⇧⌘S) | Asks for a name and a place. An Untitled project moves there. A project that has a name is copied, and the window carries on in the copy. Undo, the selection and what is playing carry on, and `daw` commands sent to the old path still land in the window |
@@ -162,6 +168,17 @@ describes all of this; in short:
 The data folder is `~/Library/Application Support/AAW`, or what `AAW_DATA_DIR`
 names. `daw projects` lists the projects open in the app, with the window in
 front first.
+
+The file type is declared in `Info.plist` as `local.aaw.project`, and
+`build.sh` registers the bundle it builds with Launch Services (`lsregister
+-f`), so the build owns `.aaw` before it is launched. When a double-click opens
+another copy of the app, or none, see which copies claim the type with
+
+```sh
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump | grep -B 20 'local.aaw.project' | grep path:
+```
+
+and register the one wanted with `lsregister -f PATH/AAW.app`.
 
 ## The window
 

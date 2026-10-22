@@ -3,8 +3,8 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// How the app was started: `AAW [PROJECT...]`, each a project's folder or its
-/// song file, and with none a new Untitled project. For checking the app without
+/// How the app was started: `AAW [PROJECT...]`, each a project's `.aaw`, its
+/// folder or its song file, and with none a new Untitled project. For checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
 /// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
@@ -306,6 +306,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// The Finder's double-click on a `.aaw`, or `open` from a terminal. With
+    /// the app closed this comes before `applicationDidFinishLaunching`, which
+    /// then makes no Untitled project; with it open, the song's window comes
+    /// forward.
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls { openSong(url) }
     }
@@ -330,11 +334,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Projects
 
-    /// A project's song file: `song.yaml` in a folder, or the file itself.
-    private static func songFile(_ url: URL) -> URL {
-        var isFolder: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isFolder)
-        return SongModel.normal(exists && isFolder.boolValue ? url.appendingPathComponent("song.yaml") : url)
+    /// The app's own file type: a project's `.aaw`, which Info.plist exports.
+    static let projectType = UTType(exportedAs: "local.aaw.project")
+
+    /// A project's song file: `song.yaml` in a folder, the file itself, or
+    /// the song a `.aaw` names beside itself, by the core's one rule. A
+    /// `.aaw` that does not read throws with what is wrong.
+    static func songFile(_ url: URL) throws -> URL {
+        SongModel.normal(URL(fileURLWithPath: try projectSongFile(path: url.path)))
+    }
+
+    /// A project's folder drawn with the app's icon in the Finder: a custom
+    /// icon on the folder, which is `Icon\r` inside it, set once. Not for an
+    /// Untitled project, which is in the app's own data folder.
+    private static func setFolderIcon(of song: URL, untitled: Bool) {
+        let folder = song.deletingLastPathComponent()
+        guard !untitled, !FileManager.default.fileExists(atPath: folder.appendingPathComponent("Icon\r").path),
+              let icon = NSApp.applicationIconImage else { return }
+        NSWorkspace.shared.setIcon(icon, forFile: folder.path, options: [])
     }
 
     private func failed(_ what: String, _ error: Error) {
@@ -359,10 +376,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !index.existed {
             // Before there was an index, Open Recent was the system's list.
             for (n, url) in NSDocumentController.shared.recentDocumentURLs.enumerated() {
-                index.keep(Self.songFile(url), title: ProjectIndex.name(of: url), untitled: false, at: Date().addingTimeInterval(-Double(n)))
+                guard let song = try? Self.songFile(url) else { continue }
+                index.keep(song, title: ProjectIndex.name(of: url), untitled: false, at: Date().addingTimeInterval(-Double(n)))
             }
         }
-        let left = projectSweepUntitled().map { Self.songFile(URL(fileURLWithPath: $0)) }
+        let left = projectSweepUntitled().map { SongModel.normal(URL(fileURLWithPath: $0)) }
         index.resolve()
         for entry in index.entries where entry.untitled && entry.missing { index.remove(entry.url) }
         for song in left { index.keep(song, title: ProjectIndex.name(of: song), untitled: true) }
@@ -386,7 +404,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @discardableResult
     func openSong(_ url: URL) -> SongWindowController? {
-        let file = Self.songFile(url)
+        let file: URL
+        do {
+            file = try Self.songFile(url)
+        } catch {
+            failed("“\(url.lastPathComponent)” could not be opened", error)
+            return nil
+        }
         if let shown = songs.first(where: { $0.model.url == file }) {
             shown.showWindow(nil)
             return shown
@@ -396,6 +420,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for other in songs where other.model.formerURLs.contains(file) { other.model.release(file) }
         do {
             let controller = SongWindowController(model: try SongModel(url: file), size: launch.size, asks: !scripted)
+            // A folder duplicated in the Finder shares its ID with the
+            // project it was copied from: the copy gets one of its own.
+            if let id = controller.model.projectID, index.taken(id, byAnotherThan: file) {
+                try? controller.model.renewProjectID()
+            }
+            Self.setFolderIcon(of: file, untitled: controller.model.untitled)
             controller.onClose = { [weak self] closed, deleted in
                 self?.songs.removeAll { $0 === closed }
                 self?.closed(closed, deleted: deleted)
@@ -406,7 +436,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             songs.append(controller)
             controller.showWindow(nil)
-            index.note(file, title: controller.model.arrangement.title, untitled: controller.model.untitled)
+            index.note(file, title: controller.model.arrangement.title, untitled: controller.model.untitled, id: controller.model.projectID)
             saveIndex()
             if let blank = launched, blank.model.untitled, blank.model.untouched { blank.close() }
             launched = nil
@@ -426,7 +456,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if deleted {
             index.remove(model.url)
         } else {
-            index.note(model.url, title: model.arrangement.title, untitled: model.untitled)
+            index.note(model.url, title: model.arrangement.title, untitled: model.untitled, id: model.projectID)
         }
         saveIndex()
     }
@@ -436,7 +466,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func moved(_ controller: SongWindowController, from old: URL) {
         if projectIsUntitled(path: old.path) { index.remove(old) }
         let url = controller.model.url
-        index.note(url, title: ProjectIndex.name(of: url), untitled: controller.model.untitled)
+        index.note(url, title: ProjectIndex.name(of: url), untitled: controller.model.untitled, id: controller.model.projectID)
+        Self.setFolderIcon(of: url, untitled: controller.model.untitled)
         saveIndex()
     }
 
@@ -451,10 +482,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.message = "Choose a project's folder, or its song.yaml"
+        panel.message = "Choose a project: its .aaw file, or its folder"
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [.yaml, .folder]
+        panel.allowedContentTypes = [Self.projectType, .folder]
         if panel.runModal() == .OK, let url = panel.url { openSong(url) }
     }
 

@@ -23,26 +23,22 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Items 1–5 are the person's notes from using the app, brought on October 19,
-2026, and come before everything else (D123). Items 6–18 are the order as it
+Items 1–4 are the person's notes from using the app, brought on October 19,
+2026, and come before everything else (D123). Items 5–17 are the order as it
 stood.
 
-1. **The `.aaw` project and its folder.** A file in every project that a
-    double-click opens, the folder shown with the app's icon, and the
-    project's skills inside it; designed under Shipping and moved up.
-    [features/project-file.md](features/project-file.md)
-2. **Devices anyone builds, to a spec.** An instrument or effect written as
+1. **Devices anyone builds, to a spec.** An instrument or effect written as
     code against one spec, with its fields, its panel and its `daw` verbs, so
     the agent writes a new device from a description, the engine runs it in
     playback and export, and it is shared as a file as a patch or a rack is.
     [features/custom-devices.md](features/custom-devices.md)
-3. **The person's skills: reverse-engineer, mix, master, arrange.** Written
+2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a sound or a track
     rebuilt from scratch as near as the tool allows, a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-4. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
+3. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
     kick layered under the wrong hits several times in a row, where the
     waveform made them plain, and a mashup of two songs matched in tempo but a
     beat ahead or behind: a song's drum hits as a list and a picture, `daw
@@ -52,58 +48,58 @@ stood.
     song with an odd bar, where the downbeat phase flips after it and bar.beat
     labels after it read two beats off, said when it changes or re-fit each
     phrase; each checked on those songs.
-5. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
+4. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
     vocal stem; a smaller model, or Whisper through MLX on this Mac, as a
     command of the tool's own, the lyric's bar still read from the stem.
 
-6. **`daw audio crossfade` with an option, while the app has the project
+5. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-7. **A time selection in the app.** A range of beats dragged across the
+6. **A time selection in the app.** A range of beats dragged across the
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-8. **A MIDI keyboard.** Notes played through the selected track, held and let
+7. **A MIDI keyboard.** Notes played through the selected track, held and let
     go rather than a beat long, through a Synth and through a Sampler, whose
     pitch needs audio prepared on the way; recording into note clips; quantize.
     The person plays a riff and the agent builds around it.
-9. **Sections, the master gain and the end fade in the app.** A section
+8. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-10. **A project made with `daw init` in the app's index,** so a song the agent
+9. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-11. **Turns and A/B.** An agent request's commands grouped, named for the
+10. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-12. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+11. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-13. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+12. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-14. **Key and chord detection,** and swing detection, of samples and songs: a
+13. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-15. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+14. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-16. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+15. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-17. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+16. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-18. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
+17. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
     or from a section-by-section plan the agent writes (`daw generate music`,
     `daw generate plan`), with its beat map in the reply; then a tab of the
     Settings window with the key's field and the budget, and a Generate tab in the
@@ -117,6 +113,16 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The `.aaw` project file, by the person at the Mac:** a `.aaw`
+  double-clicked in the Finder with the app closed, whether it launches on
+  the song with no Untitled window on the way and whether the Kind column
+  reads "AAW Project" with the app's icon on the file and on the project's
+  folder; Open… offering `.aaw` files and folders; a project moved in the
+  Finder while the app is closed, then double-clicked, taking its old place
+  in Open Recent; a project folder duplicated in the Finder opened and given
+  an ID of its own. Tests, the `daw` commands by hand on a scratch project
+  and a scripted run opening a `.aaw` only ([the `.aaw` project
+  file](features/project-file.md)).
 - **Favorites, by the person at the Mac:** Add to Favorites in a sample's,
   a patch's, a rack's and a device's menu, whether the section reads right
   first in the column with the groups under it, a favorite sample dragged
@@ -1380,6 +1386,10 @@ checkout (D75):
   items are built; AAW as an MCP server for the agent the person already pays
   for; a sign-in button only if a program opens (D114).
   [features/agent-engine.md](features/agent-engine.md)
+- **The `.aaw` type's identifier** on a domain the project will keep, in
+  place of `local.aaw.project`, before the first `.aaw` leaves this Mac: an
+  exported type identifier should not change once files carry it
+  ([the `.aaw` project file](features/project-file.md)).
 - A record of every dependency and model: version, license, whether it may be
   redistributed.
 - A statement of what leaves the machine, tested with the network off.

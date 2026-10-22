@@ -29,17 +29,69 @@ def engine() -> Path:
     return binary
 
 
-def song_file(path) -> Path:
-    """The song file a PROJECT names: the file itself, or song.yaml in a folder.
+class BadProject(argparse.ArgumentTypeError, ValueError):
+    """A PROJECT that names no song: argparse shows the reason as it is."""
 
-    A path that is not there is a folder unless it is written as a YAML file, as
-    the Rust `daw` takes it.
+
+def song_file(path) -> Path:
+    """The song file a PROJECT names: the file itself, song.yaml in a folder, or
+    the song a project's `.aaw` names beside itself.
+
+    A path that is not there is a folder unless it is written as a YAML file, and
+    a `.aaw` that is gone names its folder's song.yaml, as the Rust `daw` takes
+    them. A `.aaw` that does not read is refused with what is wrong.
     """
     path = Path(path)
+    if path.suffix.lower() == ".aaw":
+        if path.is_file():
+            return path.parent / project_file(path)["song"]
+        return path.parent / "song.yaml"
     written_as_file = path.suffix.lower() in (".yaml", ".yml")
     if path.is_dir() or not (written_as_file or path.exists()):
         return path / "song.yaml"
     return path
+
+
+PROJECT_FORMAT = 1
+
+
+def project_file(path: Path) -> dict:
+    """What a project's `.aaw` says: its `format`, `id` and `song`, the song's file
+    name in the same folder, checked as the Rust `daw` checks them."""
+    instead = f"open {path.with_name('song.yaml')} instead"
+
+    def refuse(why):
+        return BadProject(f"{path} {why}; {instead}")
+
+    try:
+        text = path.read_text()
+    except OSError as e:
+        raise refuse(f"does not read: {e}") from None
+    fields = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition(":")
+        if not sep or not key.strip() or " " in key.strip():
+            raise refuse("is not an AAW project file")
+        fields[key.strip()] = value.strip().strip("'\"")
+    if "format" not in fields:
+        raise refuse("is not an AAW project file: no format")
+    if not fields["format"].isdigit():
+        raise refuse("has a format that is not a whole number")
+    if int(fields["format"]) > PROJECT_FORMAT:
+        raise refuse(
+            f"is format {fields['format']}, written by a newer AAW than this one, which reads {PROJECT_FORMAT}"
+        )
+    if not fields.get("id"):
+        raise refuse("has no id")
+    song = fields.get("song")
+    if song is None:
+        raise refuse("names no song")
+    if not song or song in (".", "..") or "/" in song or "\\" in song:
+        raise refuse("names a song that is not a file in its folder")
+    return {"format": int(fields["format"]), "id": fields["id"], "song": song}
 
 
 def run_engine(*args):

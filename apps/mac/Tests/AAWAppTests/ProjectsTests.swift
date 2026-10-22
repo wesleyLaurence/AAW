@@ -52,7 +52,7 @@ final class ProjectsTests: XCTestCase {
         XCTAssertFalse(index.existed)
         XCTAssertEqual(index.entries, [])
         let (one, two) = (try project("One"), try project("Two"))
-        index.note(one, title: "One", untitled: false, at: Date(timeIntervalSince1970: 100))
+        index.note(one, title: "One", untitled: false, id: "one-id", at: Date(timeIntervalSince1970: 100))
         index.note(two, title: "Second", untitled: true, at: Date(timeIntervalSince1970: 200))
         XCTAssertEqual(index.entries.map(\.title), ["Second", "One"])
         XCTAssertEqual(index.entries.map(\.name), ["Two", "One"])
@@ -76,6 +76,9 @@ final class ProjectsTests: XCTestCase {
         XCTAssertEqual(first["untitled"] as? Bool, false)
         XCTAssertEqual(first["opened"] as? Double, 300)
         XCTAssertNotNil(first["bookmark"] as? String)
+        // The ID is kept when a later note has none, and left out when unknown.
+        XCTAssertEqual(first["id"] as? String, "one-id")
+        XCTAssertNil(try XCTUnwrap(json?["projects"]?.last)["id"])
 
         index.remove(one)
         XCTAssertEqual(index.entries.map(\.title), ["Second"])
@@ -124,6 +127,50 @@ final class ProjectsTests: XCTestCase {
         index.note(staying, title: "Staying", untitled: true)
         index.clear(keeping: [again.appendingPathComponent("song.yaml").path])
         XCTAssertEqual(Set(index.entries.map(\.title)), ["Moving", "Staying"])
+    }
+
+    func testAProjectMovedWhileTheAppWasClosedIsKnownByItsID() throws {
+        var index = index()
+        let (moving, staying) = (try project("Moving"), try project("Staying"))
+        index.note(moving, title: "Moving", untitled: false, id: "m", at: Date(timeIntervalSince1970: 1))
+        index.note(staying, title: "Staying", untitled: false, id: "s", at: Date(timeIntervalSince1970: 2))
+        // Copied to another disk and the original deleted: no bookmark finds
+        // it, and the ID does. Its row moves rather than a missing one staying.
+        let elsewhere = scratch.appendingPathComponent("Elsewhere/Moved/song.yaml")
+        try FileManager.default.createDirectory(at: elsewhere.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: moving, to: elsewhere)
+        try FileManager.default.removeItem(at: moving.deletingLastPathComponent())
+        XCTAssertFalse(index.taken("m", byAnotherThan: elsewhere), "the original is gone")
+        index.note(elsewhere, title: "Moved", untitled: false, id: "m", at: Date(timeIntervalSince1970: 3))
+        XCTAssertEqual(index.entries.map(\.path), [elsewhere.path, staying.path])
+        // Duplicated in the Finder with the original still there: the copy's
+        // ID is taken, and the app gives the copy one of its own.
+        let copy = scratch.appendingPathComponent("Staying copy/song.yaml")
+        try FileManager.default.copyItem(at: staying.deletingLastPathComponent(), to: copy.deletingLastPathComponent())
+        XCTAssertTrue(index.taken("s", byAnotherThan: copy))
+        XCTAssertFalse(index.taken("s", byAnotherThan: staying))
+        XCTAssertFalse(index.taken("new", byAnotherThan: copy))
+        index.note(copy, title: "Staying copy", untitled: false, id: "new", at: Date(timeIntervalSince1970: 4))
+        XCTAssertEqual(index.entries.map(\.id), ["new", "m", "s"])
+    }
+
+    @MainActor
+    func testAProjectFileNamesItsSong() throws {
+        let song = try project("Beat")
+        let file = song.deletingLastPathComponent().appendingPathComponent("Beat.aaw")
+        try "# An AAW project.\nformat: 1\nid: abc\nsong: song.yaml\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try AppDelegate.songFile(file), song)
+        XCTAssertEqual(try AppDelegate.songFile(song.deletingLastPathComponent()), song)
+        XCTAssertEqual(try AppDelegate.songFile(song), song)
+        XCTAssertEqual(projectId(song: song.path), "abc")
+        // One that is gone names the folder's song; one that does not read says why.
+        XCTAssertEqual(try AppDelegate.songFile(song.deletingLastPathComponent().appendingPathComponent("Gone.aaw")), song)
+        try "format: 1\nid: abc\nsong: ../other.yaml\n".write(to: file, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try AppDelegate.songFile(file)) { error in
+            XCTAssertTrue(SongModel.reason(error).contains("not a file in its folder"), SongModel.reason(error))
+        }
+        // The extension comes from the bundle's declaration, which the test process has none of.
+        XCTAssertEqual(AppDelegate.projectType.identifier, "local.aaw.project")
     }
 
     func testClosingAsksOnlyAboutAnUntitledProjectThatHoldsSomething() {
@@ -206,6 +253,10 @@ final class ProjectsTests: XCTestCase {
         let model = try SongModel(url: made)
         XCTAssertEqual(model.arrangement.title, "Untitled")
         XCTAssertEqual(model.arrangement.tempo, 120)
+        // The project file is named for the folder and carries the ID.
+        let id = try XCTUnwrap(model.projectID)
+        XCTAssertEqual(id.count, 36)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: made.deletingLastPathComponent().appendingPathComponent("Untitled.aaw").path))
         XCTAssertEqual(model.arrangement.lengthBeats, 4, "an empty song is one bar")
         XCTAssertTrue(model.untitled && model.untouched)
         XCTAssertEqual(Closing.of(untitled: model.untitled, untouched: model.untouched), .delete)
@@ -225,6 +276,10 @@ final class ProjectsTests: XCTestCase {
         XCTAssertEqual(moves, [made])
         XCTAssertEqual(model.formerURLs, [made])
         XCTAssertFalse(FileManager.default.fileExists(atPath: made.deletingLastPathComponent().path))
+        // The file moved with it, named for the new folder, with the same ID.
+        XCTAssertEqual(model.projectID, id)
+        XCTAssertEqual(try AppDelegate.songFile(named.appendingPathComponent("My Beat.aaw")), model.url)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: named.appendingPathComponent("Untitled.aaw").path))
         wait(for: "the title") { model.arrangement.title == "My Beat" }
         XCTAssertEqual(model.activity.first?.label, "Saved as My Beat")
         // The host's own report of the move is not a second one.
@@ -238,6 +293,14 @@ final class ProjectsTests: XCTestCase {
         try model.saveAs(copy)
         XCTAssertEqual(model.url, copy.appendingPathComponent("song.yaml"))
         XCTAssertEqual(model.formerURLs, [made, named.appendingPathComponent("song.yaml")])
+        // The copy's file is its own, with an ID of its own, and the original keeps its.
+        let copyID = try XCTUnwrap(model.projectID)
+        XCTAssertNotEqual(copyID, id)
+        XCTAssertEqual(projectId(song: copy.appendingPathComponent("song.yaml").path), copyID)
+        XCTAssertEqual(projectId(song: named.appendingPathComponent("song.yaml").path), id)
+        try model.renewProjectID()
+        XCTAssertNotEqual(model.projectID, copyID)
+        XCTAssertEqual(projectId(song: model.url.path), model.projectID)
         XCTAssertTrue(FileManager.default.fileExists(atPath: named.appendingPathComponent("song.yaml").path))
         wait(for: "the copy's title") { model.arrangement.title == "My Beat copy" }
         // A name that is taken is refused, in the host's words.

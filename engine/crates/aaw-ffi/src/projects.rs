@@ -10,10 +10,25 @@ fn text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-/// The song file a path names: the file itself, or `song.yaml` in a folder.
+/// The song file a path names: the file itself, `song.yaml` in a folder, or
+/// the song a project's `.aaw` names beside itself. A `.aaw` that does not
+/// read is refused with what is wrong.
 #[uniffi::export]
-pub fn project_song_file(path: String) -> String {
-    text(&project::song_file(Path::new(&path)))
+pub fn project_song_file(path: String) -> Result<String, SongError> {
+    Ok(text(&project::song_file(Path::new(&path))?))
+}
+
+/// A project's ID, as the `.aaw` in its song's folder says; nil without one.
+#[uniffi::export]
+pub fn project_id(song: String) -> Option<String> {
+    project::id_of(Path::new(&song))
+}
+
+/// Gives a project a new ID in its `.aaw`, for a folder duplicated in the
+/// Finder whose ID another project the app knows has, and returns it.
+#[uniffi::export]
+pub fn project_renew_id(song: String) -> Result<String, SongError> {
+    Ok(project::renew_id(Path::new(&song))?)
 }
 
 /// The app's data folder, which holds the Untitled projects and the index:
