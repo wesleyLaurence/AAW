@@ -1081,11 +1081,27 @@ fn audio_clips_are_what_the_app_draws() {
     // A clip of seconds 1 to 3 on beat 4: four beats of the session.
     let u = audio_add(&path, &seen, json!({"track": "drums", "at": 4, "source_start_seconds": 1, "source_end_seconds": 3, "gain_db": -3, "fade_out_ms": 20}));
     let clip = u.arrangement.tracks[0].audio[0].clone();
+    let audio = |u: &Update, track: usize| u.arrangement.tracks[track].audio.clone();
     assert_eq!(u.touched, [touch(Part::Clip, clip.key, Delta::Added)]);
     assert_eq!((clip.reference.as_str(), clip.sample.as_str()), (format!("@{}", clip.key).as_str(), "song"));
-    assert_eq!((clip.at, clip.length_beats, clip.seconds_per_beat), (4.0, 4.0, 0.5));
+    assert_eq!((clip.at, clip.lead_beats, clip.length_beats, clip.seconds_per_beat), (4.0, 0.0, 4.0, 0.5));
     // Its fade out comes after it leaves: 20 ms more, which is drawn with it.
     assert!((clip.tail_beats - 0.04).abs() < 1e-12);
+    // A lead starts its sound before its beat, which is drawn with it too: 250
+    // ms is half a beat here, and no more than the file holds before the clip
+    // or the song before its beat.
+    agent(&path, json!({"op": "set", "path": format!("@{}.lead_ms", clip.key), "value": 250}));
+    assert!((audio(&update(&seen), 0)[0].lead_beats - 0.5).abs() < 1e-12);
+    agent(&path, json!({"op": "set", "path": format!("@{}.source_start_seconds", clip.key), "value": 0.1}));
+    assert!((audio(&update(&seen), 0)[0].lead_beats - 0.2).abs() < 1e-12, "the file holds 100 ms before the clip");
+    agent(&path, json!({"op": "set", "path": format!("@{}.source_start_seconds", clip.key), "value": 1}));
+    update(&seen);
+    agent(&path, json!({"op": "set", "path": format!("@{}.at", clip.key), "value": 0.25}));
+    assert!((audio(&update(&seen), 0)[0].lead_beats - 0.25).abs() < 1e-12, "the song holds a quarter beat before it");
+    agent(&path, json!({"op": "set", "path": format!("@{}.at", clip.key), "value": 4}));
+    update(&seen);
+    agent(&path, json!({"op": "set", "path": format!("@{}.lead_ms", clip.key), "value": 0}));
+    update(&seen);
     assert_eq!((clip.source_start_seconds, clip.source_end_seconds), (1.0, 3.0));
     assert_eq!((clip.gain_db, clip.fade_in_ms, clip.fade_out_ms), (-3.0, 0.3, 20.0));
     assert_eq!((clip.fade_curve.as_str(), clip.source_bpm, clip.stretch.as_str()), ("equal_power", None, "repitch"));

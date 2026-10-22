@@ -205,6 +205,10 @@ private struct AudioClipInfo: View {
     private var lines: [String] {
         let clip = context.clip
         var lines = ["Plays \(Self.time(clip.sourceStartSeconds)) to \(Self.time(clip.sourceEndSeconds)) of its file, from beat \(ValueScale.plain(clip.at))."]
+        if clip.leadBeats > 0 {
+            let ms = (AudioClipLayout.ms(beats: clip.leadBeats, tempo: tempo) * 10).rounded() / 10
+            lines.append("Its lead starts it \(ValueScale.plain(ms)) ms before that beat, with the file as much earlier; the clip is drawn from there.")
+        }
         guard let file = context.file else {
             return lines + ["Its file cannot be read."]
         }

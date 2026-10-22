@@ -8,7 +8,7 @@ final class AudioClipLayoutTests: XCTestCase {
     /// beat and of two, the second after the clip leaves.
     private func clip() -> AudioClipView {
         AudioClipView(
-            key: 9, reference: "@9", sample: "song", at: 8, lengthBeats: 32, loopBeats: nil, tailBeats: 2, sourceStartSeconds: 4,
+            key: 9, reference: "@9", sample: "song", at: 8, leadBeats: 0, lengthBeats: 32, loopBeats: nil, tailBeats: 2, sourceStartSeconds: 4,
             sourceEndSeconds: 20, secondsPerBeat: 0.5, gainDb: 0, fadeInMs: 500, fadeOutMs: 1000, fadeCurve: "equal_power",
             sourceBpm: nil, stretch: "repitch", file: 3
         )
@@ -31,6 +31,25 @@ final class AudioClipLayoutTests: XCTestCase {
         XCTAssertEqual(AudioClipLayout.beats(ms: 250, tempo: 120), 0.5)
         XCTAssertEqual(AudioClipLayout.ms(beats: 0.5, tempo: 120), 250)
         XCTAssertEqual(AudioClipLayout.ms(beats: 1, tempo: 0), 0)
+    }
+
+    func testAClipWithALeadIsDrawnFromWhereItsSoundStarts() {
+        // A lead of a beat: the sound starts on beat 7, the clip's beat is 8.
+        var led = clip()
+        led.leadBeats = 1
+        let shape = AudioClipLayout(led, tempo: 120, seconds: 40)
+        XCTAssertEqual([shape.start, shape.beat, shape.end, shape.length, shape.lead], [7, 8, 42, 35, 1])
+        XCTAssertEqual(shape.fileStart, 0, "the file is where it was")
+        // The start dragged is where the sound starts, and the beat is the
+        // lead after it: so the start stops a lead sooner before the fade out.
+        XCTAssertEqual(shape.start(draggedTo: 3), 3)
+        XCTAssertEqual(shape.start(draggedTo: 60), 39 - AudioClipLayout.least)
+        // The end stays after the beat, not merely after the sound's start.
+        XCTAssertEqual(shape.end(draggedTo: 2), 8 + AudioClipLayout.least)
+        // The fades are inside the block, the fade in from where the sound starts.
+        let body = CGRect(x: 100, y: 50, width: 350, height: 27)
+        XCTAssertEqual(shape.handles(in: body).fadeIn, CGPoint(x: 110, y: 50))
+        XCTAssertEqual(shape.fadeIn(draggedTo: 9), 2)
     }
 
     func testAPressTakesAnEdgeAHandleOrTheClip() {

@@ -46,7 +46,8 @@ A join sounds best a few milliseconds before the beat, in the quiet before the
 hit, so the incoming hit is whole. That is `lead_ms`: the clip is written with
 the beat it belongs on (`at`) and the song's own time for that beat
 (`source_start_seconds`), and it starts `lead_ms` early with the file as much
-earlier. Nothing is offset by hand.
+earlier. Nothing is offset by hand. The app draws the clip from where its lead
+starts, so a block is what is heard.
 
 A clip that ends where another clip of its track begins leaves from where that
 one starts. The two meet at one place before the beat, whatever each clip's own

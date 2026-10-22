@@ -53,16 +53,22 @@ by the clip's gain. The waveform is the file's, not what the track plays, so it
 is there while an edge is dragged outward and does not wait for the song to be
 compiled again.
 
-The song writes a fade out after the place a clip leaves (`fade_out_ms`
-"follows where the clip leaves"). The app draws a clip to where its sound ends,
-with the fade out inside it, as other DAWs do: the block is the clip and its
-fade's tail, as far as the file goes. The edits below keep it that way.
+The song writes a lead before a clip's beat (`lead_ms`, "how long before its
+beat it starts") and a fade out after the place it leaves (`fade_out_ms`
+"follows where the clip leaves"). The app draws a clip from where its sound
+starts to where it ends, with the lead and the fade out inside it, as other
+DAWs do: the block is the sound, the lead before the beat as far as the file
+and the song go, and the fade's tail after the end as far as the file goes. The
+fade in is drawn from the sound's start, where the engine plays it. The edits
+below keep it that way; a lead is set with `daw`, as a cut's is, not dragged.
+Until October 22, 2026 the lead was not drawn, and a clip with a long one, a
+pickup carried as a lead, was heard before its block.
 
 | Input | Does |
 |---|---|
 | Click, Shift-click, ⌘A, Escape | Selects, as pattern clips |
 | Drag the body | Moves the selected clips by grid steps and to other tracks; with ⌘ (Option until D79), off the grid. Pattern clips and audio clips move together |
-| Drag an edge | Trims: the audio stays where it is and the clip shows more or less of it, no further than the file goes. The end is where the sound ends, so the clip leaves its fade out's length before that; a fade out that no longer fits is shortened to half the clip |
+| Drag an edge | Trims: the audio stays where it is and the clip shows more or less of it, no further than the file goes. The start is where the sound starts, so the clip's beat lands its lead after it and the lead stays; the end is where the sound ends, so the clip leaves its fade out's length before that; a fade out that no longer fits is shortened to half the clip |
 | Drag a corner's handle | Sets the fade in, or the fade out: the sound still ends where it did, and a longer fade out starts earlier. A fade goes no further than the other one |
 | Arrow keys, ⌘D, Delete | Nudge, duplicate and remove, as pattern clips |
 | ⌘E, Edit › Split | Splits the selected audio clips at the start position, or with a track selected and no clip, that track's. The later halves are selected, so Delete takes what follows the split |
@@ -105,9 +111,11 @@ and the beat map's tempo when there is one.
 ## How it is built
 
 - **`TrackView.audio`** lists a track's audio clips for the app: key, sample,
-  beat, `length_beats` to where the clip leaves and `tail_beats` of fade out
-  after that, the seconds of its file it plays, seconds of file to a beat, gain,
-  fades, tempo, stretch and the identity of its file.
+  beat, `lead_beats` before it, as the engine plays the lead (`AudioClip::
+  lead_beats`: no earlier than the file's start or the song's), `length_beats`
+  to where the clip leaves and `tail_beats` of fade out after that, the seconds
+  of its file it plays, seconds of file to a beat, gain, fades, tempo, stretch
+  and the identity of its file.
 - **`Arrangement.files`** lists the files those clips play (`files.rs`): each
   one's identity, length and beat map. A file's header is read once and kept
   while its size and date stay the same.
@@ -122,8 +130,9 @@ and the beat map's tempo when there is one.
   track with its handle kept, and `daw audio move` sends it.
 - **`PointView.shape`** is a point's shape, and `shapedProgress` in the app is
   the engine's formula for the segment after it.
-- **`AudioClipLayout`** in the app is the clip's geometry: its parts under the
-  pointer, and how far an edge or a fade can go.
+- **`AudioClipLayout`** in the app is the clip's geometry: its block from the
+  lead's start to the tail's end, its `beat` the lead after its `start`, its
+  parts under the pointer, and how far an edge or a fade can go.
 - **`--drop FILE,X,Y`** among the app's scripted input lands a file at a point as
   a drag that ended there would, since a drag cannot be scripted.
 
@@ -131,8 +140,9 @@ and the beat map's tempo when there is one.
 
 - Two clips that overlap on a track both play; nothing crossfades them. `daw
   audio crossfade` sets the fades of a join.
-- A clip's lead (`lead_ms`) is not drawn or dragged; a clip with one starts that
-  much before its block.
+- A clip's lead (`lead_ms`) is drawn, not dragged: `daw set` changes it. A
+  looped clip's lead is drawn before its first repetition only; at each wrap
+  the repetition's lead is under the one before.
 - The window does not zoom out when the song grows; ⌘0 fits it.
 - A beat map written while the song is open shows after the next change.
 - A trim of a long file at another sample rate than the song's takes the engine
@@ -142,8 +152,9 @@ and the beat map's tempo when there is one.
 
 In Rust: the clip and file views, the beat map and when it is taken, file peaks
 sent once, each edit with its limits, labels and undo, and the song's length
-after each. In Swift: the clip's parts, how far edges and fades go, the fade and
-automation curves, and a file's waveform at a clip's level. In the app, by
+after each, and a clip's lead in beats. In Swift: the clip's parts, a clip
+with a lead drawn from where its sound starts, how far edges and fades go, the
+fade and automation curves, and a file's waveform at a clip's level. In the app, by
 scripted input on generated audio: a WAV and an `.m4a` dropped on a blank
 project, a trim, a fade, a move past the song's end, a split, and a lane with
 shaped segments, each checked in a picture and in the song file. Nobody has
