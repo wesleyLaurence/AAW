@@ -256,6 +256,7 @@ def search(
     measured_bpm=None,
     roots=None,
     sort="name",
+    paths=None,
     reverse=False,
     words=(),
     ranges=None,
@@ -264,6 +265,7 @@ def search(
 ):
     """Filename search. Measured filters match only samples with a current analysis.
 
+    `paths` keeps only the files at those paths, as the index has them.
     `sort` is `name` or one of SORTS, which lists the most first; `reverse`
     turns either around. `words` keeps the samples each word is true of, and
     `ranges` those whose field lies between a least and a most, either of
@@ -280,6 +282,10 @@ def search(
             scopes.append("substr(s.path, 1, ?) = ?")
             args.extend([len(prefix), prefix])
         clauses.append("(" + " OR ".join(scopes) + ")")
+    if paths:
+        wanted = [str(Path(p).expanduser().resolve()) for p in paths]
+        clauses.append("s.path IN (" + ",".join("?" * len(wanted)) + ")")
+        args.extend(wanted)
     for token in query.lower().split():
         clauses.append("s.search_text LIKE ? ESCAPE '\\'")
         args.append(

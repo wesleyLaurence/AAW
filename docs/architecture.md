@@ -332,7 +332,11 @@ load` and the browser add to a chain in any song as one rack device, or with
 where the song allows it; an instrument rack is a MIDI track's instrument
 with its chain, and a Sampler's files, as a file in `library/instruments/`,
 `daw instrument rack save|load`, loaded as the instrument and one rack; see
-[effect-racks.md](features/effect-racks.md).
+[effect-racks.md](features/effect-racks.md). Favorites are one file beside
+them, `library/favorites.yaml`, listing a sample by its path, a patch, a rack
+or an instrument rack by name and a device by its kind in the order added,
+which `daw favorite list|add|remove` and the browser's first section read
+and change; see [favorites.md](features/favorites.md).
 
 Automation: `tracks[].automation`, `groups[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` (tracks and groups),

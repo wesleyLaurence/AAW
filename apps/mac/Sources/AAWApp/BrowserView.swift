@@ -36,10 +36,10 @@ final class Browser {
     /// The kind an instrument rack goes by where a device's kind is asked.
     static let instrumentRackKind = "instrument-rack"
     /// The instruments the browser offers, by kind.
-    static let instruments = ["sampler", "synth"]
+    nonisolated static let instruments = ["sampler", "synth"]
     /// The MIDI effects the engine offers, by kind: devices before a MIDI
     /// track's instrument that change the notes as they play.
-    static let midiEffects = browserMidiEffects()
+    nonisolated static let midiEffects = browserMidiEffects()
 
     /// Whether a kind is a MIDI effect, which goes on a MIDI track before
     /// its instrument.
@@ -68,6 +68,100 @@ final class Browser {
             rack.name.localizedCaseInsensitiveContains(word) || rack.tags.contains { $0.localizedCaseInsensitiveContains(word) }
                 || rack.instrument.localizedCaseInsensitiveContains(word) || rack.kinds.contains { $0.localizedCaseInsensitiveContains(word) }
         }
+    }
+
+    /// The sections, in the order the column lists them: Favorites first,
+    /// since it is what the person keeps at hand.
+    nonisolated static let sections = ["Favorites", "Samples", "Instruments", "MIDI Effects", "Audio Effects", "Folders"]
+
+    /// The favorites, as `daw favorite list` lists them, in the order they
+    /// were added; read again when the browser is shown and after a change.
+    private(set) var favorites: [FavoriteInfo] = []
+    /// The index's rows for the favorite samples, by path: the name, the
+    /// length and the tempo a row shows. A favorite whose file the index
+    /// does not have is shown from its path.
+    private(set) var favoriteSamples: [String: SampleInfo] = [:]
+    /// Why the favorites could not be read or changed, shown in the panel.
+    var favoriteError: String?
+
+    func refreshFavorites() {
+        do {
+            favorites = try libraryFavorites()
+            favoriteError = nil
+        } catch {
+            favoriteError = SongModel.reason(error)
+        }
+        resolveFavoriteSamples()
+    }
+
+    /// Asks the index for the favorite samples' rows, off the main thread.
+    private func resolveFavoriteSamples() {
+        let paths = favorites.filter { $0.kind == "sample" }.map(\.what)
+        guard let library, !paths.isEmpty else {
+            favoriteSamples = [:]
+            return
+        }
+        queue.async { [weak self] in
+            let found = (try? librarySamplesAt(db: library, paths: paths)) ?? []
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.favoriteSamples = Dictionary(found.map { ($0.path, $0) }, uniquingKeysWith: { first, _ in first })
+            }
+        }
+    }
+
+    /// The favorite that is `what` of `kind`, if any: a sample by its path
+    /// and a device by its kind, a patch, a rack or an instrument rack by
+    /// its slug, as the file matches them.
+    nonisolated static func favorite(in favorites: [FavoriteInfo], kind: String, _ what: String) -> FavoriteInfo? {
+        favorites.first { f in
+            f.kind == kind && (kind == "sample" || kind == "device" ? f.what == what : f.slug == what)
+        }
+    }
+
+    /// Whether `what` of `kind` is a favorite now; `what` is a sample's
+    /// path, a device's kind, or a patch's, rack's or instrument rack's slug.
+    func isFavorite(_ kind: String, _ what: String) -> Bool {
+        Self.favorite(in: favorites, kind: kind, what) != nil
+    }
+
+    /// Adds `what` of `kind` to the favorites, or takes it out when it is
+    /// one, as `daw favorite add` and `remove` do; `name` is what add takes,
+    /// a name for a patch, a rack or an instrument rack.
+    func toggleFavorite(_ kind: String, _ what: String, name: String) {
+        do {
+            if let have = Self.favorite(in: favorites, kind: kind, what) {
+                favorites = try libraryFavoriteRemove(kind: kind, what: have.what)
+            } else {
+                favorites = try libraryFavoriteAdd(kind: kind, what: name)
+            }
+            favoriteError = nil
+        } catch {
+            favoriteError = SongModel.reason(error)
+        }
+        resolveFavoriteSamples()
+    }
+
+    /// Which group of Favorites a favorite is listed under: Samples,
+    /// Instruments (an instrument, a patch, an instrument rack), MIDI
+    /// Effects or Audio Effects (an effect kind, a rack).
+    nonisolated static func favoriteGroup(_ favorite: FavoriteInfo) -> String {
+        switch favorite.kind {
+        case "sample": return "Samples"
+        case "patch", "instrument_rack": return "Instruments"
+        case "rack": return "Audio Effects"
+        default:
+            if instruments.contains(favorite.what) { return "Instruments" }
+            return midiEffects.contains(favorite.what) ? "MIDI Effects" : "Audio Effects"
+        }
+    }
+
+    /// A row for a favorite sample the index does not have: the file by
+    /// its name, in its folder, with nothing measured.
+    nonisolated static func standIn(for favorite: FavoriteInfo) -> SampleInfo {
+        let url = URL(fileURLWithPath: favorite.what)
+        return SampleInfo(id: favorite.what, name: url.lastPathComponent, pack: url.deletingLastPathComponent().lastPathComponent, path: favorite.what,
+                          seconds: 0, channels: 0, category: "", kind: "unknown", bpm: nil, key: nil, note: nil, rootNote: nil)
     }
 
     /// The Synth's patches, factory and the person's, as `daw patch list`
@@ -315,7 +409,7 @@ struct BrowserView: View {
             if let error = browser.folderError { note(error) }
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(["Samples", "Instruments", "MIDI Effects", "Audio Effects", "Folders"], id: \.self) { section in
+                    ForEach(Browser.sections, id: \.self) { section in
                         Button(section) { browser.section = section }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: browser.section == section ? .bold : .regular))
@@ -354,7 +448,9 @@ struct BrowserView: View {
                 .frame(width: 120, alignment: .leading)
                 Divider()
                 VStack(spacing: 0) {
-                    if browser.section == "Instruments" || browser.section == "MIDI Effects" || browser.section == "Audio Effects" {
+                    if browser.section == "Favorites" {
+                        favoritesList
+                    } else if browser.section == "Instruments" || browser.section == "MIDI Effects" || browser.section == "Audio Effects" {
                         devices
                     } else {
                         filters
@@ -368,17 +464,112 @@ struct BrowserView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks() }
+        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
         .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             // A patch or a rack saved from the terminal shows when the window comes back.
             if browser.section == "Instruments" { browser.refreshPatches() }
             if browser.section == "Audio Effects" { browser.refreshRacks() }
             if browser.section == "Instruments" { browser.refreshInstrumentRacks() }
+            // A favorite added from the terminal, or a patch it names saved, too.
+            if browser.section == "Favorites" { browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
         }
         .onChange(of: browser.section) { _, section in
             if section == "Instruments" { browser.refreshPatches(); browser.refreshInstrumentRacks() }
             if section == "Audio Effects" { browser.refreshRacks() }
+            if section == "Favorites" { browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
+        }
+    }
+
+    /// The favorites, in the groups the other sections list them under,
+    /// each row as it is there: a sample from the index, or from its path
+    /// when the index does not have it; a patch, a rack or an instrument
+    /// rack as the library has it now, and one it no longer has named and
+    /// gray, with Remove from Favorites in its menu; a device by its kind.
+    /// The search field narrows them by name.
+    private var favoritesList: some View {
+        let query = browser.query
+        let shown = browser.favorites.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) || readable($0.what).localizedCaseInsensitiveContains(query) }
+        let groups = ["Samples", "Instruments", "MIDI Effects", "Audio Effects"].map { group in (group, shown.filter { Browser.favoriteGroup($0) == group }) }
+        return ScrollView {
+            VStack(spacing: 0) {
+                if let error = browser.favoriteError { note(error) }
+                ForEach(groups, id: \.0) { group, favorites in
+                    if !favorites.isEmpty {
+                        heading(group)
+                        ForEach(favorites, id: \.what) { favorite in
+                            favoriteRow(favorite)
+                            if favorite.kind == "sample" { Divider().opacity(0.35) }
+                        }
+                    }
+                }
+                if browser.favorites.isEmpty && browser.favoriteError == nil {
+                    Text("Nothing is a favorite yet. Add to Favorites, in the menu of any sample, patch, rack or device in the browser, or daw favorite add, lists it here, first among the sections.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                } else if shown.isEmpty && !query.isEmpty {
+                    note("No favorite matches.")
+                }
+            }
+        }
+    }
+
+    /// A favorite's row: the row its section would draw, or a gray one for
+    /// what the library no longer has.
+    @ViewBuilder private func favoriteRow(_ favorite: FavoriteInfo) -> some View {
+        switch favorite.kind {
+        case "sample":
+            if let sample = browser.favoriteSamples[favorite.what] {
+                row(sample)
+            } else if favorite.missing {
+                missingRow(favorite, "The file is gone")
+            } else {
+                row(Browser.standIn(for: favorite))
+            }
+        case "patch":
+            if let patch = browser.patches.first(where: { $0.slug == favorite.slug }) { row(patch) } else { missingRow(favorite, "No patch of this name is saved") }
+        case "rack":
+            if let rack = browser.racks.first(where: { $0.slug == favorite.slug }) { row(rack) } else { missingRow(favorite, "No rack of this name is saved") }
+        case "instrument_rack":
+            if let rack = browser.instrumentRacks.first(where: { $0.slug == favorite.slug }) { row(rack) } else { missingRow(favorite, "No instrument rack of this name is saved") }
+        default:
+            if favorite.missing { missingRow(favorite, "No device of this kind") } else { device(favorite.what) }
+        }
+    }
+
+    /// A favorite the library no longer has: its name and why, gray, with
+    /// Remove from Favorites in its menu and nothing to drag.
+    private func missingRow(_ favorite: FavoriteInfo, _ why: String) -> some View {
+        HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(favorite.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(why)
+                    .font(.system(size: 10))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(.tertiary)
+        .padding(.leading, 18)
+        .padding(.trailing, 6)
+        .frame(height: 34)
+        .contentShape(Rectangle())
+        .help(favorite.what)
+        .contextMenu {
+            Button("Remove from Favorites") { browser.toggleFavorite(favorite.kind, favorite.kind == "sample" || favorite.kind == "device" ? favorite.what : favorite.slug, name: favorite.what) }
+        }
+    }
+
+    /// Add to Favorites, or Remove from Favorites when it is one, for a
+    /// row's menu: `what` is how the favorite is matched, a path, a kind or
+    /// a slug, and `name` what adding takes.
+    private func favoriteItem(_ kind: String, _ what: String, name: String) -> some View {
+        Button(browser.isFavorite(kind, what) ? "Remove from Favorites" : "Add to Favorites") {
+            browser.toggleFavorite(kind, what, name: name)
         }
     }
 
@@ -482,6 +673,7 @@ struct BrowserView: View {
         .frame(height: 34)
         .contentShape(Rectangle())
         .help(rack.description.isEmpty ? line : rack.description)
+        .contextMenu { favoriteItem("instrument_rack", rack.slug, name: rack.name) }
         .onTapGesture(count: 2) { model.addBrowserDevice(Browser.instrumentRackKind, to: model.selectedRow, rack: rack.name) }
         .onDrag {
             browser.dragged = nil
@@ -524,6 +716,7 @@ struct BrowserView: View {
         .frame(height: 34)
         .contentShape(Rectangle())
         .help(rack.description.isEmpty ? kinds : rack.description)
+        .contextMenu { favoriteItem("rack", rack.slug, name: rack.name) }
         .onTapGesture(count: 2) { model.addBrowserDevice("rack", to: model.selectedRow, rack: rack.name) }
         .onDrag {
             browser.dragged = nil
@@ -557,6 +750,7 @@ struct BrowserView: View {
         .font(.system(size: 12))
         .padding(10)
         .contentShape(Rectangle())
+        .contextMenu { favoriteItem("device", kind, name: kind) }
         .onTapGesture(count: 2) { model.addBrowserDevice(kind, to: model.selectedRow) }
         .onDrag {
             browser.dragged = nil
@@ -598,6 +792,7 @@ struct BrowserView: View {
         .frame(height: 34)
         .contentShape(Rectangle())
         .help(patch.description)
+        .contextMenu { favoriteItem("patch", patch.slug, name: patch.name) }
         .onTapGesture(count: 2) { model.addBrowserDevice("synth", to: model.selectedRow, patch: patch.name) }
         .onDrag {
             browser.dragged = nil
@@ -716,6 +911,7 @@ struct BrowserView: View {
             ? Color(nsColor: browser.hasKeys ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor)
             : Color.clear)
         .contentShape(Rectangle())
+        .contextMenu { favoriteItem("sample", sample.path, name: sample.path) }
         .onTapGesture(count: 2) {
             model.addSample(path: sample.path, name: Browser.padName(of: sample), note: sample.rootNote)
         }

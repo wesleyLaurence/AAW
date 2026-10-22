@@ -288,6 +288,7 @@ front first.
 | Scroll up in the conversation; the ↓ pill | The panel stops following the stream until you are back at the bottom; the pill takes you there |
 | Type in Search; choose a category or a kind | Finds samples: every word must be in the sample's path. A category lists the samples named for it and, once `daw samples analyze --all` has measured the library, those named for nothing that measure as it |
 | Click a sample | Plays it, as its file is, and gives the samples the keys; the speaker mark turns the playing off |
+| Add to Favorites, in the menu of a sample, a device kind, a patch, a rack or an instrument rack; Remove from Favorites when it is one | Puts it in the browser's Favorites, the first section, or takes it out, as `daw favorite add` and `remove` do; the row is listed there under its section's heading and does what it does here |
 | Up and Down, in the samples | Move to the sample before or after and play it, as in the Finder, until a click elsewhere takes the keys back. The selected sample is drawn in the accent color while the samples have the keys, gray when they do not |
 | Click + by a sample, or double-click it | Puts it where a drop on the selected row would: into a Sampler on the selected MIDI track, onto any other selected track as an audio clip at the start position, or with no track selected on a new MIDI track with a Sampler of it. The hint under the samples says which |
 | Drag a sample, or an audio file from the Finder, onto the timeline | An audio clip at the grid line nearest the pointer (with ⌘, off the grid): on the track under it, or under the tracks on a new track. The clip it would make is outlined while the file is dragged |
@@ -356,8 +357,14 @@ loop, starts Held in a Sampler; the pitch is not written as its root note. The
 sample, the Sampler or the audio clip, a new track and a longer song are one
 undo step.
 
-The browser has Samples, Instruments, MIDI Effects, Audio Effects and Folders,
-with search at its top. Add Folder… registers one or more directories for every project and the
+The browser has Favorites, Samples, Instruments, MIDI Effects, Audio Effects
+and Folders, with search at its top. Favorites is what the person keeps at
+hand: Add to Favorites in the menu of any sample, device kind, patch, rack or
+instrument rack puts it there, grouped as the sections are and drawn, dragged
+and added as they draw it, kept in `~/Music/AAW/library/favorites.yaml` in the
+order added, which `daw favorite list|add|remove` reads and changes; what the
+library no longer has is gray with why, and offers Remove from Favorites
+([favorites](../../docs/features/favorites.md)). Add Folder… registers one or more directories for every project and the
 agent. Check folder names to search within one or several; All folders searches
 all sources. Refresh scans for changes, and a folder's context menu removes its
 registration without touching audio files. Offline folders remain listed.
@@ -518,7 +525,7 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/NoteEditor.swift` | The piano roll, an AppKit view, and the fields beside it |
 | `Sources/AAWApp/PianoRollLayout.swift` | Where a note clip's notes are in the piano roll, and how the grid and a drag move them, tested in `Tests` |
-| `Sources/AAWApp/BrowserView.swift` | The browser: shared folders, sample search, the device lists, the Synth's patches and the effect racks |
+| `Sources/AAWApp/BrowserView.swift` | The browser: favorites, shared folders, sample search, the device lists, the Synth's patches and the effect racks |
 | `Sources/AAWApp/SongView.swift` | The window's SwiftUI: transport bar, banners, activity panel |
 | `Sources/AAWApp/CommandLineTool.swift` | The bundle's `daw` and its link on the PATH: what is there now, the commands that make and remove it, and what the menu item asks, tested in `Tests` |
 | `Sources/AAWApp/Export.swift` | File › Export Audio…: the panel's choices as the arguments of the bundle's `daw export`, the command's result as the banner reads it, and the process that runs it off the main thread, tested in `Tests` |

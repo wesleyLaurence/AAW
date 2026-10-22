@@ -86,3 +86,19 @@ def test_file_symlink_belongs_to_its_registered_folder(tmp_path):
     library.remove_folder(db, root)
     assert library.search(db) == []
     assert source.exists() and (root / "linked.wav").is_symlink()
+
+
+def test_search_by_path_keeps_only_those_files(tmp_path):
+    db = tmp_path / "index.sqlite"
+    root = tmp_path / "drums"
+    root.mkdir()
+    for name in ["kick", "snare", "hat"]:
+        sf.write(root / f"{name}.wav", np.zeros(100), 44100)
+    library.scan(root, db)
+    # The favorites' files, and one the index does not have, which is left out.
+    found = library.search(db, paths=[root / "snare.wav", root / "kick.wav", tmp_path / "none.wav"])
+    assert [r["name"] for r in found] == ["kick.wav", "snare.wav"]
+    assert found[0]["path"] == str((root / "kick.wav").resolve())
+    assert len(library.search(db, "kick", paths=[root / "snare.wav"])) == 0
+    args = parser().parse_args(["samples", "search", "--path", "a.wav", "--path", "b.wav"])
+    assert [str(p) for p in args.path] == ["a.wav", "b.wav"]
