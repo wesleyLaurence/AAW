@@ -9,6 +9,7 @@ publish.workspace = true
 aaw-model.workspace = true
 aaw-engine.workspace = true
 aaw-dsp.workspace = true
+getrandom = "0.4"
 indexmap = "2.14.2"
 num-bigint = "0.4"
 num-rational = { version = "0.4", features = ["num-bigint"] }

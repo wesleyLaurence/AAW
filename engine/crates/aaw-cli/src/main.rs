@@ -66,13 +66,16 @@ struct FieldArgs {
     fields: Vec<String>,
 }
 
-/// A command's PROJECT: the song's file, or the folder that holds `song.yaml`.
+/// A command's PROJECT: the song's file, the folder that holds `song.yaml`,
+/// or the project's `.aaw`, which names the song beside it.
 #[derive(Clone)]
 struct Song(PathBuf);
 
-impl From<std::ffi::OsString> for Song {
-    fn from(path: std::ffi::OsString) -> Song {
-        Song(project::song_file(Path::new(&path)))
+impl std::str::FromStr for Song {
+    type Err = String;
+
+    fn from_str(path: &str) -> Result<Song> {
+        Ok(Song(project::song_file(Path::new(path))?))
     }
 }
 
@@ -1733,6 +1736,7 @@ fn projects(all: bool) -> Result<Json> {
         let s = &reply.result;
         rows.push(json!({
             "project": project::shown(&listed.project),
+            "id": project::id_of(&listed.project),
             "title": s["title"],
             "open": true,
             "front": s["front"],
@@ -1753,6 +1757,7 @@ fn projects(all: bool) -> Result<Json> {
             }
             rows.push(json!({
                 "project": project::shown(&known.song),
+                "id": project::id_of(&known.song).or(known.id.clone()),
                 "title": known.title,
                 "open": false,
                 "untitled": known.untitled,
@@ -1771,7 +1776,8 @@ fn run(cli: &Cli) -> Result<Json> {
         Top::Init { directory, tempo, time_signature } => {
             let path = project::create(directory, *tempo, None, time_signature.as_deref())?;
             let path = std::fs::canonicalize(&path).map_err(text)?;
-            Ok(json!({"notes": path.with_file_name(project::NOTES_FILE), "project": path}))
+            let file = path.parent().and_then(project::project_file_in);
+            Ok(json!({"notes": path.with_file_name(project::NOTES_FILE), "project": path, "file": file}))
         }
         Top::Projects { all } => projects(*all),
         Top::Move { project, new_folder } => edit(project, C::Move { to: absolute(new_folder)? }),

@@ -175,6 +175,10 @@ public final class SongModel {
     /// The paths the project had before it was saved under another name, at
     /// which `daw` commands still reach it.
     private(set) var formerURLs: [URL] = []
+    /// The project's ID, from the `.aaw` beside the song, which the host
+    /// writes when a project lacks one; nil only when the folder cannot be
+    /// written. A move keeps it and a copy gets its own.
+    public private(set) var projectID: String?
     public private(set) var arrangement: Arrangement
     public private(set) var transport = TransportView(metronome: false, playing: false, cue: 0, loopRegion: nil, recording: false, armed: [])
     /// Recent changes, newest first.
@@ -392,6 +396,7 @@ public final class SongModel {
         song = try Song.open(path: url.path, observer: relay, audio: AudioPreferences.shared.settings)
         self.url = url
         untitled = song.isUntitled()
+        projectID = projectId(song: url.path)
         browser = Browser(library: libraryPath(song: url.path))
         arrangement = song.arrangement()
         deviceRow = arrangement.tracks.first.map { .track($0.key) }
@@ -459,6 +464,7 @@ public final class SongModel {
         formerURLs.append(old)
         url = new
         untitled = song.isUntitled()
+        projectID = projectId(song: new.path)
         agent.projectMoved(from: old.deletingLastPathComponent())
         onMoved?(old)
     }
@@ -2041,6 +2047,12 @@ public final class SongModel {
         let path = try commands.sync { try song.saveAs(folder: folder.path) }
         // Known here at once; the host's own report of it follows.
         moved(to: path)
+    }
+
+    /// Gives the project a new ID in its `.aaw`: for a folder duplicated in
+    /// the Finder, whose ID another project the app knows still carries.
+    func renewProjectID() throws {
+        projectID = try projectRenewId(song: url.path)
     }
 
     /// Stops answering `daw` commands for a path the project was saved from,

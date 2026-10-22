@@ -42,13 +42,16 @@ silicon needs `rustup target add x86_64-apple-darwin`. To check it alone:
 which runs that binary (or the one `AAW_DAW` names). The Mac app's bundle holds
 a copy, which the app's menu links onto the PATH
 ([apps/mac/README.md](../apps/mac/README.md)). A command's PROJECT is the
-project's folder or the song file in it. It implements:
+project's folder, the song file in it, or the project's `.aaw` beside the song,
+which names it ([the `.aaw` project file](../docs/features/project-file.md));
+one that does not read is refused as a bad argument with the song file to use
+instead. It implements:
 
 | Command | Does |
 |---|---|
-| `daw init DIRECTORY [--tempo T] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song one bar long until something is put in it, since the length is the song's content (D130), in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) |
+| `daw init DIRECTORY [--tempo T] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song one bar long until something is put in it, since the length is the song's content (D130), in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `DIRECTORY.aaw`, the project file with a new ID, `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) and `file` the `.aaw` |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
-| `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder. A running host carries on there; see below |
+| `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder; the `.aaw` is named for the new folder, keeping its ID in a move and given a new one in a copy. A running host carries on there; see below |
 | `daw describe [start\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|check\|samples\|beats\|joins\|export\|listen\|reference\|separate\|generate] [--schema]` | The authoring contract: without a topic, the topics a line each; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file. `--schema` adds the topic's JSON Schema, and with no topic prints the whole song's |
 | `daw fmt PROJECT` | Rewrites the song in canonical form |
 | `daw apply PROJECT PATCH --expect SHA [--label TEXT]` | Replaces fields from a JSON merge patch, unless the song changed since SHA; a label names the edit in the change log and for undo |

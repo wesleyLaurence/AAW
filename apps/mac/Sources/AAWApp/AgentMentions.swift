@@ -67,8 +67,10 @@ enum AgentMentions {
     /// many at the most.
     static let fileDepth = 2
     static let mostFiles = 300
-    /// Files and folders of the app's and the host's own, not listed.
-    static let hiddenFiles: Set<String> = [".daw", ".daw.lock", ".DS_Store"]
+    /// Files and folders of the app's and the host's own, not listed; the
+    /// project's `.aaw` and the folder's icon are the Finder's way in, not
+    /// something an agent reads.
+    static let hiddenFiles: Set<String> = [".daw", ".daw.lock", ".DS_Store", "Icon\r"]
 
     /// Everything the song and the project offer: the arrangement's rows,
     /// clips, samples, sections and markers, the library's references and
@@ -165,7 +167,7 @@ enum AgentMentions {
         func walk(_ folder: URL, prefix: String, depth: Int) {
             guard depth < fileDepth, found.count < mostFiles else { return }
             let names = ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? [])
-                .filter { !$0.hasPrefix(".") && !hiddenFiles.contains($0) }
+                .filter { !$0.hasPrefix(".") && !hiddenFiles.contains($0) && !$0.lowercased().hasSuffix(".aaw") }
                 .sorted { $0.localizedStandardCompare($1) == .orderedAscending }
             for name in names {
                 guard found.count < mostFiles else { return }

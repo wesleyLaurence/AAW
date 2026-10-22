@@ -412,7 +412,7 @@ impl Song {
     /// or another host has it open.
     #[uniffi::constructor]
     pub fn open(path: String, observer: Arc<dyn SongObserver>, audio: AudioSettings) -> Result<Arc<Song>, SongError> {
-        let file = project::song_file(Path::new(&path));
+        let file = project::song_file(Path::new(&path))?;
         let at = Arc::new(Mutex::new(file.clone()));
         let now = at.clone();
         let latest = Arc::new(Mutex::new(None));

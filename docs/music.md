@@ -6,7 +6,7 @@ them follows [development.md](development.md).
 
 ## Find the song and its state
 
-A command's PROJECT is a project folder or its `song.yaml`. Use the supplied
+A command's PROJECT is a project folder, its `song.yaml` or its `.aaw`. Use the supplied
 path, or `uv run daw projects` to find open projects, the front window first.
 For a new song, `uv run daw init projects/NAME` creates an empty project, in
 4/4 unless `--time-signature 3/4` says otherwise;

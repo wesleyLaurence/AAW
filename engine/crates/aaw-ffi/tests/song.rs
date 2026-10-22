@@ -1993,7 +1993,11 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     assert!(first.starts_with(&project_data_dir()));
     // A folder opens as its song file does.
     let folder = Path::new(&first).parent().unwrap().to_path_buf();
-    assert_eq!(project_song_file(folder.to_string_lossy().into_owned()), first);
+    assert_eq!(project_song_file(folder.to_string_lossy().into_owned()).unwrap(), first);
+    // So does the project file beside the song, which carries the ID.
+    assert_eq!(project_song_file(folder.join("Untitled.aaw").to_string_lossy().into_owned()).unwrap(), first);
+    let id = project_id(first.clone()).expect("a new project has an ID");
+    assert_eq!(id.len(), 36);
     let (song, seen) = open_at(&folder.to_string_lossy());
     transport(&seen);
     let a = song.arrangement();

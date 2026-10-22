@@ -7,6 +7,7 @@ A `daw host` process stands in for the app. No audio device is opened.
 import json
 import random
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -107,8 +108,8 @@ def test_projects_lists_what_is_open_and_what_the_app_knows(rust_daw, tmp_path, 
         (folders / "projects.json").write_text(json.dumps({"projects": index}))
         assert daw(rust_daw, "projects") == {"projects": rows}
         assert daw(rust_daw, "projects", "--all")["projects"] == rows + [
-            {"project": str(tmp_path / "three"), "title": "Third", "open": False, "untitled": True, "missing": False, "opened": 30.0},
-            {"project": str(tmp_path / "gone"), "title": "Gone", "open": False, "untitled": False, "missing": True, "opened": 20.0},
+            {"project": str(tmp_path / "three"), "id": None, "title": "Third", "open": False, "untitled": True, "missing": False, "opened": 30.0},
+            {"project": str(tmp_path / "gone"), "id": None, "title": "Gone", "open": False, "untitled": False, "missing": True, "opened": 20.0},
         ]
     finally:
         for h in hosts:
@@ -178,7 +179,10 @@ def test_a_copy_carries_the_host_on_and_leaves_the_original(rust_daw, tmp_path, 
         copied = daw(rust_daw, "copy", old, new.parent)
         assert (copied["label"], copied["project"]) == ("Saved as b", str(new))
         assert old.read_text() == before
-        assert sorted(p.name for p in new.parent.iterdir()) == sorted(p.name for p in old.parent.iterdir() if p.name != ".daw.lock")
+        # The copy has every file but the lock, and a project file of its own.
+        files = lambda folder: sorted(p.name for p in folder.iterdir() if p.name != ".daw.lock" and p.suffix != ".aaw")
+        assert files(new.parent) == files(old.parent)
+        assert (new.parent / "b.aaw").is_file() and (old.parent / "a.aaw").is_file()
         assert load(new)["session"]["title"] == "b"
 
         # A command for the original's path follows the host to the copy.
@@ -201,6 +205,7 @@ def test_a_copy_carries_the_host_on_and_leaves_the_original(rust_daw, tmp_path, 
 
 def test_move_and_copy_without_a_host(rust_daw, tmp_path, folders):
     made = daw(rust_daw, "init", tmp_path / "one", "--tempo", 100)
+    assert made["file"] == str((tmp_path / "one" / "one.aaw").resolve())
     daw(rust_daw, "track", "add", tmp_path / "one", "drums")
     moved = daw(rust_daw, "move", tmp_path / "one", tmp_path / "two")
     two = tmp_path.resolve() / "two" / "song.yaml"
@@ -211,7 +216,67 @@ def test_move_and_copy_without_a_host(rust_daw, tmp_path, folders):
     assert copied["project"] == str(three.resolve())
     assert [load(p)["session"]["title"] for p in (two, three)] == ["two", "three"]
     assert load(three)["tracks"][0]["id"] == "drums" and load(three)["session"]["tempo"] == 100
+    # The project file follows each: named for its folder, the move keeping
+    # the ID and the copy given its own.
+    ids = {}
+    for folder in (two.parent, three.parent):
+        assert [p.name for p in folder.glob("*.aaw")] == [f"{folder.name}.aaw"]
+        lines = (folder / f"{folder.name}.aaw").read_text().splitlines()
+        assert lines[0].startswith("# An AAW project") and lines[1] == "format: 1" and lines[3] == "song: song.yaml"
+        ids[folder.name] = lines[2].removeprefix("id: ")
+    assert len(ids["two"]) == 36 and ids["two"] != ids["three"]
     code, error, _ = run(rust_daw, "copy", two, three.parent)
     assert code == 1 and "already there" in error["error"]
     code, error, _ = run(rust_daw, "move", tmp_path / "one", tmp_path / "four")
     assert code == 1 and "No such file" in error["error"]
+
+
+def test_a_project_file_names_its_project(rust_daw, tmp_path, folders):
+    """The `.aaw` as PROJECT, in Rust and in Python alike, and what `daw projects` says of the ID."""
+    made = daw(rust_daw, "init", tmp_path / "beat")
+    file = tmp_path / "beat" / "beat.aaw"
+    song = tmp_path / "beat" / "song.yaml"
+    project_id = file.read_text().splitlines()[2].removeprefix("id: ")
+    daw(rust_daw, "track", "add", file, "drums")
+    assert load(song)["tracks"][0]["id"] == "drums"
+    assert daw(rust_daw, "inspect", file) == daw(rust_daw, "inspect", song)
+    assert cli("check", file) == cli("check", song)
+    assert cli("timeline", file) == cli("timeline", tmp_path / "beat")
+    assert daw(rust_daw, "render", file, "--output", tmp_path / "out")["project_sha256"] == daw(rust_daw, "inspect", song)["project_sha256"]
+
+    # The index knows the project by its ID too, and a project with no
+    # file gets one the first time a host opens it.
+    other = song_in(tmp_path / "other", 7)
+    folders.mkdir()
+    (folders / "projects.json").write_text(json.dumps({"projects": [
+        {"path": str(song), "title": "beat", "untitled": False, "opened": 5.0, "id": "stale"},
+        {"path": str(other), "title": "Other", "untitled": False, "opened": 4.0},
+    ]}))
+    rows = daw(rust_daw, "projects", "--all")["projects"]
+    assert [(r["project"], r["id"]) for r in rows] == [(str(tmp_path / "beat"), project_id), (str(tmp_path / "other"), None)]
+    assert not list((tmp_path / "other").glob("*.aaw"))
+    process = host(rust_daw, other)
+    try:
+        assert [p.name for p in (tmp_path / "other").glob("*.aaw")] == ["other.aaw"]
+        rows = daw(rust_daw, "projects")["projects"]
+        assert rows[0]["project"] == str(tmp_path / "other") and len(rows[0]["id"]) == 36
+        # A command given the file lands in the host.
+        assert daw(rust_daw, "status", tmp_path / "other" / "other.aaw")["host"]
+        daw(rust_daw, "close", other)
+        assert process.wait(timeout=30) == 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+
+    # A file that does not read is refused as a bad argument, in plain text
+    # with the reason and the song to use instead, in Rust and in Python alike.
+    file.write_text("format: 1\nid: x\nsong: ../elsewhere.yaml\n")
+    for command in ([rust_daw, "inspect", file], [sys.executable, "-m", "agent_daw.cli", "check", file]):
+        out = subprocess.run([str(c) for c in command], capture_output=True, text=True)
+        assert out.returncode == 2
+        assert "names a song that is not a file in its folder" in out.stderr and f"open {song} instead" in out.stderr, out.stderr
+    assert daw(rust_daw, "inspect", song)["tracks"]
+    # One that is gone names its folder's song.
+    file.unlink()
+    assert daw(rust_daw, "inspect", file) == daw(rust_daw, "inspect", song)
+    assert cli("check", file) == cli("check", song)

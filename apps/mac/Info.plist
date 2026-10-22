@@ -30,6 +30,28 @@
 	<string>AAW listens while you speak to the agent and puts your words in the field for you to read and send.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>AAW turns what you say to the agent into text, recognized on this Mac; nothing you say leaves it.</string>
+	<key>UTExportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>local.aaw.project</string>
+			<key>UTTypeDescription</key>
+			<string>AAW Project</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.yaml</string>
+			</array>
+			<key>UTTypeIconFile</key>
+			<string>AppIcon</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>aaw</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -37,11 +59,13 @@
 			<string>AAW Project</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
+			<key>CFBundleTypeIconFile</key>
+			<string>AppIcon</string>
 			<key>LSHandlerRank</key>
-			<string>Alternate</string>
+			<string>Owner</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>public.yaml</string>
+				<string>local.aaw.project</string>
 			</array>
 		</dict>
 	</array>

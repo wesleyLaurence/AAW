@@ -48,7 +48,7 @@ the list opens, in `AgentMentions.candidates`:
 | Sections | By ID, from its bar to its end | `sections.ID` |
 | Markers | By ID, with its bar and its text, which the filter searches | `markers.ID` |
 | References | The folders of `library/references` under the workspace `daw` uses, `AAW_WORKSPACE` or `~/Music/AAW` | The name, for `daw reference show` and `daw compare --reference` |
-| Files | The project's files and folders two levels deep by their path within the folder, `samples/kick.wav`, sorted as the Finder sorts, `.daw`, `.daw.lock` and `.DS_Store` left out, three hundred at the most | A file as a dropped one goes: an image as a picture the agent sees, a sound with its length, channels and rate, a folder with its count |
+| Files | The project's files and folders two levels deep by their path within the folder, `samples/kick.wav`, sorted as the Finder sorts, `.daw`, `.daw.lock`, `.DS_Store`, the project's `.aaw` and the folder's icon left out, three hundred at the most | A file as a dropped one goes: an image as a picture the agent sees, a sound with its length, channels and rate, a folder with its count |
 
 The song's samples reach the app through a new `samples` list on the
 arrangement view (`SampleView`: ID, path, root note), since pads and
