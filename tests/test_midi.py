@@ -311,3 +311,84 @@ def test_racks_are_saved_from_a_chain_listed_and_added_to_a_chain_in_another_son
     assert [e["type"] for e in load(other / "song.yaml")["master"]["effects"]][:3] == ["utility", "eq", "limiter"]
     for topic in ("rack", "racks", "instrument_racks"):
         assert topic in daw("describe", "effects")["semantics"]
+
+
+def test_midi_effects_change_the_notes_the_instrument_plays_and_keep_the_clips(tmp_path):
+    """An arpeggiator, a chord, a scale and a velocity before the sampler: the
+    schedule plays what they make, through `daw effect` on `midi_effects`."""
+    song = tmp_path / "song"
+    daw("init", song, "--tempo", 120)
+    path = song / "song.yaml"
+    daw("track", "add", path, "keys", "--type", "midi")
+    daw("track", "add", path, "drums")
+    (song / "samples").mkdir(exist_ok=True)
+    sf.write(song / "samples" / "a3.wav", tone(220.0, seconds=0.05), SR)
+    daw("set", path, "samples.a3", json.dumps({"path": "samples/a3.wav", "root_note": "A3"}))
+    sampler = {"sampler": {"pads": {"p": {"sample": "a3"}}, "map": [{"notes": [36, 96], "pad": "p", "pitched": True}]}}
+    daw("instrument", "set", path, "keys", json.dumps(sampler))
+    clip = daw("clip", "add", path, "keys", "--at", 4, "--length-beats", 4)["path"]
+    chord = [{"pitch": "C4", "duration": 2}, {"pitch": "E4", "duration": 2}, {"pitch": "G4", "duration": 2}]
+    daw("note", "add", path, clip, "--notes", json.dumps(chord))
+    before = load(path)["tracks"][0]["clips"]
+    assert daw("render", path, "--output", tmp_path / "plain")["tracks"]["keys"]["events"] == 3
+    # A MIDI effect goes on a MIDI track and nowhere else; an audio effect
+    # on the same track keeps going under effects.
+    with pytest.raises(ValueError, match="arpeggiator is a MIDI effect: it goes on a MIDI track"):
+        daw("effect", "add", path, "tracks.drums", "--type", "arpeggiator")
+    added = daw("effect", "add", path, "tracks.keys", "--type", "arpeggiator", "--id", "arp", "--rate", "1/8", "--gate-percent", 50)
+    assert added["label"] == "Add arpeggiator to tracks.keys"
+    daw("effect", "add", path, "tracks.keys", "--type", "limiter")
+    keys = load(path)["tracks"][0]
+    assert [e["type"] for e in keys["midi_effects"]] == ["arpeggiator"] and keys["midi_effects"][0]["rate"] == "1/8"
+    assert [e["type"] for e in keys["effects"]] == ["limiter"]
+    assert keys["clips"] == before
+    out = tmp_path / "arp"
+    report = daw("render", path, "--output", out)
+    # Eighths from beat 4 for two beats: four notes, each a quarter beat
+    # long, with silence between them.
+    assert report["tracks"]["keys"]["events"] == 4
+    x = np.abs(stem(out, "keys")).max(axis=1)
+    beat = SR // 2
+    for step in range(4):
+        start = 4 * beat + step * beat // 2
+        assert x[start : start + beat // 4].max() > 0.05, step
+        assert x[start + beat // 4 + 200 : start + beat // 2].max() == 0, step
+    # The fields are set by their path, the device is addressed by its id,
+    # and bypassing it plays the chord as written.
+    daw("set", path, "tracks.keys.midi_effects.arp.rate", "1/16")
+    assert daw("render", path, "--output", tmp_path / "sixteenths")["tracks"]["keys"]["events"] == 8
+    with pytest.raises(ValueError, match="rate"):
+        daw("set", path, "tracks.keys.midi_effects.arp.rate", "1/5")
+    daw("effect", "bypass", path, "tracks.keys.midi_effects.arp")
+    assert daw("render", path, "--output", tmp_path / "bypassed")["tracks"]["keys"]["events"] == 3
+    daw("effect", "bypass", path, "tracks.keys.midi_effects.0", "off")
+    # A chord before the arpeggiator doubles the run; moved after it, each
+    # step is a pair; a scale snaps the fifth up to the major sixth of D
+    # and a velocity scales what is left.
+    daw("effect", "add", path, "tracks.keys", "--type", "chord", "--index", 0, "--shift-1", 12)
+    keys = load(path)["tracks"][0]
+    assert [e["type"] for e in keys["midi_effects"]] == ["chord", "arpeggiator"]
+    assert daw("render", path, "--output", tmp_path / "chord-first")["tracks"]["keys"]["events"] == 8
+    daw("effect", "move", path, "tracks.keys.midi_effects.0", 1)
+    assert [e["type"] for e in load(path)["tracks"][0]["midi_effects"]] == ["arpeggiator", "chord"]
+    assert daw("render", path, "--output", tmp_path / "chord-after")["tracks"]["keys"]["events"] == 16
+    with pytest.raises(ValueError, match="stays before its track's instrument"):
+        daw("effect", "move", path, "tracks.keys.midi_effects.0", 0, "--to", "tracks.keys")
+    daw("effect", "remove", path, "tracks.keys.midi_effects.arp")
+    daw("effect", "remove", path, "tracks.keys.midi_effects.0")
+    daw("effect", "add", path, "tracks.keys", "--type", "scale", "--root", "D", "--scale", "major")
+    daw("effect", "add", path, "tracks.keys", "--type", "velocity", "--scale-percent", 50, "--min", 40)
+    scale, velocity = load(path)["tracks"][0]["midi_effects"]
+    assert (scale["type"], scale["root"], scale["scale"], scale["transpose"]) == ("scale", "D", "major", 0)
+    assert (velocity["type"], velocity["scale_percent"], velocity["min"], velocity["max"]) == ("velocity", 50, 40, 127)
+    assert "midi_effects: [{type: scale, root: D}, {type: velocity, scale_percent: 50.0, min: 40}]" in path.read_text().replace("\n   ", " ")
+    assert load(path)["tracks"][0]["clips"] == before
+    report = daw("render", path, "--output", tmp_path / "scaled")
+    assert report["tracks"]["keys"]["events"] == 3
+    with pytest.raises(ValueError, match="min is at most its max"):
+        daw("effect", "add", path, "tracks.keys", "--type", "velocity", "--min", 100, "--max", 50)
+    # What the agent reads says so.
+    described = daw("describe", "midi")
+    assert "arpeggiator" in described["semantics"]["midi_effects"]
+    assert described["fields"]["arpeggiator.rate"].startswith("1/1|1/2|1/4|1/4T|1/8|")
+    assert described["fields"]["tracks[].midi_effects"] == "list of MIDI effect: arpeggiator, chord, scale or velocity (daw describe midi), at most 16"

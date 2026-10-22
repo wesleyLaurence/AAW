@@ -229,6 +229,44 @@ const OVERDRIVE: &[Field] = &[
     number("mix_percent", "Mix", 0.0, 100.0, 100.0, "%"),
 ];
 
+/// A MIDI effect's fields, as the device panel before the instrument draws
+/// them; none is a lane target. The semitone fields are whole numbers.
+pub const ARPEGGIATOR: &[Field] = &[
+    choice("rate", "Rate", &crate::schema::ARP_RATE_NAMES, Initial::Text("1/16")),
+    choice("order", "Order", &crate::schema::ARP_ORDERS, Initial::Text("up")),
+    integer("octaves", "Octaves", 1.0, 4.0, 1.0),
+    number("gate_percent", "Gate", 1.0, 200.0, 50.0, "%"),
+    integer("seed", "Seed", 0.0, 4294967295.0, 0.0),
+];
+
+const fn semitones(name: &'static str, label: &'static str, min: f64, max: f64, default: f64) -> Field {
+    Field { unit: "st", ..integer(name, label, min, max, default) }
+}
+
+pub const CHORD: &[Field] = &[
+    semitones("shift_1", "Shift 1", -36.0, 36.0, 0.0),
+    semitones("shift_2", "Shift 2", -36.0, 36.0, 0.0),
+    semitones("shift_3", "Shift 3", -36.0, 36.0, 0.0),
+    semitones("shift_4", "Shift 4", -36.0, 36.0, 0.0),
+    semitones("shift_5", "Shift 5", -36.0, 36.0, 0.0),
+    semitones("shift_6", "Shift 6", -36.0, 36.0, 0.0),
+];
+
+pub const SCALE: &[Field] = &[
+    choice("root", "Root", &crate::schema::SCALE_ROOTS, Initial::Text("C")),
+    choice("scale", "Scale", &crate::schema::SCALE_NAMES, Initial::Text("major")),
+    semitones("transpose", "Transpose", -36.0, 36.0, 0.0),
+];
+
+pub const VELOCITY: &[Field] = &[
+    integer("offset", "Offset", -127.0, 127.0, 0.0),
+    number("scale_percent", "Scale", 0.0, 400.0, 100.0, "%"),
+    integer("random", "Random", 0.0, 127.0, 0.0),
+    integer("seed", "Seed", 0.0, 4294967295.0, 0.0),
+    integer("min", "Min", 1.0, 127.0, 1.0),
+    integer("max", "Max", 1.0, 127.0, 127.0),
+];
+
 /// A rack's fields: none of its own. Its name and its effects are not
 /// controls; the window draws the effects inside it as their own panels.
 const RACK: &[Field] = &[];
@@ -389,6 +427,10 @@ pub fn effect(kind: &str) -> &'static [Field] {
         "overdrive" => OVERDRIVE,
         "utility" => UTILITY,
         "rack" => RACK,
+        "arpeggiator" => ARPEGGIATOR,
+        "chord" => CHORD,
+        "scale" => SCALE,
+        "velocity" => VELOCITY,
         _ => &[],
     }
 }
@@ -523,6 +565,57 @@ mod tests {
                 assert!(fields.iter().any(|f| f.name == *name), "{kind}.{name} is automatable");
             }
         }
+    }
+
+    /// A song with one MIDI effect on a MIDI track, or the reason it is refused.
+    fn check_midi(effect: Value) -> Result<Project, String> {
+        let track = dict(vec![("id", Value::str("t")), ("type", Value::str("midi")), ("midi_effects", Value::List(vec![effect]))]);
+        let song = dict(vec![("session", dict(vec![])), ("tracks", Value::List(vec![track]))]);
+        Project::validate(&song).map_err(|e| e.to_string())
+    }
+
+    #[test]
+    fn midi_effect_fields_agree_with_validation_and_defaults() {
+        for kind in crate::MIDI_EFFECT_TYPES {
+            let fields = effect(kind);
+            assert!(!fields.is_empty(), "{kind}");
+            let project = check_midi(dict(vec![("type", Value::str(kind))])).unwrap_or_else(|e| panic!("{kind}: {e}"));
+            let dumped = project.tracks[0].midi.as_ref().unwrap().midi_effects[0].dump(false);
+            let Value::Dict(d) = &dumped else { panic!() };
+            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass"].contains(k)).collect();
+            assert_eq!(names, fields.iter().map(|f| f.name).collect::<Vec<_>>(), "{kind}");
+            for f in fields {
+                let got = dumped.get(f.name).unwrap();
+                match f.default {
+                    Initial::Number(x) => assert!(crate::value::py_eq(got, &Value::Float(x)), "{kind}.{}: {got:?}", f.name),
+                    Initial::Text(s) => assert!(crate::value::py_eq(got, &Value::str(s)), "{kind}.{}", f.name),
+                    _ => panic!("{kind}.{} has a default", f.name),
+                }
+                let with = |v: Value| check_midi(dict(vec![("type", Value::str(kind)), (f.name, v)]));
+                match f.kind {
+                    Kind::Number | Kind::Integer => {
+                        let n = |x: f64| if f.kind == Kind::Integer { Value::int(x as i64) } else { Value::Float(x) };
+                        assert!(with(n(f.min)).is_ok() && with(n(f.max)).is_ok(), "{kind}.{} at its limits", f.name);
+                        let step = if f.kind == Kind::Integer { 1.0 } else { 1e-6 * f.max.abs().max(1.0) };
+                        assert!(with(n(f.min - step)).is_err(), "{kind}.{} below {}", f.name, f.min);
+                        assert!(with(n(f.max + step)).is_err(), "{kind}.{} above {}", f.name, f.max);
+                    }
+                    Kind::Choice => {
+                        for c in f.choices {
+                            assert!(with(Value::str(c)).is_ok(), "{kind}.{} = {c}", f.name);
+                        }
+                        assert!(with(Value::str("other")).is_err(), "{kind}.{}", f.name);
+                    }
+                    _ => panic!("{kind}.{}", f.name),
+                }
+                assert!(automatable(kind, f.name).is_none(), "{kind}.{} is not a lane target", f.name);
+            }
+        }
+        // A velocity's floor is at most its ceiling; an audio effect is told
+        // where it goes.
+        assert!(check_midi(dict(vec![("type", Value::str("velocity")), ("min", Value::int(100)), ("max", Value::int(99))])).is_err());
+        let err = check_midi(dict(vec![("type", Value::str("limiter"))])).unwrap_err();
+        assert!(err.contains("limiter is an audio effect"), "{err}");
     }
 
     /// A song with one pad on one track, with `with` set on the pad, or the

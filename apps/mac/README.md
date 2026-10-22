@@ -238,7 +238,8 @@ front first.
 | Double-click a point, or Delete | Removes it, or Delete the selected points; a lane's last point takes the lane with it. Option-click changes whether it holds its value until the next |
 | Point at the line between two points; drag it | The segment is lit in blue; a drag up or down bends it into the curve that passes under the pointer, writing the first point's `shape` from -1 to 1, heard as it bends, one undo step. A held or level segment, or one too short to take hold of, is not lit |
 | Click × by a lane; + Lane | Removes the lane; offers the row's parameters that have none |
-| Add Effect, in the device panel | Adds an effect to the end of the chain, with a place to start |
+| Add Effect, in the device panel | Adds an effect to the end of the chain, with a place to start; on a MIDI track the MIDI effects follow the audio effects in the menu and go before the instrument |
+| A MIDI effect's panel, before a MIDI track's instrument | An arpeggiator, a chord, a scale or a velocity that changes the notes as they play, the clips keeping them as written: its bypass, ◀ ▶ among the MIDI effects, × and a control for each field; no field takes a lane |
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
 | Click a bar's number | Opens a field over it with the number selected, as the tempo's: type a value, in the bar's unit or without it (`880`, `2.5k`, `-6 dB`), and Return or a click elsewhere applies it, held to the bar's range; Escape cancels. Every bar has it: an effect's fields, the Synth's knobs, a Sampler's pad, an audio clip's gain, a pattern's swing and a note's or an event's velocity |
 | The marks in a device's title | Bypass, move earlier or later in the chain, remove; an equalizer also adds a band |
@@ -299,6 +300,7 @@ front first.
 | Drag Synth, or one of its patches, from the browser onto a MIDI track's header or its device panel, or under the tracks; + or a double-click on it | Attaches the plain saw in place of the track's instrument, or loads the patch into the track's Synth, or attaches a Synth with it; under the tracks, a new MIDI track, `synth-1` or named after the patch. The notes are kept. One undo step, as `daw synth add --patch` and `daw patch load` make |
 | Drag a knob, choose a wave, a table or a mode, type a number or tick a box in the Synth's panel; click a field's diamond; drag an entry's amount or click × on it | Sets that field of the patch, as `daw synth set` does: a knob is heard as it is dragged, and a wave, a table, a unison count, a filter mode or a routing when chosen, after a 10 ms dip; the Table menu lists the built-in tables and the project's samples; the diamond adds a lane on the field under the track, or removes it; an entry's amount is set in the target's unit, and × takes it out of the matrix |
 | ◂ ▸ in the Synth's header; its menu | Loads the patch before or after the current one in the browser's list, Factory then Mine; the menu loads any of them, and Save… writes the patch over the one of Mine it came from, or asks for a name as Save As… does: a name, a description and tags, over a patch of Mine only when ticked. As `daw patch load` and `daw patch save` |
+| Drag a MIDI effect from the browser's MIDI Effects onto a MIDI track's header or its device panel; + or a double-click on it with a MIDI track selected | Adds it before the track's instrument, after the MIDI effects it has, one undo step, as `daw effect add tracks.T --type arpeggiator` makes; on any other row it is refused |
 | Drag a rack from the browser's Audio Effects onto a header, the device panel or an insertion strip; + or a double-click on it | Adds the rack's effects to that row's chain, at the strip's place or the end, one undo step, as `daw rack load` makes; an effect whose id the chain has is numbered, and a compressor's sidechain is kept only where the song allows it. Racks are listed under the effect kinds and searched by name, tag and kind |
 | Save Rack… in the device panel's header | Asks for a name, a description and tags and writes the row's chain to the library, ~/Music/AAW/library/racks, over a rack of the name only when ticked, as `daw rack save` does; gray while the chain is empty. The browser lists it at once |
 | Drag the filter's corner; drag an envelope's handle | Moves the cutoff across and the resonance up and down, heard as it moves, one undo step; a press elsewhere on the curve takes the cutoff alone. An envelope's handles set the attack, the decay with the sustain, and the release |
@@ -354,8 +356,8 @@ loop, starts Held in a Sampler; the pitch is not written as its root note. The
 sample, the Sampler or the audio clip, a new track and a longer song are one
 undo step.
 
-The browser has Samples, Instruments, Audio Effects and Folders, with search at
-its top. Add Folder… registers one or more directories for every project and the
+The browser has Samples, Instruments, MIDI Effects, Audio Effects and Folders,
+with search at its top. Add Folder… registers one or more directories for every project and the
 agent. Check folder names to search within one or several; All folders searches
 all sources. Refresh scans for changes, and a folder's context menu removes its
 registration without touching audio files. Offline folders remain listed.

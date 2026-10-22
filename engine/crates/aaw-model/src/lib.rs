@@ -14,6 +14,7 @@ pub mod hash;
 pub mod hint;
 pub mod length;
 pub mod meter;
+pub mod midi_effects;
 pub mod pyfmt;
 pub mod rules;
 pub mod schedule;

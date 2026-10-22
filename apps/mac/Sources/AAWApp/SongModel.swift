@@ -1298,6 +1298,11 @@ public final class SongModel {
     /// rack on a MIDI track or, with no row, on a new track.
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
         if kind == "rack" { return row != nil }
+        if Browser.isMidiEffect(kind) {
+            // Before a MIDI track's instrument, and nowhere else.
+            guard case .track(let key) = row else { return false }
+            return arrangement.tracks.first { $0.key == key }?.midi == true
+        }
         if !Browser.isInstrument(kind) { return DeviceChain.kinds.contains(kind) && row != nil }
         guard let row else { return true }
         guard case .track(let key) = row else { return false }

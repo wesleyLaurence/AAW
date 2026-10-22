@@ -468,7 +468,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
             [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
-                + (DeviceChain.kinds + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
+                + (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
     @available(*, unavailable)
@@ -2217,7 +2217,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let name = board.data(forType: NSPasteboard.PasteboardType(Browser.rackType)).flatMap { String(data: $0, encoding: .utf8) }
             return ("rack", nil, name)
         }
-        return (DeviceChain.kinds + Browser.instruments).first {
+        return (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first {
             board.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true
         }.map { ($0, nil, nil) }
     }

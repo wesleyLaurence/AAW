@@ -1194,6 +1194,37 @@
           "description": "What the notes play; null plays nothing and keeps the notes.",
           "title": "Instrument"
         },
+        "midi_effects": {
+          "description": "The devices before the instrument that change the notes as they play, in order: an arpeggiator, a chord, a scale or a velocity; the clips keep the notes as written.",
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "arpeggiator": "#/$defs/Arpeggiator",
+                "chord": "#/$defs/Chord",
+                "scale": "#/$defs/Scale",
+                "velocity": "#/$defs/Velocity"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/Arpeggiator"
+              },
+              {
+                "$ref": "#/$defs/Chord"
+              },
+              {
+                "$ref": "#/$defs/Scale"
+              },
+              {
+                "$ref": "#/$defs/Velocity"
+              }
+            ]
+          },
+          "maxItems": 16,
+          "title": "Midi Effects",
+          "type": "array"
+        },
         "clips": {
           "items": {
             "$ref": "#/$defs/NoteClip"
@@ -3205,6 +3236,347 @@
         "type"
       ],
       "title": "Rack",
+      "type": "object"
+    },
+    "Arpeggiator": {
+      "additionalProperties": false,
+      "description": "The notes held at each step of a grid played one at a time in an order, over octaves: a chord becomes a run. The pattern starts over when a note begins, and a note shorter than a step that no step falls on is not heard.",
+      "properties": {
+        "type": {
+          "const": "arpeggiator",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "rate": {
+          "default": "1/16",
+          "enum": [
+            "1/1",
+            "1/2",
+            "1/4",
+            "1/4T",
+            "1/8",
+            "1/8D",
+            "1/8T",
+            "1/16",
+            "1/16D",
+            "1/16T",
+            "1/32",
+            "1/32T"
+          ],
+          "type": "string",
+          "description": "The step, a note value on the song's grid from beat 0: 1/16 is a sixteenth, T a triplet, D dotted.",
+          "title": "Rate"
+        },
+        "order": {
+          "default": "up",
+          "enum": [
+            "up",
+            "down",
+            "up_down",
+            "down_up",
+            "converge",
+            "diverge",
+            "played",
+            "random"
+          ],
+          "type": "string",
+          "description": "How the held notes are walked: up, down, up and back without repeating the ends (up_down, down_up), from the ends inward (converge) or the middle outward (diverge), in the order they began (played), or picked at random by the seed.",
+          "title": "Order"
+        },
+        "octaves": {
+          "default": 1,
+          "maximum": 4,
+          "minimum": 1,
+          "type": "integer",
+          "description": "The walk repeated an octave higher each time round, before it starts over.",
+          "title": "Octaves"
+        },
+        "gate_percent": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "type": "number",
+          "description": "How long each note sounds, as a share of a step; over 100 the notes overlap. A note is never longer than the held note it came from.",
+          "title": "Gate Percent"
+        },
+        "seed": {
+          "default": 0,
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer",
+          "description": "Which notes random picks; the same seed picks the same.",
+          "title": "Seed"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean",
+          "description": "Keeps the device without its effect on the notes."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Arpeggiator",
+      "type": "object"
+    },
+    "Chord": {
+      "additionalProperties": false,
+      "description": "Each note played with up to six more at fixed semitone shifts from it.",
+      "properties": {
+        "type": {
+          "const": "chord",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "shift_1": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "description": "A note added this many semitones from each note; 0 adds none.",
+          "title": "Shift 1"
+        },
+        "shift_2": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "title": "Shift 2"
+        },
+        "shift_3": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "title": "Shift 3"
+        },
+        "shift_4": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "title": "Shift 4"
+        },
+        "shift_5": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "title": "Shift 5"
+        },
+        "shift_6": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "title": "Shift 6"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean",
+          "description": "Keeps the device without its effect on the notes."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Chord",
+      "type": "object"
+    },
+    "Scale": {
+      "additionalProperties": false,
+      "description": "Each note moved to the nearest note of a scale, a note halfway between two going down, then transposed.",
+      "properties": {
+        "type": {
+          "const": "scale",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "root": {
+          "default": "C",
+          "enum": [
+            "C",
+            "C#",
+            "D",
+            "D#",
+            "E",
+            "F",
+            "F#",
+            "G",
+            "G#",
+            "A",
+            "A#",
+            "B"
+          ],
+          "type": "string",
+          "description": "The scale's root.",
+          "title": "Root"
+        },
+        "scale": {
+          "default": "major",
+          "enum": [
+            "major",
+            "minor",
+            "harmonic_minor",
+            "melodic_minor",
+            "dorian",
+            "phrygian",
+            "lydian",
+            "mixolydian",
+            "locrian",
+            "major_pentatonic",
+            "minor_pentatonic",
+            "blues",
+            "whole_tone",
+            "chromatic"
+          ],
+          "type": "string",
+          "description": "The scale, as semitones from the root.",
+          "title": "Scale"
+        },
+        "transpose": {
+          "default": 0,
+          "maximum": 36,
+          "minimum": -36,
+          "type": "integer",
+          "description": "Semitones every note is moved after it is snapped.",
+          "title": "Transpose"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean",
+          "description": "Keeps the device without its effect on the notes."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Scale",
+      "type": "object"
+    },
+    "Velocity": {
+      "additionalProperties": false,
+      "description": "Each note's velocity scaled, moved, spread and held between a floor and a ceiling.",
+      "properties": {
+        "type": {
+          "const": "velocity",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "offset": {
+          "default": 0,
+          "maximum": 127,
+          "minimum": -127,
+          "type": "integer",
+          "description": "Added to each velocity after the scale.",
+          "title": "Offset"
+        },
+        "scale_percent": {
+          "default": 100,
+          "maximum": 400,
+          "minimum": 0,
+          "type": "number",
+          "description": "Each velocity multiplied: 50 halves, 200 doubles.",
+          "title": "Scale Percent"
+        },
+        "random": {
+          "default": 0,
+          "maximum": 127,
+          "minimum": 0,
+          "type": "integer",
+          "description": "Each velocity spread by up to this much either way, by the seed.",
+          "title": "Random"
+        },
+        "seed": {
+          "default": 0,
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer",
+          "description": "Which way each note's spread goes; the same seed spreads the same.",
+          "title": "Seed"
+        },
+        "min": {
+          "default": 1,
+          "maximum": 127,
+          "minimum": 1,
+          "type": "integer",
+          "description": "The least a velocity comes out as; at most max.",
+          "title": "Min"
+        },
+        "max": {
+          "default": 127,
+          "maximum": 127,
+          "minimum": 1,
+          "type": "integer",
+          "description": "The most a velocity comes out as.",
+          "title": "Max"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean",
+          "description": "Keeps the device without its effect on the notes."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "Velocity",
       "type": "object"
     }
   },

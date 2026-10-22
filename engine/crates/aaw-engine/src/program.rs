@@ -457,7 +457,7 @@ impl Cache {
     /// A Synth track's notes, from the cache when its clips, the tempo and
     /// the rate are as they were.
     fn synth_notes(&mut self, p: &Project, t: &aaw_model::Track, midi: &aaw_model::Midi) -> Arc<Vec<NoteOn>> {
-        let key = format!("{:?}|{}|{}", midi.clips, p.session.tempo.to_bits(), p.session.sample_rate);
+        let key = format!("{:?}|{:?}|{}|{}", midi.clips, midi.midi_effects, p.session.tempo.to_bits(), p.session.sample_rate);
         let g = self.generation;
         if let Some(entry) = self.notes.get_mut(&t.id) {
             if entry.1 == key {

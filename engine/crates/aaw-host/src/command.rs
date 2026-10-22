@@ -1151,6 +1151,17 @@ impl<'a> Edit<'a> {
         tree::path_text(self.root, loc)
     }
 
+    /// An effect of a chain or a MIDI effect of a MIDI track: its owner,
+    /// which list it is in, `effects` or `midi_effects`, and its place.
+    fn effect_member(&self, path: &str) -> Result<(Loc, &'static str, usize)> {
+        let loc = self.at(path)?;
+        match loc.as_slice() {
+            [owner @ .., Step::Key(k), Step::Index(i)] if k == "effects" => Ok((owner.to_vec(), "effects", *i)),
+            [owner @ .., Step::Key(k), Step::Index(i)] if k == "midi_effects" => Ok((owner.to_vec(), "midi_effects", *i)),
+            _ => Err(format!("{path} is not an effect")),
+        }
+    }
+
     /// The location of an item in a list named `list`, e.g. a clip in `clips`.
     fn member(&self, path: &str, list: &str, what: &str) -> Result<(Loc, usize)> {
         let loc = self.at(path)?;
@@ -2711,6 +2722,20 @@ impl<'a> Edit<'a> {
                 self.remove_at(&loc)?;
                 out.label = format!("Remove pad {track}.{pad}");
             }
+            EffectAdd { owner, index, fields } if fields.get("type").and_then(Json::as_str).is_some_and(|t| aaw_model::MIDI_EFFECT_TYPES.contains(&t)) => {
+                let kind = fields.get("type").and_then(Json::as_str).unwrap_or("effect").to_string();
+                let loc = self.at(owner)?;
+                if !self.is_midi(&loc) {
+                    return Err(format!("{kind} is a MIDI effect: it goes on a MIDI track, before its instrument (tracks.T), not on {owner}"));
+                }
+                let count = self.node(&loc).get("midi_effects").map_or(0, |e| e.items().len());
+                if count >= aaw_model::MAX_MIDI_CHAIN {
+                    return Err(format!("{} holds {count} MIDI effects, the most it can", self.text(&loc)));
+                }
+                let at = index.unwrap_or(count);
+                out.made.push(self.insert(&loc, "midi_effects", Some(at), map_node(fields)?)?);
+                out.label = format!("Add {kind} to {}", self.text(&loc));
+            }
             EffectAdd { owner, index, fields } => {
                 let loc = self.owner(owner)?;
                 if fields.get("type").and_then(Json::as_str) == Some("rack") {
@@ -2728,9 +2753,18 @@ impl<'a> Edit<'a> {
                 out.label = format!("Add {kind} to {}", self.text(&loc));
             }
             EffectRemove { effect } => {
-                let (owner, i) = self.member(effect, "effects", "an effect")?;
-                let loc = [owner, vec![Step::Key("effects".into()), Step::Index(i)]].concat();
+                let (owner, list, i) = self.effect_member(effect)?;
+                let loc = [owner, vec![Step::Key(list.into()), Step::Index(i)]].concat();
                 out.label = format!("Remove effect {}", self.remove_at(&loc)?);
+            }
+            EffectMove { effect, index, owner: into } if self.effect_member(effect)?.1 == "midi_effects" => {
+                let (owner, _, from) = self.effect_member(effect)?;
+                if into.is_some() {
+                    return Err("A MIDI effect stays before its track's instrument: it moves only within midi_effects".into());
+                }
+                self.move_item(&owner, "midi_effects", from, *index)?;
+                let loc = [owner, vec![Step::Key("midi_effects".into()), Step::Index(*index)]].concat();
+                out.label = format!("Move MIDI effect {} to position {index}", self.text(&loc));
             }
             EffectMove { effect, index, owner: into } => {
                 let (owner, from) = self.member(effect, "effects", "an effect")?;
@@ -2761,8 +2795,8 @@ impl<'a> Edit<'a> {
                 out.label = format!("Move effect {} to position {to}", self.text(&loc));
             }
             EffectBypass { effect, bypass } => {
-                let (owner, i) = self.member(effect, "effects", "an effect")?;
-                let loc = [owner, vec![Step::Key("effects".into()), Step::Index(i)]].concat();
+                let (owner, list, i) = self.effect_member(effect)?;
+                let loc = [owner, vec![Step::Key(list.into()), Step::Index(i)]].concat();
                 self.set_leaf(&loc, "bypass", Value::Bool(*bypass));
                 out.label = format!("{} effect {}", if *bypass { "Bypass" } else { "Enable" }, self.text(&loc));
             }

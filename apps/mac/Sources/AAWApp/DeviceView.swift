@@ -244,10 +244,11 @@ struct DeviceView: View {
     let chain: DeviceChain
 
     /// What the panel takes: every effect kind and a rack, and on a MIDI
-    /// track the instruments, a Synth patch and an instrument rack.
+    /// track the instruments, the MIDI effects, a Synth patch and an
+    /// instrument rack.
     private var droppable: [String] {
         let midi = chain.track?.midi == true
-        var types = (DeviceChain.kinds + (midi ? Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
+        var types = (DeviceChain.kinds + (midi ? Browser.midiEffects + Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
         types.append(Browser.rackType)
         if midi { types.append(Browser.patchType); types.append(Browser.instrumentRackType) }
         return types
@@ -267,6 +268,9 @@ struct DeviceView: View {
                         .padding(.top, 4)
                 }
                 if let track = chain.track, track.midi {
+                    ForEach(Array(track.midiEffects.enumerated()), id: \.element.key) { index, effect in
+                        MidiEffectPanel(model: model, effect: effect, index: index, count: track.midiEffects.count)
+                    }
                     InstrumentPanel(model: model, track: track)
                 }
                 ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
@@ -315,7 +319,7 @@ struct DeviceView: View {
                 }
                 return true
             }
-            guard let kind = (DeviceChain.kinds + Browser.instruments).first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }),
+            guard let kind = (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }),
                   model.canAddBrowserDevice(kind, to: chain.row) else { return false }
             model.addBrowserDevice(kind, to: chain.row)
             return true
@@ -502,6 +506,15 @@ private struct ChainHeader: View {
                         model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil, rack: nil))
                     }
                 }
+                if chain.track?.midi == true {
+                    Divider()
+                    // A MIDI effect goes before the instrument; the host puts it there.
+                    ForEach(Browser.midiEffects, id: \.self) { kind in
+                        Button(readable(kind)) {
+                            model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil, rack: nil))
+                        }
+                    }
+                }
             } label: {
                 Label("Add Effect", systemImage: "plus").font(.system(size: 11))
             }
@@ -640,6 +653,84 @@ private struct RackSaveSheet: View {
         }
         .padding(16)
         .frame(width: 380)
+    }
+}
+
+/// A MIDI effect: a device before a MIDI track's instrument that changes
+/// the notes as they play. Its name, the marks that bypass, move and
+/// remove it, and a control for each of its fields; none takes a lane.
+private struct MidiEffectPanel: View {
+    let model: SongModel
+    let effect: EffectView
+    /// Its place among the track's MIDI effects, and how many there are.
+    let index: Int
+    let count: Int
+
+    static let width: CGFloat = 216
+
+    private var title: String {
+        let kind = readable(effect.kind)
+        return effect.id.map { "\(kind) · \($0)" } ?? kind
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 5) {
+                Button {
+                    model.edit(.effectBypass(effect: effect.key, on: !effect.bypass))
+                } label: {
+                    Image(systemName: "power").foregroundStyle(effect.bypass ? Color.secondary : Color.green)
+                }
+                .help(effect.bypass ? "Bypassed: the notes pass as written" : "Bypass")
+                Image(systemName: "pianokeys").foregroundStyle(.secondary)
+                Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                Spacer(minLength: 2)
+                Button {
+                    model.edit(.effectMove(effect: effect.key, index: UInt32(index - 1)))
+                } label: {
+                    Image(systemName: "chevron.left")
+                }
+                .help("Move earlier, before the MIDI effects ahead of it")
+                .disabled(index == 0)
+                Button {
+                    model.edit(.effectMove(effect: effect.key, index: UInt32(index + 1)))
+                } label: {
+                    Image(systemName: "chevron.right")
+                }
+                .help("Move later, nearer the instrument")
+                .disabled(index == count - 1)
+                Button {
+                    model.edit(.effectRemove(effect: effect.key))
+                } label: {
+                    Image(systemName: "xmark")
+                }
+                .help("Remove the MIDI effect; the notes are kept as written")
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .padding(.horizontal, 7)
+            .frame(height: 24)
+            .background(Color(nsColor: Theme.gray(0.24)))
+            .help("A MIDI effect before the instrument: it changes the notes as they play, and the clips keep them as written")
+            VStack(spacing: 3) {
+                ForEach(effect.fields, id: \.name) { field in
+                    HStack(spacing: 4) {
+                        Text(field.label)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 62, alignment: .leading)
+                        FieldControl(model: model, effect: effect.key, field: field)
+                    }
+                    .frame(height: 19)
+                }
+            }
+            .padding(6)
+            .opacity(effect.bypass ? 0.5 : 1)
+            Spacer(minLength: 0)
+        }
+        .frame(width: Self.width, height: model.detailHeight - 16, alignment: .top)
+        .background(Color(nsColor: Theme.gray(0.19)))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
     }
 }
 

@@ -37,6 +37,15 @@ final class Browser {
     static let instrumentRackKind = "instrument-rack"
     /// The instruments the browser offers, by kind.
     static let instruments = ["sampler", "synth"]
+    /// The MIDI effects the engine offers, by kind: devices before a MIDI
+    /// track's instrument that change the notes as they play.
+    static let midiEffects = browserMidiEffects()
+
+    /// Whether a kind is a MIDI effect, which goes on a MIDI track before
+    /// its instrument.
+    static func isMidiEffect(_ kind: String) -> Bool {
+        midiEffects.contains(kind)
+    }
 
     /// Whether a kind is an instrument, which goes on a MIDI track: a
     /// Sampler, a Synth or an instrument rack.
@@ -306,7 +315,7 @@ struct BrowserView: View {
             if let error = browser.folderError { note(error) }
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(["Samples", "Instruments", "Audio Effects", "Folders"], id: \.self) { section in
+                    ForEach(["Samples", "Instruments", "MIDI Effects", "Audio Effects", "Folders"], id: \.self) { section in
                         Button(section) { browser.section = section }
                             .buttonStyle(.plain)
                             .font(.system(size: 11, weight: browser.section == section ? .bold : .regular))
@@ -345,7 +354,7 @@ struct BrowserView: View {
                 .frame(width: 120, alignment: .leading)
                 Divider()
                 VStack(spacing: 0) {
-                    if browser.section == "Instruments" || browser.section == "Audio Effects" {
+                    if browser.section == "Instruments" || browser.section == "MIDI Effects" || browser.section == "Audio Effects" {
                         devices
                     } else {
                         filters
@@ -373,18 +382,19 @@ struct BrowserView: View {
         }
     }
 
-    /// Instruments, or audio effects, each with + and dragged by its name;
-    /// under the Synth its patches, Factory and the person's own, and under
-    /// the effects the person's racks, searched by name and tag along with
-    /// the devices.
+    /// Instruments, MIDI effects or audio effects, each with + and dragged
+    /// by its name; under the Synth its patches, Factory and the person's
+    /// own, and under the audio effects the person's racks, searched by
+    /// name and tag along with the devices.
     private var devices: some View {
         let instruments = browser.section == "Instruments"
-        let kinds = (instruments ? Browser.instruments : DeviceChain.kinds)
+        let midiEffects = browser.section == "MIDI Effects"
+        let kinds = (instruments ? Browser.instruments : midiEffects ? Browser.midiEffects : DeviceChain.kinds)
             .filter { browser.query.isEmpty || readable($0).localizedCaseInsensitiveContains(browser.query) }
         let patches = instruments ? browser.patches.filter { Browser.matches($0, browser.query) } : []
         let factory = patches.filter(\.factory)
         let mine = patches.filter { !$0.factory }
-        let racks = instruments ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
+        let racks = instruments || midiEffects ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
         let instrumentRacks = instruments ? browser.instrumentRacks.filter { Browser.matches($0, browser.query) } : []
         return ScrollView {
             VStack(spacing: 0) {
@@ -419,11 +429,18 @@ struct BrowserView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(10)
                 }
-                if !instruments && !racks.isEmpty {
+                if midiEffects && browser.query.isEmpty {
+                    Text("A MIDI effect goes on a MIDI track before its instrument and changes the notes as they play; the clips keep the notes as written. Drop one on a MIDI track's header or its device panel.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                }
+                if !instruments && !midiEffects && !racks.isEmpty {
                     heading("Racks")
                     ForEach(racks, id: \.slug) { rack in row(rack) }
                 }
-                if !instruments && browser.query.isEmpty && browser.racks.isEmpty {
+                if !instruments && !midiEffects && browser.query.isEmpty && browser.racks.isEmpty {
                     Text("A chain of effects saved with Save Rack… in the device panel, or daw rack save, is listed here under Racks and dropped on any track.")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)

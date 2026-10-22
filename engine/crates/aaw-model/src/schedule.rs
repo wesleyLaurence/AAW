@@ -1,5 +1,6 @@
 //! Event scheduling: every hit's start frame, from exact beats.
 
+use crate::midi_effects::Played;
 use crate::{frame, Beat, Event, Instrument, Midi, PadMode, Project, Sampler, Wave};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
@@ -26,7 +27,7 @@ pub struct NoteOn {
 /// those that start before the clip ends.
 pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
     let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
-    let mut notes = Vec::new();
+    let mut played = Vec::new();
     for clip in &midi.clips {
         let start = clip.at_exact();
         for (from, plays) in clip.repetitions() {
@@ -37,18 +38,24 @@ pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
                     continue;
                 }
                 let until = (&at + n.duration_exact()).min(plays.clone());
-                let beats = &until - &at;
-                notes.push(NoteOn {
-                    pitch: n.pitch,
-                    velocity: n.velocity,
-                    start: frame(&(&base + &at), tempo, rate),
-                    end: frame(&(&base + &until), tempo, rate),
-                    at: &base + at,
-                    beats,
-                });
+                played.push(Played { pitch: n.pitch, velocity: n.velocity, at: &base + &at, beats: &until - &at });
             }
         }
     }
+    // The MIDI effects change the notes here, so every reader of the
+    // schedule plays what they make.
+    let played = crate::midi_effects::apply(&midi.midi_effects, played);
+    let mut notes: Vec<NoteOn> = played
+        .into_iter()
+        .map(|n| NoteOn {
+            pitch: n.pitch,
+            velocity: n.velocity,
+            start: frame(&n.at, tempo, rate),
+            end: frame(&(&n.at + &n.beats), tempo, rate),
+            at: n.at,
+            beats: n.beats,
+        })
+        .collect();
     notes.sort_by_key(|n| (n.start, n.pitch));
     notes
 }

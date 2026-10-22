@@ -124,6 +124,13 @@ pub fn browser_effects() -> Vec<String> {
     aaw_model::EFFECT_TYPES.iter().map(|kind| kind.to_string()).collect()
 }
 
+/// The MIDI effect kinds, for the browser's MIDI Effects and Add Effect on
+/// a MIDI track.
+#[uniffi::export]
+pub fn browser_midi_effects() -> Vec<String> {
+    aaw_model::MIDI_EFFECT_TYPES.iter().map(|kind| kind.to_string()).collect()
+}
+
 /// A Synth patch as the browser lists it: a factory patch built into the
 /// engine, or one saved in the workspace library.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]

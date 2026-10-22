@@ -231,6 +231,9 @@ pub struct TrackView {
     /// Whether it is a MIDI track, whose clips are `note_clips` and whose
     /// `pads` are its sampler's.
     pub midi: bool,
+    /// A MIDI track's MIDI effects, before its instrument, in order; none
+    /// of their fields takes a lane.
+    pub midi_effects: Vec<EffectView>,
     /// The kind of a MIDI track's instrument, such as `sampler`; None
     /// without one.
     pub instrument: Option<String>,
@@ -676,6 +679,56 @@ fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrume
         }
         _ => describe::effect(e.kind()).iter().map(|f| field(f, dump.get(f.name), f.name.to_string(), None)).collect(),
     }
+}
+
+/// A MIDI track's MIDI effects, each with its fields from the model's
+/// description of its kind; no field is a lane target.
+fn midi_effects(midi: Option<&aaw_model::Midi>, handles: &[Item]) -> Vec<EffectView> {
+    let Some(midi) = midi else { return Vec::new() };
+    midi.midi_effects
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            let dump = e.dump(false);
+            let fields = describe::effect(e.kind())
+                .iter()
+                .map(|f| FieldView {
+                    label: f.label.to_string(),
+                    kind: match f.kind {
+                        Kind::Number => FieldKind::Number,
+                        Kind::Integer => FieldKind::Integer,
+                        Kind::Choice => FieldKind::Choice,
+                        Kind::Flag => FieldKind::Flag,
+                        Kind::Beats => FieldKind::Beats,
+                        Kind::Track => FieldKind::Track,
+                    },
+                    value: field_value(dump.get(f.name)),
+                    min: f.min,
+                    max: f.max,
+                    unit: f.unit.to_string(),
+                    log: f.log,
+                    choices: f.choices.iter().map(|c| c.to_string()).collect(),
+                    optional: false,
+                    initial: initial(f.default),
+                    live: true,
+                    param: None,
+                    lane: None,
+                    band: None,
+                    name: f.name.to_string(),
+                })
+                .collect();
+            EffectView {
+                key: handle(handles, i),
+                kind: e.kind().to_string(),
+                id: e.id().filter(|id| !id.is_empty()).map(str::to_string),
+                bypass: e.bypass(),
+                fields,
+                bands: 0,
+                name: None,
+                effects: Vec::new(),
+            }
+        })
+        .collect()
 }
 
 /// `tracks` are the tracks that may key the chain's compressors; a patch's
@@ -1308,6 +1361,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     })
                     .collect(),
                 midi: t.midi.is_some(),
+                midi_effects: midi_effects(t.midi.as_ref(), node.map(|n| items(n, "midi_effects")).unwrap_or(&[])),
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
                 sampler: sampler(p, t, device_sample(t).and_then(&mut file)),
                 synth,
