@@ -59,6 +59,20 @@ def test_a_closed_pipe_ends_quietly():
     assert process.stderr.read() == b""
 
 
+def test_help_lists_the_commands_by_what_they_are_for():
+    help = run("--help").stdout
+    headings = ["Start", "Read the song", "Edit any value", "Parts of the song", "Play and record", "Render and measure", "Sounds and libraries"]
+    assert [line[:-1] for line in help.splitlines() if line.endswith(":") and not line.startswith(" ")] == headings + ["Options"]
+    assert "one document addressed by paths" in help and "@N references" in help
+    # A command sits under its heading with its line as clap has it.
+    parts = help.split("Parts of the song:\n")[1].split("\n\n")[0]
+    assert "  clip        Clips, addressed by reference" in parts
+    assert "  rack        Effect racks: a chain of effects" in help
+    assert "--expect <EXPECT>" in help
+    # A command's own help keeps clap's single list.
+    assert "Commands:\n  add" in run("track", "--help").stdout
+
+
 def test_help_lists_what_a_command_takes():
     effect = run("effect", "add", "--help").stdout
     for kind in ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer", "rack", "device", "arpeggiator", "chord", "scale", "velocity"]:

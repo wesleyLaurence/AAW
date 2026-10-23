@@ -1,6 +1,7 @@
 # Finding one's way in the CLI — proposed October 23, 2026
 
-Status: proposed, not built (D148). Backlog: Next, items 1–6. It follows
+Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
+items 2–6 proposed, not built (D148). Backlog: Next, items 1–5. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
@@ -52,12 +53,16 @@ jobs; recipes (item 4) are the procedures, kept where they cannot go stale.
 
 ### Help in sections
 
-`daw --help` lists the commands under headings instead of one list. clap 4
-puts every subcommand under one heading (`subcommand_help_heading`), so the
-root command's `help_template` prints a list made from one table in
-`aaw-cli`, a heading and its commands, each with its line as clap has it. A
-test fails when a command is under no heading or two, so a new command cannot
-be left out. `daw COMMAND --help` is unchanged.
+Built October 23, 2026 (D149). `daw --help` lists the commands under headings
+instead of one list. clap 4 puts every subcommand under one heading
+(`subcommand_help_heading`), so `main` builds the command clap derives, makes
+the root's `help_template` from it and parses with that: the usual usage and
+options, and between them a list made from one table in `aaw-cli`,
+`SECTIONS`, a heading and its commands, each with its line as clap has it. A
+test fails when a command is under no heading or two, or a heading names one
+that does not exist, so a new command cannot be left out. clap's own `help`
+subcommand is under none; `-h, --help` is among the options. `daw COMMAND
+--help` is unchanged.
 
 | Heading | Commands |
 |---|---|
@@ -70,9 +75,10 @@ be left out. `daw COMMAND --help` is unchanged.
 | Sounds and libraries | `samples`, `reference`, `separate`, `generate`, `patch`, `rack`, `favorite`, `plugin`, `keys` |
 
 Above the list, two lines say what the sections imply: the song is one
-document addressed by paths (`tracks.T.clips.I`), which the commands under
+document addressed by paths (`tracks.drums.clips.0`), which the commands under
 Parts of the song edit with checks and defaults and those under Edit any value
-edit directly; and a running host gives `@N` references, undo and playback.
+edit directly; and a running host, `daw host` or the app with the project
+open, adds `@N` references, undo and redo, and playback.
 
 ### describe batch
 
@@ -153,7 +159,7 @@ fails on a command with no line. The Python commands keep argparse's help, as
 ## Done when
 
 1. `daw --help` lists every command under one of the headings, a test holds
-   it, and the two lines above the list say what the sections mean.
+   it, and the two lines above the list say what the sections mean. Done.
 2. `daw describe batch` lists every op the host takes with its keys, made from
    the enum; an unknown op is refused with the nearest.
 3. `daw describe effects.compressor` prints the compressor alone; `daw

@@ -23,7 +23,7 @@ use aaw_host::{project, registry};
 use aaw_model::schedule::schedule;
 use aaw_model::validate::ValidationError;
 use aaw_model::{contract, frame, Beat, ModelError};
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
 use serde_json::{json, Value as Json};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -49,6 +49,55 @@ struct Cli {
     expect: Option<String>,
     #[command(subcommand)]
     command: Top,
+}
+
+/// `daw --help`'s commands by what they are for. clap lists subcommands
+/// under one heading, so the root's help template prints these instead; a
+/// test holds every command to one heading.
+const SECTIONS: &[(&str, &[&str])] = &[
+    ("Start", &["describe", "init", "projects", "move", "copy"]),
+    ("Read the song", &["inspect", "map", "get", "status", "changes", "timeline", "schedule", "check", "model"]),
+    ("Edit any value", &["set", "toggle", "remove", "apply", "batch", "undo", "redo", "fmt"]),
+    (
+        "Parts of the song",
+        &[
+            "track", "group", "return", "clip", "audio", "note", "pattern", "pad", "midi", "instrument", "synth",
+            "effect", "send", "lane", "section", "marker", "range",
+        ],
+    ),
+    ("Play and record", &["host", "close", "play", "stop", "locate", "loop", "record", "device"]),
+    ("Render and measure", &["render", "listen", "compare", "joins", "export"]),
+    (
+        "Sounds and libraries",
+        &["samples", "reference", "separate", "generate", "patch", "rack", "favorite", "plugin", "keys"],
+    ),
+];
+
+/// What the sections say about the song, printed above them.
+const SECTIONS_INTRO: &str = "\
+The song is one document addressed by paths, such as tracks.drums.clips.0: the commands under Parts of the song edit it with checks and defaults, those under Edit any value edit any path directly.
+A running host (daw host, or the app with the project open) adds @N references, undo and redo, and playback.";
+
+/// The root's help template: the usual usage and options, with the commands
+/// under SECTIONS' headings, each with its line as clap has it.
+fn help_template(cmd: &clap::Command) -> String {
+    let styles = cmd.get_styles();
+    let (header, literal) = (styles.get_header(), styles.get_literal());
+    let width = SECTIONS.iter().flat_map(|(_, names)| names.iter()).map(|n| n.len()).max().unwrap_or(0);
+    let mut out = format!("{{about-with-newline}}\n{{usage-heading}} {{usage}}\n\n{SECTIONS_INTRO}\n");
+    for (heading, names) in SECTIONS {
+        out += &format!("\n{}{heading}:{}\n", header.render(), header.render_reset());
+        for name in *names {
+            let about = cmd
+                .find_subcommand(name)
+                .and_then(|c| c.get_about())
+                .map(|a| a.to_string())
+                .unwrap_or_default();
+            let pad = " ".repeat(width - name.len() + 2);
+            out += &format!("  {}{name}{}{pad}{about}\n", literal.render(), literal.render_reset());
+        }
+    }
+    out + &format!("\n{}Options:{}\n{{options}}{{after-help}}", header.render(), header.render_reset())
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -1004,6 +1053,8 @@ enum PluginCmd {
     Status { project: Song },
 }
 
+/// Effect racks: a chain of effects as a YAML file, saved in the workspace
+/// library (~/Music/AAW/library/racks, or under AAW_WORKSPACE), added to a
 /// track, group, return, master or Synth patch in any song.
 #[derive(Subcommand)]
 enum RackCmd {
@@ -3156,7 +3207,9 @@ fn forward(command: &str, args: &[String]) -> Result<ExitCode> {
 }
 
 fn main() -> ExitCode {
-    let cli = Cli::parse();
+    let cmd = Cli::command();
+    let template = help_template(&cmd);
+    let cli = Cli::from_arg_matches(&cmd.help_template(template).get_matches()).unwrap_or_else(|e| e.exit());
     if let Top::Samples(f)
     | Top::Reference(f)
     | Top::Listen(f)
@@ -3191,6 +3244,24 @@ fn main() -> ExitCode {
         Err(error) => {
             eprintln!("{}", json!({"error": error, "command": name(&cli.command)}));
             ExitCode::FAILURE
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_command_is_under_one_heading() {
+        let cmd = Cli::command();
+        let listed: Vec<&str> = SECTIONS.iter().flat_map(|(_, names)| names.iter().copied()).collect();
+        for sub in cmd.get_subcommands().map(|c| c.get_name()).filter(|n| *n != "help") {
+            let times = listed.iter().filter(|n| **n == sub).count();
+            assert_eq!(times, 1, "`daw {sub}` is under {times} headings of SECTIONS; give it one");
+        }
+        for name in &listed {
+            assert!(cmd.find_subcommand(name).is_some(), "SECTIONS names `{name}`, which is not a command");
         }
     }
 }
