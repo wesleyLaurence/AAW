@@ -69,46 +69,78 @@ feature and the decision log.
 
 ## What works today
 
-AAW today is a sample workstation that an agent and a person operate together.
-Search a local sample library, copy sounds into a project, sequence drum and
-pitched notes, play the song from any beat and render a mix and stems. It also
-provides render analysis and comparisons.
+AAW today is a workstation that an agent and a person operate together on one
+song: samples, a synthesizer and instruments of your own, MIDI and audio clips,
+recording, a mixer with groups, returns and effects, automation, rendering and
+measurement of what was rendered.
 
 One native engine, written in Rust, plays the song in real time and renders it
 offline, so what is heard while editing is what is exported. A session host holds
 the open song, applies each edit as a command with undo, and plays it as it
 lands. The agent drives it with the `daw` command; the person drives the same
-host from a native Mac app with an arrangement that shows each clip's waveform,
-a mixer, device panels, automation lanes, a pattern editor and a sample browser,
-and sees the agent's changes as they happen. The app opens on a blank project
-called Untitled, which Save As… gives a name and a place, and `daw projects`
-lists what is open in it. See
+host from a native Mac app and sees the agent's changes as they happen. See
 [engine/README.md](engine/README.md) and [apps/mac/README.md](apps/mac/README.md).
 
-Samples can be measured from their audio for pitch (with octave), loop tempo and
-one-shot/loop kind, and for what they sound like: brightness, low end, attack,
-decay, noisiness, loudness and punch, each a number with a word. Search sorts
-and filters by them and finds the samples nearest a chosen one.
+**The Mac app** has an arrangement that shows each clip's waveform, a mixer,
+device panels, automation lanes for every row (A shows them all), a pattern
+editor, a piano roll with a velocity lane, a browser of favorites, samples,
+instruments, effects, racks and plugins, a live analyzer, and File › Export
+Audio…. Each project's window has an agent panel: a conversation with your own
+Claude Code started in the project's folder, with your skills under `/`, the
+song's tracks, clips and samples under `@`, files and clips dropped in, a sound
+recorded from the input and words spoken into the field. The app opens on a
+blank project called Untitled, which Save As… gives a name and a place. A
+project is a folder with `song.yaml`, its samples and renders, `SONG.md` for
+what the song is for, and an `.aaw` file named for the folder that the Finder
+opens in the app ([the `.aaw` project file](docs/features/project-file.md)).
 
-Tracks, returns and the master bus take insert effects: filter, EQ, compressor
-with sidechain, look-ahead limiter that can hold a true peak, clipper, tempo-synced delay and a seeded
-convolution reverb. Tracks send pre- or post-fader to return buses, which
-render as their own stems. See [docs/features/effects.md](docs/features/effects.md).
+**Sound sources.** Pattern tracks play samples from pads on a step grid. MIDI
+tracks hold note clips that own their notes, played by a Sampler, by the Synth,
+a polyphonic synthesizer whose sound is a patch in the song (with factory
+patches, unison, wavetables and a modulation matrix; `daw describe synth`), or
+by an instrument of your own. MIDI effects before the instrument change the
+notes as they play: an arpeggiator, a chord, a scale and a velocity. A track's
+`audio` holds audio clips, parts of a sample file placed on beats, moved,
+trimmed, faded, split, crossfaded and looped; a pad or an audio clip can follow
+the tempo at its own pitch. An armed audio track records from an input device
+or the song's own sound, and a track can be frozen to a file. `daw separate`
+takes a song apart on this Mac into vocals and instrumental, or drums, bass,
+vocals and the rest, and `daw generate sound` makes a sound from a description
+through ElevenLabs at your own key. Standard MIDI files of one part go in and
+out (`daw describe midi`).
 
-Automation lanes move track, return and master levels, pans, send levels and
-effect parameters over time, such as a filter sweep into a drop or a quieter
-second chorus. See [docs/features/automation.md](docs/features/automation.md).
+**Mixing.** Tracks, groups, returns and the master take insert effects:
+filter, parametric EQ, compressor with sidechain, look-ahead limiter that can
+hold a true peak, clipper, saturation, overdrive, chorus, tempo-synced delay,
+seeded convolution reverb, utility and an analyzer that only shows the sound.
+A chain can be saved as a rack and loaded into any song, or kept in the chain
+as one rack device; a MIDI track's instrument with its chain is an instrument
+rack. Groups sum tracks and other groups, to any depth, and tracks and groups
+send pre- or post-fader to returns. Automation lanes move levels, pans, sends
+and effect parameters over time, each segment straight or bent. See
+[docs/features/effects.md](docs/features/effects.md) and
+[docs/features/automation.md](docs/features/automation.md).
 
-MIDI tracks hold note clips that own their notes, with numeric pitches placed
-on and off the grid, and a sampler that maps notes to pads plays them; the
-instrument can be attached, swapped or removed without touching the notes, and
-a copied clip changes independently. The agent writes them with `daw note` and
-`daw instrument`; the person draws and edits them in the app's piano roll. See
-`daw describe midi` and [docs/features/midi-clips.md](docs/features/midi-clips.md).
+**Devices of your own.** A plugin is a folder with a manifest of its fields and
+its code, written to AAW's device spec: an effect, an instrument or a MIDI
+effect, run offline in Python or, for an effect or an instrument, in real time
+as WebAssembly built from Rust. `daw plugin new` scaffolds a working one, the
+app draws its panel from the manifest, and lanes move its fields. See
+[docs/features/custom-devices.md](docs/features/custom-devices.md).
 
-The broader workspace described above is the vision. Saturation, groups, synths,
-plugin hosting and recording are not implemented. Standard MIDI import/export
-for one part is supported; see `daw describe midi`.
+**Listening and checking.** Samples are measured from their audio for pitch,
+loop tempo, kind and what they sound like, and search sorts and filters by
+them. `daw listen` and `daw compare` measure renders: loudness, spectrum,
+overlap between stems, what a mix loses in mono and on a small speaker,
+dynamics, and the difference from a reference song. `daw map` draws the song as
+a grid of tracks by bars, `daw check` warns of musical problems, and markers
+the person leaves with M while the song plays tell the agent where to look.
+
+The broader workspace described above is the vision. A tempo or a meter that
+changes within a song, a MIDI keyboard, a time selection in the app and an app
+that runs without this checkout's Python are not built yet;
+[docs/backlog.md](docs/backlog.md) lists what is next. Third-party plugins are
+not hosted, by design: devices are AAW's own or written to its spec.
 [docs/architecture.md](docs/architecture.md) describes the implemented behavior.
 
 ## Repository scope
@@ -132,7 +164,14 @@ uv run pytest -q && (cd engine && cargo test)
 
 It needs Rust stable from [rustup](https://rustup.rs) and Python 3.12+, and is
 developed for macOS. Dependencies are pinned in `engine/Cargo.lock` and `uv.lock`.
-The runtime is local and does not call a model or require a Splice connection.
+The runtime is local and does not call a model or require a Splice connection;
+`daw generate`, which calls ElevenLabs at a key you keep with `daw keys set`, is
+the one exception, and only when asked.
+
+Three parts are set up only when wanted: `daw separate setup` installs the
+stem-separation models in an environment of their own, `rustup target add
+wasm32-unknown-unknown` lets `daw plugin build` compile a real-time plugin, and
+the Mac app needs Xcode 16.2 ([apps/mac/README.md](apps/mac/README.md)).
 
 The engine, the song model, the session host and every command that reads, edits,
 plays or renders a song are Rust (`engine/`). The sample library, sample analysis
@@ -143,7 +182,7 @@ x86_64-apple-darwin`.
 
 `daw` is one command. `uv run daw` and `engine/target/release/daw` each pass the
 other the commands it does not own (`samples`, `reference`, `listen`, `compare`,
-`check`, `timeline`, `joins` and `export` run in Python), so either works for everything. `uv run daw` runs the release build, or
+`check`, `timeline`, `joins`, `export` and `separate` run in Python), so either works for everything. `uv run daw` runs the release build, or
 the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
 or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`; its
 bundle holds a copy of the binary, which **Install Command Line Tool…** in the app's
@@ -176,8 +215,18 @@ uv run daw describe effects
 uv run daw describe automation
 uv run daw describe project --schema
 
+uv run daw synth add projects/my-beat keys --patch 'Soft Pad'   # a MIDI track with the Synth
+uv run daw clip add projects/my-beat keys --id verse --length-beats 8
+uv run daw note add projects/my-beat tracks.keys.clips.verse --pitch C4 --duration 1
+uv run daw group add projects/my-beat drum-bus --tracks drums,perc
+uv run daw effect add projects/my-beat groups.drum-bus --type clipper
+uv run daw plugin new 'Tape Warmth'                          # a device of your own to edit
+uv run daw separate projects/my-beat ~/Music/song.m4a --split stems
+
 uv run daw check projects/my-beat/song.yaml
 uv run daw inspect projects/my-beat/song.yaml
+uv run daw map projects/my-beat/song.yaml
+uv run daw marker list projects/my-beat/song.yaml
 uv run daw set projects/my-beat/song.yaml tracks.drums.gain_db -4.5
 uv run daw play projects/my-beat/song.yaml --from 32
 uv run daw render projects/my-beat/song.yaml
@@ -234,7 +283,8 @@ A pad or an audio clip with `source_bpm` and `stretch: preserve_pitch` follows t
 its own pitch, so an edit can be made a few percent shorter by raising the tempo.
 See [docs/features/time-stretch.md](docs/features/time-stretch.md).
 `daw timeline` gives a song's places in beats and in seconds, where its sound ends,
-the beat a sound starts on to end on another, and fits the session's length. See
+and the beat a sound starts on to end on another. A song is as long as what is
+in it: the host sets its length after every edit. See
 [docs/features/timeline.md](docs/features/timeline.md).
 `daw joins` checks a rendered edit of a song: whether the beat carries across each
 join, whether the splice shows as a step, the level either side and the file's
@@ -243,8 +293,9 @@ length, with an excerpt of each join to hear. See [docs/features/join-checks.md]
 the level policy it applied. See [docs/features/export.md](docs/features/export.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 
-Edits are commands: `set` for any value by path, and verbs for tracks, returns,
-clips, patterns, pads, effects, sends, lanes and sections (`daw --help` lists them,
+Edits are commands: `set` for any value by path, and verbs for tracks, groups,
+returns, clips, audio clips, notes, instruments, the Synth, patterns, pads,
+effects, racks, sends, lanes, sections, markers and ranges of bars (`daw --help` lists them,
 and [engine/README.md](engine/README.md) describes them). Each validates the whole
 resulting song before it is written. While a host runs for the song, because it is
 open in the Mac app or `daw host` or `daw play` is running, commands go to that host:
@@ -277,7 +328,6 @@ schema_version: 1
 session:
   title: A beat
   tempo: 160
-  length_beats: 8
 samples:
   kick: {path: samples/kick.wav}
 patterns:
@@ -295,7 +345,8 @@ tracks:
   - {pattern: groove, at: 0, repeats: 1}
 ```
 
-A quarter beat grid means sixteenth notes. `x` triggers velocity 100, digits 1–9
+The song has no length to write: it ends at the bar after its last sound. A
+quarter beat grid means sixteenth notes. `x` triggers velocity 100, digits 1–9
 encode increasing velocity, and `.` is a rest. Step rows must exactly span the pattern.
 Pitched/gated patterns use events with `at`, `pad`, `note`, `duration`, and `velocity`.
 
@@ -327,9 +378,10 @@ master:
 
 Each render produces a stereo 48 kHz or 44.1 kHz PCM24 `mix.wav`, aligned float WAV
 stems, a project snapshot, and `report.json`. Stems include track effects, master
-gain and ending fade, but not master effects. Track stems are dry and each return
-has its own stem. Without master effects track and return stems together
-reconstruct the mix within quantization tolerance; `stems_sum_to_mix` in the report
+gain and ending fade, but not master effects. Track stems are dry, and each group
+and each return has its own stem; a grouped track's stem is its sound before its
+group. Without master effects the stems of the ungrouped tracks, the outermost
+groups and the returns together reconstruct the mix within quantization tolerance; `stems_sum_to_mix` in the report
 says whether they do. Only the effects written in the project are applied: there is
 no automatic normalization. Unsafe PCM clipping aborts export; lower
 `master_gain_db` or add a master limiter.
