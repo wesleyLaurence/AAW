@@ -481,14 +481,14 @@ struct BrowserView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             // A patch or a rack saved from the terminal shows when the window comes back.
             if browser.section == "Instruments" { browser.refreshPatches() }
-            if browser.section == "Audio Effects" { browser.refreshRacks(); model.refreshPlugins() }
+            if browser.section == "Audio Effects" || browser.section == "Instruments" { browser.refreshRacks(); model.refreshPlugins() }
             if browser.section == "Instruments" { browser.refreshInstrumentRacks() }
             // A favorite added from the terminal, or a patch it names saved, too.
             if browser.section == "Favorites" { browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
         }
         .onChange(of: browser.section) { _, section in
             if section == "Instruments" { browser.refreshPatches(); browser.refreshInstrumentRacks() }
-            if section == "Audio Effects" { browser.refreshRacks(); model.refreshPlugins() }
+            if section == "Audio Effects" || section == "Instruments" { browser.refreshRacks(); model.refreshPlugins() }
             if section == "Favorites" { browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
         }
     }
@@ -598,7 +598,8 @@ struct BrowserView: View {
         let factory = patches.filter(\.factory)
         let mine = patches.filter { !$0.factory }
         let racks = instruments || midiEffects ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
-        let plugins = instruments || midiEffects ? [] : model.plugins.filter { Browser.matches($0, browser.query) }
+        // Plugins: effects under Audio Effects, instruments under Instruments.
+        let plugins = midiEffects ? [] : model.plugins.filter { $0.kind == (instruments ? "instrument" : "effect") && Browser.matches($0, browser.query) }
         let instrumentRacks = instruments ? browser.instrumentRacks.filter { Browser.matches($0, browser.query) } : []
         return ScrollView {
             VStack(spacing: 0) {
@@ -622,6 +623,10 @@ struct BrowserView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(10)
                 }
+                if instruments && !plugins.isEmpty {
+                    heading("Plugins")
+                    ForEach(plugins, id: \.slug) { plugin in row(plugin) }
+                }
                 if instruments && !instrumentRacks.isEmpty {
                     heading("Racks")
                     ForEach(instrumentRacks, id: \.slug) { rack in row(rack) }
@@ -644,7 +649,7 @@ struct BrowserView: View {
                     heading("Plugins")
                     ForEach(plugins, id: \.slug) { plugin in row(plugin) }
                 }
-                if !instruments && !midiEffects && browser.query.isEmpty && model.plugins.isEmpty {
+                if !instruments && !midiEffects && browser.query.isEmpty && !model.plugins.contains(where: { $0.kind == "effect" }) {
                     Text("A device of your own, made with daw plugin new under the project's or the workspace's devices folder, is listed here under Plugins and dropped on any track.")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
@@ -776,7 +781,9 @@ struct BrowserView: View {
             .buttonStyle(.borderless)
             .font(.system(size: 10))
             .disabled(!model.canAddBrowserDevice(plugin.slug, to: model.selectedRow))
-            .help("Add \(plugin.name) to the selected row's chain, as daw effect add --type \(plugin.slug) does")
+            .help(plugin.kind == "instrument"
+                ? (target.map { "Play \(plugin.name) on \($0.id), as daw instrument set does" } ?? "Add a new MIDI track playing \(plugin.name)")
+                : "Add \(plugin.name) to the selected row's chain, as daw effect add --type \(plugin.slug) does")
         }
         .padding(.leading, 18)
         .padding(.trailing, 6)

@@ -2177,34 +2177,100 @@ impl MidiEffect {
     }
 }
 
-/// What a MIDI track's notes play: a sampler, or the Synth.
+/// A device's fields by name, each a number, a switch or a choice.
+fn device_fields(ctx: &mut Ctx, x: &Value) -> Option<IndexMap<String, FieldValue>> {
+    v::str_dict(ctx, x, |c, x| match x {
+        Value::Float(n) => Some(FieldValue::Number(*n)),
+        Value::Int(n) => Some(FieldValue::Number(n.to_f64().unwrap_or(0.0))),
+        Value::Bool(b) => Some(FieldValue::Flag(*b)),
+        Value::Str(s) => Some(FieldValue::Text(s.clone())),
+        _ => {
+            c.error("value_error", "Value error, a device's field is a number, true or false, or a choice");
+            None
+        }
+    })
+}
+
+/// Whether every field is named as a manifest names fields; says the first
+/// that is not.
+fn device_field_names(ctx: &mut Ctx, fields: &IndexMap<String, FieldValue>) -> bool {
+    match fields.keys().find(|k| !DEVICE_FIELD_RE.is_match(k)) {
+        Some(bad) => {
+            ctx.value_error(format!("device field {bad}: a field's name is lowercase letters, digits and underscores, starting with a letter"));
+            false
+        }
+        None => true,
+    }
+}
+
+/// What a MIDI track's notes play: a sampler, the Synth, or an instrument
+/// of the person's own.
 #[derive(Clone, Debug)]
 pub enum Instrument {
     Sampler(Sampler),
     Synth(Synth),
+    /// A device of the person's own whose manifest's kind is `instrument`,
+    /// by its slug, as `{device: {name, version, fields}}`; it has no ID and
+    /// is not bypassed, so those stay unset.
+    Device(Device),
+}
+
+impl Device {
+    const INSTRUMENT_FIELDS: &'static [&'static str] = &["name", "version", "fields"];
+
+    /// An instrument of the person's own, as a MIDI track's `instrument`
+    /// holds it under `device`.
+    fn validate_instrument(ctx: &mut Ctx, x: &Value) -> Option<Device> {
+        let f = Fields::of(ctx, x, "PluginInstrument", Self::INSTRUMENT_FIELDS)?;
+        let name = f.req(ctx, "name", |c, x| v::pattern(c, x, &DEVICE_SLUG_RE, DEVICE_SLUG));
+        let version = f.opt(ctx, "version", None, opt_string);
+        let fields = f.opt(ctx, "fields", IndexMap::new(), device_fields);
+        f.finish(ctx);
+        let fields = fields?;
+        if !device_field_names(ctx, &fields) {
+            return None;
+        }
+        Some(Device {
+            id: None,
+            name: name?,
+            version: version?,
+            fields,
+            bypass: false,
+        })
+    }
+
+    fn dump_instrument(&self, saved: bool) -> Value {
+        let mut o = Out::new(saved);
+        o.req("name", Value::str(&self.name));
+        o.opt("version", self.version.as_deref().map(Value::str));
+        o.coll("fields", Value::Dict(self.fields.iter().map(|(k, v)| (Key::str(k), v.to_value())).collect()));
+        o.done()
+    }
 }
 
 impl Instrument {
-    const FIELDS: &'static [&'static str] = &["sampler", "synth"];
+    const FIELDS: &'static [&'static str] = &["sampler", "synth", "device"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Instrument> {
         let f = Fields::of(ctx, x, "Instrument", Self::FIELDS)?;
         let before = ctx.count();
         let sampler = f.opt(ctx, "sampler", None, |c, x| v::optional(c, x, Sampler::validate));
         let synth = f.opt(ctx, "synth", None, |c, x| v::optional(c, x, Synth::validate));
+        let device = f.opt(ctx, "device", None, |c, x| v::optional(c, x, Device::validate_instrument));
         f.finish(ctx);
         if ctx.count() > before {
             return None;
         }
-        match (sampler?, synth?) {
-            (Some(s), None) => Some(Instrument::Sampler(s)),
-            (None, Some(s)) => Some(Instrument::Synth(s)),
-            (None, None) => {
-                ctx.value_error("An instrument is a sampler or a synth");
+        match (sampler?, synth?, device?) {
+            (Some(s), None, None) => Some(Instrument::Sampler(s)),
+            (None, Some(s), None) => Some(Instrument::Synth(s)),
+            (None, None, Some(d)) => Some(Instrument::Device(d)),
+            (None, None, None) => {
+                ctx.value_error("An instrument is a sampler, a synth or a device");
                 None
             }
-            (Some(_), Some(_)) => {
-                ctx.value_error("An instrument is a sampler or a synth, not both");
+            _ => {
+                ctx.value_error("An instrument is one of a sampler, a synth or a device");
                 None
             }
         }
@@ -2224,20 +2290,28 @@ impl Instrument {
         match self {
             Instrument::Sampler(_) => "sampler",
             Instrument::Synth(_) => "synth",
+            Instrument::Device(_) => "device",
         }
     }
 
     pub fn sampler(&self) -> Option<&Sampler> {
         match self {
             Instrument::Sampler(s) => Some(s),
-            Instrument::Synth(_) => None,
+            _ => None,
         }
     }
 
     pub fn synth(&self) -> Option<&Synth> {
         match self {
             Instrument::Synth(s) => Some(s),
-            Instrument::Sampler(_) => None,
+            _ => None,
+        }
+    }
+
+    pub fn device(&self) -> Option<&Device> {
+        match self {
+            Instrument::Device(d) => Some(d),
+            _ => None,
         }
     }
 
@@ -2247,10 +2321,17 @@ impl Instrument {
             Instrument::Sampler(s) => {
                 o.req("sampler", s.dump(saved));
                 o.opt("synth", None);
+                o.opt("device", None);
             }
             Instrument::Synth(s) => {
                 o.opt("sampler", None);
                 o.req("synth", s.dump(saved));
+                o.opt("device", None);
+            }
+            Instrument::Device(d) => {
+                o.opt("sampler", None);
+                o.opt("synth", None);
+                o.req("device", d.dump_instrument(saved));
             }
         }
         o.done()
@@ -2275,6 +2356,11 @@ impl Midi {
 
     pub fn synth(&self) -> Option<&Synth> {
         self.instrument.as_ref().and_then(Instrument::synth)
+    }
+
+    /// The instrument of the person's own the notes play, if they play one.
+    pub fn device(&self) -> Option<&Device> {
+        self.instrument.as_ref().and_then(Instrument::device)
     }
 }
 
@@ -3153,23 +3239,11 @@ impl Effect {
             "device" => {
                 let name = f.req(ctx, "name", |c, x| v::pattern(c, x, &DEVICE_SLUG_RE, DEVICE_SLUG));
                 let version = f.opt(ctx, "version", None, opt_string);
-                let fields = f.opt(ctx, "fields", IndexMap::new(), |c, x| {
-                    v::str_dict(c, x, |c, x| match x {
-                        Value::Float(n) => Some(FieldValue::Number(*n)),
-                        Value::Int(n) => Some(FieldValue::Number(n.to_f64().unwrap_or(0.0))),
-                        Value::Bool(b) => Some(FieldValue::Flag(*b)),
-                        Value::Str(s) => Some(FieldValue::Text(s.clone())),
-                        _ => {
-                            c.error("value_error", "Value error, a device's field is a number, true or false, or a choice");
-                            None
-                        }
-                    })
-                });
+                let fields = f.opt(ctx, "fields", IndexMap::new(), device_fields);
                 let bypass = f.opt(ctx, "bypass", false, v::boolean);
                 (|| {
                     let fields = fields?;
-                    if let Some(bad) = fields.keys().find(|k| !DEVICE_FIELD_RE.is_match(k)) {
-                        ctx.value_error(format!("device field {bad}: a field's name is lowercase letters, digits and underscores, starting with a letter"));
+                    if !device_field_names(ctx, &fields) {
                         return None;
                     }
                     Some(Effect::Device(Device {

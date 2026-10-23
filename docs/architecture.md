@@ -116,7 +116,10 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   of the person's own is given, the chain before it tapped before the fader,
   and plays the device's cache in its place (`custom`), and runs a
   real-time device's WebAssembly module on the audio thread, compiled by
-  wasmtime and stopped at a deadline (`wasm`); see
+  wasmtime and stopped at a deadline (`wasm`); a MIDI track's instrument
+  of the person's own is given the track's notes as note-ons and note-offs
+  a block, through its module, or plays the host's offline output by the
+  timeline (`aaw-dsp`'s `instrument`); see
   [custom-devices.md](features/custom-devices.md).
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
@@ -133,9 +136,10 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   ElevenLabs for a sound at the person's own key and files it with its recipe
   (`generate`), the key in the macOS Keychain (`keys`); see
   [generated-audio.md](features/generated-audio.md). It reads the manifests
-  of the person's own devices, holds a song's devices to them, runs each
-  offline device's code in Python off its thread when what feeds it
-  changed and plays the cache, makes a real-time device's module ready for
+  of the person's own devices, effects and instruments, holds a song's
+  devices to them, runs each offline device's code in Python off its thread
+  when what feeds it changed, an instrument's on the track's notes, and
+  plays the cache, makes a real-time device's module ready for
   the engine, builds one from its Rust with rustc, and hears a device's
   folder change within a second (`devices`); see
   [custom-devices.md](features/custom-devices.md).
@@ -211,7 +215,8 @@ Python, in `src/agent_daw`:
   [join-checks.md](features/join-checks.md).
 - `device_runner.py`: runs a device of the person's own for the host: loads
   `device.py` from its folder, hands `process` the input, the fields and the
-  lanes, and writes the output; `--check` runs it once on noise. See
+  lanes, or an instrument's `play` the track's notes, and writes the
+  output; `--check` runs it once on noise, or an instrument on a chord. See
   [custom-devices.md](features/custom-devices.md).
 - `separation.py`: `daw separate`, a song taken apart on this Mac into vocals
   and instrumental or drums, bass, vocals and the rest, each part a sample in
@@ -364,7 +369,7 @@ and change; see [favorites.md](features/favorites.md).
 
 Automation: `tracks[].automation`, `groups[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` (tracks and groups),
-`effects.REF.FIELD`, `effects.RACK.effects.REF.FIELD` for an effect inside a rack, or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
+`effects.REF.FIELD`, `effects.RACK.effects.REF.FIELD` for an effect inside a rack, or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD`, or with an instrument of the person's own `instrument.fields.F` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).
@@ -396,7 +401,9 @@ across the loop's end cut there and one at or after it kept and not played;
 the schedule unrolls the loop, so the engine plays what copies would play. An
 audio clip loops by the same field, with `length_beats` for how long; see
 [looping-clips.md](features/looping-clips.md). `instrument` is
-null, which plays nothing, `{sampler: {pads, map}}` or `{synth: {...}}`: pads as below, and map
+null, which plays nothing, `{sampler: {pads, map}}`, `{synth: {...}}` or
+`{device: {name, version, fields}}`, an instrument of the person's own (see
+[custom-devices.md](features/custom-devices.md)): pads as below, and map
 entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
 not overlap; a pitched entry repitches its pad from its sample's root note, or
 from middle C (C4, 60) when the sample has none, to the note. The schedule gives a MIDI track's notes to its instrument as pitch,
@@ -506,8 +513,8 @@ says so in the reply of its next edit, as `hint`
 ([watchable-steps.md](features/watchable-steps.md), D87).
 
 `note.preview` is a transport command too: a note of a pitch, velocity and
-length played now through a MIDI track's instrument, a Synth or a Sampler,
-and the track's chain, from where the stream stands, whether or not the song
+length played now through a MIDI track's instrument, a Synth, a Sampler or
+a real-time instrument of the person's own, and the track's chain, from where the stream stands, whether or not the song
 plays, outside the timeline and the undo history and in no render. A
 Sampler's note is prepared by the host, as the same note in a clip would be,
 and handed to the audio thread, which hands it back to be freed. With

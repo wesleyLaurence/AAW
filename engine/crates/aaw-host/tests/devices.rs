@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 fn open() -> (tempfile::TempDir, Session) {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    devices::new("Tilt", &dir.path().join("devices"), false).unwrap();
+    devices::new("Tilt", &dir.path().join("devices"), false, false).unwrap();
     let s = Session::open(&path, true).unwrap();
     (dir, s)
 }
@@ -167,7 +167,7 @@ fn a_device_s_cache_is_made_by_its_code_and_played_in_the_song_and_a_freeze() {
 fn a_realtime_device_is_built_checked_and_run_in_the_song() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    let made = devices::new("Live Tilt", &dir.path().join("devices"), true).unwrap();
+    let made = devices::new("Live Tilt", &dir.path().join("devices"), true, false).unwrap();
     assert!(made.realtime());
     assert_eq!((made.manifest.entry.as_str(), made.manifest.source.as_deref()), ("device.wasm", Some("device.rs")));
     let source = std::fs::read_to_string(made.dir.join("device.rs")).unwrap();
@@ -236,4 +236,142 @@ fn a_realtime_device_is_built_checked_and_run_in_the_song() {
     assert!(changed.status && !changed.caches);
     assert!(matches!(&work.status[0].state, State::Failed(e) if e.contains("aaw_process failed")), "{:?}", work.status);
     assert!(!work.failing(), "said once");
+}
+
+/// A MIDI track `keys` playing an instrument of the person's own, `slug`,
+/// with a clip of a C held two beats from beat 4 and an E an octave up from
+/// beat 6.
+fn with_keys(s: &mut Session, slug: &str) {
+    edit(s, json!({"op": "track.add", "id": "keys", "type": "midi"})).unwrap();
+    let reply = edit(s, json!({"op": "instrument.set", "track": "keys", "instrument": slug})).unwrap();
+    assert!(reply["label"].as_str().unwrap().starts_with("Attach"), "{reply}");
+    edit(
+        s,
+        json!({"op": "clip.add", "track": "keys", "id": "phrase", "at": 4, "length_beats": 4, "notes": [
+            {"pitch": 60, "at": 0, "duration": 2, "velocity": 127},
+            {"pitch": 76, "at": 2, "duration": 1, "velocity": 64},
+        ]}),
+    )
+    .unwrap();
+}
+
+/// The frames of `beats` at the test song's tempo and rate.
+fn frames_at(p: &aaw_model::Project, beats: f64) -> usize {
+    (beats * 60.0 / p.session.tempo * p.session.sample_rate as f64).round() as usize
+}
+
+#[test]
+fn an_instrument_is_set_by_slug_held_to_its_manifest_and_kept_out_of_chains() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    devices::new("Tilt", &dir.path().join("devices"), false, false).unwrap();
+    let made = devices::new("Pluck", &dir.path().join("devices"), false, true).unwrap();
+    assert!(made.instrument() && !made.realtime());
+    let code = std::fs::read_to_string(made.dir.join("device.py")).unwrap();
+    assert!(code.starts_with("\"\"\"Pluck: the scaffold of an instrument") && code.contains("def play(notes, frames, sample_rate, fields)"));
+    let mut s = Session::open(&path, true).unwrap();
+    with_keys(&mut s, "pluck");
+    let i = get(&s, "tracks.keys.instrument.device");
+    assert_eq!((&i["name"], &i["version"], &i["fields"]["wave"], &i["fields"]["gain_db"]), (&json!("pluck"), &json!("0.1"), &json!("saw"), &json!(-12.0)));
+    let refused = |s: &mut Session, j: serde_json::Value| edit(s, j).unwrap_err();
+    // Its fields and lanes are its manifest's.
+    assert!(refused(&mut s, json!({"op": "set", "path": "tracks.keys.instrument.device.fields.wave", "value": "triangle"})).contains("wave is one of sine, saw, square"));
+    assert!(refused(&mut s, json!({"op": "set", "path": "tracks.keys.instrument.device.fields.colour", "value": 1})).contains("pluck has no field colour"));
+    let lane = |param: &str| json!({"op": "set", "path": "tracks.keys.automation", "value": [{"param": param, "points": [{"at": 0, "value": 1000}]}]});
+    assert!(refused(&mut s, lane("instrument.fields.attack_ms")).contains("pluck does not take a lane on attack_ms"));
+    assert!(refused(&mut s, lane("instrument.cutoff")).contains("instrument.fields.FIELD"));
+    edit(&mut s, lane("instrument.fields.tone_hz")).unwrap();
+    edit(&mut s, json!({"op": "set", "path": "tracks.keys.instrument.device.fields.wave", "value": "sine"})).unwrap();
+    // An instrument goes on a MIDI track, an effect in a chain.
+    assert!(refused(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "pluck"})).contains("pluck is an instrument, which a MIDI track's notes play: daw instrument set SONG TRACK pluck"));
+    assert!(refused(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": "tilt"})).contains("tilt is an effect, which goes in a chain"));
+    assert!(refused(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": {"device": {"name": "tilt"}}})).contains("tilt is an effect"));
+    // Replaced by the Synth, its lanes go.
+    edit(&mut s, json!({"op": "synth.add", "track": "keys"})).unwrap();
+    assert_eq!(get(&s, "tracks.keys.automation"), json!([]));
+    // In the song's instances it comes first on its track, by its key.
+    edit(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": "pluck"})).unwrap();
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "tilt"})).unwrap();
+    let instances = devices::instances(s.project(), dir.path());
+    let keys: Vec<_> = instances.iter().filter(|i| i.owner == "tracks.keys").map(|i| (i.reference.clone(), i.is_instrument())).collect();
+    assert_eq!(keys, [("tracks.keys.instrument".to_string(), true), ("tracks.keys.effects.0".to_string(), false)]);
+}
+
+#[test]
+fn an_offline_instrument_plays_the_notes_from_its_cache_and_feeds_the_chain() {
+    if !has_python() {
+        eprintln!("no Python at the checkout: skipped");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    devices::new("Tilt", &dir.path().join("devices"), false, false).unwrap();
+    let made = devices::new("Pluck", &dir.path().join("devices"), false, true).unwrap();
+    let checked = devices::check(&made).unwrap();
+    assert_eq!((&checked["ok"], &checked["notes"], &checked["frames_out"]), (&json!(true), &json!(4), &json!(48000)));
+    let mut s = Session::open(&path, true).unwrap();
+    with_keys(&mut s, "pluck");
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "tilt", "gain_db": -6})).unwrap();
+    let p = s.project().clone();
+    let settled = devices::settle(&p, dir.path(), true).unwrap();
+    assert!(settled.status.iter().all(|x| x.state == State::Ready), "{:?}", settled.status);
+    let played = audio(settled.caches.get(&("tracks.keys".to_string(), aaw_engine::custom::INSTRUMENT)).unwrap());
+    // Silent before beat 4, sounding through the C, and its sound is what
+    // the effect after it is given.
+    let at = |beats: f64| frames_at(&p, beats);
+    assert!(played[..at(4.0)].iter().all(|f| f[0] == 0.0));
+    let loud = played[at(4.5)..at(5.5)].iter().fold(0.0f32, |m, f| m.max(f[0].abs()));
+    assert!(loud > 0.05, "{loud}");
+    let input = aaw_engine::custom::input(&p, dir.path(), "tracks.keys", 0, 4096, &settled.caches).unwrap();
+    let worst = input.iter().zip(played.iter()).map(|(i, c)| (i[0] - c[0]).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-6, "the tilt is given the instrument's sound; off by {worst}");
+    // A note moved is another identity.
+    let before = devices::instances(&p, dir.path())[0].identity.clone().unwrap();
+    edit(&mut s, json!({"op": "set", "path": "tracks.keys.clips.phrase.notes.0.velocity", "value": 30})).unwrap();
+    let after = devices::instances(s.project(), dir.path())[0].identity.clone().unwrap();
+    assert_ne!(before, after);
+    // Code that fails refuses the render, in its words.
+    std::fs::write(made.dir.join("device.py"), "def play(notes, frames, sample_rate, fields):\n    raise ValueError('no keys today')\n").unwrap();
+    let err = devices::settle(s.project(), dir.path(), true).unwrap_err();
+    assert!(err.contains("tracks.keys.instrument") && err.contains("no keys today"), "{err}");
+}
+
+#[test]
+fn a_realtime_instrument_is_built_played_frozen_and_previewed() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    let made = devices::new("Live Pluck", &dir.path().join("devices"), true, true).unwrap();
+    let source = std::fs::read_to_string(made.dir.join("device.rs")).unwrap();
+    assert!(source.starts_with("//! Live Pluck: the scaffold of a real-time instrument") && source.contains("pub extern \"C\" fn aaw_note"));
+    let built = match devices::build(&made) {
+        Ok(b) => b,
+        Err(e) if e.contains("not installed") || e.contains("Could not start") => {
+            eprintln!("no Rust for WebAssembly here: skipped ({e})");
+            return;
+        }
+        Err(e) => panic!("{e}"),
+    };
+    assert_eq!((&built["ok"], &built["run"]), (&json!(true), &json!("realtime")));
+    assert!(built["peak"].as_f64().unwrap() > 0.05, "the check's notes sound: {built}");
+    let mut s = Session::open(&path, true).unwrap();
+    with_keys(&mut s, "live-pluck");
+    let p = s.project().clone();
+    let settled = devices::settle(&p, dir.path(), true).unwrap();
+    assert!(matches!(settled.caches.get(&("tracks.keys".to_string(), aaw_engine::custom::INSTRUMENT)), Some(Made::Code(_))));
+    // Frozen, the file is its notes: silent before beat 4, the C, then the E.
+    edit(&mut s, json!({"op": "track.freeze", "track": "keys"})).unwrap();
+    let frozen = aaw_engine::sndfile::read(&dir.path().join("frozen/keys.wav")).unwrap();
+    let at = |beats: f64| frames_at(&p, beats) * 2;
+    assert!(frozen.data[..at(4.0)].iter().all(|x| *x == 0.0));
+    let peak = |a: f64, b: f64| frozen.data[at(a)..at(b)].iter().fold(0.0f64, |m, x| m.max(x.abs()));
+    assert!(peak(4.2, 5.8) > 0.05 && peak(6.2, 6.8) > 0.02, "{} {}", peak(4.2, 5.8), peak(6.2, 6.8));
+    assert!(peak(8.5, 9.0) < 1e-3, "released by then");
+    edit(&mut s, json!({"op": "track.unfreeze", "track": "keys"})).unwrap();
+    // The work loads it as ready.
+    let mut work = Work::default();
+    work.update(s.project(), dir.path());
+    assert!(work.status.iter().all(|x| x.state == State::Ready), "{:?}", work.status);
+    // As an effect it is refused at once.
+    let refused = edit(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "live-pluck"})).unwrap_err();
+    assert!(refused.contains("is an instrument"));
 }

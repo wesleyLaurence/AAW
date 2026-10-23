@@ -42,6 +42,13 @@ pub trait Live: std::fmt::Debug + Send + Sync {
 pub trait Running: Send {
     /// Processes a block in place. Does not allocate.
     fn process(&mut self, x: &mut [Frame], clock: Clock);
+    /// Plays a block as an instrument: `notes` start and end within it, in
+    /// order, and `x` is silence going in. An effect's code hears no notes.
+    /// Does not allocate.
+    fn play(&mut self, x: &mut [Frame], clock: Clock, notes: &[crate::instrument::NoteEvent]) {
+        let _ = notes;
+        self.process(x, clock);
+    }
     /// Continues from the state of `old`, an instance of the same code,
     /// leaving `old` with state to be freed off the audio thread. Does not
     /// allocate.

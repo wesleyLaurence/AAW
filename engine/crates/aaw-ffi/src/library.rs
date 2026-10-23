@@ -187,6 +187,9 @@ pub struct DeviceInfo {
     pub slug: String,
     pub description: String,
     pub version: String,
+    /// `effect`, which goes in a chain, or `instrument`, which a MIDI
+    /// track's notes play.
+    pub kind: String,
     /// The fields' names, in the manifest's order.
     pub fields: Vec<String>,
     /// `project` or `workspace`.
@@ -211,6 +214,7 @@ pub fn library_devices(project: String, query: String) -> Vec<DeviceInfo> {
             slug: d.manifest.slug.clone(),
             description: d.manifest.description.clone(),
             version: d.manifest.version.clone(),
+            kind: d.manifest.kind.clone(),
             fields: d.manifest.fields.iter().map(|f| f.name.clone()).collect(),
             from: match d.from {
                 aaw_host::devices::Where::Project => "project".into(),

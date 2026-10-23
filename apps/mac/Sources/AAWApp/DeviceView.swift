@@ -533,11 +533,11 @@ private struct ChainHeader: View {
                         model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil, rack: nil))
                     }
                 }
-                if !model.plugins.isEmpty {
+                if model.plugins.contains(where: { $0.kind == "effect" }) {
                     Divider()
-                    // The plugins installed, by name; the host makes each
-                    // from its manifest.
-                    ForEach(model.plugins, id: \.slug) { plugin in
+                    // The effect plugins installed, by name; the host makes
+                    // each from its manifest.
+                    ForEach(model.plugins.filter { $0.kind == "effect" }, id: \.slug) { plugin in
                         Button(plugin.name) {
                             model.edit(.effectAdd(row: chain.row.row, kind: plugin.slug, index: nil, rack: nil))
                         }
@@ -790,6 +790,7 @@ private struct InstrumentPanel: View {
     private var title: String {
         if track.sampler != nil { return "Sampler" }
         if let synth = track.synth { return synth.patch.map { "Synth · \($0)" } ?? "Synth" }
+        if let plugin = track.plugin { return plugin.name ?? "Plugin" }
         return track.instrument.map(readable) ?? "No instrument"
     }
 
@@ -799,13 +800,20 @@ private struct InstrumentPanel: View {
         return 216
     }
 
+    /// What the panel says under an instrument of the person's own: why it
+    /// is not installed, or what the host is doing with it.
+    private var pluginNote: String? {
+        guard let plugin = track.plugin else { return nil }
+        return plugin.note ?? SongModel.deviceNote(model.instrumentStates["tracks.\(track.id).instrument"], instrument: true)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let synth = track.synth {
                 SynthHeader(model: model, track: track, synth: synth)
             } else {
                 HStack(spacing: 5) {
-                    Image(systemName: "pianokeys").foregroundStyle(.secondary)
+                    Image(systemName: track.plugin == nil ? "pianokeys" : "puzzlepiece.extension").foregroundStyle(.secondary)
                     Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 2)
                     if track.instrument != nil {
@@ -827,6 +835,31 @@ private struct InstrumentPanel: View {
                 SamplerPanel(model: model, track: track, sampler: sampler)
             } else if let synth = track.synth {
                 SynthPanel(model: model, track: track, synth: synth, height: model.detailHeight - 16 - 24)
+            } else if let plugin = track.plugin {
+                // An instrument of the person's own: its manifest's fields, as
+                // a device of the person's own in a chain shows them.
+                VStack(spacing: 3) {
+                    ForEach(plugin.fields, id: \.name) { field in
+                        HStack(spacing: 4) {
+                            Text(field.label)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 62, alignment: .leading)
+                            FieldControl(model: model, field: field) { .pluginInstrumentSet(track: track.key, field: field.name, value: $0) }
+                            SynthLaneMark(model: model, track: track, field: field)
+                        }
+                        .frame(height: 19)
+                    }
+                    if let note = pluginNote {
+                        Text(note)
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.top, 2)
+                    }
+                }
+                .padding(6)
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {

@@ -666,8 +666,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let sends = unfolded.contains(track.key) ? a.returns.count : 0
             let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
                 + lanesHeight(.track(track.key), track.lanes)
-            // A MIDI track's chain starts with its instrument.
-            let chain = track.midi ? ([track.instrument ?? "no instrument"] + [Self.chain(track.effects)]).filter { !$0.isEmpty }.joined(separator: " · ")
+            // A MIDI track's chain starts with its instrument, one of the
+            // person's own by the name its manifest gives it.
+            let chain = track.midi ? ([track.plugin?.name ?? track.instrument ?? "no instrument"] + [Self.chain(track.effects)]).filter { !$0.isEmpty }.joined(separator: " · ")
                 : Self.chain(track.effects)
             // A frozen track says so before its devices, which its file plays for.
             let detail = frozen ? (["frozen"] + [chain]).filter { !$0.isEmpty }.joined(separator: " · ") : chain
@@ -2235,7 +2236,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if let (row, _) = row(atY: point.y) {
             return (point.x < TimelineLayout.headerWidth && model.canAddBrowserDevice(kind, to: row), row)
         }
-        return (Browser.isInstrument(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
+        return (model.isInstrumentKind(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
     }
 
     /// The effect being dragged by its title out of the device panel.

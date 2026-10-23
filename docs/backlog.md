@@ -32,11 +32,12 @@ stood.
     cache, the generic panel from the manifest and `daw plugin
     new|check|list|show|status` are built (D144), and the real-time tier,
     WebAssembly built from Rust by `daw plugin build` and run on the audio
-    thread (D145). Left: instruments with note input and the piano roll's
-    preview, MIDI effects, and the spec's version 1 written as the
-    reference with how a device is shared; FAUST as another source built
-    to the same ABI; a finer dependency for an offline device's input than
-    the whole song; a timeout on an offline run.
+    thread (D145), and instruments, offline and in real time, with the
+    piano roll's preview through a real-time one (D146). Left: MIDI
+    effects, and the spec's version 1 written as the reference with how a
+    device is shared; FAUST as another source built to the same ABI; a
+    finer dependency for an offline device's input than the whole song; a
+    timeout on an offline run.
     [features/custom-devices.md](features/custom-devices.md)
 2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
@@ -119,6 +120,15 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **An instrument of the person's own, by the agent on a real song:** `daw
+  plugin new --instrument --realtime`, its `device.rs` edited into a sound
+  the song wants and built, `daw instrument set` on a MIDI track, the piano
+  roll's notes previewed through it, a field moved while a chord is held,
+  played from the middle of a note to hear the notes picked up, and the
+  same as an offline one in Python; dragged from the browser's
+  Instruments onto a header and below the tracks. Rendered and checked by
+  their pitches in tests and from the terminal; nothing heard, the app
+  never ran one.
 - **A real-time device of the person's own, by the agent while the song
   plays:** `daw plugin new --realtime`, its `device.rs` edited into a sound
   the song wants and built, added by its slug, a field moved in the panel

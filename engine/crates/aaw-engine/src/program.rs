@@ -13,6 +13,7 @@
 use crate::sndfile;
 use crate::stretch::{self, MARGIN_SECONDS};
 use aaw_dsp::device::{Kernels, Plan};
+use aaw_dsp::instrument::InstrumentPlan;
 pub use aaw_dsp::spectrum::Taps;
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::resample::{repitch_ratio, resample_poly};
@@ -165,6 +166,10 @@ pub struct TrackProgram {
     /// Synth has none; its notes are the synth's.
     pub voices: Arc<Vec<Voice>>,
     pub synth: Option<SynthProgram>,
+    /// A MIDI track's instrument of the person's own: its notes, its fields
+    /// and what the host made of it. Its sound goes to the inserts as a
+    /// Synth's does.
+    pub instrument: Option<InstrumentPlan>,
     /// Equal for tracks whose voices are the same hits of the same audio
     /// within the same session length, so that what was worked out from
     /// them, such as waveform peaks, can be kept.
@@ -899,6 +904,9 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
     if t.midi.as_ref().is_some_and(|m| m.synth().is_some()) {
         return "synth".to_string();
     }
+    if t.midi.as_ref().is_some_and(|m| m.device().is_some()) {
+        return "device".to_string();
+    }
     let mut key = format!(
         "{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}",
         t.pads,
@@ -1277,11 +1285,20 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
                 chain: chain(&spec.effects, |i| patch_effect_lanes(&lanes.instrument, i), p, cache, None, None, 0),
             });
         }
-        // The inserts follow the patch's effects, so their latency counts
-        // the patch chain's.
-        let patch_latency = synth.as_ref().map_or(0, |s| s.chain.latency);
-        let mut effect_lanes = std::mem::take(&mut lanes.effects);
         let owner = format!("tracks.{}", t.id);
+        // An instrument of the person's own plays what the host made of it,
+        // by the track and `custom::INSTRUMENT`.
+        let instrument = match t.midi.as_ref().and_then(|m| m.device().map(|d| (m, d))).filter(|_| !frozen) {
+            Some((midi, device)) => {
+                let made = cache.devices.get(&(owner.clone(), crate::custom::INSTRUMENT)).cloned();
+                Some(InstrumentPlan::new(cache.synth_notes(p, t, midi), device, std::mem::take(&mut lanes.instrument), made))
+            }
+            None => None,
+        };
+        // The inserts follow the patch's effects, or the instrument, so their
+        // latency counts the patch chain's or the instrument's.
+        let patch_latency = synth.as_ref().map_or(0, |s| s.chain.latency) + instrument.as_ref().map_or(0, |i| i.latency);
+        let mut effect_lanes = std::mem::take(&mut lanes.effects);
         let mut chain = chain(effects, |i| effect_lanes.remove(&i).unwrap_or_default(), p, cache, Some(&t.id), Some(&owner), patch_latency);
         // The track waits for the slowest of its keys.
         let delay = chain
@@ -1310,6 +1327,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             id: t.id.clone(),
             voices,
             synth,
+            instrument,
             voices_id,
             chain,
             gain: lanes.channel("gain_db", t.gain_db),
@@ -1441,7 +1459,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     };
     (rate, track_offset, return_latency, latency).hash(&mut h);
     for t in &tracks {
-        (&t.id, t.delay, t.align, t.in_mix, t.group, t.synth.as_ref().map(|s| s.patch.signature)).hash(&mut h);
+        (&t.id, t.delay, t.align, t.in_mix, t.group, t.synth.as_ref().map(|s| s.patch.signature), t.instrument.as_ref().map(|i| i.signature)).hash(&mut h);
         if let Some(s) = &t.synth {
             devices(&s.chain, &mut h);
         }

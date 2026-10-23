@@ -224,6 +224,14 @@ pub enum Edit {
     NotesPaste { notes: Vec<NoteCopy>, clip: u64, at: Option<f64> },
     /// Takes a MIDI track's instrument off; its notes are kept.
     InstrumentRemove { track: u64 },
+    /// Puts an instrument of the person's own, by its slug, on a MIDI track
+    /// in place of the instrument it had, or creates a MIDI track with it,
+    /// named after it: what the browser's instrument plugins do when
+    /// dropped.
+    PluginInstrument { track: Option<u64>, slug: String },
+    /// Sets a field of a MIDI track's instrument of the person's own, named
+    /// as its `FieldView` names it, `fields.F`.
+    PluginInstrumentSet { track: u64, field: String, value: FieldValue },
     /// Attach an empty sampler, or create a MIDI track with one.
     InstrumentAdd { track: Option<u64> },
     /// Attaches a Synth to a MIDI track, in place of the instrument it had,
@@ -1634,6 +1642,24 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             })
         }
         Edit::InstrumentRemove { track } => Ok(vec![json!({"op": "instrument.set", "track": handle_text(*track), "instrument": null})]),
+        Edit::PluginInstrument { track, slug } => Ok(match track {
+            Some(key) => {
+                let t = midi_track(project, &doc.tree(), *key)?;
+                batch(vec![json!({"op": "instrument.set", "track": handle_text(*key), "instrument": slug})], format!("Attach {slug} to {}", t.id))
+            }
+            None => {
+                let id = unique(&ident(slug, "keys"), |name| taken(project, name));
+                batch(
+                    vec![json!({"op": "track.add", "id": id, "type": "midi"}), json!({"op": "instrument.set", "track": id, "instrument": slug})],
+                    format!("Add track {id} with {slug}"),
+                )
+            }
+        }),
+        Edit::PluginInstrumentSet { track, field, value } => {
+            let t = midi_track(project, &doc.tree(), *track)?;
+            let path = format!("tracks.{}.instrument.device.{field}", handle_text(*track));
+            Ok(batch(vec![json!({"op": "set", "path": path, "value": field_json(value)})], format!("Set {} on {}", field.strip_prefix("fields.").unwrap_or(field), t.id)))
+        }
         Edit::SamplerLoad { track: key, asset, name } => {
             let tree = doc.tree();
             let (t, loaded) = sampler_device(project, &tree, *key)?;

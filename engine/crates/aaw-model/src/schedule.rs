@@ -210,6 +210,9 @@ pub fn sounded(p: &Project) -> Vec<Sounded> {
                             push(at, until, None, format!("{} {}", entry.pad, pad.transpose));
                         }
                     }
+                    // An instrument of the person's own is taken to sound
+                    // the note's pitch.
+                    Some(Instrument::Device(_)) => push(at, until, Some(n.pitch as f64), String::new()),
                     None => {}
                 }
             }

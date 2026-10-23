@@ -308,6 +308,9 @@ pub struct TrackView {
     pub sampler: Option<SamplerView>,
     /// The instrument as the Synth, when it is one.
     pub synth: Option<SynthView>,
+    /// The instrument when it is one of the person's own, drawn as a device
+    /// of the person's own is in a chain: its fields from its manifest.
+    pub plugin: Option<EffectView>,
     pub note_clips: Vec<NoteClipView>,
     /// The key of the group the track is in, if any. A group's tracks are
     /// next to each other among the tracks.
@@ -901,6 +904,20 @@ fn lane_label(owner: Owner, kind: &TargetKind, field: &str, devices: &Devices) -
         TargetKind::Channel => ("Volume".into(), "dB".into()),
         TargetKind::Send(to) => (format!("Send {to}"), "dB".into()),
         TargetKind::Instrument => {
+            // An instrument of the person's own: its manifest's label, after
+            // its name.
+            if let Some(d) = match owner {
+                Owner::Track(t) => t.midi.as_ref().and_then(|m| m.device()),
+                _ => None,
+            } {
+                let name = field.strip_prefix("fields.").unwrap_or(field);
+                let installed = devices.get(&d.name);
+                let spec = installed.and_then(|x| x.manifest.field(name).cloned());
+                return (
+                    format!("{} {}", installed.map_or(d.name.as_str(), |x| x.manifest.name.as_str()), spec.as_ref().map_or(name, |s| s.label.as_str())),
+                    spec.map_or(String::new(), |s| s.unit),
+                );
+            }
             let synth = match owner {
                 Owner::Track(t) => t.midi.as_ref().and_then(|m| m.synth()),
                 _ => None,
@@ -962,6 +979,16 @@ fn lanes(owner: Owner, lanes: &[Lane], handles: &[Item], devices: &Devices) -> V
             let (min, max) = match &t.kind {
                 TargetKind::Channel if t.field == "gain_db" => (-60.0, 6.0),
                 TargetKind::Send(_) => (-60.0, 0.0),
+                TargetKind::Instrument if t.field.starts_with("fields.") => match owner {
+                    Owner::Track(x) => x
+                        .midi
+                        .as_ref()
+                        .and_then(|m| m.device())
+                        .and_then(|d| devices.get(&d.name))
+                        .and_then(|d| d.manifest.field(&t.field["fields.".len()..]).map(|f| (f.min, f.max)))
+                        .unwrap_or((0.0, 1.0)),
+                    _ => (0.0, 1.0),
+                },
                 TargetKind::Effect { index, inner, .. } => match Effect::at(owner.effects(), Place::new(*index, *inner)) {
                     Some(Effect::Device(d)) => devices
                         .get(&d.name)
@@ -1015,6 +1042,20 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven, devices: &Devic
         })
         .collect();
     if let Owner::Track(t) = owner {
+        // An instrument of the person's own: the fields its manifest lets a
+        // lane move.
+        if let Some(installed) = t.midi.as_ref().and_then(|m| m.device()).and_then(|d| devices.get(&d.name)) {
+            for f in installed.manifest.fields.iter().filter(|f| f.lane && f.kind.numeric()) {
+                let field = format!("fields.{}", f.name);
+                if driven.instrument.contains_key(&field) {
+                    continue;
+                }
+                out.push(LaneTarget {
+                    label: lane_label(owner, &TargetKind::Instrument, &field, devices).0,
+                    param: format!("instrument.{field}"),
+                });
+            }
+        }
         if let Some(synth) = t.midi.as_ref().and_then(|m| m.synth()) {
             for path in synth_params(synth) {
                 let param = format!("instrument.{path}");
@@ -1076,7 +1117,12 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven, devices: &Devic
 /// A channel's effects, lanes and what could still be automated, and a
 /// MIDI track's Synth. `samples` are the project's samples, which a
 /// wavetable may name, under `directory`.
-fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String], samples: &Project, directory: &Path) -> (Vec<EffectView>, Vec<LaneView>, Vec<LaneTarget>, Option<SynthView>) {
+/// What a channel shows: its effects, its lanes, the parameters it could
+/// have a lane on, a track's Synth and a track's instrument of the person's
+/// own.
+type Channel = (Vec<EffectView>, Vec<LaneView>, Vec<LaneTarget>, Option<SynthView>, Option<EffectView>);
+
+fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String], samples: &Project, directory: &Path) -> Channel {
     let (effect_items, lane_items) = match node {
         Some(n) => (items(n, "effects"), items(n, "automation")),
         None => (&[][..], &[][..]),
@@ -1090,12 +1136,52 @@ fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String
         _ => None,
     };
     let devices = devices_in(directory);
+    let plugin = match owner {
+        Owner::Track(t) => t.midi.as_ref().and_then(|m| m.device()).map(|d| plugin_view(d, &driven, &devices)),
+        _ => None,
+    };
     (
         effects(owner.effects(), effect_items, tracks, &driven, false, &devices),
         lanes(owner, owner.automation(), lane_items, &devices),
         lane_targets(owner, sends, &driven, &devices),
         synth,
+        plugin,
     )
+}
+
+/// A track's instrument of the person's own as its panel draws it, as a
+/// device effect is drawn: titled as its manifest names it, a control for
+/// each of its fields, whose lanes are the track's on
+/// `instrument.fields.F`. It has no handle of its own: it is edited by its
+/// track's (`Edit::PluginInstrumentSet`).
+fn plugin_view(d: &aaw_model::Device, driven: &Driven, devices: &Devices) -> EffectView {
+    let installed = devices.get(&d.name).filter(|x| x.instrument());
+    let fields = match installed {
+        Some(device) => device_fields(d, device, 0, "", driven, None)
+            .into_iter()
+            .map(|mut f| {
+                f.lane = driven.instrument.get(&f.name).copied();
+                f.param = f.param.map(|_| format!("instrument.{}", f.name));
+                f
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    EffectView {
+        key: 0,
+        kind: "device".into(),
+        id: None,
+        bypass: false,
+        fields,
+        bands: 0,
+        name: Some(installed.map_or_else(|| d.name.clone(), |x| x.manifest.name.clone())),
+        effects: Vec::new(),
+        note: match (devices.get(&d.name), installed) {
+            (None, _) => Some(format!("{} is not installed under the project's or the workspace's devices/; the notes play nothing", d.name)),
+            (Some(_), None) => Some(format!("{} is an effect, not an instrument; the notes play nothing", d.name)),
+            _ => None,
+        },
+    }
 }
 
 /// A field of a synth as a control needs it. `path` is its path in the
@@ -1433,7 +1519,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             let clip_items = node.map(|n| items(n, "clips")).unwrap_or(&[]);
             let audio_items = node.map(|n| items(n, "audio")).unwrap_or(&[]);
             let sends: Vec<String> = t.sends.iter().map(|s| s.to.clone()).collect();
-            let (effects, lanes, lane_targets, synth) = channel(Owner::Track(t), node, &keys(p, Some(&t.id)), &sends, p, directory);
+            let (effects, lanes, lane_targets, synth, plugin) = channel(Owner::Track(t), node, &keys(p, Some(&t.id)), &sends, p, directory);
             TrackView {
                 key: handle(track_items, i),
                 id: t.id.clone(),
@@ -1471,6 +1557,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
                 sampler: sampler(p, t, device_sample(t).and_then(&mut file)),
                 synth,
+                plugin,
                 map: t
                     .midi
                     .as_ref()
@@ -1593,7 +1680,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         .map(|(i, g)| {
             let node = group_items.get(i).map(|item| &item.node);
             let sends: Vec<String> = g.sends.iter().map(|s| s.to.clone()).collect();
-            let (effects, lanes, lane_targets, _) = channel(Owner::Group(g), node, &keys(p, None), &sends, p, directory);
+            let (effects, lanes, lane_targets, _, _) = channel(Owner::Group(g), node, &keys(p, None), &sends, p, directory);
             GroupView {
                 key: handle(group_items, i),
                 id: g.id.clone(),
@@ -1625,7 +1712,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         .enumerate()
         .map(|(i, r)| {
             let node = return_items.get(i).map(|item| &item.node);
-            let (effects, lanes, lane_targets, _) = channel(Owner::Return(r), node, &keys(p, None), &[], p, directory);
+            let (effects, lanes, lane_targets, _, _) = channel(Owner::Return(r), node, &keys(p, None), &[], p, directory);
             ReturnView {
                 key: handle(return_items, i),
                 id: r.id.clone(),
@@ -1665,7 +1752,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
     // A song edited as a file may list them in any order.
     markers.sort_by(|a, b| a.at.total_cmp(&b.at));
     // A master compressor cannot be keyed.
-    let (master_effects, master_lanes, master_targets, _) = channel(Owner::Master(&p.master), tree.get("master"), &[], &[], p, directory);
+    let (master_effects, master_lanes, master_targets, _, _) = channel(Owner::Master(&p.master), tree.get("master"), &[], &[], p, directory);
     Arrangement {
         revision,
         project_sha256: doc.sha.clone(),

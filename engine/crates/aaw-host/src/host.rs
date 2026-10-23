@@ -890,10 +890,12 @@ impl Host {
     }
 
     /// `note.preview`: a note played now through a MIDI track's instrument,
-    /// its Synth or its Sampler, and its chain, from where the stream stands,
-    /// outside the timeline and the history. Opens the output if no play has
-    /// yet. A Sampler plays it as the same note in a clip would; a pitch its
-    /// map leaves silent is silent here too, and the reply says so. With
+    /// its Synth, its Sampler or a real-time instrument of the person's own,
+    /// and its chain, from where the stream stands, outside the timeline
+    /// and the history. Opens the output if no play has yet. A Sampler plays
+    /// it as the same note in a clip would; a pitch its map leaves silent is
+    /// silent here too, and the reply says so, as it says why an instrument
+    /// of the person's own is silent: offline, or its code not ready. With
     /// `replace` the track's earlier previews are let go first, each through
     /// its release, so one is heard at a time, as the piano roll asks.
     fn preview(&mut self, track: &str, pitch: &Json, velocity: Option<i64>, length_beats: Option<&Json>, replace: bool) -> Result<Json> {
@@ -923,12 +925,13 @@ impl Host {
         }
         let midi = t.midi.as_ref();
         let synth = midi.and_then(|m| m.synth()).is_some();
-        if !synth && midi.and_then(|m| m.sampler()).is_none() {
+        let device = midi.and_then(|m| m.device()).is_some();
+        if !synth && !device && midi.and_then(|m| m.sampler()).is_none() {
             return Err(format!("{track} has no instrument to play the note; daw synth add or daw instrument add attaches one"));
         }
         let frames = (length * 60.0 / session.tempo * session.sample_rate as f64).round() as usize;
         // A Sampler's note is prepared here, as an edit's notes are.
-        let voice = match synth {
+        let voice = match synth || device {
             true => None,
             false => {
                 let (project, dir) = (self.session.project(), self.session.dir());
@@ -945,9 +948,25 @@ impl Host {
         let index = playing
             .tracks
             .iter()
-            .position(|p| p.id == track && p.synth.is_some() == synth)
+            .position(|p| p.id == track && p.synth.is_some() == synth && p.instrument.is_some() == device)
             .ok_or_else(|| format!("{track} is not yet playing its instrument; playback keeps the previous version"))?;
+        // An instrument of the person's own plays a preview through its code;
+        // offline, its sound is the host's output over the timeline.
+        let silent_why = match &playing.tracks[index].instrument {
+            Some(i) => match &i.made {
+                Some(aaw_dsp::device::Made::Code(_)) => None,
+                Some(aaw_dsp::device::Made::Audio(_)) => Some(format!("{} plays offline, from what its code made of the song; only a real-time instrument plays a preview", i.device.name)),
+                None => Some(format!("{} is not ready yet: daw plugin status says why", i.device.name)),
+            },
+            None => None,
+        };
         let sounds = match voice {
+            None if silent_why.is_some() => {
+                if replace {
+                    t.control.let_go_previews(index)?;
+                }
+                false
+            }
             None => {
                 t.control.preview(index, pitch as f64, velocity as f64 / 127.0, frames, replace)?;
                 true
@@ -973,6 +992,12 @@ impl Host {
             "length_beats": length,
             "frames": frames,
         }))
+        .map(|mut reply| {
+            if let Some(why) = silent_why {
+                reply["why"] = json!(why);
+            }
+            reply
+        })
     }
 
     /// The output's hardware latency in the song's frames, what the person

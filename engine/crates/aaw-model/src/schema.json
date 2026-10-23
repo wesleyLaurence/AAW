@@ -902,7 +902,7 @@
     },
     "Instrument": {
       "additionalProperties": false,
-      "description": "A sampler or the Synth: exactly one of the two.",
+      "description": "A sampler, the Synth, or an instrument of your own: exactly one of the three.",
       "properties": {
         "sampler": {
           "anyOf": [
@@ -927,6 +927,19 @@
           ],
           "default": null,
           "title": "Synth"
+        },
+        "device": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PluginInstrument"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "An instrument of your own: a device whose manifest's kind is instrument, by its slug under the project's or the workspace's devices/",
+          "title": "Device"
         }
       },
       "title": "Instrument",
@@ -1924,6 +1937,57 @@
         "length_beats"
       ],
       "title": "Pattern",
+      "type": "object"
+    },
+    "PluginInstrument": {
+      "additionalProperties": false,
+      "description": "An instrument of your own, by its slug: the notes go to its code, which makes the track's sound before its effects.",
+      "properties": {
+        "name": {
+          "description": "The device's slug, the name of its folder under devices/",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The manifest's version the song was written with",
+          "title": "Version"
+        },
+        "fields": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "The values of the fields the device's manifest declares, by name",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "title": "Fields",
+          "type": "object"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "PluginInstrument",
       "type": "object"
     },
     "Point": {

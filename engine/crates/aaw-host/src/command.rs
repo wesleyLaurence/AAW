@@ -2321,6 +2321,16 @@ impl<'a> Edit<'a> {
             InstrumentSet { track, instrument } => {
                 let loc = self.midi_track(track)?;
                 let had = !matches!(self.node(&loc).get("instrument"), None | Some(Node::Leaf(Value::None)));
+                // An instrument of the person's own by its slug, at its
+                // manifest's defaults.
+                let resolved;
+                let instrument = match instrument {
+                    Json::String(slug) => {
+                        resolved = crate::devices::instrument_node(self.dir.as_deref(), slug)?;
+                        &resolved
+                    }
+                    other => other,
+                };
                 let value = json_value(instrument)?;
                 let kind = match &value {
                     Value::Dict(d) => d
@@ -2331,15 +2341,21 @@ impl<'a> Edit<'a> {
                         .to_string(),
                     _ => "instrument".to_string(),
                 };
+                // An instrument of the person's own goes by its slug.
+                let plugin = match value.get("device").and_then(|d| d.get("name")) {
+                    Some(Value::Str(n)) => Some(n.clone()),
+                    _ => None,
+                };
                 let removing = value.is_none();
                 self.node_mut(&loc).map_mut().expect("a track").insert("instrument".into(), Node::new(&value));
                 // Lanes on the synth's fields that the new instrument lacks go.
                 self.drop_instrument_lanes(&loc)?;
                 let name = self.name(&loc);
+                let kind = plugin.unwrap_or(format!("a {kind}"));
                 out.label = match (had, removing) {
                     (_, true) => format!("Remove the instrument of {name}"),
-                    (false, false) => format!("Attach a {kind} to {name}"),
-                    (true, false) => format!("Replace the instrument of {name} with a {kind}"),
+                    (false, false) => format!("Attach {kind} to {name}"),
+                    (true, false) => format!("Replace the instrument of {name} with {kind}"),
                 };
             }
             InstrumentMap { track, fields } => {
@@ -3655,18 +3671,26 @@ impl<'a> Edit<'a> {
     fn drop_instrument_lanes(&mut self, track: &[Step]) -> Result<()> {
         // The instrument as validation fills it in, so a lane on a field at
         // its default stays.
-        let synth = self
-            .node(track)
-            .get("instrument")
-            .and_then(|i| aaw_model::Instrument::parse(&i.value()).ok())
-            .and_then(|i| i.synth().cloned());
+        let instrument = self.node(track).get("instrument").and_then(|i| aaw_model::Instrument::parse(&i.value()).ok());
+        let synth = instrument.as_ref().and_then(|i| i.synth().cloned());
+        // An instrument of the person's own keeps the lanes on the fields its
+        // manifest lets a lane move, or every field's while it is not
+        // installed.
+        let device = instrument.as_ref().and_then(|i| i.device()).map(|d| {
+            crate::devices::find(self.dir.as_deref(), &d.name)
+                .ok()
+                .map(|x| x.manifest.fields.iter().filter(|f| f.lane).map(|f| f.name.clone()).collect::<Vec<_>>())
+        });
         let name = self.text(track);
         let lanes = self.list(track, "automation")?;
         let mut notes = Vec::new();
         lanes.retain(|lane| {
             let Some(param) = lane.node.field("param") else { return true };
             let Some(field) = param.strip_prefix("instrument.") else { return true };
-            let kept = synth.as_ref().is_some_and(|s| aaw_model::rules::synth_param(s, field).is_ok());
+            let kept = match &device {
+                Some(fields) => field.strip_prefix("fields.").is_some_and(|f| fields.as_ref().is_none_or(|names| names.iter().any(|n| n == f))),
+                None => synth.as_ref().is_some_and(|s| aaw_model::rules::synth_param(s, field).is_ok()),
+            };
             if !kept {
                 notes.push(format!("{name}: removed lane {param}"));
             }

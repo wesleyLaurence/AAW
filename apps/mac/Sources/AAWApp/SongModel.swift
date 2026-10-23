@@ -219,6 +219,9 @@ public final class SongModel {
     /// handle, as the host last said: its cache made and playing, its code
     /// running, waiting its turn, failed, not installed, or off.
     private(set) var deviceStates: [UInt64: DeviceStatusView] = [:]
+    /// What the host is doing with each track's instrument of the person's
+    /// own, by its reference, `tracks.T.instrument`.
+    private(set) var instrumentStates: [String: DeviceStatusView] = [:]
     /// The plugins installed for this project, the project's own and the
     /// workspace's, by slug: what the browser lists under Plugins and what a
     /// dropped slug is checked against.
@@ -468,6 +471,7 @@ public final class SongModel {
     /// `daw move` or `daw copy` did.
     fileprivate func apply(_ devices: [DeviceStatusView]) {
         deviceStates = Dictionary(devices.filter { $0.effect != 0 }.map { ($0.effect, $0) }, uniquingKeysWith: { _, last in last })
+        instrumentStates = Dictionary(devices.filter { $0.reference.hasSuffix(".instrument") }.map { ($0.reference, $0) }, uniquingKeysWith: { _, last in last })
     }
 
     /// Reads the plugins installed for the project again, as the browser
@@ -477,14 +481,17 @@ public final class SongModel {
     }
 
     /// The line a device's panel says under its fields, from the host's
-    /// last word of it; nothing while its cache plays or it is off.
-    nonisolated static func deviceNote(_ state: DeviceStatusView?) -> String? {
+    /// last word of it; nothing while its cache plays or it is off. An
+    /// instrument's says the notes play nothing, where an effect passes its
+    /// sound through.
+    nonisolated static func deviceNote(_ state: DeviceStatusView?, instrument: Bool = false) -> String? {
         guard let state else { return nil }
+        let meanwhile = instrument ? "the notes play nothing" : "the sound passes through"
         switch state.state {
-        case "computing": return "Computing: its code runs on what feeds it; the sound passes through until it is done"
-        case "waiting": return "Waiting for its turn to compute; the sound passes through"
-        case "failed": return "Failed: \(state.error ?? "the run gave no reason"); the sound passes through"
-        case "missing": return "Not installed: \(state.error ?? "no folder of its name"); the sound passes through"
+        case "computing": return instrument ? "Computing: its code plays the notes; they play nothing until it is done" : "Computing: its code runs on what feeds it; the sound passes through until it is done"
+        case "waiting": return "Waiting for its turn to compute; \(meanwhile)"
+        case "failed": return "Failed: \(state.error ?? "the run gave no reason"); \(meanwhile)"
+        case "missing": return "Not installed: \(state.error ?? "no folder of its name"); \(meanwhile)"
         default: return nil
         }
     }
@@ -1333,6 +1340,19 @@ public final class SongModel {
     /// Whether a device from the browser can go on a row: an effect or a
     /// saved rack (`kind` "rack") on any row, an instrument or an instrument
     /// rack on a MIDI track or, with no row, on a new track.
+    /// Whether `kind` names an instrument plugin installed for the project,
+    /// which a MIDI track's notes play.
+    func isInstrumentPlugin(_ kind: String) -> Bool {
+        plugins.contains { $0.slug == kind && $0.kind == "instrument" }
+    }
+
+    /// Whether `kind` goes on a MIDI track as its instrument, or below the
+    /// tracks as a new one: the Sampler, the Synth, an instrument rack or an
+    /// instrument plugin.
+    func isInstrumentKind(_ kind: String) -> Bool {
+        Browser.isInstrument(kind) || isInstrumentPlugin(kind)
+    }
+
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
         if kind == "rack" { return row != nil }
         if Browser.isMidiEffect(kind) {
@@ -1340,7 +1360,7 @@ public final class SongModel {
             guard case .track(let key) = row else { return false }
             return arrangement.tracks.first { $0.key == key }?.midi == true
         }
-        if !Browser.isInstrument(kind) { return (DeviceChain.kinds.contains(kind) || plugins.contains { $0.slug == kind }) && row != nil }
+        if !isInstrumentKind(kind) { return (DeviceChain.kinds.contains(kind) || plugins.contains { $0.slug == kind && $0.kind == "effect" }) && row != nil }
         guard let row else { return true }
         guard case .track(let key) = row else { return false }
         return arrangement.tracks.first { $0.key == key }?.midi == true
@@ -1354,7 +1374,7 @@ public final class SongModel {
     /// a new track.
     func addBrowserDevice(_ kind: String, to row: RowID?, index: UInt32? = nil, patch: String? = nil, rack: String? = nil, into: UInt64? = nil) {
         guard canAddBrowserDevice(kind, to: row) else { return }
-        if Browser.isInstrument(kind) {
+        if isInstrumentKind(kind) {
             let track: UInt64?
             if case .track(let key) = row { track = key } else { track = nil }
             let edit: Edit
@@ -1363,7 +1383,8 @@ public final class SongModel {
             case Browser.instrumentRackKind:
                 guard let rack else { return }
                 edit = .instrumentRackAdd(track: track, rack: rack)
-            default: edit = .synthAdd(track: track, patch: patch)
+            case "synth": edit = .synthAdd(track: track, patch: patch)
+            default: edit = .pluginInstrument(track: track, slug: kind)
             }
             self.edit(edit) { [weak self] made in
                 guard let self else { return }

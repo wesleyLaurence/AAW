@@ -20,11 +20,18 @@
 //! - optionally `aaw_latency() -> i32`, the frames by which the device
 //!   delays its input, read after `aaw_init`.
 //!
+//! An instrument also exports `aaw_note(at: i32, key: i32, velocity: i32)`,
+//! called before `aaw_process` for each note starting or ending within the
+//! frames it is given, in order: `at` the frame among them, `key` the MIDI
+//! note, `velocity` 1 to 127 for a start and 0 for an end. Its buffers hold
+//! silence when `aaw_process` is called, and it writes its sound there.
+//!
 //! A call that traps, runs past its deadline, or gives samples that are not
 //! numbers ends the instance: the device passes its input through from
 //! then on, and the code keeps the reason for the host to say.
 
 use aaw_dsp::device::{Live, Running};
+use aaw_dsp::instrument::NoteEvent;
 use aaw_dsp::envelope::{Envelope, Param};
 use aaw_dsp::{Clock, Frame};
 use aaw_model::rules::Domain;
@@ -129,6 +136,8 @@ impl Field {
 pub struct Code {
     module: Module,
     fields: Vec<Field>,
+    /// Whether the code is an instrument's, which is given notes.
+    instrument: bool,
     rate: f64,
     tempo: f64,
     latency: usize,
@@ -148,6 +157,8 @@ struct Wasm {
     store: Store<StoreLimits>,
     memory: Memory,
     process: TypedFunc<(i32, i64, i32), ()>,
+    /// An instrument's `aaw_note`.
+    note: Option<TypedFunc<(i32, i32, i32), ()>>,
     fields: usize,
     left: usize,
     right: usize,
@@ -158,8 +169,9 @@ fn deadline(store: &mut Store<StoreLimits>) {
 }
 
 /// Instantiates the module and runs `aaw_init`, checking every export the
-/// ABI names; the latency is the second value.
-fn instantiate(module: &Module, fields: usize, rate: f64, tempo: f64) -> Result<(Wasm, usize)> {
+/// ABI names, `aaw_note` too for an instrument; the latency is the second
+/// value.
+fn instantiate(module: &Module, fields: usize, rate: f64, tempo: f64, instrument: bool) -> Result<(Wasm, usize)> {
     let engine = engine()?;
     if let Some(import) = module.imports().next() {
         return Err(format!("the module imports {} from {}; a device imports nothing", import.name(), import.module()));
@@ -183,6 +195,10 @@ fn instantiate(module: &Module, fields: usize, rate: f64, tempo: f64) -> Result<
     let left_at = func!("aaw_left", (), i32, "() -> i32");
     let right_at = func!("aaw_right", (), i32, "() -> i32");
     let process = func!("aaw_process", (i32, i64, i32), (), "(i32, i64, i32)");
+    let note = match instrument {
+        true => Some(func!("aaw_note", (i32, i32, i32), (), "(i32, i32, i32), which an instrument is given its notes by")),
+        false => None,
+    };
     let trap = |what: &str, e: wasmtime::Error| format!("{what} failed: {e:#}");
     let version = abi.call(&mut store, ()).map_err(|e| trap("aaw_abi", e))?;
     if version != ABI {
@@ -222,6 +238,7 @@ fn instantiate(module: &Module, fields: usize, rate: f64, tempo: f64) -> Result<
             store,
             memory,
             process,
+            note,
             fields: fields_ptr,
             left,
             right,
@@ -233,17 +250,20 @@ fn instantiate(module: &Module, fields: usize, rate: f64, tempo: f64) -> Result<
 impl Code {
     /// Makes code ready from a module's bytes, for a device with these
     /// fields in a song at `rate` and `tempo`: compiles it, checks its
-    /// exports and runs it once on silence.
-    pub fn new(bytes: &[u8], fields: Vec<Field>, rate: f64, tempo: f64) -> Result<Code> {
+    /// exports and runs it once on silence, an instrument with a note
+    /// played and let go.
+    pub fn new(bytes: &[u8], fields: Vec<Field>, rate: f64, tempo: f64, instrument: bool) -> Result<Code> {
         let module = compile(bytes)?;
-        let (mut wasm, latency) = instantiate(&module, fields.len(), rate, tempo)?;
-        let silence = vec![[0.0; 2]; FRAMES];
+        let (mut wasm, latency) = instantiate(&module, fields.len(), rate, tempo, instrument)?;
+        let mut silence = vec![[0.0; 2]; FRAMES];
         let values: Vec<f64> = fields.iter().map(|f| f.number(None)).collect();
-        call(&mut wasm, &values, &silence, 0, true).map(|_| ())?;
-        let signature = hash_of((hash_of(bytes), &values.len(), rate.to_bits(), tempo.to_bits(), latency));
+        let notes = [NoteEvent { at: 0, key: 60, velocity: 100 }, NoteEvent { at: FRAMES / 2, key: 60, velocity: 0 }];
+        run(&mut wasm, &values, &mut silence, if instrument { &notes } else { &[] }, 0, true)?;
+        let signature = hash_of((hash_of(bytes), &values.len(), rate.to_bits(), tempo.to_bits(), latency, instrument));
         Ok(Code {
             module,
             fields,
+            instrument,
             rate,
             tempo,
             latency,
@@ -259,6 +279,11 @@ impl Code {
 
     pub fn latency(&self) -> usize {
         self.latency
+    }
+
+    /// Whether the code is an instrument's, given notes by `aaw_note`.
+    pub fn instrument(&self) -> bool {
+        self.instrument
     }
 
     /// An instance with the fields at `values`, in the manifest's order,
@@ -281,17 +306,11 @@ impl Code {
     }
 }
 
-/// Writes the fields and a chunk of at most `FRAMES` frames, runs the
-/// module on it and reads the output back into `x`. Leaves `x` as it was
-/// on a failure, which is the error.
-fn call(wasm: &mut Wasm, values: &[f64], x: &[Frame], frame: i64, rolling: bool) -> Result<Vec<Frame>> {
-    let mut out = x.to_vec();
-    run(wasm, values, &mut out, frame, rolling)?;
-    Ok(out)
-}
-
-/// `call` in place, without allocating.
-fn run(wasm: &mut Wasm, values: &[f64], x: &mut [Frame], frame: i64, rolling: bool) -> Result<()> {
+/// Writes the fields and a chunk of at most `FRAMES` frames, gives an
+/// instrument the notes within it, runs the module on it and reads the
+/// output back into `x`, in place and without allocating. A failure is
+/// the error, and leaves `x` as it was.
+fn run(wasm: &mut Wasm, values: &[f64], x: &mut [Frame], notes: &[NoteEvent], frame: i64, rolling: bool) -> Result<()> {
     debug_assert!(x.len() <= FRAMES);
     let data = wasm.memory.data_mut(&mut wasm.store);
     for (i, v) in values.iter().enumerate() {
@@ -301,6 +320,17 @@ fn run(wasm: &mut Wasm, values: &[f64], x: &mut [Frame], frame: i64, rolling: bo
     for (i, f) in x.iter().enumerate() {
         data[wasm.left + 4 * i..wasm.left + 4 * i + 4].copy_from_slice(&(f[0] as f32).to_le_bytes());
         data[wasm.right + 4 * i..wasm.right + 4 * i + 4].copy_from_slice(&(f[1] as f32).to_le_bytes());
+    }
+    if let Some(note) = &wasm.note {
+        for e in notes {
+            deadline(&mut wasm.store);
+            if let Err(e) = note.call(&mut wasm.store, (e.at as i32, i32::from(e.key), i32::from(e.velocity))) {
+                return Err(assert_no_alloc::permit_alloc(|| match e.downcast_ref::<wasmtime::Trap>() {
+                    Some(wasmtime::Trap::Interrupt) => "aaw_note ran past its deadline".to_string(),
+                    _ => format!("aaw_note failed: {e:#}"),
+                }));
+            }
+        }
     }
     deadline(&mut wasm.store);
     if let Err(e) = wasm.process.call(&mut wasm.store, (x.len() as i32, frame, i32::from(rolling))) {
@@ -345,7 +375,7 @@ impl Live for Code {
         let wasm = if failed {
             None
         } else {
-            match instantiate(&self.module, self.fields.len(), self.rate, self.tempo) {
+            match instantiate(&self.module, self.fields.len(), self.rate, self.tempo, self.instrument) {
                 Ok((wasm, _)) => Some(wasm),
                 Err(e) => {
                     self.fail(e);
@@ -361,6 +391,7 @@ impl Live for Code {
             values: vec![0.0; self.fields.len()],
             line: vec![[0.0; 2]; self.latency],
             at: 0,
+            notes: vec![NoteEvent { at: 0, key: 0, velocity: 0 }; if self.instrument { aaw_dsp::instrument::MAX_EVENTS } else { 0 }],
             failure: self.failure.clone(),
         })
     }
@@ -378,6 +409,8 @@ struct Playing {
     /// The pass-through's delay line and where it is.
     line: Vec<Frame>,
     at: usize,
+    /// An instrument's notes for a chunk, at the chunk's frames.
+    notes: Vec<NoteEvent>,
     failure: Arc<Mutex<Option<String>>>,
 }
 
@@ -395,8 +428,21 @@ impl Playing {
 
 impl Running for Playing {
     fn process(&mut self, x: &mut [Frame], clock: Clock) {
+        self.play(x, clock, &[]);
+    }
+
+    fn play(&mut self, x: &mut [Frame], clock: Clock, notes: &[NoteEvent]) {
         let rolling = clock.step != 0;
+        let mut next = 0;
         for (k, chunk) in x.chunks_mut(FRAMES).enumerate() {
+            // The notes within this chunk, at their frames among its own.
+            let from = k * FRAMES;
+            let mut upto = next;
+            while upto < notes.len() && notes[upto].at < from + chunk.len() {
+                upto += 1;
+            }
+            let mine = &notes[next..upto];
+            next = upto;
             if !self.alive || self.wasm.is_none() {
                 self.through(chunk);
                 continue;
@@ -406,8 +452,12 @@ impl Running for Playing {
                 let (lo, hi) = self.bounds[i];
                 self.values[i] = if p.moves() { p.at(frame).clamp(lo, hi) } else { p.value() };
             }
+            for (slot, e) in self.notes.iter_mut().zip(mine) {
+                *slot = NoteEvent { at: e.at - from, ..*e };
+            }
+            let count = mine.len().min(self.notes.len());
             let wasm = self.wasm.as_mut().expect("an instance");
-            if let Err(e) = run(wasm, &self.values, chunk, frame, rolling) {
+            if let Err(e) = run(wasm, &self.values, chunk, &self.notes[..count], frame, rolling) {
                 self.alive = false;
                 if let Ok(mut f) = self.failure.try_lock() {
                     f.get_or_insert(e);
