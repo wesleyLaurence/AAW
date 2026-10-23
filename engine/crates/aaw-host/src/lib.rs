@@ -7,6 +7,7 @@
 pub mod capture;
 pub mod client;
 pub mod command;
+pub mod devices;
 pub mod favorites;
 pub mod generate;
 pub mod host;

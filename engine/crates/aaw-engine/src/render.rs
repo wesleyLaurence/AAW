@@ -677,9 +677,10 @@ impl Renderer {
         r
     }
 
-    /// Has `stem` given each track's block as its inserts leave it, aligned
-    /// to the timeline but before its gain, pan, mute and solo: what a
-    /// freeze keeps. Groups' and returns' blocks are as they were.
+    /// Has `stem` given each track's, group's and return's block as its
+    /// inserts leave it, aligned to the timeline but before its gain, pan,
+    /// mute and solo: what a freeze keeps, and what a device of the
+    /// person's own at the end of the chain would be given.
     pub fn tap_before_faders(&mut self) {
         self.before_faders = true;
     }
@@ -970,7 +971,7 @@ impl Renderer {
                 }
             }
             if g.in_mix {
-                stem(stems, post, out);
+                stem(stems, if self.before_faders { &*x } else { &*post }, out);
                 stems += 1;
             }
         }
@@ -994,7 +995,7 @@ impl Renderer {
             let post = &mut self.post[..n];
             fade_strip(&mut state.strip, x, post, &mut self.values);
             mute(&mut state.strip.heard, r.mute, post, &mut self.values[0][..n]);
-            stem(stems, post, at);
+            stem(stems, if self.before_faders { &*x } else { &*post }, at);
             stems += 1;
             state.align.process(post);
             for (m, p) in mix.iter_mut().zip(post.iter()) {

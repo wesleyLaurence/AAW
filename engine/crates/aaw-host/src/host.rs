@@ -177,6 +177,10 @@ pub enum Event {
     Transport(TransportState),
     /// song.yaml holds an external edit that does not load, or it was fixed.
     Invalid(Option<String>),
+    /// What each device of the person's own in the song is doing, whenever
+    /// that changes: made and playing, its code running, waiting its turn,
+    /// failed, not installed, or off.
+    Devices(Vec<crate::devices::Status>),
     /// The project was saved under another name and the song is now at this
     /// path. The `Changed` that records it follows.
     Moved(PathBuf),
@@ -292,6 +296,9 @@ struct Host {
     /// The markers the person left or reworded that the agent has not been
     /// told of, by handle.
     fresh_markers: Vec<u64>,
+    /// The caches of the song's devices of the person's own, and the run
+    /// making the next.
+    devices: crate::devices::Work,
 }
 
 fn beat(j: &Json) -> Result<BigRational> {
@@ -538,9 +545,32 @@ impl Host {
         self.transport.as_mut().expect("transport").control.set_loop(region)
     }
 
+    /// Reads the song's devices of the person's own anew, or takes in a
+    /// finished run: caches that landed go to the next compile, and what
+    /// changed of their states is told.
+    fn devices_update(&mut self, poll: bool) -> bool {
+        let project = self.session.project().clone();
+        let dir = self.session.dir().to_path_buf();
+        let changed = if poll {
+            self.devices.poll(&project, &dir)
+        } else {
+            self.devices.update(&project, &dir)
+        };
+        if changed.caches {
+            self.cache.set_devices(self.devices.caches.clone());
+            self.program = None;
+        }
+        if changed.status {
+            self.emit(json!({"custom_devices": self.devices.status_json()}));
+            self.notify(Event::Devices(self.devices.status.clone()));
+        }
+        changed.caches
+    }
+
     /// Sends the current revision to the audio thread, or with `prepare` and
     /// no output open yet, compiles it for the first play.
     fn refresh(&mut self) {
+        self.devices_update(false);
         let result = if self.transport.is_some() {
             self.reload()
         } else if self.opts.prepare {
@@ -1127,6 +1157,7 @@ impl Host {
         m.insert("playing".into(), json!(playing));
         m.insert("sample_rate".into(), json!(s.sample_rate));
         m.insert("metronome".into(), json!(self.metronome));
+        m.insert("custom_devices".into(), self.devices.status_json());
         m.insert(
             "position".into(),
             json!({"frame": frame, "beat": round3(frame as f64 * tempo / 60.0 / rate), "seconds": round3(frame as f64 / rate)}),
@@ -1458,6 +1489,9 @@ impl Host {
         self.follow_devices();
         self.record_tick();
         self.capture_tick();
+        if self.devices.busy() && self.devices_update(true) {
+            self.refresh();
+        }
         if let Some(t) = &mut self.transport {
             t.control.collect();
             let played = t.control.shared().played.load(Relaxed);
@@ -1569,6 +1603,7 @@ fn open(project: &Path, opts: Options, observer: Option<Observer>, clock: Arc<Cl
         from: BigRational::zero(),
         agent_at: None,
         fresh_markers: Vec::new(),
+        devices: crate::devices::Work::default(),
     };
     host.listen_at(listener, claim);
     host.emit(json!({"host": {

@@ -37,6 +37,8 @@ pub const CODES: &[(&str, &str)] = &[
     ("notes-outside-clip", "Notes start before their clip or at or after its end; they are kept and do not play."),
     ("notes-unmapped", "A sampler maps no pad to notes of a clip, which are silent."),
     ("macro-unused", "A Synth macro that no modulation entry uses moves nothing."),
+    ("device-missing", "A device of the person's own that the song names is not installed under the project's or the workspace's devices/ folder, so it passes its sound through unchanged; install the folder, or remove the effect."),
+    ("device-version", "A device the song names is installed at another version than the song was written with; the sound may differ. daw set the effect's version to the installed one once it is heard, or install the version the song names."),
     ("voices-exceeded", "More notes sound at once than the Synth has voices, so the oldest are cut off."),
     ("release-cut", "The last note's release runs past the song's end, and the end fade cuts it."),
     ("stretch-without-tempo", "A pad or audio clip is to be stretched with preserve_pitch but has no source_bpm, so nothing is stretched."),

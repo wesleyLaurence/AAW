@@ -12,7 +12,7 @@ use aaw_model::{step_cells, AudioClip, Curve, Effect, Lane, Project};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Arrangement {
@@ -115,6 +115,71 @@ pub struct EffectView {
     /// A rack's effects, in order, each drawn as its own panel inside the
     /// rack's frame; empty for any other effect.
     pub effects: Vec<EffectView>,
+    /// A line the panel says under a device of the person's own: why it is
+    /// not installed. What a device is doing while the song plays comes by
+    /// `SongObserver::devices`.
+    pub note: Option<String>,
+}
+
+/// The devices of the person's own installed for a project, by slug.
+pub type Devices = HashMap<String, aaw_host::devices::Installed>;
+
+/// The devices installed for the project in `directory`, read again at
+/// most once a second, since an arrangement is drawn after every edit.
+pub fn devices_in(directory: &Path) -> Devices {
+    use std::sync::{LazyLock, Mutex};
+    use std::time::{Duration, Instant};
+    static KNOWN: LazyLock<Mutex<HashMap<PathBuf, (Instant, Devices)>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut known = KNOWN.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((at, found)) = known.get(directory) {
+        if at.elapsed() < Duration::from_secs(1) {
+            return found.clone();
+        }
+    }
+    let found: Devices = aaw_host::devices::list(Some(directory)).devices.into_iter().map(|d| (d.manifest.slug.clone(), d)).collect();
+    known.insert(directory.to_path_buf(), (Instant::now(), found.clone()));
+    found
+}
+
+/// A device's fields as controls need them, from its manifest: a number
+/// with its range, a choice or a switch, each with the song's value or the
+/// manifest's default, and a lane where the manifest allows one.
+fn device_fields(d: &aaw_model::Device, device: &aaw_host::devices::Installed, index: usize, reference: &str, driven: &Driven, within: Option<(usize, &str)>) -> Vec<FieldView> {
+    use aaw_host::devices::FieldKind as K;
+    device
+        .manifest
+        .fields
+        .iter()
+        .map(|f| {
+            let name = format!("fields.{}", f.name);
+            let lane = match within {
+                Some((rack, _)) => driven.effects.get(&(rack, format!("effects.{index}.{name}"))).copied(),
+                None => driven.effects.get(&(index, name.clone())).copied(),
+            };
+            let value = d.fields.get(&f.name).map_or_else(|| f.default.to_value(), aaw_model::FieldValue::to_value);
+            FieldView {
+                label: f.label.clone(),
+                kind: match f.kind {
+                    K::Switch => FieldKind::Flag,
+                    K::Choice => FieldKind::Choice,
+                    _ => FieldKind::Number,
+                },
+                value: field_value(Some(&value)),
+                min: f.min,
+                max: f.max,
+                unit: f.unit.clone(),
+                log: f.log,
+                choices: f.choices.clone(),
+                optional: false,
+                initial: field_value(Some(&f.default.to_value())),
+                live: true,
+                param: (f.lane && f.kind.numeric()).then(|| format!("effects.{reference}.{name}")),
+                lane,
+                band: None,
+                name,
+            }
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -627,12 +692,18 @@ impl Driven {
 /// effect is in, for one inside a rack: the rack's place and its
 /// reference, so that the field's lane is the owner's on
 /// `effects.RACK.effects.REF.FIELD`.
-fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrument: bool, within: Option<(usize, &str)>) -> Vec<FieldView> {
+fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrument: bool, within: Option<(usize, &str)>, devices: &Devices) -> Vec<FieldView> {
     let dump = e.dump(false);
     let reference = match within {
         Some((_, rack)) => format!("{rack}.effects.{}", effect_ref(e, index)),
         None => effect_ref(e, index),
     };
+    if let Effect::Device(d) = e {
+        return match devices.get(&d.name) {
+            Some(device) => device_fields(d, device, index, &reference, driven, within),
+            None => Vec::new(),
+        };
+    }
     let prefix = if instrument { "instrument." } else { "" };
     let field = |f: &describe::Field, value: Option<&Value>, name: String, band: Option<u32>| {
         let kind = if matches!(e, Effect::Eq(_)) { "eq" } else { e.kind() };
@@ -730,6 +801,7 @@ fn midi_effects(midi: Option<&aaw_model::Midi>, handles: &[Item]) -> Vec<EffectV
                 bands: 0,
                 name: None,
                 effects: Vec::new(),
+                note: None,
             }
         })
         .collect()
@@ -737,11 +809,12 @@ fn midi_effects(midi: Option<&aaw_model::Midi>, handles: &[Item]) -> Vec<EffectV
 
 /// `tracks` are the tracks that may key the chain's compressors; a patch's
 /// chain (`instrument`) has none. A rack's effects are drawn under it.
-fn effects(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Driven, instrument: bool) -> Vec<EffectView> {
-    effects_within(chain, handles, tracks, driven, instrument, None)
+/// `devices` are the devices of the person's own installed for the project.
+fn effects(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Driven, instrument: bool, devices: &Devices) -> Vec<EffectView> {
+    effects_within(chain, handles, tracks, driven, instrument, None, devices)
 }
 
-fn effects_within(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Driven, instrument: bool, within: Option<(usize, &str)>) -> Vec<EffectView> {
+fn effects_within(chain: &[Effect], handles: &[Item], tracks: &[String], driven: &Driven, instrument: bool, within: Option<(usize, &str)>, devices: &Devices) -> Vec<EffectView> {
     chain
         .iter()
         .enumerate()
@@ -750,19 +823,28 @@ fn effects_within(chain: &[Effect], handles: &[Item], tracks: &[String], driven:
             kind: e.kind().to_string(),
             id: e.id().filter(|id| !id.is_empty()).map(str::to_string),
             bypass: e.bypass(),
-            fields: fields(e, i, tracks, driven, instrument, within),
+            fields: fields(e, i, tracks, driven, instrument, within, devices),
             bands: match e {
                 Effect::Eq(eq) => eq.bands.len() as u32,
                 _ => 0,
             },
-            name: e.name().map(str::to_string),
+            // A device of the person's own is titled as its manifest names
+            // it, or by its slug while it is not installed.
+            name: match e {
+                Effect::Device(d) => Some(devices.get(&d.name).map_or_else(|| d.name.clone(), |x| x.manifest.name.clone())),
+                _ => e.name().map(str::to_string),
+            },
             effects: match e {
                 Effect::Rack(r) => {
                     let inner = handles.get(i).map(|item| items(&item.node, "effects")).unwrap_or(&[]);
                     let reference = effect_ref(e, i);
-                    effects_within(&r.effects, inner, tracks, driven, instrument, Some((i, &reference)))
+                    effects_within(&r.effects, inner, tracks, driven, instrument, Some((i, &reference)), devices)
                 }
                 _ => Vec::new(),
+            },
+            note: match e {
+                Effect::Device(d) if !devices.contains_key(&d.name) => Some(format!("{} is not installed under the project's or the workspace's devices/; the sound passes through", d.name)),
+                _ => None,
             },
         })
         .collect()
@@ -813,7 +895,7 @@ pub fn synth_label(synth: &aaw_model::Synth, path: &str) -> (String, String) {
 }
 
 /// A lane parameter as a person reads it, with its unit.
-fn lane_label(owner: Owner, kind: &TargetKind, field: &str) -> (String, String) {
+fn lane_label(owner: Owner, kind: &TargetKind, field: &str, devices: &Devices) -> (String, String) {
     match kind {
         TargetKind::Channel if field == "pan" => ("Pan".into(), String::new()),
         TargetKind::Channel => ("Volume".into(), "dB".into()),
@@ -834,6 +916,13 @@ fn lane_label(owner: Owner, kind: &TargetKind, field: &str) -> (String, String) 
             let Some(e) = Effect::at(chain, Place::new(*index, *inner)) else {
                 return (field.to_string(), String::new());
             };
+            if let Effect::Device(d) = e {
+                let spec = devices.get(&d.name).and_then(|x| x.manifest.field(field.strip_prefix("fields.").unwrap_or(field)).cloned());
+                return (
+                    format!("{} {}", effect_name(e), spec.as_ref().map_or(field.strip_prefix("fields.").unwrap_or(field), |s| s.label.as_str())),
+                    spec.map_or(String::new(), |s| s.unit),
+                );
+            }
             // An effect inside a rack is named after the rack: "Drum Glue
             // › duck threshold".
             let rack = match inner {
@@ -861,17 +950,25 @@ fn lane_label(owner: Owner, kind: &TargetKind, field: &str) -> (String, String) 
     }
 }
 
-fn lanes(owner: Owner, lanes: &[Lane], handles: &[Item]) -> Vec<LaneView> {
+fn lanes(owner: Owner, lanes: &[Lane], handles: &[Item], devices: &Devices) -> Vec<LaneView> {
     lanes
         .iter()
         .enumerate()
         .filter_map(|(i, lane)| {
             let t = target(owner, &lane.param).ok()?;
-            let (label, unit) = lane_label(owner, &t.kind, &t.field);
-            // Levels show the range the faders cover.
+            let (label, unit) = lane_label(owner, &t.kind, &t.field, devices);
+            // Levels show the range the faders cover; a device's field the
+            // range its manifest gives it.
             let (min, max) = match &t.kind {
                 TargetKind::Channel if t.field == "gain_db" => (-60.0, 6.0),
                 TargetKind::Send(_) => (-60.0, 0.0),
+                TargetKind::Effect { index, inner, .. } => match Effect::at(owner.effects(), Place::new(*index, *inner)) {
+                    Some(Effect::Device(d)) => devices
+                        .get(&d.name)
+                        .and_then(|x| x.manifest.field(t.field.strip_prefix("fields.").unwrap_or(&t.field)).map(|f| (f.min, f.max)))
+                        .unwrap_or((0.0, 1.0)),
+                    _ => (t.range.low, t.range.high),
+                },
                 _ => (t.range.low, t.range.high),
             };
             let point_handles = handles.get(i).map(|item| items(&item.node, "points")).unwrap_or(&[]);
@@ -901,7 +998,7 @@ fn lanes(owner: Owner, lanes: &[Lane], handles: &[Item]) -> Vec<LaneView> {
 }
 
 /// The parameters of an owner that could have a lane and have none.
-fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarget> {
+fn lane_targets(owner: Owner, sends: &[String], driven: &Driven, devices: &Devices) -> Vec<LaneTarget> {
     let mut params: Vec<String> = vec!["gain_db".into()];
     if !matches!(owner, Owner::Master(_)) {
         params.push("pan".into());
@@ -912,7 +1009,7 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
         .filter_map(|param| {
             let t = target(owner, &param).ok()?;
             (!driven.others.contains(&t.key())).then(|| LaneTarget {
-                label: lane_label(owner, &t.kind, &t.field).0,
+                label: lane_label(owner, &t.kind, &t.field, devices).0,
                 param,
             })
         })
@@ -928,7 +1025,7 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
                         continue;
                     }
                     out.push(LaneTarget {
-                        label: lane_label(owner, &t.kind, &t.field).0,
+                        label: lane_label(owner, &t.kind, &t.field, devices).0,
                         param,
                     });
                 }
@@ -950,6 +1047,10 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
                 .filter(|(_, f)| describe::automatable("eq", f.name).is_some())
                 .map(|(j, f)| format!("bands.{j}.{}", f.name))
                 .collect(),
+            Effect::Device(d) => devices
+                .get(&d.name)
+                .map(|x| x.manifest.fields.iter().filter(|f| f.lane && f.kind.numeric()).map(|f| format!("fields.{}", f.name)).collect())
+                .unwrap_or_default(),
             _ => describe::effect(e.kind())
                 .iter()
                 .filter(|f| describe::automatable(e.kind(), f.name).is_some())
@@ -963,7 +1064,7 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven) -> Vec<LaneTarg
             let param = format!("effects.{reference}.{name}");
             if let Ok(t) = target(owner, &param) {
                 out.push(LaneTarget {
-                    label: lane_label(owner, &t.kind, &t.field).0,
+                    label: lane_label(owner, &t.kind, &t.field, devices).0,
                     param,
                 });
             }
@@ -988,10 +1089,11 @@ fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String
         }),
         _ => None,
     };
+    let devices = devices_in(directory);
     (
-        effects(owner.effects(), effect_items, tracks, &driven, false),
-        lanes(owner, owner.automation(), lane_items),
-        lane_targets(owner, sends, &driven),
+        effects(owner.effects(), effect_items, tracks, &driven, false, &devices),
+        lanes(owner, owner.automation(), lane_items, &devices),
+        lane_targets(owner, sends, &driven, &devices),
         synth,
     )
 }
@@ -1098,7 +1200,7 @@ fn synth_view(synth: &aaw_model::Synth, driven: &Driven, effect_items: &[Item], 
                 field
             })
             .collect(),
-        effects: effects(&synth.effects, effect_items, &[], driven, true),
+        effects: effects(&synth.effects, effect_items, &[], driven, true, &Devices::new()),
         modulation: synth
             .modulation
             .iter()

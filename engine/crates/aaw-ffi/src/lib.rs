@@ -129,6 +129,21 @@ pub struct Update {
     pub redo: Option<HistoryStep>,
 }
 
+/// What a device of the person's own is doing.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DeviceStatusView {
+    /// The effect's handle, 0 when it cannot be found.
+    pub effect: u64,
+    /// The effect as commands name it: `tracks.T.effects.REF`.
+    pub reference: String,
+    /// The device's slug.
+    pub device: String,
+    /// `ready`, `computing`, `waiting`, `failed`, `missing` or `off`.
+    pub state: String,
+    /// Why it failed or is missing.
+    pub error: Option<String>,
+}
+
 /// The transport, in beats.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct TransportView {
@@ -339,6 +354,10 @@ pub trait SongObserver: Send + Sync {
     /// track has, and peaks the app has not been sent. Called on a thread of
     /// its own, in order.
     fn waveforms(&self, waveforms: Waveforms);
+    /// What each device of the person's own in the song is doing, whenever
+    /// that changes: its cache made and playing, its code running, waiting
+    /// its turn, failed with the reason, not installed, or off.
+    fn devices(&self, devices: Vec<DeviceStatusView>);
     /// The host has saved and shut down, as after `daw close`.
     fn closed(&self);
 }
@@ -475,6 +494,29 @@ impl Song {
                 })
             }
             Event::Invalid(error) => observer.invalid(error),
+            Event::Devices(statuses) => {
+                let views = {
+                    let doc = locked(&current);
+                    let tree = doc.as_ref().map(|d| d.tree());
+                    statuses
+                        .iter()
+                        .map(|s| {
+                            let j = s.json();
+                            DeviceStatusView {
+                                effect: tree
+                                    .as_ref()
+                                    .and_then(|t| aaw_host::tree::resolve(t, &s.reference, true).ok().map(|loc| aaw_host::tree::handle_at(t, &loc)))
+                                    .unwrap_or(0),
+                                reference: s.reference.clone(),
+                                device: s.device.clone(),
+                                state: j["state"].as_str().unwrap_or("off").to_string(),
+                                error: j.get("error").and_then(serde_json::Value::as_str).map(str::to_string),
+                            }
+                        })
+                        .collect()
+                };
+                observer.devices(views);
+            }
             Event::Moved(path) => {
                 *locked(&now) = path.clone();
                 observer.moved(path.to_string_lossy().into_owned());

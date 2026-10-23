@@ -31,6 +31,9 @@ final class Browser {
     static let patchType = "org.aaw.browser-patch"
     /// An effect rack dragged out of the browser; the data is its name.
     static let rackType = "org.aaw.browser-rack"
+    /// A plugin, a device of the person's own, dragged out of the browser;
+    /// the data is its slug, which the song names it by.
+    static let pluginType = "org.aaw.browser-plugin"
     /// An instrument rack dragged out of the browser; the data is its name.
     static let instrumentRackType = "org.aaw.browser-instrument-rack"
     /// The kind an instrument rack goes by where a device's kind is asked.
@@ -184,6 +187,15 @@ final class Browser {
     nonisolated static func matches(_ patch: PatchInfo, _ query: String) -> Bool {
         query.split(separator: " ").allSatisfy { word in
             patch.name.localizedCaseInsensitiveContains(word) || patch.tags.contains { $0.localizedCaseInsensitiveContains(word) }
+        }
+    }
+
+    /// Whether every word of `query` is in the plugin's name, slug,
+    /// description or a field's name.
+    nonisolated static func matches(_ plugin: DeviceInfo, _ query: String) -> Bool {
+        query.split(separator: " ").allSatisfy { word in
+            plugin.name.localizedCaseInsensitiveContains(word) || plugin.slug.localizedCaseInsensitiveContains(word)
+                || plugin.description.localizedCaseInsensitiveContains(word) || plugin.fields.contains { $0.localizedCaseInsensitiveContains(word) }
         }
     }
 
@@ -464,19 +476,19 @@ struct BrowserView: View {
         .frame(width: Self.width)
         .frame(maxHeight: .infinity, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.14)))
-        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
+        .onAppear { browser.hasKeys = false; browser.refreshFolders(); browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites(); model.refreshPlugins() }
         .onReceive(NotificationCenter.default.publisher(for: .init("AAWLibraryChanged"))) { _ in browser.refreshFolders() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in
             // A patch or a rack saved from the terminal shows when the window comes back.
             if browser.section == "Instruments" { browser.refreshPatches() }
-            if browser.section == "Audio Effects" { browser.refreshRacks() }
+            if browser.section == "Audio Effects" { browser.refreshRacks(); model.refreshPlugins() }
             if browser.section == "Instruments" { browser.refreshInstrumentRacks() }
             // A favorite added from the terminal, or a patch it names saved, too.
             if browser.section == "Favorites" { browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
         }
         .onChange(of: browser.section) { _, section in
             if section == "Instruments" { browser.refreshPatches(); browser.refreshInstrumentRacks() }
-            if section == "Audio Effects" { browser.refreshRacks() }
+            if section == "Audio Effects" { browser.refreshRacks(); model.refreshPlugins() }
             if section == "Favorites" { browser.refreshPatches(); browser.refreshRacks(); browser.refreshInstrumentRacks(); browser.refreshFavorites() }
         }
     }
@@ -586,6 +598,7 @@ struct BrowserView: View {
         let factory = patches.filter(\.factory)
         let mine = patches.filter { !$0.factory }
         let racks = instruments || midiEffects ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
+        let plugins = instruments || midiEffects ? [] : model.plugins.filter { Browser.matches($0, browser.query) }
         let instrumentRacks = instruments ? browser.instrumentRacks.filter { Browser.matches($0, browser.query) } : []
         return ScrollView {
             VStack(spacing: 0) {
@@ -622,6 +635,17 @@ struct BrowserView: View {
                 }
                 if midiEffects && browser.query.isEmpty {
                     Text("A MIDI effect goes on a MIDI track before its instrument and changes the notes as they play; the clips keep the notes as written. Drop one on a MIDI track's header or its device panel.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(10)
+                }
+                if !instruments && !midiEffects && !plugins.isEmpty {
+                    heading("Plugins")
+                    ForEach(plugins, id: \.slug) { plugin in row(plugin) }
+                }
+                if !instruments && !midiEffects && browser.query.isEmpty && model.plugins.isEmpty {
+                    Text("A device of your own, made with daw plugin new under the project's or the workspace's devices folder, is listed here under Plugins and dropped on any track.")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -723,6 +747,48 @@ struct BrowserView: View {
             let provider = NSItemProvider()
             provider.registerDataRepresentation(forTypeIdentifier: Browser.rackType, visibility: .all) { completion in
                 completion(Data(rack.name.utf8), nil)
+                return nil
+            }
+            return provider
+        }
+    }
+
+    /// A plugin: its name and fields, + to add it to the selected row's
+    /// chain, and dragged by its slug.
+    private func row(_ plugin: DeviceInfo) -> some View {
+        let line = plugin.fields.isEmpty ? plugin.description : plugin.fields.map(readable).joined(separator: " · ")
+        return HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(plugin.name)
+                    .font(.system(size: 11, weight: .medium))
+                    .lineLimit(1)
+                Text(line)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+            Button {
+                model.addBrowserDevice(plugin.slug, to: model.selectedRow)
+            } label: {
+                Image(systemName: "plus").frame(width: 18, height: 18)
+            }
+            .buttonStyle(.borderless)
+            .font(.system(size: 10))
+            .disabled(!model.canAddBrowserDevice(plugin.slug, to: model.selectedRow))
+            .help("Add \(plugin.name) to the selected row's chain, as daw effect add --type \(plugin.slug) does")
+        }
+        .padding(.leading, 18)
+        .padding(.trailing, 6)
+        .frame(height: 34)
+        .contentShape(Rectangle())
+        .help(plugin.description.isEmpty ? "\(plugin.slug), version \(plugin.version), from the \(plugin.from)" : plugin.description)
+        .onTapGesture(count: 2) { model.addBrowserDevice(plugin.slug, to: model.selectedRow) }
+        .onDrag {
+            browser.dragged = nil
+            let provider = NSItemProvider()
+            provider.registerDataRepresentation(forTypeIdentifier: Browser.pluginType, visibility: .all) { completion in
+                completion(Data(plugin.slug.utf8), nil)
                 return nil
             }
             return provider

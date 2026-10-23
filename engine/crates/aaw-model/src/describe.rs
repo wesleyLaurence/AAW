@@ -469,6 +469,11 @@ mod tests {
     /// An effect with its required fields at their suggested values, and `with`.
     fn effect_value(kind: &str, with: &[(&str, Value)]) -> Value {
         let mut fields: Vec<(&str, Value)> = vec![("type", Value::str(kind))];
+        // A device of the person's own is named for its folder; its fields
+        // are its manifest's, none here.
+        if kind == "device" {
+            fields.push(("name", Value::str("tilt")));
+        }
         let own: Vec<(&str, Value)> = match kind {
             "eq" => {
                 let band = |with: &[(&str, Value)]| {
@@ -508,7 +513,7 @@ mod tests {
             let fields = if kind == "eq" { BAND } else { effect(kind) };
             // An analyzer has nothing to set: the song's `type`, `id` and
             // `bypass` alone; a rack's name and effects are not controls.
-            assert!(!fields.is_empty() || kind == "analyzer" || kind == "rack", "{kind}");
+            assert!(!fields.is_empty() || kind == "analyzer" || kind == "rack" || kind == "device", "{kind}");
             // The suggested start is valid, and its dump has every field.
             let project = check(effect_value(kind, &[])).unwrap_or_else(|e| panic!("{kind}: {e}"));
             let dumped = project.master.effects[0].dump(false);
@@ -520,7 +525,7 @@ mod tests {
                 _ => dumped,
             };
             let Value::Dict(d) = &dumped else { panic!() };
-            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass", "name", "effects"].contains(k)).collect();
+            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass", "name", "effects", "version", "fields"].contains(k)).collect();
             assert_eq!(names, fields.iter().map(|f| f.name).collect::<Vec<_>>(), "{kind}");
             for f in fields {
                 let got = dumped.get(f.name).unwrap();

@@ -41,7 +41,7 @@ fn load(path: &Path) -> Project {
 fn frozen(path: &Path, track: &str, block: usize) -> (Project, Vec<[f32; 2]>) {
     let dir = path.parent().unwrap();
     let p = load(path);
-    let frames = freeze_track(&p, dir, track, block).unwrap();
+    let frames = freeze_track(&p, dir, track, block, &Default::default()).unwrap();
     std::fs::create_dir_all(dir.join("frozen")).unwrap();
     let relative = format!("frozen/{track}.wav");
     std::fs::write(dir.join(&relative), float_wav_bytes(&frames, p.session.sample_rate as u32)).unwrap();
@@ -80,8 +80,8 @@ fn a_freeze_does_not_depend_on_block_partition() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_mix_song(dir.path());
     let p = load(&path);
-    let whole = freeze_track(&p, dir.path(), "bass", 4096).unwrap();
-    let small = freeze_track(&p, dir.path(), "bass", 1000).unwrap();
+    let whole = freeze_track(&p, dir.path(), "bass", 4096, &Default::default()).unwrap();
+    let small = freeze_track(&p, dir.path(), "bass", 1000, &Default::default()).unwrap();
     assert_eq!(whole, small);
 }
 
@@ -92,8 +92,8 @@ fn a_frozen_track_freezes_again_from_its_content() {
     let (p, frames) = frozen(&path, "hats", 4096);
     // Frozen already, the track renders from its pads and inserts, not from
     // its file.
-    let again = freeze_track(&p, dir.path(), "hats", 4096).unwrap();
+    let again = freeze_track(&p, dir.path(), "hats", 4096, &Default::default()).unwrap();
     assert_eq!(again, frames);
-    assert!(freeze_track(&p, dir.path(), "nothing", 4096).unwrap_err().contains("Unknown track"));
+    assert!(freeze_track(&p, dir.path(), "nothing", 4096, &Default::default()).unwrap_err().contains("Unknown track"));
 }
 

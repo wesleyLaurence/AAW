@@ -10,9 +10,9 @@ reads songs through `aaw-py`.
 | Crate | Responsibility |
 |---|---|
 | `aaw-model` | Schema types (version 1, and 2 with MIDI tracks), validation, exact beats, canonical YAML, fingerprints, the event schedule and what each track plays, the schema `daw describe` prints, the warnings `daw check` gives |
-| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the twelve effects, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
+| `aaw-dsp` | Resampler (a port of `scipy.signal.resample_poly`), automation envelopes, the twelve effects and the offline device of the person's own that plays its cache, the analyzer's meter and the loudness it and `daw listen` read, wavetables and the Synth |
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, input capture and taps for recording, waveform peaks |
-| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket, recording; a project as a folder, made, moved and copied |
+| `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket, recording; a project as a folder, made, moved and copied; the person's own devices, their manifests read, their code run and cached |
 | `aaw-cli` | The `daw` binary |
 | `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, markers, devices, lanes, patterns, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
 | `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module, with the meter's loudness of saved audio |
@@ -79,6 +79,7 @@ instead. It implements:
 | `daw patch list [WORDS]`, `daw patch show NAME`, `daw patch save PROJECT TRACK NAME [--description TEXT] [--tags a,b] [--replace]`, `daw patch load PROJECT TRACK NAME` | Patches: a Synth's sound as a YAML file, the twelve factory patches built into `daw` and the saved ones in the workspace library, `~/Music/AAW/library/patches/` or `library/patches/` under `AAW_WORKSPACE`, each named by the slug of its name; a track's synth saved there, over a saved name only with `--replace`, naming the song's patch after it; and a patch, by name or as a `.yaml` path, put in place of a MIDI track's whole synth in one undo step, the notes staying. See `daw describe synth` |
 | `daw rack list [WORDS]`, `daw rack show NAME`, `daw rack save PROJECT OWNER NAME [--description TEXT] [--tags a,b] [--replace]`, `daw rack load PROJECT OWNER NAME [--index N] [--flat]`, `daw rack wrap PROJECT EFFECT... [--name N] [--id ID]`, `daw rack unwrap PROJECT RACK` | Effect racks: `rack` is an effect kind holding a chain of its own, run where it is, its effects addressed through it as `tracks.T.effects.RACK.effects.REF`, a chain owner for `effect add`, `rack load` and `rack save`; a saved rack is a chain as a YAML file in the workspace library, `~/Music/AAW/library/racks/` or `library/racks/` under `AAW_WORKSPACE`, each named by the slug of its name; a chain saved from `tracks.T`, `groups.G`, `returns.R`, `master`, `tracks.T.instrument.synth` or a rack of one, over a saved name only with `--replace`, the song unchanged and a rack in the chain laid out; and a saved rack, by name or as a `.yaml` path, added to a chain at `--index` or its end as one rack device named for it, or with `--flat` and into a rack or a patch laid in, an `id` the chain has numbered and a compressor's sidechain kept only where the song allows it, in one undo step; effects of one chain wrapped in a new rack and a rack laid out, the lanes on them following. `WORDS` match the name, a tag or an effect's kind. See [effect racks](../docs/features/effect-racks.md) and `daw describe effects` |
 | `daw instrument rack list [WORDS]`, `daw instrument rack show NAME`, `daw instrument rack save PROJECT TRACK NAME [--description TEXT] [--tags a,b] [--replace]`, `daw instrument rack load PROJECT TRACK NAME` | Instrument racks: a MIDI track's instrument with its chain as a YAML file in `library/instruments/`, a Sampler's files by their place and hash; loaded as the instrument, its samples brought into the project where the song lacks them, and one rack first in the track's chain, in one undo step |
+| `daw plugin list [--project P] [WORDS]`, `daw plugin show SLUG`, `daw plugin new NAME [--project P]`, `daw plugin check SLUG`, `daw plugin status PROJECT`, `daw effect add PROJECT OWNER --type SLUG [--FIELD VALUE...]` | Plugins, devices of the person's own: a folder named by its slug under the workspace's `devices/` (`~/Music/AAW/devices/`, or under `AAW_WORKSPACE`) or a project's own, with `device.yaml`, the manifest of its fields, and `device.py`, whose `process(audio, sample_rate, fields)` makes its sound over numpy; `new` scaffolds a working one, `check` reads the manifest and runs the code once on noise, `list` and `show` read what is installed, a project's shadowing the workspace's, and `status` says what each device in a song is doing (`ready`, `computing`, `waiting`, `failed`, `missing`, `off`), from the running host or the caches on disk. In a song a device is `{type: device, name: SLUG, version, fields}`, added by its slug with its manifest's defaults under the fields given, its fields set as `effects.REF.fields.F` and a lane put on one the manifest allows, each held to the manifest in words; the host runs its code on the device's input when what feeds it changes and plays the cache, `daw render` and a freeze make the caches first and refuse on code that fails. `daw device` is the Mac's audio devices. See [devices anyone builds](../docs/features/custom-devices.md) and `daw describe effects` |
 | `daw favorite list`, `daw favorite add KIND WHAT`, `daw favorite remove KIND WHAT` | Favorites: what the person keeps at hand, one file in the workspace library, `~/Music/AAW/library/favorites.yaml` or `library/favorites.yaml` under `AAW_WORKSPACE`, in the order added; `KIND` is `sample`, `patch`, `rack`, `instrument-rack` or `device`, and `WHAT` a sample's file, a patch's, a rack's or an instrument rack's name, or a device kind (`sampler`, `synth`, an effect kind, a MIDI effect kind); adding checks the library and names the thing as it has it, one already there stays where it is, listing says each with `missing` when the library no longer has it, and removing leaves the thing itself. The app's browser lists the same under Favorites, first. See [favorites](../docs/features/favorites.md) and `daw describe samples` |
 | `daw generate sound PROJECT "TEXT" [--seconds S \| --bars N] [--loop] [--influence I] [--id ID] [--estimate]`, `daw generate list PROJECT` | Generated audio: a sound or a loop from a description, made by ElevenLabs's sound-effects endpoint at the person's own key and imported into the project as the sample ID in one undoable edit, the bytes kept in the workspace's `library/generated/` with the recipe beside them and the folder in the sample library, the project's copy named by its hash with the recipe beside it; `--bars` from the song's tempo and meter, at most 30 s, `--loop` a sound made to repeat, `--estimate` the seconds and credits with nothing sent; the budget, the formats by tier, a 429 retried once and each refusal explained. Nothing is placed. `list` is the project's recipes, newest first. See `daw describe generate` and [generated audio](../docs/features/generated-audio.md) |
 | `daw keys set elevenlabs`, `daw keys status`, `daw keys remove elevenlabs`, `daw keys budget [--agent-seconds N]` | The person's ElevenLabs key, typed on the terminal unseen or piped, kept in the macOS Keychain and never printed, checked with the service once on saving; the plan's tier, credits and reset date; and the seconds of audio the agent may generate in a day without asking, 120 unless set. `AAW_GENERATE_URL` points the commands at a stand-in and, at a loopback address only, `AAW_TEST_GENERATE_KEY` is the key; the Keychain's key goes to ElevenLabs's own address only |
@@ -178,6 +179,16 @@ stream is cut into blocks, and processing never allocates.
   into the owner's chain and remaps the lanes as `effect.add` does, numbering
   an `id` the chain has and dropping a sidechain the chain cannot have;
   `rack.save` writes the file and changes nothing in the song.
+- **A device of the person's own** (`custom.rs`) is given the chain before
+  it: the song cut before the device, compiled for its owner's stem and
+  tapped before the fader, each block laid by its timeline frame, so frame
+  N of the input is the device's input at timeline frame N whatever the
+  latency before it; the master's device is given the mix before the end
+  fade. The program takes the caches from `Cache::set_devices`, by owner
+  and index, and the device's unit (`aaw-dsp`'s `Offline`) plays its cache
+  by the timeline frame of its input, or passes the input through without
+  one or while the transport stands still; a new cache is another
+  signature, swapped in through the dip.
 - **Peaks** (`peaks.rs`) are what a track's voices sum to, before its inserts
   and fader, as the least and greatest sample of every 64 frames and of
   coarser stretches four times as long each, for a display to draw at any
@@ -236,6 +247,23 @@ its seconds and level, and the stop writes it at the song's rate where
 asked, the reply's `captured` giving the file, the peak and `at_beat`, the
 beat its first frame was heard against while the song played
 ([a sound recorded into the conversation](../docs/features/agent-record-audio.md)).
+
+A host runs the person's own devices
+([devices anyone builds](../docs/features/custom-devices.md)). After every
+compile it reads the song's devices in the order their inputs can be made,
+tracks, groups each after the groups in it, returns, the master, loads the
+caches that are there under the project's `.daw/devices/`, drops those of
+devices changed or gone, and runs one device's code at a time off its
+thread, through `agent_daw.device_runner` in the checkout's Python, with
+the caches made so far (`devices::Work`); a run that lands is compiled in
+and played, and `daw status` says what each device is doing under
+`custom_devices`. A cache's identity is the cut song's text, the device's
+entry and lanes, every device's code and the rate; a failure is kept by
+identity until something changes. `effect.add` with a type that is no
+built-in kind, or `device` with a `name`, makes the entry from the manifest
+(`devices::effect_node`), and every edit is held to the manifests
+(`devices::check_song`). A freeze and `daw render` settle the caches first
+(`devices::settle`), refusing on a device whose code fails.
 
 A host freezes a track ([freezing](../docs/features/freezing.md)).
 `track.freeze {track}` renders what the track's instrument, effects and

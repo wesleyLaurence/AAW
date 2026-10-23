@@ -215,6 +215,14 @@ public final class SongModel {
     /// The effects whose panels are folded to a strip in the device panel,
     /// by key: the window's, not the song's.
     var foldedEffects: Set<UInt64> = []
+    /// What each device of the person's own is doing, by the effect's
+    /// handle, as the host last said: its cache made and playing, its code
+    /// running, waiting its turn, failed, not installed, or off.
+    private(set) var deviceStates: [UInt64: DeviceStatusView] = [:]
+    /// The plugins installed for this project, the project's own and the
+    /// workspace's, by slug: what the browser lists under Plugins and what a
+    /// dropped slug is checked against.
+    private(set) var plugins: [DeviceInfo] = []
     /// What the detail panel shows: devices after a row is selected, and a
     /// pattern after a clip is.
     var detail = Detail.devices
@@ -458,6 +466,29 @@ public final class SongModel {
 
     /// The project is at another path: the person saved it under a name, or
     /// `daw move` or `daw copy` did.
+    fileprivate func apply(_ devices: [DeviceStatusView]) {
+        deviceStates = Dictionary(devices.filter { $0.effect != 0 }.map { ($0.effect, $0) }, uniquingKeysWith: { _, last in last })
+    }
+
+    /// Reads the plugins installed for the project again, as the browser
+    /// is shown; `daw plugin list` lists the same.
+    func refreshPlugins() {
+        plugins = libraryDevices(project: url.path, query: "")
+    }
+
+    /// The line a device's panel says under its fields, from the host's
+    /// last word of it; nothing while its cache plays or it is off.
+    nonisolated static func deviceNote(_ state: DeviceStatusView?) -> String? {
+        guard let state else { return nil }
+        switch state.state {
+        case "computing": return "Computing: its code runs on what feeds it; the sound passes through until it is done"
+        case "waiting": return "Waiting for its turn to compute; the sound passes through"
+        case "failed": return "Failed: \(state.error ?? "the run gave no reason"); the sound passes through"
+        case "missing": return "Not installed: \(state.error ?? "no folder of its name"); the sound passes through"
+        default: return nil
+        }
+    }
+
     fileprivate func moved(to path: String) {
         let (old, new) = (url, Self.normal(URL(fileURLWithPath: path)))
         guard new != old else { return }
@@ -1309,7 +1340,7 @@ public final class SongModel {
             guard case .track(let key) = row else { return false }
             return arrangement.tracks.first { $0.key == key }?.midi == true
         }
-        if !Browser.isInstrument(kind) { return DeviceChain.kinds.contains(kind) && row != nil }
+        if !Browser.isInstrument(kind) { return (DeviceChain.kinds.contains(kind) || plugins.contains { $0.slug == kind }) && row != nil }
         guard let row else { return true }
         guard case .track(let key) = row else { return false }
         return arrangement.tracks.first { $0.key == key }?.midi == true
@@ -2203,6 +2234,10 @@ private final class Relay: SongObserver, @unchecked Sendable {
 
     func waveforms(waveforms: Waveforms) {
         onMain { $0.apply(waveforms) }
+    }
+
+    func devices(devices: [DeviceStatusView]) {
+        onMain { $0.apply(devices) }
     }
 
     func closed() {

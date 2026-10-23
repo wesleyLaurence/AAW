@@ -20,6 +20,10 @@ pub struct RenderOptions {
     pub track: Option<String>,
     pub section: Option<String>,
     pub block_size: usize,
+    /// The caches of the song's devices of the person's own, made before
+    /// the render (`aaw_host::devices::settle`); a device without one
+    /// passes its input through.
+    pub devices: crate::custom::Caches,
 }
 
 impl Default for RenderOptions {
@@ -29,6 +33,7 @@ impl Default for RenderOptions {
             track: None,
             section: None,
             block_size: 4096,
+            devices: Default::default(),
         }
     }
 }
@@ -230,7 +235,9 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     // A track, group or return preview is its stem: it needs the tracks that
     // key or feed it, and omits the master chain.
     let scope = opts.track.as_deref().map_or(Scope::Song, Scope::Channel);
-    let program = Arc::new(compile_scoped(&p, directory, &mut Cache::default(), scope)?);
+    let mut cache = Cache::default();
+    cache.set_devices(opts.devices.clone());
+    let program = Arc::new(compile_scoped(&p, directory, &mut cache, scope)?);
     let (first, last) = region.map_or((0, total), |(a, b)| (a, b));
     let frames = (last - first).max(0) as usize;
     let names = program.stems();

@@ -292,7 +292,10 @@ impl Session {
         if p.track(track).is_none() {
             return Err(format!("No track {track}; daw inspect lists them"));
         }
-        let frames = aaw_engine::freeze::freeze_track(p, &self.dir, track, 4096)?;
+        // The devices of the person's own play from their caches in the
+        // freeze as in the song: made here where they are not yet.
+        let settled = crate::devices::settle(p, &self.dir, true)?;
+        let frames = aaw_engine::freeze::freeze_track(p, &self.dir, track, 4096, &settled.caches)?;
         let relative = format!("frozen/{track}.wav");
         let path = self.dir.join(&relative);
         if let Some(parent) = path.parent() {
@@ -450,6 +453,7 @@ impl Session {
         };
         self.verify_changed(&project)?;
         self.check_frozen(&project)?;
+        crate::devices::check_song(&project, &self.dir)?;
         if outcome.report.contains_key("length_beats") {
             // A range command reports the song's length: as settled.
             outcome.report.insert("length_beats".into(), value_json(&project.session.length_beats.to_value()));

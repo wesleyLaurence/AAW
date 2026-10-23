@@ -17,7 +17,7 @@ final class DeviceChainTests: XCTestCase {
     }
 
     private func effect(_ key: UInt64, kind: String = "compressor", effects: [EffectView] = []) -> EffectView {
-        EffectView(key: key, kind: kind, id: nil, bypass: false, fields: [], bands: 0, name: nil, effects: effects)
+        EffectView(key: key, kind: kind, id: nil, bypass: false, fields: [], bands: 0, name: nil, effects: effects, note: nil)
     }
 
     func testAnEffectIsFoundAndPlacedThroughTheRackItIsIn() {

@@ -99,6 +99,7 @@ impl SongObserver for Watcher {
     fn waveforms(&self, waveforms: Waveforms) {
         let _ = self.1.lock().unwrap().send(waveforms);
     }
+    fn devices(&self, _devices: Vec<aaw_ffi::DeviceStatusView>) {}
     fn closed(&self) {
         self.send(Seen::Closed);
     }

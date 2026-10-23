@@ -371,6 +371,80 @@
       "title": "Delay",
       "type": "object"
     },
+    "Device": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "device",
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "anyOf": [
+            {
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "name": {
+          "description": "The device's slug, the name of its folder under devices/",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The manifest's version the song was written with",
+          "title": "Version"
+        },
+        "fields": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "description": "The values of the fields the device's manifest declares, by name",
+          "propertyNames": {
+            "pattern": "^[a-z][a-z0-9_]*$"
+          },
+          "title": "Fields",
+          "type": "object"
+        },
+        "bypass": {
+          "default": false,
+          "title": "Bypass",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "type",
+        "name"
+      ],
+      "title": "Device",
+      "type": "object"
+    },
     "Eq": {
       "additionalProperties": false,
       "properties": {
@@ -679,7 +753,8 @@
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer",
-                "rack": "#/$defs/Rack"
+                "rack": "#/$defs/Rack",
+                "device": "#/$defs/Device"
               },
               "propertyName": "type"
             },
@@ -722,6 +797,9 @@
               },
               {
                 "$ref": "#/$defs/Rack"
+              },
+              {
+                "$ref": "#/$defs/Device"
               }
             ]
           },
@@ -1055,7 +1133,8 @@
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer",
-                "rack": "#/$defs/Rack"
+                "rack": "#/$defs/Rack",
+                "device": "#/$defs/Device"
               },
               "propertyName": "type"
             },
@@ -1098,6 +1177,9 @@
               },
               {
                 "$ref": "#/$defs/Rack"
+              },
+              {
+                "$ref": "#/$defs/Device"
               }
             ]
           },
@@ -1248,7 +1330,8 @@
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer",
-                "rack": "#/$defs/Rack"
+                "rack": "#/$defs/Rack",
+                "device": "#/$defs/Device"
               },
               "propertyName": "type"
             },
@@ -1291,6 +1374,9 @@
               },
               {
                 "$ref": "#/$defs/Rack"
+              },
+              {
+                "$ref": "#/$defs/Device"
               }
             ]
           },
@@ -1930,7 +2016,8 @@
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer",
-                "rack": "#/$defs/Rack"
+                "rack": "#/$defs/Rack",
+                "device": "#/$defs/Device"
               },
               "propertyName": "type"
             },
@@ -1973,6 +2060,9 @@
               },
               {
                 "$ref": "#/$defs/Rack"
+              },
+              {
+                "$ref": "#/$defs/Device"
               }
             ]
           },
@@ -2690,7 +2780,8 @@
                 "overdrive": "#/$defs/Overdrive",
                 "utility": "#/$defs/Utility",
                 "analyzer": "#/$defs/Analyzer",
-                "rack": "#/$defs/Rack"
+                "rack": "#/$defs/Rack",
+                "device": "#/$defs/Device"
               },
               "propertyName": "type"
             },
@@ -2733,6 +2824,9 @@
               },
               {
                 "$ref": "#/$defs/Rack"
+              },
+              {
+                "$ref": "#/$defs/Device"
               }
             ]
           },

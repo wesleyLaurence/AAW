@@ -350,6 +350,12 @@ enum Top {
     Patch(PatchCmd),
     #[command(subcommand)]
     Rack(RackCmd),
+    /// Plugins: devices of your own, written to the device spec, a folder
+    /// with a manifest and code under the project's devices/ or the
+    /// workspace's (~/Music/AAW/devices). daw describe effects, under
+    /// device, says how one is used; daw device is the Mac's audio devices.
+    #[command(subcommand)]
+    Plugin(PluginCmd),
     #[command(subcommand)]
     Favorite(FavoriteCmd),
     /// Generated audio: a sound or a loop from a description through the
@@ -923,6 +929,52 @@ enum KeysCmd {
 
 /// Effect racks: a chain of effects as a YAML file, saved in the workspace
 /// library (~/Music/AAW/library/racks, or under AAW_WORKSPACE), added to a
+/// Plugins, devices of your own: a folder named by its slug, with
+/// device.yaml, the manifest that names it and declares its fields, and
+/// device.py, whose process(audio, sample_rate, fields) makes its sound over
+/// numpy. The host runs it when what feeds the device changes and plays the
+/// result; in a song it is {type: device, name: SLUG}.
+#[derive(Subcommand)]
+enum PluginCmd {
+    /// The plugins installed: the project's own and the workspace's, each
+    /// with its name, slug, version, fields and folder; WORDS keep those with
+    /// every word in the name, slug, description or a field's name.
+    List {
+        /// A project whose own devices/ are listed first.
+        #[arg(long)]
+        project: Option<Song>,
+        #[arg(trailing_var_arg = true)]
+        words: Vec<String>,
+    },
+    /// A plugin's manifest as read, with its folder and the hash of its code.
+    Show {
+        device: String,
+        #[arg(long)]
+        project: Option<Song>,
+    },
+    /// Make a plugin named NAME from the scaffold, a working gain, tone and
+    /// warmth to edit: a folder under the workspace's devices/, or under the
+    /// project's with --project. The reply names the folder and its files.
+    New {
+        name: String,
+        /// Put it under this project's devices/, for this song alone.
+        #[arg(long)]
+        project: Option<Song>,
+    },
+    /// Validate a plugin's manifest and run its code once on a short noise,
+    /// with every field at its default: whether it loads, has process and
+    /// returns audio of the right shape.
+    Check {
+        device: String,
+        #[arg(long)]
+        project: Option<Song>,
+    },
+    /// What each plugin in a song is doing: ready, computing, waiting,
+    /// failed (with the reason), missing or off; from the running host, or
+    /// from the caches on disk when none runs.
+    Status { project: Song },
+}
+
 /// track, group, return, master or Synth patch in any song.
 #[derive(Subcommand)]
 enum RackCmd {
@@ -1385,6 +1437,7 @@ fn effect_help() -> String {
         let model = format!("{}{}", kind[..1].to_ascii_uppercase(), &kind[1..]);
         out.push_str(&format!("{kind}\n{}", takes(&model, &["type"])));
     }
+    out.push_str("A plugin, a device of your own, by its slug: --type SLUG, with --FIELD VALUE for its manifest's fields; daw plugin list shows them.\n");
     out.push_str("--index places it in the chain, 0 first; last unless given. daw describe effects says what each does, and daw describe midi the MIDI effects.");
     out
 }
@@ -1810,13 +1863,19 @@ fn run(cli: &Cli) -> Result<Json> {
             block_size,
         } => {
             let defaults = RenderOptions::default();
+            let path = files(project);
+            // The devices of the person's own play from their caches, made
+            // here where they are not yet; one that fails refuses the render.
+            let p = aaw_model::load(&path, false).map_err(text)?;
+            let settled = aaw_host::devices::settle(&p, path.parent().unwrap_or(Path::new(".")), true)?;
             render(
-                &files(project),
+                &path,
                 &RenderOptions {
                     output: output.clone(),
                     track: track.clone(),
                     section: section.clone(),
                     block_size: block_size.unwrap_or(defaults.block_size),
+                    devices: settled.caches,
                 },
             )
             .map(value)
@@ -2355,6 +2414,68 @@ fn run(cli: &Cli) -> Result<Json> {
                 }
             }
         }
+        Top::Plugin(d) => match d {
+            PluginCmd::List { project, words } => {
+                let query = words.join(" ");
+                let dir = project.as_ref().map(|p| files(p));
+                let listing = aaw_host::devices::list(dir.as_deref().and_then(Path::parent));
+                let mut out = json!({
+                    "workspace": aaw_host::devices::dir(),
+                    "devices": listing.devices.iter().filter(|d| aaw_host::devices::matches(d, &query)).map(|d| d.json()).collect::<Vec<_>>(),
+                });
+                if let Some(dir) = &dir {
+                    out["project"] = json!(aaw_host::devices::project_dir(dir.parent().unwrap_or(Path::new("."))));
+                }
+                if !listing.problems.is_empty() {
+                    out["problems"] = json!(listing.problems);
+                }
+                Ok(out)
+            }
+            PluginCmd::Show { device, project } => {
+                let dir = project.as_ref().map(|p| files(p));
+                Ok(aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?.json())
+            }
+            PluginCmd::New { name, project } => {
+                let root = match project {
+                    Some(p) => aaw_host::devices::project_dir(files(p).parent().unwrap_or(Path::new("."))),
+                    None => aaw_host::devices::dir(),
+                };
+                let made = aaw_host::devices::new(name, &root)?;
+                let mut out = made.json();
+                out["files"] = json!([made.dir.join("device.yaml"), made.dir.join(&made.manifest.entry)]);
+                out["next"] = json!(format!(
+                    "Edit {} and {}; daw plugin check {} runs it once; daw effect add PROJECT tracks.T --type {} puts it on a track",
+                    made.dir.join("device.yaml").display(),
+                    made.dir.join(&made.manifest.entry).display(),
+                    made.manifest.slug,
+                    made.manifest.slug
+                ));
+                Ok(out)
+            }
+            PluginCmd::Check { device, project } => {
+                let dir = project.as_ref().map(|p| files(p));
+                let found = aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?;
+                let mut out = aaw_host::devices::check(&found)?;
+                out["manifest"] = found.manifest.json();
+                Ok(out)
+            }
+            PluginCmd::Status { project } => {
+                // A running host says what it is doing; without one, the
+                // caches on disk say what is ready.
+                if let Ok(status) = edit(project, C::Status) {
+                    if let Some(d) = status.get("custom_devices") {
+                        return Ok(json!({"devices": d, "host": true}));
+                    }
+                }
+                let path = files(project);
+                let p = aaw_model::load(&path, false).map_err(text)?;
+                let dir = path.parent().unwrap_or(Path::new("."));
+                Ok(json!({
+                    "devices": aaw_host::devices::status_headless(&p, dir).iter().map(|s| s.json()).collect::<Vec<_>>(),
+                    "host": false,
+                }))
+            }
+        },
         Top::Rack(r) => match r {
             RackCmd::List { words } => {
                 let query = words.join(" ");
@@ -2935,6 +3056,7 @@ fn name(top: &Top) -> String {
         Top::Synth(_) => group("synth", ""),
         Top::Patch(_) => group("patch", ""),
         Top::Rack(_) => group("rack", ""),
+        Top::Plugin(_) => group("plugin", ""),
         Top::Favorite(_) => group("favorite", ""),
         Top::Generate(_) => group("generate", ""),
         Top::Keys(_) => group("keys", ""),
