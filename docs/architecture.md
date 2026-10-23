@@ -114,7 +114,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   before its fader for a freeze, and plays a frozen track as its file
   (`freeze`); see [freezing.md](features/freezing.md); renders what a device
   of the person's own is given, the chain before it tapped before the fader,
-  and plays the device's cache in its place (`custom`); see
+  and plays the device's cache in its place (`custom`), and runs a
+  real-time device's WebAssembly module on the audio thread, compiled by
+  wasmtime and stopped at a deadline (`wasm`); see
   [custom-devices.md](features/custom-devices.md).
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
@@ -132,8 +134,10 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   (`generate`), the key in the macOS Keychain (`keys`); see
   [generated-audio.md](features/generated-audio.md). It reads the manifests
   of the person's own devices, holds a song's devices to them, runs each
-  device's code in Python off its thread when what feeds it changed and
-  plays the cache (`devices`); see
+  offline device's code in Python off its thread when what feeds it
+  changed and plays the cache, makes a real-time device's module ready for
+  the engine, builds one from its Rust with rustc, and hears a device's
+  folder change within a second (`devices`); see
   [custom-devices.md](features/custom-devices.md).
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
@@ -326,9 +330,10 @@ tone after its curve; see [overdrive.md](features/overdrive.md)), `utility`
 device panel and in a window of its own; see
 [analyzer.md](features/analyzer.md); not inside a Synth patch) and `device`
 (a device of the person's own, `{type: device, name: SLUG, version, fields}`,
-a folder with a manifest and Python code under the project's or the
-workspace's `devices/`, run by the host on the device's input and played
-from its cache; not in a rack or a patch; see
+a folder with a manifest and its code under the project's or the
+workspace's `devices/`, offline Python run by the host on the device's
+input and played from its cache, or a real-time WebAssembly module run on
+the audio thread; not in a rack or a patch; see
 [custom-devices.md](features/custom-devices.md)), listed in order under
 `tracks[].effects`, `groups[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
 patch, `tracks[].instrument.synth.effects`, each with an optional `id` unique

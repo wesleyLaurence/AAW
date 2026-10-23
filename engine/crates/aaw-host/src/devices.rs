@@ -3,18 +3,24 @@
 //! its sound, under the project's `devices/` or the workspace's
 //! (`~/Music/AAW/devices/`, or under `AAW_WORKSPACE`), named by its slug.
 //!
-//! The first tier is offline: the folder's `device.py` defines
-//! `process(audio, sample_rate, fields)` over numpy, which the host runs in
-//! the checkout's Python on the device's input as the song makes it,
-//! whenever what feeds the device changes, and keeps the result under the
-//! project's `.daw/devices/` by an identity of everything it was made from.
-//! The engine plays the cache in the device's place, in playback and in a
-//! render alike; until it is there, or when the run fails, the device
-//! passes its input through.
+//! An offline device's `device.py` defines `process(audio, sample_rate,
+//! fields)` over numpy, which the host runs in the checkout's Python on the
+//! device's input as the song makes it, whenever what feeds the device
+//! changes, and keeps the result under the project's `.daw/devices/` by an
+//! identity of everything it was made from. The engine plays the cache in
+//! the device's place, in playback and in a render alike; until it is
+//! there, or when the run fails, the device passes its input through.
+//!
+//! A real-time device's `device.wasm` is a WebAssembly module meeting the
+//! device ABI (`aaw_engine::wasm`), built from its source, `device.rs`, by
+//! `daw plugin build`. The host makes it ready and the engine runs it on
+//! the audio thread, an instance to each place the device is in a chain.
 
 use crate::patches::{slug, workspace};
 use crate::python;
+use aaw_dsp::device::Made;
 use aaw_engine::custom::{self, Caches};
+use aaw_engine::wasm;
 use aaw_model::value::{Dict, Key, Value};
 use aaw_model::{yaml_load, Effect, FieldValue, Project};
 use serde_json::{json, Map, Value as Json};
@@ -158,10 +164,14 @@ pub struct Manifest {
     pub version: String,
     pub author: String,
     pub license: String,
-    /// `offline`; the real-time tier is a later stage.
+    /// `offline` or `realtime`.
     pub run: String,
-    /// The code, relative to the folder: `device.py`.
+    /// The code, relative to the folder: `device.py` offline, `device.wasm`
+    /// in real time.
     pub entry: String,
+    /// What a real-time device's entry is built from, `device.rs`, when the
+    /// folder holds its source.
+    pub source: Option<String>,
     pub fields: Vec<FieldSpec>,
 }
 
@@ -191,6 +201,7 @@ impl Manifest {
             "license": self.license,
             "run": self.run,
             "entry": self.entry,
+            "source": self.source,
             "fields": self.fields.iter().map(|f| {
                 let mut m = Map::new();
                 m.insert("name".into(), json!(f.name));
@@ -396,7 +407,7 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
     };
     for k in d.keys() {
         match k.as_str() {
-            Some("format" | "kind" | "name" | "description" | "version" | "author" | "license" | "run" | "entry" | "fields") => {}
+            Some("format" | "kind" | "name" | "description" | "version" | "author" | "license" | "run" | "entry" | "source" | "fields") => {}
             Some(other) => return Err(format!("{other} is not a field of a manifest")),
             None => return Err("a manifest's fields are named".into()),
         }
@@ -416,15 +427,24 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
         other => return Err(format!("kind {other} is not one of effect, instrument, midi")),
     }
     let run = text(d, "run")?.unwrap_or_else(|| "offline".into());
-    match run.as_str() {
-        "offline" => {}
-        "realtime" => return Err("run realtime is a later stage: only offline devices are built".into()),
+    let (default_entry, extension) = match run.as_str() {
+        "offline" => ("device.py", ".py"),
+        "realtime" => ("device.wasm", ".wasm"),
         other => return Err(format!("run {other} is offline or realtime")),
-    }
+    };
     let name = text(d, "name")?.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()).ok_or("name is required")?;
-    let entry = text(d, "entry")?.unwrap_or_else(|| "device.py".into());
-    if entry.contains('/') || entry.contains("..") || !entry.ends_with(".py") {
-        return Err(format!("entry {entry} is a .py file in the device's folder"));
+    let in_folder = |file: &str| !file.contains('/') && !file.contains("..") && !file.starts_with('.');
+    let entry = text(d, "entry")?.unwrap_or_else(|| default_entry.into());
+    if !in_folder(&entry) || !entry.ends_with(extension) {
+        return Err(format!("entry {entry} is a {extension} file in the device's folder, for run {run}"));
+    }
+    let source = text(d, "source")?;
+    match &source {
+        Some(_) if run == "offline" => return Err("source is for a real-time device, whose entry is built from it; an offline device's entry is its source".into()),
+        Some(file) if !in_folder(file) || !file.ends_with(".rs") => {
+            return Err(format!("source {file} is a .rs file in the device's folder, which daw plugin build compiles"));
+        }
+        _ => {}
     }
     let mut fields = Vec::new();
     match d.get(&key("fields")) {
@@ -454,6 +474,7 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
         license: text(d, "license")?.unwrap_or_default(),
         run,
         entry,
+        source,
         fields,
     })
 }
@@ -497,8 +518,11 @@ pub fn read(folder: &Path, from: Where) -> Result<Installed> {
     let name = folder.file_name().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let text_of_file = std::fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
     let manifest = parse_manifest(&text_of_file, &name).map_err(|e| format!("{}: {e}", file.display()))?;
+    // A real-time device whose source is there and not yet built is read,
+    // so that it can be built; it plays once it is.
     let entry = folder.join(&manifest.entry);
-    if !entry.is_file() {
+    let built_later = manifest.source.as_ref().is_some_and(|s| folder.join(s).is_file());
+    if !entry.is_file() && !built_later {
         return Err(format!("{}: the manifest's entry {} is not there", file.display(), manifest.entry));
     }
     Ok(Installed {
@@ -579,7 +603,7 @@ pub fn matches(d: &Installed, query: &str) -> bool {
     })
 }
 
-/// The manifest `daw device new` writes, with NAME and SLUG filled in.
+/// The manifest `daw plugin new` writes, with NAME filled in.
 pub const MANIFEST_TEMPLATE: &str = r#"# A device of your own. The manifest is the contract: what the song, the
 # app's panel, daw set, lanes and the browser know of the device comes from
 # here. daw describe effects, under device, says how it is used.
@@ -591,7 +615,8 @@ version: "0.1"
 author: ""
 license: MIT
 # offline: device.py runs in Python on the device's input over the whole
-# song, when what feeds it changes; the result is cached and played.
+# song, when what feeds it changes; the result is cached and played. The
+# other is realtime, on the audio thread: daw plugin new --realtime.
 run: offline
 entry: device.py
 fields:
@@ -607,7 +632,7 @@ fields:
   invert: {type: switch, default: false}
 "#;
 
-/// The code `daw device new` writes.
+/// The code `daw plugin new` writes.
 pub const CODE_TEMPLATE: &str = r#""""NAME: the scaffold of a device, to edit.
 
 process(audio, sample_rate, fields) is the whole contract of an offline
@@ -643,10 +668,44 @@ def process(audio, sample_rate, fields):
     return out
 "#;
 
+/// The manifest `daw plugin new --realtime` writes, with NAME filled in.
+pub const REALTIME_MANIFEST_TEMPLATE: &str = r#"# A device of your own. The manifest is the contract: what the song, the
+# app's panel, daw set, lanes and the browser know of the device comes from
+# here. daw describe effects, under device, says how it is used.
+format: 1
+kind: effect
+name: NAME
+description: "A gain, a tone and a warmth: the scaffold to edit."
+version: "0.1"
+author: ""
+license: MIT
+# realtime: device.wasm runs on the audio thread, built from device.rs by
+# daw plugin build. The fields reach the code in this order.
+run: realtime
+entry: device.wasm
+source: device.rs
+fields:
+  # type: db, hz, percent, ms, beats or number take min, max and default;
+  # scale is linear or log (hz is log unless said); lane says whether a lane
+  # may move the field (yes unless said). switch has a default, true or
+  # false; choice has choices and a default among them. label and unit are
+  # optional.
+  gain_db: {type: db, min: -24, max: 24, default: 0, label: Gain}
+  tone_hz: {type: hz, min: 200, max: 20000, default: 20000, label: Tone}
+  warmth_percent: {type: percent, min: 0, max: 100, default: 0, label: Warmth}
+  mode: {type: choice, choices: [stereo, mono], default: stereo}
+  invert: {type: switch, default: false}
+"#;
+
+/// The source `daw plugin new --realtime` writes: Rust, built to the
+/// device ABI.
+pub const RUST_TEMPLATE: &str = include_str!("../templates/device.rs");
+
 /// Makes a device folder for `name` under `root`, the project's or the
-/// workspace's `devices/`, from the templates: a working device to edit.
-/// Refuses a folder that is there.
-pub fn new(name: &str, root: &Path) -> Result<Installed> {
+/// workspace's `devices/`, from the templates: a working device to edit,
+/// offline in Python or, with `realtime`, in Rust for the audio thread,
+/// which is left to `build`. Refuses a folder that is there.
+pub fn new(name: &str, root: &Path, realtime: bool) -> Result<Installed> {
     let name = name.trim();
     let slug_of = slug(name);
     if slug_of.is_empty() {
@@ -657,10 +716,15 @@ pub fn new(name: &str, root: &Path) -> Result<Installed> {
         return Err(format!("{} is already there; choose another name or edit it", folder.display()));
     }
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let manifest = MANIFEST_TEMPLATE.replace("NAME", name).replace("SLUG", &slug_of);
-    let code = CODE_TEMPLATE.replace("NAME", name);
+    let (manifest, file, code) = if realtime {
+        (REALTIME_MANIFEST_TEMPLATE, "device.rs", RUST_TEMPLATE)
+    } else {
+        (MANIFEST_TEMPLATE, "device.py", CODE_TEMPLATE)
+    };
+    let manifest = manifest.replace("NAME", name);
+    let code = code.replacen("NAME", name, 1).replace("SLUG", &slug_of);
     aaw_model::atomic_write(&folder.join("device.yaml"), &manifest).map_err(|e| e.to_string())?;
-    aaw_model::atomic_write(&folder.join("device.py"), &code).map_err(|e| e.to_string())?;
+    aaw_model::atomic_write(&folder.join(file), &code).map_err(|e| e.to_string())?;
     read(&folder, if root == dir() { Where::Workspace } else { Where::Project })
 }
 
@@ -688,10 +752,168 @@ fn run_python(mut command: Command, what: &str) -> Result<Json> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("{what} printed no JSON: {e}"))
 }
 
+/// The compiler a real-time device's source is built with: `AAW_RUSTC`,
+/// else rustup's under `~/.cargo/bin`, else `rustc` on the path.
+fn rustc() -> PathBuf {
+    if let Some(r) = std::env::var_os("AAW_RUSTC") {
+        return PathBuf::from(r);
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        let rustup = Path::new(&home).join(".cargo/bin/rustc");
+        if rustup.is_file() {
+            return rustup;
+        }
+    }
+    PathBuf::from("rustc")
+}
+
+/// Builds a real-time device: compiles its source to its entry with rustc
+/// for WebAssembly, then checks it. The reply is the check's, with the
+/// module's file, its size and the seconds the build took.
+pub fn build(device: &Installed) -> Result<Json> {
+    let m = &device.manifest;
+    if m.run != "realtime" {
+        return Err(format!("{} runs offline: its {} is run as it is, with nothing to build", m.slug, m.entry));
+    }
+    let source = m.source.as_ref().ok_or_else(|| format!("{} names no source to build; its device.yaml says source: device.rs", m.slug))?;
+    let src = device.dir.join(source);
+    if !src.is_file() {
+        return Err(format!("{}: the source {source} is not there", device.dir.display()));
+    }
+    let entry = device.dir.join(&m.entry);
+    let partial = device.dir.join(format!(".{}.building", m.entry));
+    let started = std::time::Instant::now();
+    let compiler = rustc();
+    let out = Command::new(&compiler)
+        .args(["--edition", "2024", "--crate-type", "cdylib", "--target", "wasm32-unknown-unknown"])
+        .args(["-C", "opt-level=3", "-C", "panic=abort", "-C", "strip=symbols"])
+        .arg("-o")
+        .arg(&partial)
+        .arg(&src)
+        .current_dir(&device.dir)
+        .output()
+        .map_err(|e| format!("Could not start {}: {e}; Rust from rustup.rs builds a real-time device", compiler.display()))?;
+    if !out.status.success() {
+        let _ = std::fs::remove_file(&partial);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let mut message = stderr.trim().to_string();
+        if stderr.contains("wasm32-unknown-unknown") && (stderr.contains("can't find crate") || stderr.contains("target may not be installed")) {
+            message.push_str("\nThe WebAssembly target is not installed: rustup target add wasm32-unknown-unknown installs it");
+        }
+        return Err(format!("{source} does not build:\n{message}"));
+    }
+    std::fs::rename(&partial, &entry).map_err(|e| format!("{}: {e}", entry.display()))?;
+    let built = read(&device.dir, device.from)?;
+    let mut reply = check(&built)?;
+    reply["built"] = json!(entry);
+    reply["bytes"] = json!(std::fs::metadata(&entry).map(|m| m.len()).unwrap_or(0));
+    reply["build_seconds"] = json!((started.elapsed().as_secs_f64() * 1000.0).round() / 1000.0);
+    Ok(reply)
+}
+
+impl Installed {
+    pub fn realtime(&self) -> bool {
+        self.manifest.run == "realtime"
+    }
+
+    /// The fields as a real-time device's code is given them.
+    pub fn wasm_fields(&self) -> Vec<wasm::Field> {
+        self.manifest
+            .fields
+            .iter()
+            .map(|f| wasm::Field {
+                name: f.name.clone(),
+                default: f.default.clone(),
+                min: f.min,
+                max: f.max,
+                log: f.log,
+                choices: f.choices.clone(),
+            })
+            .collect()
+    }
+
+    /// Whether the source was changed after the module was built from it.
+    pub fn stale(&self) -> bool {
+        let modified = |f: &str| std::fs::metadata(self.dir.join(f)).and_then(|m| m.modified()).ok();
+        match (self.manifest.source.as_deref().and_then(modified), modified(&self.manifest.entry)) {
+            (Some(source), Some(entry)) => source > entry,
+            _ => false,
+        }
+    }
+
+    /// A real-time device's code made ready for a song at `rate` and
+    /// `tempo`: its module compiled, its exports checked, and run once.
+    pub fn code(&self, rate: f64, tempo: f64) -> Result<Arc<wasm::Code>> {
+        let m = &self.manifest;
+        let file = self.dir.join(&m.entry);
+        if !file.is_file() {
+            return Err(match &m.source {
+                Some(source) => format!("{} is not built yet: daw plugin build {} compiles {source}", m.entry, m.slug),
+                None => format!("{} is not there", m.entry),
+            });
+        }
+        let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+        wasm::Code::new(&bytes, self.wasm_fields(), rate, tempo).map(Arc::new).map_err(|e| format!("{}: {e}", m.entry))
+    }
+}
+
+/// Runs a real-time device for a second of noise at 48 kHz with every
+/// field at its default: whether its module meets the ABI and runs, and
+/// what share of the time it took.
+fn check_realtime(device: &Installed) -> Result<Json> {
+    const RATE: usize = 48000;
+    let code = device.code(RATE as f64, 120.0)?;
+    let defaults = device.manifest.fields.iter().map(|f| (f.name.clone(), f.default.clone())).collect();
+    let mut running = code.instance_at(&defaults);
+    // A fixed noise, the same every check.
+    let mut seed: u32 = 1;
+    let mut noise = || {
+        seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        (f64::from(seed >> 8) / f64::from(1u32 << 24) - 0.5) * 0.5
+    };
+    let mut audio: Vec<aaw_dsp::Frame> = (0..RATE).map(|_| [noise(), noise()]).collect();
+    let started = std::time::Instant::now();
+    for (k, block) in audio.chunks_mut(512).enumerate() {
+        let clock = aaw_dsp::Clock {
+            frame: (k * 512) as i64,
+            step: 1,
+            total: RATE as i64,
+        };
+        running.process(block, clock);
+    }
+    let seconds = started.elapsed().as_secs_f64();
+    if let Some(e) = code.failure() {
+        return Err(format!("{}: {e}", device.manifest.entry));
+    }
+    let peak = audio.iter().flat_map(|f| f.iter()).fold(0.0f64, |m, x| m.max(x.abs()));
+    let mut reply = json!({
+        "ok": true,
+        "run": "realtime",
+        "frames_in": RATE,
+        "frames_out": RATE,
+        "channels": 2,
+        "peak": peak,
+        "latency": code.latency(),
+        // The share of real time one instance takes on this Mac.
+        "load_percent": (seconds * 100.0 * 1000.0).round() / 1000.0,
+    });
+    if device.stale() {
+        reply["stale"] = json!(format!("{} was changed after {} was built: daw plugin build {} builds it again", device.manifest.source.as_deref().unwrap_or_default(), device.manifest.entry, device.manifest.slug));
+    }
+    Ok(reply)
+}
+
 /// Runs the device's code once on a short noise, with every field at its
 /// default: whether it loads, has `process` and returns audio of the right
-/// shape. The reply says the frames in and out and the channels.
+/// shape. The reply says the frames in and out and the channels; a
+/// real-time device's also its latency and its load.
 pub fn check(device: &Installed) -> Result<Json> {
+    if device.realtime() {
+        let mut reply = check_realtime(device)?;
+        reply["device"] = json!(device.manifest.slug);
+        reply["folder"] = json!(device.dir);
+        return Ok(reply);
+    }
     let params = json!({
         "sample_rate": 48000,
         "tempo": 120.0,
@@ -727,7 +949,8 @@ pub struct Instance {
     pub installed: std::result::Result<Installed, String>,
     /// Whether the engine runs it: not bypassed, and not on a frozen track.
     pub heard: bool,
-    /// What its cache is made from, when it is installed and heard.
+    /// What an offline device's cache is made from, when it is installed
+    /// and heard; a real-time device has none.
     pub identity: Option<String>,
 }
 
@@ -794,7 +1017,7 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
     };
     for inst in &mut out {
         let Ok(device) = &inst.installed else { continue };
-        if !inst.heard {
+        if !inst.heard || device.realtime() {
             continue;
         }
         let Ok(fed) = custom::cut(p, &inst.owner, inst.index) else { continue };
@@ -1157,9 +1380,21 @@ pub fn settle(p: &Project, project: &Path, strict: bool) -> Result<Settled> {
         let state = match (&inst.installed, inst.heard) {
             (Err(e), _) => State::Missing(e.clone()),
             (Ok(_), false) => State::Off,
+            (Ok(device), true) if device.realtime() => match device.code(p.session.sample_rate as f64, p.session.tempo) {
+                Ok(code) => {
+                    caches.insert(inst.key(), Made::Code(code));
+                    State::Ready
+                }
+                Err(e) => {
+                    if strict {
+                        return Err(format!("{}: {e}", inst.reference));
+                    }
+                    State::Failed(e)
+                }
+            },
             (Ok(_), true) => match compute(p, project, &inst, &caches) {
                 Ok(audio) => {
-                    caches.insert(inst.key(), audio);
+                    caches.insert(inst.key(), Made::Audio(audio));
                     State::Ready
                 }
                 Err(e) => {
@@ -1179,8 +1414,9 @@ pub fn settle(p: &Project, project: &Path, strict: bool) -> Result<Settled> {
     Ok(Settled { caches, status })
 }
 
-/// The state of a song's devices without a host: ready where a cache file
-/// is there, waiting otherwise.
+/// The state of a song's devices without a host: an offline device ready
+/// where a cache file is there and waiting otherwise, a real-time device
+/// ready where its code runs.
 pub fn status_headless(p: &Project, project: &Path) -> Vec<Status> {
     instances(p, project)
         .iter()
@@ -1190,6 +1426,10 @@ pub fn status_headless(p: &Project, project: &Path) -> Vec<Status> {
             state: match (&inst.installed, inst.heard) {
                 (Err(e), _) => State::Missing(e.clone()),
                 (Ok(_), false) => State::Off,
+                (Ok(device), true) if device.realtime() => match device.code(p.session.sample_rate as f64, p.session.tempo) {
+                    Ok(_) => State::Ready,
+                    Err(e) => State::Failed(e),
+                },
                 (Ok(_), true) => match inst.cache_file(project) {
                     Some(f) if f.is_file() => State::Ready,
                     _ => State::Waiting,
@@ -1226,7 +1466,12 @@ mod tests {
         assert!(refused("format: 2\nname: X\n").contains("format 2"));
         assert!(refused("format: 1\n").contains("name is required"));
         assert!(refused("format: 1\nname: X\nkind: instrument\n").contains("later stage"));
-        assert!(refused("format: 1\nname: X\nrun: realtime\n").contains("later stage"));
+        assert!(refused("format: 1\nname: X\nrun: live\n").contains("offline or realtime"));
+        assert!(refused("format: 1\nname: X\nrun: realtime\nentry: device.py\n").contains(".wasm file"));
+        assert!(refused("format: 1\nname: X\nsource: device.rs\n").contains("real-time device"));
+        assert!(refused("format: 1\nname: X\nrun: realtime\nsource: ../x.rs\n").contains(".rs file in the device's folder"));
+        let rt = parse_manifest("format: 1\nname: X\nrun: realtime\nsource: device.rs\n", "x").unwrap();
+        assert_eq!((rt.entry.as_str(), rt.source.as_deref()), ("device.wasm", Some("device.rs")));
         assert!(refused("format: 1\nname: X\ncolour: red\n").contains("colour"));
         assert!(refused("format: 1\nname: X\nfields: {Gain: {type: db}}\n").contains("field Gain"));
         assert!(refused("format: 1\nname: X\nfields: {gain: {type: loud}}\n").contains("type loud"));
@@ -1249,11 +1494,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ws = tmp.path().join("ws");
         let proj = tmp.path().join("proj");
-        let made = new("Tilt EQ", &ws.join("devices")).unwrap();
+        let made = new("Tilt EQ", &ws.join("devices"), false).unwrap();
         assert_eq!(made.manifest.slug, "tilt-eq");
         assert!(made.dir.join("device.py").is_file());
-        assert!(new("Tilt EQ", &ws.join("devices")).unwrap_err().contains("already there"));
-        let own = new("Tilt EQ", &proj.join("devices")).unwrap();
+        assert!(new("Tilt EQ", &ws.join("devices"), false).unwrap_err().contains("already there"));
+        let own = new("Tilt EQ", &proj.join("devices"), false).unwrap();
         assert_eq!(own.from, Where::Project);
         assert_eq!(own.code, made.code, "the same files hash the same");
         std::fs::write(own.dir.join("device.py"), "def process(a, r, f):\n    return a\n").unwrap();
@@ -1326,8 +1571,35 @@ pub struct Work {
     loaded: HashMap<(String, usize), String>,
     /// Why a cache could not be made, by identity, until something changes.
     failed: HashMap<String, String>,
+    /// The real-time devices' code as loaded, by owner and index.
+    codes: HashMap<(String, usize), Arc<wasm::Code>>,
     job: Option<Job>,
     pub status: Vec<Status>,
+    /// The device folders the song uses, each with its files' latest
+    /// change, and when they were last looked at.
+    folders: Vec<(PathBuf, Option<std::time::SystemTime>)>,
+    looked: Option<std::time::Instant>,
+}
+
+/// The latest change of a folder's files, as `code_hash` reads them.
+fn folder_stamp(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut latest = std::fs::metadata(dir).and_then(|m| m.modified()).ok();
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(d) = pending.pop() {
+        for entry in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with('.') || name == "__pycache__" {
+                continue;
+            }
+            let path = entry.path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if let Ok(t) = entry.metadata().and_then(|m| m.modified()) {
+                latest = latest.max(Some(t));
+            }
+        }
+    }
+    latest
 }
 
 impl Work {
@@ -1336,12 +1608,39 @@ impl Work {
     /// device whose cache is wanting when none is running.
     pub fn update(&mut self, p: &Arc<Project>, project: &Path) -> Changed {
         self.plan = instances(p, project);
+        let mut dirs: Vec<PathBuf> = self.plan.iter().filter_map(|i| i.installed.as_ref().ok().map(|d| d.dir.clone())).collect();
+        dirs.sort();
+        dirs.dedup();
+        self.folders = dirs.into_iter().map(|d| (d.clone(), folder_stamp(&d))).collect();
+        self.looked = Some(std::time::Instant::now());
         self.refresh(p, project)
     }
 
-    /// Takes in a finished run, if one finished.
+    /// Whether a device folder the song uses changed since the song's
+    /// devices were last read, as a build or an edit of the code changes
+    /// it; looked at once a second at most.
+    pub fn folders_changed(&mut self) -> bool {
+        if self.folders.is_empty() || self.looked.is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(1)) {
+            return false;
+        }
+        self.looked = Some(std::time::Instant::now());
+        self.folders.iter().any(|(dir, stamp)| folder_stamp(dir) != *stamp)
+    }
+
+    /// Whether a real-time device failed while playing and the host has
+    /// not said so yet.
+    pub fn failing(&self) -> bool {
+        self.plan.iter().zip(&self.status).any(|(inst, status)| {
+            !matches!(status.state, State::Failed(_)) && self.codes.get(&inst.key()).is_some_and(|c| c.failure().is_some())
+        })
+    }
+
+    /// Takes in a finished run, if one finished, and a real-time device's
+    /// failure.
     pub fn poll(&mut self, p: &Arc<Project>, project: &Path) -> Changed {
-        let Some(job) = &self.job else { return Changed::default() };
+        let Some(job) = &self.job else {
+            return if self.failing() { self.refresh(p, project) } else { Changed::default() };
+        };
         let result = match job.rx.try_recv() {
             Ok(r) => r,
             Err(std::sync::mpsc::TryRecvError::Empty) => return Changed::default(),
@@ -1375,6 +1674,33 @@ impl Work {
             let key = inst.key();
             let state = match (&inst.installed, inst.heard, &inst.identity) {
                 (Err(e), _, _) => State::Missing(e.clone()),
+                // A real-time device's code is loaded here, a few
+                // milliseconds' work, and made again when its folder or
+                // the rate or the tempo change.
+                (Ok(device), true, _) if device.realtime() => {
+                    let want = format!("live:{}:{}:{}", device.code, p.session.sample_rate, p.session.tempo);
+                    let loaded = self.loaded.get(&key) == Some(&want) && self.codes.contains_key(&key);
+                    if !loaded && !self.failed.contains_key(&want) {
+                        match device.code(p.session.sample_rate as f64, p.session.tempo) {
+                            Ok(code) => {
+                                self.caches.insert(key.clone(), Made::Code(code.clone()));
+                                self.codes.insert(key.clone(), code);
+                                self.loaded.insert(key.clone(), want.clone());
+                            }
+                            Err(e) => {
+                                self.failed.insert(want.clone(), e);
+                            }
+                        }
+                    }
+                    match (self.failed.get(&want), self.codes.get(&key)) {
+                        (Some(e), _) => State::Failed(e.clone()),
+                        (None, Some(code)) => {
+                            keep.push(key.clone());
+                            code.failure().map_or(State::Ready, State::Failed)
+                        }
+                        (None, None) => State::Failed("the code was not loaded".into()),
+                    }
+                }
                 (Ok(_), false, _) | (Ok(_), true, None) => State::Off,
                 (Ok(_), true, Some(identity)) => {
                     if self.loaded.get(&key) == Some(identity) && self.caches.contains_key(&key) {
@@ -1388,7 +1714,7 @@ impl Work {
                         let file = cache_dir(project).join(format!("{identity}.wav"));
                         match file.is_file().then(|| load_cache(&file)) {
                             Some(Ok(audio)) => {
-                                self.caches.insert(key.clone(), audio);
+                                self.caches.insert(key.clone(), Made::Audio(audio));
                                 self.loaded.insert(key.clone(), identity.clone());
                                 keep.push(key.clone());
                                 State::Ready
@@ -1415,6 +1741,7 @@ impl Work {
         }
         self.caches.retain(|k, _| keep.contains(k));
         self.loaded.retain(|k, _| keep.contains(k));
+        self.codes.retain(|k, _| keep.contains(k));
         if let Some(inst) = next {
             let identity = inst.identity.clone().expect("a waiting device has an identity");
             let (tx, rx) = std::sync::mpsc::channel();

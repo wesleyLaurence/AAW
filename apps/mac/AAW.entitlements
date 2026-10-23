@@ -6,5 +6,10 @@
 	     hardened runtime a Developer ID signs with. -->
 	<key>com.apple.security.device.audio-input</key>
 	<true/>
+	<!-- Memory made executable at run time, for the real-time devices of
+	     the person's own, WebAssembly that wasmtime compiles to machine
+	     code; the hardened runtime refuses it otherwise. -->
+	<key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+	<true/>
 </dict>
 </plist>

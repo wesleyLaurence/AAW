@@ -18,9 +18,45 @@ use crate::svf::{self, Svf};
 use crate::utility::Utility;
 use crate::{Clock, Frame};
 use aaw_model::{frame, Effect, FilterMode};
+use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+
+/// A real-time device of the person's own, as the engine holds it: code
+/// made ready off the audio thread, from which each unit takes an instance
+/// with state of its own.
+pub trait Live: std::fmt::Debug + Send + Sync {
+    /// Frames by which the device delays its input.
+    fn latency(&self) -> usize;
+    /// What tells this code from other code: an instance of one with the
+    /// same signature continues from another's state.
+    fn signature(&self) -> u64;
+    /// An instance playing `device`'s fields, moved by `lanes` by field
+    /// (`fields.F`). One whose code fails passes its input through, delayed
+    /// by the latency. Called off the audio thread.
+    fn instance(&self, device: &aaw_model::Device, lanes: &BTreeMap<String, Arc<Envelope>>) -> Box<dyn Running>;
+}
+
+/// An instance of a real-time device, run on the audio thread.
+pub trait Running: Send {
+    /// Processes a block in place. Does not allocate.
+    fn process(&mut self, x: &mut [Frame], clock: Clock);
+    /// Continues from the state of `old`, an instance of the same code,
+    /// leaving `old` with state to be freed off the audio thread. Does not
+    /// allocate.
+    fn take_over(&mut self, old: &mut dyn Running);
+    fn as_any(&mut self) -> &mut dyn Any;
+}
+
+/// What the host made of a device of the person's own, for the engine to
+/// play in its place: an offline device's output over the timeline, or a
+/// real-time device's code.
+#[derive(Clone, Debug)]
+pub enum Made {
+    Audio(Arc<Vec<[f32; 2]>>),
+    Code(Arc<dyn Live>),
+}
 
 /// Reverb kernels kept between compiles. Making one takes far longer than
 /// anything else in a compile, and an edit elsewhere leaves it as it was.
@@ -82,6 +118,8 @@ pub struct Plan {
     /// host computed it, a frame for each frame of the timeline, or None
     /// while the host has not, when the device passes its input through.
     pub cache: Option<Arc<Vec<[f32; 2]>>>,
+    /// A real-time device's code, which each unit runs an instance of.
+    pub live: Option<Arc<dyn Live>>,
 }
 
 impl Plan {
@@ -145,6 +183,22 @@ impl Plan {
             tap: None,
             ring: None,
             cache: None,
+            live: None,
+        }
+    }
+
+    /// Gives a device of the person's own what the host made of it: an
+    /// offline device's cache, or a real-time device's code, which sets the
+    /// latency and is part of the signature.
+    pub fn with_made(&mut self, made: Option<Made>) {
+        match made {
+            Some(Made::Code(live)) => {
+                self.latency = live.latency();
+                self.signature = hash((self.signature, "live", live.signature()));
+                self.live = Some(live);
+            }
+            Some(Made::Audio(audio)) => self.with_cache(Some(audio)),
+            None => self.with_cache(None),
         }
     }
 
@@ -211,6 +265,8 @@ pub enum Device {
     /// A device of the person's own, offline: its cached output, or its
     /// input through.
     Offline(Offline),
+    /// A device of the person's own, in real time: an instance of its code.
+    Live(Box<dyn Running>),
 }
 
 /// A device in a chain.
@@ -347,7 +403,10 @@ impl Unit {
             // The program lays a rack out into its effects; a rack itself
             // changes nothing.
             Effect::Rack(_) => Device::Analyzer,
-            Effect::Device(_) => Device::Offline(Offline { audio: plan.cache.clone() }),
+            Effect::Device(d) => match &plan.live {
+                Some(live) => Device::Live(live.instance(d, lanes)),
+                None => Device::Offline(Offline { audio: plan.cache.clone() }),
+            },
         };
         Unit {
             device,
@@ -375,6 +434,7 @@ impl Unit {
             Device::Utility(d) => d.process(x, clock),
             Device::Analyzer => {}
             Device::Offline(d) => d.process(x, clock),
+            Device::Live(d) => d.process(x, clock),
         }
         if let Some(tap) = &self.tap {
             tap.write(x);
@@ -401,6 +461,7 @@ impl Unit {
             (Device::Saturation(new), Device::Saturation(was)) => new.take_over(was),
             (Device::Overdrive(new), Device::Overdrive(was)) => new.take_over(was),
             (Device::Utility(new), Device::Utility(was)) => new.take_over(was),
+            (Device::Live(new), Device::Live(was)) => new.take_over(was.as_mut()),
             _ => {}
         }
     }

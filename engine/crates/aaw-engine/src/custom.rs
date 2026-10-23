@@ -8,11 +8,13 @@ use aaw_model::rules::{target, Owner, TargetKind};
 use aaw_model::{Effect, Project};
 use std::collections::HashMap;
 use std::path::Path;
+use aaw_dsp::device::Made;
 use std::sync::Arc;
 
-/// The caches of offline devices, by the chain's owner and the device's
-/// index in it.
-pub type Caches = HashMap<(String, usize), Arc<Vec<[f32; 2]>>>;
+/// What the host made of the devices of the person's own, an offline
+/// device's cache or a real-time device's code, by the chain's owner and
+/// the device's index in it.
+pub type Caches = HashMap<(String, usize), Made>;
 
 /// The chain an owner path names: the list it is in and its name.
 fn split(owner: &str) -> Result<(&str, &str), String> {

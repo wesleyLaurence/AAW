@@ -930,10 +930,12 @@ enum KeysCmd {
 /// Effect racks: a chain of effects as a YAML file, saved in the workspace
 /// library (~/Music/AAW/library/racks, or under AAW_WORKSPACE), added to a
 /// Plugins, devices of your own: a folder named by its slug, with
-/// device.yaml, the manifest that names it and declares its fields, and
-/// device.py, whose process(audio, sample_rate, fields) makes its sound over
-/// numpy. The host runs it when what feeds the device changes and plays the
-/// result; in a song it is {type: device, name: SLUG}.
+/// device.yaml, the manifest that names it and declares its fields, and its
+/// code. Offline, device.py, whose process(audio, sample_rate, fields) makes
+/// its sound over numpy, run by the host when what feeds the device changes
+/// and played from the result. In real time, device.wasm, a WebAssembly
+/// module built from device.rs by daw plugin build, run on the audio
+/// thread. In a song it is {type: device, name: SLUG}.
 #[derive(Subcommand)]
 enum PluginCmd {
     /// The plugins installed: the project's own and the workspace's, each
@@ -954,16 +956,32 @@ enum PluginCmd {
     },
     /// Make a plugin named NAME from the scaffold, a working gain, tone and
     /// warmth to edit: a folder under the workspace's devices/, or under the
-    /// project's with --project. The reply names the folder and its files.
+    /// project's with --project. Offline in Python, or with --realtime in
+    /// Rust for the audio thread, built at once when rustc can. The reply
+    /// names the folder and its files.
     New {
         name: String,
         /// Put it under this project's devices/, for this song alone.
         #[arg(long)]
         project: Option<Song>,
+        /// A real-time device: device.rs, built to device.wasm.
+        #[arg(long)]
+        realtime: bool,
+    },
+    /// Build a real-time plugin: compile its source, device.rs, to its
+    /// entry, device.wasm, with rustc for WebAssembly, then check it. A
+    /// host playing a song with the plugin hears the new build within a
+    /// second.
+    Build {
+        device: String,
+        #[arg(long)]
+        project: Option<Song>,
     },
     /// Validate a plugin's manifest and run its code once on a short noise,
     /// with every field at its default: whether it loads, has process and
-    /// returns audio of the right shape.
+    /// returns audio of the right shape; for a real-time plugin also its
+    /// latency, its load (the share of real time one instance takes) and
+    /// whether its source changed after it was built.
     Check {
         device: String,
         #[arg(long)]
@@ -2435,21 +2453,46 @@ fn run(cli: &Cli) -> Result<Json> {
                 let dir = project.as_ref().map(|p| files(p));
                 Ok(aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?.json())
             }
-            PluginCmd::New { name, project } => {
+            PluginCmd::New { name, project, realtime } => {
                 let root = match project {
                     Some(p) => aaw_host::devices::project_dir(files(p).parent().unwrap_or(Path::new("."))),
                     None => aaw_host::devices::dir(),
                 };
-                let made = aaw_host::devices::new(name, &root)?;
-                let mut out = made.json();
-                out["files"] = json!([made.dir.join("device.yaml"), made.dir.join(&made.manifest.entry)]);
-                out["next"] = json!(format!(
-                    "Edit {} and {}; daw plugin check {} runs it once; daw effect add PROJECT tracks.T --type {} puts it on a track",
-                    made.dir.join("device.yaml").display(),
-                    made.dir.join(&made.manifest.entry).display(),
-                    made.manifest.slug,
-                    made.manifest.slug
-                ));
+                let made = aaw_host::devices::new(name, &root, *realtime)?;
+                let code = made.dir.join(made.manifest.source.as_ref().unwrap_or(&made.manifest.entry));
+                let slug = &made.manifest.slug;
+                let mut out = json!({});
+                if *realtime {
+                    match aaw_host::devices::build(&made) {
+                        Ok(check) => out["build"] = check,
+                        Err(e) => out["build_error"] = json!(e),
+                    }
+                }
+                let made = aaw_host::devices::read(&made.dir, made.from)?;
+                let built = out.as_object().cloned().unwrap_or_default();
+                out = made.json();
+                out.as_object_mut().expect("an object").extend(built);
+                out["files"] = json!([made.dir.join("device.yaml"), &code]);
+                out["next"] = json!(if *realtime {
+                    format!(
+                        "Edit {} and {}; daw plugin build {slug} compiles and checks it; daw effect add PROJECT tracks.T --type {slug} puts it on a track",
+                        made.dir.join("device.yaml").display(),
+                        code.display()
+                    )
+                } else {
+                    format!(
+                        "Edit {} and {}; daw plugin check {slug} runs it once; daw effect add PROJECT tracks.T --type {slug} puts it on a track",
+                        made.dir.join("device.yaml").display(),
+                        code.display()
+                    )
+                });
+                Ok(out)
+            }
+            PluginCmd::Build { device, project } => {
+                let dir = project.as_ref().map(|p| files(p));
+                let found = aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?;
+                let mut out = aaw_host::devices::build(&found)?;
+                out["manifest"] = found.manifest.json();
                 Ok(out)
             }
             PluginCmd::Check { device, project } => {

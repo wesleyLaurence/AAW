@@ -68,8 +68,9 @@ com.dropbox.ignored 1 .build build Generated`.
 | `Resources/Licenses` | The licenses of those libraries |
 | `Resources/AppIcon.icns` | The app's icon, made by `build.sh` from `AppIcon.png` at every size the Dock and the Finder draw it at |
 
-The app is signed with `AAW.entitlements`, which asks for the microphone under
-the hardened runtime, and `Info.plist` says why the app wants the microphone
+The app and `daw` are signed with `AAW.entitlements`, which asks for the
+microphone under the hardened runtime and for memory made executable at run
+time, which wasmtime needs for a real-time device of the person's own, and `Info.plist` says why the app wants the microphone
 and speech recognition, which the system shows when the agent panel's
 microphone is first pressed.
 The app and `daw` load the libraries from `Frameworks`, so the bundle runs from

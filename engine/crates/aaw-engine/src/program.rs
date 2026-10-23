@@ -404,12 +404,13 @@ pub struct Cache {
     /// Wavetables read from samples, by the file and its stamp.
     tables: HashMap<(PathBuf, Stamp), (u64, Arc<Wavetable>)>,
     kernels: Kernels,
-    /// The output of each offline device of the person's own, as the host
-    /// computed it, by the chain's owner (`tracks.T`, `groups.G`,
-    /// `returns.R` or `master`) and the device's index in the chain. A
-    /// device with none passes its input through. The host keeps these as
-    /// its devices' caches land; a compile only reads them.
-    devices: HashMap<(String, usize), Arc<Vec<[f32; 2]>>>,
+    /// What the host made of each device of the person's own: an offline
+    /// device's output or a real-time device's code, by the chain's owner
+    /// (`tracks.T`, `groups.G`, `returns.R` or `master`) and the device's
+    /// index in the chain. A device with none passes its input through.
+    /// The host keeps these as its devices' caches land; a compile only
+    /// reads them.
+    devices: crate::custom::Caches,
     /// The equalizers' taps for the app's spectrum, shared with whoever
     /// reads them.
     taps: Arc<Taps>,
@@ -431,14 +432,14 @@ impl Cache {
         self.taps.begin();
     }
 
-    /// The offline devices' caches, by owner and index.
-    pub fn devices(&self) -> &HashMap<(String, usize), Arc<Vec<[f32; 2]>>> {
+    /// What the host made of the devices, by owner and index.
+    pub fn devices(&self) -> &crate::custom::Caches {
         &self.devices
     }
 
-    /// Replaces the offline devices' caches: what the next compile's
+    /// Replaces what the host made of the devices: what the next compile's
     /// devices play.
-    pub fn set_devices(&mut self, devices: HashMap<(String, usize), Arc<Vec<[f32; 2]>>>) {
+    pub fn set_devices(&mut self, devices: crate::custom::Caches) {
         self.devices = devices;
     }
 
@@ -1093,7 +1094,7 @@ fn chain(
         };
         let mut plan = Plan::new(effect, own, p.session.sample_rate, p.session.tempo, &mut cache.kernels);
         if let (Some(owner), Effect::Device(_)) = (owner, effect) {
-            plan.with_cache(cache.devices.get(&(owner.to_string(), place.index)).cloned());
+            plan.with_made(cache.devices.get(&(owner.to_string(), place.index)).cloned());
         }
         match (taps, effect) {
             (Some(owner), Effect::Eq(_)) => plan.tap = Some(cache.taps.get(owner, flat)),
