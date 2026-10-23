@@ -357,7 +357,7 @@ fn each_topic_describes_its_models() {
 fn a_topic_lists_its_fields_a_line_each() {
     let midi = contract::describe("midi").unwrap();
     let text = serde_json::to_string_pretty(&midi).unwrap();
-    assert!(text.len() < 8200, "{} bytes", text.len());
+    assert!(text.len() < 13000, "{} bytes", text.len());
     let fields = &midi["fields"];
     assert_eq!(fields["tracks[].type"], "midi, required");
     assert_eq!(fields["tracks[].clips[].notes[].pitch"], "integer 0..127 or text, required");

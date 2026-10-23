@@ -1290,14 +1290,15 @@
           "title": "Instrument"
         },
         "midi_effects": {
-          "description": "The devices before the instrument that change the notes as they play, in order: an arpeggiator, a chord, a scale or a velocity; the clips keep the notes as written.",
+          "description": "The devices before the instrument that change the notes as they play, in order: an arpeggiator, a chord, a scale, a velocity or a device of the person's own whose manifest's kind is midi; the clips keep the notes as written.",
           "items": {
             "discriminator": {
               "mapping": {
                 "arpeggiator": "#/$defs/Arpeggiator",
                 "chord": "#/$defs/Chord",
                 "scale": "#/$defs/Scale",
-                "velocity": "#/$defs/Velocity"
+                "velocity": "#/$defs/Velocity",
+                "device": "#/$defs/Device"
               },
               "propertyName": "type"
             },
@@ -1313,6 +1314,9 @@
               },
               {
                 "$ref": "#/$defs/Velocity"
+              },
+              {
+                "$ref": "#/$defs/Device"
               }
             ]
           },

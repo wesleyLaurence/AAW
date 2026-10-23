@@ -57,12 +57,14 @@ pub trait Running: Send {
 }
 
 /// What the host made of a device of the person's own, for the engine to
-/// play in its place: an offline device's output over the timeline, or a
-/// real-time device's code.
+/// play in its place: an offline device's output over the timeline, a
+/// real-time device's code, or what a MIDI effect made of a track's notes,
+/// which the schedule plays.
 #[derive(Clone, Debug)]
 pub enum Made {
     Audio(Arc<Vec<[f32; 2]>>),
     Code(Arc<dyn Live>),
+    Notes(Arc<aaw_model::midi_effects::Made>),
 }
 
 /// Reverb kernels kept between compiles. Making one takes far longer than
@@ -205,7 +207,7 @@ impl Plan {
                 self.live = Some(live);
             }
             Some(Made::Audio(audio)) => self.with_cache(Some(audio)),
-            None => self.with_cache(None),
+            Some(Made::Notes(_)) | None => self.with_cache(None),
         }
     }
 

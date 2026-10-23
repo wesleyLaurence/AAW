@@ -655,6 +655,7 @@ use aaw_model::Place;
 
 /// An owner's lanes by what they drive, as (effect index, field name) for an
 /// effect's and the lane's own parameter otherwise, with each lane's handle.
+#[derive(Default)]
 struct Driven {
     effects: HashMap<(usize, String), u64>,
     /// A synth's fields by their path in the patch.
@@ -760,13 +761,17 @@ fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrume
 }
 
 /// A MIDI track's MIDI effects, each with its fields from the model's
-/// description of its kind; no field is a lane target.
-fn midi_effects(midi: Option<&aaw_model::Midi>, handles: &[Item]) -> Vec<EffectView> {
+/// description of its kind, or a device of the person's own's from its
+/// manifest; no field is a lane target.
+fn midi_effects(midi: Option<&aaw_model::Midi>, handles: &[Item], devices: &Devices) -> Vec<EffectView> {
     let Some(midi) = midi else { return Vec::new() };
     midi.midi_effects
         .iter()
         .enumerate()
         .map(|(i, e)| {
+            if let aaw_model::MidiEffect::Device(d) = e {
+                return midi_device_view(d, handle(handles, i), devices);
+            }
             let dump = e.dump(false);
             let fields = describe::effect(e.kind())
                 .iter()
@@ -808,6 +813,39 @@ fn midi_effects(midi: Option<&aaw_model::Midi>, handles: &[Item]) -> Vec<EffectV
             }
         })
         .collect()
+}
+
+/// A MIDI effect of the person's own as its panel draws it: titled as its
+/// manifest names it, a control for each of its fields, set by its handle
+/// as `fields.F`, none a lane target.
+fn midi_device_view(d: &aaw_model::Device, key: u64, devices: &Devices) -> EffectView {
+    let installed = devices.get(&d.name).filter(|x| x.midi());
+    let fields = match installed {
+        Some(device) => device_fields(d, device, 0, "", &Driven::default(), None)
+            .into_iter()
+            .map(|mut f| {
+                f.param = None;
+                f.lane = None;
+                f
+            })
+            .collect(),
+        None => Vec::new(),
+    };
+    EffectView {
+        key,
+        kind: "device".into(),
+        id: d.id.clone().filter(|id| !id.is_empty()),
+        bypass: d.bypass,
+        fields,
+        bands: 0,
+        name: Some(installed.map_or_else(|| d.name.clone(), |x| x.manifest.name.clone())),
+        effects: Vec::new(),
+        note: match (devices.get(&d.name), installed) {
+            (None, _) => Some(format!("{} is not installed under the project's or the workspace's devices/; the notes pass through", d.name)),
+            (Some(_), None) => Some(format!("{} is not a MIDI effect; the notes pass through", d.name)),
+            _ => None,
+        },
+    }
 }
 
 /// `tracks` are the tracks that may key the chain's compressors; a patch's
@@ -1553,7 +1591,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     })
                     .collect(),
                 midi: t.midi.is_some(),
-                midi_effects: midi_effects(t.midi.as_ref(), node.map(|n| items(n, "midi_effects")).unwrap_or(&[])),
+                midi_effects: midi_effects(t.midi.as_ref(), node.map(|n| items(n, "midi_effects")).unwrap_or(&[]), &devices_in(directory)),
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
                 sampler: sampler(p, t, device_sample(t).and_then(&mut file)),
                 synth,

@@ -1153,6 +1153,17 @@ impl<'a> Edit<'a> {
 
     /// An effect of a chain or a MIDI effect of a MIDI track: its owner,
     /// which list it is in, `effects` or `midi_effects`, and its place.
+    /// The slug of a MIDI effect of the person's own that an `effect.add`'s
+    /// fields name by its type, or as `device` with a name.
+    fn midi_device(&self, fields: &Map<String, Json>) -> Option<String> {
+        let slug = match fields.get("type").and_then(Json::as_str)? {
+            "device" => fields.get("name").and_then(Json::as_str)?,
+            k if aaw_model::EFFECT_TYPES.contains(&k) || aaw_model::MIDI_EFFECT_TYPES.contains(&k) => return None,
+            k => k,
+        };
+        crate::devices::find(self.dir.as_deref(), slug).ok().filter(|d| d.midi()).map(|d| d.manifest.slug)
+    }
+
     fn effect_member(&self, path: &str) -> Result<(Loc, &'static str, usize)> {
         let loc = self.at(path)?;
         match loc.as_slice() {
@@ -2751,6 +2762,23 @@ impl<'a> Edit<'a> {
                 let at = index.unwrap_or(count);
                 out.made.push(self.insert(&loc, "midi_effects", Some(at), map_node(fields)?)?);
                 out.label = format!("Add {kind} to {}", self.text(&loc));
+            }
+            EffectAdd { owner, index, fields } if self.midi_device(fields).is_some() => {
+                // A MIDI effect of the person's own goes among the track's
+                // MIDI effects, as the built-in kinds do.
+                let slug = self.midi_device(fields).expect("a MIDI effect");
+                let loc = self.at(owner)?;
+                if !self.is_midi(&loc) {
+                    return Err(format!("{slug} is a MIDI effect: it goes on a MIDI track, before its instrument (tracks.T), not on {owner}"));
+                }
+                let count = self.node(&loc).get("midi_effects").map_or(0, |e| e.items().len());
+                if count >= aaw_model::MAX_MIDI_CHAIN {
+                    return Err(format!("{} holds {count} MIDI effects, the most it can", self.text(&loc)));
+                }
+                let node = crate::devices::effect_node(self.dir.as_deref(), &slug, fields)?;
+                let at = index.unwrap_or(count);
+                out.made.push(self.insert(&loc, "midi_effects", Some(at), map_node(&node)?)?);
+                out.label = format!("Add {slug} to {}", self.text(&loc));
             }
             EffectAdd { owner, index, fields } => {
                 let loc = self.owner(owner)?;

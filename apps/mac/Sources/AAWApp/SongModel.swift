@@ -484,11 +484,14 @@ public final class SongModel {
     /// last word of it; nothing while its cache plays or it is off. An
     /// instrument's says the notes play nothing, where an effect passes its
     /// sound through.
-    nonisolated static func deviceNote(_ state: DeviceStatusView?, instrument: Bool = false) -> String? {
+    nonisolated static func deviceNote(_ state: DeviceStatusView?, instrument: Bool = false, midi: Bool = false) -> String? {
         guard let state else { return nil }
-        let meanwhile = instrument ? "the notes play nothing" : "the sound passes through"
+        let meanwhile = instrument ? "the notes play nothing" : midi ? "the notes pass through as written" : "the sound passes through"
         switch state.state {
-        case "computing": return instrument ? "Computing: its code plays the notes; they play nothing until it is done" : "Computing: its code runs on what feeds it; the sound passes through until it is done"
+        case "computing":
+            if instrument { return "Computing: its code plays the notes; they play nothing until it is done" }
+            if midi { return "Computing: its code runs on the notes; they pass through as written until it is done" }
+            return "Computing: its code runs on what feeds it; the sound passes through until it is done"
         case "waiting": return "Waiting for its turn to compute; \(meanwhile)"
         case "failed": return "Failed: \(state.error ?? "the run gave no reason"); \(meanwhile)"
         case "missing": return "Not installed: \(state.error ?? "no folder of its name"); \(meanwhile)"
@@ -1346,6 +1349,12 @@ public final class SongModel {
         plugins.contains { $0.slug == kind && $0.kind == "instrument" }
     }
 
+    /// Whether `kind` names a MIDI effect plugin installed for the project,
+    /// which goes before a MIDI track's instrument.
+    func isMidiEffectPlugin(_ kind: String) -> Bool {
+        plugins.contains { $0.slug == kind && $0.kind == "midi" }
+    }
+
     /// Whether `kind` goes on a MIDI track as its instrument, or below the
     /// tracks as a new one: the Sampler, the Synth, an instrument rack or an
     /// instrument plugin.
@@ -1355,7 +1364,7 @@ public final class SongModel {
 
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
         if kind == "rack" { return row != nil }
-        if Browser.isMidiEffect(kind) {
+        if Browser.isMidiEffect(kind) || isMidiEffectPlugin(kind) {
             // Before a MIDI track's instrument, and nowhere else.
             guard case .track(let key) = row else { return false }
             return arrangement.tracks.first { $0.key == key }?.midi == true

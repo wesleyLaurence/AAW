@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 fn open() -> (tempfile::TempDir, Session) {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    devices::new("Tilt", &dir.path().join("devices"), false, false).unwrap();
+    devices::new("Tilt", &dir.path().join("devices"), false, "effect").unwrap();
     let s = Session::open(&path, true).unwrap();
     (dir, s)
 }
@@ -30,6 +30,7 @@ fn audio(made: &Made) -> Arc<Vec<[f32; 2]>> {
     match made {
         Made::Audio(a) => a.clone(),
         Made::Code(_) => panic!("a real-time device's code, not a cache"),
+        Made::Notes(_) => panic!("a MIDI effect's notes, not a cache"),
     }
 }
 
@@ -167,7 +168,7 @@ fn a_device_s_cache_is_made_by_its_code_and_played_in_the_song_and_a_freeze() {
 fn a_realtime_device_is_built_checked_and_run_in_the_song() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    let made = devices::new("Live Tilt", &dir.path().join("devices"), true, false).unwrap();
+    let made = devices::new("Live Tilt", &dir.path().join("devices"), true, "effect").unwrap();
     assert!(made.realtime());
     assert_eq!((made.manifest.entry.as_str(), made.manifest.source.as_deref()), ("device.wasm", Some("device.rs")));
     let source = std::fs::read_to_string(made.dir.join("device.rs")).unwrap();
@@ -264,8 +265,8 @@ fn frames_at(p: &aaw_model::Project, beats: f64) -> usize {
 fn an_instrument_is_set_by_slug_held_to_its_manifest_and_kept_out_of_chains() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    devices::new("Tilt", &dir.path().join("devices"), false, false).unwrap();
-    let made = devices::new("Pluck", &dir.path().join("devices"), false, true).unwrap();
+    devices::new("Tilt", &dir.path().join("devices"), false, "effect").unwrap();
+    let made = devices::new("Pluck", &dir.path().join("devices"), false, "instrument").unwrap();
     assert!(made.instrument() && !made.realtime());
     let code = std::fs::read_to_string(made.dir.join("device.py")).unwrap();
     assert!(code.starts_with("\"\"\"Pluck: the scaffold of an instrument") && code.contains("def play(notes, frames, sample_rate, fields)"));
@@ -305,8 +306,8 @@ fn an_offline_instrument_plays_the_notes_from_its_cache_and_feeds_the_chain() {
     }
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    devices::new("Tilt", &dir.path().join("devices"), false, false).unwrap();
-    let made = devices::new("Pluck", &dir.path().join("devices"), false, true).unwrap();
+    devices::new("Tilt", &dir.path().join("devices"), false, "effect").unwrap();
+    let made = devices::new("Pluck", &dir.path().join("devices"), false, "instrument").unwrap();
     let checked = devices::check(&made).unwrap();
     assert_eq!((&checked["ok"], &checked["notes"], &checked["frames_out"]), (&json!(true), &json!(4), &json!(48000)));
     let mut s = Session::open(&path, true).unwrap();
@@ -340,7 +341,7 @@ fn an_offline_instrument_plays_the_notes_from_its_cache_and_feeds_the_chain() {
 fn a_realtime_instrument_is_built_played_frozen_and_previewed() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());
-    let made = devices::new("Live Pluck", &dir.path().join("devices"), true, true).unwrap();
+    let made = devices::new("Live Pluck", &dir.path().join("devices"), true, "instrument").unwrap();
     let source = std::fs::read_to_string(made.dir.join("device.rs")).unwrap();
     assert!(source.starts_with("//! Live Pluck: the scaffold of a real-time instrument") && source.contains("pub extern \"C\" fn aaw_note"));
     let built = match devices::build(&made) {
@@ -374,4 +375,161 @@ fn a_realtime_instrument_is_built_played_frozen_and_previewed() {
     // As an effect it is refused at once.
     let refused = edit(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "live-pluck"})).unwrap_err();
     assert!(refused.contains("is an instrument"));
+}
+
+/// A MIDI track, keys, playing the Synth: a C held two beats from beat 4,
+/// then the E an octave and a third above it for a beat.
+fn with_synth_keys(s: &mut Session) {
+    edit(s, json!({"op": "track.add", "id": "keys", "type": "midi"})).unwrap();
+    edit(s, json!({"op": "synth.add", "track": "keys"})).unwrap();
+    edit(
+        s,
+        json!({"op": "clip.add", "track": "keys", "id": "phrase", "at": 4, "length_beats": 4, "notes": [
+            {"pitch": 60, "at": 0, "duration": 2, "velocity": 127},
+            {"pitch": 76, "at": 2, "duration": 1, "velocity": 64},
+        ]}),
+    )
+    .unwrap();
+}
+
+/// A track's notes as the schedule plays them: pitch, start and length in
+/// beats, velocity.
+fn played(p: &aaw_model::Project, track: &str) -> Vec<(i64, f64, f64, i64)> {
+    use num_traits::ToPrimitive;
+    let midi = p.track(track).unwrap().midi.as_ref().unwrap();
+    aaw_model::schedule::track_notes(p, midi).iter().map(|n| (n.pitch, n.at.to_f64().unwrap(), n.beats.to_f64().unwrap(), n.velocity)).collect()
+}
+
+#[test]
+fn a_midi_effect_is_added_by_slug_held_to_its_manifest_and_kept_in_its_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    let root = dir.path().join("devices");
+    devices::new("Tilt", &root, false, "effect").unwrap();
+    devices::new("Pluck", &root, false, "instrument").unwrap();
+    let made = devices::new("Echo", &root, false, "midi").unwrap();
+    assert!(made.midi() && !made.realtime() && !made.instrument());
+    let code = std::fs::read_to_string(made.dir.join("device.py")).unwrap();
+    assert!(code.starts_with("\"\"\"Echo: the scaffold of a MIDI effect") && code.contains("def transform(notes, fields, tempo)"));
+    assert!(made.manifest.fields.iter().all(|f| !f.lane), "no lane moves a MIDI effect's field");
+    assert!(devices::new("Fast Echo", &root, true, "midi").unwrap_err().contains("runs offline"));
+    let mut s = Session::open(&path, true).unwrap();
+    with_synth_keys(&mut s);
+    // Added by its slug, it goes among the MIDI effects, with its defaults.
+    let reply = edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "echo", "echoes": 1})).unwrap();
+    assert_eq!(reply["label"], "Add echo to tracks.keys");
+    let e = get(&s, "tracks.keys.midi_effects.0");
+    assert_eq!((&e["type"], &e["name"], &e["version"]), (&json!("device"), &json!("echo"), &json!("0.1")));
+    assert_eq!((&e["fields"]["echoes"], &e["fields"]["pitch"], &e["fields"]["keep_original"]), (&json!(1.0), &json!("same"), &json!(true)));
+    assert_eq!(get(&s, "tracks.keys.effects"), json!([]));
+    // The other spelling, before the first.
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "device", "name": "echo", "id": "e", "index": 0, "fields": {"transpose": 7}})).unwrap();
+    assert_eq!(get(&s, "tracks.keys.midi_effects.0.id"), json!("e"));
+    assert_eq!(get(&s, "tracks.keys.midi_effects.e.fields.transpose"), json!(7.0));
+    // Its fields are its manifest's, and no lane moves them.
+    let refused = |s: &mut Session, j: serde_json::Value| edit(s, j).unwrap_err();
+    assert!(refused(&mut s, json!({"op": "set", "path": "tracks.keys.midi_effects.1.fields.echoes", "value": 9})).contains("echoes is 0 to 8; 9 is outside"));
+    assert!(refused(&mut s, json!({"op": "set", "path": "tracks.keys.midi_effects.1.fields.pitch", "value": "fifth"})).contains("pitch is one of same, octave_up, octave_down"));
+    assert!(refused(&mut s, json!({"op": "set", "path": "tracks.keys.midi_effects.1.fields.colour", "value": 1})).contains("echo has no field colour"));
+    edit(&mut s, json!({"op": "set", "path": "tracks.keys.midi_effects.1.fields.pitch", "value": "octave_up"})).unwrap();
+    // A MIDI effect goes before a MIDI track's instrument and nowhere else;
+    // an effect or an instrument does not go there.
+    assert!(refused(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "echo"})).contains("echo is a MIDI effect: it goes on a MIDI track"));
+    assert!(refused(&mut s, json!({"op": "apply", "patch": {"master": {"effects": [{"type": "device", "name": "echo"}]}}})).contains("echo is a MIDI effect, which changes a MIDI track's notes"));
+    assert!(refused(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": "echo"})).contains("echo is a MIDI effect"));
+    let among = |name: &str| json!({"op": "set", "path": "tracks.keys.midi_effects", "value": [{"type": "device", "name": name}]});
+    assert!(refused(&mut s, among("tilt")).contains("tilt is an audio effect, which goes in the chain after the instrument"));
+    assert!(refused(&mut s, among("pluck")).contains("pluck is an instrument"));
+    // In the song's instances the MIDI effects come first on their track,
+    // in order, by their own owner.
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "tilt"})).unwrap();
+    edit(&mut s, json!({"op": "effect.bypass", "effect": "tracks.keys.midi_effects.1", "bypass": true})).unwrap();
+    let instances = devices::instances(s.project(), dir.path());
+    let keys: Vec<_> = instances.iter().filter(|i| i.owner.starts_with("tracks.keys")).map(|i| (i.reference.clone(), i.key(), i.is_midi(), i.heard)).collect();
+    assert_eq!(
+        keys,
+        [
+            ("tracks.keys.midi_effects.e".to_string(), ("tracks.keys.midi_effects".to_string(), 0), true, true),
+            ("tracks.keys.midi_effects.1".to_string(), ("tracks.keys.midi_effects".to_string(), 1), true, false),
+            ("tracks.keys.effects.0".to_string(), ("tracks.keys".to_string(), 0), false, true),
+        ]
+    );
+    // Saved as written, and its state without a host is waiting.
+    s.save().unwrap();
+    let text = std::fs::read_to_string(s.path()).unwrap();
+    assert!(text.contains("midi_effects: [{type: device, id: e, name: echo"), "{text}");
+    assert_eq!(devices::status_headless(s.project(), s.dir())[0].state, State::Waiting);
+}
+
+#[test]
+fn a_midi_effect_s_notes_are_made_by_its_code_and_played_by_the_schedule() {
+    if !has_python() {
+        eprintln!("no Python at the checkout: skipped");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    devices::new("Tilt", &dir.path().join("devices"), false, "effect").unwrap();
+    let made = devices::new("Echo", &dir.path().join("devices"), false, "midi").unwrap();
+    let checked = devices::check(&made).unwrap();
+    assert_eq!((&checked["ok"], &checked["notes_in"], &checked["notes_out"]), (&json!(true), &json!(4), &json!(12)));
+    assert_eq!(checked["first"][3], json!([0.5, 2.5, 60, 60]), "the first echo, half a beat later at 60% of the velocity");
+    let mut s = Session::open(&path, true).unwrap();
+    with_synth_keys(&mut s);
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "echo", "transpose": 12, "echoes": 1, "decay_percent": 50})).unwrap();
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.keys", "type": "tilt", "gain_db": -6})).unwrap();
+    let p = s.project().clone();
+    // Before its notes are made the notes pass through as written.
+    let written = vec![(60, 4.0, 2.0, 127), (76, 6.0, 1.0, 64)];
+    assert_eq!(played(&p, "keys"), written);
+    let settled = devices::settle(&p, dir.path(), true).unwrap();
+    assert!(settled.status.iter().all(|x| x.state == State::Ready), "{:?}", settled.status);
+    let key = ("tracks.keys.midi_effects".to_string(), 0);
+    assert!(matches!(settled.caches.get(&key), Some(Made::Notes(_))));
+    // The schedule plays what it made: an octave up, and each note again
+    // half a beat later at half the velocity.
+    let heard = devices::heard(&p, &settled.caches);
+    let echoed = vec![(72, 4.0, 2.0, 127), (72, 4.5, 2.0, 64), (88, 6.0, 1.0, 64), (88, 6.5, 1.0, 32)];
+    assert_eq!(played(&heard, "keys"), echoed);
+    let midi_instance = devices::instances(&heard, dir.path()).into_iter().find(|i| i.is_midi()).unwrap();
+    let file = midi_instance.cache_file(dir.path()).unwrap();
+    assert!(file.is_file() && file.extension().unwrap() == "json");
+    // The effect after the instrument is given the notes it made: its
+    // identity is another with them than without.
+    let tilt = |p: &aaw_model::Project| devices::instances(p, dir.path()).into_iter().find(|i| i.reference == "tracks.keys.effects.0").unwrap().identity.unwrap();
+    assert_ne!(tilt(&p), tilt(&heard));
+    // A compile plays them: the render's events are the made notes.
+    let mut cache = aaw_engine::program::Cache::default();
+    cache.set_devices(settled.caches.clone());
+    let program = aaw_engine::program::compile_cached(&p, dir.path(), &mut cache).unwrap();
+    let synth = program.tracks.iter().find(|t| t.id == "keys").and_then(|t| t.synth.as_ref()).expect("the Synth");
+    assert_eq!(synth.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), [72, 72, 88, 88]);
+    // A note changed is another input: a host's work makes it again off
+    // its thread, and the work says what it is doing.
+    edit(&mut s, json!({"op": "set", "path": "tracks.keys.clips.phrase.notes.0.velocity", "value": 100})).unwrap();
+    let p = s.project().clone();
+    let mut work = Work::default();
+    work.update(&p, dir.path());
+    assert_eq!(work.status[0].state, State::Computing, "{:?}", work.status);
+    let started = Instant::now();
+    while work.busy() || work.status.iter().any(|x| x.state != State::Ready) {
+        assert!(started.elapsed() < Duration::from_secs(120), "{:?}", work.status);
+        work.poll(&p, dir.path());
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let heard = devices::heard(&p, &work.caches);
+    assert_eq!(played(&heard, "keys")[..2], [(72, 4.0, 2.0, 100), (72, 4.5, 2.0, 50)]);
+    assert!(!file.is_file(), "the old notes are swept");
+    // Code that fails refuses the render in its words; the notes pass
+    // through meanwhile.
+    std::fs::write(made.dir.join("device.py"), "def transform(notes, fields, tempo):\n    raise ValueError('no echoes today')\n").unwrap();
+    let err = devices::settle(&p, dir.path(), true).unwrap_err();
+    assert!(err.contains("tracks.keys.midi_effects.0") && err.contains("no echoes today"), "{err}");
+    let lenient = devices::settle(&p, dir.path(), false).unwrap();
+    assert!(matches!(&lenient.status[0].state, State::Failed(e) if e.contains("no echoes today")));
+    assert_eq!(played(&devices::heard(&p, &lenient.caches), "keys"), vec![(60, 4.0, 2.0, 100), (76, 6.0, 1.0, 64)]);
+    // Notes out of range are refused in words.
+    std::fs::write(made.dir.join("device.py"), "def transform(notes, fields, tempo):\n    return [(0, 1, 130, 100)]\n").unwrap();
+    let err = devices::settle(&p, dir.path(), true).unwrap_err();
+    assert!(err.contains("pitch 130; a pitch is a whole number 0 to 127"), "{err}");
 }

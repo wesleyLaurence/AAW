@@ -1856,8 +1856,14 @@ pub enum MidiEffect {
     Chord(Chord),
     Scale(Scale),
     Velocity(Velocity),
+    /// A device of the person's own whose manifest's kind is `midi`, by its
+    /// slug, as `{type: device, name, version, fields}`: the host runs its
+    /// code on the notes and the schedule plays what it made
+    /// (`Midi::made`).
+    Device(Device),
 }
 
+/// The built-in MIDI effect kinds; `device` names one of the person's own.
 pub const MIDI_EFFECT_TYPES: [&str; 4] = ["arpeggiator", "chord", "scale", "velocity"];
 
 /// The most MIDI effects a track holds.
@@ -1996,6 +2002,7 @@ impl MidiEffect {
             MidiEffect::Chord(_) => "chord",
             MidiEffect::Scale(_) => "scale",
             MidiEffect::Velocity(_) => "velocity",
+            MidiEffect::Device(_) => "device",
         }
     }
 
@@ -2005,6 +2012,7 @@ impl MidiEffect {
             MidiEffect::Chord(e) => e.id.as_deref(),
             MidiEffect::Scale(e) => e.id.as_deref(),
             MidiEffect::Velocity(e) => e.id.as_deref(),
+            MidiEffect::Device(e) => e.id.as_deref(),
         }
     }
 
@@ -2014,6 +2022,7 @@ impl MidiEffect {
             MidiEffect::Chord(e) => e.bypass,
             MidiEffect::Scale(e) => e.bypass,
             MidiEffect::Velocity(e) => e.bypass,
+            MidiEffect::Device(e) => e.bypass,
         }
     }
 
@@ -2028,11 +2037,11 @@ impl MidiEffect {
             return None;
         };
         let kind = match tag {
-            Value::Str(s) if MIDI_EFFECT_TYPES.contains(&s.as_str()) => s.clone(),
+            Value::Str(s) if MIDI_EFFECT_TYPES.contains(&s.as_str()) || s == "device" => s.clone(),
             Value::Str(s) if EFFECT_TYPES.contains(&s.as_str()) => {
                 ctx.error(
                     "union_tag_invalid",
-                    format!("{s} is an audio effect: it goes under effects, after the instrument; midi_effects take 'arpeggiator', 'chord', 'scale', 'velocity'"),
+                    format!("{s} is an audio effect: it goes under effects, after the instrument; midi_effects take 'arpeggiator', 'chord', 'scale', 'velocity', 'device'"),
                 );
                 return None;
             }
@@ -2040,7 +2049,7 @@ impl MidiEffect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'arpeggiator', 'chord', 'scale', 'velocity'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'arpeggiator', 'chord', 'scale', 'velocity', 'device'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2056,6 +2065,7 @@ impl MidiEffect {
             "arpeggiator" => &["type", "id", "rate", "order", "octaves", "gate_percent", "seed", "bypass"],
             "chord" => &["type", "id", "shift_1", "shift_2", "shift_3", "shift_4", "shift_5", "shift_6", "bypass"],
             "scale" => &["type", "id", "root", "scale", "transpose", "bypass"],
+            "device" => &["type", "id", "name", "version", "fields", "bypass"],
             _ => &["type", "id", "offset", "scale_percent", "random", "seed", "min", "max", "bypass"],
         };
         let f = Fields::member(x, fields);
@@ -2104,6 +2114,24 @@ impl MidiEffect {
                         root: root?.to_string(),
                         scale: scale?.to_string(),
                         transpose: transpose?,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+            "device" => {
+                let name = f.req(ctx, "name", |c, x| v::pattern(c, x, &DEVICE_SLUG_RE, DEVICE_SLUG));
+                let version = f.opt(ctx, "version", None, opt_string);
+                let fields = f.opt(ctx, "fields", IndexMap::new(), device_fields);
+                (|| {
+                    let fields = fields?;
+                    if !device_field_names(ctx, &fields) {
+                        return None;
+                    }
+                    Some(MidiEffect::Device(Device {
+                        id: id?,
+                        name: name?,
+                        version: version?,
+                        fields,
                         bypass: bypass?,
                     }))
                 })()
@@ -2170,6 +2198,11 @@ impl MidiEffect {
                 o.int("seed", e.seed, 0);
                 o.int("min", e.min, 1);
                 o.int("max", e.max, 127);
+            }
+            MidiEffect::Device(e) => {
+                o.req("name", Value::str(&e.name));
+                o.opt("version", e.version.as_deref().map(Value::str));
+                o.coll("fields", Value::Dict(e.fields.iter().map(|(k, v)| (Key::str(k), v.to_value())).collect()));
             }
         }
         o.bool("bypass", self.bypass(), false);
@@ -2347,6 +2380,12 @@ pub struct Midi {
     /// The devices before the instrument, in order, that change the notes
     /// as they play; written as `midi_effects`.
     pub midi_effects: Vec<MidiEffect>,
+    /// What the host made of the notes for each device of the person's own
+    /// among `midi_effects`, by its place; never written, and set only on
+    /// the copy of a song a compile or a reader plays. A device without
+    /// one, or whose input is not what it was made from, passes the notes
+    /// through.
+    pub made: std::collections::BTreeMap<usize, std::sync::Arc<crate::midi_effects::Made>>,
 }
 
 impl Midi {
@@ -2361,6 +2400,15 @@ impl Midi {
     /// The instrument of the person's own the notes play, if they play one.
     pub fn device(&self) -> Option<&Device> {
         self.instrument.as_ref().and_then(Instrument::device)
+    }
+
+    /// The MIDI effects of the person's own, each with its place among
+    /// `midi_effects`.
+    pub fn devices(&self) -> impl Iterator<Item = (usize, &Device)> {
+        self.midi_effects.iter().enumerate().filter_map(|(i, e)| match e {
+            MidiEffect::Device(d) => Some((i, d)),
+            _ => None,
+        })
     }
 }
 
@@ -3766,7 +3814,7 @@ impl Track {
                 Some(list)
             });
             let notes = match (instrument, clips, midi_effects) {
-                (Some(instrument), Some(clips), Some(midi_effects)) => Some(Some(Midi { instrument, clips, midi_effects })),
+                (Some(instrument), Some(clips), Some(midi_effects)) => Some(Some(Midi { instrument, clips, midi_effects, made: Default::default() })),
                 _ => None,
             };
             (Some(IndexMap::new()), Some(Vec::new()), Some(Vec::new()), notes)

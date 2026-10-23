@@ -20,6 +20,37 @@ pub type Caches = HashMap<(String, usize), Made>;
 /// caches, beside its chain's devices: `(tracks.T, INSTRUMENT)`.
 pub const INSTRUMENT: usize = usize::MAX;
 
+/// The owner a track's MIDI effects of the person's own are kept by among
+/// the caches, with their places among its `midi_effects`:
+/// `(tracks.T.midi_effects, I)`.
+pub fn midi_owner(track: &str) -> String {
+    format!("tracks.{track}.midi_effects")
+}
+
+/// The song with what the MIDI effects of the person's own made of the
+/// notes set on its tracks (`Midi::made`), so that the schedule plays it;
+/// None when `caches` hold none.
+pub fn attach(p: &Project, caches: &Caches) -> Option<Project> {
+    let mut made: Vec<(&str, usize, &Arc<aaw_model::midi_effects::Made>)> = caches
+        .iter()
+        .filter_map(|((owner, i), m)| match m {
+            Made::Notes(n) => Some((owner.strip_prefix("tracks.")?.strip_suffix(".midi_effects")?, *i, n)),
+            _ => None,
+        })
+        .collect();
+    if made.is_empty() {
+        return None;
+    }
+    made.sort_by_key(|(t, i, _)| (*t, *i));
+    let mut out = p.clone();
+    for t in &mut out.tracks {
+        if let Some(midi) = t.midi.as_mut() {
+            midi.made = made.iter().filter(|(id, _, _)| *id == t.id).map(|(_, i, n)| (*i, (*n).clone())).collect();
+        }
+    }
+    Some(out)
+}
+
 /// The chain an owner path names: the list it is in and its name.
 fn split(owner: &str) -> Result<(&str, &str), String> {
     if owner == "master" {

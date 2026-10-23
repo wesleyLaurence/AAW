@@ -505,7 +505,19 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
             None if !t.pads.is_empty() => format!("pads {}", t.pads.keys().cloned().collect::<Vec<_>>().join(" ")),
             None => "audio".into(),
         };
-        parts.push(instrument);
+        // The MIDI effects the notes pass through before it, a plugin by
+        // its slug.
+        let through: Vec<String> = t
+            .midi
+            .iter()
+            .flat_map(|m| &m.midi_effects)
+            .filter(|e| !e.bypass())
+            .map(|e| match e {
+                aaw_model::MidiEffect::Device(d) => format!("plugin {}", d.name),
+                e => e.kind().to_string(),
+            })
+            .collect();
+        parts.push(if through.is_empty() { instrument } else { format!("{instrument} after {}", through.join(", ")) });
         parts.push(format!("{} dB", number(t.gain_db)));
         if let Some(s) = span(&pitches) {
             parts.push(s);

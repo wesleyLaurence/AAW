@@ -270,7 +270,7 @@ impl InstrumentPlan {
                 ("audio", Arc::as_ptr(audio) as usize).hash(&mut h);
                 0
             }
-            None => 0,
+            Some(Made::Notes(_)) | None => 0,
         };
         InstrumentPlan {
             notes,
@@ -312,7 +312,7 @@ impl Instrument {
         let sound = match &plan.made {
             Some(Made::Code(live)) => Sound::Live(live.instance(&plan.device, &plan.lanes)),
             Some(Made::Audio(audio)) => Sound::Cache(audio.clone()),
-            None => Sound::Silent,
+            Some(Made::Notes(_)) | None => Sound::Silent,
         };
         Instrument {
             sound,

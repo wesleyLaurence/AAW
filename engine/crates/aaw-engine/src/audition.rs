@@ -72,6 +72,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         // The audition is the patch's sound: the notes as given, through no
         // MIDI effect.
         midi_effects: Vec::new(),
+        made: Default::default(),
     });
     track.sends.clear();
     track.automation.clear();

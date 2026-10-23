@@ -22,6 +22,12 @@
 //! `play(notes, frames, sample_rate, fields)`, run over the whole song and
 //! cached as an effect's output is; in real time, the module also exports
 //! `aaw_note`, and plays previewed notes too.
+//!
+//! A MIDI effect (`kind: midi`) sits among a MIDI track's `midi_effects`
+//! and changes its notes: `device.py` defines `transform(notes, fields,
+//! tempo)`, run on the notes it is given, in beats, whenever they or its
+//! fields change; what it returns is cached under `.daw/devices/` and the
+//! schedule plays it, so the instrument and every effect after it hear it.
 
 use crate::patches::{slug, workspace};
 use crate::python;
@@ -161,7 +167,7 @@ fn num(x: f64) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Manifest {
     pub format: i64,
-    /// `effect` or `instrument`; MIDI effects are a later stage.
+    /// `effect`, `instrument` or `midi`.
     pub kind: String,
     /// The title, such as `Tilt EQ`.
     pub name: String,
@@ -305,7 +311,9 @@ fn flag(d: &Dict, name: &str) -> Result<Option<bool>> {
     }
 }
 
-fn field_spec(name: &str, spec: &Value) -> Result<FieldSpec> {
+/// A field of a MIDI effect (`midi`) takes no lane: its code runs on the
+/// notes, not a frame at a time.
+fn field_spec(name: &str, spec: &Value, midi: bool) -> Result<FieldSpec> {
     let Value::Dict(d) = spec else {
         return Err(format!("field {name}: a field is a mapping with a type"));
     };
@@ -378,7 +386,12 @@ fn field_spec(name: &str, spec: &Value) -> Result<FieldSpec> {
             if !(default >= min && default <= max) {
                 return Err(format!("field {name}: default {} is outside {} to {}", num(default), num(min), num(max)));
             }
-            (min, max, FieldValue::Number(default), flag(d, "lane")?.unwrap_or(true))
+            let lane = match flag(d, "lane")? {
+                Some(true) if midi => return Err(format!("field {name}: a MIDI effect's fields take no lane; its code runs on the notes")),
+                Some(lane) => lane,
+                None => !midi,
+            };
+            (min, max, FieldValue::Number(default), lane)
         }
     };
     Ok(FieldSpec {
@@ -429,11 +442,14 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
     }
     let kind = text(d, "kind")?.unwrap_or_else(|| "effect".into());
     match kind.as_str() {
-        "effect" | "instrument" => {}
-        "midi" => return Err("kind midi is a later stage: effects and instruments are built".into()),
+        "effect" | "instrument" | "midi" => {}
         other => return Err(format!("kind {other} is not one of effect, instrument, midi")),
     }
+    let midi = kind == "midi";
     let run = text(d, "run")?.unwrap_or_else(|| "offline".into());
+    if midi && run != "offline" {
+        return Err("a MIDI effect runs offline: its device.py changes the notes before they play, as the built-in MIDI effects do".into());
+    }
     let (default_entry, extension) = match run.as_str() {
         "offline" => ("device.py", ".py"),
         "realtime" => ("device.wasm", ".wasm"),
@@ -462,7 +478,7 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
                 if !aaw_model::valid_device_field(fname) {
                     return Err(format!("field {fname}: a field's name is lowercase letters, digits and underscores, starting with a letter"));
                 }
-                fields.push(field_spec(fname, spec)?);
+                fields.push(field_spec(fname, spec, midi)?);
             }
         }
         Some(_) => return Err("fields is a mapping of names to fields".into()),
@@ -795,12 +811,83 @@ def play(notes, frames, sample_rate, fields):
 /// to the device ABI with `aaw_note`.
 pub const RUST_INSTRUMENT_TEMPLATE: &str = include_str!("../templates/instrument.rs");
 
+/// The manifest `daw plugin new --midi` writes, with NAME filled in.
+pub const MIDI_MANIFEST_TEMPLATE: &str = r#"# A MIDI effect of your own. The manifest is the contract: what the song,
+# the app's panel, daw set and the browser know of the effect comes from
+# here. daw describe midi, under device, says how it is used.
+format: 1
+kind: midi
+name: NAME
+description: "A transpose and echoes of each note: the scaffold to edit."
+version: "0.1"
+author: ""
+license: MIT
+# offline: device.py runs in Python on the notes it is given, when they or
+# the fields change; what it returns is cached and the track plays it. A
+# MIDI effect runs offline only.
+run: offline
+entry: device.py
+fields:
+  # type: db, hz, percent, ms, beats or number take min, max and default;
+  # scale is linear or log (hz is log unless said). switch has a default,
+  # true or false; choice has choices and a default among them. label and
+  # unit are optional. No lane moves a MIDI effect's field.
+  transpose: {type: number, min: -24, max: 24, default: 0, unit: st}
+  echoes: {type: number, min: 0, max: 8, default: 2}
+  spacing_beats: {type: beats, min: 0.0625, max: 4, default: 0.5, label: Spacing}
+  decay_percent: {type: percent, min: 0, max: 100, default: 40, label: Decay}
+  pitch: {type: choice, choices: [same, octave_up, octave_down], default: same}
+  keep_original: {type: switch, default: true, label: Original}
+"#;
+
+/// The code `daw plugin new --midi` writes.
+pub const MIDI_CODE_TEMPLATE: &str = r#""""NAME: the scaffold of a MIDI effect, to edit.
+
+transform(notes, fields, tempo) is the whole contract of a MIDI effect.
+notes holds the notes it is given, as the clips play them through the MIDI
+effects before it, a row a note in the order they start: notes["start"]
+and notes["end"] are beats from the song's start (floats), notes["pitch"]
+the MIDI note and notes["velocity"] 1 to 127; a row unpacks as start, end,
+pitch, velocity. fields maps each name the manifest declares to its value:
+a float for a number, True or False for a switch, a string for a choice.
+tempo is the song's, in beats a minute. Return the notes to play, in any
+order: a structured array of the same fields, or rows of (start, end,
+pitch, velocity), with start at 0 or after, end after start, pitch 0 to
+127 and velocity 1 to 127. Times are kept to 1/960 of a beat. Only numpy
+and scipy are promised.
+"""
+
+
+def transform(notes, fields, tempo):
+    transpose = int(round(fields["transpose"]))
+    echoes = int(round(fields["echoes"]))
+    spacing = float(fields["spacing_beats"])
+    keep = 1 - float(fields["decay_percent"]) / 100
+    step = {"same": 0, "octave_up": 12, "octave_down": -12}[fields["pitch"]]
+    first = 0 if fields["keep_original"] else 1
+    out = []
+    for start, end, pitch, velocity in notes:
+        # The note itself, then each echo later, softer and moved by step.
+        for k in range(first, echoes + 1):
+            p = int(pitch) + transpose + k * step
+            v = int(round(velocity * keep**k))
+            if 0 <= p <= 127 and v >= 1:
+                out.append((start + k * spacing, end + k * spacing, p, v))
+    return out
+"#;
+
 /// Makes a device folder for `name` under `root`, the project's or the
-/// workspace's `devices/`, from the templates: a working effect, or with
-/// `instrument` an instrument, to edit, offline in Python or, with
-/// `realtime`, in Rust for the audio thread, which is left to `build`.
-/// Refuses a folder that is there.
-pub fn new(name: &str, root: &Path, realtime: bool, instrument: bool) -> Result<Installed> {
+/// workspace's `devices/`, from the templates: a working device of `kind`
+/// (`effect`, `instrument` or `midi`) to edit, offline in Python or, with
+/// `realtime`, in Rust for the audio thread, which is left to `build`. A
+/// MIDI effect is offline only. Refuses a folder that is there.
+pub fn new(name: &str, root: &Path, realtime: bool, kind: &str) -> Result<Installed> {
+    if !["effect", "instrument", "midi"].contains(&kind) {
+        return Err(format!("kind {kind} is not one of effect, instrument, midi"));
+    }
+    if kind == "midi" && realtime {
+        return Err("A MIDI effect runs offline, in Python: daw plugin new NAME --midi".into());
+    }
     let name = name.trim();
     let slug_of = slug(name);
     if slug_of.is_empty() {
@@ -811,11 +898,12 @@ pub fn new(name: &str, root: &Path, realtime: bool, instrument: bool) -> Result<
         return Err(format!("{} is already there; choose another name or edit it", folder.display()));
     }
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let (manifest, file, code) = match (instrument, realtime) {
-        (false, true) => (REALTIME_MANIFEST_TEMPLATE.to_string(), "device.rs", RUST_TEMPLATE),
-        (false, false) => (MANIFEST_TEMPLATE.to_string(), "device.py", CODE_TEMPLATE),
-        (true, true) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_REALTIME_RUN), "device.rs", RUST_INSTRUMENT_TEMPLATE),
-        (true, false) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_OFFLINE_RUN), "device.py", INSTRUMENT_CODE_TEMPLATE),
+    let (manifest, file, code) = match (kind, realtime) {
+        ("midi", _) => (MIDI_MANIFEST_TEMPLATE.to_string(), "device.py", MIDI_CODE_TEMPLATE),
+        ("instrument", true) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_REALTIME_RUN), "device.rs", RUST_INSTRUMENT_TEMPLATE),
+        ("instrument", false) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_OFFLINE_RUN), "device.py", INSTRUMENT_CODE_TEMPLATE),
+        (_, true) => (REALTIME_MANIFEST_TEMPLATE.to_string(), "device.rs", RUST_TEMPLATE),
+        (_, false) => (MANIFEST_TEMPLATE.to_string(), "device.py", CODE_TEMPLATE),
     };
     let manifest = manifest.replace("NAME", name);
     let code = code.replacen("NAME", name, 1).replace("SLUG", &slug_of);
@@ -917,6 +1005,12 @@ impl Installed {
         self.manifest.kind == "instrument"
     }
 
+    /// Whether it is a MIDI effect, which changes a MIDI track's notes
+    /// before its instrument.
+    pub fn midi(&self) -> bool {
+        self.manifest.kind == "midi"
+    }
+
     /// The fields as a real-time device's code is given them.
     pub fn wasm_fields(&self) -> Vec<wasm::Field> {
         self.manifest
@@ -962,6 +1056,50 @@ impl Installed {
 /// (start, end, key, velocity): a chord held half a second, then a note
 /// above it.
 const CHECK_NOTES: [(usize, usize, u8, u8); 4] = [(0, 24000, 60, 100), (0, 24000, 64, 90), (0, 24000, 67, 80), (28800, 43200, 72, 110)];
+
+/// The notes a MIDI effect's check is given, as (start, end, pitch,
+/// velocity) in beats: a chord held two beats, then a note above it.
+const CHECK_MIDI_NOTES: [(f64, f64, i64, i64); 4] = [(0.0, 2.0, 60, 100), (0.0, 2.0, 64, 90), (0.0, 2.0, 67, 80), (2.5, 3.5, 72, 110)];
+
+/// Runs a MIDI effect once on `CHECK_MIDI_NOTES` at 120 BPM with every
+/// field at its default, and holds what it returns to what a song plays.
+/// The reply says the notes in and out, their range of pitches and the
+/// first few, in beats.
+fn check_midi_effect(device: &Installed) -> Result<Json> {
+    let m = &device.manifest;
+    let params = json!({
+        "tempo": 120.0,
+        "fields": m.fields.iter().map(|f| (f.name.clone(), f.default_json())).collect::<Map<String, Json>>(),
+        "notes": CHECK_MIDI_NOTES.iter().map(|&(s, e, p, v)| json!([s, e, p, v])).collect::<Vec<_>>(),
+    });
+    let work = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let params_file = work.path().join("params.json");
+    std::fs::write(&params_file, params.to_string()).map_err(|e| e.to_string())?;
+    let output_file = work.path().join("output.json");
+    let mut command = runner()?;
+    command.arg("--device").arg(&device.dir).arg("--output").arg(&output_file).arg("--params").arg(&params_file);
+    run_python(command, &format!("the check of {}", m.slug))?;
+    let text = std::fs::read_to_string(&output_file).map_err(|e| format!("{}: the device wrote no notes: {e}", m.slug))?;
+    let out: Json = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", m.slug))?;
+    let rows = out.get("notes").and_then(Json::as_array).ok_or_else(|| format!("{}: the device wrote no notes", m.slug))?;
+    let ticks = ticks_of(&m.slug, rows)?;
+    let beat = |t: i64| t as f64 / TICKS_PER_BEAT as f64;
+    let pitches: Vec<i64> = ticks.iter().map(|n| n[2]).collect();
+    Ok(json!({
+        "ok": true,
+        "kind": "midi",
+        "run": "offline",
+        "notes_in": CHECK_MIDI_NOTES.len(),
+        "notes_out": ticks.len(),
+        "pitches": match (pitches.iter().min(), pitches.iter().max()) {
+            (Some(lo), Some(hi)) => json!([lo, hi]),
+            _ => json!([]),
+        },
+        "first": ticks.iter().take(8).map(|n| json!([beat(n[0]), beat(n[1]), n[2], n[3]])).collect::<Vec<_>>(),
+        "device": m.slug,
+        "folder": device.dir,
+    }))
+}
 
 /// Runs a real-time device for a second of noise at 48 kHz, or an
 /// instrument for a second of `CHECK_NOTES`, with every field at its
@@ -1033,6 +1171,9 @@ fn check_realtime(device: &Installed) -> Result<Json> {
 /// shape. The reply says the frames in and out and the channels; a
 /// real-time device's also its latency and its load.
 pub fn check(device: &Installed) -> Result<Json> {
+    if device.midi() {
+        return check_midi_effect(device);
+    }
     if device.realtime() {
         let mut reply = check_realtime(device)?;
         reply["device"] = json!(device.manifest.slug);
@@ -1067,16 +1208,19 @@ pub fn check(device: &Installed) -> Result<Json> {
 // ---------------------------------------------------------------------------
 // The devices of a song
 
-/// One device in a song's chains, or a track's instrument.
+/// One device in a song's chains, a track's instrument, or a MIDI effect
+/// among a track's `midi_effects`.
 #[derive(Clone, Debug)]
 pub struct Instance {
-    /// The chain's owner as the host addresses it: `tracks.T`.
+    /// The chain's owner as the host addresses it: `tracks.T`, or
+    /// `tracks.T.midi_effects` for a MIDI effect (`custom::midi_owner`).
     pub owner: String,
-    /// Its place in the chain, or `custom::INSTRUMENT` for the track's
-    /// instrument.
+    /// Its place in the chain or among the MIDI effects, or
+    /// `custom::INSTRUMENT` for the track's instrument.
     pub index: usize,
-    /// The effect as commands name it, `tracks.T.effects.REF`, or the
-    /// instrument, `tracks.T.instrument`.
+    /// The effect as commands name it, `tracks.T.effects.REF` or
+    /// `tracks.T.midi_effects.REF`, or the instrument,
+    /// `tracks.T.instrument`.
     pub reference: String,
     pub slug: String,
     pub version: Option<String>,
@@ -1099,9 +1243,34 @@ impl Instance {
         self.index == custom::INSTRUMENT
     }
 
-    /// The cache's file, under the project's `.daw/devices/`.
+    /// Whether it is a MIDI effect, which makes notes rather than sound.
+    pub fn is_midi(&self) -> bool {
+        self.owner.ends_with(".midi_effects")
+    }
+
+    /// The cache's file, under the project's `.daw/devices/`: the notes a
+    /// MIDI effect made as JSON, or sound as WAV.
     pub fn cache_file(&self, project: &Path) -> Option<PathBuf> {
-        self.identity.as_ref().map(|id| cache_dir(project).join(format!("{id}.wav")))
+        let extension = if self.is_midi() { "json" } else { "wav" };
+        self.identity.as_ref().map(|id| cache_dir(project).join(format!("{id}.{extension}")))
+    }
+}
+
+/// A MIDI effect's reference among a track's `midi_effects`: its ID, or its
+/// place.
+fn midi_reference(e: &aaw_model::MidiEffect, index: usize) -> String {
+    e.id().filter(|id| !id.is_empty()).map_or_else(|| index.to_string(), str::to_string)
+}
+
+/// The track, its notes and the MIDI effect of the person's own an
+/// instance names.
+fn midi_parts<'a>(p: &'a Project, inst: &Instance) -> Option<(&'a aaw_model::Track, &'a aaw_model::Midi, &'a aaw_model::Device)> {
+    let id = inst.owner.strip_prefix("tracks.")?.strip_suffix(".midi_effects")?;
+    let t = p.track(id)?;
+    let midi = t.midi.as_ref()?;
+    match midi.midi_effects.get(inst.index)? {
+        aaw_model::MidiEffect::Device(d) => Some((t, midi, d)),
+        _ => None,
     }
 }
 
@@ -1118,10 +1287,14 @@ fn effect_reference(e: &Effect, index: usize) -> String {
 /// each with its instrument first, then groups each after the groups in it,
 /// returns, then the master, and within a chain in order, so that a device
 /// fed by another comes after it.
+///
+/// A track's MIDI effects of the person's own come before its instrument,
+/// in their order; `p` carries what those before have made
+/// (`custom::attach`), so that what each is given is known.
 pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
-    let mut owners: Vec<(String, &[Effect], bool, Option<&aaw_model::Device>)> = Vec::new();
+    let mut owners: Vec<(String, &[Effect], bool, Option<&aaw_model::Midi>)> = Vec::new();
     for t in &p.tracks {
-        owners.push((format!("tracks.{}", t.id), &t.effects, t.frozen.is_none(), t.midi.as_ref().and_then(|m| m.device())));
+        owners.push((format!("tracks.{}", t.id), &t.effects, t.frozen.is_none(), t.midi.as_ref()));
     }
     for g in p.group_order() {
         owners.push((format!("groups.{}", g.id), &g.effects, true, None));
@@ -1132,8 +1305,22 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
     owners.push(("master".to_string(), &p.master.effects, true, None));
     let mut found: HashMap<String, std::result::Result<Installed, String>> = HashMap::new();
     let mut out = Vec::new();
-    for (owner, effects, live, instrument) in owners {
-        if let Some(d) = instrument {
+    for (owner, effects, live, midi) in owners {
+        for (index, d) in midi.into_iter().flat_map(|m| m.devices()) {
+            let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name)).clone();
+            let track = owner.strip_prefix("tracks.").unwrap_or(&owner);
+            out.push(Instance {
+                owner: custom::midi_owner(track),
+                index,
+                reference: format!("{owner}.midi_effects.{}", midi_reference(&midi.expect("a MIDI track").midi_effects[index], index)),
+                slug: d.name.clone(),
+                version: d.version.clone(),
+                installed,
+                heard: live && !d.bypass,
+                identity: None,
+            });
+        }
+        if let Some(d) = midi.and_then(|m| m.device()) {
             let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name)).clone();
             out.push(Instance {
                 owner: owner.clone(),
@@ -1174,6 +1361,10 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
         if !inst.heard || device.realtime() {
             continue;
         }
+        if inst.is_midi() {
+            inst.identity = midi_identity(p, inst, device);
+            continue;
+        }
         if inst.is_instrument() {
             inst.identity = instrument_identity(p, &inst.owner, device);
             continue;
@@ -1190,10 +1381,45 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
         h.update([0]);
         h.update(codes.join(",").as_bytes());
         h.update([0]);
+        // What the MIDI effects of the person's own made of the notes,
+        // which the song's text does not hold.
+        h.update(made_marks(p).as_bytes());
+        h.update([0]);
         h.update(p.session.sample_rate.to_string().as_bytes());
         inst.identity = Some(hex(&h.finalize()));
     }
     out
+}
+
+/// Which notes made by the MIDI effects of the person's own a song
+/// carries, by track, place and key.
+fn made_marks(p: &Project) -> String {
+    let mut out = String::new();
+    for t in &p.tracks {
+        for (i, m) in t.midi.iter().flat_map(|m| &m.made) {
+            out.push_str(&format!("{}:{i}:{:x};", t.id, m.key));
+        }
+    }
+    out
+}
+
+/// What a MIDI effect's cache is made from: the notes it is given, in
+/// exact beats, its entry, its code and the tempo.
+fn midi_identity(p: &Project, inst: &Instance, device: &Installed) -> Option<String> {
+    let (_, midi, d) = midi_parts(p, inst)?;
+    let mut h = Sha256::new();
+    h.update(b"midi\0");
+    for n in aaw_model::schedule::midi_effect_input(midi, inst.index) {
+        h.update(format!("{},{},{},{};", n.at, n.beats, n.pitch, n.velocity).as_bytes());
+    }
+    h.update([0]);
+    let entry = aaw_model::Device { id: None, bypass: false, ..d.clone() };
+    h.update(aaw_model::yaml_emit::dump(&aaw_model::MidiEffect::Device(entry).dump(false)).as_bytes());
+    h.update([0]);
+    h.update(device.code.as_bytes());
+    h.update([0]);
+    h.update(p.session.tempo.to_string().as_bytes());
+    Some(hex(&h.finalize()))
 }
 
 /// What an offline instrument's cache is made from: the track's notes as
@@ -1296,6 +1522,9 @@ fn check_device(p: &Project, owner: &str, index: usize, e: &Effect, lanes: &[aaw
     if device.instrument() {
         return Err(format!("{reference}: {} is an instrument, which a MIDI track's notes play: daw instrument set SONG TRACK {}", d.name, d.name));
     }
+    if device.midi() {
+        return Err(format!("{reference}: {} is a MIDI effect, which changes a MIDI track's notes before its instrument: daw effect add SONG tracks.T --type {} puts it there", d.name, d.name));
+    }
     for (name, value) in &d.fields {
         let Some(spec) = m.field(name) else {
             return Err(format!("{reference}: {} has no field {name}; its fields are {}", d.name, m.field_names()));
@@ -1324,6 +1553,9 @@ fn check_device(p: &Project, owner: &str, index: usize, e: &Effect, lanes: &[aaw
 fn check_instrument(t: &aaw_model::Track, d: &aaw_model::Device, device: &Installed) -> Result<()> {
     let reference = format!("tracks.{}.instrument.device", t.id);
     let m = &device.manifest;
+    if device.midi() {
+        return Err(format!("{reference}: {} is a MIDI effect, which changes the notes before the instrument: daw effect add SONG tracks.{} --type {}", d.name, t.id, d.name));
+    }
     if !device.instrument() {
         return Err(format!("{reference}: {} is an effect, which goes in a chain: daw effect add SONG tracks.{} --type {}", d.name, t.id, d.name));
     }
@@ -1344,12 +1576,43 @@ fn check_instrument(t: &aaw_model::Track, d: &aaw_model::Device, device: &Instal
     Ok(())
 }
 
+/// Refuses a MIDI effect of the person's own among a track's
+/// `midi_effects` whose manifest is not a MIDI effect's or whose fields
+/// are not what it allows. `index` is its place.
+fn check_midi(t: &aaw_model::Track, index: usize, d: &aaw_model::Device, device: &Installed) -> Result<()> {
+    let e = &t.midi.as_ref().ok_or("a MIDI track")?.midi_effects[index];
+    let reference = format!("tracks.{}.midi_effects.{}", t.id, midi_reference(e, index));
+    let m = &device.manifest;
+    if device.instrument() {
+        return Err(format!("{reference}: {} is an instrument, which the notes play: daw instrument set SONG {} {}", d.name, t.id, d.name));
+    }
+    if !device.midi() {
+        return Err(format!("{reference}: {} is an audio effect, which goes in the chain after the instrument: daw effect add SONG tracks.{} --type {}", d.name, t.id, d.name));
+    }
+    for (name, value) in &d.fields {
+        let Some(spec) = m.field(name) else {
+            return Err(format!("{reference}: {} has no field {name}; its fields are {}", d.name, m.field_names()));
+        };
+        spec.accept(value).map_err(|e| format!("{reference}.fields.{e}"))?;
+    }
+    Ok(())
+}
+
 /// Refuses a song whose devices' fields or lanes are not what their
 /// manifests allow, an instrument in a chain or an effect as a track's
-/// instrument. A device that is not installed cannot be checked and
+/// instrument, or a MIDI effect anywhere but among a track's
+/// `midi_effects`. A device that is not installed cannot be checked and
 /// passes.
 pub fn check_song(p: &Project, project: &Path) -> Result<()> {
     let mut found: HashMap<String, Option<Installed>> = HashMap::new();
+    for t in &p.tracks {
+        for (index, d) in t.midi.iter().flat_map(|m| m.devices()) {
+            let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name).ok());
+            if let Some(device) = installed {
+                check_midi(t, index, d, device)?;
+            }
+        }
+    }
     for t in &p.tracks {
         let Some(d) = t.midi.as_ref().and_then(|m| m.device()) else { continue };
         let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name).ok());
@@ -1430,6 +1693,9 @@ pub fn effect_node(project: Option<&Path>, slug_of: &str, given: &Map<String, Js
 pub fn instrument_node(project: Option<&Path>, slug_of: &str) -> Result<Json> {
     let device = find(project, slug_of)?;
     let m = &device.manifest;
+    if device.midi() {
+        return Err(format!("{} is a MIDI effect, which changes the notes before the instrument: daw effect add SONG tracks.T --type {}", m.slug, m.slug));
+    }
     if !device.instrument() {
         return Err(format!("{} is an effect, which goes in a chain: daw effect add SONG OWNER --type {}", m.slug, m.slug));
     }
@@ -1452,11 +1718,127 @@ fn to_stereo(audio: &aaw_engine::sndfile::Audio) -> Vec<[f32; 2]> {
         .collect()
 }
 
-/// Makes a device's cache: renders what feeds it, with the caches of the
-/// devices before it, evaluates the lanes on its fields a frame at a time,
-/// runs its code on them and writes the result under `.daw/devices/`,
-/// returning the audio. `p` is the song as it stands.
-pub fn compute(p: &Project, project: &Path, inst: &Instance, caches: &Caches) -> Result<Arc<Vec<[f32; 2]>>> {
+/// Makes a device's cache under `.daw/devices/` and returns it: the notes
+/// a MIDI effect makes of those it is given, or a device's sound. `p` is
+/// the song as it stands, with what the MIDI effects before it made
+/// (`custom::attach`); `caches` are what the devices before it made.
+pub fn compute(p: &Project, project: &Path, inst: &Instance, caches: &Caches) -> Result<Made> {
+    if inst.is_midi() {
+        return compute_midi(p, project, inst).map(Made::Notes);
+    }
+    compute_audio(p, project, inst, caches).map(Made::Audio)
+}
+
+/// Reads a device's cache file as what it made.
+fn load_made(p: &Project, inst: &Instance, file: &Path) -> Result<Made> {
+    if inst.is_midi() {
+        let (_, midi, d) = midi_parts(p, inst).ok_or("the MIDI effect")?;
+        let key = aaw_model::midi_effects::key(d, &aaw_model::schedule::midi_effect_input(midi, inst.index));
+        return load_notes(file).map(|notes| Made::Notes(Arc::new(aaw_model::midi_effects::Made { key, notes })));
+    }
+    load_cache(file).map(Made::Audio)
+}
+
+/// The steps of a beat a MIDI effect's notes are kept to.
+pub const TICKS_PER_BEAT: i64 = 960;
+
+/// The notes of a MIDI effect's cache: rows of start, end, pitch and
+/// velocity, the times in ticks of `TICKS_PER_BEAT`.
+fn load_notes(file: &Path) -> Result<Vec<aaw_model::midi_effects::Played>> {
+    let text = std::fs::read_to_string(file).map_err(|e| format!("{}: {e}", file.display()))?;
+    let j: Json = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?;
+    let rows = j.get("notes").and_then(Json::as_array).ok_or_else(|| format!("{}: no notes", file.display()))?;
+    let tick = |t: i64| num_rational::BigRational::new(t.into(), TICKS_PER_BEAT.into());
+    rows.iter()
+        .map(|r| {
+            let n: Vec<i64> = r.as_array().into_iter().flatten().filter_map(Json::as_i64).collect();
+            match n.as_slice() {
+                &[start, end, pitch, velocity] if end > start => Ok(aaw_model::midi_effects::Played { pitch, velocity, at: tick(start), beats: tick(end - start) }),
+                _ => Err(format!("{}: a note is [start, end, pitch, velocity] in ticks", file.display())),
+            }
+        })
+        .collect()
+}
+
+/// The most notes a MIDI effect may make.
+const MAX_NOTES: usize = 200_000;
+
+/// The notes a MIDI effect's code returned, as `[start, end, pitch,
+/// velocity]` with the times in beats, kept to ticks: refused in words when
+/// one is out of range.
+fn ticks_of(slug_of: &str, rows: &[Json]) -> Result<Vec<[i64; 4]>> {
+    if rows.len() > MAX_NOTES {
+        return Err(format!("{slug_of}: transform returned {} notes; at most {MAX_NOTES} are played", rows.len()));
+    }
+    let mut out = Vec::with_capacity(rows.len());
+    for (k, r) in rows.iter().enumerate() {
+        let x: Vec<f64> = r.as_array().into_iter().flatten().filter_map(Json::as_f64).collect();
+        let &[start, end, pitch, velocity] = x.as_slice() else {
+            return Err(format!("{slug_of}: note {k} is not start, end, pitch and velocity"));
+        };
+        if !(start.is_finite() && end.is_finite()) || start < 0.0 || end <= start {
+            return Err(format!("{slug_of}: note {k} starts at {start} and ends at {end}; a note starts at 0 or after and ends after it starts"));
+        }
+        if pitch.fract() != 0.0 || !(0.0..=127.0).contains(&pitch) {
+            return Err(format!("{slug_of}: note {k} has pitch {pitch}; a pitch is a whole number 0 to 127"));
+        }
+        if velocity.fract() != 0.0 || !(1.0..=127.0).contains(&velocity) {
+            return Err(format!("{slug_of}: note {k} has velocity {velocity}; a velocity is a whole number 1 to 127"));
+        }
+        let at = (start * TICKS_PER_BEAT as f64).round() as i64;
+        let until = ((end * TICKS_PER_BEAT as f64).round() as i64).max(at + 1);
+        out.push([at, until, pitch as i64, velocity as i64]);
+    }
+    out.sort();
+    Ok(out)
+}
+
+/// Makes a MIDI effect's cache: hands its code the notes it is given, in
+/// beats, with its fields and the tempo, and keeps the notes it returns,
+/// kept to ticks, under `.daw/devices/`.
+fn compute_midi(p: &Project, project: &Path, inst: &Instance) -> Result<Arc<aaw_model::midi_effects::Made>> {
+    let device = inst.installed.clone()?;
+    let identity = inst.identity.clone().ok_or("the device is not heard")?;
+    let file = cache_dir(project).join(format!("{identity}.json"));
+    if file.is_file() {
+        return match load_made(p, inst, &file)? {
+            Made::Notes(n) => Ok(n),
+            _ => Err("not notes".into()),
+        };
+    }
+    let (t, midi, d) = midi_parts(p, inst).ok_or("the MIDI effect")?;
+    check_midi(t, inst.index, d, &device)?;
+    let input = aaw_model::schedule::midi_effect_input(midi, inst.index);
+    let key = aaw_model::midi_effects::key(d, &input);
+    let m = &device.manifest;
+    let f = |x: &num_rational::BigRational| num_traits::ToPrimitive::to_f64(x).unwrap_or(0.0);
+    let notes: Vec<Json> = input.iter().map(|n| json!([f(&n.at), f(&(&n.at + &n.beats)), n.pitch, n.velocity])).collect();
+    let work = cache_dir(project).join(format!("work-{}-{}", std::process::id(), &identity[..12]));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
+    let result = (|| -> Result<Arc<aaw_model::midi_effects::Made>> {
+        let params = json!({"tempo": p.session.tempo, "fields": field_values(m, d), "notes": notes});
+        let params_file = work.join("params.json");
+        std::fs::write(&params_file, params.to_string()).map_err(|e| e.to_string())?;
+        let output_file = work.join("output.json");
+        let mut command = runner()?;
+        command.arg("--device").arg(&device.dir).arg("--output").arg(&output_file).arg("--params").arg(&params_file);
+        run_python(command, &format!("{} on {}", m.slug, inst.reference))?;
+        let text = std::fs::read_to_string(&output_file).map_err(|e| format!("{}: the device wrote no notes: {e}", m.slug))?;
+        let out: Json = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", m.slug))?;
+        let rows = out.get("notes").and_then(Json::as_array).ok_or_else(|| format!("{}: the device wrote no notes", m.slug))?;
+        let ticks = ticks_of(&m.slug, rows)?;
+        std::fs::create_dir_all(cache_dir(project)).map_err(|e| e.to_string())?;
+        let saved = json!({"ticks_per_beat": TICKS_PER_BEAT, "notes": ticks});
+        aaw_model::atomic_write(&file, &saved.to_string()).map_err(|e| e.to_string())?;
+        Ok(Arc::new(aaw_model::midi_effects::Made { key, notes: load_notes(&file)? }))
+    })();
+    let _ = std::fs::remove_dir_all(&work);
+    result
+}
+
+/// An offline device's or instrument's sound, made or read from its cache.
+fn compute_audio(p: &Project, project: &Path, inst: &Instance, caches: &Caches) -> Result<Arc<Vec<[f32; 2]>>> {
     let device = inst.installed.clone()?;
     let identity = inst.identity.clone().ok_or("the device is not heard")?;
     let file = cache_dir(project).join(format!("{identity}.wav"));
@@ -1657,10 +2039,10 @@ fn compute_instrument(p: &Project, project: &Path, inst: &Instance, device: &Ins
 pub fn sweep(project: &Path, instances: &[Instance]) {
     let dir = cache_dir(project);
     let Ok(entries) = std::fs::read_dir(&dir) else { return };
-    let keep: Vec<String> = instances.iter().filter_map(|i| i.identity.as_ref().map(|id| format!("{id}.wav"))).collect();
+    let keep: Vec<PathBuf> = instances.iter().filter_map(|i| i.cache_file(project)).collect();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        if name.ends_with(".wav") && !keep.contains(&name) {
+        if (name.ends_with(".wav") || name.ends_with(".json")) && !keep.contains(&entry.path()) {
             let _ = std::fs::remove_file(entry.path());
         }
     }
@@ -1718,73 +2100,86 @@ pub struct Settled {
     pub status: Vec<Status>,
 }
 
+/// The song with what the MIDI effects in `caches` made of its notes set
+/// on it, or the song itself when they made nothing.
+pub fn heard<'a>(p: &'a Project, caches: &Caches) -> std::borrow::Cow<'a, Project> {
+    custom::attach(p, caches).map_or(std::borrow::Cow::Borrowed(p), std::borrow::Cow::Owned)
+}
+
+/// Goes through a song's devices one at a time in the order their inputs
+/// can be made, `each` giving the state of one and what it made, if
+/// anything; the devices after a MIDI effect are read again with what it
+/// made, since it changes what they are given. Returns the states in the
+/// order of the last reading, with what was made.
+fn walk(p: &Project, project: &Path, mut each: impl FnMut(&Project, &Instance, &Caches) -> Result<(State, Option<Made>)>) -> Result<Settled> {
+    let mut caches = Caches::new();
+    let mut states: HashMap<(String, usize), State> = HashMap::new();
+    loop {
+        let q = heard(p, &caches);
+        let plan = instances(&q, project);
+        let Some(inst) = plan.iter().find(|i| !states.contains_key(&i.key())) else {
+            let status = plan
+                .iter()
+                .map(|inst| Status {
+                    reference: inst.reference.clone(),
+                    device: inst.slug.clone(),
+                    state: states.remove(&inst.key()).unwrap_or(State::Waiting),
+                })
+                .collect();
+            return Ok(Settled { caches, status });
+        };
+        let (state, made) = each(&q, inst, &caches)?;
+        if let Some(made) = made {
+            caches.insert(inst.key(), made);
+        }
+        states.insert(inst.key(), state);
+    }
+}
+
 /// Makes every device's cache in order, each with the caches of those
 /// before it, and returns them with each device's state. A device that
 /// fails stops nothing else; `strict` makes its failure the error.
 pub fn settle(p: &Project, project: &Path, strict: bool) -> Result<Settled> {
-    let mut caches = Caches::new();
-    let mut status = Vec::new();
-    for inst in instances(p, project) {
-        let state = match (&inst.installed, inst.heard) {
-            (Err(e), _) => State::Missing(e.clone()),
-            (Ok(_), false) => State::Off,
-            (Ok(device), true) if device.realtime() => match device.code(p.session.sample_rate as f64, p.session.tempo) {
-                Ok(code) => {
-                    caches.insert(inst.key(), Made::Code(code));
-                    State::Ready
-                }
-                Err(e) => {
-                    if strict {
-                        return Err(format!("{}: {e}", inst.reference));
-                    }
-                    State::Failed(e)
-                }
-            },
-            (Ok(_), true) => match compute(p, project, &inst, &caches) {
-                Ok(audio) => {
-                    caches.insert(inst.key(), Made::Audio(audio));
-                    State::Ready
-                }
-                Err(e) => {
-                    if strict {
-                        return Err(format!("{}: {e}", inst.reference));
-                    }
-                    State::Failed(e)
-                }
-            },
+    walk(p, project, |q, inst, caches| {
+        let made = match (&inst.installed, inst.heard) {
+            (Err(e), _) => return Ok((State::Missing(e.clone()), None)),
+            (Ok(_), false) => return Ok((State::Off, None)),
+            (Ok(device), true) if device.realtime() => device.code(q.session.sample_rate as f64, q.session.tempo).map(|c| Made::Code(c)),
+            (Ok(_), true) => compute(q, project, inst, caches),
         };
-        status.push(Status {
-            reference: inst.reference.clone(),
-            device: inst.slug.clone(),
-            state,
-        });
-    }
-    Ok(Settled { caches, status })
+        match made {
+            Ok(made) => Ok((State::Ready, Some(made))),
+            Err(e) if strict => Err(format!("{}: {e}", inst.reference)),
+            Err(e) => Ok((State::Failed(e), None)),
+        }
+    })
 }
 
 /// The state of a song's devices without a host: an offline device ready
 /// where a cache file is there and waiting otherwise, a real-time device
 /// ready where its code runs.
 pub fn status_headless(p: &Project, project: &Path) -> Vec<Status> {
-    instances(p, project)
-        .iter()
-        .map(|inst| Status {
-            reference: inst.reference.clone(),
-            device: inst.slug.clone(),
-            state: match (&inst.installed, inst.heard) {
-                (Err(e), _) => State::Missing(e.clone()),
-                (Ok(_), false) => State::Off,
-                (Ok(device), true) if device.realtime() => match device.code(p.session.sample_rate as f64, p.session.tempo) {
-                    Ok(_) => State::Ready,
-                    Err(e) => State::Failed(e),
+    let settled = walk(p, project, |q, inst, _| {
+        Ok(match (&inst.installed, inst.heard) {
+            (Err(e), _) => (State::Missing(e.clone()), None),
+            (Ok(_), false) => (State::Off, None),
+            (Ok(device), true) if device.realtime() => match device.code(q.session.sample_rate as f64, q.session.tempo) {
+                Ok(_) => (State::Ready, None),
+                Err(e) => (State::Failed(e), None),
+            },
+            (Ok(_), true) => match inst.cache_file(project) {
+                // A MIDI effect's notes are read, since what comes after
+                // it is given them.
+                Some(f) if f.is_file() && inst.is_midi() => match load_made(q, inst, &f) {
+                    Ok(made) => (State::Ready, Some(made)),
+                    Err(e) => (State::Failed(e), None),
                 },
-                (Ok(_), true) => match inst.cache_file(project) {
-                    Some(f) if f.is_file() => State::Ready,
-                    _ => State::Waiting,
-                },
+                Some(f) if f.is_file() => (State::Ready, None),
+                _ => (State::Waiting, None),
             },
         })
-        .collect()
+    });
+    settled.map(|s| s.status).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -1813,7 +2208,11 @@ mod tests {
         assert!(refused("name: X\n").contains("format"));
         assert!(refused("format: 2\nname: X\n").contains("format 2"));
         assert!(refused("format: 1\n").contains("name is required"));
-        assert!(refused("format: 1\nname: X\nkind: midi\n").contains("later stage"));
+        let midi = parse_manifest("format: 1\nname: X\nkind: midi\nfields: {shift: {type: number, min: -12, max: 12, default: 0}}\n", "x").unwrap();
+        assert!(midi.kind == "midi" && !midi.field("shift").unwrap().lane, "a MIDI effect's fields take no lane");
+        assert!(refused("format: 1\nname: X\nkind: midi\nrun: realtime\n").contains("a MIDI effect runs offline"));
+        assert!(refused("format: 1\nname: X\nkind: midi\nfields: {shift: {type: number, min: -12, max: 12, default: 0, lane: true}}\n").contains("take no lane"));
+        assert!(refused("format: 1\nname: X\nkind: audio\n").contains("one of effect, instrument, midi"));
         assert_eq!(parse_manifest("format: 1\nname: X\nkind: instrument\n", "x").unwrap().kind, "instrument");
         assert!(refused("format: 1\nname: X\nrun: live\n").contains("offline or realtime"));
         assert!(refused("format: 1\nname: X\nrun: realtime\nentry: device.py\n").contains(".wasm file"));
@@ -1843,11 +2242,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ws = tmp.path().join("ws");
         let proj = tmp.path().join("proj");
-        let made = new("Tilt EQ", &ws.join("devices"), false, false).unwrap();
+        let made = new("Tilt EQ", &ws.join("devices"), false, "effect").unwrap();
         assert_eq!(made.manifest.slug, "tilt-eq");
         assert!(made.dir.join("device.py").is_file());
-        assert!(new("Tilt EQ", &ws.join("devices"), false, false).unwrap_err().contains("already there"));
-        let own = new("Tilt EQ", &proj.join("devices"), false, false).unwrap();
+        assert!(new("Tilt EQ", &ws.join("devices"), false, "effect").unwrap_err().contains("already there"));
+        let own = new("Tilt EQ", &proj.join("devices"), false, "effect").unwrap();
         assert_eq!(own.from, Where::Project);
         assert_eq!(own.code, made.code, "the same files hash the same");
         std::fs::write(own.dir.join("device.py"), "def process(a, r, f):\n    return a\n").unwrap();
@@ -1904,7 +2303,7 @@ pub struct Changed {
 
 struct Job {
     identity: String,
-    rx: std::sync::mpsc::Receiver<Result<Arc<Vec<[f32; 2]>>>>,
+    rx: std::sync::mpsc::Receiver<Result<Made>>,
 }
 
 /// A host's work on a song's devices of the person's own: the caches it has
@@ -1956,13 +2355,13 @@ impl Work {
     /// drops those of devices that changed or went, and starts the next
     /// device whose cache is wanting when none is running.
     pub fn update(&mut self, p: &Arc<Project>, project: &Path) -> Changed {
-        self.plan = instances(p, project);
+        let changed = self.refresh(p, project);
         let mut dirs: Vec<PathBuf> = self.plan.iter().filter_map(|i| i.installed.as_ref().ok().map(|d| d.dir.clone())).collect();
         dirs.sort();
         dirs.dedup();
         self.folders = dirs.into_iter().map(|d| (d.clone(), folder_stamp(&d))).collect();
         self.looked = Some(std::time::Instant::now());
-        self.refresh(p, project)
+        changed
     }
 
     /// Whether a device folder the song uses changed since the song's
@@ -2003,7 +2402,6 @@ impl Work {
         // A result lands by its file, which `refresh` loads where a device
         // is still made from it; a run of what the song no longer holds is
         // left on disk until the sweep.
-        self.plan = instances(p, project);
         let changed = self.refresh(p, project);
         sweep(project, &self.plan);
         changed
@@ -2014,8 +2412,64 @@ impl Work {
         self.job.is_some()
     }
 
+    /// The notes the MIDI effects made, by place and the identity each was
+    /// made from.
+    fn notes_loaded(&self) -> Vec<((String, usize), String)> {
+        let mut out: Vec<_> = self.loaded.iter().filter(|(k, _)| matches!(self.caches.get(*k), Some(Made::Notes(_)))).map(|(k, v)| (k.clone(), v.clone())).collect();
+        out.sort();
+        out
+    }
+
+    /// Reads the song's devices with what the MIDI effects made of its
+    /// notes, again while that changes, since what the devices after them
+    /// are given changes with it; then starts the next run.
     fn refresh(&mut self, p: &Arc<Project>, project: &Path) -> Changed {
-        let before: Vec<((String, usize), String)> = self.loaded.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut before: Vec<((String, usize), String)> = self.loaded.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let mut status = Vec::new();
+        let mut next = None;
+        // Each reading loads or drops at least one MIDI effect's notes, or
+        // is the last; there are at most MAX_MIDI_CHAIN on a track.
+        for _ in 0..=p.tracks.len() * aaw_model::MAX_MIDI_CHAIN + 1 {
+            let notes = self.notes_loaded();
+            let q = custom::attach(p, &self.caches).map_or_else(|| p.clone(), Arc::new);
+            self.plan = instances(&q, project);
+            let (read, wanting) = self.pass(&q, project);
+            status = read;
+            next = wanting.map(|i| (i, q));
+            if self.notes_loaded() == notes {
+                break;
+            }
+        }
+        if let Some((inst, q)) = next {
+            let identity = inst.identity.clone().expect("a waiting device has an identity");
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (project, caches) = (project.to_path_buf(), self.caches.clone());
+            std::thread::Builder::new()
+                .name(format!("device {}", inst.slug))
+                .spawn(move || {
+                    let _ = tx.send(compute(&q, &project, &inst, &caches));
+                })
+                .expect("a thread for the device");
+            self.job = Some(Job { identity, rx });
+            if let Some(s) = status.iter_mut().find(|s| s.state == State::Waiting) {
+                s.state = State::Computing;
+            }
+        }
+        let mut after: Vec<((String, usize), String)> = self.loaded.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        before.sort();
+        after.sort();
+        let changed = Changed {
+            caches: before != after,
+            status: self.status != status,
+        };
+        self.status = status;
+        changed
+    }
+
+    /// One reading of the plan against what is loaded: each device's state,
+    /// the caches there loaded and those no longer wanted dropped, and the
+    /// first device whose cache is wanting, when nothing runs.
+    fn pass(&mut self, p: &Arc<Project>, project: &Path) -> (Vec<Status>, Option<Instance>) {
         let mut status = Vec::new();
         let mut keep: Vec<(String, usize)> = Vec::new();
         let mut next: Option<Instance> = None;
@@ -2060,10 +2514,10 @@ impl Work {
                     } else if self.job.as_ref().is_some_and(|j| &j.identity == identity) {
                         State::Computing
                     } else {
-                        let file = cache_dir(project).join(format!("{identity}.wav"));
-                        match file.is_file().then(|| load_cache(&file)) {
-                            Some(Ok(audio)) => {
-                                self.caches.insert(key.clone(), Made::Audio(audio));
+                        let file = inst.cache_file(project).expect("an identity");
+                        match file.is_file().then(|| load_made(p, inst, &file)) {
+                            Some(Ok(made)) => {
+                                self.caches.insert(key.clone(), made);
                                 self.loaded.insert(key.clone(), identity.clone());
                                 keep.push(key.clone());
                                 State::Ready
@@ -2091,31 +2545,7 @@ impl Work {
         self.caches.retain(|k, _| keep.contains(k));
         self.loaded.retain(|k, _| keep.contains(k));
         self.codes.retain(|k, _| keep.contains(k));
-        if let Some(inst) = next {
-            let identity = inst.identity.clone().expect("a waiting device has an identity");
-            let (tx, rx) = std::sync::mpsc::channel();
-            let (p, project, caches) = (p.clone(), project.to_path_buf(), self.caches.clone());
-            std::thread::Builder::new()
-                .name(format!("device {}", inst.slug))
-                .spawn(move || {
-                    let _ = tx.send(compute(&p, &project, &inst, &caches));
-                })
-                .expect("a thread for the device");
-            self.job = Some(Job { identity, rx });
-            if let Some(s) = status.iter_mut().find(|s| s.state == State::Waiting) {
-                s.state = State::Computing;
-            }
-        }
-        let mut after: Vec<((String, usize), String)> = self.loaded.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let mut before = before;
-        before.sort();
-        after.sort();
-        let changed = Changed {
-            caches: before != after,
-            status: self.status != status,
-        };
-        self.status = status;
-        changed
+        (status, next)
     }
 
     /// The devices' states, for `daw status`.

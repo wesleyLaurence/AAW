@@ -119,8 +119,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   wasmtime and stopped at a deadline (`wasm`); a MIDI track's instrument
   of the person's own is given the track's notes as note-ons and note-offs
   a block, through its module, or plays the host's offline output by the
-  timeline (`aaw-dsp`'s `instrument`); see
-  [custom-devices.md](features/custom-devices.md).
+  timeline (`aaw-dsp`'s `instrument`); what a MIDI effect of the person's
+  own made of a track's notes is set on the song a compile plays
+  (`custom::attach`); see [custom-devices.md](features/custom-devices.md).
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It arms tracks and records them, each take laid on the timeline, written
@@ -138,8 +139,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   [generated-audio.md](features/generated-audio.md). It reads the manifests
   of the person's own devices, effects and instruments, holds a song's
   devices to them, runs each offline device's code in Python off its thread
-  when what feeds it changed, an instrument's on the track's notes, and
-  plays the cache, makes a real-time device's module ready for
+  when what feeds it changed, an instrument's on the track's notes and a
+  MIDI effect's on the notes it is given, and plays the cache, makes a
+  real-time device's module ready for
   the engine, builds one from its Rust with rustc, and hears a device's
   folder change within a second (`devices`); see
   [custom-devices.md](features/custom-devices.md).
@@ -380,7 +382,9 @@ effects before it under `midi_effects`, and note clips under `clips`; no
 pads, pattern clips or audio clips. `midi_effects` list devices that change
 the notes as they play, in order: an `arpeggiator` (rate on the song's grid,
 order, octaves, gate), a `chord` (six shifts), a `scale` (root, scale,
-transpose) and a `velocity` (scale, offset, random by seed, min, max), each
+transpose), a `velocity` (scale, offset, random by seed, min, max) and a
+`device` of the person's own whose manifest's kind is `midi`, run offline
+by the host on the notes it is given and played from its cache, each
 `{type, id, bypass, ...}`; the schedule applies them to a track's notes
 before the frames are computed, so playback, a render, a freeze and
 `sounded` play what they make while the clips keep the notes as written, a

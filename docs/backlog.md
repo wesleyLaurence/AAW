@@ -32,11 +32,12 @@ stood.
     cache, the generic panel from the manifest and `daw plugin
     new|check|list|show|status` are built (D144), and the real-time tier,
     WebAssembly built from Rust by `daw plugin build` and run on the audio
-    thread (D145), and instruments, offline and in real time, with the
-    piano roll's preview through a real-time one (D146). Left: MIDI
-    effects, and the spec's version 1 written as the reference with how a
-    device is shared; FAUST as another source built to the same ABI; a
-    finer dependency for an offline device's input than the whole song; a
+    thread (D145), instruments, offline and in real time, with the
+    piano roll's preview through a real-time one (D146), and MIDI effects,
+    offline in Python among a MIDI track's `midi_effects` (D147). Left:
+    the spec's version 1 written as the reference with how a device is
+    shared; FAUST as another source built to the same ABI; a finer
+    dependency for an offline device's input than the whole song; a
     timeout on an offline run.
     [features/custom-devices.md](features/custom-devices.md)
 2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
@@ -120,6 +121,14 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A MIDI effect of the person's own, by the agent on a real song:** `daw
+  plugin new --midi`, its `transform` edited into what a part wants (a
+  strum, a humanize, a call and response), added by its slug before an
+  arpeggiator or after it, a field changed in its panel and the change
+  heard once the run lands, the panel's line while it computes, and a
+  note moved in the piano roll; dragged from the browser's MIDI Effects
+  onto a MIDI track's header. Rendered and its pitches read in tests and
+  from the terminal; nothing heard, the app never ran one.
 - **An instrument of the person's own, by the agent on a real song:** `daw
   plugin new --instrument --realtime`, its `device.rs` edited into a sound
   the song wants and built, `daw instrument set` on a MIDI track, the piano
@@ -1167,6 +1176,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
 ### What the agent reads and writes
 
+- `daw check` and `daw listen`'s `sounded` through a MIDI effect of the
+  person's own: both read the song without the host's caches, so they
+  hear the notes as written where the device changes them; read its
+  cached notes from `.daw/devices/` as a render does
+  ([devices anyone builds](features/custom-devices.md)).
 - A text piano roll of one clip or a few bars.
 - Queries: which bars the bass plays in, every snare off the backbeat.
 - A client library over the host, where a block of calls is one turn.

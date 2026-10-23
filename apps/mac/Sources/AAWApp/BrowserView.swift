@@ -598,8 +598,10 @@ struct BrowserView: View {
         let factory = patches.filter(\.factory)
         let mine = patches.filter { !$0.factory }
         let racks = instruments || midiEffects ? [] : browser.racks.filter { Browser.matches($0, browser.query) }
-        // Plugins: effects under Audio Effects, instruments under Instruments.
-        let plugins = midiEffects ? [] : model.plugins.filter { $0.kind == (instruments ? "instrument" : "effect") && Browser.matches($0, browser.query) }
+        // Plugins: effects under Audio Effects, instruments under
+        // Instruments, MIDI effects under MIDI Effects.
+        let pluginKind = instruments ? "instrument" : midiEffects ? "midi" : "effect"
+        let plugins = model.plugins.filter { $0.kind == pluginKind && Browser.matches($0, browser.query) }
         let instrumentRacks = instruments ? browser.instrumentRacks.filter { Browser.matches($0, browser.query) } : []
         return ScrollView {
             VStack(spacing: 0) {
@@ -638,8 +640,12 @@ struct BrowserView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(10)
                 }
+                if midiEffects && !plugins.isEmpty {
+                    heading("Plugins")
+                    ForEach(plugins, id: \.slug) { plugin in row(plugin) }
+                }
                 if midiEffects && browser.query.isEmpty {
-                    Text("A MIDI effect goes on a MIDI track before its instrument and changes the notes as they play; the clips keep the notes as written. Drop one on a MIDI track's header or its device panel.")
+                    Text("A MIDI effect goes on a MIDI track before its instrument and changes the notes as they play; the clips keep the notes as written. Drop one on a MIDI track's header or its device panel. One of your own, made with daw plugin new --midi, is listed here under Plugins.")
                         .font(.system(size: 10))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -783,6 +789,8 @@ struct BrowserView: View {
             .disabled(!model.canAddBrowserDevice(plugin.slug, to: model.selectedRow))
             .help(plugin.kind == "instrument"
                 ? (target.map { "Play \(plugin.name) on \($0.id), as daw instrument set does" } ?? "Add a new MIDI track playing \(plugin.name)")
+                : plugin.kind == "midi"
+                ? "Add \(plugin.name) before the selected MIDI track's instrument, as daw effect add --type \(plugin.slug) does"
                 : "Add \(plugin.name) to the selected row's chain, as daw effect add --type \(plugin.slug) does")
         }
         .padding(.leading, 18)

@@ -1,4 +1,4 @@
-# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stage 3 October 23
+# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23
 
 Asked for by the person on October 19, 2026 (D123): "we need some kind of
 standard almost programming spec where it's like you can code a brand new
@@ -9,8 +9,8 @@ completely flexible and programmable ... similar concept to Max for Live
 where people can build things into Ableton, but I want it to be completely
 agent driven". Backlog: Next, Devices anyone builds, to a spec. The first
 stage, the manifest and the offline tier, is built (D144), the second, the
-real-time tier (D145), and the third, instruments (D146); MIDI effects and
-the spec's version 1 are the stages below.
+real-time tier (D145), the third, instruments (D146), and the fourth, MIDI
+effects (D147); the spec's version 1 and FAUST are the stages below.
 
 ## What
 
@@ -36,10 +36,17 @@ PROJECT TRACK SLUG` puts it there, the browser lists it under Instruments,
 and `daw plugin new NAME --instrument [--realtime]` scaffolds a working
 synth of a wave, an envelope and a tone.
 
+A MIDI effect is the same folder with `kind: midi`: it sits among a MIDI
+track's `midi_effects` with the arpeggiator and the chord, its code is
+given the notes and returns the notes to play, `daw effect add PROJECT
+tracks.T --type SLUG` puts it there, the browser lists it under MIDI
+Effects, and `daw plugin new NAME --midi` scaffolds one that transposes
+each note and echoes it.
+
 ## How it works
 
 - **The manifest is the contract.** `device.yaml` has `format: 1`, `kind`
-  (`effect` unless said, or `instrument`; `midi` is a later stage), `name` (the title),
+  (`effect` unless said, `instrument` or `midi`), `name` (the title),
   `description`, `version`, `author`, `license`, `run` (`offline` unless
   said, or `realtime`), `entry` (`device.py` offline and `device.wasm` in
   real time unless said, a file in the folder), `source` (a real-time
@@ -240,9 +247,71 @@ synth of a wave, an envelope and a tone.
     device panel, or below the tracks for a new MIDI track named after it.
     `daw map` names it `plugin SLUG`, and `daw check` takes it to sound
     each note at its pitch.
+- **MIDI effects** (`kind: midi`, D147). Among a MIDI track's
+  `midi_effects` the entry is `{type: device, name: SLUG, version: V,
+  fields: {F: value}}` with an `id` and a `bypass`
+  (`aaw_model::MidiEffect::Device`), beside the arpeggiator, the chord,
+  the scale and the velocity. `daw effect add PROJECT tracks.T --type
+  SLUG`, or `--type device --name SLUG`, puts one there from the
+  manifest's defaults when the slug names a MIDI effect, and refuses it
+  off a MIDI track; `daw effect remove|move|bypass` and `daw set
+  tracks.T.midi_effects.REF.fields.F` work as on any MIDI effect, each
+  value held to the manifest (`check_midi`). A MIDI effect in a chain or
+  as an instrument is refused in words, as an effect or an instrument
+  among the MIDI effects is. It runs offline only (`run: realtime` is
+  refused in the manifest), and no lane moves its fields (`lane: true` is
+  refused), as with the built-in kinds, since it runs on the notes before
+  they become frames.
+  - **The contract.** `device.py` defines `transform(notes, fields,
+    tempo)`: `notes` a numpy structured array of `start` and `end` in
+    beats from the song's start (float64), `pitch` and `velocity`, a row a
+    note in the order they start, as the clips play them through the MIDI
+    effects before it (`schedule::midi_effect_input`); `fields` each name
+    to a float, a bool or a string; `tempo` in beats a minute. It returns
+    the notes to play in any order, a structured array of those fields or
+    rows of four numbers. The runner and the host hold every note to a
+    start at 0 or after, an end after it, a whole pitch 0 to 127 and a
+    whole velocity 1 to 127, at most 200,000 notes, and keep the times to
+    1/960 of a beat (`TICKS_PER_BEAT`), a note at least one tick long.
+  - **The cache.** The notes are kept under `.daw/devices/IDENTITY.json`
+    as ticks, the identity a SHA-256 over the notes it is given in exact
+    beats, its entry without its ID, its code and the tempo, so an edit
+    elsewhere in the song runs nothing. What it made reaches the engine as
+    `Made::Notes` among the caches, by `(tracks.T.midi_effects, I)`
+    (`custom::midi_owner`); `custom::attach` sets them on the copy of the
+    song a compile plays (`Midi::made`, never written), and
+    `midi_effects::apply` plays them in the device's place only while
+    their key, of the slug, the version, the fields and the very notes the
+    device is given, matches. Until then, when the run fails, when it is
+    bypassed or not installed, the notes pass through as written. So the
+    sampler, the Synth, an instrument of the person's own, a freeze and a
+    render play what it made, and an offline device after the instrument
+    is given it: every offline identity counts the notes the MIDI effects
+    made.
+  - **The host's work** reads a track's MIDI effects of the person's own
+    first, before its instrument and its chain, and reads the song's
+    devices again with what each made while that changes
+    (`devices::walk` for a render, a freeze and the headless status,
+    `Work::refresh` for a host), so a device after it is judged by what it
+    is now given. `daw plugin status` lists one as
+    `tracks.T.midi_effects.REF`. `daw plugin check` runs it on a chord
+    held two beats and a note above it at 120 BPM and replies the notes in
+    and out, their range of pitches and the first eight in beats.
+  - **The terminal and the app.** `daw plugin new NAME --midi` writes the
+    scaffold, a transpose, echoes of each note at a spacing in beats, each
+    softer by a decay, moved by an octave or not, and the note itself or
+    not, with the contract in its docstring; `--realtime` is refused with
+    it. `daw map` names the MIDI effects a track's notes pass through, a
+    plugin by its slug. In the app its panel stands among the MIDI effects
+    before the instrument, titled as the manifest names it, its fields
+    from the manifest with no diamond, and a line for what the host is
+    doing; the browser lists MIDI effect plugins under MIDI Effects ›
+    Plugins, dropped on a MIDI track's header or device panel and added
+    with + or a double-click, and Add Effect lists them on a MIDI track.
 - **`daw check`** warns `device-missing` of a device the song names that is
   not installed and `device-version` of one installed at another version
-  than the song was written with; a project's own folder shadows the
+  than the song was written with, in a chain, among a MIDI track's MIDI
+  effects or as its instrument; a project's own folder shadows the
   workspace's of the same slug.
 
 ## Tested
@@ -315,6 +384,27 @@ synth of a wave, an envelope and a tone.
   `tests/test_devices.py`: both made from the terminal, set by slug, and
   rendered with the pitches of their notes (A4 then E5), the offline one
   silent after its release and the real-time one with no cache.
+- MIDI effects. `aaw-model/src/midi_effects.rs`: a device passing the notes
+  through with nothing made, playing what was made of its very input,
+  passing through for another input, another field or a bypass.
+  `aaw-host/src/devices.rs`: `kind: midi` read, `run: realtime` and a lane
+  refused. `aaw-host/tests/devices.rs`: the scaffold made and `--realtime`
+  refused; added by slug and by `device` with a name among the MIDI
+  effects; its fields held to the manifest; refused off a MIDI track, in
+  a chain, as an instrument, and an effect and an instrument refused among
+  the MIDI effects; first on its track among the instances by its own
+  owner, a bypass not heard; saved and its headless state; with the
+  checkout's Python, the check, the written notes before it is made, the
+  notes made an octave up and echoed in the schedule and the compile's
+  Synth, the cache a `.json`, the tilt after the Synth judged by them, a
+  note's change made again by `Work` with the old notes swept, code that
+  raises refusing the strict settle with the notes passing through in the
+  lenient one, and a pitch out of range refused. `tests/test_devices.py`:
+  made, checked and listed from the terminal, added by slug, a render's
+  stem at 880 Hz for an A4 an octave up and again softer two beats later,
+  `ready` in `daw plugin status`, refused off a MIDI track and as an
+  instrument, named by `daw map`, and once its folder is gone warned of by
+  `daw check` and passing the note through.
 
 ## Limits
 
@@ -355,12 +445,22 @@ synth of a wave, an envelope and a tone.
   Synth alone.
 - No timeout on a run: code that never returns holds the host's work on
   devices, though not the host.
+- A MIDI effect runs offline: an edit of the notes it is given is heard
+  with its result once the run lands, the notes as written meanwhile, and
+  a note played now (the piano roll's previews, the Synth's keys) does not
+  pass through it, as through no MIDI effect. Its fields take no lane. It
+  is given the notes, their velocities, its fields and the tempo: no
+  controllers, and not the sections or the clips the notes came from.
+- `daw check` and `daw listen`'s `sounded` read a track's notes through the
+  built-in MIDI effects only: a MIDI effect of the person's own passes the
+  notes through for them, since they read the song without the host's
+  caches.
 
 ## Remaining stages
 
-4. MIDI effects, then the spec's version 1 written as the reference, with
-   how a device is shared.
-5. FAUST as a way to make a real-time device: a `.dsp` source built to a
+5. The spec's version 1 written as the reference, with how a device is
+   shared.
+6. FAUST as a way to make a real-time device: a `.dsp` source built to a
    module of the same ABI, where the FAUST compiler is installed.
 
 ## Open questions
