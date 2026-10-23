@@ -351,6 +351,11 @@ unfreeze` are the terminal's way.
   handles such as `@12` that keep naming the same object as other edits land.
   `daw inspect` lists each clip's reference, in the order the clips play, and
   `daw get` puts one on every list item.
+- **`daw --help` lists the commands by what they are for,** under seven
+  headings from one table, `SECTIONS` in `aaw-cli`: Start, Read the song, Edit
+  any value, Parts of the song, Play and record, Render and measure, and Sounds
+  and libraries, with two lines above them on paths and what a host adds. A
+  test fails on a command under no heading or two.
 - **Help and errors say what is accepted.** A command that takes `--FIELD VALUE`
   pairs lists them in its `--help` with each one's range and default, from the
   schema: `effect add --help` every effect type and its fields, `lane set

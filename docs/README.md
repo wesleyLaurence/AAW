@@ -75,7 +75,7 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [finding one's way in the CLI](features/cli-navigation.md) | Next, items 1–6; proposed |
+| [finding one's way in the CLI](features/cli-navigation.md) | Help in sections built (D149); the rest Next, items 1–5, proposed |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
