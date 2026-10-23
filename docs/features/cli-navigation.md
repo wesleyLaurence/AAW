@@ -1,7 +1,8 @@
 # Finding one's way in the CLI — proposed October 23, 2026
 
 Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
-items 2–6 proposed, not built (D148). Backlog: Next, items 1–5. It follows
+item 2, describe batch, built the same day (D150, PR #144); items 3–6
+proposed, not built (D148). Backlog: Next, items 1–4. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
@@ -82,16 +83,34 @@ open, adds `@N` references, undo and redo, and playback.
 
 ### describe batch
 
-`daw describe batch` prints every op a batch takes: its name, the command it
-is the same as (`clip.add` is `daw clip add`), and its keys, each with what it
-takes and its default, in the one-line form `describe` gives fields. The lines
-are made from the `Command` enum, as `contract::listing` makes field lines
-from the model's schema, so a new op is listed when it is added; the ops whose
-names differ from the command's words (`event.*`, `point.*`,
-`instrument.rack.*`) say so on their line. A batch with an op it does not know
-is refused with the nearest op name, as an unknown field is refused with the
-nearest field. `daw batch --help` points to `daw describe batch`, and
-`describe start`'s batch file stays as the example.
+Built October 23, 2026 (D150). `daw describe batch` prints every op a batch
+takes, the edits: its name, the command it is the same as (`clip.add` is
+`daw clip add`), and its keys, each with what it takes, its default and
+whether it is required, in the one-line form `describe` gives fields. The
+lines are made from the `Command` enum, which derives a JSON Schema
+(schemars), as `contract::listing` makes field lines from the model's
+schema, so a new op is listed when it is added. Three things the enum does
+not say are tables in `aaw-cli/src/batch.rs`, each held by a test: what a
+key typed as any JSON value takes, by its name (`at` beats, `points` a list
+of points); the models whose fields an op with fields takes besides its
+keys (`clip.add` a Clip's or a NoteClip's, with the topic that lists them);
+and the ops whose words are not the command's (`event.*` under `daw pattern
+event`, `point.*` under `daw lane point`, `point.set` as `lane point
+move`), every op held to a command that exists. Four lines of semantics say
+how a batch file is written, how ops are spelled, what keys take and what is
+refused; `--schema` adds the enum's schema.
+
+A batch takes the ops whose kind is an edit, apply aside; `Kind::of` names
+an op's kind and a test holds it to `Command::kind` over every op (open
+question 2). `aaw_host::command::batch_commands` reads a batch file's list
+before serde does: an op it does not know is refused with the nearest op
+name (`pattern.event.add`: did you mean `event.add`?), as an unknown field is
+refused with the nearest field; a transport, history or reading op is
+refused as one a batch does not take; and a key an op without fields does
+not have is refused with the nearest key, where serde ignored it. A key of
+an op with fields goes to the object it adds, which the song's model checks
+as before. `daw batch --help` and `describe start` point to `daw describe
+batch`, and `describe start`'s batch file stays as the example.
 
 ### A part of a topic
 
@@ -161,7 +180,7 @@ fails on a command with no line. The Python commands keep argparse's help, as
 1. `daw --help` lists every command under one of the headings, a test holds
    it, and the two lines above the list say what the sections mean. Done.
 2. `daw describe batch` lists every op the host takes with its keys, made from
-   the enum; an unknown op is refused with the nearest.
+   the enum; an unknown op is refused with the nearest. Done.
 3. `daw describe effects.compressor` prints the compressor alone; `daw
    describe` lists each topic's parts and size; `sampler` no longer repeats
    `project`.
@@ -180,9 +199,9 @@ it without reading source: a field found through a part, a batch written from
 1. **The audio-devices command's new name.** `daw audio-device`, as Settings
    › Audio and Ableton's Audio Device name it (recommended); `daw io`;
    or `daw interface`. `daw audio` is taken by audio clips.
-2. **Whether a batch takes every op.** The enum holds transport and reading
-   ops (`play`, `inspect`) beside the edits; `describe batch` lists what a
-   batch accepts, which is to be read from the host before item 2 is built.
+2. **Whether a batch takes every op.** Answered while building item 2 (D150):
+   a batch takes the edits, apply aside, as `Edit::run` already refused the
+   rest one by one; `describe batch` lists those.
 3. **Whether `loop` needs more than the cross-reference.** Renaming the
    transport's loop (`daw cycle`, as Logic has it) was weighed and not
    proposed, since every DAW the person knows calls it a loop.

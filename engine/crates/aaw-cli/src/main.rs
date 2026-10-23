@@ -31,6 +31,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+mod batch;
 mod generate;
 
 // Debug builds abort when the audio callback allocates.
@@ -146,6 +147,7 @@ struct Forwarded {
 #[derive(Clone, Copy, ValueEnum)]
 enum Topic {
     Start,
+    Batch,
     Project,
     Sampler,
     Synth,
@@ -372,7 +374,7 @@ enum Top {
     /// Remove an object or map entry by path, or reset a field to its default.
     Remove { project: Song, path: String },
     /// Apply a JSON list of commands as one step. --label names the step in
-    /// the change log and for undo.
+    /// the change log and for undo. `daw describe batch` lists the ops.
     Batch {
         project: Song,
         file: PathBuf,
@@ -1920,6 +1922,9 @@ fn run(cli: &Cli) -> Result<Json> {
                 return Ok(if *schema { contract::describe_with_schema("project") } else { Some(contract::topics()) }
                     .expect("the song has a schema"));
             };
+            if let Topic::Batch = topic {
+                return Ok(batch::describe(&Cli::command(), *schema));
+            }
             let name = topic.to_possible_value().expect("a topic has a name");
             let described = if *schema { contract::describe_with_schema } else { contract::describe };
             described(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
@@ -2146,8 +2151,8 @@ fn run(cli: &Cli) -> Result<Json> {
                 ),
                 other => (other, None),
             };
-            let commands: Vec<Command> =
-                serde_json::from_value(list).map_err(|e| format!("{}: {e}", file.display()))?;
+            let commands =
+                aaw_host::command::batch_commands(list).map_err(|e| format!("{}: {e}", file.display()))?;
             edit(
                 project,
                 C::Batch {

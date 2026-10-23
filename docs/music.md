@@ -87,7 +87,8 @@ A running host (the Mac app, `daw host` or `daw play`; status reports `host: tru
 shows and plays edits as they land and keeps one undo history with their origin.
 Without a host the commands edit the file, but undo/history require a host.
 Read `daw changes PROJECT --since REV` for changes since a known host revision.
-Give `daw batch PROJECT FILE` a `--label` describing the musical edit.
+Give `daw batch PROJECT FILE` a `--label` describing the musical edit;
+`daw describe batch` lists every op a batch file takes and its keys.
 
 With a host running, work in steps the person can watch. Make the song a part
 at a time: a sound found and imported, a track added, a clip and its notes,

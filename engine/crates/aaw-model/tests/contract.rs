@@ -340,7 +340,10 @@ fn each_topic_describes_its_models() {
     }
     assert!(contract::describe("other").is_none());
     let topics = contract::topics();
-    assert_eq!(topics["topics"].as_object().unwrap().keys().collect::<Vec<_>>(), contract::TOPICS);
+    // batch is listed with them and described by daw, from the host's commands.
+    let listed: Vec<&String> = topics["topics"].as_object().unwrap().keys().filter(|t| *t != "batch").collect();
+    assert_eq!(listed, contract::TOPICS);
+    assert!(topics["topics"].get("batch").is_some());
     let effects = contract::describe_with_schema("effects").unwrap();
     let kinds: Vec<&String> = effects["schema"].as_object().unwrap().keys().collect();
     assert_eq!(kinds, aaw_model::EFFECT_TYPES.iter().collect::<Vec<_>>());
