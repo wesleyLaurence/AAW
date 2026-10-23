@@ -14,4 +14,5 @@ pub mod realtime;
 pub mod render;
 pub mod sndfile;
 pub mod stretch;
+pub mod wasm;
 pub mod wav;

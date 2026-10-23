@@ -157,8 +157,9 @@ done
 
 # A certificate signs with the hardened runtime and a timestamp, which
 # notarizing asks for. Code inside the bundle is signed before the bundle.
-# The app itself carries AAW.entitlements, for the microphone under the
-# hardened runtime.
+# The app and daw carry AAW.entitlements, for the microphone and for the
+# code wasmtime compiles for a real-time device, under the hardened
+# runtime; daw records, and renders an export for the app.
 sign() {
     if [ "$identity" = - ]; then
         quiet codesign --force --sign - "$@"
@@ -167,7 +168,7 @@ sign() {
     fi
 }
 find "$frameworks" -name '*.dylib' | while read -r lib; do sign "$lib"; done
-sign --identifier local.aaw.daw "$contents/Helpers/daw"
+sign --identifier local.aaw.daw --entitlements "$here/AAW.entitlements" "$contents/Helpers/daw"
 sign --entitlements "$here/AAW.entitlements" "$app"
 codesign --verify --strict --deep "$app"
 "$contents/Helpers/daw" --help >/dev/null

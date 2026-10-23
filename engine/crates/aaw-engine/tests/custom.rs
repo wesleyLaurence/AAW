@@ -3,6 +3,7 @@
 
 mod common;
 
+use aaw_dsp::device::Made;
 use aaw_engine::custom::{self, Caches};
 use aaw_engine::freeze::freeze_track;
 use aaw_engine::offline::{render, RenderOptions};
@@ -91,7 +92,7 @@ fn a_device_is_given_the_chain_before_it_and_plays_its_cache_in_its_place() {
     // With a cache, the device plays it: here the input at half.
     let cache: Arc<Vec<[f32; 2]>> = Arc::new(input.iter().map(|f| [f[0] * 0.5, f[1] * 0.5]).collect());
     let mut caches = Caches::new();
-    caches.insert(("tracks.bass".into(), 1), cache.clone());
+    caches.insert(("tracks.bass".into(), 1), Made::Audio(cache.clone()));
     let played = freeze_track(&p, dir.path(), "bass", 4096, &caches).unwrap();
     close(&played, &cache, 1e-6, "the cache plays");
     // Bypassed, the device is not run: the cache is not heard.
@@ -106,7 +107,7 @@ fn a_device_is_given_the_chain_before_it_and_plays_its_cache_in_its_place() {
     close(&silent, &input, 0.0, "bypassed");
     // A cache keyed for another place in the chain is not this device's.
     let mut elsewhere = Caches::new();
-    elsewhere.insert(("tracks.bass".into(), 0), cache);
+    elsewhere.insert(("tracks.bass".into(), 0), Made::Audio(cache));
     let unmoved = freeze_track(&p, dir.path(), "bass", 4096, &elsewhere).unwrap();
     close(&unmoved, &input, 0.0, "another index");
 }
@@ -131,7 +132,7 @@ fn a_device_on_the_master_or_a_group_is_given_what_reaches_it() {
     // With a cache of silence the mix is silent; without one, as it was.
     aaw_model::save(&p, &path).unwrap();
     let mut caches = Caches::new();
-    caches.insert(("master".into(), 0), Arc::new(vec![[0.0f32; 2]; input.len()]));
+    caches.insert(("master".into(), 0), Made::Audio(Arc::new(vec![[0.0f32; 2]; input.len()])));
     render(&path, &RenderOptions { output: Some(dir.path().join("muted")), devices: caches, ..Default::default() }).unwrap();
     let muted = frames(&dir.path().join("muted/mix.wav"));
     assert!(muted.iter().all(|f| f == &[0.0, 0.0]));

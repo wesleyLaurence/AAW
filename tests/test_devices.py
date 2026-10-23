@@ -140,3 +140,47 @@ def test_a_project_s_own_device_shadows_the_workspace_s(tmp_path, workspace):
     assert daw("get", project, "tracks.bass.effects.0.version") == "0.2"
     assert os.environ["AAW_WORKSPACE"] == str(workspace)
     assert json.loads(json.dumps(listed))["project"].endswith("devices")
+
+
+def test_a_realtime_plugin_is_built_run_in_the_song_and_rebuilt(tmp_path, workspace):
+    made = daw("plugin", "new", "Live Tilt", "--realtime")
+    if "build_error" in made:
+        if "not installed" in made["build_error"] or "Could not start" in made["build_error"]:
+            pytest.skip("no Rust for WebAssembly here")
+        raise AssertionError(made["build_error"])
+    assert made["run"] == "realtime" and made["entry"] == "device.wasm" and made["source"] == "device.rs"
+    assert made["build"]["ok"] is True and made["build"]["latency"] == 0
+    assert "daw plugin build live-tilt" in made["next"]
+    folder = workspace / "devices" / "live-tilt"
+    assert all((folder / f).is_file() for f in ("device.yaml", "device.rs", "device.wasm"))
+    # In a chain it runs as the song plays, and makes no cache.
+    x = tone(1000)
+    device = {"type": "device", "name": "live-tilt", "fields": {"gain_db": -6}}
+    out, reports = run_chain(tmp_path / "gain", [device], x)
+    assert abs(level_db(out) - level_db(x) + 6.02) < 0.05
+    assert reports[0]["type"] == "device"
+    assert not list((tmp_path / "gain").glob(".daw/devices/*.wav"))
+    # A lane on its gain, and one on its tone, which moves on a log scale.
+    moved, _ = run_chain(tmp_path / "lane", [device], x, automation={0: {"fields.gain_db": [(0, -24), (2, 0)]}})
+    half = len(x) // 2
+    assert level_db(moved[half:]) - level_db(moved[:half]) > 8
+    dark, _ = run_chain(tmp_path / "dark", [device], x, automation={0: {"fields.tone_hz": [(0, 200), (2, 200)]}})
+    assert level_db(dark) < level_db(out) - 6
+    # Its state without a host: ready, its code running.
+    project = tmp_path / "song"
+    daw("init", project)
+    daw("track", "add", project, "bass")
+    daw("effect", "add", project, "tracks.bass", "--type", "live-tilt")
+    assert daw("plugin", "status", project)["devices"] == [{"effect": "tracks.bass.effects.0", "device": "live-tilt", "state": "ready"}]
+    # A changed source is said to be stale until built; one that does not
+    # compile is refused with rustc's words.
+    source = folder / "device.rs"
+    os.utime(folder / "device.wasm", (1, 1))
+    assert "daw plugin build live-tilt" in daw("plugin", "check", "live-tilt")["stale"]
+    source.write_text(source.read_text().replace("fn latency(&self) -> usize {\n        0", "fn latency(&self) -> usize {\n        0 +"))
+    with pytest.raises(ValueError, match="device.rs does not build"):
+        daw("plugin", "build", "live-tilt")
+    # An offline plugin has nothing to build.
+    daw("plugin", "new", "Tilt EQ")
+    with pytest.raises(ValueError, match="runs offline"):
+        daw("plugin", "build", "tilt-eq")

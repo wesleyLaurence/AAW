@@ -18,6 +18,9 @@ assert_no_alloc = "1.1.2"
 tempfile = "3.27.0"
 rtrb = "0.4.0"
 signalsmith-stretch = "=0.1.3"
+# Real-time devices of the person's own: WebAssembly compiled by Cranelift.
+# No signal handlers, so it sits quietly in the app and in Python.
+wasmtime = { version = "50", default-features = false, features = ["cranelift", "runtime", "std"] }
 realfft = "3.5.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -28,3 +31,5 @@ objc2-core-foundation = "0.3.2"
 [dev-dependencies]
 assert_no_alloc = "1.1.2"
 tempfile = "3.27.0"
+# Test devices written as WebAssembly text.
+wat = "1"

@@ -30,13 +30,14 @@ stood.
 1. **Devices anyone builds, to a spec: the remaining stages.** The
     manifest, the `device` effect kind, the offline Python tier with its
     cache, the generic panel from the manifest and `daw plugin
-    new|check|list|show|status` are built (D144). Left: the real-time tier
-    in a sandboxed language the engine compiles (FAUST or WebAssembly, after
-    the spike; no FAUST compiler is on this Mac), instruments with note
-    input and the piano roll's preview, MIDI effects, and the spec's version
-    1 written as the reference with how a device is shared; a finer
-    dependency for a device's input than the whole song; a timeout on a
-    run. [features/custom-devices.md](features/custom-devices.md)
+    new|check|list|show|status` are built (D144), and the real-time tier,
+    WebAssembly built from Rust by `daw plugin build` and run on the audio
+    thread (D145). Left: instruments with note input and the piano roll's
+    preview, MIDI effects, and the spec's version 1 written as the
+    reference with how a device is shared; FAUST as another source built
+    to the same ABI; a finer dependency for an offline device's input than
+    the whole song; a timeout on an offline run.
+    [features/custom-devices.md](features/custom-devices.md)
 2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a sound or a track
@@ -118,6 +119,15 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A real-time device of the person's own, by the agent while the song
+  plays:** `daw plugin new --realtime`, its `device.rs` edited into a sound
+  the song wants and built, added by its slug, a field moved in the panel
+  and heard at once, a lane on its tone, a rebuild heard within a second
+  without touching the song, and a device made to trap, to hear the
+  pass-through and read the panel's line; whether a stall of 150 to 200 ms
+  before the deadline is heard as a dropout. The app has never run one;
+  tests only, nothing heard. Then an export from the app with one, the
+  bundle's `daw` signed with the new entitlement.
 - **A device of the person's own, by the agent on a real song:** `daw
   plugin new`, the scaffold edited into a sound the song wants, added by
   its slug, heard once its cache lands and after a field is moved, a lane

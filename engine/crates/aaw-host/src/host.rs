@@ -1489,7 +1489,12 @@ impl Host {
         self.follow_devices();
         self.record_tick();
         self.capture_tick();
-        if self.devices.busy() && self.devices_update(true) {
+        if (self.devices.busy() || self.devices.failing()) && self.devices_update(true) {
+            self.refresh();
+        }
+        // A device's folder changed, by a build or an edit of its code: the
+        // song's devices are read again and the change is heard.
+        if self.devices.folders_changed() {
             self.refresh();
         }
         if let Some(t) = &mut self.transport {

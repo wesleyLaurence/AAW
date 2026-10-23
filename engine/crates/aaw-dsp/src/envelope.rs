@@ -41,6 +41,26 @@ impl Envelope {
         }
     }
 
+    /// The same lane moving in `domain`: a device of the person's own says
+    /// in its manifest which of its fields move on a log scale, which the
+    /// song's rules do not know. A lane through zero or below stays linear.
+    pub fn in_domain(&self, domain: Domain) -> Envelope {
+        let (values, log) = match (self.log, domain == Domain::Log) {
+            (false, true) if self.values.iter().all(|v| *v > 0.0) => (self.values.iter().map(|v| v.ln()).collect(), true),
+            (true, false) => (self.values.iter().map(|v| v.exp()).collect(), false),
+            _ => (self.values.clone(), self.log),
+        };
+        Envelope {
+            frames: self.frames.clone(),
+            values,
+            hold: self.hold.clone(),
+            power: self.power.clone(),
+            late: self.late.clone(),
+            log,
+            constant: self.constant,
+        }
+    }
+
     /// The value of a lane whose points all share one, which renders exactly
     /// as that static value.
     pub fn constant(&self) -> Option<f64> {
