@@ -499,6 +499,7 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
                     None => "synth".into(),
                 },
                 Some(aaw_model::Instrument::Sampler(s)) => format!("sampler of {}", plural(s.pads.len(), "pad", "pads")),
+                Some(aaw_model::Instrument::Device(d)) => format!("plugin {}", d.name),
                 None => "no instrument".into(),
             },
             None if !t.pads.is_empty() => format!("pads {}", t.pads.keys().cloned().collect::<Vec<_>>().join(" ")),

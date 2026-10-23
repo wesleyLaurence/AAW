@@ -22,6 +22,7 @@ use crate::program::{amplitude, pan_gains, ChainProgram, Program, Voice};
 use aaw_dsp::device::Unit;
 use aaw_dsp::dynamics::Reduction;
 use aaw_dsp::envelope::{Glide, Param};
+use aaw_dsp::instrument::Instrument;
 use aaw_dsp::synth::Synth;
 use aaw_dsp::Clock;
 use std::sync::Arc;
@@ -324,6 +325,9 @@ struct TrackState {
     /// A MIDI track's Synth, with its voices, and its patch's own effects,
     /// which the voices go through before the inserts.
     synth: Option<Synth>,
+    /// A MIDI track's instrument of the person's own, whose sound goes
+    /// before the inserts as a Synth's does.
+    instrument: Option<Instrument>,
     patch_chain: Chain,
     /// The track of the renderer being taken over from whose voices ring out
     /// here, when this track's voices differ from them.
@@ -609,6 +613,7 @@ impl Renderer {
             .map(|t| TrackState {
                 voices: Voices::new(&t.voices, max_block),
                 synth: t.synth.as_ref().map(|s| Synth::new(s.patch.clone(), s.notes.clone(), max_block, fade)),
+                instrument: t.instrument.as_ref().map(|i| Instrument::new(i, max_block)),
                 patch_chain: match &t.synth {
                     Some(s) => Chain::new(&s.chain, max_block, fade, &mut reverbs),
                     None => Chain { slots: Vec::new() },
@@ -696,22 +701,30 @@ impl Renderer {
             if let Some(s) = &mut state.synth {
                 s.seek(to as i64 - t.delay as i64, ramp);
             }
+            if let Some(i) = &mut state.instrument {
+                i.seek(to as i64 - t.delay as i64);
+            }
         }
     }
 
     /// Plays a note now through the Synth of the track at `track` among the
-    /// program's tracks, outside the timeline: `pitch` as a MIDI number,
-    /// `velocity` 0 to 1, let go after `frames` frames. It runs through the
-    /// track's chain and fader as its notes do, whether or not the transport
-    /// rolls. With `replace` the track's earlier previews are let go first,
-    /// so this one sounds alone. Nothing happens for a track without a
-    /// Synth. Does not allocate.
+    /// program's tracks, or its instrument of the person's own, outside the
+    /// timeline: `pitch` as a MIDI number, `velocity` 0 to 1, let go after
+    /// `frames` frames. It runs through the track's chain and fader as its
+    /// notes do, whether or not the transport rolls. With `replace` the
+    /// track's earlier previews are let go first, so this one sounds alone.
+    /// Nothing happens for a track without either, or for an instrument
+    /// played from the host's offline output. Does not allocate.
     pub fn preview(&mut self, track: usize, pitch: f64, velocity: f64, frames: usize, replace: bool) {
         if replace {
             self.let_go_previews(track);
         }
-        if let Some(s) = self.tracks.get_mut(track).and_then(|t| t.synth.as_mut()) {
+        let Some(state) = self.tracks.get_mut(track) else { return };
+        if let Some(s) = &mut state.synth {
             s.preview(pitch, velocity, frames);
+        }
+        if let Some(i) = &mut state.instrument {
+            i.preview(pitch, velocity, frames);
         }
     }
 
@@ -721,6 +734,9 @@ impl Renderer {
     pub fn let_go_previews(&mut self, track: usize) {
         if let Some(s) = self.tracks.get_mut(track).and_then(|t| t.synth.as_mut()) {
             s.let_go_previews();
+        }
+        if let Some(i) = self.tracks.get_mut(track).and_then(|t| t.instrument.as_mut()) {
+            i.let_go_previews();
         }
         let fade = self.fade;
         for p in self.previews.iter_mut().flatten().filter(|p| p.track == track) {
@@ -754,7 +770,7 @@ impl Renderer {
 
     /// Whether a previewed note is sounding on any track.
     pub fn previewing(&self) -> bool {
-        self.tracks.iter().any(|t| t.synth.as_ref().is_some_and(|s| s.previewing()))
+        self.tracks.iter().any(|t| t.synth.as_ref().is_some_and(|s| s.previewing()) || t.instrument.as_ref().is_some_and(Instrument::previewing))
             || self.previews.iter().flatten().any(Previewed::sounding)
     }
 
@@ -764,6 +780,9 @@ impl Renderer {
             state.voices.release(self.fade);
             if let Some(s) = &mut state.synth {
                 s.release();
+            }
+            if let Some(i) = &mut state.instrument {
+                i.release();
             }
         }
     }
@@ -862,6 +881,9 @@ impl Renderer {
             state.voices.ring(&t.voices, out, self.fade, self.ramp);
             if let Some(s) = &mut state.synth {
                 s.render(out, start, total, rolling, self.ramp);
+            }
+            if let Some(i) = &mut state.instrument {
+                i.render(out, start, total, rolling);
             }
             for p in self.previews.iter_mut().flatten().filter(|p| p.track == ti && p.sounding()) {
                 p.render(out);
@@ -1056,6 +1078,9 @@ impl Renderer {
         if let Some(s) = &mut self.tracks[track].synth {
             s.ring(out);
         }
+        if let Some(i) = &mut self.tracks[track].instrument {
+            i.ring(out);
+        }
     }
 
     /// Takes over from the renderer of a program with the same structure, at
@@ -1079,17 +1104,32 @@ impl Renderer {
                 (Some(a), Some(b)) => Arc::ptr_eq(&a.notes, &b.notes),
                 (None, None) => true,
                 _ => false,
+            } && match (&t.instrument, &o.instrument) {
+                (Some(a), Some(b)) => Arc::ptr_eq(&a.notes, &b.notes),
+                (None, None) => true,
+                _ => false,
             };
             if same_time && Arc::ptr_eq(&t.voices, &o.voices) && same_notes {
                 state.voices.copy(&was.voices);
                 if let (Some(s), Some(w)) = (&mut state.synth, &mut was.synth) {
                     s.take_over(w);
                 }
+                if let (Some(i), Some(w)) = (&mut state.instrument, &mut was.instrument) {
+                    i.take_over(w, true);
+                }
                 state.inherits = None;
             } else {
                 state.voices.seek(&t.voices, cursor as i64 - t.delay as i64, true);
                 if let Some(s) = &mut state.synth {
                     s.seek(cursor as i64 - t.delay as i64, true);
+                }
+                // The instrument's code carries on through the edit: what it
+                // held ends, and the notes sounding here start.
+                if let Some(i) = &mut state.instrument {
+                    i.seek(cursor as i64 - t.delay as i64);
+                    if let Some(w) = &mut was.instrument {
+                        i.take_over(w, false);
+                    }
                 }
                 was.voices.release(old.fade);
                 if let Some(w) = &mut was.synth {
@@ -1156,6 +1196,10 @@ impl Renderer {
                 // A note being previewed carries on under the new patch.
                 if let (Some(s), Some(w)) = (&mut state.synth, &mut old.tracks[i].synth) {
                     s.take_previews(w);
+                }
+                // The same instrument's code carries on, its tail ringing.
+                if let (Some(n), Some(w)) = (&mut state.instrument, &mut old.tracks[i].instrument) {
+                    n.take_over(w, false);
                 }
             }
         }

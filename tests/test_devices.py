@@ -9,7 +9,7 @@ import os
 import numpy as np
 import pytest
 import yaml
-from helpers import SR, cli, daw, level_db, run_chain, tone
+from helpers import SR, cli, daw, level_db, run_chain, stem, tone
 
 
 @pytest.fixture
@@ -184,3 +184,73 @@ def test_a_realtime_plugin_is_built_run_in_the_song_and_rebuilt(tmp_path, worksp
     daw("plugin", "new", "Tilt EQ")
     with pytest.raises(ValueError, match="runs offline"):
         daw("plugin", "build", "tilt-eq")
+
+
+def keys_song(project, slug):
+    """A song of one MIDI track playing the instrument `slug`: an A held two
+    beats from beat 0 at 120 BPM, then the E above it for a beat."""
+    from helpers import render
+
+    daw("init", project, "--tempo", "120")
+    daw("track", "add", project, "keys", "--type", "midi")
+    attached = daw("instrument", "set", project, "keys", slug)
+    assert attached["label"] == f"Attach {slug} to keys"
+    clip = daw("clip", "add", project, "keys", "--length-beats", "4")["path"]
+    notes = [{"pitch": "A4", "at": 0, "duration": 2, "velocity": 127}, {"pitch": "E5", "at": 2, "duration": 1}]
+    daw("note", "add", project, clip, "--notes", json.dumps(notes))
+    daw("set", project, "session.end_fade_ms", "0")
+    out = project / "out"
+    report = render(project, out)
+    return stem(out, "keys"), report
+
+
+def strongest_hz(x):
+    """The frequency of the strongest bin of a stretch of audio."""
+    spectrum = np.abs(np.fft.rfft(x[:, 0] * np.hanning(len(x))))
+    return np.fft.rfftfreq(len(x), 1 / SR)[np.argmax(spectrum)]
+
+
+def test_an_offline_instrument_is_made_set_by_slug_and_plays_the_notes(tmp_path, workspace):
+    made = daw("plugin", "new", "Soft Keys", "--instrument")
+    assert made["kind"] == "instrument" and made["run"] == "offline"
+    assert "daw instrument set PROJECT TRACK soft-keys" in made["next"]
+    checked = daw("plugin", "check", "soft-keys")
+    assert checked["ok"] is True and checked["notes"] == 4 and checked["peak"] > 0.1
+    assert [d["kind"] for d in daw("plugin", "list")["devices"]] == ["instrument"]
+    project = tmp_path / "song"
+    x, report = keys_song(project, "soft-keys")
+    assert report["tracks"]["keys"]["events"] == 2
+    beat = SR // 2
+    assert abs(strongest_hz(x[2000 : 2000 + 16384]) - 440) < 5
+    assert abs(strongest_hz(x[2 * beat + 2000 : 2 * beat + 2000 + 16384]) - 659.3) < 5
+    assert np.max(np.abs(x[int(3.7 * beat) :])) < 1e-3, "released and silent by the end"
+    assert daw("plugin", "status", project)["devices"] == [{"effect": "tracks.keys.instrument", "device": "soft-keys", "state": "ready"}]
+    # Its fields are set as an effect's are, under the instrument.
+    daw("set", project, "tracks.keys.instrument.device.fields.wave", "sine")
+    with pytest.raises(ValueError, match="wave is one of sine, saw, square"):
+        daw("set", project, "tracks.keys.instrument.device.fields.wave", "noise")
+    daw("lane", "set", project, "tracks.keys", "instrument.fields.gain_db", '[{"at": 0, "value": -24}]')
+    # It is not an effect, and an effect is not an instrument.
+    with pytest.raises(ValueError, match="soft-keys is an instrument"):
+        daw("effect", "add", project, "tracks.keys", "--type", "soft-keys")
+    daw("plugin", "new", "Tilt EQ")
+    with pytest.raises(ValueError, match="tilt-eq is an effect"):
+        daw("instrument", "set", project, "keys", "tilt-eq")
+    described = daw("describe", "midi")
+    assert "daw plugin new NAME --instrument" in described["semantics"]["device"]
+
+
+def test_a_realtime_instrument_is_built_and_plays_the_notes(tmp_path, workspace):
+    made = daw("plugin", "new", "Bright Keys", "--instrument", "--realtime")
+    if "build_error" in made:
+        if "not installed" in made["build_error"] or "Could not start" in made["build_error"]:
+            pytest.skip("no Rust for WebAssembly here")
+        raise AssertionError(made["build_error"])
+    assert made["kind"] == "instrument" and made["build"]["ok"] is True and made["build"]["peak"] > 0.1
+    project = tmp_path / "song"
+    x, _ = keys_song(project, "bright-keys")
+    beat = SR // 2
+    assert abs(strongest_hz(x[2000 : 2000 + 16384]) - 440) < 5
+    assert abs(strongest_hz(x[2 * beat + 2000 : 2 * beat + 2000 + 16384]) - 659.3) < 5
+    assert not list(project.glob(".daw/devices/*.wav")), "no cache: its code plays"
+    assert daw("plugin", "status", project)["devices"][0]["state"] == "ready"

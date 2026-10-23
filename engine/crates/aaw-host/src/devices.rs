@@ -1,7 +1,8 @@
-//! Devices anyone builds, to a spec: an effect written as a folder, with a
-//! manifest that names it and declares its fields and the code that makes
-//! its sound, under the project's `devices/` or the workspace's
-//! (`~/Music/AAW/devices/`, or under `AAW_WORKSPACE`), named by its slug.
+//! Devices anyone builds, to a spec: an effect or an instrument written as
+//! a folder, with a manifest that names it and declares its fields and the
+//! code that makes its sound, under the project's `devices/` or the
+//! workspace's (`~/Music/AAW/devices/`, or under `AAW_WORKSPACE`), named by
+//! its slug.
 //!
 //! An offline device's `device.py` defines `process(audio, sample_rate,
 //! fields)` over numpy, which the host runs in the checkout's Python on the
@@ -15,6 +16,12 @@
 //! device ABI (`aaw_engine::wasm`), built from its source, `device.rs`, by
 //! `daw plugin build`. The host makes it ready and the engine runs it on
 //! the audio thread, an instance to each place the device is in a chain.
+//!
+//! An instrument (`kind: instrument`) is a MIDI track's instrument, given
+//! the track's notes rather than audio: offline, `device.py` defines
+//! `play(notes, frames, sample_rate, fields)`, run over the whole song and
+//! cached as an effect's output is; in real time, the module also exports
+//! `aaw_note`, and plays previewed notes too.
 
 use crate::patches::{slug, workspace};
 use crate::python;
@@ -154,7 +161,7 @@ fn num(x: f64) -> String {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Manifest {
     pub format: i64,
-    /// `effect`; instruments and MIDI effects are later stages.
+    /// `effect` or `instrument`; MIDI effects are a later stage.
     pub kind: String,
     /// The title, such as `Tilt EQ`.
     pub name: String,
@@ -422,8 +429,8 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
     }
     let kind = text(d, "kind")?.unwrap_or_else(|| "effect".into());
     match kind.as_str() {
-        "effect" => {}
-        "instrument" | "midi" => return Err(format!("kind {kind} is a later stage: only effects are built")),
+        "effect" | "instrument" => {}
+        "midi" => return Err("kind midi is a later stage: effects and instruments are built".into()),
         other => return Err(format!("kind {other} is not one of effect, instrument, midi")),
     }
     let run = text(d, "run")?.unwrap_or_else(|| "offline".into());
@@ -701,11 +708,99 @@ fields:
 /// device ABI.
 pub const RUST_TEMPLATE: &str = include_str!("../templates/device.rs");
 
+/// The manifest `daw plugin new --instrument` writes, with NAME and RUN
+/// filled in.
+pub const INSTRUMENT_MANIFEST_TEMPLATE: &str = r#"# An instrument of your own. The manifest is the contract: what the song,
+# the app's panel, daw set, lanes and the browser know of the instrument
+# comes from here. daw describe midi, under device, says how it is used.
+format: 1
+kind: instrument
+name: NAME
+description: "A wave, an envelope and a tone, a voice a note: the scaffold to edit."
+version: "0.1"
+author: ""
+license: MIT
+RUN
+fields:
+  # type: db, hz, percent, ms, beats or number take min, max and default;
+  # scale is linear or log (hz is log unless said); lane says whether a lane
+  # may move the field (yes unless said). switch has a default, true or
+  # false; choice has choices and a default among them. label and unit are
+  # optional.
+  gain_db: {type: db, min: -36, max: 12, default: -12, label: Gain}
+  wave: {type: choice, choices: [sine, saw, square], default: saw}
+  attack_ms: {type: ms, min: 0, max: 2000, default: 5, lane: false, label: Attack}
+  release_ms: {type: ms, min: 1, max: 5000, default: 250, lane: false, label: Release}
+  tone_hz: {type: hz, min: 200, max: 20000, default: 6000, label: Tone}
+"#;
+
+/// How an offline instrument's manifest says where its code is.
+const INSTRUMENT_OFFLINE_RUN: &str = "# offline: device.py runs in Python on the track's notes over the whole\n# song, when they or the fields change; the result is cached and played.\n# The other is realtime, on the audio thread, which also plays previews:\n# daw plugin new --instrument --realtime.\nrun: offline\nentry: device.py";
+
+/// How a real-time instrument's manifest says where its code is.
+const INSTRUMENT_REALTIME_RUN: &str = "# realtime: device.wasm runs on the audio thread, built from device.rs by\n# daw plugin build. The fields reach the code in this order.\nrun: realtime\nentry: device.wasm\nsource: device.rs";
+
+/// The code `daw plugin new --instrument` writes.
+pub const INSTRUMENT_CODE_TEMPLATE: &str = r#""""NAME: the scaffold of an instrument, to edit.
+
+play(notes, frames, sample_rate, fields) is the whole contract of an
+offline instrument. notes holds the track's notes as they play, after its
+MIDI effects, a row a note in the order they start: notes["start"] and
+notes["end"] are frames of the song, notes["pitch"] the MIDI note and
+notes["velocity"] 1 to 127; a row unpacks as start, end, pitch, velocity.
+frames is the song's length in frames and sample_rate its rate. fields maps
+each name the manifest declares to its value: a float for a number, True or
+False for a switch, a string for a choice, or, where a lane moves the field,
+a float64 array of shape (frames, 1) with one value a frame. Return a float
+array of shape (frames, channels), (frames, 1) or (frames,): the
+instrument's sound over the whole song, frame N at the song's frame N.
+Only numpy and scipy are promised.
+"""
+
+import numpy as np
+from scipy.signal import lfilter
+
+
+def play(notes, frames, sample_rate, fields):
+    out = np.zeros(frames)
+    attack = max(1, int(float(fields["attack_ms"]) / 1000 * sample_rate))
+    release = max(1, int(float(fields["release_ms"]) / 1000 * sample_rate))
+    for start, end, pitch, velocity in notes:
+        held = max(1, end - start)
+        n = min(held + release, frames - start)
+        if n <= 0:
+            continue
+        t = np.arange(n)
+        hz = 440 * 2 ** ((pitch - 69) / 12)
+        phase = (hz * t / sample_rate) % 1
+        if fields["wave"] == "sine":
+            wave = np.sin(2 * np.pi * phase)
+        elif fields["wave"] == "square":
+            wave = np.where(phase < 0.5, 1.0, -1.0)
+        else:
+            wave = 2 * phase - 1
+        # Up over the attack while held, then down over the release.
+        level = np.minimum(1, (t + 1) / attack)
+        level = np.where(t < held, level, level[min(held, n) - 1] * np.maximum(0, 1 - (t - held) / release))
+        out[start:start + n] += wave * level * velocity / 127
+    # The tone: a one-pole lowpass, its cutoff from the first frame's value.
+    tone = float(np.asarray(fields["tone_hz"]).flat[0])
+    pole = np.exp(-2 * np.pi * min(tone, 0.49 * sample_rate) / sample_rate)
+    out = lfilter([1 - pole], [1, -pole], out)
+    gain = 10 ** (np.asarray(fields["gain_db"], dtype=np.float64) / 20)
+    return out.reshape(-1, 1) * gain
+"#;
+
+/// The source `daw plugin new --instrument --realtime` writes: Rust, built
+/// to the device ABI with `aaw_note`.
+pub const RUST_INSTRUMENT_TEMPLATE: &str = include_str!("../templates/instrument.rs");
+
 /// Makes a device folder for `name` under `root`, the project's or the
-/// workspace's `devices/`, from the templates: a working device to edit,
-/// offline in Python or, with `realtime`, in Rust for the audio thread,
-/// which is left to `build`. Refuses a folder that is there.
-pub fn new(name: &str, root: &Path, realtime: bool) -> Result<Installed> {
+/// workspace's `devices/`, from the templates: a working effect, or with
+/// `instrument` an instrument, to edit, offline in Python or, with
+/// `realtime`, in Rust for the audio thread, which is left to `build`.
+/// Refuses a folder that is there.
+pub fn new(name: &str, root: &Path, realtime: bool, instrument: bool) -> Result<Installed> {
     let name = name.trim();
     let slug_of = slug(name);
     if slug_of.is_empty() {
@@ -716,10 +811,11 @@ pub fn new(name: &str, root: &Path, realtime: bool) -> Result<Installed> {
         return Err(format!("{} is already there; choose another name or edit it", folder.display()));
     }
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let (manifest, file, code) = if realtime {
-        (REALTIME_MANIFEST_TEMPLATE, "device.rs", RUST_TEMPLATE)
-    } else {
-        (MANIFEST_TEMPLATE, "device.py", CODE_TEMPLATE)
+    let (manifest, file, code) = match (instrument, realtime) {
+        (false, true) => (REALTIME_MANIFEST_TEMPLATE.to_string(), "device.rs", RUST_TEMPLATE),
+        (false, false) => (MANIFEST_TEMPLATE.to_string(), "device.py", CODE_TEMPLATE),
+        (true, true) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_REALTIME_RUN), "device.rs", RUST_INSTRUMENT_TEMPLATE),
+        (true, false) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_OFFLINE_RUN), "device.py", INSTRUMENT_CODE_TEMPLATE),
     };
     let manifest = manifest.replace("NAME", name);
     let code = code.replacen("NAME", name, 1).replace("SLUG", &slug_of);
@@ -816,6 +912,11 @@ impl Installed {
         self.manifest.run == "realtime"
     }
 
+    /// Whether it is an instrument, which a MIDI track's notes play.
+    pub fn instrument(&self) -> bool {
+        self.manifest.kind == "instrument"
+    }
+
     /// The fields as a real-time device's code is given them.
     pub fn wasm_fields(&self) -> Vec<wasm::Field> {
         self.manifest
@@ -853,33 +954,57 @@ impl Installed {
             });
         }
         let bytes = std::fs::read(&file).map_err(|e| format!("{}: {e}", file.display()))?;
-        wasm::Code::new(&bytes, self.wasm_fields(), rate, tempo).map(Arc::new).map_err(|e| format!("{}: {e}", m.entry))
+        wasm::Code::new(&bytes, self.wasm_fields(), rate, tempo, self.instrument()).map(Arc::new).map_err(|e| format!("{}: {e}", m.entry))
     }
 }
 
-/// Runs a real-time device for a second of noise at 48 kHz with every
-/// field at its default: whether its module meets the ABI and runs, and
-/// what share of the time it took.
+/// The notes an instrument's check plays over a second at 48 kHz, as
+/// (start, end, key, velocity): a chord held half a second, then a note
+/// above it.
+const CHECK_NOTES: [(usize, usize, u8, u8); 4] = [(0, 24000, 60, 100), (0, 24000, 64, 90), (0, 24000, 67, 80), (28800, 43200, 72, 110)];
+
+/// Runs a real-time device for a second of noise at 48 kHz, or an
+/// instrument for a second of `CHECK_NOTES`, with every field at its
+/// default: whether its module meets the ABI and runs, and what share of
+/// the time it took.
 fn check_realtime(device: &Installed) -> Result<Json> {
+    use aaw_dsp::instrument::NoteEvent;
     const RATE: usize = 48000;
+    const BLOCK: usize = 512;
     let code = device.code(RATE as f64, 120.0)?;
     let defaults = device.manifest.fields.iter().map(|f| (f.name.clone(), f.default.clone())).collect();
     let mut running = code.instance_at(&defaults);
-    // A fixed noise, the same every check.
+    // A fixed noise, the same every check; an instrument's input is silence.
     let mut seed: u32 = 1;
     let mut noise = || {
         seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
         (f64::from(seed >> 8) / f64::from(1u32 << 24) - 0.5) * 0.5
     };
-    let mut audio: Vec<aaw_dsp::Frame> = (0..RATE).map(|_| [noise(), noise()]).collect();
+    let instrument = device.instrument();
+    let mut audio: Vec<aaw_dsp::Frame> = (0..RATE).map(|_| if instrument { [0.0, 0.0] } else { [noise(), noise()] }).collect();
+    let mut notes = Vec::with_capacity(16);
     let started = std::time::Instant::now();
-    for (k, block) in audio.chunks_mut(512).enumerate() {
+    for (k, block) in audio.chunks_mut(BLOCK).enumerate() {
+        let at = k * BLOCK;
         let clock = aaw_dsp::Clock {
-            frame: (k * 512) as i64,
+            frame: at as i64,
             step: 1,
             total: RATE as i64,
         };
-        running.process(block, clock);
+        if instrument {
+            notes.clear();
+            for &(start, end, key, velocity) in &CHECK_NOTES {
+                for (frame, v) in [(start, velocity), (end, 0)] {
+                    if (at..at + block.len()).contains(&frame) {
+                        notes.push(NoteEvent { at: frame - at, key, velocity: v });
+                    }
+                }
+            }
+            notes.sort_by_key(|e| (e.at, e.velocity != 0));
+            running.play(block, clock, &notes);
+        } else {
+            running.process(block, clock);
+        }
     }
     let seconds = started.elapsed().as_secs_f64();
     if let Some(e) = code.failure() {
@@ -914,12 +1039,19 @@ pub fn check(device: &Installed) -> Result<Json> {
         reply["folder"] = json!(device.dir);
         return Ok(reply);
     }
+    // An instrument plays a second of the check's notes; an effect half a
+    // second of noise.
+    let (frames, notes) = match device.instrument() {
+        true => (48000, CHECK_NOTES.iter().map(|&(s, e, k, v)| json!([s, e, k, v])).collect::<Vec<_>>()),
+        false => (24000, Vec::new()),
+    };
     let params = json!({
         "sample_rate": 48000,
         "tempo": 120.0,
-        "frames": 24000,
+        "frames": frames,
         "fields": device.manifest.fields.iter().map(|f| (f.name.clone(), f.default_json())).collect::<Map<String, Json>>(),
         "lanes": {},
+        "notes": notes,
     });
     let work = tempfile::tempdir().map_err(|e| e.to_string())?;
     let params_file = work.path().join("params.json");
@@ -935,13 +1067,16 @@ pub fn check(device: &Installed) -> Result<Json> {
 // ---------------------------------------------------------------------------
 // The devices of a song
 
-/// One device in a song's chains.
+/// One device in a song's chains, or a track's instrument.
 #[derive(Clone, Debug)]
 pub struct Instance {
     /// The chain's owner as the host addresses it: `tracks.T`.
     pub owner: String,
+    /// Its place in the chain, or `custom::INSTRUMENT` for the track's
+    /// instrument.
     pub index: usize,
-    /// The effect as commands name it: `tracks.T.effects.REF`.
+    /// The effect as commands name it, `tracks.T.effects.REF`, or the
+    /// instrument, `tracks.T.instrument`.
     pub reference: String,
     pub slug: String,
     pub version: Option<String>,
@@ -957,6 +1092,11 @@ pub struct Instance {
 impl Instance {
     pub fn key(&self) -> (String, usize) {
         (self.owner.clone(), self.index)
+    }
+
+    /// Whether it is a track's instrument rather than an effect.
+    pub fn is_instrument(&self) -> bool {
+        self.index == custom::INSTRUMENT
     }
 
     /// The cache's file, under the project's `.daw/devices/`.
@@ -975,23 +1115,37 @@ fn effect_reference(e: &Effect, index: usize) -> String {
 }
 
 /// The devices of a song, in the order their inputs can be made: tracks,
-/// then groups each after the groups in it, returns, then the master, and
-/// within a chain in order, so that a device fed by another comes after it.
+/// each with its instrument first, then groups each after the groups in it,
+/// returns, then the master, and within a chain in order, so that a device
+/// fed by another comes after it.
 pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
-    let mut owners: Vec<(String, &[Effect], bool)> = Vec::new();
+    let mut owners: Vec<(String, &[Effect], bool, Option<&aaw_model::Device>)> = Vec::new();
     for t in &p.tracks {
-        owners.push((format!("tracks.{}", t.id), &t.effects, t.frozen.is_none()));
+        owners.push((format!("tracks.{}", t.id), &t.effects, t.frozen.is_none(), t.midi.as_ref().and_then(|m| m.device())));
     }
     for g in p.group_order() {
-        owners.push((format!("groups.{}", g.id), &g.effects, true));
+        owners.push((format!("groups.{}", g.id), &g.effects, true, None));
     }
     for r in &p.returns {
-        owners.push((format!("returns.{}", r.id), &r.effects, true));
+        owners.push((format!("returns.{}", r.id), &r.effects, true, None));
     }
-    owners.push(("master".to_string(), &p.master.effects, true));
+    owners.push(("master".to_string(), &p.master.effects, true, None));
     let mut found: HashMap<String, std::result::Result<Installed, String>> = HashMap::new();
     let mut out = Vec::new();
-    for (owner, effects, live) in owners {
+    for (owner, effects, live, instrument) in owners {
+        if let Some(d) = instrument {
+            let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name)).clone();
+            out.push(Instance {
+                owner: owner.clone(),
+                index: custom::INSTRUMENT,
+                reference: format!("{owner}.instrument"),
+                slug: d.name.clone(),
+                version: d.version.clone(),
+                installed,
+                heard: live,
+                identity: None,
+            });
+        }
         for (index, e) in effects.iter().enumerate() {
             let Effect::Device(d) = e else { continue };
             let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name)).clone();
@@ -1020,6 +1174,10 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
         if !inst.heard || device.realtime() {
             continue;
         }
+        if inst.is_instrument() {
+            inst.identity = instrument_identity(p, &inst.owner, device);
+            continue;
+        }
         let Ok(fed) = custom::cut(p, &inst.owner, inst.index) else { continue };
         let mut h = Sha256::new();
         h.update(aaw_model::to_yaml(&fed).as_bytes());
@@ -1036,6 +1194,43 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
         inst.identity = Some(hex(&h.finalize()));
     }
     out
+}
+
+/// What an offline instrument's cache is made from: the track's notes as
+/// they play, the instrument's entry and the lanes on its fields, its code,
+/// the song's length, tempo and rate.
+fn instrument_identity(p: &Project, owner: &str, device: &Installed) -> Option<String> {
+    let t = p.track(owner.strip_prefix("tracks.")?)?;
+    let midi = t.midi.as_ref()?;
+    let d = midi.device()?;
+    let mut h = Sha256::new();
+    for n in aaw_model::schedule::track_notes(p, midi) {
+        h.update(format!("{},{},{},{};", n.start, n.end, n.pitch, n.velocity).as_bytes());
+    }
+    h.update([0]);
+    h.update(aaw_model::yaml_emit::dump(&aaw_model::Instrument::Device(d.clone()).dump(false)).as_bytes());
+    for lane in instrument_lanes(t) {
+        h.update(aaw_model::yaml_emit::dump(&lane.dump(false)).as_bytes());
+    }
+    h.update([0]);
+    h.update(device.code.as_bytes());
+    h.update([0]);
+    h.update(format!("{}|{}|{}", total_frames(p), p.session.tempo, p.session.sample_rate).as_bytes());
+    Some(hex(&h.finalize()))
+}
+
+/// The lanes on a track's instrument of the person's own, on
+/// `instrument.fields.F`.
+fn instrument_lanes(t: &aaw_model::Track) -> Vec<&aaw_model::Lane> {
+    t.automation
+        .iter()
+        .filter(|lane| matches!(aaw_model::rules::target(aaw_model::rules::Owner::Track(t), &lane.param), Ok(x) if x.kind == aaw_model::rules::TargetKind::Instrument))
+        .collect()
+}
+
+/// The song's length in frames, as the engine plays it.
+fn total_frames(p: &Project) -> usize {
+    aaw_model::frame(&p.session.length_exact(), p.session.tempo, p.session.sample_rate).max(0) as usize
 }
 
 fn owner_parts<'a>(p: &'a Project, owner: &str) -> Option<(&'a [Effect], &'a [aaw_model::Lane])> {
@@ -1098,6 +1293,9 @@ fn check_device(p: &Project, owner: &str, index: usize, e: &Effect, lanes: &[aaw
     let Effect::Device(d) = e else { return Ok(()) };
     let reference = format!("{owner}.effects.{}", effect_reference(e, index));
     let m = &device.manifest;
+    if device.instrument() {
+        return Err(format!("{reference}: {} is an instrument, which a MIDI track's notes play: daw instrument set SONG TRACK {}", d.name, d.name));
+    }
     for (name, value) in &d.fields {
         let Some(spec) = m.field(name) else {
             return Err(format!("{reference}: {} has no field {name}; its fields are {}", d.name, m.field_names()));
@@ -1121,11 +1319,44 @@ fn check_device(p: &Project, owner: &str, index: usize, e: &Effect, lanes: &[aaw
     Ok(())
 }
 
+/// Refuses a track's instrument of the person's own whose fields or lanes
+/// are not what its manifest allows, or whose manifest is an effect's.
+fn check_instrument(t: &aaw_model::Track, d: &aaw_model::Device, device: &Installed) -> Result<()> {
+    let reference = format!("tracks.{}.instrument.device", t.id);
+    let m = &device.manifest;
+    if !device.instrument() {
+        return Err(format!("{reference}: {} is an effect, which goes in a chain: daw effect add SONG tracks.{} --type {}", d.name, t.id, d.name));
+    }
+    for (name, value) in &d.fields {
+        let Some(spec) = m.field(name) else {
+            return Err(format!("{reference}: {} has no field {name}; its fields are {}", d.name, m.field_names()));
+        };
+        spec.accept(value).map_err(|e| format!("{reference}.fields.{e}"))?;
+    }
+    for lane in instrument_lanes(t) {
+        let field = lane.param.strip_prefix("instrument.fields.").unwrap_or(&lane.param);
+        match m.field(field) {
+            None => return Err(format!("tracks.{}.automation: {}: {} has no field {field}; its fields are {}", t.id, lane.param, d.name, m.field_names())),
+            Some(spec) if !spec.lane => return Err(format!("tracks.{}.automation: {}: {} does not take a lane on {field}", t.id, lane.param, d.name)),
+            Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
 /// Refuses a song whose devices' fields or lanes are not what their
-/// manifests allow. A device that is not installed cannot be checked and
+/// manifests allow, an instrument in a chain or an effect as a track's
+/// instrument. A device that is not installed cannot be checked and
 /// passes.
 pub fn check_song(p: &Project, project: &Path) -> Result<()> {
     let mut found: HashMap<String, Option<Installed>> = HashMap::new();
+    for t in &p.tracks {
+        let Some(d) = t.midi.as_ref().and_then(|m| m.device()) else { continue };
+        let installed = found.entry(d.name.clone()).or_insert_with(|| find(Some(project), &d.name).ok());
+        if let Some(device) = installed {
+            check_instrument(t, d, device)?;
+        }
+    }
     let mut owners: Vec<(String, &[Effect], &[aaw_model::Lane])> = Vec::new();
     for t in &p.tracks {
         owners.push((format!("tracks.{}", t.id), &t.effects, &t.automation));
@@ -1155,6 +1386,9 @@ pub fn check_song(p: &Project, project: &Path) -> Result<()> {
 pub fn effect_node(project: Option<&Path>, slug_of: &str, given: &Map<String, Json>) -> Result<Map<String, Json>> {
     let device = find(project, slug_of)?;
     let m = &device.manifest;
+    if device.instrument() {
+        return Err(format!("{} is an instrument, which a MIDI track's notes play: daw instrument set SONG TRACK {}", m.slug, m.slug));
+    }
     let mut out = Map::new();
     out.insert("type".into(), json!("device"));
     if let Some(id) = given.get("id") {
@@ -1191,6 +1425,18 @@ pub fn effect_node(project: Option<&Path>, slug_of: &str, given: &Map<String, Js
     Ok(out)
 }
 
+/// The instrument `daw instrument set SONG TRACK SLUG` puts on a track:
+/// `{device: {name, version, fields}}` with the manifest's defaults.
+pub fn instrument_node(project: Option<&Path>, slug_of: &str) -> Result<Json> {
+    let device = find(project, slug_of)?;
+    let m = &device.manifest;
+    if !device.instrument() {
+        return Err(format!("{} is an effect, which goes in a chain: daw effect add SONG OWNER --type {}", m.slug, m.slug));
+    }
+    let fields: Map<String, Json> = m.fields.iter().map(|f| (f.name.clone(), f.default_json())).collect();
+    Ok(json!({"device": {"name": m.slug, "version": m.version, "fields": fields}}))
+}
+
 /// Reads a cache file: stereo float frames.
 pub fn load_cache(file: &Path) -> Result<Arc<Vec<[f32; 2]>>> {
     let audio = aaw_engine::sndfile::read(file)?;
@@ -1216,6 +1462,9 @@ pub fn compute(p: &Project, project: &Path, inst: &Instance, caches: &Caches) ->
     let file = cache_dir(project).join(format!("{identity}.wav"));
     if file.is_file() {
         return load_cache(&file);
+    }
+    if inst.is_instrument() {
+        return compute_instrument(p, project, inst, &device, &identity);
     }
     // A song written by hand, or rendered without a host, is held to the
     // manifest here, as every edit through a host is.
@@ -1297,6 +1546,105 @@ pub fn compute(p: &Project, project: &Path, inst: &Instance, caches: &Caches) ->
         if !frames_out.iter().all(|f| f[0].is_finite() && f[1].is_finite()) {
             return Err(format!("{}: the device wrote samples that are not numbers", m.slug));
         }
+        std::fs::create_dir_all(cache_dir(project)).map_err(|e| e.to_string())?;
+        aaw_engine::wav::write_atomic(&file, &aaw_engine::wav::float_wav_bytes(&frames_out, rate as u32))?;
+        Ok(Arc::new(frames_out))
+    })();
+    let _ = std::fs::remove_dir_all(&work);
+    result
+}
+
+/// Writes the lanes on a device's fields as raw files of one float a frame
+/// under `work`, by field: `lanes` are the lanes by the field each moves.
+fn lane_files(p: &Project, m: &Manifest, lanes: &[(String, &aaw_model::Lane)], frames: usize, work: &Path) -> Result<Map<String, Json>> {
+    let mut out = Map::new();
+    let mut values = vec![0.0f64; frames];
+    for (name, lane) in lanes {
+        let Some(spec) = m.field(name).filter(|s| s.lane && s.kind.numeric()) else { continue };
+        let domain = if spec.log { aaw_model::rules::Domain::Log } else { aaw_model::rules::Domain::Linear };
+        let env = aaw_dsp::envelope::Envelope::new(lane, domain, p.session.tempo, p.session.sample_rate);
+        env.fill(0, 1, &mut values);
+        let bytes: Vec<u8> = values.iter().flat_map(|v| (v.clamp(spec.min, spec.max) as f32).to_le_bytes()).collect();
+        let lane_file = work.join(format!("{name}.f32"));
+        std::fs::write(&lane_file, bytes).map_err(|e| format!("{}: {e}", lane_file.display()))?;
+        out.insert(name.clone(), json!(lane_file));
+    }
+    Ok(out)
+}
+
+/// The fields as the code is given them: the song's values over the
+/// manifest's defaults.
+fn field_values(m: &Manifest, d: &aaw_model::Device) -> Map<String, Json> {
+    let mut fields: Map<String, Json> = m.fields.iter().map(|f| (f.name.clone(), f.default_json())).collect();
+    for (name, value) in &d.fields {
+        fields.insert(name.clone(), match value {
+            FieldValue::Number(x) => json!(x),
+            FieldValue::Flag(b) => json!(b),
+            FieldValue::Text(s) => json!(s),
+        });
+    }
+    fields
+}
+
+/// Runs the device's code with `params` and reads what it wrote as the
+/// song's frames, checked; `output` is where it writes.
+fn run_and_read(command: Command, what: &str, slug_of: &str, output: &Path, rate: i64) -> Result<Vec<[f32; 2]>> {
+    run_python(command, what)?;
+    let audio = aaw_engine::sndfile::read(output)?;
+    if audio.rate as i64 != rate {
+        return Err(format!("{slug_of}: the device wrote audio at {} Hz; the song is at {rate}", audio.rate));
+    }
+    if audio.channels == 0 || audio.channels > 2 {
+        return Err(format!("{slug_of}: the device wrote {} channels; one or two are played", audio.channels));
+    }
+    let frames_out = to_stereo(&audio);
+    if frames_out.is_empty() {
+        return Err(format!("{slug_of}: the device wrote no audio"));
+    }
+    if !frames_out.iter().all(|f| f[0].is_finite() && f[1].is_finite()) {
+        return Err(format!("{slug_of}: the device wrote samples that are not numbers"));
+    }
+    Ok(frames_out)
+}
+
+/// Makes an offline instrument's cache: hands its code the track's notes as
+/// they play, in frames, with its fields and the lanes on them, and keeps
+/// what it plays under `.daw/devices/`.
+fn compute_instrument(p: &Project, project: &Path, inst: &Instance, device: &Installed, identity: &str) -> Result<Arc<Vec<[f32; 2]>>> {
+    let file = cache_dir(project).join(format!("{identity}.wav"));
+    let t = p.track(inst.owner.strip_prefix("tracks.").unwrap_or_default()).ok_or("the track")?;
+    let midi = t.midi.as_ref().ok_or("the track's notes")?;
+    let d = midi.device().ok_or("the track's instrument")?;
+    check_instrument(t, d, device)?;
+    let rate = p.session.sample_rate;
+    let frames = total_frames(p);
+    if frames == 0 {
+        return Err("The song has no frames".into());
+    }
+    let m = &device.manifest;
+    let work = cache_dir(project).join(format!("work-{}-{}", std::process::id(), &identity[..12]));
+    let _ = std::fs::remove_dir_all(&work);
+    std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
+    let result = (|| -> Result<Arc<Vec<[f32; 2]>>> {
+        let lanes: Vec<(String, &aaw_model::Lane)> = instrument_lanes(t)
+            .into_iter()
+            .map(|l| (l.param.strip_prefix("instrument.fields.").unwrap_or(&l.param).to_string(), l))
+            .collect();
+        let notes: Vec<Json> = aaw_model::schedule::track_notes(p, midi).iter().map(|n| json!([n.start, n.end, n.pitch, n.velocity])).collect();
+        let params = json!({
+            "sample_rate": rate,
+            "tempo": p.session.tempo,
+            "frames": frames,
+            "fields": field_values(m, d),
+            "lanes": lane_files(p, m, &lanes, frames, &work)?,
+            "notes": notes,
+        });
+        let params_file = work.join("params.json");
+        std::fs::write(&params_file, params.to_string()).map_err(|e| e.to_string())?;
+        let output_file = work.join("output.wav");
+        let mut command = runner()?;
+        command.arg("--device").arg(&device.dir).arg("--output").arg(&output_file).arg("--params").arg(&params_file);
+        let frames_out = run_and_read(command, &format!("{} on {}", m.slug, inst.reference), &m.slug, &output_file, rate)?;
         std::fs::create_dir_all(cache_dir(project)).map_err(|e| e.to_string())?;
         aaw_engine::wav::write_atomic(&file, &aaw_engine::wav::float_wav_bytes(&frames_out, rate as u32))?;
         Ok(Arc::new(frames_out))
@@ -1465,7 +1813,8 @@ mod tests {
         assert!(refused("name: X\n").contains("format"));
         assert!(refused("format: 2\nname: X\n").contains("format 2"));
         assert!(refused("format: 1\n").contains("name is required"));
-        assert!(refused("format: 1\nname: X\nkind: instrument\n").contains("later stage"));
+        assert!(refused("format: 1\nname: X\nkind: midi\n").contains("later stage"));
+        assert_eq!(parse_manifest("format: 1\nname: X\nkind: instrument\n", "x").unwrap().kind, "instrument");
         assert!(refused("format: 1\nname: X\nrun: live\n").contains("offline or realtime"));
         assert!(refused("format: 1\nname: X\nrun: realtime\nentry: device.py\n").contains(".wasm file"));
         assert!(refused("format: 1\nname: X\nsource: device.rs\n").contains("real-time device"));
@@ -1494,11 +1843,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let ws = tmp.path().join("ws");
         let proj = tmp.path().join("proj");
-        let made = new("Tilt EQ", &ws.join("devices"), false).unwrap();
+        let made = new("Tilt EQ", &ws.join("devices"), false, false).unwrap();
         assert_eq!(made.manifest.slug, "tilt-eq");
         assert!(made.dir.join("device.py").is_file());
-        assert!(new("Tilt EQ", &ws.join("devices"), false).unwrap_err().contains("already there"));
-        let own = new("Tilt EQ", &proj.join("devices"), false).unwrap();
+        assert!(new("Tilt EQ", &ws.join("devices"), false, false).unwrap_err().contains("already there"));
+        let own = new("Tilt EQ", &proj.join("devices"), false, false).unwrap();
         assert_eq!(own.from, Where::Project);
         assert_eq!(own.code, made.code, "the same files hash the same");
         std::fs::write(own.dir.join("device.py"), "def process(a, r, f):\n    return a\n").unwrap();

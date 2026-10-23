@@ -648,6 +648,20 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
     }
     if let Owner::Track(track) = owner {
         if parts[0] == "instrument" {
+            // An instrument of the person's own: its fields are its
+            // manifest's, which a host checks; the song knows the shape,
+            // instrument.fields.F.
+            if track.midi.as_ref().and_then(|m| m.device()).is_some() {
+                if parts.len() != 3 || parts[1] != "fields" {
+                    return Err(format!("{param}: address an instrument's field of your own as instrument.fields.FIELD"));
+                }
+                return Ok(Target {
+                    kind: TargetKind::Instrument,
+                    field: format!("fields.{}", parts[2]),
+                    domain: Domain::Linear,
+                    range: Range::closed(f64::NEG_INFINITY, f64::INFINITY),
+                });
+            }
             let synth = track
                 .midi
                 .as_ref()

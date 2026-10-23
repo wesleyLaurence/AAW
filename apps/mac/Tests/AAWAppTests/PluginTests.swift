@@ -17,10 +17,13 @@ final class PluginTests: XCTestCase {
         XCTAssertTrue(SongModel.deviceNote(state("waiting"))!.hasPrefix("Waiting"))
         XCTAssertEqual(SongModel.deviceNote(state("failed", error: "process raised")), "Failed: process raised; the sound passes through")
         XCTAssertTrue(SongModel.deviceNote(state("missing", error: "No device tilt"))!.hasPrefix("Not installed: No device tilt"))
+        // An instrument's notes play nothing meanwhile; it passes nothing through.
+        XCTAssertEqual(SongModel.deviceNote(state("failed", error: "play raised"), instrument: true), "Failed: play raised; the notes play nothing")
+        XCTAssertTrue(SongModel.deviceNote(state("computing"), instrument: true)!.contains("they play nothing until it is done"))
     }
 
     func testAPluginIsMatchedByNameSlugDescriptionOrField() {
-        let tilt = DeviceInfo(name: "Tilt EQ", slug: "tilt-eq", description: "A tilt about a pivot", version: "0.1", fields: ["tilt_db", "pivot_hz"], from: "workspace", folder: "/w/devices/tilt-eq")
+        let tilt = DeviceInfo(name: "Tilt EQ", slug: "tilt-eq", description: "A tilt about a pivot", version: "0.1", kind: "effect", fields: ["tilt_db", "pivot_hz"], from: "workspace", folder: "/w/devices/tilt-eq")
         XCTAssertTrue(Browser.matches(tilt, ""))
         XCTAssertTrue(Browser.matches(tilt, "tilt eq"))
         XCTAssertTrue(Browser.matches(tilt, "pivot"))

@@ -2,11 +2,15 @@
 
 The host calls this with the device's folder, the input it rendered, where
 to write the output and a params file: {"sample_rate", "tempo", "frames",
-"fields": {name: value}, "lanes": {name: path}}, a lane's path a raw file of
-one little-endian float32 a frame. The folder's entry (device.py) defines
-process(audio, sample_rate, fields) and returns the output as an array. With
---check the device runs once on a short noise instead and the reply says what
-came back. Errors go to stderr as {"error": ...} with status 1.
+"fields": {name: value}, "lanes": {name: path}, "notes": [[start, end,
+pitch, velocity], ...]}, a lane's path a raw file of one little-endian
+float32 a frame. An effect's entry (device.py) defines process(audio,
+sample_rate, fields) and returns the output as an array; an instrument's
+(kind: instrument in its manifest) defines play(notes, frames, sample_rate,
+fields), given the track's notes and no input. With --check the device runs
+once on a short noise, or an instrument on the notes given, instead and the
+reply says what came back. Errors go to stderr as {"error": ...} with
+status 1.
 """
 
 import argparse
@@ -24,8 +28,18 @@ def fail(message):
     sys.exit(1)
 
 
-def load(folder, entry):
-    """The device's module, from its file, with its folder importable."""
+NOTE = np.dtype([("start", np.int64), ("end", np.int64), ("pitch", np.int64), ("velocity", np.int64)])
+
+
+def notes_of(params):
+    """The notes as an instrument receives them: a structured array of
+    start, end, pitch and velocity, a row a note."""
+    rows = [tuple(int(x) for x in n) for n in params.get("notes", [])]
+    return np.array(rows, dtype=NOTE)
+
+
+def load(folder, entry, function="process", signature="process(audio, sample_rate, fields)"):
+    """The device's function, from its file, with its folder importable."""
     file = folder / entry
     if not file.is_file():
         fail(f"{file} is not there")
@@ -36,10 +50,10 @@ def load(folder, entry):
         spec.loader.exec_module(module)
     except Exception:  # noqa: BLE001 - whatever the device raised is the report
         fail(f"{file.name} did not load:\n{traceback.format_exc(limit=4)}")
-    process = getattr(module, "process", None)
-    if not callable(process):
-        fail(f"{file.name} defines no process(audio, sample_rate, fields)")
-    return process
+    found = getattr(module, function, None)
+    if not callable(found):
+        fail(f"{file.name} defines no {signature}")
+    return found
 
 
 def fields_of(params, frames):
@@ -54,21 +68,21 @@ def fields_of(params, frames):
     return fields
 
 
-def run(process, audio, sample_rate, fields):
+def run(function, *args, name="process"):
     try:
-        out = process(audio, sample_rate, fields)
+        out = function(*args)
     except Exception:  # noqa: BLE001
-        fail(f"process raised:\n{traceback.format_exc(limit=4)}")
+        fail(f"{name} raised:\n{traceback.format_exc(limit=4)}")
     try:
         out = np.asarray(out, dtype=np.float64)
     except Exception:  # noqa: BLE001
-        fail(f"process returned {type(out).__name__}, not an array of audio")
+        fail(f"{name} returned {type(out).__name__}, not an array of audio")
     if out.ndim == 1:
         out = out.reshape(-1, 1)
     if out.ndim != 2 or out.shape[1] not in (1, 2) or out.shape[0] == 0:
-        fail(f"process returned an array of shape {out.shape}; (frames, channels) with one or two channels is expected")
+        fail(f"{name} returned an array of shape {out.shape}; (frames, channels) with one or two channels is expected")
     if not np.all(np.isfinite(out)):
-        fail("process returned samples that are not numbers")
+        fail(f"{name} returned samples that are not numbers")
     return out
 
 
@@ -82,15 +96,31 @@ def main(argv=None):
     a = parser.parse_args(argv)
     params = json.loads(a.params.read_text())
     manifest = a.device / "device.yaml"
-    entry = "device.py"
-    # The entry as the manifest names it, read without a YAML library: one
-    # line, `entry: NAME`.
+    entry, kind = "device.py", "effect"
+    # The entry and the kind as the manifest names them, read without a YAML
+    # library: a line each, `entry: NAME` and `kind: KIND`.
     if manifest.is_file():
         for line in manifest.read_text().splitlines():
             if line.startswith("entry:"):
                 entry = line.split(":", 1)[1].strip().strip("'\"") or entry
-    process = load(a.device, entry)
+            if line.startswith("kind:"):
+                kind = line.split(":", 1)[1].split("#")[0].strip().strip("'\"") or kind
     sample_rate = int(params["sample_rate"])
+    if kind == "instrument":
+        play = load(a.device, entry, "play", "play(notes, frames, sample_rate, fields)")
+        frames = int(params["frames"])
+        notes = notes_of(params)
+        out = run(play, notes, frames, sample_rate, fields_of(params, frames), name="play")
+        if a.check:
+            print(json.dumps({"ok": True, "notes": int(len(notes)), "frames_in": frames, "frames_out": int(out.shape[0]),
+                              "channels": int(out.shape[1]), "peak": float(np.max(np.abs(out)))}))
+            return
+        import soundfile as sf
+
+        sf.write(a.output, out.astype(np.float32), sample_rate, subtype="FLOAT")
+        print(json.dumps({"ok": True, "notes": int(len(notes)), "frames_out": int(out.shape[0]), "channels": int(out.shape[1])}))
+        return
+    process = load(a.device, entry)
     if a.check:
         frames = int(params.get("frames", sample_rate // 2))
         rng = np.random.default_rng(1)

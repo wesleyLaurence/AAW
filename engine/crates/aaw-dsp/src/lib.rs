@@ -9,6 +9,7 @@ pub mod delay;
 pub mod device;
 pub mod dynamics;
 pub mod envelope;
+pub mod instrument;
 pub mod loudness;
 pub mod meter;
 pub mod overdrive;

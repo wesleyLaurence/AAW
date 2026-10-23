@@ -827,7 +827,7 @@ struct NoteClipHeader: View {
     }
 
     private var subtitle: String {
-        switch context.track.instrument {
+        switch context.track.plugin?.name ?? context.track.instrument {
         case nil: "Notes on \(context.track.id), no instrument"
         case let kind?: "Notes on \(context.track.id), by its \(kind)"
         }

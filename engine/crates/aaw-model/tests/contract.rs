@@ -58,6 +58,9 @@ tracks:
         modulation: [{source: macros.tone, target: filter.cutoff_hz, amount: 1}]
         effects: [{type: chorus}, {type: saturation}]
     automation: [{param: instrument.filter.cutoff_hz, points: [{at: 0, value: 900}]}]
+  - id: d
+    type: midi
+    instrument: {device: {name: pluck}}
 groups:
   - id: g
     effects: [{type: limiter}]

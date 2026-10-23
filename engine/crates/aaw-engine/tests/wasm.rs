@@ -64,7 +64,7 @@ fn gain_field() -> Vec<Field> {
 }
 
 fn code(bytes: &[u8]) -> Result<Code, String> {
-    Code::new(bytes, gain_field(), RATE, 120.0)
+    Code::new(bytes, gain_field(), RATE, 120.0, false)
 }
 
 fn at(gain: f64) -> BTreeMap<String, FieldValue> {
@@ -99,7 +99,7 @@ fn a_module_plays_its_fields_in_blocks_of_any_size_without_allocating() {
     // default, and a number outside the range its edge.
     let mut fields = gain_field();
     fields.push(Field { name: "mode".into(), default: FieldValue::Text("b".into()), min: 0.0, max: 1.0, log: false, choices: vec!["a".into(), "b".into()] });
-    let two = Code::new(&module("", "", 1), fields, RATE, 120.0).unwrap();
+    let two = Code::new(&module("", "", 1), fields, RATE, 120.0, false).unwrap();
     let mut y = vec![[1.0, 1.0]; 4];
     two.instance_at(&BTreeMap::new()).process(&mut y, rolling(0));
     assert_eq!(y[0], [1.0, 1.0], "the default gain");
@@ -245,7 +245,7 @@ fn a_module_in_a_song_plays_in_its_place_with_its_lanes() {
         set(bass, "effects", "[{type: device, name: gain, fields: {gain: 0.5}}]");
     });
     let rate = p.session.sample_rate as f64;
-    let code = Arc::new(Code::new(&module("", "", 1), gain_field(), rate, p.session.tempo).unwrap());
+    let code = Arc::new(Code::new(&module("", "", 1), gain_field(), rate, p.session.tempo, false).unwrap());
     let mut caches = Caches::new();
     caches.insert(("tracks.bass".into(), 0), Made::Code(code.clone()));
     // Without its code the device passes through; with it, the gain.
@@ -266,5 +266,158 @@ fn a_module_in_a_song_plays_in_its_place_with_its_lanes() {
         let g = (1.0 - f as f64 / span).clamp(0.0, 1.0) as f32;
         assert!((moved[f][0] - g * dry[f][0]).abs() < 0.002, "frame {f}");
     }
+    assert!(code.failure().is_none());
+}
+
+/// An instrument: its left is its first field times the velocity of the
+/// note held, over 127, changing at the frame the note starts or ends, and
+/// its right the key of the last note started, over 127. One change a call.
+fn instrument_module() -> Vec<u8> {
+    wat::parse_str(
+        r#"(module
+  (memory (export "memory") 1)
+  (global $level (mut f32) (f32.const 0))
+  (global $next (mut f32) (f32.const 0))
+  (global $key (mut f32) (f32.const 0))
+  (global $from (mut i32) (i32.const 100000))
+  (func (export "aaw_abi") (result i32) (i32.const 1))
+  (func (export "aaw_init") (param f64 f64))
+  (func (export "aaw_fields") (result i32) (i32.const 16))
+  (func (export "aaw_left") (result i32) (i32.const 1024))
+  (func (export "aaw_right") (result i32) (i32.const 2048))
+  (func (export "aaw_note") (param $at i32) (param $key i32) (param $velocity i32)
+    (global.set $from (local.get $at))
+    (global.set $next (f32.div (f32.convert_i32_s (local.get $velocity)) (f32.const 127)))
+    (if (i32.gt_s (local.get $velocity) (i32.const 0))
+      (then (global.set $key (f32.div (f32.convert_i32_s (local.get $key)) (f32.const 127))))))
+  (func (export "aaw_process") (param $n i32) (param $frame i64) (param $rolling i32)
+    (local $i i32) (local $g f32) (local $at i32)
+    (local.set $g (f32.demote_f64 (f64.load (i32.const 16))))
+    (block $done (loop $next
+      (br_if $done (i32.ge_s (local.get $i) (local.get $n)))
+      (if (i32.eq (local.get $i) (global.get $from))
+        (then (global.set $level (global.get $next)) (global.set $from (i32.const 100000))))
+      (local.set $at (i32.shl (local.get $i) (i32.const 2)))
+      (f32.store (i32.add (i32.const 1024) (local.get $at)) (f32.add (f32.load (i32.add (i32.const 1024) (local.get $at))) (f32.mul (local.get $g) (global.get $level))))
+      (f32.store (i32.add (i32.const 2048) (local.get $at)) (global.get $key))
+      (local.set $i (i32.add (local.get $i) (i32.const 1)))
+      (br $next))))
+)"#,
+    )
+    .unwrap()
+}
+
+#[test]
+fn an_instrument_is_given_its_notes_at_their_frames() {
+    use aaw_dsp::instrument::NoteEvent;
+    // An instrument's code must take notes; an effect's need not.
+    let refused = Code::new(&module("", "", 1), gain_field(), RATE, 120.0, true).unwrap_err();
+    assert!(refused.contains("exports no aaw_note"), "{refused}");
+    let code = Code::new(&instrument_module(), gain_field(), RATE, 120.0, true).unwrap();
+    assert!(code.instrument());
+    let mut running = code.instance_at(&at(1.0));
+    let mut x = vec![[0.0, 0.0]; 400];
+    let notes = [
+        NoteEvent { at: 5, key: 127, velocity: 127 },
+        NoteEvent { at: 200, key: 127, velocity: 0 },
+    ];
+    // Given in pieces of 128 frames, each note at its frame within its piece.
+    assert_no_alloc::assert_no_alloc(|| running.play(&mut x, rolling(0), &notes));
+    assert_eq!(x[4][0], 0.0);
+    assert_eq!(x[5], [1.0, 1.0]);
+    assert_eq!(x[199], [1.0, 1.0]);
+    assert_eq!(x[200], [0.0, 1.0], "let go at 200");
+    assert!(code.failure().is_none());
+}
+
+#[test]
+fn an_instrument_in_a_song_plays_its_notes_its_lanes_and_a_preview() {
+    use aaw_engine::program::{compile_cached, Cache};
+    use aaw_engine::render::Renderer;
+    let dir = tempfile::tempdir().unwrap();
+    let yaml = r#"
+session: {tempo: 120, length_beats: 8}
+tracks:
+- id: keys
+  type: midi
+  instrument: {device: {name: tone, fields: {gain: 0.5}}}
+  clips: [{length_beats: 8, notes: [{pitch: 127, at: 1, duration: 2, velocity: 127}]}]
+"#;
+    let p = Project::validate(&aaw_model::yaml_load::load(yaml).unwrap()).unwrap();
+    let code = Arc::new(Code::new(&instrument_module(), gain_field(), 48000.0, 120.0, true).unwrap());
+    let mut caches = Caches::new();
+    caches.insert(("tracks.keys".into(), aaw_engine::custom::INSTRUMENT), Made::Code(code.clone()));
+    // Without its code nothing sounds; with it, the note at half its gain
+    // from beat 1 to beat 3, 24000 frames a beat.
+    let silent = freeze_track(&p, dir.path(), "keys", 4096, &Caches::new()).unwrap();
+    assert!(silent.iter().all(|f| f[0] == 0.0));
+    let played = freeze_track(&p, dir.path(), "keys", 1000, &caches).unwrap();
+    assert_eq!(played[23999][0], 0.0);
+    assert_eq!(played[24000][0], 0.5);
+    assert_eq!(played[71999][0], 0.5);
+    assert_eq!(played[72000][0], 0.0);
+    // A lane moves its gain from 1 to 0 over the eight beats: at beat 2,
+    // three quarters.
+    let laned = with(&p, |d| {
+        let keys = track(d, "keys");
+        set(keys, "automation", "[{param: instrument.fields.gain, points: [{at: 0, value: 1}, {at: 8, value: 0}]}]");
+    });
+    let moved = freeze_track(&laned, dir.path(), "keys", 1000, &caches).unwrap();
+    assert!((moved[48000][0] - 0.75).abs() < 0.01, "{}", moved[48000][0]);
+    // A note previewed while the transport stands still sounds through it.
+    let mut cache = Cache::default();
+    cache.set_devices(caches.clone());
+    let program = Arc::new(compile_cached(&p, dir.path(), &mut cache).unwrap());
+    let mut r = Renderer::new(program, 0, 512);
+    r.preview(0, 127.0, 1.0, 600, true);
+    assert!(r.previewing());
+    let mut mix = vec![[0.0, 0.0]; 512];
+    r.process(&mut mix, false, None, |_, _, _| {});
+    assert!(mix[10][0] > 0.1, "{:?}", mix[10]);
+    r.process(&mut mix, false, None, |_, _, _| {});
+    assert!(!r.previewing());
+    assert!(mix[100][0] == 0.0, "let go after 600 frames");
+    assert!(code.failure().is_none());
+}
+
+#[test]
+fn an_instrument_carries_its_note_through_an_edit_and_lets_go_of_one_removed() {
+    use aaw_engine::program::{compile_cached, Cache};
+    use aaw_engine::render::Renderer;
+    let dir = tempfile::tempdir().unwrap();
+    let song = |gain: f64, notes: &str| {
+        let yaml = format!(
+            "session: {{tempo: 120, length_beats: 8}}\ntracks:\n- id: keys\n  type: midi\n  instrument: {{device: {{name: tone, fields: {{gain: {gain}}}}}}}\n  clips: [{{length_beats: 8, notes: {notes}}}]\n"
+        );
+        Project::validate(&aaw_model::yaml_load::load(&yaml).unwrap()).unwrap()
+    };
+    let code = Arc::new(Code::new(&instrument_module(), gain_field(), 48000.0, 120.0, true).unwrap());
+    let mut cache = Cache::default();
+    let mut caches = Caches::new();
+    caches.insert(("tracks.keys".into(), aaw_engine::custom::INSTRUMENT), Made::Code(code.clone()));
+    cache.set_devices(caches);
+    let held = "[{pitch: 127, at: 0, duration: 4, velocity: 127}]";
+    let a = Arc::new(compile_cached(&song(0.5, held), dir.path(), &mut cache).unwrap());
+    let b = Arc::new(compile_cached(&song(1.0, held), dir.path(), &mut cache).unwrap());
+    let c = Arc::new(compile_cached(&song(1.0, "[{pitch: 127, at: 6, duration: 1, velocity: 127}]"), dir.path(), &mut cache).unwrap());
+    assert_eq!(a.structure, b.structure);
+    assert_eq!(b.structure, c.structure);
+    let mut old = Renderer::new(a, 0, 512);
+    let mut mix = vec![[0.0, 0.0]; 512];
+    old.process(&mut mix, true, None, |_, _, _| {});
+    // The mix through the fader and pan: what half the gain is there.
+    let half = mix[511][0];
+    assert!(half > 0.1);
+    // A field changed: the note held carries on at the new gain.
+    let mut new = Renderer::new(b, 0, 512);
+    new.take_over(&mut old);
+    new.process(&mut mix, true, Some(&mut old), |_, _, _| {});
+    new.end_take_over();
+    assert!((mix[511][0] - 2.0 * half).abs() < 1e-9, "{} against {half}", mix[511][0]);
+    // The note removed: let go where the edit lands.
+    let mut last = Renderer::new(c, 0, 512);
+    last.take_over(&mut new);
+    last.process(&mut mix, true, Some(&mut new), |_, _, _| {});
+    assert_eq!(mix[0][0], 0.0, "{:?}", &mix[..4]);
     assert!(code.failure().is_none());
 }

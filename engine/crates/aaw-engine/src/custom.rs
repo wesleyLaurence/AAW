@@ -13,8 +13,12 @@ use std::sync::Arc;
 
 /// What the host made of the devices of the person's own, an offline
 /// device's cache or a real-time device's code, by the chain's owner and
-/// the device's index in it.
+/// the device's index in it, or `INSTRUMENT` for a track's instrument.
 pub type Caches = HashMap<(String, usize), Made>;
+
+/// The index a track's instrument of the person's own is kept by among the
+/// caches, beside its chain's devices: `(tracks.T, INSTRUMENT)`.
+pub const INSTRUMENT: usize = usize::MAX;
 
 /// The chain an owner path names: the list it is in and its name.
 fn split(owner: &str) -> Result<(&str, &str), String> {

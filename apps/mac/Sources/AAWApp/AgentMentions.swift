@@ -79,7 +79,7 @@ enum AgentMentions {
         var found: [AgentMention] = []
         for track in a.tracks {
             let clips = track.clips.count + track.audio.count + track.noteClips.count
-            var parts = [track.midi ? "MIDI track" + (track.instrument.map { " with a \(readable($0))" } ?? " with no instrument") : "sample track"]
+            var parts = [track.midi ? "MIDI track" + (track.plugin?.name.map { " with \($0)" } ?? track.instrument.map { " with a \(readable($0))" } ?? " with no instrument") : "sample track"]
             parts.append("\(clips) clip\(clips == 1 ? "" : "s")")
             if let group = track.group, let g = a.groups.first(where: { $0.key == group }) { parts.append("in group \(g.id)") }
             if track.mute { parts.append("muted") }

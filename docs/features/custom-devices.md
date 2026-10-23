@@ -1,4 +1,4 @@
-# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026
+# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stage 3 October 23
 
 Asked for by the person on October 19, 2026 (D123): "we need some kind of
 standard almost programming spec where it's like you can code a brand new
@@ -8,9 +8,9 @@ a UI elements and usable CLI interface for the agent. This DAW needs to be
 completely flexible and programmable ... similar concept to Max for Live
 where people can build things into Ableton, but I want it to be completely
 agent driven". Backlog: Next, Devices anyone builds, to a spec. The first
-stage, the manifest and the offline tier, is built (D144), and the second,
-the real-time tier (D145); instruments and MIDI effects are the stages
-below.
+stage, the manifest and the offline tier, is built (D144), the second, the
+real-time tier (D145), and the third, instruments (D146); MIDI effects and
+the spec's version 1 are the stages below.
 
 ## What
 
@@ -30,10 +30,16 @@ edited, `daw plugin check` runs it once (`daw plugin build` compiles a
 real-time one first), and it is tried on the track in the same
 conversation.
 
+An instrument is the same folder with `kind: instrument`: a MIDI track's
+notes play it in place of a Sampler or the Synth, `daw instrument set
+PROJECT TRACK SLUG` puts it there, the browser lists it under Instruments,
+and `daw plugin new NAME --instrument [--realtime]` scaffolds a working
+synth of a wave, an envelope and a tone.
+
 ## How it works
 
 - **The manifest is the contract.** `device.yaml` has `format: 1`, `kind`
-  (`effect`; `instrument` and `midi` are later stages), `name` (the title),
+  (`effect` unless said, or `instrument`; `midi` is a later stage), `name` (the title),
   `description`, `version`, `author`, `license`, `run` (`offline` unless
   said, or `realtime`), `entry` (`device.py` offline and `device.wasm` in
   real time unless said, a file in the folder), `source` (a real-time
@@ -177,6 +183,63 @@ conversation.
   freeze load it too and refuse on code that does not load. Once a second
   the host reads the song's device folders for a change, so a build, or an
   edit of an offline device's code, is heard without an edit of the song.
+- **Instruments** (`kind: instrument`, D146). On a MIDI track the
+  instrument is `{device: {name: SLUG, version: V, fields: {F: value}}}`
+  (`aaw_model::Instrument::Device`, the same `Device` with no ID and no
+  bypass), a third kind beside the sampler and the Synth. `daw instrument
+  set PROJECT TRACK SLUG` (`instrument.set` with a string,
+  `devices::instrument_node`) makes it from the manifest's defaults; `daw
+  set tracks.T.instrument.device.fields.F` sets a field and a lane on
+  `instrument.fields.F` moves one, each held to the manifest as an
+  effect's are (`check_instrument`). An instrument in a chain is refused
+  with `daw instrument set` named, and an effect as an instrument with
+  `daw effect add`; replacing the instrument keeps only the lanes on the
+  fields the new one lets a lane move. The track's notes as they play,
+  after its MIDI effects (the Synth's cached `track_notes`), are its input;
+  its sound goes to the track's inserts as the Synth's does, its latency
+  counted before them.
+  - **Offline**, `device.py` defines `play(notes, frames, sample_rate,
+    fields)`: `notes` a numpy structured array of `start`, `end`, `pitch`
+    and `velocity`, a row a note in the order they start, `start` and `end`
+    in frames of the song; `frames` the song's length; `fields` as an
+    effect's. It returns the sound over the whole song, cached under
+    `.daw/devices/` by an identity of the notes in frames, its entry and
+    the lanes on its fields, its code, the song's length, tempo and rate,
+    and added to the track by the timeline while the transport rolls. The
+    host gives it the notes and no input (`compute_instrument`), and it
+    comes first among its track's devices, so an effect after it is given
+    its sound.
+  - **In real time**, `device.wasm` also exports `aaw_note(at: i32, key:
+    i32, velocity: i32)`, which the engine calls before `aaw_process` for
+    each note starting or ending within the frames given, in order, `at`
+    the frame among them and a velocity of 0 an end; the buffers hold
+    silence, and the module writes its sound there. Code that lacks it is
+    refused for an instrument, and `Code::new` plays it a note to check it.
+    `aaw_dsp::instrument::Feed` makes the events of each block from the
+    notes: a note ends at its end or the song's, an end comes before a
+    start at the same frame, a seek ends what is held and starts again the
+    notes sounding there, a stop ends what is held, and at most 256 notes
+    are held, the longest held ending first past that. A live edit keeps
+    the instance and its voices: a field changed carries a held note on, and
+    notes changed end what was held where the edit lands.
+  - **Previews.** `note.preview`, the piano roll's notes, plays through a
+    real-time instrument whether or not the song plays: a start now, an end
+    after its length. An offline one plays only from the timeline; the
+    reply says `sounds: false` with `why`, as it does while the code is
+    not ready.
+  - **The terminal and the app.** `daw plugin list` says each plugin's
+    `kind`; `daw plugin check` plays an instrument a chord held half a
+    second and a note above it over a second at 48 kHz and replies its
+    peak, and a real-time one's load; `daw plugin status` lists it as
+    `tracks.T.instrument`. In the app its panel is first in the track's
+    device panel, the manifest's fields as a device's in a chain with a
+    diamond for a lane, titled as the manifest names it, with a line for
+    what the host is doing (`TrackView.plugin`); the browser lists
+    instruments under Instruments › Plugins and effects under Audio
+    Effects › Plugins, an instrument dragged onto a MIDI track's header or
+    device panel, or below the tracks for a new MIDI track named after it.
+    `daw map` names it `plugin SLUG`, and `daw check` takes it to sound
+    each note at its pitch.
 - **`daw check`** warns `device-missing` of a device the song names that is
   not installed and `device-version` of one installed at another version
   than the song was written with; a project's own folder shadows the
@@ -229,8 +292,29 @@ conversation.
   cache, lanes on its gain and on its tone, `ready` in `daw plugin status`,
   `stale` after its source changed, a source that does not compile refused
   with rustc's words, and an offline plugin with nothing to build.
-- Swift: the panel's line for each state, and a plugin matched by name,
-  slug, description or field.
+- Swift: the panel's line for each state, an instrument's included, and a
+  plugin matched by name, slug, description or field.
+- Instruments. `aaw-dsp/src/instrument.rs`: notes starting and ending at
+  their frames whatever the blocks, an end before a start at one frame, a
+  seek ending what is held and starting what sounds, a stop, a preview
+  standing still and let go, a take-over ending the old notes before the
+  new, and an offline instrument's cache added by the timeline and
+  playing no preview. `aaw-engine/tests/wasm.rs`: code without `aaw_note`
+  refused for an instrument; notes given at their frames across pieces of
+  128 without allocating; in a song, the note at its gain from its beat to
+  its end, a lane on its gain, a preview standing still; a note carried
+  through a field's edit and let go when it is removed.
+  `aaw-host/tests/devices.rs`: set by slug, its fields and lanes held to
+  the manifest, refused in a chain and an effect refused as one, its lanes
+  dropped when the Synth replaces it, first among its track's devices; an
+  offline one checked, settled to a cache silent before its notes and
+  sounding through them and fed to the effect after it, made again when a
+  note changes, its failure refusing the render; a real-time one built
+  from the scaffold, checked with sound, settled as code, frozen silent
+  before its notes and sounding through them, ready in the work.
+  `tests/test_devices.py`: both made from the terminal, set by slug, and
+  rendered with the pitches of their notes (A4 then E5), the offline one
+  silent after its release and the real-time one with no cache.
 
 ## Limits
 
@@ -260,14 +344,20 @@ conversation.
   when its identity changes (an edit of the device's code or fields, or of
   what feeds it), and the host does not retry a transient one on its own.
 - A device is not offered in a rack or a Synth patch; a saved rack holding
-  one loads only with `--flat`.
+  one loads only with `--flat`. An instrument of the person's own is not
+  saved in an instrument rack's file as anything but its entry: the
+  folder is not carried with it.
+- An instrument is given notes, their velocities and its fields: no pitch
+  bend, controllers, aftertouch or the arrangement. An offline one plays no
+  preview and is computed again on any change of its notes. Two notes of
+  one key overlapping are given as they come, two starts and two ends, and
+  what the code makes of that is its own. `daw synth audition` is for the
+  Synth alone.
 - No timeout on a run: code that never returns holds the host's work on
   devices, though not the host.
 
 ## Remaining stages
 
-3. Instruments: note input to the device, the piano roll's preview through
-   it; a real-time instrument's ABI gains the notes.
 4. MIDI effects, then the spec's version 1 written as the reference, with
    how a device is shared.
 5. FAUST as a way to make a real-time device: a `.dsp` source built to a

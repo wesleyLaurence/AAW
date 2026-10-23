@@ -737,7 +737,7 @@ enum NoteCmd {
 /// The instrument of a MIDI track. Replacing or removing it leaves the notes.
 #[derive(Subcommand)]
 enum InstrumentCmd {
-    /// Attach or replace the instrument, e.g. '{"sampler": {"pads": {...}, "map": [...]}}'.
+    /// Attach or replace the instrument, e.g. '{"sampler": {"pads": {...}, "map": [...]}}', or an instrument of your own by its slug, at its manifest's defaults (daw plugin list).
     Set { project: Song, track: String, instrument: String },
     /// Remove the instrument; the notes are kept and play nothing.
     Remove { project: Song, track: String },
@@ -955,10 +955,11 @@ enum PluginCmd {
         project: Option<Song>,
     },
     /// Make a plugin named NAME from the scaffold, a working gain, tone and
-    /// warmth to edit: a folder under the workspace's devices/, or under the
-    /// project's with --project. Offline in Python, or with --realtime in
-    /// Rust for the audio thread, built at once when rustc can. The reply
-    /// names the folder and its files.
+    /// warmth to edit, or with --instrument a working synth of a wave, an
+    /// envelope and a tone: a folder under the workspace's devices/, or
+    /// under the project's with --project. Offline in Python, or with
+    /// --realtime in Rust for the audio thread, built at once when rustc
+    /// can. The reply names the folder and its files.
     New {
         name: String,
         /// Put it under this project's devices/, for this song alone.
@@ -967,6 +968,10 @@ enum PluginCmd {
         /// A real-time device: device.rs, built to device.wasm.
         #[arg(long)]
         realtime: bool,
+        /// An instrument, which a MIDI track's notes play, rather than an
+        /// effect.
+        #[arg(long)]
+        instrument: bool,
     },
     /// Build a real-time plugin: compile its source, device.rs, to its
     /// entry, device.wasm, with rustc for WebAssembly, then check it. A
@@ -2453,12 +2458,12 @@ fn run(cli: &Cli) -> Result<Json> {
                 let dir = project.as_ref().map(|p| files(p));
                 Ok(aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?.json())
             }
-            PluginCmd::New { name, project, realtime } => {
+            PluginCmd::New { name, project, realtime, instrument } => {
                 let root = match project {
                     Some(p) => aaw_host::devices::project_dir(files(p).parent().unwrap_or(Path::new("."))),
                     None => aaw_host::devices::dir(),
                 };
-                let made = aaw_host::devices::new(name, &root, *realtime)?;
+                let made = aaw_host::devices::new(name, &root, *realtime, *instrument)?;
                 let code = made.dir.join(made.manifest.source.as_ref().unwrap_or(&made.manifest.entry));
                 let slug = &made.manifest.slug;
                 let mut out = json!({});
@@ -2473,19 +2478,13 @@ fn run(cli: &Cli) -> Result<Json> {
                 out = made.json();
                 out.as_object_mut().expect("an object").extend(built);
                 out["files"] = json!([made.dir.join("device.yaml"), &code]);
-                out["next"] = json!(if *realtime {
-                    format!(
-                        "Edit {} and {}; daw plugin build {slug} compiles and checks it; daw effect add PROJECT tracks.T --type {slug} puts it on a track",
-                        made.dir.join("device.yaml").display(),
-                        code.display()
-                    )
+                let run = if *realtime { format!("daw plugin build {slug} compiles and checks it") } else { format!("daw plugin check {slug} runs it once") };
+                let on = if *instrument {
+                    format!("daw instrument set PROJECT TRACK {slug} puts it on a MIDI track")
                 } else {
-                    format!(
-                        "Edit {} and {}; daw plugin check {slug} runs it once; daw effect add PROJECT tracks.T --type {slug} puts it on a track",
-                        made.dir.join("device.yaml").display(),
-                        code.display()
-                    )
-                });
+                    format!("daw effect add PROJECT tracks.T --type {slug} puts it on a track")
+                };
+                out["next"] = json!(format!("Edit {} and {}; {run}; {on}", made.dir.join("device.yaml").display(), code.display()));
                 Ok(out)
             }
             PluginCmd::Build { device, project } => {
@@ -2628,8 +2627,12 @@ fn run(cli: &Cli) -> Result<Json> {
         },
         Top::Instrument(i) => match i {
             InstrumentCmd::Set { project, track, instrument } => {
-                let instrument: Json =
-                    serde_json::from_str(instrument).map_err(|e| format!("The instrument must be JSON: {e}"))?;
+                // A word that is not JSON is a plugin's slug.
+                let instrument: Json = match serde_json::from_str(instrument) {
+                    Ok(json) => json,
+                    Err(_) if aaw_model::valid_device_slug(instrument) => Json::String(instrument.clone()),
+                    Err(e) => return Err(format!("The instrument must be JSON, or an instrument plugin's slug: {e}")),
+                };
                 edit(project, C::InstrumentSet { track: track.clone(), instrument })
             }
             InstrumentCmd::Remove { project, track } => edit(

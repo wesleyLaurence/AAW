@@ -426,7 +426,11 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
             continue;
         };
         let track = &program.tracks[ti];
-        let events = track.synth.as_ref().map_or(track.voices.len(), |s| s.notes.len());
+        let events = match (&track.synth, &track.instrument) {
+            (Some(s), _) => s.notes.len(),
+            (None, Some(i)) => i.notes.len(),
+            (None, None) => track.voices.len(),
+        };
         let mut fields = vec![
             ("events", Value::int(events as i64)),
             ("effects", effects(&reports.tracks[ti], &t.effects)),

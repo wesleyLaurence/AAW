@@ -696,7 +696,8 @@ fn pitched(p: &Project, t: &Track) -> Vec<(f64, f64, i64)> {
     let mut out = Vec::new();
     if let Some(midi) = &t.midi {
         let keep = |pitch: i64| match &midi.instrument {
-            Some(Instrument::Synth(_)) => true,
+            // An instrument of the person's own is taken to sound the note.
+            Some(Instrument::Synth(_) | Instrument::Device(_)) => true,
             Some(Instrument::Sampler(s)) => s.entry(pitch).is_some_and(|e| e.pitched),
             None => false,
         };

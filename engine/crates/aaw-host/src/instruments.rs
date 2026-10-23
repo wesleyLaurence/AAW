@@ -45,11 +45,15 @@ pub struct InstrumentRack {
 }
 
 impl InstrumentRack {
-    /// `synth` or `sampler`.
+    /// `synth`, `sampler` or `device`, an instrument of the person's own.
     pub fn kind(&self) -> &'static str {
-        match self.instrument.get("synth") {
-            Some(v) if !v.is_none() => "synth",
-            _ => "sampler",
+        let given = |k: &str| self.instrument.get(k).is_some_and(|v| !v.is_none());
+        if given("synth") {
+            "synth"
+        } else if given("device") {
+            "device"
+        } else {
+            "sampler"
         }
     }
 
@@ -109,7 +113,7 @@ pub fn validate(instrument: &Value) -> Result<Instrument> {
 fn pad_samples(instrument: &Instrument) -> Vec<String> {
     match instrument {
         Instrument::Sampler(s) => s.pads.values().map(|p| p.sample.clone()).collect(),
-        Instrument::Synth(_) => Vec::new(),
+        Instrument::Synth(_) | Instrument::Device(_) => Vec::new(),
     }
 }
 
