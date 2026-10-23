@@ -467,7 +467,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onWaveforms = { [weak self] in self?.takeWaveforms() }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
-            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
+            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.pluginType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
                 + (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
@@ -2220,6 +2220,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if board.types?.contains(NSPasteboard.PasteboardType(Browser.rackType)) == true {
             let name = board.data(forType: NSPasteboard.PasteboardType(Browser.rackType)).flatMap { String(data: $0, encoding: .utf8) }
             return ("rack", nil, name)
+        }
+        if board.types?.contains(NSPasteboard.PasteboardType(Browser.pluginType)) == true,
+           let slug = board.data(forType: NSPasteboard.PasteboardType(Browser.pluginType)).flatMap({ String(data: $0, encoding: .utf8) }) {
+            return (slug, nil, nil)
         }
         return (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first {
             board.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true

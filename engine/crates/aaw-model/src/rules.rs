@@ -704,6 +704,19 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
             spec = &r.effects[j];
             rest = &rest[2..];
         }
+        // A device of the person's own: its fields are its manifest's,
+        // which a host checks; the song knows the shape, effects.REF.fields.F.
+        if let Effect::Device(_) = spec {
+            if rest.len() != 2 || rest[0] != "fields" {
+                return Err(format!("{param}: address a device's field as effects.REF.fields.FIELD"));
+            }
+            return Ok(Target {
+                kind: TargetKind::Effect { index, inner, band: None },
+                field: format!("fields.{}", rest[1]),
+                domain: Domain::Linear,
+                range: Range::closed(f64::NEG_INFINITY, f64::INFINITY),
+            });
+        }
         let allowed = effect_params(spec.kind());
         let mut band = None;
         if let Effect::Eq(eq) = spec {

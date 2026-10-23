@@ -2738,6 +2738,27 @@ impl<'a> Edit<'a> {
             }
             EffectAdd { owner, index, fields } => {
                 let loc = self.owner(owner)?;
+                // A type that is no built-in kind names a device of the
+                // person's own, as does `device` with a name: the node is
+                // made from its manifest, with its defaults under the
+                // fields given.
+                let kind_given = fields.get("type").and_then(Json::as_str).unwrap_or("");
+                let device_slug = match kind_given {
+                    "device" => Some(fields.get("name").and_then(Json::as_str).unwrap_or("").to_string()),
+                    k if !k.is_empty() && !aaw_model::EFFECT_TYPES.contains(&k) => Some(k.to_string()),
+                    _ => None,
+                };
+                let resolved;
+                let fields = match device_slug.clone() {
+                    Some(slug) => {
+                        if self.is_rack(&loc) || self.is_synth(&loc) {
+                            return Err("A device of your own goes in a track's, a group's, a return's or the master's chain, not in a rack or a patch".into());
+                        }
+                        resolved = crate::devices::effect_node(self.dir.as_deref(), &slug, fields)?;
+                        &resolved
+                    }
+                    None => fields,
+                };
                 if fields.get("type").and_then(Json::as_str) == Some("rack") {
                     if self.is_rack(&loc) {
                         return Err("A rack holds no rack: add the effect to the rack itself".into());
@@ -2749,7 +2770,7 @@ impl<'a> Edit<'a> {
                 let at = index.unwrap_or(self.node(&loc).get("effects").map_or(0, |e| e.items().len()));
                 out.made.push(self.insert(&loc, "effects", Some(at), map_node(fields)?)?);
                 self.remap_lanes(&loc, |j| Some(if j >= at { j + 1 } else { j }), None)?;
-                let kind = fields.get("type").map_or_else(|| "effect".to_string(), |t| t.as_str().unwrap_or("effect").to_string());
+                let kind = device_slug.unwrap_or_else(|| fields.get("type").map_or_else(|| "effect".to_string(), |t| t.as_str().unwrap_or("effect").to_string()));
                 out.label = format!("Add {kind} to {}", self.text(&loc));
             }
             EffectRemove { effect } => {

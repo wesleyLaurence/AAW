@@ -27,11 +27,16 @@ Items 1–4 are the person's notes from using the app, brought on October 19,
 2026, and come before everything else (D123). Items 5–17 are the order as it
 stood.
 
-1. **Devices anyone builds, to a spec.** An instrument or effect written as
-    code against one spec, with its fields, its panel and its `daw` verbs, so
-    the agent writes a new device from a description, the engine runs it in
-    playback and export, and it is shared as a file as a patch or a rack is.
-    [features/custom-devices.md](features/custom-devices.md)
+1. **Devices anyone builds, to a spec: the remaining stages.** The
+    manifest, the `device` effect kind, the offline Python tier with its
+    cache, the generic panel from the manifest and `daw plugin
+    new|check|list|show|status` are built (D144). Left: the real-time tier
+    in a sandboxed language the engine compiles (FAUST or WebAssembly, after
+    the spike; no FAUST compiler is on this Mac), instruments with note
+    input and the piano roll's preview, MIDI effects, and the spec's version
+    1 written as the reference with how a device is shared; a finer
+    dependency for a device's input than the whole song; a timeout on a
+    run. [features/custom-devices.md](features/custom-devices.md)
 2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a sound or a track
@@ -113,6 +118,13 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A device of the person's own, by the agent on a real song:** `daw
+  plugin new`, the scaffold edited into a sound the song wants, added by
+  its slug, heard once its cache lands and after a field is moved, a lane
+  on a field, and the panel's line while it computes; whether the wait
+  after an edit is bearable on a long song, and whether a render refusing
+  on failing code reads right. Nothing was heard; tests, and the Python
+  run, only.
 - **A clip's lead drawn, on Junior ROAR 2026:** whether Start the Party's block
   now begins where its sound does, just after bar 43, with the pickup's
   waveform under it; whether the start edge of a clip with a lead trims as

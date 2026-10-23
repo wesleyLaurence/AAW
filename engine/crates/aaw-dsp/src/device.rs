@@ -78,6 +78,10 @@ pub struct Plan {
     pub tap: Option<Arc<Tap>>,
     /// Where an analyzer's output goes, every frame, for the app's meters.
     pub ring: Option<Arc<Ring>>,
+    /// What an offline device of the person's own plays: its output as the
+    /// host computed it, a frame for each frame of the timeline, or None
+    /// while the host has not, when the device passes its input through.
+    pub cache: Option<Arc<Vec<[f32; 2]>>>,
 }
 
 impl Plan {
@@ -126,6 +130,9 @@ impl Plan {
             Effect::Analyzer(_) => hash("analyzer"),
             // A rack is laid out into its effects before any plan is made.
             Effect::Rack(_) => hash("rack"),
+            // A device of the person's own: the program gives it its cache,
+            // which is part of what it is.
+            Effect::Device(d) => hash(("device", &d.name)),
         };
         Plan {
             effect: effect.clone(),
@@ -137,7 +144,46 @@ impl Plan {
             signature,
             tap: None,
             ring: None,
+            cache: None,
         }
+    }
+
+    /// Gives an offline device its cache, or none. Another cache is another
+    /// device: a program with one swaps in through the dip rather than
+    /// taking over, since its output jumps.
+    pub fn with_cache(&mut self, cache: Option<Arc<Vec<[f32; 2]>>>) {
+        self.signature = hash((self.signature, cache.as_ref().map_or(0, |c| Arc::as_ptr(c) as usize)));
+        self.cache = cache;
+    }
+}
+
+/// An offline device of the person's own, as the engine plays it: its
+/// output was computed by the host over the whole timeline, and the device
+/// plays that back, a frame for each timeline frame of its input, in place
+/// of what it is given. With no cache, or while the transport stands still
+/// (when nothing on the timeline is heard), the input passes through.
+pub struct Offline {
+    audio: Option<Arc<Vec<[f32; 2]>>>,
+}
+
+impl Offline {
+    pub fn process(&mut self, x: &mut [Frame], clock: Clock) {
+        let Some(audio) = &self.audio else { return };
+        if clock.step == 0 {
+            return;
+        }
+        for (i, frame) in x.iter_mut().enumerate() {
+            let at = clock.frame + i as i64;
+            *frame = match usize::try_from(at).ok().and_then(|at| audio.get(at)) {
+                Some(f) => [f64::from(f[0]), f64::from(f[1])],
+                None => [0.0, 0.0],
+            };
+        }
+    }
+
+    /// Whether the device plays a cache, rather than passing through.
+    pub fn cached(&self) -> bool {
+        self.audio.is_some()
     }
 }
 
@@ -162,6 +208,9 @@ pub enum Device {
     /// An analyzer, which changes nothing: what it shows is read from the
     /// unit's ring.
     Analyzer,
+    /// A device of the person's own, offline: its cached output, or its
+    /// input through.
+    Offline(Offline),
 }
 
 /// A device in a chain.
@@ -298,6 +347,7 @@ impl Unit {
             // The program lays a rack out into its effects; a rack itself
             // changes nothing.
             Effect::Rack(_) => Device::Analyzer,
+            Effect::Device(_) => Device::Offline(Offline { audio: plan.cache.clone() }),
         };
         Unit {
             device,
@@ -324,6 +374,7 @@ impl Unit {
             Device::Overdrive(d) => d.process(x, clock),
             Device::Utility(d) => d.process(x, clock),
             Device::Analyzer => {}
+            Device::Offline(d) => d.process(x, clock),
         }
         if let Some(tap) = &self.tap {
             tap.write(x);
@@ -373,5 +424,51 @@ impl Unit {
             Device::Clipper(d) => d.reduction.split(edges),
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod offline_tests {
+    use super::*;
+
+    #[test]
+    fn an_offline_device_plays_its_cache_by_the_timeline_and_passes_through_without_one() {
+        let cache: Arc<Vec<[f32; 2]>> = Arc::new((0..100).map(|i| [i as f32, -(i as f32)]).collect());
+        let mut d = Offline { audio: Some(cache.clone()) };
+        let mut x = vec![[7.0, 7.0]; 8];
+        // Rolling at frame 96: the cache's last four frames, then silence past its end.
+        d.process(&mut x, Clock { frame: 96, step: 1, total: 100 });
+        assert_eq!(x[0], [96.0, -96.0]);
+        assert_eq!(x[3], [99.0, -99.0]);
+        assert_eq!(x[4], [0.0, 0.0]);
+        // Before frame zero, silence; stopped, the input passes through.
+        let mut x = vec![[7.0, 7.0]; 4];
+        d.process(&mut x, Clock { frame: -2, step: 1, total: 100 });
+        assert_eq!((x[0], x[2]), ([0.0, 0.0], [0.0, 0.0]));
+        let mut x = vec![[7.0, 7.0]; 4];
+        d.process(&mut x, Clock { frame: 10, step: 0, total: 100 });
+        assert_eq!(x[0], [7.0, 7.0]);
+        // No cache: the input passes through, and the plan's signature tells the two apart.
+        let mut none = Offline { audio: None };
+        let mut x = vec![[7.0, 7.0]; 4];
+        none.process(&mut x, Clock { frame: 10, step: 1, total: 100 });
+        assert_eq!(x[3], [7.0, 7.0]);
+        assert!(!none.cached() && d.cached());
+        let e = aaw_model::Effect::Device(aaw_model::Device {
+            id: None,
+            name: "tilt".into(),
+            version: None,
+            fields: Default::default(),
+            bypass: false,
+        });
+        let mut a = Plan::new(&e, BTreeMap::new(), 48000, 120.0, &mut Kernels::default());
+        let mut b = a.clone();
+        let without = a.signature;
+        a.with_cache(Some(cache.clone()));
+        b.with_cache(Some(cache));
+        assert_eq!(a.signature, b.signature, "the same cache is the same device");
+        assert_ne!(a.signature, without, "a cache is another device than none");
+        let unit = Unit::new(&a, 64, 16, 0);
+        assert!(matches!(unit.device, Device::Offline(_)));
     }
 }

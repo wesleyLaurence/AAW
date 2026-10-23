@@ -179,6 +179,48 @@ pub struct RackInfo {
     pub file: Option<String>,
 }
 
+/// A device of the person's own as the browser lists it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DeviceInfo {
+    pub name: String,
+    /// The folder's name, which the song uses.
+    pub slug: String,
+    pub description: String,
+    pub version: String,
+    /// The fields' names, in the manifest's order.
+    pub fields: Vec<String>,
+    /// `project` or `workspace`.
+    pub from: String,
+    pub folder: String,
+}
+
+/// The devices of the person's own installed for the project whose song
+/// file or folder is `project`, the project's own and the workspace's, that
+/// have every word of `query` in their name, slug, description or a field's
+/// name; all of them for an empty query. What `daw plugin list` lists.
+#[uniffi::export]
+pub fn library_devices(project: String, query: String) -> Vec<DeviceInfo> {
+    let path = std::path::Path::new(&project);
+    let directory = if path.is_dir() { path.to_path_buf() } else { path.parent().map(std::path::Path::to_path_buf).unwrap_or_default() };
+    aaw_host::devices::list(Some(&directory))
+        .devices
+        .iter()
+        .filter(|d| aaw_host::devices::matches(d, &query))
+        .map(|d| DeviceInfo {
+            name: d.manifest.name.clone(),
+            slug: d.manifest.slug.clone(),
+            description: d.manifest.description.clone(),
+            version: d.manifest.version.clone(),
+            fields: d.manifest.fields.iter().map(|f| f.name.clone()).collect(),
+            from: match d.from {
+                aaw_host::devices::Where::Project => "project".into(),
+                aaw_host::devices::Where::Workspace => "workspace".into(),
+            },
+            folder: d.dir.to_string_lossy().into_owned(),
+        })
+        .collect()
+}
+
 /// The racks, by name, that have every word of `query` in their name, a tag
 /// or an effect's kind; all of them for an empty query. What `daw rack list`
 /// lists. Reads the library's folder.

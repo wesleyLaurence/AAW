@@ -16,6 +16,22 @@ pub const ID: &str = "^[a-zA-Z][a-zA-Z0-9_-]*$";
 const SHA256: &str = "^[0-9a-f]{64}$";
 static ID_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(ID).expect("id pattern"));
 static SHA_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(SHA256).expect("sha pattern"));
+/// A custom device's slug, the name of its folder: `tilt`, `phaser-chop`.
+pub const DEVICE_SLUG: &str = "^[a-z0-9][a-z0-9-]*$";
+/// A custom device's field name, as its manifest declares it: `gain_db`.
+pub const DEVICE_FIELD: &str = "^[a-z][a-z0-9_]*$";
+static DEVICE_SLUG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(DEVICE_SLUG).expect("slug pattern"));
+static DEVICE_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(DEVICE_FIELD).expect("field pattern"));
+
+/// Whether `s` is a custom device's slug.
+pub fn valid_device_slug(s: &str) -> bool {
+    DEVICE_SLUG_RE.is_match(s)
+}
+
+/// Whether `s` is a custom device's field name.
+pub fn valid_device_field(s: &str) -> bool {
+    DEVICE_FIELD_RE.is_match(s)
+}
 
 // ---------------------------------------------------------------------------
 // Dumps
@@ -1748,6 +1764,9 @@ impl Synth {
             if synth.effects.iter().any(|e| matches!(e, Effect::Rack(_))) {
                 return Err("A rack is not offered inside a patch: the patch's chain is the synth's own; put the rack on the track's chain".into());
             }
+            if synth.effects.iter().any(|e| matches!(e, Effect::Device(_))) {
+                return Err("A device of your own is not offered inside a patch: put it on the track's own chain".into());
+            }
             let ids: Vec<&str> = synth.effects.iter().filter_map(Effect::id).filter(|i| !i.is_empty()).collect();
             if ids.iter().collect::<std::collections::HashSet<_>>().len() != ids.len() {
                 return Err("The patch's effect IDs must be unique".into());
@@ -2570,6 +2589,48 @@ pub struct Rack {
     pub bypass: bool,
 }
 
+/// The value of a custom device's field: a number, a switch or a choice.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FieldValue {
+    Number(f64),
+    Flag(bool),
+    Text(String),
+}
+
+impl FieldValue {
+    pub fn to_value(&self) -> Value {
+        match self {
+            FieldValue::Number(x) => Value::Float(*x),
+            FieldValue::Flag(b) => Value::Bool(*b),
+            FieldValue::Text(s) => Value::str(s),
+        }
+    }
+
+    pub fn as_f64(&self) -> Option<f64> {
+        match self {
+            FieldValue::Number(x) => Some(*x),
+            _ => None,
+        }
+    }
+}
+
+/// A device anyone builds: an effect written to the device spec, a folder
+/// named by its slug under the project's or the workspace's `devices/`,
+/// with a manifest that declares its fields and the code that makes its
+/// sound. `name` is the slug, `version` the manifest's version when the
+/// device was added, and `fields` the values of the fields the manifest
+/// declares: the song checks their shape, and a host their ranges against
+/// the manifest. A device sits in a track's, a group's, a return's or the
+/// master's chain, not in a rack or a patch.
+#[derive(Clone, Debug)]
+pub struct Device {
+    pub id: Option<String>,
+    pub name: String,
+    pub version: Option<String>,
+    pub fields: IndexMap<String, FieldValue>,
+    pub bypass: bool,
+}
+
 /// The most effects a chain holds, a rack's included.
 pub const MAX_CHAIN: usize = 32;
 
@@ -2588,9 +2649,10 @@ pub enum Effect {
     Utility(Utility),
     Analyzer(Analyzer),
     Rack(Rack),
+    Device(Device),
 }
 
-pub const EFFECT_TYPES: [&str; 13] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer", "rack"];
+pub const EFFECT_TYPES: [&str; 14] = ["filter", "eq", "compressor", "limiter", "clipper", "delay", "reverb", "chorus", "saturation", "overdrive", "utility", "analyzer", "rack", "device"];
 
 /// An effect of a chain with where it is: its place in the chain, and for an
 /// effect inside a rack, the rack's place and its own within the rack.
@@ -2629,6 +2691,7 @@ impl Effect {
             Effect::Utility(_) => "utility",
             Effect::Analyzer(_) => "analyzer",
             Effect::Rack(_) => "rack",
+            Effect::Device(_) => "device",
         }
     }
 
@@ -2649,6 +2712,7 @@ impl Effect {
             Effect::Utility(x) => x.bypass = bypass,
             Effect::Analyzer(x) => x.bypass = bypass,
             Effect::Rack(x) => x.bypass = bypass,
+            Effect::Device(x) => x.bypass = bypass,
         }
         e
     }
@@ -2732,6 +2796,7 @@ impl Effect {
             Effect::Utility(e) => e.id.as_deref(),
             Effect::Analyzer(e) => e.id.as_deref(),
             Effect::Rack(e) => e.id.as_deref(),
+            Effect::Device(e) => e.id.as_deref(),
         }
     }
 
@@ -2750,6 +2815,7 @@ impl Effect {
             Effect::Utility(e) => e.bypass,
             Effect::Analyzer(e) => e.bypass,
             Effect::Rack(e) => e.bypass,
+            Effect::Device(e) => e.bypass,
         }
     }
 
@@ -2801,7 +2867,7 @@ impl Effect {
                 ctx.error(
                     "union_tag_invalid",
                     format!(
-                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'overdrive', 'utility', 'analyzer', 'rack'",
+                        "Input tag '{}' found using 'type' does not match any of the expected tags: 'filter', 'eq', 'compressor', 'limiter', 'clipper', 'delay', 'reverb', 'chorus', 'saturation', 'overdrive', 'utility', 'analyzer', 'rack', 'device'",
                         crate::value::py_str(other)
                     ),
                 );
@@ -2832,6 +2898,7 @@ impl Effect {
             "utility" => &["type", "id", "gain_db", "pan", "width_percent", "mono", "mono_below_hz", "invert", "bypass"],
             "analyzer" => &["type", "id", "bypass"],
             "rack" => &["type", "id", "name", "effects", "bypass"],
+            "device" => &["type", "id", "name", "version", "fields", "bypass"],
             _ => &[
                 "type", "id", "decay_seconds", "predelay_ms", "damping_hz", "lowcut_hz",
                 "width_percent", "mix_percent", "seed", "bypass",
@@ -3060,6 +3127,10 @@ impl Effect {
                             c.value_error("A rack holds no rack: lay its effects in the rack");
                             return None;
                         }
+                        if matches!(e, Effect::Device(_)) {
+                            c.value_error("A device of your own goes in the chain itself, not in a rack");
+                            return None;
+                        }
                         Some(e)
                     })
                 });
@@ -3075,6 +3146,37 @@ impl Effect {
                         id: id?,
                         name: name?.filter(|n| !n.trim().is_empty()),
                         effects,
+                        bypass: bypass?,
+                    }))
+                })()
+            }
+            "device" => {
+                let name = f.req(ctx, "name", |c, x| v::pattern(c, x, &DEVICE_SLUG_RE, DEVICE_SLUG));
+                let version = f.opt(ctx, "version", None, opt_string);
+                let fields = f.opt(ctx, "fields", IndexMap::new(), |c, x| {
+                    v::str_dict(c, x, |c, x| match x {
+                        Value::Float(n) => Some(FieldValue::Number(*n)),
+                        Value::Int(n) => Some(FieldValue::Number(n.to_f64().unwrap_or(0.0))),
+                        Value::Bool(b) => Some(FieldValue::Flag(*b)),
+                        Value::Str(s) => Some(FieldValue::Text(s.clone())),
+                        _ => {
+                            c.error("value_error", "Value error, a device's field is a number, true or false, or a choice");
+                            None
+                        }
+                    })
+                });
+                let bypass = f.opt(ctx, "bypass", false, v::boolean);
+                (|| {
+                    let fields = fields?;
+                    if let Some(bad) = fields.keys().find(|k| !DEVICE_FIELD_RE.is_match(k)) {
+                        ctx.value_error(format!("device field {bad}: a field's name is lowercase letters, digits and underscores, starting with a letter"));
+                        return None;
+                    }
+                    Some(Effect::Device(Device {
+                        id: id?,
+                        name: name?,
+                        version: version?,
+                        fields,
                         bypass: bypass?,
                     }))
                 })()
@@ -3215,6 +3317,11 @@ impl Effect {
             Effect::Rack(e) => {
                 o.opt("name", opt_str(&e.name));
                 o.coll("effects", list(&e.effects, saved, Effect::dump));
+            }
+            Effect::Device(e) => {
+                o.req("name", Value::str(&e.name));
+                o.opt("version", e.version.as_deref().map(Value::str));
+                o.coll("fields", Value::Dict(e.fields.iter().map(|(k, v)| (Key::str(k), v.to_value())).collect()));
             }
         }
         o.bool("bypass", self.bypass(), false);

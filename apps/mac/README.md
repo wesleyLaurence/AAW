@@ -320,6 +320,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | ◂ ▸ in the Synth's header; its menu | Loads the patch before or after the current one in the browser's list, Factory then Mine; the menu loads any of them, and Save… writes the patch over the one of Mine it came from, or asks for a name as Save As… does: a name, a description and tags, over a patch of Mine only when ticked. As `daw patch load` and `daw patch save` |
 | Drag a MIDI effect from the browser's MIDI Effects onto a MIDI track's header or its device panel; + or a double-click on it with a MIDI track selected | Adds it before the track's instrument, after the MIDI effects it has, one undo step, as `daw effect add tracks.T --type arpeggiator` makes; on any other row it is refused |
 | Drag a rack from the browser's Audio Effects onto a header, the device panel or an insertion strip; + or a double-click on it | Adds the rack's effects to that row's chain, at the strip's place or the end, one undo step, as `daw rack load` makes; an effect whose id the chain has is numbered, and a compressor's sidechain is kept only where the song allows it. Racks are listed under the effect kinds and searched by name, tag and kind |
+| Drag a plugin from the browser's Audio Effects, listed under Plugins, onto a header, the device panel or an insertion strip; + or a double-click on it; or its name in Add Effect | Adds a device of the person's own to that row's chain, at the strip's place or the end, with its manifest's defaults, as `daw effect add --type SLUG` makes; its panel is drawn from the manifest, titled as it names the device, with a line under the fields while the host computes its cache, when the run failed or when the device is not installed; a plugin goes in no rack. Plugins are the folders under the project's and the workspace's `devices/`, searched by name, slug, description and field |
 | Save Rack… in the device panel's header | Asks for a name, a description and tags and writes the row's chain to the library, ~/Music/AAW/library/racks, over a rack of the name only when ticked, as `daw rack save` does; gray while the chain is empty. The browser lists it at once |
 | Drag the filter's corner; drag an envelope's handle | Moves the cutoff across and the resonance up and down, heard as it moves, one undo step; a press elsewhere on the curve takes the cutoff alone. An envelope's handles set the attack, the decay with the sustain, and the release |
 | Drag an envelope's, an LFO's or a macro's tab, or velocity, note or random in the Matrix column, onto a control | Adds a matrix entry from that source to the control's target, an oscillator's Semitones standing for its pitch, with an amount enough to hear. A control an entry moves shows its reach as a line under the bar |
@@ -343,6 +344,8 @@ A device panel is drawn from what the host says of the effect: each field's
 label, unit, range, default and choices. No panel is made by hand for an
 effect type, so a new field or effect in the engine shows up here by itself;
 the equalizer alone has a drawing of its own, its curve, over the same fields.
+A device of the person's own is drawn the same way from its manifest
+(`SongObserver.devices` tells the panel what the host is doing with it).
 
 A pattern clip's waveform is what its track's sampler plays over the clip's
 span, before the track's effects and fader, so a level or an effect does not
@@ -376,7 +379,8 @@ sample, the Sampler or the audio clip, a new track and a longer song are one
 undo step.
 
 The browser has Favorites, Samples, Instruments, MIDI Effects, Audio Effects
-and Folders, with search at its top. Favorites is what the person keeps at
+(the effect kinds, then the person's own devices under Plugins and the saved
+racks under Racks) and Folders, with search at its top. Favorites is what the person keeps at
 hand: Add to Favorites in the menu of any sample, device kind, patch, rack or
 instrument rack puts it there, grouped as the sections are and drawn, dragged
 and added as they draw it, kept in `~/Music/AAW/library/favorites.yaml` in the

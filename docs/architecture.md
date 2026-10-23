@@ -112,7 +112,10 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   the mix in the player for a take, each block headed by when it is
   (`capture`); see [recording.md](features/recording.md); renders a track
   before its fader for a freeze, and plays a frozen track as its file
-  (`freeze`); see [freezing.md](features/freezing.md).
+  (`freeze`); see [freezing.md](features/freezing.md); renders what a device
+  of the person's own is given, the chain before it tapped before the fader,
+  and plays the device's cache in its place (`custom`); see
+  [custom-devices.md](features/custom-devices.md).
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It arms tracks and records them, each take laid on the timeline, written
@@ -127,7 +130,11 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   next edit of the markers the person left since its last command, asks
   ElevenLabs for a sound at the person's own key and files it with its recipe
   (`generate`), the key in the macOS Keychain (`keys`); see
-  [generated-audio.md](features/generated-audio.md).
+  [generated-audio.md](features/generated-audio.md). It reads the manifests
+  of the person's own devices, holds a song's devices to them, runs each
+  device's code in Python off its thread when what feeds it changed and
+  plays the cache (`devices`); see
+  [custom-devices.md](features/custom-devices.md).
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
 - `aaw-ffi` and `apps/mac`: the Mac app, which embeds the host; see
@@ -198,6 +205,10 @@ Python, in `src/agent_daw`:
 - `joins.py`: checks of a rendered edit of a song: each join's beat, splice and
   level, the file's length, and an excerpt of each join; see
   [join-checks.md](features/join-checks.md).
+- `device_runner.py`: runs a device of the person's own for the host: loads
+  `device.py` from its folder, hands `process` the input, the fields and the
+  lanes, and writes the output; `--check` runs it once on noise. See
+  [custom-devices.md](features/custom-devices.md).
 - `separation.py`: `daw separate`, a song taken apart on this Mac into vocals
   and instrumental or drums, bass, vocals and the rest, each part a sample in
   the project with the source's length; the manifest of models
@@ -313,7 +324,12 @@ tone after its curve; see [overdrive.md](features/overdrive.md)), `utility`
 [utility.md](features/utility.md)) and
 `analyzer` (changes nothing; the app shows the sound through it, in the
 device panel and in a window of its own; see
-[analyzer.md](features/analyzer.md); not inside a Synth patch), listed in order under
+[analyzer.md](features/analyzer.md); not inside a Synth patch) and `device`
+(a device of the person's own, `{type: device, name: SLUG, version, fields}`,
+a folder with a manifest and Python code under the project's or the
+workspace's `devices/`, run by the host on the device's input and played
+from its cache; not in a rack or a patch; see
+[custom-devices.md](features/custom-devices.md)), listed in order under
 `tracks[].effects`, `groups[].effects`, `returns[].effects`, `master.effects` or, inside a Synth
 patch, `tracks[].instrument.synth.effects`, each with an optional `id` unique
 within its chain. A patch's effects come before the track's inserts, which

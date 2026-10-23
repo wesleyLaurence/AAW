@@ -254,6 +254,7 @@ struct DeviceView: View {
         let midi = chain.track?.midi == true
         var types = (DeviceChain.kinds + (midi ? Browser.midiEffects + Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
         types.append(Browser.rackType)
+        types.append(Browser.pluginType)
         if midi { types.append(Browser.patchType); types.append(Browser.instrumentRackType) }
         return types
     }
@@ -300,6 +301,15 @@ struct DeviceView: View {
                 provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
                     guard let data, let name = String(data: data, encoding: .utf8) else { return }
                     DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, rack: name) }
+                }
+                return true
+            }
+            if provider.hasItemConformingToTypeIdentifier(Browser.pluginType) {
+                // A plugin, by its slug: one device at the end of the shown row's chain.
+                let row = chain.row
+                provider.loadDataRepresentation(forTypeIdentifier: Browser.pluginType) { data, _ in
+                    guard let data, let slug = String(data: data, encoding: .utf8) else { return }
+                    DispatchQueue.main.async { model.addBrowserDevice(slug, to: row) }
                 }
                 return true
             }
@@ -350,7 +360,7 @@ private struct DeviceInsertion: View {
         RoundedRectangle(cornerRadius: 2)
             .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
             .frame(width: 12, height: model.detailHeight - 54 - (rack == nil ? 0 : RackLayout.inset))
-            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [Browser.rackType, DeviceChain.effectType],
+            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [Browser.rackType, Browser.pluginType, DeviceChain.effectType],
                     delegate: InsertionDrop(model: model, row: row, index: index, keys: keys, rack: rack, targeted: $targeted))
             .help(rack == nil
                   ? "Drop an effect or a rack here, or one of the chain's effects dragged from its title to move it; with Option, a copy of one"
@@ -382,6 +392,11 @@ private struct InsertionDrop: DropDelegate {
         info.hasItemsConforming(to: [Browser.rackType])
     }
 
+    /// A plugin from the browser can go here, but not inside a rack.
+    private func isPlugin(_ info: DropInfo) -> Bool {
+        rack == nil && info.hasItemsConforming(to: [Browser.pluginType])
+    }
+
     private var copying: Bool {
         NSEvent.modifierFlags.contains(.option)
     }
@@ -403,11 +418,11 @@ private struct InsertionDrop: DropDelegate {
     }
 
     private func accepts(_ info: DropInfo) -> Bool {
-        kind(of: info) != nil || isRack(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && (copying || move != nil || crossing != nil))
+        kind(of: info) != nil || isRack(info) || isPlugin(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && (copying || move != nil || crossing != nil))
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        kind(of: info) != nil || isRack(info) || info.hasItemsConforming(to: [DeviceChain.effectType])
+        kind(of: info) != nil || isRack(info) || isPlugin(info) || info.hasItemsConforming(to: [DeviceChain.effectType])
     }
 
     func dropEntered(info: DropInfo) {
@@ -436,6 +451,14 @@ private struct InsertionDrop: DropDelegate {
             provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
                 guard let data, let name = String(data: data, encoding: .utf8) else { return }
                 DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, index: index, rack: name, into: rack) }
+            }
+            return true
+        }
+        if isPlugin(info), let provider = info.itemProviders(for: [Browser.pluginType]).first {
+            let (model, row, index) = (model, row, index)
+            provider.loadDataRepresentation(forTypeIdentifier: Browser.pluginType) { data, _ in
+                guard let data, let slug = String(data: data, encoding: .utf8) else { return }
+                DispatchQueue.main.async { model.addBrowserDevice(slug, to: row, index: index) }
             }
             return true
         }
@@ -508,6 +531,16 @@ private struct ChainHeader: View {
                 ForEach(DeviceChain.kinds, id: \.self) { kind in
                     Button(readable(kind)) {
                         model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil, rack: nil))
+                    }
+                }
+                if !model.plugins.isEmpty {
+                    Divider()
+                    // The plugins installed, by name; the host makes each
+                    // from its manifest.
+                    ForEach(model.plugins, id: \.slug) { plugin in
+                        Button(plugin.name) {
+                            model.edit(.effectAdd(row: chain.row.row, kind: plugin.slug, index: nil, rack: nil))
+                        }
                     }
                 }
                 if chain.track?.midi == true {
@@ -606,7 +639,7 @@ private struct RackSaveSheet: View {
         case .rack(let key, _): DeviceChain.find(key, in: chain.effects)?.effects ?? []
         default: chain.effects
         }
-        return effects.map { $0.kind == "rack" ? ($0.name ?? "Rack") : readable($0.kind) }.joined(separator: ", ")
+        return effects.map { $0.kind == "rack" ? ($0.name ?? "Rack") : $0.kind == "device" ? ($0.name ?? "Device") : readable($0.kind) }.joined(separator: ", ")
     }
 
     private var line: String {
@@ -856,8 +889,16 @@ private struct DevicePanel: View {
     static let folded: CGFloat = 28
 
     private var title: String {
-        let kind = readable(effect.kind)
+        // A device of the person's own is titled as its manifest names it.
+        let kind = effect.kind == "device" ? (effect.name ?? "Device") : readable(effect.kind)
         return effect.id.map { "\(kind) · \($0)" } ?? kind
+    }
+
+    /// What the panel says under a device of the person's own: why it is
+    /// not installed, or what the host is doing with it.
+    private var note: String? {
+        guard effect.kind == "device" else { return nil }
+        return effect.note ?? SongModel.deviceNote(model.deviceStates[effect.key])
     }
 
     private var selected: Bool {
@@ -1024,6 +1065,14 @@ private struct DevicePanel: View {
                                 LaneMark(model: model, row: chain.row, field: field)
                             }
                             .frame(height: 19)
+                        }
+                        if let note {
+                            Text(note)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.top, 2)
                         }
                     }
                     .padding(6)

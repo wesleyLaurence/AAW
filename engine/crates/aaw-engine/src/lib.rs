@@ -2,6 +2,7 @@
 
 pub mod audition;
 pub mod capture;
+pub mod custom;
 pub mod devices;
 pub mod freeze;
 pub mod measure;

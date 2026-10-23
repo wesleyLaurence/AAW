@@ -37,6 +37,7 @@ tracks:
       - {type: utility}
       - {type: analyzer}
       - {type: rack, effects: [{type: utility}]}
+      - {type: device, name: tilt}
     sends: [{to: r}]
     automation: [{param: gain_db, points: [{at: 0, value: 0}]}]
   - id: m

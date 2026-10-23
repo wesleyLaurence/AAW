@@ -1,6 +1,7 @@
 //! A track frozen to audio: what its instrument, inserts and their lanes
 //! make, rendered once to a file that plays in their place.
 
+use crate::custom::Caches;
 use crate::program::{compile_scoped, Cache, Scope, StemKind};
 use crate::render::Renderer;
 use aaw_model::Project;
@@ -12,8 +13,9 @@ use std::sync::Arc;
 /// frames at the song's rate, one per frame of the song's length. The
 /// track's own `frozen` is set aside, so a frozen track renders from its
 /// content again; the tracks that key its sidechains play along as they
-/// are. The file this makes is what the track plays while frozen.
-pub fn freeze_track(p: &Project, directory: &Path, track: &str, block_size: usize) -> Result<Vec<[f32; 2]>, String> {
+/// are, and the devices of the person's own play from `caches`. The file
+/// this makes is what the track plays while frozen.
+pub fn freeze_track(p: &Project, directory: &Path, track: &str, block_size: usize, caches: &Caches) -> Result<Vec<[f32; 2]>, String> {
     if block_size == 0 {
         return Err("block_size must be positive".into());
     }
@@ -24,7 +26,9 @@ pub fn freeze_track(p: &Project, directory: &Path, track: &str, block_size: usiz
         .find(|t| t.id == track)
         .ok_or_else(|| format!("Unknown track: {track}"))?;
     t.frozen = None;
-    let program = Arc::new(compile_scoped(&thawed, directory, &mut Cache::default(), Scope::Channel(track))?);
+    let mut cache = Cache::default();
+    cache.set_devices(caches.clone());
+    let program = Arc::new(compile_scoped(&thawed, directory, &mut cache, Scope::Channel(track))?);
     let index = program
         .stem_index(StemKind::Track, track)
         .ok_or_else(|| format!("{track} has no stem to freeze"))?;
