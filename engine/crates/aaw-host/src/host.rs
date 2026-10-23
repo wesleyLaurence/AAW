@@ -956,7 +956,7 @@ impl Host {
             Some(i) => match &i.made {
                 Some(aaw_dsp::device::Made::Code(_)) => None,
                 Some(aaw_dsp::device::Made::Audio(_)) => Some(format!("{} plays offline, from what its code made of the song; only a real-time instrument plays a preview", i.device.name)),
-                None => Some(format!("{} is not ready yet: daw plugin status says why", i.device.name)),
+                Some(aaw_dsp::device::Made::Notes(_)) | None => Some(format!("{} is not ready yet: daw plugin status says why", i.device.name)),
             },
             None => None,
         };

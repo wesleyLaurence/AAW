@@ -254,3 +254,56 @@ def test_a_realtime_instrument_is_built_and_plays_the_notes(tmp_path, workspace)
     assert abs(strongest_hz(x[2 * beat + 2000 : 2 * beat + 2000 + 16384]) - 659.3) < 5
     assert not list(project.glob(".daw/devices/*.wav")), "no cache: its code plays"
     assert daw("plugin", "status", project)["devices"][0]["state"] == "ready"
+
+
+def test_a_midi_effect_is_made_added_by_slug_and_changes_the_notes_played(tmp_path, workspace):
+    from helpers import render
+
+    made = daw("plugin", "new", "Echoes", "--midi")
+    assert made["kind"] == "midi" and made["run"] == "offline"
+    assert "puts it before a MIDI track's instrument" in made["next"]
+    assert all(f["lane"] is False for f in made["fields"] if "lane" in f)
+    checked = daw("plugin", "check", "echoes")
+    assert checked["ok"] is True and checked["notes_in"] == 4 and checked["notes_out"] == 12
+    assert [d["kind"] for d in daw("plugin", "list")["devices"]] == ["midi"]
+    # A sine Synth playing an A4 a beat long from beat 0, through the
+    # MIDI effect: an octave up, and once more two beats later.
+    project = tmp_path / "song"
+    daw("init", project, "--tempo", "120")
+    daw("track", "add", project, "keys", "--type", "midi")
+    daw("instrument", "set", project, "keys", json.dumps({"synth": {"oscillators": {"a": {"wave": "sine"}}}}))
+    clip = daw("clip", "add", project, "keys", "--length-beats", "4")["path"]
+    daw("note", "add", project, clip, "--notes", json.dumps([{"pitch": "A4", "at": 0, "duration": 1, "velocity": 127}]))
+    added = daw("effect", "add", project, "tracks.keys", "--type", "echoes", "--transpose", "12", "--echoes", "1", "--spacing-beats", "2")
+    assert added["path"] == "tracks.keys.midi_effects.0"
+    daw("set", project, "session.end_fade_ms", "0")
+    out = project / "out"
+    report = render(project, out)
+    assert report["tracks"]["keys"]["events"] == 2
+    x = stem(out, "keys")
+    beat = SR // 2
+    assert abs(strongest_hz(x[1000 : 1000 + 16384]) - 880) < 5
+    assert abs(strongest_hz(x[2 * beat + 1000 : 2 * beat + 1000 + 16384]) - 880) < 5
+    assert level_db(x[2 * beat + 1000 : 3 * beat]) < level_db(x[1000:beat]) - 3, "the echo is softer"
+    assert list(project.glob(".daw/devices/*.json")), "its notes are cached"
+    assert daw("plugin", "status", project)["devices"] == [{"effect": "tracks.keys.midi_effects.0", "device": "echoes", "state": "ready"}]
+    # Its fields are held to its manifest, and it goes nowhere but before
+    # a MIDI track's instrument.
+    with pytest.raises(ValueError, match="pitch is one of same, octave_up, octave_down"):
+        daw("set", project, "tracks.keys.midi_effects.0.fields.pitch", "fifth")
+    daw("track", "add", project, "bass")
+    with pytest.raises(ValueError, match="echoes is a MIDI effect: it goes on a MIDI track"):
+        daw("effect", "add", project, "tracks.bass", "--type", "echoes")
+    with pytest.raises(ValueError, match="echoes is a MIDI effect"):
+        daw("instrument", "set", project, "keys", "echoes")
+    assert "plugin echoes" in "\n".join(daw("map", project)["map"])
+    # Gone, daw check says so and the notes pass through as written.
+    import shutil
+
+    shutil.rmtree(workspace / "devices" / "echoes")
+    code, checked = cli("check", project)
+    assert code == 0
+    missing = [w for w in checked["warnings"] if w["code"] == "device-missing"]
+    assert missing and missing[0]["paths"] == ["tracks.keys.midi_effects.0"]
+    assert render(project, project / "dry")["tracks"]["keys"]["events"] == 1
+    assert "--midi" in daw("describe", "midi")["semantics"]["device"]

@@ -7,10 +7,13 @@ pitch, velocity], ...]}, a lane's path a raw file of one little-endian
 float32 a frame. An effect's entry (device.py) defines process(audio,
 sample_rate, fields) and returns the output as an array; an instrument's
 (kind: instrument in its manifest) defines play(notes, frames, sample_rate,
-fields), given the track's notes and no input. With --check the device runs
-once on a short noise, or an instrument on the notes given, instead and the
-reply says what came back. Errors go to stderr as {"error": ...} with
-status 1.
+fields), given the track's notes and no input. A MIDI effect's (kind: midi)
+defines transform(notes, fields, tempo), given notes in beats, and the
+runner writes the notes it returns to the output as JSON, {"notes":
+[[start, end, pitch, velocity], ...]}. With --check the device runs once on
+a short noise, an instrument or a MIDI effect on the notes given, instead
+and the reply says what came back. Errors go to stderr as {"error": ...}
+with status 1.
 """
 
 import argparse
@@ -36,6 +39,49 @@ def notes_of(params):
     start, end, pitch and velocity, a row a note."""
     rows = [tuple(int(x) for x in n) for n in params.get("notes", [])]
     return np.array(rows, dtype=NOTE)
+
+
+BEATS = np.dtype([("start", np.float64), ("end", np.float64), ("pitch", np.int64), ("velocity", np.int64)])
+
+
+def beat_notes_of(params):
+    """The notes as a MIDI effect receives them: a structured array of
+    start and end in beats, pitch and velocity, a row a note."""
+    rows = [(float(s), float(e), int(p), int(v)) for s, e, p, v in params.get("notes", [])]
+    return np.array(rows, dtype=BEATS)
+
+
+def transformed(function, notes, fields, tempo):
+    """What a MIDI effect's transform returned, as rows of [start, end,
+    pitch, velocity]: from a structured array with those fields, or from
+    rows of four numbers."""
+    try:
+        out = function(notes, fields, tempo)
+    except Exception:  # noqa: BLE001 - whatever the device raised is the report
+        fail(f"transform raised:\n{traceback.format_exc(limit=4)}")
+    if out is None:
+        fail("transform returned None; it returns the notes to play, an empty list for none")
+    if isinstance(out, np.ndarray) and out.dtype.names:
+        missing = [f for f in ("start", "end", "pitch") if f not in out.dtype.names]
+        if missing:
+            fail(f"transform returned an array without {', '.join(missing)}")
+        velocity = out["velocity"] if "velocity" in out.dtype.names else np.full(len(out), 100)
+        rows = list(zip(out["start"], out["end"], out["pitch"], velocity))
+    else:
+        try:
+            rows = [tuple(r) for r in out]
+        except TypeError:
+            fail(f"transform returned {type(out).__name__}, not notes")
+    notes_out = []
+    for k, row in enumerate(rows):
+        if len(row) != 4:
+            fail(f"note {k} is {len(row)} values; a note is (start, end, pitch, velocity)")
+        try:
+            start, end, pitch, velocity = (float(x) for x in row)
+        except (TypeError, ValueError):
+            fail(f"note {k} is not four numbers: {row!r}")
+        notes_out.append([start, end, pitch, velocity])
+    return notes_out
 
 
 def load(folder, entry, function="process", signature="process(audio, sample_rate, fields)"):
@@ -105,6 +151,19 @@ def main(argv=None):
                 entry = line.split(":", 1)[1].strip().strip("'\"") or entry
             if line.startswith("kind:"):
                 kind = line.split(":", 1)[1].split("#")[0].strip().strip("'\"") or kind
+    if kind == "midi":
+        transform = load(a.device, entry, "transform", "transform(notes, fields, tempo)")
+        notes = beat_notes_of(params)
+        out = transformed(transform, notes, dict(params.get("fields", {})), float(params.get("tempo", 120.0)))
+        if a.check:
+            pitches = [int(n[2]) for n in out]
+            print(json.dumps({"ok": True, "kind": "midi", "notes_in": int(len(notes)), "notes_out": len(out),
+                              "pitches": [min(pitches), max(pitches)] if pitches else [],
+                              "first": out[:8]}))
+            return
+        a.output.write_text(json.dumps({"notes": out}))
+        print(json.dumps({"ok": True, "notes_in": int(len(notes)), "notes_out": len(out)}))
+        return
     sample_rate = int(params["sample_rate"])
     if kind == "instrument":
         play = load(a.device, entry, "play", "play(notes, frames, sample_rate, fields)")

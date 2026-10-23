@@ -20,6 +20,9 @@ final class PluginTests: XCTestCase {
         // An instrument's notes play nothing meanwhile; it passes nothing through.
         XCTAssertEqual(SongModel.deviceNote(state("failed", error: "play raised"), instrument: true), "Failed: play raised; the notes play nothing")
         XCTAssertTrue(SongModel.deviceNote(state("computing"), instrument: true)!.contains("they play nothing until it is done"))
+        // A MIDI effect's: the notes pass through as written meanwhile.
+        XCTAssertEqual(SongModel.deviceNote(state("failed", error: "transform raised"), midi: true), "Failed: transform raised; the notes pass through as written")
+        XCTAssertTrue(SongModel.deviceNote(state("computing"), midi: true)!.contains("runs on the notes; they pass through as written until it is done"))
     }
 
     func testAPluginIsMatchedByNameSlugDescriptionOrField() {

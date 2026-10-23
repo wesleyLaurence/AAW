@@ -27,6 +27,34 @@ pub struct NoteOn {
 /// those that start before the clip ends.
 pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
     let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
+    // The MIDI effects change the notes here, so every reader of the
+    // schedule plays what they make.
+    let played = crate::midi_effects::apply(&midi.midi_effects, &midi.made, written(midi));
+    let mut notes: Vec<NoteOn> = played
+        .into_iter()
+        .map(|n| NoteOn {
+            pitch: n.pitch,
+            velocity: n.velocity,
+            start: frame(&n.at, tempo, rate),
+            end: frame(&(&n.at + &n.beats), tempo, rate),
+            at: n.at,
+            beats: n.beats,
+        })
+        .collect();
+    notes.sort_by_key(|n| (n.start, n.pitch));
+    notes
+}
+
+/// The notes the MIDI effect at `index` of the track's `midi_effects` is
+/// given: the clips' notes as they play, through the effects before it,
+/// in the order they start.
+pub fn midi_effect_input(midi: &Midi, index: usize) -> Vec<Played> {
+    let before = &midi.midi_effects[..index.min(midi.midi_effects.len())];
+    crate::midi_effects::apply(before, &midi.made, written(midi))
+}
+
+/// The clips' notes as they play, before any MIDI effect, in beats.
+fn written(midi: &Midi) -> Vec<Played> {
     let mut played = Vec::new();
     for clip in &midi.clips {
         let start = clip.at_exact();
@@ -42,22 +70,7 @@ pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
             }
         }
     }
-    // The MIDI effects change the notes here, so every reader of the
-    // schedule plays what they make.
-    let played = crate::midi_effects::apply(&midi.midi_effects, played);
-    let mut notes: Vec<NoteOn> = played
-        .into_iter()
-        .map(|n| NoteOn {
-            pitch: n.pitch,
-            velocity: n.velocity,
-            start: frame(&n.at, tempo, rate),
-            end: frame(&(&n.at + &n.beats), tempo, rate),
-            at: n.at,
-            beats: n.beats,
-        })
-        .collect();
-    notes.sort_by_key(|n| (n.start, n.pitch));
-    notes
+    played
 }
 
 /// What a sampler plays for notes: the pad each note's map entry names, at the

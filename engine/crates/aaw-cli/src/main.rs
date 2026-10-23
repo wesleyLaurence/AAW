@@ -955,11 +955,13 @@ enum PluginCmd {
         project: Option<Song>,
     },
     /// Make a plugin named NAME from the scaffold, a working gain, tone and
-    /// warmth to edit, or with --instrument a working synth of a wave, an
-    /// envelope and a tone: a folder under the workspace's devices/, or
+    /// warmth to edit, with --instrument a working synth of a wave, an
+    /// envelope and a tone, or with --midi a MIDI effect that transposes
+    /// each note and echoes it: a folder under the workspace's devices/, or
     /// under the project's with --project. Offline in Python, or with
     /// --realtime in Rust for the audio thread, built at once when rustc
-    /// can. The reply names the folder and its files.
+    /// can; a MIDI effect is offline only. The reply names the folder and
+    /// its files.
     New {
         name: String,
         /// Put it under this project's devices/, for this song alone.
@@ -970,8 +972,12 @@ enum PluginCmd {
         realtime: bool,
         /// An instrument, which a MIDI track's notes play, rather than an
         /// effect.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "midi")]
         instrument: bool,
+        /// A MIDI effect, which changes a MIDI track's notes before its
+        /// instrument, in Python.
+        #[arg(long, conflicts_with = "realtime")]
+        midi: bool,
     },
     /// Build a real-time plugin: compile its source, device.rs, to its
     /// entry, device.wasm, with rustc for WebAssembly, then check it. A
@@ -2458,12 +2464,19 @@ fn run(cli: &Cli) -> Result<Json> {
                 let dir = project.as_ref().map(|p| files(p));
                 Ok(aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?.json())
             }
-            PluginCmd::New { name, project, realtime, instrument } => {
+            PluginCmd::New { name, project, realtime, instrument, midi } => {
                 let root = match project {
                     Some(p) => aaw_host::devices::project_dir(files(p).parent().unwrap_or(Path::new("."))),
                     None => aaw_host::devices::dir(),
                 };
-                let made = aaw_host::devices::new(name, &root, *realtime, *instrument)?;
+                let kind = if *midi {
+                    "midi"
+                } else if *instrument {
+                    "instrument"
+                } else {
+                    "effect"
+                };
+                let made = aaw_host::devices::new(name, &root, *realtime, kind)?;
                 let code = made.dir.join(made.manifest.source.as_ref().unwrap_or(&made.manifest.entry));
                 let slug = &made.manifest.slug;
                 let mut out = json!({});
@@ -2481,6 +2494,8 @@ fn run(cli: &Cli) -> Result<Json> {
                 let run = if *realtime { format!("daw plugin build {slug} compiles and checks it") } else { format!("daw plugin check {slug} runs it once") };
                 let on = if *instrument {
                     format!("daw instrument set PROJECT TRACK {slug} puts it on a MIDI track")
+                } else if *midi {
+                    format!("daw effect add PROJECT tracks.T --type {slug} puts it before a MIDI track's instrument")
                 } else {
                     format!("daw effect add PROJECT tracks.T --type {slug} puts it on a track")
                 };

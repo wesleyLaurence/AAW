@@ -12,7 +12,9 @@ in building them is under Design.
 A MIDI track's `midi_effects` list devices before its instrument, in order,
 each `{type, id, bypass, ...}` as an effect is. They change the notes as they
 play: the clips keep the notes as written, and the schedule plays what the
-chain makes of them.
+chain makes of them. One of the person's own, `{type: device, name: SLUG,
+...}` with a manifest of `kind: midi`, stands among them too (D147,
+[devices anyone builds](custom-devices.md)).
 
 ```yaml
 tracks:

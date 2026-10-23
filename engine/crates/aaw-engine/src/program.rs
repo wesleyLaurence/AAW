@@ -1165,6 +1165,10 @@ pub fn compile_cached(p: &Project, directory: &Path, cache: &mut Cache) -> Resul
 }
 
 pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: Scope) -> Result<Program, String> {
+    // What the MIDI effects of the person's own made of the notes is
+    // played by the schedule, from the song they are set on.
+    let attached = crate::custom::attach(p, &cache.devices);
+    let p = attached.as_ref().unwrap_or(p);
     let rate = p.session.sample_rate;
     let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
     // A preview needs the target's sidechain sources; a group's also needs

@@ -2,10 +2,16 @@
 //! its notes. They run in the schedule, in exact beats, so playback, a
 //! render, a freeze and `sounded` play the same notes; the clips keep the
 //! notes as written.
+//!
+//! A device of the person's own among them (`MidiEffect::Device`) is run
+//! by the host, which hands back what it made of the notes it was given;
+//! here it plays that, or passes the notes through until it is there.
 
-use crate::schema::{Arpeggiator, Chord, MidiEffect, Scale, Velocity};
+use crate::schema::{Arpeggiator, Chord, Device, MidiEffect, Scale, Velocity};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
+use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// A note as a MIDI effect sees it: its pitch, velocity, start and length,
 /// before the frames are known.
@@ -23,16 +29,51 @@ impl Played {
     }
 }
 
+/// What a device of the person's own made of the notes it was given: the
+/// notes it plays, and the key of its input and its entry, so that it is
+/// played only for the very notes and fields it was made from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Made {
+    pub key: u64,
+    pub notes: Vec<Played>,
+}
+
+/// The key of a device's input and its entry: its slug, version and
+/// fields, and every note in exact beats.
+pub fn key(device: &Device, notes: &[Played]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut eat = |s: &str| {
+        for b in s.bytes().chain([0]) {
+            h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+        }
+    };
+    eat(&device.name);
+    eat(device.version.as_deref().unwrap_or(""));
+    for (name, value) in &device.fields {
+        eat(name);
+        eat(&crate::yaml_emit::dump(&value.to_value()));
+    }
+    for n in notes {
+        eat(&format!("{}|{}|{}|{}", n.at, n.beats, n.pitch, n.velocity));
+    }
+    h
+}
+
 /// The notes through the chain, each device that is not bypassed in turn,
-/// sorted by start and pitch.
-pub fn apply(effects: &[MidiEffect], mut notes: Vec<Played>) -> Vec<Played> {
+/// sorted by start and pitch. `made` is what the host made for the devices
+/// of the person's own, by their place.
+pub fn apply(effects: &[MidiEffect], made: &BTreeMap<usize, Arc<Made>>, mut notes: Vec<Played>) -> Vec<Played> {
     sort(&mut notes);
-    for effect in effects.iter().filter(|e| !e.bypass()) {
+    for (i, effect) in effects.iter().enumerate().filter(|(_, e)| !e.bypass()) {
         notes = match effect {
             MidiEffect::Arpeggiator(a) => arpeggiate(a, &notes),
             MidiEffect::Chord(c) => chord(c, &notes),
             MidiEffect::Scale(s) => scale(s, &notes),
             MidiEffect::Velocity(v) => velocity(v, &notes),
+            MidiEffect::Device(d) => match made.get(&i) {
+                Some(m) if m.key == key(d, &notes) => m.notes.clone(),
+                _ => notes,
+            },
         };
         sort(&mut notes);
     }
@@ -256,24 +297,24 @@ mod tests {
         // A C major chord held two beats from beat 1: sixteenths from beat 1,
         // each half a step long, up and around.
         let chord = vec![note(60, r(1, 1), r(2, 1)), note(64, r(1, 1), r(2, 1)), note(67, r(1, 1), r(2, 1))];
-        let out = apply(&[arp("")], chord.clone());
+        let out = apply(&[arp("")], &Default::default(), chord.clone());
         let pitches: Vec<i64> = out.iter().map(|n| n.pitch).collect();
         assert_eq!(pitches, vec![60, 64, 67, 60, 64, 67, 60, 64]);
         assert_eq!(out[0].at, r(1, 1));
         assert_eq!(out[1].at, r(5, 4));
         assert!(out.iter().all(|n| n.beats == r(1, 8)));
         // Down, over two octaves, with a full gate.
-        let out = apply(&[arp(", order: down, octaves: 2, gate_percent: 100, rate: 1/8")], chord.clone());
+        let out = apply(&[arp(", order: down, octaves: 2, gate_percent: 100, rate: 1/8")], &Default::default(), chord.clone());
         let pitches: Vec<i64> = out.iter().map(|n| n.pitch).collect();
         assert_eq!(pitches, vec![79, 76, 72, 67]);
         assert!(out.iter().all(|n| n.beats == r(1, 2)));
         // Up and down does not repeat the ends.
-        let out = apply(&[arp(", order: up_down")], chord.clone());
+        let out = apply(&[arp(", order: up_down")], &Default::default(), chord.clone());
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60, 64, 67, 64, 60, 64, 67, 64]);
         // Converge and diverge.
-        let out = apply(&[arp(", order: converge, rate: 1/8")], chord.clone());
+        let out = apply(&[arp(", order: converge, rate: 1/8")], &Default::default(), chord.clone());
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60, 67, 64, 60]);
-        let out = apply(&[arp(", order: diverge, rate: 1/8")], chord.clone());
+        let out = apply(&[arp(", order: diverge, rate: 1/8")], &Default::default(), chord.clone());
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![64, 67, 60, 64]);
     }
 
@@ -282,7 +323,7 @@ mod tests {
         // Two notes, then a third joining a beat later: the pattern restarts
         // with it. The last step's note is cut where its source ends.
         let notes = vec![note(60, r(0, 1), r(2, 1)), note(64, r(0, 1), r(2, 1)), note(67, r(1, 1), r(5, 4))];
-        let out = apply(&[arp(", rate: 1/8, gate_percent: 200")], notes);
+        let out = apply(&[arp(", rate: 1/8, gate_percent: 200")], &Default::default(), notes);
         assert_eq!(
             played(&out),
             vec![
@@ -296,47 +337,71 @@ mod tests {
         // Off the grid, the first step is the next grid point; a gap ends
         // the run and the next chord starts its own.
         let notes = vec![note(60, r(1, 3), r(1, 1)), note(62, r(3, 1), r(1, 2))];
-        let out = apply(&[arp(", rate: 1/8")], notes);
+        let out = apply(&[arp(", rate: 1/8")], &Default::default(), notes);
         assert_eq!(out.iter().map(|n| (n.pitch, n.at.to_string())).collect::<Vec<_>>(), vec![(60, "1/2".into()), (60, "1".into()), (62, "3".into())]);
         // Played order keeps the order of the starts; random is stable.
         let notes = vec![note(67, r(0, 1), r(2, 1)), note(60, r(1, 4), r(2, 1))];
-        let out = apply(&[arp(", order: played, rate: 1/8")], notes.clone());
+        let out = apply(&[arp(", order: played, rate: 1/8")], &Default::default(), notes.clone());
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![67, 67, 60, 67, 60]);
-        let a = apply(&[arp(", order: random, seed: 3")], notes.clone());
-        let b = apply(&[arp(", order: random, seed: 3")], notes.clone());
+        let a = apply(&[arp(", order: random, seed: 3")], &Default::default(), notes.clone());
+        let b = apply(&[arp(", order: random, seed: 3")], &Default::default(), notes.clone());
         assert_eq!(a, b);
         assert!(a.iter().all(|n| n.pitch == 60 || n.pitch == 67));
         // A note shorter than a step between two steps is not heard; an
         // empty chain or a bypassed device is the notes as written.
         let short = vec![note(60, r(1, 8), r(1, 16))];
-        assert!(apply(&[arp("")], short.clone()).is_empty());
-        assert_eq!(apply(&[arp(", bypass: true")], short.clone()), short);
-        assert_eq!(apply(&[], short.clone()), short);
+        assert!(apply(&[arp("")], &Default::default(), short.clone()).is_empty());
+        assert_eq!(apply(&[arp(", bypass: true")], &Default::default(), short.clone()), short);
+        assert_eq!(apply(&[], &Default::default(), short.clone()), short);
     }
 
     #[test]
     fn chord_scale_and_velocity_change_the_notes_and_keep_the_keyboard() {
         let notes = vec![note(61, r(0, 1), r(1, 1)), note(126, r(1, 1), r(1, 1))];
-        let out = apply(&chain("[{type: chord, shift_1: 4, shift_2: 7, shift_3: 7}]"), notes.clone());
+        let out = apply(&chain("[{type: chord, shift_1: 4, shift_2: 7, shift_3: 7}]"), &Default::default(), notes.clone());
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![61, 65, 68, 126]);
         // C# snaps down to C in C major (a semitone either way goes down),
         // F# snaps to G in D major... and a transpose follows the snap.
-        let out = apply(&chain("[{type: scale}]"), vec![note(61, r(0, 1), r(1, 1)), note(66, r(1, 1), r(1, 1))]);
+        let out = apply(&chain("[{type: scale}]"), &Default::default(), vec![note(61, r(0, 1), r(1, 1)), note(66, r(1, 1), r(1, 1))]);
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60, 65]);
-        let out = apply(&chain("[{type: scale, root: D, scale: minor, transpose: 12}]"), vec![note(66, r(0, 1), r(1, 1))]);
+        let out = apply(&chain("[{type: scale, root: D, scale: minor, transpose: 12}]"), &Default::default(), vec![note(66, r(0, 1), r(1, 1))]);
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![77]);
-        let out = apply(&chain("[{type: scale, transpose: 36}]"), vec![note(120, r(0, 1), r(1, 1))]);
+        let out = apply(&chain("[{type: scale, transpose: 36}]"), &Default::default(), vec![note(120, r(0, 1), r(1, 1))]);
         assert!(out.is_empty());
         // Velocity: scaled, moved, held, and spread the same each time.
-        let out = apply(&chain("[{type: velocity, scale_percent: 50, offset: 10, min: 20, max: 55}]"), notes.clone());
+        let out = apply(&chain("[{type: velocity, scale_percent: 50, offset: 10, min: 20, max: 55}]"), &Default::default(), notes.clone());
         assert_eq!(out.iter().map(|n| n.velocity).collect::<Vec<_>>(), vec![55, 55]);
-        let a = apply(&chain("[{type: velocity, random: 20, seed: 9}]"), notes.clone());
-        let b = apply(&chain("[{type: velocity, random: 20, seed: 9}]"), notes.clone());
+        let a = apply(&chain("[{type: velocity, random: 20, seed: 9}]"), &Default::default(), notes.clone());
+        let b = apply(&chain("[{type: velocity, random: 20, seed: 9}]"), &Default::default(), notes.clone());
         assert_eq!(a, b);
         assert!(a.iter().all(|n| (80..=120).contains(&n.velocity)));
         assert_ne!(a.iter().map(|n| n.velocity).collect::<Vec<_>>(), vec![100, 100]);
         // A chord then an arpeggiator arpeggiates the chord.
-        let out = apply(&chain("[{type: chord, shift_1: 7}, {type: arpeggiator, rate: 1/8}]"), vec![note(60, r(0, 1), r(1, 1))]);
+        let out = apply(&chain("[{type: chord, shift_1: 7}, {type: arpeggiator, rate: 1/8}]"), &Default::default(), vec![note(60, r(0, 1), r(1, 1))]);
         assert_eq!(out.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60, 67]);
+    }
+
+    #[test]
+    fn a_device_plays_what_was_made_of_its_very_input_or_passes_the_notes_through() {
+        let notes = vec![note(60, r(0, 1), r(1, 1)), note(64, r(1, 1), r(1, 1))];
+        let effects = chain("[{type: chord, shift_1: 12}, {type: device, name: echo, fields: {echoes: 1}}]");
+        let MidiEffect::Device(d) = &effects[1] else { panic!("a device") };
+        // Nothing made: the device passes the chord's notes through.
+        let through = apply(&effects, &Default::default(), notes.clone());
+        assert_eq!(through.len(), 4);
+        // Made of the very notes it is given: it plays what was made.
+        let input = apply(&effects[..1], &Default::default(), notes.clone());
+        let made = Made { key: key(d, &input), notes: vec![note(48, r(1, 2), r(1, 4))] };
+        let mut by_place = BTreeMap::new();
+        by_place.insert(1, Arc::new(made.clone()));
+        assert_eq!(apply(&effects, &by_place, notes.clone()), made.notes);
+        // Another input, or another field, and what was made is not its.
+        let moved = vec![note(60, r(0, 1), r(2, 1)), note(64, r(1, 1), r(1, 1))];
+        assert_eq!(apply(&effects, &by_place, moved).len(), 4);
+        let other = chain("[{type: chord, shift_1: 12}, {type: device, name: echo, fields: {echoes: 2}}]");
+        assert_eq!(apply(&other, &by_place, notes.clone()).len(), 4);
+        // Bypassed, it passes the notes through.
+        let off = chain("[{type: chord, shift_1: 12}, {type: device, name: echo, fields: {echoes: 1}, bypass: true}]");
+        assert_eq!(apply(&off, &by_place, notes).len(), 4);
     }
 }

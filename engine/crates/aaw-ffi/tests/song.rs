@@ -3493,3 +3493,38 @@ fn a_track_is_frozen_from_the_header_and_its_clips_are_held() {
     assert_eq!(update(&seen).arrangement.tracks[1].clips[0].at, 12.0);
     song.close();
 }
+
+#[test]
+fn a_midi_effect_of_the_person_s_own_is_drawn_from_its_manifest() {
+    let (dir, _path, song, seen) = open();
+    transport(&seen);
+    aaw_host::devices::new("Echo", &dir.path().join("devices"), false, "midi").unwrap();
+    // The installed devices are read again at most once a second.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    let track = song.edit(Edit::SynthAdd { track: None, patch: None }, None).unwrap()[0];
+    update(&seen);
+    // Added by its slug, as the browser and Add Effect add it: among the
+    // MIDI effects, not the chain.
+    song.edit(Edit::EffectAdd { row: Row::Track { key: track }, kind: "echo".into(), index: None, rack: None }, None).unwrap();
+    let u = update(&seen);
+    let t = u.arrangement.tracks.iter().find(|t| t.key == track).unwrap();
+    assert!(t.effects.is_empty());
+    let e = &t.midi_effects[0];
+    assert_eq!((e.kind.as_str(), e.name.as_deref(), e.note.as_deref()), ("device", Some("Echo"), None));
+    let names: Vec<&str> = e.fields.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["fields.transpose", "fields.echoes", "fields.spacing_beats", "fields.decay_percent", "fields.pitch", "fields.keep_original"]);
+    assert!(e.fields.iter().all(|f| f.param.is_none() && f.lane.is_none()), "no lane moves a MIDI effect's field");
+    // Set through its handle, as the panel's controls set it.
+    song.edit(Edit::EffectSet { effect: e.key, field: "fields.echoes".into(), value: number(3.0) }, None).unwrap();
+    let u = update(&seen);
+    let t = u.arrangement.tracks.iter().find(|t| t.key == track).unwrap();
+    assert_eq!(t.midi_effects[0].fields[1].value, number(3.0));
+    // Gone from the folder, the panel says the notes pass through.
+    std::fs::remove_dir_all(dir.path().join("devices/echo")).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    song.edit(Edit::EffectBypass { effect: e.key, on: true }, None).unwrap();
+    let u = update(&seen);
+    let t = u.arrangement.tracks.iter().find(|t| t.key == track).unwrap();
+    assert!(t.midi_effects[0].note.as_deref().unwrap_or_default().contains("the notes pass through"), "{:?}", t.midi_effects[0].note);
+    song.close();
+}

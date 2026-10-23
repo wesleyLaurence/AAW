@@ -713,18 +713,23 @@ def check(path):
 
 def device_warnings(project, path):
     """A device of the person's own the song names that is not installed, or
-    installed at another version than the song was written with."""
-    chains = [(f"tracks.{t['id']}", t["effects"]) for t in project["tracks"]]
-    chains += [(f"groups.{g['id']}", g["effects"]) for g in project.get("groups", [])]
-    chains += [(f"returns.{r['id']}", r["effects"]) for r in project.get("returns", [])]
-    chains.append(("master", project["master"]["effects"]))
-    named = [(owner, i, e) for owner, effects in chains for i, e in enumerate(effects) if e.get("type") == "device"]
+    installed at another version than the song was written with: in a
+    chain, among a MIDI track's MIDI effects, or as its instrument."""
+    chains = [(f"tracks.{t['id']}.effects", t["effects"]) for t in project["tracks"]]
+    chains += [(f"tracks.{t['id']}.midi_effects", t.get("midi_effects", [])) for t in project["tracks"]]
+    chains += [(f"groups.{g['id']}.effects", g["effects"]) for g in project.get("groups", [])]
+    chains += [(f"returns.{r['id']}.effects", r["effects"]) for r in project.get("returns", [])]
+    chains.append(("master.effects", project["master"]["effects"]))
+    named = [(f"{owner}.{e.get('id') or i}", e) for owner, effects in chains for i, e in enumerate(effects) if e.get("type") == "device"]
+    for t in project["tracks"]:
+        device = (t.get("instrument") or {}).get("device")
+        if device:
+            named.append((f"tracks.{t['id']}.instrument", device))
     if not named:
         return []
     installed = {d["slug"]: d for d in run_engine("plugin", "list", "--project", path)["devices"]}
     out = []
-    for owner, i, e in named:
-        ref = f"{owner}.effects.{e.get('id') or i}"
+    for ref, e in named:
         found = installed.get(e["name"])
         if found is None:
             out.append(warning("device-missing", f"{ref}: {e['name']} is not installed; its sound passes through", ref))

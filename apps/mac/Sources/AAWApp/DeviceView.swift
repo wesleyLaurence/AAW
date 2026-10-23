@@ -551,6 +551,11 @@ private struct ChainHeader: View {
                             model.edit(.effectAdd(row: chain.row.row, kind: kind, index: nil, rack: nil))
                         }
                     }
+                    ForEach(model.plugins.filter { $0.kind == "midi" }, id: \.slug) { plugin in
+                        Button(plugin.name) {
+                            model.edit(.effectAdd(row: chain.row.row, kind: plugin.slug, index: nil, rack: nil))
+                        }
+                    }
                 }
             } label: {
                 Label("Add Effect", systemImage: "plus").font(.system(size: 11))
@@ -706,8 +711,16 @@ private struct MidiEffectPanel: View {
     static let width: CGFloat = 216
 
     private var title: String {
-        let kind = readable(effect.kind)
+        // A MIDI effect of the person's own is titled as its manifest names it.
+        let kind = effect.kind == "device" ? (effect.name ?? "Device") : readable(effect.kind)
         return effect.id.map { "\(kind) · \($0)" } ?? kind
+    }
+
+    /// What the panel says under a MIDI effect of the person's own: why it
+    /// is not installed, or what the host is doing with it.
+    private var note: String? {
+        guard effect.kind == "device" else { return nil }
+        return effect.note ?? SongModel.deviceNote(model.deviceStates[effect.key], midi: true)
     }
 
     var body: some View {
@@ -759,6 +772,14 @@ private struct MidiEffectPanel: View {
                         FieldControl(model: model, effect: effect.key, field: field)
                     }
                     .frame(height: 19)
+                }
+                if let note {
+                    Text(note)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 2)
                 }
             }
             .padding(6)
