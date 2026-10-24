@@ -166,6 +166,36 @@ enum Topic {
     Generate,
 }
 
+/// A topic, or a part of one: `effects`, `effects.compressor`.
+#[derive(Clone)]
+struct Described {
+    topic: Topic,
+    part: Option<String>,
+}
+
+/// Parses a topic as clap parses `Topic`, and a part after its first dot;
+/// help lists the topics.
+#[derive(Clone)]
+struct DescribedParser;
+
+impl clap::builder::TypedValueParser for DescribedParser {
+    type Value = Described;
+
+    fn parse_ref(&self, cmd: &clap::Command, arg: Option<&clap::Arg>, value: &std::ffi::OsStr) -> std::result::Result<Described, clap::Error> {
+        let text = value.to_string_lossy();
+        let (name, part) = match text.split_once('.') {
+            Some((name, part)) => (name, Some(part.to_string())),
+            None => (text.as_ref(), None),
+        };
+        let topic = clap::builder::EnumValueParser::<Topic>::new().parse_ref(cmd, arg, std::ffi::OsStr::new(name))?;
+        Ok(Described { topic, part })
+    }
+
+    fn possible_values(&self) -> Option<Box<dyn Iterator<Item = clap::builder::PossibleValue> + '_>> {
+        Some(Box::new(Topic::value_variants().iter().filter_map(ValueEnum::to_possible_value)))
+    }
+}
+
 #[derive(Subcommand)]
 enum Top {
     /// Create DIRECTORY/song.yaml, an empty song, and SONG.md beside it for
@@ -193,10 +223,13 @@ enum Top {
     /// running host carries on in the copy and leaves the original as it was.
     Copy { project: Song, new_folder: PathBuf },
     /// The authoring contract: what a topic's fields mean and what each takes.
-    /// Without a topic, the topics; `daw describe start` makes a first song.
+    /// Without a topic, the topics with their parts and sizes; `daw describe
+    /// start` makes a first song.
     Describe {
-        #[arg(value_enum)]
-        topic: Option<Topic>,
+        /// A topic, or one of its parts after a dot: effects.compressor,
+        /// synth.filter.cutoff_hz.
+        #[arg(value_name = "TOPIC[.PART]", value_parser = DescribedParser)]
+        topic: Option<Described>,
         /// Print the JSON Schema of the topic's models as well; without a
         /// topic, the schema of the whole song.
         #[arg(long)]
@@ -1918,16 +1951,32 @@ fn run(cli: &Cli) -> Result<Json> {
         Top::Move { project, new_folder } => edit(project, C::Move { to: absolute(new_folder)? }),
         Top::Copy { project, new_folder } => edit(project, C::Copy { to: absolute(new_folder)? }),
         Top::Describe { topic, schema } => {
-            let Some(topic) = topic else {
-                return Ok(if *schema { contract::describe_with_schema("project") } else { Some(contract::topics()) }
-                    .expect("the song has a schema"));
+            let Some(Described { topic, part }) = topic else {
+                if *schema {
+                    return Ok(contract::describe_with_schema("project").expect("the song has a schema"));
+                }
+                // batch is described here, so its parts and size are too.
+                let mut topics = contract::topics();
+                let index = contract::index("batch", &batch::describe(&Cli::command(), false));
+                if let (Some(entry), Json::Object(index)) = (topics["topics"]["batch"].as_object_mut(), index) {
+                    entry.extend(index);
+                }
+                return Ok(topics);
             };
-            if let Topic::Batch = topic {
-                return Ok(batch::describe(&Cli::command(), *schema));
-            }
             let name = topic.to_possible_value().expect("a topic has a name");
+            let name = name.get_name();
+            if let Topic::Batch = topic {
+                let described = batch::describe(&Cli::command(), *schema);
+                return match part {
+                    Some(part) => contract::part(name, &described, part),
+                    None => Ok(described),
+                };
+            }
+            if let Some(part) = part {
+                return contract::describe_part(name, part, *schema).unwrap_or_else(|| Err("Unknown topic".into()));
+            }
             let described = if *schema { contract::describe_with_schema } else { contract::describe };
-            described(name.get_name()).ok_or_else(|| "Unknown topic".to_string())
+            described(name).ok_or_else(|| "Unknown topic".to_string())
         }
         Top::Samples(_)
         | Top::Reference(_)

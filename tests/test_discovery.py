@@ -73,6 +73,28 @@ def test_help_lists_the_commands_by_what_they_are_for():
     assert "Commands:\n  add" in run("track", "--help").stdout
 
 
+def test_a_part_of_a_topic_is_printed_alone():
+    compressor = daw("describe", "effects.compressor")
+    assert list(compressor["semantics"]) == ["compressor"]
+    assert compressor["fields"]["compressor.ratio"] == "number 1..20, default 4"
+    assert list(daw("describe", "effects.compressor", "--schema")["schema"]) == ["compressor"]
+    # The listing says each topic's parts and how much it prints, batch's too.
+    listed = daw("describe")["topics"]
+    assert "compressor" in listed["effects"]["parts"].split(", ")
+    assert listed["effects"]["bytes"] == len(run("describe", "effects").stdout.encode())
+    assert listed["batch"]["bytes"] == len(run("describe", "batch").stdout.encode())
+    # A part of batch is the ops within it.
+    clips = daw("describe", "batch.clip")["ops"]
+    assert "clip.add" in clips and all(op.startswith("clip.") for op in clips)
+    assert [a["properties"]["op"]["const"] for a in daw("describe", "batch.clip.add", "--schema")["schema"]["oneOf"]] == ["clip.add"]
+    refused = run("describe", "effects.compresor")
+    assert refused.returncode != 0 and "Did you mean `effects.compressor`?" in refused.stderr
+    assert "TOPIC[.PART]" in run("describe", "--help").stdout
+    # The sampler no longer repeats the project's semantics; it names them.
+    sampler = daw("describe", "sampler")
+    assert "time" not in sampler["semantics"] and "project.steps" in sampler["semantics"]["project"]
+
+
 def test_describe_batch_lists_every_op_a_batch_takes(tmp_path):
     batch = daw("describe", "batch")
     ops = batch["ops"]

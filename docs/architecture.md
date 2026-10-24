@@ -251,7 +251,8 @@ Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
 track and 1 in any other, which saves byte for byte as it did before MIDI
 tracks; either is read (D63). Unknown fields are rejected, and an edit that
 names one is told the nearest field. Run `daw describe TOPIC` for each field's
-path, bounds and default, and `--schema` for the exact generated JSON schema.
+path, bounds and default, `daw describe TOPIC.PART` for one part of it, and
+`--schema` for the exact generated JSON schema.
 
 Session: `title`, `tempo`, `time_signature` (`N/D`, 1 to 32 beats over 1, 2, 4,
 8 or 16, `4/4` by default, one for the whole song; see

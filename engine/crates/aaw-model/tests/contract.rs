@@ -357,6 +357,65 @@ fn each_topic_describes_its_models() {
 }
 
 #[test]
+fn a_part_of_a_topic_is_that_part_alone() {
+    let topics = contract::topics();
+    for topic in contract::TOPICS.iter().filter(|t| **t != "start") {
+        let described = contract::describe(topic).unwrap();
+        let listed = &topics["topics"][topic];
+        assert_eq!(listed["bytes"], serde_json::to_string_pretty(&described).unwrap().len() + 1, "{topic}");
+        let parts = contract::parts(&described);
+        assert_eq!(listed["parts"], parts.join(", "), "{topic}");
+        // Every part listed is printed, and is less than the topic.
+        for part in &parts {
+            let printed = contract::part(topic, &described, part).unwrap_or_else(|e| panic!("{topic}.{part}: {e}"));
+            assert!(printed.to_string().len() < described.to_string().len(), "{topic}.{part}");
+        }
+    }
+    let compressor = contract::describe_part("effects", "compressor", false).unwrap().unwrap();
+    assert_eq!(compressor["semantics"].as_object().unwrap().keys().collect::<Vec<_>>(), ["compressor"]);
+    let fields = compressor["fields"].as_object().unwrap();
+    assert_eq!(fields.len(), 10);
+    assert!(fields.keys().all(|f| f.starts_with("compressor.")));
+    assert!(compressor.get("schema").is_none());
+    // A field's path past the part, with or without its brackets.
+    let ratio = contract::describe_part("effects", "compressor.ratio", false).unwrap().unwrap();
+    assert_eq!(ratio["fields"].as_object().unwrap().keys().collect::<Vec<_>>(), ["compressor.ratio"]);
+    let gain = contract::describe_part("project", "tracks.gain_db", false).unwrap().unwrap();
+    assert_eq!(gain["fields"].as_object().unwrap().keys().collect::<Vec<_>>(), ["tracks[].gain_db"]);
+    // A list of the topic's own is a part by its name.
+    let modulation = contract::describe_part("synth", "modulation", false).unwrap().unwrap();
+    assert!(modulation["modulation"]["targets"].get("filter.cutoff_hz").is_some());
+    // With the schema, the part's models.
+    let compressor = contract::describe_part("effects", "compressor", true).unwrap().unwrap();
+    assert_eq!(compressor["schema"]["compressor"], contract::model("Compressor"));
+    let filter = contract::describe_part("synth", "filter", true).unwrap().unwrap();
+    assert_eq!(filter["schema"]["filter"], contract::model("SynthFilter"));
+    let pads = contract::describe_part("sampler", "tracks", true).unwrap().unwrap();
+    assert_eq!(pads["schema"]["tracks[].pads.ID"], contract::model("Pad"));
+    let wanted = contract::describe_part("synth", "wavetables", true).unwrap().unwrap();
+    assert!(wanted["wavetables"].is_array());
+    // An unknown part is refused with the nearest and the parts.
+    let error = contract::describe_part("effects", "compresor", false).unwrap().unwrap_err();
+    assert!(error.contains("Did you mean `effects.compressor`?") && error.contains("Its parts: order, filter"), "{error}");
+    assert!(contract::describe_part("start", "steps", false).unwrap().is_err());
+    assert!(contract::describe_part("other", "x", false).is_none());
+}
+
+#[test]
+fn the_sampler_names_the_project_for_what_it_says() {
+    let sampler = contract::describe("sampler").unwrap();
+    let project = contract::describe("project").unwrap();
+    let said = sampler["semantics"].as_object().unwrap();
+    assert!(said.keys().all(|k| project["semantics"].get(k).is_none() || k == "project"), "{:?}", said.keys());
+    // Each part of the project it names is one.
+    let parts = contract::parts(&project);
+    let text = said["project"].as_str().unwrap();
+    let named: Vec<&str> = text.split("project.").skip(1).map(|t| t.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').next().unwrap()).collect();
+    assert!(named.len() >= 6);
+    assert!(named.iter().all(|n| parts.iter().any(|p| p == n)), "{named:?}");
+}
+
+#[test]
 fn a_topic_lists_its_fields_a_line_each() {
     let midi = contract::describe("midi").unwrap();
     let text = serde_json::to_string_pretty(&midi).unwrap();

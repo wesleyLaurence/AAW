@@ -69,7 +69,8 @@ const SYNTH: &[(&str, &str)] = &[
     ("limits", "LFO fields are not matrix targets; the triangle is not bandlimited; a wavetable is one cycle, not a sweep of frames; a sample's cycle is read at most 65536 frames long."),
 ];
 
-const SAMPLER_DEVICE: &[(&str, &str)] = &[
+const SAMPLER: &[(&str, &str)] = &[
+    ("project", "Samples, pads and patterns are parts of the song, and daw describe project says what they mean: project.samples a sample's file, project.pitch its root note, project.steps and project.swing a pattern's rows, project.gate and project.choke how a pad's voice ends, project.stretch a pad's tempo and project.mix its level and pan."),
     ("device", "The app's Sampler, dragged from the browser's Instruments onto a MIDI track, is the track's sampler instrument. Empty it is {sampler: {pads: {}, map: []}}, which plays nothing. A sample dropped on it loads one pad on every note at its pitch, as it is at middle C: {sampler: {pads: {NAME: {sample: S}}, map: [{notes: [0, 127], pad: NAME, pitched: true}]}}, the same as a sample dropped on the track's header or under the tracks makes; a sample the browser measured a pitch of starts with mode gate. Its panel shows the file's waveform and sets the pad's mode, gain_db, pan, transpose, start_seconds, end_seconds, attack_ms, release_ms and reverse, which daw pad set SONG TRACK NAME sets too, and the sample's root_note, which daw set SONG samples.S.root_note NOTE sets; Measure in the panel sets it to the pitch daw samples analyze finds. A sampler of several pads, as daw instrument map makes, is listed in the panel and not drawn as the device."),
 ];
 
@@ -277,8 +278,15 @@ fn references(schema: &Json, node: &Json, found: &mut BTreeSet<String>) {
 
 /// One model's schema on its own, with the models it refers to under `$defs`.
 pub fn model(name: &str) -> Json {
+    standalone(&SCHEMA["$defs"][name])
+}
+
+/// A node of the schema on its own, with the models it refers to under `$defs`.
+fn standalone(own: &Json) -> Json {
+    if let Some(name) = ref_name(own) {
+        return model(name);
+    }
     let schema = &*SCHEMA;
-    let own = &schema["$defs"][name];
     let mut needed = BTreeSet::new();
     references(schema, own, &mut needed);
     let mut out = Map::new();
@@ -286,7 +294,7 @@ pub fn model(name: &str) -> Json {
         let defs: Map<String, Json> = needed.iter().map(|n| (n.clone(), schema["$defs"][n].clone())).collect();
         out.insert("$defs".into(), Json::Object(defs));
     }
-    out.extend(own.as_object().expect("a model is an object").clone());
+    out.extend(own.as_object().expect("a schema node is an object").clone());
     Json::Object(out)
 }
 
@@ -625,14 +633,15 @@ impl Listing<'_> {
 
 /// The field lines of a topic: each root model at its path in the song,
 /// listing the `expand` models field by field.
-fn listing(roots: &[(&str, &str)], expand: &[&str]) -> Json {
+fn listing(roots: &[(String, String)], expand: &[String]) -> Json {
+    let expand: Vec<&str> = expand.iter().map(String::as_str).collect();
     let mut listing = Listing {
-        expand,
+        expand: &expand,
         lines: Map::new(),
         open: Vec::new(),
     };
     for (path, model) in roots {
-        if *model == "Project" {
+        if model == "Project" {
             listing.model(path, &SCHEMA);
         } else {
             listing.descend(path, model);
@@ -641,40 +650,44 @@ fn listing(roots: &[(&str, &str)], expand: &[&str]) -> Json {
     Json::Object(listing.lines)
 }
 
-/// The fields of a topic, or None for a topic of commands alone.
-fn fields(topic: &str) -> Option<Json> {
+/// The models a topic lists: each root model at its path in the song, and
+/// the models listed field by field. None for a topic of commands alone.
+fn layout(topic: &str) -> Option<(Vec<(String, String)>, Vec<String>)> {
+    let owned = |items: &[(&str, &str)]| items.iter().map(|(p, m)| (p.to_string(), m.to_string())).collect::<Vec<_>>();
+    let names = |items: &[&str]| items.iter().map(|m| m.to_string()).collect::<Vec<_>>();
     Some(match topic {
-        "project" => listing(
-            &[("", "Project")],
-            &["Session", "Sample", "Pattern", "Event", "Track", "Input", "Frozen", "Clip", "Section", "Marker", "Master", "Group", "Return", "Send"],
+        "project" => (
+            owned(&[("", "Project")]),
+            names(&["Session", "Sample", "Pattern", "Event", "Track", "Input", "Frozen", "Clip", "Section", "Marker", "Master", "Group", "Return", "Send"]),
         ),
-        "sampler" => listing(
-            &[("samples.ID", "Sample"), ("tracks[].pads.ID", "Pad"), ("patterns.ID.events[]", "Event")],
-            &["Sample", "Pad", "Event"],
+        "sampler" => (
+            owned(&[("samples.ID", "Sample"), ("tracks[].pads.ID", "Pad"), ("patterns.ID.events[]", "Event")]),
+            names(&["Sample", "Pad", "Event"]),
         ),
         // By their paths in the patch, as daw synth set, lanes and the matrix
         // take them; the patch is tracks.T.instrument.synth.
-        "synth" => listing(
-            &[("", "Synth")],
-            &["Synth", "Oscillator", "SynthFilter", "SynthEnvelope", "Lfo", "Modulation"],
-        ),
+        "synth" => (owned(&[("", "Synth")]), names(&["Synth", "Oscillator", "SynthFilter", "SynthEnvelope", "Lfo", "Modulation"])),
         "midi" => {
-            let mut roots = vec![("tracks[]", "MidiTrack")];
-            roots.extend(MIDI_EFFECT_TYPES.iter().map(|k| (*k, kind_model(k))));
-            listing(&roots, &["MidiTrack", "NoteClip", "Note", "Instrument", "Sampler", "NoteMap", "Arpeggiator", "Chord", "Scale", "Velocity"])
+            let mut roots = owned(&[("tracks[]", "MidiTrack")]);
+            roots.extend(MIDI_EFFECT_TYPES.iter().map(|k| (k.to_string(), kind_model(k).to_string())));
+            (roots, names(&["MidiTrack", "NoteClip", "Note", "Instrument", "Sampler", "NoteMap", "Arpeggiator", "Chord", "Scale", "Velocity"]))
         }
         "effects" => {
-            let roots: Vec<(&str, String)> = EFFECT_TYPES.iter().map(|k| (*k, title(k))).collect();
-            let mut roots: Vec<(&str, &str)> = roots.iter().map(|(k, m)| (*k, m.as_str())).collect();
-            roots.extend([("tracks[].sends[]", "Send"), ("groups[]", "Group"), ("returns[]", "Return")]);
+            let mut roots: Vec<(String, String)> = EFFECT_TYPES.iter().map(|k| (k.to_string(), title(k))).collect();
+            roots.extend(owned(&[("tracks[].sends[]", "Send"), ("groups[]", "Group"), ("returns[]", "Return")]));
             let mut expand: Vec<String> = EFFECT_TYPES.iter().map(|k| title(k)).collect();
-            expand.extend(["EqBand".into(), "Send".into(), "Group".into(), "Return".into()]);
-            listing(&roots, &expand.iter().map(String::as_str).collect::<Vec<_>>())
+            expand.extend(names(&["EqBand", "Send", "Group", "Return"]));
+            (roots, expand)
         }
-        "automation" => listing(&[("tracks[].automation[]", "Lane")], &["Lane", "Point"]),
-        "edit" => listing(&[("tracks[].audio[]", "AudioClip")], &["AudioClip"]),
+        "automation" => (owned(&[("tracks[].automation[]", "Lane")]), names(&["Lane", "Point"])),
+        "edit" => (owned(&[("tracks[].audio[]", "AudioClip")]), names(&["AudioClip"])),
         _ => return None,
     })
+}
+
+/// The fields of a topic, or None for a topic of commands alone.
+fn fields(topic: &str) -> Option<Json> {
+    layout(topic).map(|(roots, expand)| listing(&roots, &expand))
 }
 
 const GENERATE: &[(&str, &str)] = &[
@@ -691,11 +704,20 @@ const GENERATE: &[(&str, &str)] = &[
     ("limits", "Sounds and loops only, through POST /v1/sound-generation; whole songs, composition plans, regenerating a section, stems from the service and spoken or sung phrases are later lines in the backlog. A sound comes back mono at 44.1 kHz. The Keychain needs a Mac, and its key is sent to api.elevenlabs.io and nowhere else; a stand-in for tests is AAW_GENERATE_URL at a loopback address with the key in AAW_TEST_GENERATE_KEY, and any other address is refused. The budget's day turns at midnight UTC. Nothing here has been heard or costed against a real account yet: the costs and formats are as documented."),
 ];
 
-/// `daw describe` with no topic: the topics, a line each.
+/// `daw describe` with no topic: the topics, a line each, with each one's
+/// parts and size. `batch`, which `daw` describes, has its line alone;
+/// `index` gives the rest.
 pub fn topics() -> Json {
+    let listed = ABOUT.iter().map(|(topic, about)| {
+        let mut entry = json!({"about": about});
+        if let Some(described) = describe(topic) {
+            merge(&mut entry, index(topic, &described));
+        }
+        (topic.to_string(), entry)
+    });
     json!({
-        "topics": texts(ABOUT),
-        "usage": "daw describe TOPIC prints what the topic's fields mean and, for each field, its path, what it takes and its default; --schema prints the JSON Schema as well. A command's --help lists the fields it takes.",
+        "topics": Json::Object(listed.collect()),
+        "usage": "daw describe TOPIC prints what the topic's fields mean and, for each field, its path, what it takes and its default; --schema prints the JSON Schema as well. daw describe TOPIC.PART prints one of the parts listed beside a topic, which is shorter than its bytes: effects.compressor the compressor's paragraph and fields, synth.filter.cutoff_hz one field's line. A command's --help lists the fields it takes.",
     })
 }
 
@@ -785,7 +807,7 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         "project" => json!({"schema": schema(), "semantics": texts(PROJECT)}),
         "sampler" => json!({
             "schema": {"pad": model("Pad"), "event": model("Event"), "sample": model("Sample")},
-            "semantics": texts(&[PROJECT, SAMPLER_DEVICE].concat()),
+            "semantics": texts(SAMPLER),
         }),
         "synth" => json!({
             "schema": {"synth": model("Synth")},
@@ -843,4 +865,174 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
         "generate" => json!({"semantics": texts(GENERATE)}),
         _ => return None,
     })
+}
+
+/// A path or a part with its `[]` left out, as a part names it:
+/// `tracks[].sends[].to` is `tracks.sends.to`.
+fn plain_path(path: &str) -> String {
+    path.replace("[]", "")
+}
+
+/// Whether a path is the part or within it: `compressor.attack_ms` is
+/// within `compressor`, `compressor_x` is not.
+fn within(path: &str, part: &str) -> bool {
+    let (path, part) = (plain_path(path), plain_path(part));
+    path.strip_prefix(&part).is_some_and(|rest| rest.is_empty() || rest.starts_with('.'))
+}
+
+/// The first word of a path, which names its part.
+fn root(path: &str) -> String {
+    plain_path(path).split('.').next().unwrap_or_default().to_string()
+}
+
+/// The keys of a described topic that list paths, a line each.
+const LISTS: [&str; 2] = ["fields", "ops"];
+
+/// A topic's parts, in the order it says them: its semantics entries, the
+/// first word of each field (or each op of `batch`), and the lists it has
+/// besides, such as the Synth's modulation.
+pub fn parts(described: &Json) -> Vec<String> {
+    let mut parts: Vec<String> = described["semantics"].as_object().into_iter().flatten().map(|(k, _)| k.clone()).collect();
+    for list in LISTS {
+        parts.extend(described[list].as_object().into_iter().flatten().map(|(path, _)| root(path)));
+    }
+    let others = described.as_object().into_iter().flatten().map(|(k, _)| k);
+    parts.extend(others.filter(|k| *k != "semantics" && !LISTS.contains(&k.as_str())).cloned());
+    let mut seen = BTreeSet::new();
+    parts.retain(|p| seen.insert(p.clone()));
+    parts
+}
+
+/// What `daw describe` lists beside a topic: its parts and how many bytes
+/// `daw describe TOPIC` prints. `start` is read whole and has no parts.
+pub fn index(topic: &str, described: &Json) -> Json {
+    let bytes = serde_json::to_string_pretty(described).map_or(0, |t| t.len() + 1);
+    if topic == "start" {
+        return json!({"bytes": bytes});
+    }
+    json!({"parts": parts(described).join(", "), "bytes": bytes})
+}
+
+fn merge(into: &mut Json, from: Json) {
+    if let (Some(into), Json::Object(from)) = (into.as_object_mut(), from) {
+        into.extend(from);
+    }
+}
+
+/// One part of a described topic: the semantics entry its first word
+/// names, the field lines (or `batch`'s ops) within it, and a list of the
+/// topic's own by that name; with a schema, the part of it. A part that
+/// names nothing is refused with the nearest and the topic's parts.
+pub fn part(topic: &str, described: &Json, part: &str) -> Result<Json, String> {
+    if topic == "start" {
+        return Err("start has no parts: daw describe start prints it whole".into());
+    }
+    let first = root(part);
+    let mut out = Map::new();
+    if let Some(text) = described["semantics"].get(&first) {
+        out.insert("semantics".into(), json!({first.clone(): text}));
+    }
+    for list in LISTS {
+        let lines: Map<String, Json> = described[list]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(path, _)| within(path, part))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        if !lines.is_empty() {
+            out.insert(list.into(), Json::Object(lines));
+        }
+    }
+    let others = described.as_object().into_iter().flatten();
+    for (key, value) in others.filter(|(k, _)| **k == first && !LISTS.contains(&k.as_str())) {
+        out.insert(key.clone(), value.clone());
+    }
+    if out.is_empty() {
+        let parts = parts(described);
+        let names: Vec<&str> = parts.iter().map(String::as_str).collect();
+        let near = crate::hint::nearest(&first, &names).map_or_else(String::new, |p| format!(" Did you mean `{topic}.{p}`?"));
+        return Err(format!("`{part}` is not a part of {topic}.{near} Its parts: {}.", parts.join(", ")));
+    }
+    if let Some(schema) = described.get("schema") {
+        if let Some(schema) = part_schema(topic, part).or_else(|| ops_schema(schema, part)) {
+            out.insert("schema".into(), schema);
+        }
+    }
+    Ok(Json::Object(out))
+}
+
+/// What `daw describe TOPIC.PART` prints, with `--schema` the part of the
+/// topic's schema as well, or an error naming the topic's parts.
+pub fn describe_part(topic: &str, name: &str, with_schema: bool) -> Option<Result<Json, String>> {
+    let mut described = describe(topic)?;
+    if with_schema {
+        let full = describe_with_schema(topic)?;
+        // A list only the schema's form has, such as the Synth's wavetables,
+        // is a part too; the Synth's fields by part are not.
+        for (key, value) in full.as_object().into_iter().flatten() {
+            if described.get(key).is_none() && key != "fields" {
+                described[key] = value.clone();
+            }
+        }
+    }
+    Some(part(topic, &described, name))
+}
+
+/// The schema of a part: each of the topic's root models within it, by its
+/// path in the song, or the node the part names inside a root model.
+fn part_schema(topic: &str, part: &str) -> Option<Json> {
+    let (roots, _) = layout(topic)?;
+    let mut out = Map::new();
+    let wanted = plain_path(part);
+    for (path, model) in &roots {
+        let node = if model == "Project" { &*SCHEMA } else { &SCHEMA["$defs"][model.as_str()] };
+        if !path.is_empty() && within(path, part) {
+            out.insert(path.clone(), standalone(node));
+            continue;
+        }
+        let at = plain_path(path);
+        let rest = if at.is_empty() { Some(wanted.as_str()) } else { wanted.strip_prefix(&at).and_then(|r| r.strip_prefix('.')) };
+        if let Some(found) = rest.and_then(|rest| rest.split('.').try_fold(node, step)) {
+            out.insert(part.to_string(), standalone(found));
+        }
+    }
+    (!out.is_empty()).then_some(Json::Object(out))
+}
+
+/// The node a word of a path names inside a schema node: a field, an
+/// array's item's field, or with `ID` a mapping's value.
+fn step<'a>(node: &'a Json, word: &str) -> Option<&'a Json> {
+    if let Some(model) = ref_name(node) {
+        return step(&SCHEMA["$defs"][model], word);
+    }
+    if let Some(alternatives) = node.get("anyOf").and_then(Json::as_array) {
+        return alternatives.iter().find_map(|a| step(a, word));
+    }
+    if let Some(items) = node.get("items").filter(|i| i.is_object()) {
+        return step(items, word);
+    }
+    if word == "ID" {
+        if let Some(value) = node.get("additionalProperties").filter(|v| v.is_object()) {
+            return Some(value);
+        }
+    }
+    node.get("properties")?.get(word)
+}
+
+/// The part of `batch`'s schema: the ops within the part, with the
+/// definitions they share.
+fn ops_schema(schema: &Json, part: &str) -> Option<Json> {
+    let alternatives = schema.get("oneOf")?.as_array()?;
+    let kept: Vec<Json> = alternatives
+        .iter()
+        .filter(|a| a["properties"]["op"]["const"].as_str().is_some_and(|op| within(op, part)))
+        .cloned()
+        .collect();
+    if kept.is_empty() {
+        return None;
+    }
+    let mut out = schema.clone();
+    out["oneOf"] = json!(kept);
+    Some(out)
 }

@@ -125,7 +125,9 @@ triplets. A grid of `1/4` means sixteenth notes.
 Use `uv run daw COMMAND --help` for syntax and the fields a command takes.
 `daw describe TOPIC` says what a topic's fields mean and gives each field's path,
 range and default on one line; `--schema` adds the JSON Schema when it is
-needed. The commands below also use the `uv run` prefix; read only the topics
+needed. `daw describe` lists each topic's parts and size, and `daw describe
+TOPIC.PART` prints one part, `effects.compressor` or `batch.clip`, where the
+whole topic is more than the step needs. The commands below also use the `uv run` prefix; read only the topics
 the operation needs. A refused edit names the field it meant and the fix.
 
 | Task | Read or do |
