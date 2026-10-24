@@ -93,7 +93,10 @@ and group gain, pan, mute and solo, master gain and the end fade. `render` write
 mix, a stem for each track, group and return, the snapshot and `report.json` with what
 each effect did; `--track` renders a track, a group or a return as its stem, with only
 the tracks that key or feed it. A grouped track's stem is its sound before its
-group, so the ungrouped tracks, the groups and the returns sum to the mix.
+group, so the ungrouped tracks, the groups and the returns sum to the mix. A render
+without `--output` goes to the project's `renders/` under its render ID, which keeps
+the newest three full renders and the newest three previews; each render removes the
+oldest of its kind beyond them and lists them as `removed_renders`.
 
 ## The engine
 

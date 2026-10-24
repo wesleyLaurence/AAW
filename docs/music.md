@@ -153,8 +153,10 @@ the operation needs. A refused edit names the field it meant and the fix.
 Run `daw check PROJECT` before rendering and read each warning's code
 (`daw describe check`); investigate edits with a short section or isolated
 track render. Full mixes point from `renders/latest.json`; previews use
-`renders/latest-preview.json`. `daw listen` and `daw compare` measure audio;
-do not claim listening when only numerical analysis was performed
+`renders/latest-preview.json`. `renders/` keeps the newest three full renders
+and three previews, so export a render that is to be kept. `daw listen` and
+`daw compare` measure audio; do not claim listening when only numerical
+analysis was performed
 (`daw describe listen`). A render's `overlap` names the pairs of stems that put
 their energy in the same band at the same moments; `daw listen RENDER --overlap
 A B` reads one pair by band and section, and `daw compare` says what an edit did
