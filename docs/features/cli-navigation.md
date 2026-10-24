@@ -5,7 +5,7 @@ item 2, describe batch, built the same day (D150, PR #144); item 3, a part
 of a topic, built the same day (D151, PR #145); item 4, recipes, built the
 same day (D152, PR #146); item 5, names that do not collide, built October
 24, 2026 (D154, PR #148); item 6, no empty help lines, built the same day
-(D155). Designed as D148. It follows
+(D155, PR #149). Designed as D148. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
