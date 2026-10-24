@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "device.yaml",
+  "description": "The manifest of a device of the person's own, format 1 of the device spec. The folder holding it is named by the device's slug.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "name"],
+  "properties": {
+    "format": {"const": 1, "description": "The spec's format this manifest is written to."},
+    "kind": {"enum": ["effect", "instrument", "midi"], "default": "effect", "description": "An effect in a chain, a MIDI track's instrument, or a MIDI effect among its midi_effects."},
+    "name": {"type": "string", "minLength": 1, "description": "The title the panel and the browser show."},
+    "description": {"type": "string", "default": ""},
+    "version": {"type": "string", "default": "0", "description": "The device's own version, as text; the song records the one it was written with."},
+    "author": {"type": "string", "default": ""},
+    "license": {"type": "string", "default": "", "description": "What others may do with the device, such as MIT."},
+    "run": {"enum": ["offline", "realtime"], "default": "offline", "description": "offline: Python over the whole song, cached. realtime: WebAssembly on the audio thread. A MIDI effect runs offline."},
+    "entry": {"type": "string", "pattern": "^[^./][^/]*\\.(py|wasm)$", "description": "The code, a file in the folder: device.py offline and device.wasm in real time unless said."},
+    "source": {"type": "string", "pattern": "^[^./][^/]*\\.rs$", "description": "A real-time device's Rust source, which daw plugin build compiles to its entry."},
+    "fields": {
+      "type": "object",
+      "maxProperties": 64,
+      "propertyNames": {"pattern": "^[a-z][a-z0-9_]*$"},
+      "additionalProperties": {"$ref": "#/$defs/field"},
+      "description": "The device's controls, in the order the real-time ABI hands them over."
+    }
+  },
+  "$defs": {
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": {"enum": ["db", "hz", "percent", "ms", "beats", "number", "switch", "choice"]},
+        "min": {"type": "number", "description": "Required of a numeric type; above 0 on a log scale."},
+        "max": {"type": "number", "description": "Required of a numeric type; above min."},
+        "default": {"type": ["number", "boolean", "string"], "description": "Required: a number within min and max, true or false for a switch, one of the choices for a choice."},
+        "scale": {"enum": ["linear", "log"], "description": "How the panel's bar and a lane move between min and max: linear unless said, log for hz."},
+        "lane": {"type": "boolean", "default": true, "description": "Whether a lane may move a numeric field; a MIDI effect's fields take none."},
+        "choices": {"type": "array", "items": {"type": "string"}, "minItems": 2, "description": "A choice's words."},
+        "label": {"type": "string", "description": "The name the panel shows, the field's name in words unless said."},
+        "unit": {"type": "string", "description": "dB, Hz, %, ms or beats by its type unless said."}
+      }
+    }
+  }
+}

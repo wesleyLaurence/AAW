@@ -1,4 +1,4 @@
-# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23
+# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23, stage 5 October 24
 
 Asked for by the person on October 19, 2026 (D123): "we need some kind of
 standard almost programming spec where it's like you can code a brand new
@@ -9,8 +9,9 @@ completely flexible and programmable ... similar concept to Max for Live
 where people can build things into Ableton, but I want it to be completely
 agent driven". Backlog: Next, Devices anyone builds, to a spec. The first
 stage, the manifest and the offline tier, is built (D144), the second, the
-real-time tier (D145), the third, instruments (D146), and the fourth, MIDI
-effects (D147); the spec's version 1 and FAUST are the stages below.
+real-time tier (D145), the third, instruments (D146), the fourth, MIDI
+effects (D147), and the fifth, the spec's version 1 as a reference and how
+a device is shared (D156); FAUST is the stage below.
 
 ## What
 
@@ -42,6 +43,15 @@ given the notes and returns the notes to play, `daw effect add PROJECT
 tracks.T --type SLUG` puts it there, the browser lists it under MIDI
 Effects, and `daw plugin new NAME --midi` scaffolds one that transposes
 each note and echoes it.
+
+The spec they are all written to, version 1, is `daw describe plugins`:
+the folder, the manifest and its JSON Schema, the contract of each kind in
+each tier, the ABI, what version 1 promises and what installing one
+trusts. A device is shared as its folder zipped: `daw plugin pack SLUG
+--to FILE.zip` writes it, `daw plugin install FILE.zip` puts it in the
+workspace on another Mac or, with `--project`, in a project, where a slug
+of the workspace's copies it so the song carries it, and `daw plugin
+remove SLUG` moves one to the Trash.
 
 ## How it works
 
@@ -308,6 +318,53 @@ each note and echoes it.
     doing; the browser lists MIDI effect plugins under MIDI Effects ›
     Plugins, dropped on a MIDI track's header or device panel and added
     with + or a double-click, and Add Effect lists them on a MIDI track.
+- **The spec** is `daw describe plugins` (`aaw-model/src/contract.rs`),
+  one topic of parts: `spec`, `folder`, `manifest`, `fields`, `song`,
+  `offline`, `instrument`, `midi`, `realtime`, `build`, `terminal`,
+  `sharing`, `trust`, `versions` and `limits`, with `manifest`, a line for
+  each key of `device.yaml` as the song's fields have, and `abi`, a line
+  for each export of the module. `--schema` adds the manifest's JSON
+  Schema (`aaw-model/src/device_manifest.json`, `contract::
+  device_manifest_schema`), and `daw describe plugins.manifest --schema`
+  that alone; a test holds the schema's keys, a field's parts and its
+  types to what the host reads (`devices::MANIFEST_KEYS`, `FIELD_PARTS`,
+  `FIELD_TYPES`). Version 1 promises that a device written to `format: 1`
+  and ABI 1 plays the same in every later AAW: what a later spec adds that
+  1 would misread comes with a new number, which an AAW that does not read
+  it refuses, naming the one it reads, and within ABI 1 an export is added
+  only as an optional one. The `device` parts of `daw describe effects` and
+  `midi` are short and name the topic, and every scaffold's manifest says
+  `daw describe plugins is the spec it is written to`.
+- **Sharing** (`aaw-host/src/devices/share.rs`). `daw plugin pack SLUG
+  --to FILE.zip [--project P] [--replace]` zips under `SLUG/` the files the
+  code hash counts (`devices::files`: all but hidden files and
+  `__pycache__`), deflated, in order, at 1980-01-01 and mode 644, so the
+  same folder packs to the same bytes, and replies the file, its size and
+  SHA-256, the files and the code's hash, with a warning where the
+  manifest names no author or no license. A real-time device is packed
+  only as built: without its `device.wasm`, or with a source changed after
+  it, the pack is refused with `daw plugin build` named, so what is shared
+  plays where no compiler is. `daw plugin install SOURCE [--project P]
+  [--replace]` takes a `.zip` (a pack, or the Finder's Compress of the
+  folder, whose `__MACOSX/` and `.DS_Store` are left out), a device's
+  folder, or with `--project` the slug of a workspace's device. It unpacks
+  into a hidden `.installing-*` folder beside where the device goes,
+  refusing a path that leaves the folder, a link, an encrypted file, files
+  outside one folder or in more than one, a folder that is not a slug, and
+  more than 4096 files or 256 MB; gives every file one time, so a module
+  built after its source is not taken for stale where it lands; reads the
+  manifest, any refusal said of the zip; and renames the folder into place.
+  A device there with the same code is left (`unchanged`); with other code
+  the install is refused naming both versions unless `--replace`, which
+  moves the old folder aside, renames the new one in, removes the old one
+  and replies its version and code. The reply says `sandboxed` and `trust`:
+  an offline device's Python runs as the person does, a real-time one in
+  the engine's sandbox. `daw plugin remove SLUG [--project P]` moves the
+  workspace's folder, or the project's own, to `~/.Trash` under a name not
+  used there (`tilt-eq 2`), and says in `now` which device the slug finds
+  after, the workspace's where the project's own was removed. Installed,
+  a device has the code it was packed with, so a host playing a song that
+  names it hears it within a second and every cache made with it is good.
 - **`daw check`** warns `device-missing` of a device the song names that is
   not installed and `device-version` of one installed at another version
   than the song was written with, in a chain, among a MIDI track's MIDI
@@ -406,6 +463,24 @@ each note and echoes it.
   instrument, named by `daw map`, and once its folder is gone warned of by
   `daw check` and passing the note through.
 
+- Sharing. `aaw-host/tests/share.rs`: a pack's entries and the same bytes
+  twice, a file there refused without `--replace` and a name that is not a
+  `.zip`; installed into another project with the same code and the same
+  hash where it lands, a second install unchanged, nothing left beside it,
+  other code refused and replaced with `--replace`, a folder installed as a
+  zip is; a path leaving the folder, two folders, a file outside a folder,
+  no manifest, a link, a folder that is not a slug and a file that is not a
+  zip refused with nothing left, a refusal said of the zip, and what the
+  Finder's Compress adds left out; a real-time device refused unbuilt and
+  stale, packed when built and not stale where it lands, sandboxed; the
+  schema's keys, parts and types the host's, and every scaffold of format 1
+  naming the spec. `tests/test_devices.py`: packed in one workspace and
+  installed in another with the same code and checked, unchanged a second
+  time, copied into a project by its slug, a slug refused without
+  `--project`, the project's removed to the Trash leaving the workspace's
+  and then the workspace's as `tilt-eq 2`; the topic's parts, its manifest
+  lines, its ABI, its schema and the part's schema.
+
 ## Limits
 
 - An offline device's code runs after an edit, not on the audio thread, so
@@ -451,6 +526,10 @@ each note and echoes it.
   pass through it, as through no MIDI effect. Its fields take no lane. It
   is given the notes, their velocities, its fields and the tempo: no
   controllers, and not the sections or the clips the notes came from.
+- A device is shared from the terminal only: the app installs none from a
+  zip dropped on it and has no Share… or Show in Finder for a plugin. The
+  Trash a removal moves a folder to has no Put Back. Installing an offline
+  device runs its author's Python as the person; nothing reads it for them.
 - `daw check` and `daw listen`'s `sounded` read a track's notes through the
   built-in MIDI effects only: a MIDI effect of the person's own passes the
   notes through for them, since they read the song without the host's
@@ -458,8 +537,6 @@ each note and echoes it.
 
 ## Remaining stages
 
-5. The spec's version 1 written as the reference, with how a device is
-   shared.
 6. FAUST as a way to make a real-time device: a `.dsp` source built to a
    module of the same ABI, where the FAUST compiler is installed.
 
@@ -469,9 +546,10 @@ each note and echoes it.
    Rust; FAUST later as another source for the same ABI.
 2. How much UI a device may own beyond the generic panel, and when: a curve
    over a spectrum, a meter, a sequencer row, as named widgets.
-3. Versioning a device a song already uses: whether a song pins a version
-   and carries a copy under its own `devices/`, as it copies samples. The
-   song names the version it was written with and `daw check` says when
-   the installed one differs; nothing copies yet.
+3. Answered (D156): a song names the version it was written with and `daw
+   check` says when the installed one differs; it carries a copy only when
+   asked, by `daw plugin install SLUG --project P`, since a copy made on
+   every add would stop the workspace's edits reaching a song while the
+   device is being written.
 4. Whether an offline device may read the arrangement (the clip's position,
    the sections) or only audio and fields; the tempo is given.

@@ -45,10 +45,16 @@ use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, String>;
 
+pub mod share;
+
 /// The manifest format this reads.
 pub const FORMAT: i64 = 1;
 /// A field's types, as the manifest names them.
 pub const FIELD_TYPES: [&str; 8] = ["db", "hz", "percent", "ms", "beats", "number", "switch", "choice"];
+/// What a manifest may say, in the order the spec lists them.
+pub const MANIFEST_KEYS: [&str; 11] = ["format", "kind", "name", "description", "version", "author", "license", "run", "entry", "source", "fields"];
+/// What a field may say.
+pub const FIELD_PARTS: [&str; 9] = ["type", "min", "max", "default", "scale", "lane", "choices", "label", "unit"];
 /// The block size the device's input is rendered in.
 const BLOCK: usize = 4096;
 
@@ -319,7 +325,7 @@ fn field_spec(name: &str, spec: &Value, midi: bool) -> Result<FieldSpec> {
     };
     for k in d.keys() {
         match k.as_str() {
-            Some("type" | "min" | "max" | "default" | "scale" | "lane" | "choices" | "label" | "unit") => {}
+            Some(part) if FIELD_PARTS.contains(&part) => {}
             Some(other) => return Err(format!("field {name}: {other} is not part of a field; the parts are type, min, max, default, scale, lane, choices, label and unit")),
             None => return Err(format!("field {name}: parts are named")),
         }
@@ -427,7 +433,7 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
     };
     for k in d.keys() {
         match k.as_str() {
-            Some("format" | "kind" | "name" | "description" | "version" | "author" | "license" | "run" | "entry" | "source" | "fields") => {}
+            Some(k) if MANIFEST_KEYS.contains(&k) => {}
             Some(other) => return Err(format!("{other} is not a field of a manifest")),
             None => return Err("a manifest's fields are named".into()),
         }
@@ -502,9 +508,9 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
     })
 }
 
-/// SHA-256 over a device folder's files, by name and bytes, leaving out
-/// Python's caches and hidden files.
-fn code_hash(dir: &Path) -> Result<String> {
+/// A device folder's files, in order: every file under it but Python's
+/// caches and hidden files, which are what its code is and what is shared.
+pub fn files(dir: &Path) -> Result<Vec<PathBuf>> {
     let mut files: Vec<PathBuf> = Vec::new();
     let mut pending = vec![dir.to_path_buf()];
     while let Some(d) = pending.pop() {
@@ -523,8 +529,13 @@ fn code_hash(dir: &Path) -> Result<String> {
         }
     }
     files.sort();
+    Ok(files)
+}
+
+/// SHA-256 over a device folder's files, by name and bytes.
+fn code_hash(dir: &Path) -> Result<String> {
     let mut h = Sha256::new();
-    for f in files {
+    for f in files(dir)? {
         let rel = f.strip_prefix(dir).unwrap_or(&f).to_string_lossy().into_owned();
         h.update(rel.as_bytes());
         h.update([0]);
@@ -629,7 +640,7 @@ pub fn matches(d: &Installed, query: &str) -> bool {
 /// The manifest `daw plugin new` writes, with NAME filled in.
 pub const MANIFEST_TEMPLATE: &str = r#"# A device of your own. The manifest is the contract: what the song, the
 # app's panel, daw set, lanes and the browser know of the device comes from
-# here. daw describe effects, under device, says how it is used.
+# here. daw describe plugins is the spec it is written to.
 format: 1
 kind: effect
 name: NAME
@@ -694,7 +705,7 @@ def process(audio, sample_rate, fields):
 /// The manifest `daw plugin new --realtime` writes, with NAME filled in.
 pub const REALTIME_MANIFEST_TEMPLATE: &str = r#"# A device of your own. The manifest is the contract: what the song, the
 # app's panel, daw set, lanes and the browser know of the device comes from
-# here. daw describe effects, under device, says how it is used.
+# here. daw describe plugins is the spec it is written to.
 format: 1
 kind: effect
 name: NAME
@@ -728,7 +739,7 @@ pub const RUST_TEMPLATE: &str = include_str!("../templates/device.rs");
 /// filled in.
 pub const INSTRUMENT_MANIFEST_TEMPLATE: &str = r#"# An instrument of your own. The manifest is the contract: what the song,
 # the app's panel, daw set, lanes and the browser know of the instrument
-# comes from here. daw describe midi, under device, says how it is used.
+# comes from here. daw describe plugins is the spec it is written to.
 format: 1
 kind: instrument
 name: NAME
@@ -814,7 +825,7 @@ pub const RUST_INSTRUMENT_TEMPLATE: &str = include_str!("../templates/instrument
 /// The manifest `daw plugin new --midi` writes, with NAME filled in.
 pub const MIDI_MANIFEST_TEMPLATE: &str = r#"# A MIDI effect of your own. The manifest is the contract: what the song,
 # the app's panel, daw set and the browser know of the effect comes from
-# here. daw describe midi, under device, says how it is used.
+# here. daw describe plugins is the spec it is written to.
 format: 1
 kind: midi
 name: NAME

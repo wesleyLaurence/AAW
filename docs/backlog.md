@@ -33,9 +33,10 @@ Items 1–4 are the person's notes from using the app, brought on October
     WebAssembly built from Rust by `daw plugin build` and run on the audio
     thread (D145), instruments, offline and in real time, with the
     piano roll's preview through a real-time one (D146), and MIDI effects,
-    offline in Python among a MIDI track's `midi_effects` (D147). Left:
-    the spec's version 1 written as the reference with how a device is
-    shared; FAUST as another source built to the same ABI; a finer
+    offline in Python among a MIDI track's `midi_effects` (D147), and the
+    spec's version 1 as `daw describe plugins` with `daw plugin pack`,
+    `install` and `remove` (D156). Left: FAUST as another source built to
+    the same ABI; a finer
     dependency for an offline device's input than the whole song; a
     timeout on an offline run.
     [features/custom-devices.md](features/custom-devices.md)
@@ -120,6 +121,14 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A device shared, by the agent and the person:** a device the agent
+  wrote packed with `daw plugin pack`, the zip sent to another Mac or
+  another workspace and installed with `daw plugin install`, a song using
+  it opened there and heard the same; one carried into a project by its
+  slug and the workspace's edited, to hear the song keep its copy; the
+  Finder's Compress of a folder installed; `daw plugin remove` and the
+  folder found in the Trash. Tests and a scratch workspace only; nothing
+  heard, no second Mac.
 - **A MIDI effect of the person's own, by the agent on a real song:** `daw
   plugin new --midi`, its `transform` edited into what a part wants (a
   strum, a humanize, a call and response), added by its slug before an
@@ -1282,6 +1291,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - Real-time devices in a sandboxed language, after a spike (FAUST is the
   candidate); the spec they are written to is Next
   ([devices anyone builds](features/custom-devices.md)).
+- Plugins shared from the app: a `.zip` of a device dropped on the browser
+  installs it, saying whether its code is sandboxed, and a plugin's row has
+  Share… (the zip `daw plugin pack` makes), Show in Finder and Move to
+  Trash (D156).
 - `daw promote`: a render, slice or pattern into the library with its recipe.
 
 ### Library and perception
