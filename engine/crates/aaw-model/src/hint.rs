@@ -96,7 +96,7 @@ fn unknown_field(doc: &Value, loc: &[Loc]) -> Option<String> {
 
 /// The field a mistaken name most likely meant: a synonym, the name with its
 /// unit left off (`cutoff` for `cutoff_hz`), or a spelling a letter or two away.
-fn nearest(name: &str, fields: &[&str]) -> Option<String> {
+pub fn nearest(name: &str, fields: &[&str]) -> Option<String> {
     let name = name.to_ascii_lowercase().replace('-', "_");
     if let Some(field) = fields.iter().find(|f| **f == name) {
         return Some(field.to_string());

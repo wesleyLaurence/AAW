@@ -12,7 +12,7 @@ import soundfile as sf
 from agent_daw.model import save
 from helpers import SR, cli, daw
 
-TOPICS = ["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"]
+TOPICS = ["start", "batch", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"]
 
 
 def run(*args, cwd=None):
@@ -71,6 +71,29 @@ def test_help_lists_the_commands_by_what_they_are_for():
     assert "--expect <EXPECT>" in help
     # A command's own help keeps clap's single list.
     assert "Commands:\n  add" in run("track", "--help").stdout
+
+
+def test_describe_batch_lists_every_op_a_batch_takes(tmp_path):
+    batch = daw("describe", "batch")
+    ops = batch["ops"]
+    assert ops["clip.move"] == {"command": "daw clip move", "keys": {"clip": "text, required", "track": "text", "at": "beats"}}
+    assert ops["event.add"]["command"] == "daw pattern event add" and ops["point.set"]["command"] == "daw lane point move"
+    assert "Clip (daw describe project) or NoteClip (daw describe midi)" in ops["clip.add"]["fields"]
+    assert "play" not in ops and "apply" not in ops and "undo" not in ops
+    assert "schema" in daw("describe", "batch", "--schema")
+    assert "daw describe batch" in run("batch", "--help").stdout
+    # Every op of the first song's batch file is listed, with its keys.
+    for command in daw("describe", "start")["batch"]["content"]["commands"]:
+        listed = ops[command["op"]]
+        assert set(command) - {"op"} <= set(listed.get("keys", {})) | ({"length_beats", "id", "notes"} if "fields" in listed else set())
+    song = tmp_path / "song"
+    run("init", song)
+    file = tmp_path / "wrong.json"
+    file.write_text(json.dumps([{"op": "track.add", "id": "drums"}, {"op": "pattern.event.add", "pattern": "p"}]))
+    refused = run("batch", song, file)
+    assert refused.returncode == 1
+    assert "command 1: `pattern.event.add` is not an op; did you mean `event.add`?" in json.loads(refused.stderr)["error"]
+    assert "drums" not in daw("get", song, "tracks")
 
 
 def test_help_lists_what_a_command_takes():

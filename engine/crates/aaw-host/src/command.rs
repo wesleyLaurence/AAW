@@ -35,7 +35,7 @@ impl Origin {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op")]
 pub enum Command {
     // Values
@@ -365,7 +365,7 @@ pub enum Command {
     PatternSteps {
         pattern: String,
         pad: String,
-        /// None removes the row.
+        /// Null, or left out, removes the row.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         row: Option<String>,
     },
@@ -866,6 +866,89 @@ impl Command {
     pub fn json(&self) -> Json {
         serde_json::to_value(self).expect("commands serialize")
     }
+}
+
+impl Kind {
+    /// The kind of command an op names, as `Command::kind` gives it.
+    pub fn of(op: &str) -> Kind {
+        match op {
+            "undo" | "redo" => Kind::History,
+            "play" | "stop" | "locate" | "loop" | "metronome" | "note.preview" | "audio" => Kind::Transport,
+            "arm" | "record.start" | "record.stop" | "capture.start" | "capture.stop" => Kind::Transport,
+            "inspect" | "status" | "changes" | "get" | "notes" | "map" | "markers" | "midi.export" => Kind::Read,
+            "select" | "front" | "project.move" | "project.copy" | "project.release" | "fmt" | "close" => Kind::Host,
+            _ => Kind::Edit,
+        }
+    }
+}
+
+/// The JSON Schema of the commands, made from the enum: one alternative an
+/// op, with its keys. `daw describe batch` is made from it.
+pub fn schema() -> Json {
+    serde_json::to_value(schemars::schema_for!(Command)).expect("the schema serializes")
+}
+
+/// Every op with its alternative in `schema()`, in the enum's order.
+pub fn ops() -> Vec<(String, Json)> {
+    let schema = schema();
+    let alternatives = schema["oneOf"].as_array().cloned().unwrap_or_default();
+    alternatives
+        .into_iter()
+        .filter_map(|a| Some((a["properties"]["op"]["const"].as_str()?.to_string(), a)))
+        .collect()
+}
+
+/// Whether a batch takes the op: the edits, apply aside, which replaces
+/// the whole song.
+pub fn batchable(op: &str) -> bool {
+    Kind::of(op) == Kind::Edit && op != "apply"
+}
+
+/// The commands of a batch file's list. Each is checked before it is read:
+/// an op a batch does not take, or a key its op does not have, is refused
+/// with the nearest one, rather than the op refused among all of them or
+/// the key ignored.
+pub fn batch_commands(list: Json) -> Result<Vec<Command>> {
+    let Json::Array(items) = list else {
+        return Err("A batch is a JSON list of commands, or an object with commands and a label".into());
+    };
+    let ops = ops();
+    let names: Vec<&str> = ops.iter().map(|(op, _)| op.as_str()).filter(|op| batchable(op)).collect();
+    items
+        .into_iter()
+        .enumerate()
+        .map(|(n, item)| {
+            let place = |e: String| format!("command {n}: {e}");
+            let op = item.get("op").and_then(Json::as_str).ok_or_else(|| place("an object with an op is wanted".into()))?.to_string();
+            let op = op.as_str();
+            let Some((_, alternative)) = ops.iter().find(|(o, _)| o == op) else {
+                let near = names
+                    .iter()
+                    .find(|o| op.ends_with(&format!(".{o}")))
+                    .map(|o| o.to_string())
+                    .or_else(|| aaw_model::hint::nearest(op, &names));
+                let near = near.map_or_else(String::new, |o| format!("did you mean `{o}`? "));
+                return Err(place(format!("`{op}` is not an op; {near}daw describe batch lists them")));
+            };
+            if !batchable(op) {
+                return Err(place(format!("a batch does not take `{op}`; run its command on its own")));
+            }
+            if alternative.get("additionalProperties").is_none() {
+                let keys: Vec<&str> =
+                    alternative["properties"].as_object().into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| *k != "op").collect();
+                for key in item.as_object().into_iter().flatten().map(|(k, _)| k.as_str()).filter(|k| *k != "op") {
+                    if !keys.contains(&key) {
+                        let takes = keys.join(", ");
+                        return Err(place(match aaw_model::hint::nearest(key, &keys) {
+                            Some(k) => format!("`{key}` is not a key of {op}; did you mean `{k}`? It takes {takes}"),
+                            None => format!("`{key}` is not a key of {op}, which takes {takes}"),
+                        }));
+                    }
+                }
+            }
+            serde_json::from_value(item).map_err(|e| place(format!("{op}: {e}")))
+        })
+        .collect()
 }
 
 /// A command applied to a tree: what changed, for the log and the reply.

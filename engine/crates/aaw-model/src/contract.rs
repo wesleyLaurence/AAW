@@ -13,6 +13,8 @@ use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
 use std::sync::LazyLock;
 
+/// The topics described here. `batch`, listed among them by `topics`, is
+/// described by `daw` from the host's commands.
 pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"];
 
 static SCHEMA: LazyLock<Json> =
@@ -397,6 +399,7 @@ pub fn schema() -> &'static Json {
 /// What each topic is about, as `daw describe` lists them.
 const ABOUT: &[(&str, &str)] = &[
     ("start", "The commands that make a first song, from init to listen. Read this first."),
+    ("batch", "daw batch: every op a batch file takes, the command it is the same as and what each key takes."),
     ("project", "The song: session, samples, patterns, tracks, groups, returns, sections and the person's markers; editing, rendering and playback."),
     ("sampler", "Pads, samples and pattern events: pitch, gate, choke, stretch, and the app's Sampler."),
     ("synth", "The Synth: oscillators, filter, envelopes, LFOs, the modulation matrix, macros, patches and recipes."),
@@ -744,7 +747,7 @@ fn start() -> Json {
         },
         "semantics": texts(&[
             ("placeholders", "KICK_PATH and the other paths come from daw samples search. Everything else runs as written in an empty folder."),
-            ("batch", "A batch file lists commands as objects: op is the command (set, track.add, clip.add, note.add, synth.add, effect.add and the others), and its other keys are the command's arguments and the fields of what it adds. A label names the step in the change log and for undo."),
+            ("batch", "A batch file lists commands as objects: op is the command (set, track.add, clip.add, note.add, synth.add, effect.add and the others), and its other keys are the command's arguments and the fields of what it adds; daw describe batch lists every op with its keys. A label names the step in the change log and for undo."),
             ("pace", "With the app open (daw status says host: true), run each step as soon as it is decided, as they are listed here, so the person watches each sound, part and clip land on the timeline and in the activity as it is made and can say what they think before the next; do not plan the whole song and then run everything at once. A batch is one musical edit, as the chords here, not the whole song. A host whose agent sent nothing for five minutes says so in the next edit's reply, as hint."),
             ("next", "daw play song plays it, or open the folder in the app. daw map song shows where each track plays, bar by bar, daw inspect song summarizes it, daw get song PATH reads any part, and daw set song PATH VALUE changes any field. daw --help lists the commands, a command's --help what it takes, and daw describe the topics."),
         ]),
