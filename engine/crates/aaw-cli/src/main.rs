@@ -564,9 +564,11 @@ enum TrackCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
+    /// Remove a track with its clips, effects, sends and lanes.
     Remove { project: Song, track: String },
     /// Rename a track and the sidechains that name it.
     Rename { project: Song, track: String, to: String },
+    /// Move a track to INDEX among the tracks, counting from 0.
     Move { project: Song, track: String, index: usize },
     /// Freeze a track: its instrument, effects and their lanes rendered before its fader to frozen/TRACK.wav, which plays in their place; its clips, devices and the tempo cannot change until it is unfrozen; its fader, pan, mute, solo and sends can. A frozen track is rendered again.
     Freeze { project: Song, track: String },
@@ -577,6 +579,8 @@ enum TrackCmd {
 /// Returns.
 #[derive(Subcommand)]
 enum ReturnCmd {
+    /// Add a return, a chain the sends of tracks and groups feed; --index
+    /// places it, and any return field.
     #[command(after_help = fields_help("Return", &["id"]))]
     Add {
         project: Song,
@@ -588,6 +592,7 @@ enum ReturnCmd {
     Remove { project: Song, id: String },
     /// Rename a return, its sends and their lanes.
     Rename { project: Song, id: String, to: String },
+    /// Move a return to INDEX among the returns, counting from 0.
     Move { project: Song, id: String, index: usize },
 }
 
@@ -616,6 +621,8 @@ enum GroupCmd {
     Remove { project: Song, group: String },
     /// Rename a group and the tracks' and groups' group naming it.
     Rename { project: Song, group: String, to: String },
+    /// Move a group to INDEX among the groups, counting from 0; its tracks
+    /// stay where they are.
     Move { project: Song, group: String, index: usize },
 }
 
@@ -712,6 +719,8 @@ enum ClipCmd {
         #[arg(long)]
         at: Option<String>,
     },
+    /// Set how many times a pattern clip plays its pattern, one after
+    /// another: 1 to 10000.
     Repeats { project: Song, clip: String, repeats: String },
     /// Copy a clip, by default right after the original, or after the copies
     /// already in a row there, so that duplicating again lays them in a row.
@@ -729,6 +738,7 @@ enum ClipCmd {
         #[arg(long)]
         times: Option<String>,
     },
+    /// Remove a clip; a note clip's notes go with it.
     Remove { project: Song, clip: String },
     /// Set a note clip's length; its notes stay where they are. On a looped
     /// audio clip (tracks.T.audio.N), how long it plays.
@@ -1221,6 +1231,8 @@ enum MidiCmd {
 /// Patterns and their events.
 #[derive(Subcommand)]
 enum PatternCmd {
+    /// Add a pattern: --length-beats, and --grid and --swing if wanted; its
+    /// steps and events come after, with `pattern steps` and `pattern event add`.
     #[command(after_help = fields_help("Pattern", &[]))]
     Add {
         project: Song,
@@ -1237,6 +1249,8 @@ enum PatternCmd {
         #[arg(long)]
         clear: bool,
     },
+    /// Copy a pattern as TO, with its steps and events; the clips that play
+    /// it keep playing the original.
     Duplicate { project: Song, pattern: String, to: String },
     #[command(subcommand)]
     Event(EventCmd),
@@ -1261,6 +1275,7 @@ enum EventCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
+    /// Remove an event from its pattern.
     Remove { project: Song, event: String },
 }
 
@@ -1285,6 +1300,7 @@ enum PadCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
+    /// Remove a pad from a track.
     Remove { project: Song, track: String, pad: String },
 }
 
@@ -1320,6 +1336,8 @@ enum EffectCmd {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Bypass an effect, or with off play it again; its settings and lanes
+    /// are kept.
     Bypass {
         project: Song,
         effect: String,
@@ -1351,6 +1369,7 @@ enum LaneCmd {
     /// Replace or create a whole lane from a JSON list of points.
     #[command(after_help = lane_help())]
     Set { project: Song, owner: String, param: String, points: String },
+    /// Remove a lane and its points; the parameter plays its own value again.
     Remove { project: Song, owner: String, param: String },
     #[command(subcommand)]
     Point(PointCmd),
@@ -1383,6 +1402,7 @@ enum PointCmd {
 /// Sections: labels over beats, and with --with-content the beats under them.
 #[derive(Subcommand)]
 enum SectionCmd {
+    /// Add a section: a label ID over LENGTH beats from AT.
     Add { project: Song, id: String, at: String, length: String },
     /// Move a section's label to AT; with --with-content, its beats too,
     /// over what is there, as `range copy` puts them.
@@ -3345,6 +3365,27 @@ mod tests {
         for name in &listed {
             assert!(cmd.find_subcommand(name).is_some(), "SECTIONS names `{name}`, which is not a command");
         }
+    }
+
+    #[test]
+    fn every_command_has_a_help_line() {
+        // A command with no line of its own takes the line of the arguments
+        // it flattens, as FieldArgs's, which says nothing of the command.
+        let fields = FieldArgs::augment_args(clap::Command::new("fields")).get_about().map(|a| a.to_string());
+        fn walk(cmd: &clap::Command, path: &str, fields: &Option<String>, empty: &mut Vec<String>) {
+            for sub in cmd.get_subcommands().filter(|c| c.get_name() != "help") {
+                let path = format!("{path} {}", sub.get_name());
+                let about = sub.get_about().map(|a| a.to_string());
+                if about.as_deref().is_none_or(|a| a.trim().is_empty()) || about == *fields {
+                    empty.push(path.clone());
+                }
+                walk(sub, &path, fields, empty);
+            }
+        }
+        assert!(fields.is_some(), "FieldArgs has no line, so the test cannot tell it from a command's");
+        let mut empty = Vec::new();
+        walk(&Cli::command(), "daw", &fields, &mut empty);
+        assert!(empty.is_empty(), "these commands have no line of their own in their parent's help: {empty:?}");
     }
 
     #[test]

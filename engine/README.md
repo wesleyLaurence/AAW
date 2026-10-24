@@ -355,7 +355,8 @@ unfreeze` are the terminal's way.
   headings from one table, `SECTIONS` in `aaw-cli`: Start, Read the song, Edit
   any value, Parts of the song, Play and record, Render and measure, and Sounds
   and libraries, with two lines above them on paths and what a host adds. A
-  test fails on a command under no heading or two.
+  test fails on a command under no heading or two, and another, walking the
+  whole tree, on a command with no line of its own in its parent's help.
 - **Help and errors say what is accepted.** A command that takes `--FIELD VALUE`
   pairs lists them in its `--help` with each one's range and default, from the
   schema: `effect add --help` every effect type and its fields, `lane set

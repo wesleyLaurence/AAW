@@ -1,11 +1,11 @@
-# Finding one's way in the CLI — proposed October 23, 2026
+# Finding one's way in the CLI — implemented October 23–24, 2026
 
 Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
 item 2, describe batch, built the same day (D150, PR #144); item 3, a part
 of a topic, built the same day (D151, PR #145); item 4, recipes, built the
 same day (D152, PR #146); item 5, names that do not collide, built October
-24, 2026 (D154, PR #148); item 6 proposed, not built (D148).
-Backlog: Next, item 1. It follows
+24, 2026 (D154, PR #148); item 6, no empty help lines, built the same day
+(D155, PR #149). Designed as D148. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
@@ -209,14 +209,24 @@ Built October 24, 2026 (D154). Two names said two things:
 
 ### No empty help lines
 
-The twelve commands whose line in their parent's help is empty get one:
-`track remove`, `track move`, `return move`, `group move`, `clip repeats`,
-`clip remove`, `pattern duplicate`, `pattern event remove`, `pad remove`,
-`effect bypass`, `lane remove`, `section add`. `return add`, whose line is
-the generic one for fields (found building the recipes, D152), gets one of
-its own. A test walks the help tree and
-fails on a command with no line. The Python commands keep argparse's help, as
-[learning the CLI quickly](cli-discovery.md#limits) records.
+Built October 24, 2026 (D155). Every command in the Rust help tree has a
+line in its parent's help. Twelve had none: `track remove`, `track move`,
+`return move`, `group move`, `clip repeats`, `clip remove`, `pattern
+duplicate`, `pattern event remove`, `pad remove`, `effect bypass`, `lane
+remove` and `section add`. Two had the line of the fields they take,
+which clap gives a command with no line of its own that flattens
+`FieldArgs`: `return add`, found building the recipes (D152), and `pattern
+add`, found by the test. Each line says what the command does to the song
+and what goes with it, as the host does it: a track is removed with its
+clips, effects, sends and lanes, a note clip with its notes, a lane with
+its points, and a `move`'s index counts from 0.
+
+`every_command_has_a_help_line` in `aaw-cli` walks the tree from `Cli` and
+fails on a command whose line is empty or is `FieldArgs`'s, naming each one.
+The arguments' own lines are not held, and most are empty: an argument's
+name beside the command's line says what it takes. The Python commands keep
+argparse's help, as [learning the CLI quickly](cli-discovery.md#limits)
+records.
 
 ## Done when
 
@@ -232,6 +242,7 @@ fails on a command with no line. The Python commands keep argparse's help, as
 5. The audio-devices command has its new name, the old one is refused with
    it, and every doc, test and `describe` text uses the new one. Done.
 6. No command in the Rust help tree has an empty line, and a test holds it.
+   Done.
 
 Each item is done when an agent in a fresh session, told only the task, uses
 it without reading source: a field found through a part, a batch written from
