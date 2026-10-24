@@ -142,6 +142,50 @@ def test_a_project_s_own_device_shadows_the_workspace_s(tmp_path, workspace):
     assert json.loads(json.dumps(listed))["project"].endswith("devices")
 
 
+def test_a_plugin_is_packed_installed_elsewhere_carried_by_a_song_and_removed(tmp_path, workspace, monkeypatch):
+    daw("plugin", "new", "Tilt EQ")
+    packed = daw("plugin", "pack", "tilt-eq", "--to", tmp_path / "shared" / "tilt-eq-0.1.zip")
+    assert packed["files"] == ["device.py", "device.yaml"] and packed["device"]["version"] == "0.1"
+    assert "daw plugin install" in packed["next"]
+    # On another Mac: a workspace with nothing in it.
+    monkeypatch.setenv("AAW_WORKSPACE", str(tmp_path / "elsewhere"))
+    assert daw("plugin", "list")["devices"] == []
+    installed = daw("plugin", "install", packed["file"])
+    assert installed["device"]["code"] == packed["device"]["code"] and installed["device"]["from"] == "workspace"
+    assert installed["sandboxed"] is False and "read it" in installed["trust"]
+    assert daw("plugin", "check", "tilt-eq")["ok"] is True
+    assert daw("plugin", "install", packed["file"])["unchanged"] is True
+    # A song carries its own copy, made from the workspace's by its slug.
+    project = tmp_path / "song"
+    daw("init", project)
+    carried = daw("plugin", "install", "tilt-eq", "--project", project)
+    assert carried["device"]["from"] == "project" and carried["source"]["workspace"].endswith("tilt-eq")
+    assert carried["device"]["folder"] == str((project / "devices" / "tilt-eq").resolve())
+    with pytest.raises(ValueError, match="is not a file or a folder"):
+        daw("plugin", "install", "tilt-eq")
+    # Removed to the Trash: the project's own first, which leaves the
+    # workspace's for the song, then the workspace's.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    removed = daw("plugin", "remove", "tilt-eq", "--project", project)
+    assert removed["trash"] == str(tmp_path / "home" / ".Trash" / "tilt-eq") and removed["now"]["from"] == "workspace"
+    removed = daw("plugin", "remove", "tilt-eq")
+    assert removed["trash"].endswith("tilt-eq 2") and removed["now"] is None
+    assert (tmp_path / "home" / ".Trash" / "tilt-eq 2" / "device.py").is_file()
+    with pytest.raises(ValueError, match="No device tilt-eq"):
+        daw("plugin", "remove", "tilt-eq")
+
+
+def test_the_spec_is_a_topic_of_its_own():
+    topic = daw("describe", "plugins")
+    assert {"spec", "manifest", "fields", "offline", "realtime", "sharing", "trust", "versions"} <= set(topic["semantics"])
+    assert topic["manifest"]["format"] == "1, required"
+    assert "aaw_note" in topic["abi"] and "schema" not in topic
+    schema = daw("describe", "plugins", "--schema")["schema"]["manifest"]
+    assert schema["properties"]["format"]["const"] == 1 and schema["required"] == ["format", "name"]
+    assert daw("describe", "plugins.manifest", "--schema")["schema"]["title"] == "device.yaml"
+    assert "daw describe plugins" in daw("describe", "effects")["semantics"]["device"]
+
+
 def test_a_realtime_plugin_is_built_run_in_the_song_and_rebuilt(tmp_path, workspace):
     made = daw("plugin", "new", "Live Tilt", "--realtime")
     if "build_error" in made:

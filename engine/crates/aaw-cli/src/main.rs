@@ -154,6 +154,7 @@ enum Topic {
     Synth,
     Midi,
     Effects,
+    Plugins,
     Automation,
     Edit,
     Check,
@@ -440,9 +441,8 @@ enum Top {
     Rack(RackCmd),
     /// Plugins: devices of your own, written to the device spec, a folder
     /// with a manifest and code under the project's devices/ or the
-    /// workspace's (~/Music/AAW/devices). daw describe effects, under
-    /// device, says how one is used; daw audio-device is the Mac's audio
-    /// devices.
+    /// workspace's (~/Music/AAW/devices). daw describe plugins is the spec,
+    /// and how one is shared; daw audio-device is the Mac's audio devices.
     #[command(subcommand)]
     Plugin(PluginCmd),
     #[command(subcommand)]
@@ -1102,6 +1102,43 @@ enum PluginCmd {
     /// failed (with the reason), missing or off; from the running host, or
     /// from the caches on disk when none runs.
     Status { project: Song },
+    /// Share a plugin: zip its folder to FILE.zip, SLUG/ with its manifest,
+    /// its code and its other files, the same bytes for the same folder. A
+    /// real-time plugin is packed with its built device.wasm, so it plays
+    /// where no compiler is; one not built since its source changed is
+    /// refused.
+    Pack {
+        device: String,
+        /// The file to write, a .zip.
+        #[arg(long)]
+        to: PathBuf,
+        #[arg(long)]
+        project: Option<Song>,
+        /// Write over FILE if it is there.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Install a plugin from a .zip a pack made, or from a device's folder,
+    /// into the workspace's devices/, or into the project's with --project;
+    /// with --project, SOURCE may be the slug of a workspace's plugin, which
+    /// copies it into the project so the song carries it. The reply says
+    /// whether its code runs in the sandbox.
+    Install {
+        source: String,
+        #[arg(long)]
+        project: Option<Song>,
+        /// Replace a plugin of the same slug with other code.
+        #[arg(long)]
+        replace: bool,
+    },
+    /// Move a plugin's folder to the Trash: the workspace's, or the
+    /// project's own with --project. A song that names it plays it dry, or
+    /// plays the workspace's where the project's own was removed.
+    Remove {
+        device: String,
+        #[arg(long)]
+        project: Option<Song>,
+    },
 }
 
 /// Effect racks: a chain of effects as a YAML file, saved in the workspace
@@ -2662,6 +2699,19 @@ fn run(cli: &Cli) -> Result<Json> {
                     "devices": aaw_host::devices::status_headless(&p, dir).iter().map(|s| s.json()).collect::<Vec<_>>(),
                     "host": false,
                 }))
+            }
+            PluginCmd::Pack { device, to, project, replace } => {
+                let dir = project.as_ref().map(|p| files(p));
+                let found = aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?;
+                aaw_host::devices::share::pack(&found, to, *replace)
+            }
+            PluginCmd::Install { source, project, replace } => {
+                let dir = project.as_ref().map(|p| files(p));
+                aaw_host::devices::share::install(source, dir.as_deref().and_then(Path::parent), *replace)
+            }
+            PluginCmd::Remove { device, project } => {
+                let dir = project.as_ref().map(|p| files(p));
+                aaw_host::devices::share::remove(dir.as_deref().and_then(Path::parent), device)
             }
         },
         Top::Rack(r) => match r {

@@ -143,7 +143,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   MIDI effect's on the notes it is given, and plays the cache, makes a
   real-time device's module ready for
   the engine, builds one from its Rust with rustc, and hears a device's
-  folder change within a second (`devices`); see
+  folder change within a second (`devices`); packs a device's folder to a
+  zip and installs one from a zip, a folder or the workspace into a project
+  (`devices::share`); see
   [custom-devices.md](features/custom-devices.md).
 - `aaw-cli`: the `daw` binary, a thin command shell with machine-readable results
   and errors.
