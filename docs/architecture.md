@@ -491,12 +491,12 @@ Listening determines musical quality; these numerical checks do not.
 ## Playback and live editing
 
 `daw play PROJECT --from BEAT` plays from any beat through the system's default
-output, or the device `--output` names by part of its name; `daw device list`
+output, or the device `--output` names by part of its name; `daw audio-device list`
 prints what the Mac has. The output is opened at the song's rate when the
 device offers it, bit for bit the render, and else at the rate the device
 runs at, the player's output resampled to it in the callback, so a song at
 44.1 kHz plays through AirPods at 48. A host follows the Mac's default output
-as it changes and opens a chosen device that comes back; `daw device use` and
+as it changes and opens a chosen device that comes back; `daw audio-device use` and
 Settings › Audio in the app change its devices and buffer with the song still
 playing ([audio settings](features/audio-settings.md), D135).
 Samples already sounding at that position are picked up partway through; effects

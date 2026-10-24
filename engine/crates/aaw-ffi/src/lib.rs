@@ -174,7 +174,7 @@ pub struct AudioSettings {
     pub buffer: u32,
 }
 
-/// One of the Mac's audio devices, as `daw device list` prints it.
+/// One of the Mac's audio devices, as `daw audio-device list` prints it.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct AudioDevice {
     pub name: String,

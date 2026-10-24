@@ -125,7 +125,7 @@ each note and echoes it.
   tone, a warmth, a mode and a switch, with the contract in its docstring),
   `daw plugin check SLUG` (the manifest read and the code run once on noise
   at the defaults) and `daw plugin status PROJECT`. The group is `plugin`
-  because `daw device` is the Mac's audio devices. `daw describe effects`
+  because `daw audio-device` is the Mac's audio devices. `daw describe effects`
   has the `device` entry; `daw effect add --help` names `--type SLUG`.
 - **In the app** a device's panel is the generic effect panel from the
   manifest: a bar for each numeric field with its range and unit, a menu

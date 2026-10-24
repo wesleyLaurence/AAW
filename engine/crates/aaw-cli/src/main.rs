@@ -66,7 +66,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
             "effect", "send", "lane", "section", "marker", "range",
         ],
     ),
-    ("Play and record", &["host", "close", "play", "stop", "locate", "loop", "record", "device"]),
+    ("Play and record", &["host", "close", "play", "stop", "locate", "loop", "record", "audio-device"]),
     ("Render and measure", &["render", "listen", "compare", "joins", "export"]),
     (
         "Sounds and libraries",
@@ -312,7 +312,8 @@ enum Top {
         #[arg(long, default_value_t = 128)]
         buffer: u32,
         /// Play through the output device whose name contains this, ignoring
-        /// case; the system's default otherwise. `daw device list` names them.
+        /// case; the system's default otherwise. `daw audio-device list`
+        /// names them.
         #[arg(long)]
         output: Option<String>,
         /// Open the device at this rate whatever the song's, for checking.
@@ -335,7 +336,8 @@ enum Top {
         #[arg(long, default_value_t = 128)]
         buffer: u32,
         /// Play through the output device whose name contains this, ignoring
-        /// case (without a running host); `daw device list` names them.
+        /// case (without a running host); `daw audio-device list` names
+        /// them.
         #[arg(long)]
         output: Option<String>,
         /// Open the device at this rate whatever the song's, for checking.
@@ -349,7 +351,8 @@ enum Top {
     Stop { project: Song },
     /// Move the playhead to a beat; while stopped, play starts there.
     Locate { project: Song, beat: String },
-    /// Loop START LENGTH (beats), or `loop PROJECT off`.
+    /// The transport's loop: START LENGTH (beats), or `loop PROJECT off`. A
+    /// clip's own repeats are `daw clip loop`.
     Loop {
         project: Song,
         start: String,
@@ -438,7 +441,8 @@ enum Top {
     /// Plugins: devices of your own, written to the device spec, a folder
     /// with a manifest and code under the project's devices/ or the
     /// workspace's (~/Music/AAW/devices). daw describe effects, under
-    /// device, says how one is used; daw device is the Mac's audio devices.
+    /// device, says how one is used; daw audio-device is the Mac's audio
+    /// devices.
     #[command(subcommand)]
     Plugin(PluginCmd),
     #[command(subcommand)]
@@ -471,7 +475,7 @@ enum Top {
     #[command(subcommand)]
     Range(RangeCmd),
     #[command(subcommand)]
-    Device(DeviceCmd),
+    AudioDevice(AudioDeviceCmd),
     #[command(subcommand)]
     Record(RecordCmd),
 }
@@ -528,7 +532,7 @@ enum RecordCmd {
 /// The Mac's audio devices: what it has, and which a running host plays
 /// and records through.
 #[derive(Subcommand)]
-enum DeviceCmd {
+enum AudioDeviceCmd {
     /// Every audio device the Mac has: its name, input and output channels,
     /// the sample rates it offers and the one it runs at, the buffers it
     /// takes, and which are the system's defaults.
@@ -732,7 +736,8 @@ enum ClipCmd {
     /// Loop a note clip or an audio clip: its first BEATS play again and again
     /// until its end, so `loop CLIP 8` then `resize CLIP 64` plays a two-bar
     /// phrase eight times. `off` plays the clip once again. An audio clip
-    /// keeps its length, or takes --length BEATS.
+    /// keeps its length, or takes --length BEATS. The transport's loop is
+    /// `daw loop`.
     Loop {
         project: Song,
         clip: String,
@@ -3075,15 +3080,15 @@ fn run(cli: &Cli) -> Result<Json> {
                 }))
             }
         },
-        Top::Device(d) => match d {
-            DeviceCmd::List => {
+        Top::AudioDevice(d) => match d {
+            AudioDeviceCmd::List => {
                 let devices: Vec<Json> = aaw_engine::devices::list()?.iter().map(|d| value(d.to_value())).collect();
                 Ok(json!({
                     "devices": devices,
                     "default_output": aaw_engine::devices::default_output_name(),
                 }))
             }
-            DeviceCmd::Use {
+            AudioDeviceCmd::Use {
                 project,
                 output,
                 input,
@@ -3234,12 +3239,27 @@ fn name(top: &Top) -> String {
         Top::Lane(_) => group("lane", ""),
         Top::Section(_) => group("section", ""),
         Top::Marker(_) => group("marker", ""),
-        Top::Device(_) => group("device", ""),
+        Top::AudioDevice(_) => group("audio-device", ""),
         Top::Record(_) => group("record", ""),
         Top::Range(_) => group("range", ""),
     }
     .trim()
     .to_string()
+}
+
+/// A command's old name, refused with its new one rather than kept as an
+/// alias, so that the help shows one name for one thing.
+fn renamed(e: &clap::Error) -> Option<String> {
+    use clap::error::{ContextKind, ContextValue, ErrorKind};
+    if e.kind() != ErrorKind::InvalidSubcommand {
+        return None;
+    }
+    match e.get(ContextKind::InvalidSubcommand) {
+        Some(ContextValue::String(old)) if old == "device" => Some(
+            "daw device is now daw audio-device, the Mac's audio devices: daw audio-device list, daw audio-device use PROJECT. A device in a song is an instrument or an effect; one of your own is daw plugin".into(),
+        ),
+        _ => None,
+    }
 }
 
 /// Runs a Python command with this process's arguments, input and output, and
@@ -3264,7 +3284,14 @@ fn forward(command: &str, args: &[String]) -> Result<ExitCode> {
 fn main() -> ExitCode {
     let cmd = Cli::command();
     let template = help_template(&cmd);
-    let cli = Cli::from_arg_matches(&cmd.help_template(template).get_matches()).unwrap_or_else(|e| e.exit());
+    let matches = cmd.help_template(template).try_get_matches().unwrap_or_else(|e| {
+        if let Some(error) = renamed(&e) {
+            eprintln!("{}", json!({"error": error, "command": "device"}));
+            std::process::exit(1);
+        }
+        e.exit()
+    });
+    let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     if let Top::Samples(f)
     | Top::Reference(f)
     | Top::Listen(f)
@@ -3318,5 +3345,13 @@ mod tests {
         for name in &listed {
             assert!(cmd.find_subcommand(name).is_some(), "SECTIONS names `{name}`, which is not a command");
         }
+    }
+
+    #[test]
+    fn the_old_name_device_is_refused_with_the_new() {
+        let e = Cli::command().try_get_matches_from(["daw", "device", "list"]).unwrap_err();
+        assert!(renamed(&e).is_some_and(|error| error.contains("daw audio-device list")));
+        let e = Cli::command().try_get_matches_from(["daw", "devic"]).unwrap_err();
+        assert!(renamed(&e).is_none());
     }
 }
