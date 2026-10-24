@@ -23,30 +23,26 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Items 1–4 make the CLI easier for an agent to find its way in, put first on
+Items 1–3 make the CLI easier for an agent to find its way in, put first on
 October 23, 2026 at the person's request (D148); their design is
-[features/cli-navigation.md](features/cli-navigation.md), whose first two
-items, `daw --help` in sections and `daw describe batch`, are built (D149,
-D150). Items 5–8 are the person's notes from using the app, brought on
-October 19, 2026 (D123). Items 9–21 are the order as it stood.
+[features/cli-navigation.md](features/cli-navigation.md), whose first three
+items, `daw --help` in sections, `daw describe batch` and a part of a topic,
+are built (D149, D150, D151). Items 4–7 are the person's notes from using the
+app, brought on October 19, 2026 (D123). Items 8–20 are the order as it stood.
 
-1. **A part of a `describe` topic.** `daw describe effects.compressor` prints
-    that entry of the semantics and its fields alone; `daw describe` lists
-    each topic's parts and size; `sampler` stops repeating `project`'s
-    semantics. [features/cli-navigation.md](features/cli-navigation.md#a-part-of-a-topic)
-2. **Recipes, tested.** `daw describe recipes` and `recipes.NAME` in the form
+1. **Recipes, tested.** `daw describe recipes` and `recipes.NAME` in the form
     `describe start` has, each run by a test on a generated song: a drum bus,
     a phrase with a variation, a mix pass, answering markers, a finished-song
     edit; `docs/music.md` names them. [features/cli-navigation.md](features/cli-navigation.md#recipes)
-3. **Names that do not collide.** `daw device`, the Mac's audio devices,
+2. **Names that do not collide.** `daw device`, the Mac's audio devices,
     renamed (`audio-device` recommended; the person's call), the old name
     refused with the new; `daw loop` and `daw clip loop` naming each other.
     [features/cli-navigation.md](features/cli-navigation.md#names-that-do-not-collide)
-4. **No empty help lines.** The twelve commands with none (`track remove`,
+3. **No empty help lines.** The twelve commands with none (`track remove`,
     `clip repeats`, `effect bypass` and the rest) given one, and a test that
     walks the help tree. [features/cli-navigation.md](features/cli-navigation.md#no-empty-help-lines)
 
-5. **Devices anyone builds, to a spec: the remaining stages.** The
+4. **Devices anyone builds, to a spec: the remaining stages.** The
     manifest, the `device` effect kind, the offline Python tier with its
     cache, the generic panel from the manifest and `daw plugin
     new|check|list|show|status` are built (D144), and the real-time tier,
@@ -59,13 +55,13 @@ October 19, 2026 (D123). Items 9–21 are the order as it stood.
     dependency for an offline device's input than the whole song; a
     timeout on an offline run.
     [features/custom-devices.md](features/custom-devices.md)
-6. **The person's skills: reverse-engineer, mix, master, arrange.** Written
+5. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a sound or a track
     rebuilt from scratch as near as the tool allows, a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-7. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
+6. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
     kick layered under the wrong hits several times in a row, where the
     waveform made them plain, and a mashup of two songs matched in tempo but a
     beat ahead or behind: a song's drum hits as a list and a picture, `daw
@@ -75,58 +71,58 @@ October 19, 2026 (D123). Items 9–21 are the order as it stood.
     song with an odd bar, where the downbeat phase flips after it and bar.beat
     labels after it read two beats off, said when it changes or re-fit each
     phrase; each checked on those songs.
-8. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
+7. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
     vocal stem; a smaller model, or Whisper through MLX on this Mac, as a
     command of the tool's own, the lyric's bar still read from the stem.
 
-9. **`daw audio crossfade` with an option, while the app has the project
+8. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-10. **A time selection in the app.** A range of beats dragged across the
+9. **A time selection in the app.** A range of beats dragged across the
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-11. **A MIDI keyboard.** Notes played through the selected track, held and let
+10. **A MIDI keyboard.** Notes played through the selected track, held and let
     go rather than a beat long, through a Synth and through a Sampler, whose
     pitch needs audio prepared on the way; recording into note clips; quantize.
     The person plays a riff and the agent builds around it.
-12. **Sections, the master gain and the end fade in the app.** A section
+11. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-13. **A project made with `daw init` in the app's index,** so a song the agent
+12. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-14. **Turns and A/B.** An agent request's commands grouped, named for the
+13. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-15. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+14. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-16. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+15. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-17. **Key and chord detection,** and swing detection, of samples and songs: a
+16. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-18. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+17. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-19. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+18. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-20. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+19. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-21. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
+20. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
     or from a section-by-section plan the agent writes (`daw generate music`,
     `daw generate plan`), with its beat map in the reply; then a tab of the
     Settings window with the key's field and the budget, and a Generate tab in the
@@ -1171,12 +1167,14 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   show the Synth's strips and tests hold where a strip puts an effect; a
   scripted drag starts the drag but reaches no drop, so nothing was moved by
   a drag.
-- **`daw --help` in sections and `daw describe batch`, by an agent in a
-  fresh session:** told only a task, whether it finds the command it needs
-  from the seven headings, and writes a batch file from `describe batch`
-  with no op or key refused, without reading source; whether a heading or
-  a key's line misleads it. Tests hold the headings, every op's command and
-  the refusals; no agent has used them.
+- **`daw --help` in sections, `daw describe batch` and a part of a topic,
+  by an agent in a fresh session:** told only a task, whether it finds the
+  command it needs from the seven headings, writes a batch file from
+  `describe batch` with no op or key refused, and reads a part
+  (`effects.compressor`, `batch.clip`) where it would have read a whole
+  topic, without reading source; whether a heading, a key's line or a
+  topic's list of parts misleads it. Tests hold the headings, every op's
+  command, every listed part and the refusals; no agent has used them.
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
   (Later, under Shipping).
 

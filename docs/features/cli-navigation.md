@@ -1,8 +1,9 @@
 # Finding one's way in the CLI — proposed October 23, 2026
 
 Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
-item 2, describe batch, built the same day (D150, PR #144); items 3–6
-proposed, not built (D148). Backlog: Next, items 1–4. It follows
+item 2, describe batch, built the same day (D150, PR #144); item 3, a part
+of a topic, built the same day (D151); items 4–6 proposed, not built (D148).
+Backlog: Next, items 1–3. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
@@ -114,18 +115,37 @@ batch`, and `describe start`'s batch file stays as the example.
 
 ### A part of a topic
 
-`daw describe TOPIC.PART` prints one part of a topic: the topic's `semantics`
-entry named PART and the `fields` lines whose path begins with it.
+Built October 23, 2026 (D151). `daw describe TOPIC.PART` prints one part of
+a topic: the `semantics` entry named by the part's first word, the `fields`
+lines whose path is the part or within it, and a list of the topic's own by
+that name (the Synth's `modulation`, `check`'s `codes`, `samples`' `lines`).
 `daw describe effects.compressor` gives the compressor's paragraph and its
-ten fields; `daw describe synth.filter` the filter's. `daw describe` with no
-topic lists each topic's parts beside its line and its size in bytes, so an
-agent knows before reading whether to read a part. An unknown part is refused
-with the nearest one and the list. `--schema` takes a part too. A topic
-without a part is unchanged.
+ten fields, 864 bytes of the topic's 27,416; `synth.filter` the filter's. A
+part may go on past its first word, `effects.compressor.ratio` one field's
+line, and a path's `[]` may be left out, `project.tracks.gain_db` for
+`tracks[].gain_db`. For `batch` a part is the ops within it, `batch.clip`
+every `clip.*` op. A topic's parts are its semantics entries, then the first
+word of each field (or op), then its own lists, in that order; `start` has
+none and is read whole.
 
-`sampler` prints `project`'s semantics before its own today. With parts, it
-prints its own and names `project` for the rest, as other topics name the
-topic that lists a model.
+`daw describe` with no topic gives each topic its line as `about`, its parts
+as `parts` and as `bytes` how much `daw describe TOPIC` prints, so an agent
+knows before reading whether to read a part. A part that names nothing is
+refused with the nearest and the parts (`effects.compresor`: did you mean
+`effects.compressor`?), through `hint::nearest`. With `--schema`, a part has
+the schema of the topic's root models within it, by their path in the song
+(`effects.compressor` the Compressor's, `sampler.tracks` the Pad's at
+`tracks[].pads.ID`), or of the node it names inside one (`synth.filter` the
+SynthFilter's), with the models it refers to; a part of `batch` the ops'
+alternatives of the enum's schema; and the lists only the schema's form has
+are parts there too (`synth.wavetables`). A topic without a part is
+unchanged. The roots and the models a topic lists are one table, `layout`,
+which the field lines and a part's schema both read.
+
+`sampler` printed `project`'s semantics before its own, 14,396 bytes. It now
+prints its own and a `project` entry naming the parts of `project` that say
+what samples, pads and patterns mean (`project.steps`, `project.gate` and the
+rest), 2,884 bytes; a test holds each name to a part.
 
 ### Recipes
 
@@ -183,7 +203,7 @@ fails on a command with no line. The Python commands keep argparse's help, as
    the enum; an unknown op is refused with the nearest. Done.
 3. `daw describe effects.compressor` prints the compressor alone; `daw
    describe` lists each topic's parts and size; `sampler` no longer repeats
-   `project`.
+   `project`. Done.
 4. `daw describe recipes` lists at least the six recipes above, each run in a
    test; `docs/music.md` names them.
 5. The audio-devices command has its new name, the old one is refused with
