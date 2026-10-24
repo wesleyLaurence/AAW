@@ -4,7 +4,7 @@ Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
 item 2, describe batch, built the same day (D150, PR #144); item 3, a part
 of a topic, built the same day (D151, PR #145); item 4, recipes, built the
 same day (D152, PR #146); item 5, names that do not collide, built October
-24, 2026 (D154); item 6 proposed, not built (D148).
+24, 2026 (D154, PR #148); item 6 proposed, not built (D148).
 Backlog: Next, item 1. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
