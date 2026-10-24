@@ -262,15 +262,15 @@ def test_a_host_takes_commands_from_other_processes(rust_daw, tmp_path, registry
 
 def output_device(binary, part):
     """The Mac's output device whose name contains `part`, or None."""
-    listed = daw(binary, "device", "list")
+    listed = daw(binary, "audio-device", "list")
     for device in listed["devices"]:
         if part.lower() in device["name"].lower() and device["output_channels"] >= 2:
             return device
     return None
 
 
-def test_device_list_names_the_macs_devices(rust_daw):
-    listed = daw(rust_daw, "device", "list")
+def test_audio_device_list_names_the_macs_devices(rust_daw):
+    listed = daw(rust_daw, "audio-device", "list")
     assert isinstance(listed["devices"], list)
     for device in listed["devices"]:
         assert device["name"]
@@ -286,10 +286,20 @@ def test_device_list_names_the_macs_devices(rust_daw):
         assert virtual["current_rate"] in virtual["sample_rates"]
 
 
-def test_device_use_changes_a_running_hosts_devices(rust_daw, tmp_path, registry):
+def test_the_old_name_device_is_refused_with_the_new(rust_daw, tmp_path):
+    path = make_song(random.Random(31), tmp_path)
+    for args in (["device", "list"], ["--origin", "user", "device", "use", str(path), "--buffer", "256"]):
+        done = subprocess.run([str(rust_daw), *args], capture_output=True, text=True)
+        assert done.returncode == 1 and done.stdout == ""
+        refused = json.loads(done.stderr)
+        assert refused["command"] == "device"
+        assert "daw audio-device list" in refused["error"] and "daw plugin" in refused["error"]
+
+
+def test_audio_device_use_changes_a_running_hosts_devices(rust_daw, tmp_path, registry):
     path = make_song(random.Random(31), tmp_path)
     # Without a host the devices exist only while one runs.
-    refused = daw(rust_daw, "device", "use", path, "--buffer", "256", check=False)
+    refused = daw(rust_daw, "audio-device", "use", path, "--buffer", "256", check=False)
     assert "No host" in refused["error"]
     host = subprocess.Popen([str(rust_daw), "host", str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
@@ -298,13 +308,13 @@ def test_device_use_changes_a_running_hosts_devices(rust_daw, tmp_path, registry
         assert status["audio"] is None
         assert status["sample_rate"] == load(path)["session"]["sample_rate"]
 
-        changed = daw(rust_daw, "device", "use", path, "--buffer", "256", "--input", "Microphone")
+        changed = daw(rust_daw, "audio-device", "use", path, "--buffer", "256", "--input", "Microphone")
         assert changed["devices"] == {"output": "default", "input": "Microphone", "buffer_frames": 256, "fallback": None}
         # Each left out stays; `default` clears one.
-        back = daw(rust_daw, "device", "use", path, "--input", "default")
+        back = daw(rust_daw, "audio-device", "use", path, "--input", "default")
         assert back["devices"]["input"] == "default" and back["devices"]["buffer_frames"] == 256
-        assert "16 to 8192" in daw(rust_daw, "device", "use", path, "--buffer", "5", check=False)["error"]
-        assert "--output" in daw(rust_daw, "device", "use", path, check=False)["error"]
+        assert "16 to 8192" in daw(rust_daw, "audio-device", "use", path, "--buffer", "5", check=False)["error"]
+        assert "--output" in daw(rust_daw, "audio-device", "use", path, check=False)["error"]
         # Never an edit: the song's revision stands.
         assert daw(rust_daw, "status", path)["revision"] == 0
     finally:

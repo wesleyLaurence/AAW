@@ -142,7 +142,7 @@ impl Transport {
             .or_else(|| std::env::var("AAW_OUTPUT_DEVICE").ok().filter(|n| !n.trim().is_empty()));
         let device = match wanted {
             Some(name) => crate::devices::find_output(&name)?
-                .ok_or_else(|| format!("No audio output device named {}; daw device list names them", name.trim()))?,
+                .ok_or_else(|| format!("No audio output device named {}; daw audio-device list names them", name.trim()))?,
             None => host.default_output_device().ok_or("No audio output device")?,
         };
         let name = device

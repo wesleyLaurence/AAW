@@ -3,6 +3,7 @@ command takes, and errors that say what to do next."""
 
 import json
 import os
+import re
 import shlex
 import subprocess
 
@@ -66,8 +67,11 @@ def test_help_lists_the_commands_by_what_they_are_for():
     assert "one document addressed by paths" in help and "@N references" in help
     # A command sits under its heading with its line as clap has it.
     parts = help.split("Parts of the song:\n")[1].split("\n\n")[0]
-    assert "  clip        Clips, addressed by reference" in parts
-    assert "  rack        Effect racks: a chain of effects" in help
+    # The names are padded to the longest, so the gap is not pinned.
+    assert re.search(r"^  clip +Clips, addressed by reference", parts, re.M)
+    assert re.search(r"^  rack +Effect racks: a chain of effects", help, re.M)
+    assert re.search(r"^  audio-device +The Mac's audio devices", help.split("Play and record:\n")[1], re.M)
+    assert not re.search(r"^  device ", help, re.M)
     assert "--expect <EXPECT>" in help
     # A command's own help keeps clap's single list.
     assert "Commands:\n  add" in run("track", "--help").stdout

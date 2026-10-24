@@ -419,7 +419,7 @@ final class AgentPanelTests: XCTestCase {
         agent.toggleRecording()
         XCTAssertTrue(agent.recording, "recording until the host answers")
         wait("the refusal") { !agent.recording }
-        XCTAssertEqual(model.refusal, "No audio input device named no-such-device-xyz; daw device list names them")
+        XCTAssertEqual(model.refusal, "No audio input device named no-such-device-xyz; daw audio-device list names them")
         XCTAssertEqual(agent.attachments, [])
         XCTAssertEqual((try? FileManager.default.contentsOfDirectory(atPath: attachments.path)) ?? [], [], "nothing is written for a refused start")
 

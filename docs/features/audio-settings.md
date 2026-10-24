@@ -16,8 +16,8 @@ what and at which rate. The song plays through whatever is chosen, at the
 song's rate when the device offers it and at the device's own rate
 otherwise, resampled in the player; the system's default is followed as it
 changes, so AirPods connecting take the song over, and a chosen device that
-is not connected gives way to the default and the tab says so. `daw device
-list` prints what the Mac has and `daw device use` chooses for a running
+is not connected gives way to the default and the tab says so. `daw audio-device
+list` prints what the Mac has and `daw audio-device use` chooses for a running
 host.
 
 ## How it works
@@ -41,7 +41,7 @@ host.
   host as it opens and sends them to every open song when one changes; a
   terminal gives them to `daw play` and `daw host` with `--output`, and
   `AAW_OUTPUT_DEVICE` still stands in for a scripted run when nothing was
-  chosen. `daw device use PROJECT --output NAME --input NAME --buffer N` is
+  chosen. `daw audio-device use PROJECT --output NAME --input NAME --buffer N` is
   the host's `audio` command, monitoring and never an edit; an open output is
   closed and opened again at the same beat, still playing if it was.
 - **Following the Mac.** The engine listens, once a process, for the default
@@ -50,7 +50,7 @@ host.
   means is not the one open, it opens that one at the same beat. A device
   chosen in the app that is not connected falls back to the default with a
   warning and `status.devices.fallback` naming it, and is taken up when it
-  returns; one named on the terminal, by `--output` or `daw device use`, or
+  returns; one named on the terminal, by `--output` or `daw audio-device use`, or
   by `AAW_OUTPUT_DEVICE` is refused when it is not there, since a scripted
   run that must not be heard must never fall through to the speakers
   (`Audio.strict_output`).
@@ -89,7 +89,7 @@ host.
   at 48 kHz come back at 1000 Hz within 3 Hz and at the same level within
   3%; a song at 48 kHz opens at 48 kHz unchanged; the device list carries
   BlackHole's rates. Without BlackHole the tests say so and pass.
-- `tests/test_host.py`: `daw device list`; `daw device use` on a running
+- `tests/test_host.py`: `daw audio-device list`; `daw audio-device use` on a running
   host, its refusals and that the revision stands; `daw play --output
   BlackHole --device-rate 48000` reporting `resampled` on a 44.1 kHz song,
   then at its own rate, skipped without the device. Each `daw` there has a

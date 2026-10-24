@@ -3,8 +3,9 @@
 Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
 item 2, describe batch, built the same day (D150, PR #144); item 3, a part
 of a topic, built the same day (D151, PR #145); item 4, recipes, built the
-same day (D152); items 5 and 6 proposed, not built (D148).
-Backlog: Next, items 1–2. It follows
+same day (D152, PR #146); item 5, names that do not collide, built October
+24, 2026 (D154); item 6 proposed, not built (D148).
+Backlog: Next, item 1. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
@@ -186,17 +187,25 @@ recipe beside the task.
 
 ### Names that do not collide
 
-Two names say two things:
+Built October 24, 2026 (D154). Two names said two things:
 
 - **`daw loop`** is the transport's loop, and **`daw clip loop`** loops a
-  clip's start. Different arguments keep them apart in practice; the
-  transport's help names `clip loop` and the clip's names `loop`.
-- **`daw device`** is the Mac's audio devices, while a device everywhere else
-  is an instrument or an effect, as in Ableton, and a device of the person's
-  own is `daw plugin`; `daw plugin`'s own help has to say so. It is renamed
-  (open question 1). The old name is refused with the new one in the error,
-  rather than kept as a hidden alias, so that an agent reading the help sees
-  one name.
+  clip's start. Different arguments keep them apart in practice; `daw
+  loop`'s line says it is the transport's and names `daw clip loop` for a
+  clip's repeats, and `daw clip loop`'s ends naming `daw loop`.
+- **`daw audio-device list|use`** is the Mac's audio devices, which was
+  `daw device`, while a device everywhere else is an instrument or an
+  effect, as in Ableton, and a device of the person's own is `daw plugin`,
+  whose line says so. `daw device`, with anything after it and with
+  `--origin` or `--expect` before it, is refused with exit status 1 and
+  `{"error": ..., "command": "device"}` on stderr, the error naming `daw
+  audio-device list`, `daw audio-device use PROJECT` and `daw plugin`,
+  rather than kept as a hidden alias, so that an agent reading the help
+  sees one name. The refusal is made where clap's parse fails on an
+  unknown subcommand, from the word clap names, so a misspelling such as
+  `devic` gets clap's own error. The errors that name an output or input
+  the Mac does not have say `daw audio-device list names them`. A Rust
+  test and a Python test hold the refusal.
 
 ### No empty help lines
 
@@ -221,7 +230,7 @@ fails on a command with no line. The Python commands keep argparse's help, as
 4. `daw describe recipes` lists at least the six recipes above, each run in a
    test; `docs/music.md` names them. Done.
 5. The audio-devices command has its new name, the old one is refused with
-   it, and every doc, test and `describe` text uses the new one.
+   it, and every doc, test and `describe` text uses the new one. Done.
 6. No command in the Rust help tree has an empty line, and a test holds it.
 
 Each item is done when an agent in a fresh session, told only the task, uses
@@ -230,9 +239,10 @@ it without reading source: a field found through a part, a batch written from
 
 ## Open questions
 
-1. **The audio-devices command's new name.** `daw audio-device`, as Settings
-   › Audio and Ableton's Audio Device name it (recommended); `daw io`;
-   or `daw interface`. `daw audio` is taken by audio clips.
+1. **The audio-devices command's new name.** Answered by the person on
+   October 24, 2026 (D154): `daw audio-device`, as Settings › Audio and
+   Ableton's Audio Device name it, over `daw io` and `daw interface`;
+   `daw audio` is taken by audio clips.
 2. **Whether a batch takes every op.** Answered while building item 2 (D150):
    a batch takes the edits, apply aside, as `Edit::run` already refused the
    rest one by one; `describe batch` lists those.

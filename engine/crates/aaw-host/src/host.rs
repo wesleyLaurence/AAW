@@ -440,7 +440,7 @@ impl Host {
         let fallback = match self.chosen_output_strictly() {
             (Some(name), strict) if aaw_engine::devices::find_output(&name)?.is_none() => {
                 if strict {
-                    return Err(format!("No audio output device named {}; daw device list names them", name.trim()));
+                    return Err(format!("No audio output device named {}; daw audio-device list names them", name.trim()));
                 }
                 Some(name)
             }
@@ -1116,7 +1116,7 @@ impl Host {
                 }
                 if let (Some(name), true) = (&audio.output, audio.strict_output) {
                     if aaw_engine::devices::find_output(name)?.is_none() {
-                        return Err(format!("No audio output device named {name}; daw device list names them"));
+                        return Err(format!("No audio output device named {name}; daw audio-device list names them"));
                     }
                 }
                 let changed = audio != self.audio;

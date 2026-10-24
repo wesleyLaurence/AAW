@@ -211,7 +211,7 @@ pub fn open_input(name: Option<&str>, channels: &[i64], rate: u32, seconds: f64)
     crate::devices::watch();
     let host = cpal::default_host();
     let device = match name.map(str::trim).filter(|n| !n.is_empty()) {
-        Some(name) => crate::devices::find_input(name)?.ok_or_else(|| format!("No audio input device named {name}; daw device list names them"))?,
+        Some(name) => crate::devices::find_input(name)?.ok_or_else(|| format!("No audio input device named {name}; daw audio-device list names them"))?,
         None => host.default_input_device().ok_or("No audio input device")?,
     };
     let device_name = device
