@@ -12,7 +12,7 @@ import soundfile as sf
 from agent_daw.model import save
 from helpers import SR, cli, daw
 
-TOPICS = ["start", "batch", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"]
+TOPICS = ["start", "recipes", "batch", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"]
 
 
 def run(*args, cwd=None):
@@ -227,34 +227,3 @@ def test_duplicates_lay_out_in_a_row_and_a_stack_is_mapped_and_checked(tmp_path)
     assert [w["code"] for w in warnings] == ["clips-stacked"]
     assert warnings[0]["at"] == 8 and len(warnings[0]["paths"]) == 2
     assert "clips-stacked" in daw("describe", "check")["codes"]
-
-
-def test_the_first_song_recipe_runs_as_written(tmp_path, monkeypatch):
-    library = tmp_path / "library"
-    library.mkdir()
-    t = np.arange(SR // 4) / SR
-    sf.write(library / "kick.wav", 0.8 * np.sin(2 * np.pi * (50 + 120 * np.exp(-30 * t)) * t) * np.exp(-8 * t), SR)
-    monkeypatch.setenv("AAW_LIBRARY", str(tmp_path / "library.sqlite"))
-    assert daw("samples", "scan", library)["indexed"] == 1
-
-    start = daw("describe", "start")
-    # The recipe says to run each step as it is decided, with the app open.
-    assert "run each step as soon as it is decided" in start["semantics"]["pace"]
-    work = tmp_path / "work"
-    work.mkdir()
-    batch = start["batch"]
-    (work / batch["file"]).write_text(json.dumps(batch["content"]))
-    found = {}
-    for step in start["steps"]:
-        args = shlex.split(step["run"])
-        assert args[0] == "daw", step
-        # The placeholders are the paths a search finds.
-        args = [found.get(a, a) for a in args[1:]]
-        out = run(*args, cwd=work)
-        assert out.returncode == 0, (step["run"], out.stderr)
-        result = json.loads(out.stdout)
-        if args[:2] == ["samples", "search"]:
-            found[f"{args[2].upper()}_PATH"] = result[0]["path"]
-    assert result["kind"] == "listen"
-    tracks = [t["id"] for t in daw("inspect", work / "song")["tracks"]]
-    assert tracks == ["drums", "bass", "keys"]

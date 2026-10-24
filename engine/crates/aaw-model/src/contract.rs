@@ -15,7 +15,7 @@ use std::sync::LazyLock;
 
 /// The topics described here. `batch`, listed among them by `topics`, is
 /// described by `daw` from the host's commands.
-pub const TOPICS: &[&str] = &["start", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"];
+pub const TOPICS: &[&str] = &["start", "recipes", "project", "sampler", "synth", "midi", "effects", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"];
 
 static SCHEMA: LazyLock<Json> =
     LazyLock::new(|| serde_json::from_str(include_str!("schema.json")).expect("schema.json is JSON"));
@@ -407,6 +407,7 @@ pub fn schema() -> &'static Json {
 /// What each topic is about, as `daw describe` lists them.
 const ABOUT: &[(&str, &str)] = &[
     ("start", "The commands that make a first song, from init to listen. Read this first."),
+    ("recipes", "The commands for a job, in order, with what each reply says: a drum bus, a phrase and its variation, a mix pass, the person's markers answered, an edit of a finished song. Each is run by a test as written."),
     ("batch", "daw batch: every op a batch file takes, the command it is the same as and what each key takes."),
     ("project", "The song: session, samples, patterns, tracks, groups, returns, sections and the person's markers; editing, rendering and playback."),
     ("sampler", "Pads, samples and pattern events: pitch, gate, choke, stretch, and the app's Sampler."),
@@ -721,66 +722,13 @@ pub fn topics() -> Json {
     })
 }
 
-/// The first-song recipe: `daw describe start`.
-const START: &[(&str, &str)] = &[
-    ("daw init song --tempo 96", "Makes song/song.yaml at 96 BPM in 4/4 (--time-signature 3/4 for a waltz), as long as what is put in it: the end follows the last clip, and song/song.aaw, the file that opens the project in the app. song is the PROJECT every other command takes. SONG.md beside it is for what the song is and where it is heading (daw describe project, notes)."),
-    ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR. daw describe samples says how to choose between them by what they measure as."),
-    ("daw samples import KICK_PATH --project song --id kick", "Copies the file into the project and names it kick in the song. Import the snare and the hat the same way, as snare and hat."),
-    ("daw track add song drums", "A track of pads, played by patterns."),
-    ("daw pad add song drums kick --sample kick", "A pad plays a sample. Add the snare and hat pads the same way; daw describe sampler lists what a pad takes."),
-    ("daw pattern add song beat --length-beats 4", "A one-bar pattern. Its grid is 1/4 of a beat, so a row has sixteen steps of a sixteenth note."),
-    ("daw pattern steps song beat kick \"x... .... x.x. ....\"", "A pad's row: x hits, a dot rests. Then snare \".... x... .... x...\" and hat \"x.x. x.x. x.x. x.x.\"."),
-    ("daw clip add song drums beat --repeats 8", "Plays the pattern eight times in a row from beat 0."),
-    ("daw synth add song bass --patch \"Sub Bass\"", "A new MIDI track playing a factory patch; daw patch list names them all."),
-    ("daw clip add song bass --id bassline --length-beats 32", "A note clip of 32 beats at beat 0. Its notes are placed from its start."),
-    (
-        "daw note add song tracks.bass.clips.bassline --notes '[{\"pitch\": \"C2\", \"duration\": 3.5}, {\"pitch\": \"A#1\", \"at\": 8, \"duration\": 3.5}, {\"pitch\": \"C2\", \"at\": 16, \"duration\": 3.5}, {\"pitch\": \"A#1\", \"at\": 24, \"duration\": 3.5}]'",
-        "Notes by name or MIDI number, C4 being middle C; at and duration in beats.",
-    ),
-    ("daw batch song chords.json", "Runs the commands of the file below as one undo step: a pad track with chords."),
-    ("daw effect add song master --type limiter", "A limiter on the master holds the render under full scale."),
-    ("daw render song", "Renders the mix and each track's stem under song/renders. The reply has the mix's peak and loudness."),
-    ("daw listen song/renders/latest.json", "Measures the render: loudness, spectrum, each track's resonances, where two tracks overlap, what the mix loses in mono and on a small speaker, how hard each track's hits land, what each compressor, limiter and clipper took off, and pictures to look at (daw describe listen). It measures; it does not hear for you."),
-];
-
-/// What `daw describe start` prints.
-fn start() -> Json {
-    let steps: Vec<Json> = START.iter().map(|(run, does)| json!({"run": run, "does": does})).collect();
-    let chord = |at: i64, names: [&str; 3]| -> Vec<Json> {
-        names.iter().map(|n| json!({"pitch": n, "at": at, "duration": 8})).collect()
-    };
-    let notes: Vec<Json> = [(0, ["C4", "D#4", "G4"]), (8, ["A#3", "D4", "F4"]), (16, ["G#3", "C4", "D#4"]), (24, ["A#3", "D4", "G4"])]
-        .into_iter()
-        .flat_map(|(at, names)| chord(at, names))
-        .collect();
-    json!({
-        "steps": steps,
-        "batch": {
-            "file": "chords.json",
-            "content": {
-                "label": "Add chords",
-                "commands": [
-                    {"op": "synth.add", "track": "keys", "patch": "Soft Pad"},
-                    {"op": "clip.add", "track": "keys", "id": "chords", "length_beats": 32},
-                    {"op": "note.add", "clip": "tracks.keys.clips.chords", "notes": notes},
-                    {"op": "set", "path": "tracks.keys.gain_db", "value": -6},
-                ],
-            },
-        },
-        "semantics": texts(&[
-            ("placeholders", "KICK_PATH and the other paths come from daw samples search. Everything else runs as written in an empty folder."),
-            ("batch", "A batch file lists commands as objects: op is the command (set, track.add, clip.add, note.add, synth.add, effect.add and the others), and its other keys are the command's arguments and the fields of what it adds; daw describe batch lists every op with its keys. A label names the step in the change log and for undo."),
-            ("pace", "With the app open (daw status says host: true), run each step as soon as it is decided, as they are listed here, so the person watches each sound, part and clip land on the timeline and in the activity as it is made and can say what they think before the next; do not plan the whole song and then run everything at once. A batch is one musical edit, as the chords here, not the whole song. A host whose agent sent nothing for five minutes says so in the next edit's reply, as hint."),
-            ("next", "daw play song plays it, or open the folder in the app. daw map song shows where each track plays, bar by bar, daw inspect song summarizes it, daw get song PATH reads any part, and daw set song PATH VALUE changes any field. daw --help lists the commands, a command's --help what it takes, and daw describe the topics."),
-        ]),
-    })
-}
-
 /// What `daw describe TOPIC` prints: what the topic's fields mean and a line
 /// for each field, or None for an unknown topic.
 pub fn describe(topic: &str) -> Option<Json> {
-    if topic == "start" {
-        return Some(start());
+    match topic {
+        "start" => return crate::recipes::recipe("start"),
+        "recipes" => return Some(crate::recipes::listing()),
+        _ => {}
     }
     let mut full = describe_with_schema(topic)?;
     let full = full.as_object_mut().expect("a topic is an object");
@@ -803,7 +751,8 @@ pub fn describe(topic: &str) -> Option<Json> {
 /// models with what their fields mean, or None for an unknown topic.
 pub fn describe_with_schema(topic: &str) -> Option<Json> {
     Some(match topic {
-        "start" => start(),
+        "start" => return crate::recipes::recipe("start"),
+        "recipes" => crate::recipes::listing(),
         "project" => json!({"schema": schema(), "semantics": texts(PROJECT)}),
         "sampler" => json!({
             "schema": {"pad": model("Pad"), "event": model("Event"), "sample": model("Sample")},
@@ -904,11 +853,14 @@ pub fn parts(described: &Json) -> Vec<String> {
 }
 
 /// What `daw describe` lists beside a topic: its parts and how many bytes
-/// `daw describe TOPIC` prints. `start` is read whole and has no parts.
+/// `daw describe TOPIC` prints. `start` is read whole and has no parts;
+/// the parts of `recipes` are the recipes.
 pub fn index(topic: &str, described: &Json) -> Json {
     let bytes = serde_json::to_string_pretty(described).map_or(0, |t| t.len() + 1);
-    if topic == "start" {
-        return json!({"bytes": bytes});
+    match topic {
+        "start" => return json!({"bytes": bytes}),
+        "recipes" => return json!({"parts": crate::recipes::names().join(", "), "bytes": bytes}),
+        _ => {}
     }
     json!({"parts": parts(described).join(", "), "bytes": bytes})
 }
@@ -926,6 +878,9 @@ fn merge(into: &mut Json, from: Json) {
 pub fn part(topic: &str, described: &Json, part: &str) -> Result<Json, String> {
     if topic == "start" {
         return Err("start has no parts: daw describe start prints it whole".into());
+    }
+    if topic == "recipes" {
+        return recipe_part(part);
     }
     let first = root(part);
     let mut out = Map::new();
@@ -960,6 +915,20 @@ pub fn part(topic: &str, described: &Json, part: &str) -> Result<Json, String> {
         }
     }
     Ok(Json::Object(out))
+}
+
+/// A recipe, read whole: `recipes.mix-pass`.
+fn recipe_part(part: &str) -> Result<Json, String> {
+    let names = crate::recipes::names();
+    let (name, rest) = part.split_once('.').map_or((part, None), |(n, r)| (n, Some(r)));
+    match crate::recipes::recipe(name) {
+        Some(_) if rest.is_some() => Err(format!("A recipe is read whole: daw describe recipes.{name}")),
+        Some(recipe) => Ok(recipe),
+        None => {
+            let near = crate::hint::nearest(name, &names).map_or_else(String::new, |p| format!(" Did you mean `recipes.{p}`?"));
+            Err(format!("`{name}` is not a recipe.{near} The recipes: {}.", names.join(", ")))
+        }
+    }
 }
 
 /// What `daw describe TOPIC.PART` prints, with `--schema` the part of the

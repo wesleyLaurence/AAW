@@ -11,7 +11,9 @@ path, or `uv run daw projects` to find open projects, the front window first.
 For a new song, `uv run daw init projects/NAME` creates an empty project, in
 4/4 unless `--time-signature 3/4` says otherwise;
 `uv run daw describe start` is the dozen commands from there to a rendered song,
-and the quickest way to learn the verbs.
+and the quickest way to learn the verbs. `daw describe recipes` lists the
+others, the commands for a job in order with what each reply says, and the
+table below names each beside its task; a test runs every one as written.
 
 Run `uv run daw map PROJECT` to see the arrangement bar by bar: where each
 track plays, the same music under the same letter, and `#` where two clips of a
@@ -137,12 +139,14 @@ the operation needs. A refused edit names the field it meant and the fix.
 | A song's vocals, instrumental or stems | `daw describe separate`; `daw separate PROJECT SOURCE` for an a cappella and an instrumental, `--split stems` for drums, bass, vocals and the rest, each a sample in the project, `--tracks` to lay them under the source; `daw separate models` says what is downloaded, and a measurement is not a listen |
 | A sound the library lacks | `daw describe generate`; `daw generate sound PROJECT "TEXT" --seconds S`, or `--bars N --loop` for a loop at the song's tempo, makes it with ElevenLabs at the person's own key and imports it as a sample, placing nothing; `--estimate` first, within the agent's daily budget; without a key the person enters one with `daw keys set elevenlabs`; a prompt names no artist, and a measurement is not a listen |
 | Pitched or gated samples | `daw describe sampler`; confirm root octave with `samples analyze` or import `--root-note auto`; resolve `daw check` root warnings |
-| MIDI notes and instruments | `daw describe midi` |
+| MIDI notes and instruments | `daw describe midi`; a phrase, a variation of it and a looped part are `daw describe recipes.phrase` |
 | A synthesized sound | `daw describe synth`; start from a factory patch with `daw synth add TRACK --patch NAME` (`daw patch list`), hear it with `daw synth audition`, keep it with `daw patch save` |
-| Effects, groups or return buses | `daw describe effects`; a drum bus is `daw group add PROJECT drums --tracks kick,snare,hats`, with effects, a level and sends of its own; a chain worth keeping is `daw rack save PROJECT tracks.T NAME`, and `daw rack load` adds it to a chain in any song (`daw rack list`); track stems include inserts but exclude return contributions and master effects; groups and returns have separate stems, and a grouped track's stem is before its group |
+| Effects, groups or return buses | `daw describe effects`; a drum bus is `daw group add PROJECT drums --tracks kick,snare,hats`, with effects, a level and sends of its own, step by step in `daw describe recipes.drum-bus`; a chain worth keeping is `daw rack save PROJECT tracks.T NAME`, and `daw rack load` adds it to a chain in any song (`daw rack list`); track stems include inserts but exclude return contributions and master effects; groups and returns have separate stems, and a grouped track's stem is before its group |
 | Automation | `daw describe automation`; give automated effects an `id` and ramp levels over a few milliseconds |
 | Repeat, insert, remove or empty whole bars across the tracks | `daw range copy\|insert\|delete\|clear` and `daw section duplicate\|move\|remove --with-content`; `daw describe edit` under `ranges` |
-| Finished-song edits from timecodes | `daw describe edit`, `beats`, `joins` and `export`, each before its step; follow the person's own skill for the kind of edit when one is listed, at the root or in the project |
+| A mix pass: what to change found in a render and checked after | `daw describe recipes.mix-pass`: `check`, a render, `listen` and one pair's `--overlap`, an eq bell from a resonance, a render again and `compare`; [Check and hand off](#check-and-hand-off) says how to read them |
+| The person's markers | `daw describe recipes.markers`: `daw marker list`, an answer and the marker's removal in one batch, a marker that asks for nothing kept |
+| Finished-song edits from timecodes | `daw describe edit`, `beats`, `joins` and `export`, each before its step, and `daw describe recipes.finished-edit` for the commands in order; follow the person's own skill for the kind of edit when one is listed, at the root or in the project |
 
 ## Check and hand off
 

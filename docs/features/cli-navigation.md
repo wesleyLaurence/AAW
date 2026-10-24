@@ -2,8 +2,9 @@
 
 Status: item 1, help in sections, built October 23, 2026 (D149, PR #143);
 item 2, describe batch, built the same day (D150, PR #144); item 3, a part
-of a topic, built the same day (D151); items 4–6 proposed, not built (D148).
-Backlog: Next, items 1–3. It follows
+of a topic, built the same day (D151, PR #145); item 4, recipes, built the
+same day (D152); items 5 and 6 proposed, not built (D148).
+Backlog: Next, items 1–2. It follows
 [learning the CLI quickly](cli-discovery.md) (D76), which made `describe` short,
 wrote `describe start` and gave errors their fixes; this is what an agent still
 trips on three weeks and some seventy decisions later.
@@ -149,28 +150,39 @@ rest), 2,884 bytes; a test holds each name to a part.
 
 ### Recipes
 
-`daw describe recipes` lists recipes, a line each; `daw describe
-recipes.NAME` prints one in the form `describe start` has: steps of a
-command and what it does, and a batch file beside them when one is used.
-`start` becomes the first recipe, and `daw describe start` still prints it.
-Each recipe runs in a test, as written, on a song the test makes from
-generated audio, so a command that changes breaks the test rather than the
-recipe. The first ones:
+Built October 23, 2026 (D152). `daw describe recipes` lists the recipes, a
+line each, as `recipes`; `daw describe recipes.NAME` prints one: `given`,
+the song it starts from, `steps`, each a command to run and what it does
+and what its reply says, `batch`, a file to write before the step that runs
+it, when it has one, and `semantics`. `start` is the first recipe, and `daw
+describe start` prints the same. A word of two or more capitals in a
+command, `KICK_PATH` or `PEAK_HZ`, comes from an earlier reply or from the
+given, as its step says; a note's name, `A#1`, is not one. The recipes are
+a table in `aaw_model::recipes`, and `daw describe` lists them as the parts
+of `recipes`, each read whole: `recipes.phrase.steps` is refused, and a name
+that is none is refused with the nearest (`recipes.drum_bus`: did you mean
+`recipes.drum-bus`?).
 
-| Recipe | Steps |
-|---|---|
-| `start` | A first song, from `init` to `listen` (as today) |
-| `drum-bus` | Drum tracks grouped, a compressor and a level on the group, a send to a reverb return |
-| `phrase` | A note clip, a variation of it, the two duplicated in a row and one looped |
-| `mix-pass` | `check`, a render, `listen`, a stem's overlap and resonances read, an EQ bell set from them, a render again and `compare` |
-| `markers` | Markers read with what plays at each, an edit that answers one and the marker removed in the same batch |
-| `finished-edit` | A song imported, its beats found, an audio clip cut at bars, the joins crossfaded and checked with `joins`, and an export |
+`tests/test_recipes.py` runs every recipe as written, in a folder of its
+own, on a song it makes from generated audio as the recipe's `given` says,
+filling the capitals from the replies, and fails on a recipe it has no song
+for. The recipes:
+
+| Recipe | Given | Steps |
+|---|---|---|
+| `start` | An empty folder and a library of a kick, a snare and a hat | A first song, from `init` to `listen` |
+| `drum-bus` | Tracks of pads `kick`, `snare` and `hat` | `group add`, a compressor and a level on the group, a return with a reverb, the group's send to it, a render and `listen`'s `effects` and `hits` |
+| `phrase` | An empty song | A note clip, `clip duplicate` and two notes changed for its variation, the two copied on with `range copy`, a one-bar part with `clip loop` and `clip resize`, and `map` |
+| `mix-pass` | The song `start` makes | `check`, a render, `listen` and one pair's `--overlap`, an eq bell from a stem's resonance, a render again and `compare` with the first |
+| `markers` | The song `start` makes, with markers `bass too loud here` and `love this` | `marker list`, `map` around the first, a batch that answers it with a lane and removes it, and the second kept |
+| `finished-edit` | A finished song's WAV and an empty song | `samples import`, `samples beats` on the copy, the session's tempo, rate and level, one audio clip from the downbeat, `audio cut` of four bars, `audio crossfade`, a fade out, a limiter, a render, `joins` and `export` |
 
 The Synth's `recipes` are sounds, a patch built step by step, and stay in
-`describe synth`. A recipe here is mechanics: which commands, in what order, and what each reply
-says. It holds no taste. A skill of the person's names a recipe for a step
+`describe synth`. A recipe here is mechanics: which commands, in what
+order, and what each reply says; its values are examples, and what to set
+is the song's call. A skill of the person's names a recipe for a step
 rather than repeating its commands, and `docs/music.md`'s table names the
-recipe beside the topic.
+recipe beside the task.
 
 ### Names that do not collide
 
@@ -191,7 +203,9 @@ Two names say two things:
 The twelve commands whose line in their parent's help is empty get one:
 `track remove`, `track move`, `return move`, `group move`, `clip repeats`,
 `clip remove`, `pattern duplicate`, `pattern event remove`, `pad remove`,
-`effect bypass`, `lane remove`, `section add`. A test walks the help tree and
+`effect bypass`, `lane remove`, `section add`. `return add`, whose line is
+the generic one for fields (found building the recipes, D152), gets one of
+its own. A test walks the help tree and
 fails on a command with no line. The Python commands keep argparse's help, as
 [learning the CLI quickly](cli-discovery.md#limits) records.
 
@@ -205,7 +219,7 @@ fails on a command with no line. The Python commands keep argparse's help, as
    describe` lists each topic's parts and size; `sampler` no longer repeats
    `project`. Done.
 4. `daw describe recipes` lists at least the six recipes above, each run in a
-   test; `docs/music.md` names them.
+   test; `docs/music.md` names them. Done.
 5. The audio-devices command has its new name, the old one is refused with
    it, and every doc, test and `describe` text uses the new one.
 6. No command in the Rust help tree has an empty line, and a test holds it.

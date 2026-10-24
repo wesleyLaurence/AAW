@@ -359,7 +359,7 @@ fn each_topic_describes_its_models() {
 #[test]
 fn a_part_of_a_topic_is_that_part_alone() {
     let topics = contract::topics();
-    for topic in contract::TOPICS.iter().filter(|t| **t != "start") {
+    for topic in contract::TOPICS.iter().filter(|t| !["start", "recipes"].contains(t)) {
         let described = contract::describe(topic).unwrap();
         let listed = &topics["topics"][topic];
         assert_eq!(listed["bytes"], serde_json::to_string_pretty(&described).unwrap().len() + 1, "{topic}");
@@ -398,6 +398,13 @@ fn a_part_of_a_topic_is_that_part_alone() {
     let error = contract::describe_part("effects", "compresor", false).unwrap().unwrap_err();
     assert!(error.contains("Did you mean `effects.compressor`?") && error.contains("Its parts: order, filter"), "{error}");
     assert!(contract::describe_part("start", "steps", false).unwrap().is_err());
+    // The parts of recipes are the recipes, each read whole.
+    assert_eq!(topics["topics"]["recipes"]["parts"], "start, drum-bus, phrase, mix-pass, markers, finished-edit");
+    assert_eq!(contract::describe_part("recipes", "start", false).unwrap().unwrap(), contract::describe("start").unwrap());
+    assert!(contract::describe_part("recipes", "drum-bus", false).unwrap().unwrap()["steps"].is_array());
+    let error = contract::describe_part("recipes", "drum_bus", false).unwrap().unwrap_err();
+    assert!(error.contains("Did you mean `recipes.drum-bus`?"), "{error}");
+    assert!(contract::describe_part("recipes", "phrase.steps", false).unwrap().is_err());
     assert!(contract::describe_part("other", "x", false).is_none());
 }
 
