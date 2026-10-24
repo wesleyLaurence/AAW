@@ -170,7 +170,8 @@ the one exception, and only when asked.
 
 Three parts are set up only when wanted: `daw separate setup` installs the
 stem-separation models in an environment of their own, `rustup target add
-wasm32-unknown-unknown` lets `daw plugin build` compile a real-time plugin, and
+wasm32-unknown-unknown` lets `daw plugin build` compile a real-time plugin, the
+FAUST compiler (`brew install faust`) lets it compile one written in FAUST, and
 the Mac app needs Xcode 16.2 ([apps/mac/README.md](apps/mac/README.md)).
 
 The engine, the song model, the session host and every command that reads, edits,

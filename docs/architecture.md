@@ -116,7 +116,8 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   of the person's own is given, the chain before it tapped before the fader,
   and plays the device's cache in its place (`custom`), and runs a
   real-time device's WebAssembly module on the audio thread, compiled by
-  wasmtime and stopped at a deadline (`wasm`); a MIDI track's instrument
+  wasmtime, given the math FAUST's code imports and stopped at a deadline
+  (`wasm`); a MIDI track's instrument
   of the person's own is given the track's notes as note-ons and note-offs
   a block, through its module, or plays the host's offline output by the
   timeline (`aaw-dsp`'s `instrument`); what a MIDI effect of the person's
@@ -142,7 +143,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   when what feeds it changed, an instrument's on the track's notes and a
   MIDI effect's on the notes it is given, and plays the cache, makes a
   real-time device's module ready for
-  the engine, builds one from its Rust with rustc, and hears a device's
+  the engine, builds one from its Rust with rustc, or from its FAUST with
+  the FAUST compiler, wrapped in the device ABI (`devices::faust`), and
+  hears a device's
   folder change within a second (`devices`); packs a device's folder to a
   zip and installs one from a zip, a folder or the workspace into a project
   (`devices::share`); see

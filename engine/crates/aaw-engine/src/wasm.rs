@@ -2,8 +2,10 @@
 //! the engine off the audio thread and run on it, an instance to each place
 //! the device is in a chain.
 //!
-//! The module meets the device ABI, version 1. It imports nothing, and
-//! exports its `memory` and these functions:
+//! The module meets the device ABI, version 1. It imports nothing but
+//! the math functions of [`MATH`] from `env`, which the engine gives it
+//! (FAUST's code calls them), and exports its `memory` and these
+//! functions:
 //!
 //! - `aaw_abi() -> i32`, which returns 1;
 //! - `aaw_init(sample_rate: f64, tempo: f64)`, called once before any audio;
@@ -41,7 +43,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
-use wasmtime::{Engine, Instance, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
+use wasmtime::{Engine, Linker, Memory, Module, Store, StoreLimits, StoreLimitsBuilder, TypedFunc};
 
 /// The ABI version this runs.
 pub const ABI: i32 = 1;
@@ -76,6 +78,56 @@ fn engine() -> Result<&'static Engine> {
                 })
                 .map_err(|e| format!("WebAssembly is not available: {e}"))?;
             Ok(engine)
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+/// The math functions a module may import from `env`, single precision,
+/// by the names and types FAUST's WebAssembly backend calls them.
+pub const MATH: [&str; 23] = [
+    "_acosf", "_acoshf", "_asinf", "_asinhf", "_atanf", "_atan2f", "_atanhf", "_copysignf", "_cosf", "_coshf", "_expf", "_fmodf", "_isinff", "_isnanf", "_logf", "_log10f", "_powf",
+    "_remainderf", "_roundf", "_sinf", "_sinhf", "_tanf", "_tanhf",
+];
+
+/// What instantiates a module: the math of [`MATH`] under `env`.
+fn linker() -> Result<&'static Linker<StoreLimits>> {
+    static LINKER: OnceLock<std::result::Result<Linker<StoreLimits>, String>> = OnceLock::new();
+    LINKER
+        .get_or_init(|| {
+            let mut l = Linker::new(engine()?);
+            let failed = |e: wasmtime::Error| format!("WebAssembly is not available: {e}");
+            macro_rules! one {
+                ($($name:literal => $f:expr),* $(,)?) => {
+                    $(l.func_wrap("env", $name, $f).map_err(failed)?;)*
+                };
+            }
+            one! {
+                "_acosf" => |x: f32| x.acos(),
+                "_acoshf" => |x: f32| x.acosh(),
+                "_asinf" => |x: f32| x.asin(),
+                "_asinhf" => |x: f32| x.asinh(),
+                "_atanf" => |x: f32| x.atan(),
+                "_atan2f" => |y: f32, x: f32| y.atan2(x),
+                "_atanhf" => |x: f32| x.atanh(),
+                "_copysignf" => |x: f32, y: f32| x.copysign(y),
+                "_cosf" => |x: f32| x.cos(),
+                "_coshf" => |x: f32| x.cosh(),
+                "_expf" => |x: f32| x.exp(),
+                "_fmodf" => |x: f32, y: f32| x % y,
+                "_isinff" => |x: f32| i32::from(x.is_infinite()),
+                "_isnanf" => |x: f32| i32::from(x.is_nan()),
+                "_logf" => |x: f32| x.ln(),
+                "_log10f" => |x: f32| x.log10(),
+                "_powf" => |x: f32, y: f32| x.powf(y),
+                "_remainderf" => |x: f32, y: f32| x - (x / y).round_ties_even() * y,
+                "_roundf" => |x: f32| x.round(),
+                "_sinf" => |x: f32| x.sin(),
+                "_sinhf" => |x: f32| x.sinh(),
+                "_tanf" => |x: f32| x.tan(),
+                "_tanhf" => |x: f32| x.tanh(),
+            }
+            Ok(l)
         })
         .as_ref()
         .map_err(Clone::clone)
@@ -173,14 +225,18 @@ fn deadline(store: &mut Store<StoreLimits>) {
 /// value.
 fn instantiate(module: &Module, fields: usize, rate: f64, tempo: f64, instrument: bool) -> Result<(Wasm, usize)> {
     let engine = engine()?;
-    if let Some(import) = module.imports().next() {
-        return Err(format!("the module imports {} from {}; a device imports nothing", import.name(), import.module()));
+    if let Some(import) = module.imports().find(|i| i.module() != "env" || !MATH.contains(&i.name())) {
+        return Err(format!(
+            "the module imports {} from {}; a device imports nothing but the math functions env._sinf and the like (daw describe plugins.abi)",
+            import.name(),
+            import.module()
+        ));
     }
     let limits = StoreLimitsBuilder::new().memory_size(MEMORY_BYTES).instances(1).build();
     let mut store = Store::new(engine, limits);
     store.limiter(|l| l);
     deadline(&mut store);
-    let instance = Instance::new(&mut store, module, &[]).map_err(|e| format!("the module does not start: {e:#}"))?;
+    let instance = linker()?.instantiate(&mut store, module).map_err(|e| format!("the module does not start: {e:#}"))?;
     let memory = instance.get_memory(&mut store, "memory").ok_or("the module exports no memory")?;
     macro_rules! func {
         ($name:literal, $params:ty, $results:ty, $shape:literal) => {

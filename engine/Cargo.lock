@@ -87,6 +87,9 @@ dependencies = [
  "sha2 0.11.0",
  "tempfile",
  "ureq",
+ "wasmparser 0.261.0",
+ "wasmprinter",
+ "wat",
  "zip",
 ]
 

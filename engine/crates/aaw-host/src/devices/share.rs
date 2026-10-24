@@ -43,7 +43,7 @@ fn unbuilt(device: &Installed) -> Option<String> {
 /// Python runs as they do, a real-time one in a sandbox.
 fn trust(device: &Installed) -> (bool, String) {
     if device.manifest.run == "realtime" {
-        (true, "Its device.wasm runs in the engine's sandbox: it imports nothing, reaches no file and no network, and is stopped when it traps or runs past its deadline.".into())
+        (true, "Its device.wasm runs in the engine's sandbox: it imports nothing but math, reaches no file and no network, and is stopped when it traps or runs past its deadline.".into())
     } else {
         (false, format!("Its {} runs as you, in this Mac's Python, whenever a song plays it, and may read and write your files: read it, or know its author, before a song plays it.", device.manifest.entry))
     }

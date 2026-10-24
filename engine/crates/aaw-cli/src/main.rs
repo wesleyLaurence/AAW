@@ -1034,8 +1034,8 @@ enum KeysCmd {
 /// code. Offline, device.py, whose process(audio, sample_rate, fields) makes
 /// its sound over numpy, run by the host when what feeds the device changes
 /// and played from the result. In real time, device.wasm, a WebAssembly
-/// module built from device.rs by daw plugin build, run on the audio
-/// thread. In a song it is {type: device, name: SLUG}.
+/// module built from device.rs or device.dsp (FAUST) by daw plugin build,
+/// run on the audio thread. In a song it is {type: device, name: SLUG}.
 #[derive(Subcommand)]
 enum PluginCmd {
     /// The plugins installed: the project's own and the workspace's, each
@@ -1060,8 +1060,9 @@ enum PluginCmd {
     /// each note and echoes it: a folder under the workspace's devices/, or
     /// under the project's with --project. Offline in Python, or with
     /// --realtime in Rust for the audio thread, built at once when rustc
-    /// can; a MIDI effect is offline only. The reply names the folder and
-    /// its files.
+    /// can, or with --faust an effect in FAUST for the audio thread, built
+    /// at once when the FAUST compiler is there; a MIDI effect is offline
+    /// only. The reply names the folder and its files.
     New {
         name: String,
         /// Put it under this project's devices/, for this song alone.
@@ -1078,9 +1079,14 @@ enum PluginCmd {
         /// instrument, in Python.
         #[arg(long, conflicts_with = "realtime")]
         midi: bool,
+        /// A real-time effect whose source is FAUST: device.dsp, built to
+        /// device.wasm.
+        #[arg(long, conflicts_with_all = ["realtime", "instrument", "midi"])]
+        faust: bool,
     },
-    /// Build a real-time plugin: compile its source, device.rs, to its
-    /// entry, device.wasm, with rustc for WebAssembly, then check it. A
+    /// Build a real-time plugin: compile its source to its entry,
+    /// device.wasm, device.rs with rustc for WebAssembly or device.dsp with
+    /// the FAUST compiler (AAW_FAUST, else faust), then check it. A
     /// host playing a song with the plugin hears the new build within a
     /// second.
     Build {
@@ -2632,7 +2638,7 @@ fn run(cli: &Cli) -> Result<Json> {
                 let dir = project.as_ref().map(|p| files(p));
                 Ok(aaw_host::devices::find(dir.as_deref().and_then(Path::parent), device)?.json())
             }
-            PluginCmd::New { name, project, realtime, instrument, midi } => {
+            PluginCmd::New { name, project, realtime, instrument, midi, faust } => {
                 let root = match project {
                     Some(p) => aaw_host::devices::project_dir(files(p).parent().unwrap_or(Path::new("."))),
                     None => aaw_host::devices::dir(),
@@ -2644,7 +2650,11 @@ fn run(cli: &Cli) -> Result<Json> {
                 } else {
                     "effect"
                 };
-                let made = aaw_host::devices::new(name, &root, *realtime, kind)?;
+                let made = match faust {
+                    true => aaw_host::devices::new_faust(name, &root)?,
+                    false => aaw_host::devices::new(name, &root, *realtime, kind)?,
+                };
+                let realtime = &(*realtime || *faust);
                 let code = made.dir.join(made.manifest.source.as_ref().unwrap_or(&made.manifest.entry));
                 let slug = &made.manifest.slug;
                 let mut out = json!({});

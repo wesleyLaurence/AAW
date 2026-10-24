@@ -13,8 +13,8 @@
 //! there, or when the run fails, the device passes its input through.
 //!
 //! A real-time device's `device.wasm` is a WebAssembly module meeting the
-//! device ABI (`aaw_engine::wasm`), built from its source, `device.rs`, by
-//! `daw plugin build`. The host makes it ready and the engine runs it on
+//! device ABI (`aaw_engine::wasm`), built from its source by `daw plugin
+//! build`: Rust, `device.rs`, or FAUST, `device.dsp` (`faust`). The host makes it ready and the engine runs it on
 //! the audio thread, an instance to each place the device is in a chain.
 //!
 //! An instrument (`kind: instrument`) is a MIDI track's instrument, given
@@ -45,6 +45,7 @@ use std::sync::Arc;
 
 type Result<T> = std::result::Result<T, String>;
 
+pub mod faust;
 pub mod share;
 
 /// The manifest format this reads.
@@ -188,8 +189,8 @@ pub struct Manifest {
     /// The code, relative to the folder: `device.py` offline, `device.wasm`
     /// in real time.
     pub entry: String,
-    /// What a real-time device's entry is built from, `device.rs`, when the
-    /// folder holds its source.
+    /// What a real-time device's entry is built from, `device.rs` or
+    /// `device.dsp`, when the folder holds its source.
     pub source: Option<String>,
     pub fields: Vec<FieldSpec>,
 }
@@ -470,8 +471,11 @@ pub fn parse_manifest(text_of_file: &str, folder: &str) -> Result<Manifest> {
     let source = text(d, "source")?;
     match &source {
         Some(_) if run == "offline" => return Err("source is for a real-time device, whose entry is built from it; an offline device's entry is its source".into()),
-        Some(file) if !in_folder(file) || !file.ends_with(".rs") => {
-            return Err(format!("source {file} is a .rs file in the device's folder, which daw plugin build compiles"));
+        Some(file) if !in_folder(file) || !(file.ends_with(".rs") || faust::is_faust(file)) => {
+            return Err(format!("source {file} is a .rs or a .dsp file in the device's folder, which daw plugin build compiles"));
+        }
+        Some(file) if faust::is_faust(file) && kind != "effect" => {
+            return Err(format!("source {file} is FAUST, which builds an effect; a real-time {kind}'s source is Rust, device.rs"));
         }
         _ => {}
     }
@@ -735,6 +739,18 @@ fields:
 /// device ABI.
 pub const RUST_TEMPLATE: &str = include_str!("../templates/device.rs");
 
+/// The manifest `daw plugin new --faust` writes, with NAME filled in: the
+/// real-time scaffold's fields, built from FAUST.
+pub fn faust_manifest_template() -> String {
+    REALTIME_MANIFEST_TEMPLATE
+        .replace("# realtime: device.wasm runs on the audio thread, built from device.rs by\n# daw plugin build. The fields reach the code in this order.", "# realtime: device.wasm runs on the audio thread, built from device.dsp by\n# daw plugin build with the FAUST compiler. Each field is the control of\n# device.dsp its label names, its range within the control's.")
+        .replace("source: device.rs", "source: device.dsp")
+}
+
+/// The source `daw plugin new --faust` writes: FAUST, built to the device
+/// ABI.
+pub const FAUST_TEMPLATE: &str = include_str!("../templates/device.dsp");
+
 /// The manifest `daw plugin new --instrument` writes, with NAME and RUN
 /// filled in.
 pub const INSTRUMENT_MANIFEST_TEMPLATE: &str = r#"# An instrument of your own. The manifest is the contract: what the song,
@@ -899,6 +915,23 @@ pub fn new(name: &str, root: &Path, realtime: bool, kind: &str) -> Result<Instal
     if kind == "midi" && realtime {
         return Err("A MIDI effect runs offline, in Python: daw plugin new NAME --midi".into());
     }
+    let (manifest, file, code) = match (kind, realtime) {
+        ("midi", _) => (MIDI_MANIFEST_TEMPLATE.to_string(), "device.py", MIDI_CODE_TEMPLATE),
+        ("instrument", true) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_REALTIME_RUN), "device.rs", RUST_INSTRUMENT_TEMPLATE),
+        ("instrument", false) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_OFFLINE_RUN), "device.py", INSTRUMENT_CODE_TEMPLATE),
+        (_, true) => (REALTIME_MANIFEST_TEMPLATE.to_string(), "device.rs", RUST_TEMPLATE),
+        (_, false) => (MANIFEST_TEMPLATE.to_string(), "device.py", CODE_TEMPLATE),
+    };
+    scaffold(name, root, &manifest, file, code)
+}
+
+/// Makes a real-time effect's folder for `name` under `root` whose source
+/// is FAUST, `device.dsp`, left to `build`.
+pub fn new_faust(name: &str, root: &Path) -> Result<Installed> {
+    scaffold(name, root, &faust_manifest_template(), "device.dsp", FAUST_TEMPLATE)
+}
+
+fn scaffold(name: &str, root: &Path, manifest: &str, file: &str, code: &str) -> Result<Installed> {
     let name = name.trim();
     let slug_of = slug(name);
     if slug_of.is_empty() {
@@ -909,13 +942,6 @@ pub fn new(name: &str, root: &Path, realtime: bool, kind: &str) -> Result<Instal
         return Err(format!("{} is already there; choose another name or edit it", folder.display()));
     }
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let (manifest, file, code) = match (kind, realtime) {
-        ("midi", _) => (MIDI_MANIFEST_TEMPLATE.to_string(), "device.py", MIDI_CODE_TEMPLATE),
-        ("instrument", true) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_REALTIME_RUN), "device.rs", RUST_INSTRUMENT_TEMPLATE),
-        ("instrument", false) => (INSTRUMENT_MANIFEST_TEMPLATE.replace("RUN", INSTRUMENT_OFFLINE_RUN), "device.py", INSTRUMENT_CODE_TEMPLATE),
-        (_, true) => (REALTIME_MANIFEST_TEMPLATE.to_string(), "device.rs", RUST_TEMPLATE),
-        (_, false) => (MANIFEST_TEMPLATE.to_string(), "device.py", CODE_TEMPLATE),
-    };
     let manifest = manifest.replace("NAME", name);
     let code = code.replacen("NAME", name, 1).replace("SLUG", &slug_of);
     aaw_model::atomic_write(&folder.join("device.yaml"), &manifest).map_err(|e| e.to_string())?;
@@ -962,9 +988,10 @@ fn rustc() -> PathBuf {
     PathBuf::from("rustc")
 }
 
-/// Builds a real-time device: compiles its source to its entry with rustc
-/// for WebAssembly, then checks it. The reply is the check's, with the
-/// module's file, its size and the seconds the build took.
+/// Builds a real-time device: compiles its source to its entry, Rust with
+/// rustc for WebAssembly and FAUST with the FAUST compiler wrapped in the
+/// ABI, then checks it. The reply is the check's, with the module's file,
+/// its size and the seconds the build took.
 pub fn build(device: &Installed) -> Result<Json> {
     let m = &device.manifest;
     if m.run != "realtime" {
@@ -978,24 +1005,14 @@ pub fn build(device: &Installed) -> Result<Json> {
     let entry = device.dir.join(&m.entry);
     let partial = device.dir.join(format!(".{}.building", m.entry));
     let started = std::time::Instant::now();
-    let compiler = rustc();
-    let out = Command::new(&compiler)
-        .args(["--edition", "2024", "--crate-type", "cdylib", "--target", "wasm32-unknown-unknown"])
-        .args(["-C", "opt-level=3", "-C", "panic=abort", "-C", "strip=symbols"])
-        .arg("-o")
-        .arg(&partial)
-        .arg(&src)
-        .current_dir(&device.dir)
-        .output()
-        .map_err(|e| format!("Could not start {}: {e}; Rust from rustup.rs builds a real-time device", compiler.display()))?;
-    if !out.status.success() {
-        let _ = std::fs::remove_file(&partial);
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let mut message = stderr.trim().to_string();
-        if stderr.contains("wasm32-unknown-unknown") && (stderr.contains("can't find crate") || stderr.contains("target may not be installed")) {
-            message.push_str("\nThe WebAssembly target is not installed: rustup target add wasm32-unknown-unknown installs it");
+    if faust::is_faust(source) {
+        let made = faust::build(device, source, &partial);
+        if made.is_err() {
+            let _ = std::fs::remove_file(&partial);
         }
-        return Err(format!("{source} does not build:\n{message}"));
+        made?;
+    } else {
+        rust(&src, source, &device.dir, &partial)?;
     }
     std::fs::rename(&partial, &entry).map_err(|e| format!("{}: {e}", entry.display()))?;
     let built = read(&device.dir, device.from)?;
@@ -1004,6 +1021,30 @@ pub fn build(device: &Installed) -> Result<Json> {
     reply["bytes"] = json!(std::fs::metadata(&entry).map(|m| m.len()).unwrap_or(0));
     reply["build_seconds"] = json!((started.elapsed().as_secs_f64() * 1000.0).round() / 1000.0);
     Ok(reply)
+}
+
+/// Compiles a Rust source to `partial` for WebAssembly.
+fn rust(src: &Path, source: &str, dir: &Path, partial: &Path) -> Result<()> {
+    let compiler = rustc();
+    let out = Command::new(&compiler)
+        .args(["--edition", "2024", "--crate-type", "cdylib", "--target", "wasm32-unknown-unknown"])
+        .args(["-C", "opt-level=3", "-C", "panic=abort", "-C", "strip=symbols"])
+        .arg("-o")
+        .arg(partial)
+        .arg(src)
+        .current_dir(dir)
+        .output()
+        .map_err(|e| format!("Could not start {}: {e}; Rust from rustup.rs builds a real-time device", compiler.display()))?;
+    if !out.status.success() {
+        let _ = std::fs::remove_file(partial);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        let mut message = stderr.trim().to_string();
+        if stderr.contains("wasm32-unknown-unknown") && (stderr.contains("can't find crate") || stderr.contains("target may not be installed")) {
+            message.push_str("\nThe WebAssembly target is not installed: rustup target add wasm32-unknown-unknown installs it");
+        }
+        return Err(format!("{source} does not build:\n{message}"));
+    }
+    Ok(())
 }
 
 impl Installed {
@@ -2228,7 +2269,7 @@ mod tests {
         assert!(refused("format: 1\nname: X\nrun: live\n").contains("offline or realtime"));
         assert!(refused("format: 1\nname: X\nrun: realtime\nentry: device.py\n").contains(".wasm file"));
         assert!(refused("format: 1\nname: X\nsource: device.rs\n").contains("real-time device"));
-        assert!(refused("format: 1\nname: X\nrun: realtime\nsource: ../x.rs\n").contains(".rs file in the device's folder"));
+        assert!(refused("format: 1\nname: X\nrun: realtime\nsource: ../x.rs\n").contains(".rs or a .dsp file in the device's folder"));
         let rt = parse_manifest("format: 1\nname: X\nrun: realtime\nsource: device.rs\n", "x").unwrap();
         assert_eq!((rt.entry.as_str(), rt.source.as_deref()), ("device.wasm", Some("device.rs")));
         assert!(refused("format: 1\nname: X\ncolour: red\n").contains("colour"));

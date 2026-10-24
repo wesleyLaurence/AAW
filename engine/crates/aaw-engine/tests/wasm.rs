@@ -113,7 +113,13 @@ fn a_module_that_does_not_meet_the_abi_is_refused_in_words() {
     let refused = |bytes: Vec<u8>| code(&bytes).unwrap_err();
     assert!(refused(module("", "", 2)).contains("device ABI 2"), "{}", refused(module("", "", 2)));
     let imports = wat::parse_str(r#"(module (import "env" "log" (func)) (memory (export "memory") 1))"#).unwrap();
-    assert!(refused(imports).contains("imports log from env; a device imports nothing"));
+    let imports = refused(imports);
+    assert!(imports.contains("imports log from env; a device imports nothing but the math functions"), "{imports}");
+    let other = wat::parse_str(r#"(module (import "wasi" "_sinf" (func (param f32) (result f32))) (memory (export "memory") 1))"#).unwrap();
+    assert!(refused(other).contains("imports _sinf from wasi"));
+    let typed = wat::parse_str(r#"(module (import "env" "_sinf" (func (param f64) (result f64))) (memory (export "memory") 1))"#).unwrap();
+    let typed = refused(typed);
+    assert!(typed.contains("does not start"), "{typed}");
     let bare = wat::parse_str(r#"(module (memory (export "memory") 1) (func (export "aaw_abi") (result i32) (i32.const 1)))"#).unwrap();
     assert!(refused(bare).contains("exports no aaw_init"));
     let far = wat::parse_str(
@@ -134,6 +140,41 @@ fn a_module_that_does_not_meet_the_abi_is_refused_in_words() {
     assert_eq!(late.latency(), 64);
     // One that traps at once fails when it is made ready.
     assert!(refused(module("unreachable", "", 1)).contains("aaw_process failed"));
+}
+
+#[test]
+fn a_module_calls_the_engine_s_math_without_allocating() {
+    // Each sample becomes its sine and its power of two, through env.
+    let bytes = wat::parse_str(
+        r#"(module
+  (import "env" "_sinf" (func $sin (param f32) (result f32)))
+  (import "env" "_powf" (func $pow (param f32 f32) (result f32)))
+  (memory (export "memory") 1)
+  (func (export "aaw_abi") (result i32) (i32.const 1))
+  (func (export "aaw_init") (param f64 f64))
+  (func (export "aaw_fields") (result i32) (i32.const 16))
+  (func (export "aaw_left") (result i32) (i32.const 1024))
+  (func (export "aaw_right") (result i32) (i32.const 2048))
+  (func (export "aaw_process") (param $n i32) (param $frame i64) (param $rolling i32)
+    (local $at i32)
+    (block $done (loop $next
+      (br_if $done (i32.ge_s (local.get $at) (i32.shl (local.get $n) (i32.const 2))))
+      (f32.store (i32.add (i32.const 1024) (local.get $at)) (call $sin (f32.load (i32.add (i32.const 1024) (local.get $at)))))
+      (f32.store (i32.add (i32.const 2048) (local.get $at)) (call $pow (f32.const 2) (f32.load (i32.add (i32.const 2048) (local.get $at)))))
+      (local.set $at (i32.add (local.get $at) (i32.const 4)))
+      (br $next))))
+)"#,
+    )
+    .unwrap();
+    let code = Code::new(&bytes, vec![], RATE, 120.0, false).unwrap();
+    let mut running = code.instance_at(&BTreeMap::new());
+    let input = ramp(300);
+    let mut x = input.clone();
+    assert_no_alloc::assert_no_alloc(|| running.process(&mut x, rolling(0)));
+    for (y, x) in x.iter().zip(&input) {
+        assert!((y[0] - x[0].sin()).abs() < 1e-6 && (y[1] - 2f64.powf(x[1])).abs() < 1e-6, "{y:?} from {x:?}");
+    }
+    assert!(code.failure().is_none());
 }
 
 #[test]
