@@ -230,6 +230,32 @@ def test_a_realtime_plugin_is_built_run_in_the_song_and_rebuilt(tmp_path, worksp
         daw("plugin", "build", "tilt-eq")
 
 
+def test_a_faust_plugin_is_built_and_run_in_the_song(tmp_path, workspace):
+    made = daw("plugin", "new", "Faust Tilt", "--faust")
+    folder = workspace / "devices" / "faust-tilt"
+    assert made["source"] == "device.dsp" and (folder / "device.dsp").is_file()
+    assert "daw plugin build faust-tilt" in made["next"]
+    if "build_error" in made:
+        if "Could not start" in made["build_error"]:
+            pytest.skip("no FAUST compiler here")
+        raise AssertionError(made["build_error"])
+    assert made["build"]["ok"] is True and made["build"]["latency"] == 0
+    # In a chain it runs as the song plays: -6 dB once the gain has glided
+    # there, and darker with the tone's lane low.
+    x = tone(1000)
+    device = {"type": "device", "name": "faust-tilt", "fields": {"gain_db": -6}}
+    out, _ = run_chain(tmp_path / "gain", [device], x)
+    settled = len(x) // 4
+    assert abs(level_db(out[settled : len(x)]) - level_db(x[settled:]) + 6.02) < 0.05
+    dark, _ = run_chain(tmp_path / "dark", [device], x, automation={0: {"fields.tone_hz": [(0, 200), (2, 200)]}})
+    assert level_db(dark[settled : len(x)]) < level_db(out[settled : len(x)]) - 6
+    # Its control renamed: the build says the line the manifest needs.
+    source = folder / "device.dsp"
+    source.write_text(source.read_text().replace('checkbox("invert")', 'checkbox("flip")'))
+    with pytest.raises(ValueError, match="flip: {type: switch, default: false}"):
+        daw("plugin", "build", "faust-tilt")
+
+
 def keys_song(project, slug):
     """A song of one MIDI track playing the instrument `slug`: an A held two
     beats from beat 0 at 120 BPM, then the E above it for a beat."""

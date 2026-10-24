@@ -1,4 +1,4 @@
-# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23, stage 5 October 24
+# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23, stages 5 and 6 October 24
 
 Asked for by the person on October 19, 2026 (D123): "we need some kind of
 standard almost programming spec where it's like you can code a brand new
@@ -10,8 +10,9 @@ where people can build things into Ableton, but I want it to be completely
 agent driven". Backlog: Next, Devices anyone builds, to a spec. The first
 stage, the manifest and the offline tier, is built (D144), the second, the
 real-time tier (D145), the third, instruments (D146), the fourth, MIDI
-effects (D147), and the fifth, the spec's version 1 as a reference and how
-a device is shared (D156); FAUST is the stage below.
+effects (D147), the fifth, the spec's version 1 as a reference and how
+a device is shared (D156), and the sixth, FAUST as a real-time effect's
+source (D157).
 
 ## What
 
@@ -30,6 +31,12 @@ plugin new NAME [--realtime]` scaffolds a working device, the code is
 edited, `daw plugin check` runs it once (`daw plugin build` compiles a
 real-time one first), and it is tried on the track in the same
 conversation.
+
+A real-time effect may be written in FAUST, the language of signal
+processing, rather than Rust: `daw plugin new NAME --faust` scaffolds
+`device.dsp`, whose controls are the manifest's fields by their labels,
+and `daw plugin build` compiles it with the FAUST compiler, where one is
+installed, to a module of the same ABI.
 
 An instrument is the same folder with `kind: instrument`: a MIDI track's
 notes play it in place of a Sampler or the Synth, `daw instrument set
@@ -148,8 +155,8 @@ remove SLUG` moves one to the Trash.
   too.
 - **The real-time tier** (`run: realtime`). `device.wasm` is a
   WebAssembly module meeting the device ABI, version 1
-  (`aaw-engine/src/wasm.rs`): it imports nothing and exports `memory`,
-  `aaw_abi() -> i32` returning 1, `aaw_init(sample_rate: f64, tempo: f64)`,
+  (`aaw-engine/src/wasm.rs`): it imports nothing but the math functions
+  the engine gives (FAUST, below) and exports `memory`, `aaw_abi() -> i32` returning 1, `aaw_init(sample_rate: f64, tempo: f64)`,
   `aaw_fields() -> i32`, where the engine writes an `f64` for each field in
   the manifest's order before every call (a number as itself, a switch as 1
   or 0, a choice as the index of its choice), `aaw_left() -> i32` and
@@ -192,6 +199,38 @@ remove SLUG` moves one to the Trash.
   the defaults and replies its latency and its load, the share of real
   time one instance takes on this Mac, and `stale` when the source was
   changed after the module was built.
+- **FAUST** (D157, `aaw-host/src/devices/faust.rs`). `source:
+  device.dsp` in a real-time effect's manifest; the manifest refuses it
+  for an instrument or a MIDI effect. `daw plugin build` runs the FAUST
+  compiler (`AAW_FAUST`, else `faust` on the path) as `-lang wasm -ftz 2
+  -I FOLDER -o FILE device.dsp` in a scratch folder. Its module keeps the
+  code's state at address 0 and imports math functions from `env`; the
+  JSON it writes there before `init` says the state's size, the channels
+  and each control with the byte its value is at. The host reads the
+  JSON and the exports `init` and `compute` with wasmparser, binds each
+  control to the field its label names (in lowercase, every run of other
+  characters an underscore: "Cutoff Hz" is `cutoff_hz`), and refuses in
+  words a control with no field, with the manifest's line to add, a
+  field with no control, a switch on a slider or a number on a checkbox,
+  and a numeric field or a choice whose range is outside its control's.
+  It prints the module as text with wasmprinter, defines the two globals
+  FAUST imports and nothing reads, grows the memory to hold the ABI's
+  places past the state and the JSON, and adds the ABI's exports:
+  `aaw_init` calls `init` at the rate, `aaw_process` writes each field to
+  its control as an `f32`, calls `compute` on the buffers and copies the
+  output back over them; then `wat` assembles it to `device.wasm`, which
+  is checked as a Rust one is. A process of one channel in and one out is
+  compiled again as `par(i, 2, component("device.dsp"))`, two of it whose
+  identical controls FAUST makes one; one channel in is given the two's
+  mean, and one channel out is given to both. The engine gives every
+  module the math FAUST's code calls (`wasm::MATH`): 23 single-precision
+  functions under `env`, by FAUST's names and types, through a wasmtime
+  linker, calling Rust's own without allocating; anything else imported is
+  refused. `daw plugin new NAME --faust` writes the real-time scaffold's
+  manifest with `source: device.dsp` and a `device.dsp` of the same gain,
+  tone, warmth, mode and invert, each smoothed with `si.smoo`, and builds
+  it when the compiler is there. A failed build leaves the module that
+  played.
 - **The host's work on a real-time device** loads its code where an
   offline device's run would start, keyed by the folder's hash, the rate
   and the tempo, and hands it to the engine with the offline caches
@@ -420,6 +459,25 @@ remove SLUG` moves one to the Trash.
   with rustc's words, and an offline plugin with nothing to build.
 - Swift: the panel's line for each state, an instrument's included, and a
   plugin matched by name, slug, description or field.
+- FAUST. `aaw-engine/tests/wasm.rs`: a module calling `env._sinf` and
+  `env._powf` without allocating, and an import from elsewhere or of
+  another type refused. `aaw-host/tests/faust.rs`, over two modules the
+  FAUST compiler made, checked in beside their `.dsp`: the controls read
+  with their names, units and scales; a stereo one bound and run through
+  the ABI, its switch bypassing it exactly, its gain exact frame by
+  frame, its cutoff low taking 95% of a noise's energy and its choice's
+  index scaling a channel; a mono one given the channels' mean and giving
+  both; each refusal of a field and a control with its words, and a
+  `.dsp` refused for an instrument. With a FAUST compiler: the scaffold
+  built, checked, added by slug and frozen at its gain once it glided
+  there, a source that does not compile refused with the compiler's words
+  and a renamed control with the line to add; a mono source of tanh and
+  sine built to run on each channel apart. `tests/test_devices.py`, with
+  a compiler: `--faust` made and built from the terminal, rendering at its
+  gain, a lane on its tone darkening it, and a renamed control refused.
+  The tests with a compiler ran here with `AAW_FAUST` naming a stand-in
+  over FAUST 2.90's WebAssembly build (`@grame/faustwasm`), since this Mac
+  had no room for Homebrew's FAUST and its LLVM.
 - Instruments. `aaw-dsp/src/instrument.rs`: notes starting and ending at
   their frames whatever the blocks, an end before a start at one frame, a
   seek ending what is held and starting what sounds, a stop, a preview
@@ -487,9 +545,13 @@ remove SLUG` moves one to the Trash.
   a change is heard when the run lands (a second or more on a long song)
   and a previewed note or a ringing tail passes through dry; a real-time
   device has neither limit.
-- A real-time device's source is Rust, one file, built by rustc; a module
-  built from any other language that meets the ABI plays, but nothing
-  builds it for the person. Its fields change every 128 frames, so the
+- A real-time device's source is Rust, one file, built by rustc, or for
+  an effect FAUST, built by the FAUST compiler the person installs; a
+  module built from any other language that meets the ABI plays, but
+  nothing builds it for the person. A FAUST device has no latency to
+  declare, takes and gives one or two channels, and binds controls by
+  label alone; its build reads the JSON and the memory as FAUST 2.90
+  writes them. Its fields change every 128 frames, so the
   code glides what would click. Growing its memory in `process` is not
   free of allocation on the audio thread; the scaffold makes everything in
   `new`. The deadline stops a stall only after the audio has broken for
@@ -537,8 +599,9 @@ remove SLUG` moves one to the Trash.
 
 ## Remaining stages
 
-6. FAUST as a way to make a real-time device: a `.dsp` source built to a
-   module of the same ABI, where the FAUST compiler is installed.
+The six stages are built. What is left is in the backlog's line: a finer
+dependency for an offline device's input than the whole song, and a
+timeout on an offline run (both under Limits).
 
 ## Open questions
 

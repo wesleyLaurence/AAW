@@ -15,7 +15,7 @@
     "license": {"type": "string", "default": "", "description": "What others may do with the device, such as MIT."},
     "run": {"enum": ["offline", "realtime"], "default": "offline", "description": "offline: Python over the whole song, cached. realtime: WebAssembly on the audio thread. A MIDI effect runs offline."},
     "entry": {"type": "string", "pattern": "^[^./][^/]*\\.(py|wasm)$", "description": "The code, a file in the folder: device.py offline and device.wasm in real time unless said."},
-    "source": {"type": "string", "pattern": "^[^./][^/]*\\.rs$", "description": "A real-time device's Rust source, which daw plugin build compiles to its entry."},
+    "source": {"type": "string", "pattern": "^[^./][^/]*\\.(rs|dsp)$", "description": "A real-time device's source, Rust (.rs) or FAUST (.dsp), which daw plugin build compiles to its entry; FAUST makes an effect."},
     "fields": {
       "type": "object",
       "maxProperties": 64,

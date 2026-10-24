@@ -35,10 +35,9 @@ Items 1–4 are the person's notes from using the app, brought on October
     piano roll's preview through a real-time one (D146), and MIDI effects,
     offline in Python among a MIDI track's `midi_effects` (D147), and the
     spec's version 1 as `daw describe plugins` with `daw plugin pack`,
-    `install` and `remove` (D156). Left: FAUST as another source built to
-    the same ABI; a finer
-    dependency for an offline device's input than the whole song; a
-    timeout on an offline run.
+    `install` and `remove` (D156), and FAUST as a real-time effect's
+    source (D157). Left: a finer dependency for an offline device's input
+    than the whole song; a timeout on an offline run.
     [features/custom-devices.md](features/custom-devices.md)
 2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
@@ -121,6 +120,13 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A FAUST effect, by the agent on a real song:** the FAUST compiler
+  installed (`brew install faust`, once the disk has room), `daw plugin
+  new NAME --faust` built by it, and a sound the agent writes in FAUST
+  from a sentence (a filter, a delay, a reverb from `stdfaust.lib`) put on
+  a track and heard against the same in Rust; a field moved in its panel
+  and by a lane while it plays. Built and run only with FAUST's
+  WebAssembly build standing in for the compiler; nothing heard.
 - **A device shared, by the agent and the person:** a device the agent
   wrote packed with `daw plugin pack`, the zip sent to another Mac or
   another workspace and installed with `daw plugin install`, a song using
