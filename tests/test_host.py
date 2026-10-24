@@ -31,7 +31,8 @@ def registry(monkeypatch):
 
 
 def daw(binary, *args, check=True):
-    out = subprocess.run([str(binary), *map(str, args)], capture_output=True, text=True)
+    # A play through a device that never starts fails here, not by hanging the suite.
+    out = subprocess.run([str(binary), *map(str, args)], capture_output=True, text=True, timeout=120)
     if check and out.returncode:
         raise AssertionError(out.stderr)
     return json.loads(out.stdout) if out.returncode == 0 else json.loads(out.stderr)

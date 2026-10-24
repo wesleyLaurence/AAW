@@ -465,7 +465,10 @@ impl Host {
     /// and still playing if it was: another rate or another device.
     fn reopen(&mut self, program: Arc<Program>) -> Result<()> {
         let old = self.transport.take().expect("transport");
-        let (playing, frame, old_program) = (old.control.playing(), old.control.position(), old.control.program().clone());
+        // A play the stream died before taking still plays, from where it asked.
+        let unheard = old.control.play_unheard();
+        let playing = old.control.playing() || unheard.is_some();
+        let (frame, old_program) = (unheard.unwrap_or(old.control.position()), old.control.program().clone());
         drop(old);
         let beats = BigRational::from_float(frame as f64 * old_program.tempo / 60.0 / old_program.rate as f64).unwrap_or_default();
         self.open_transport(program)?;

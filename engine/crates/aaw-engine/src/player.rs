@@ -189,6 +189,8 @@ pub struct Control {
     garbage: rtrb::Consumer<Garbage>,
     shared: Arc<Shared>,
     program: Arc<Program>,
+    /// Where the last play sent asked to start; None once a stop is sent.
+    asked: Option<usize>,
 }
 
 /// A connected player and control, stopped at frame 0 of `program`.
@@ -220,6 +222,7 @@ pub fn channel(program: Arc<Program>) -> (Control, Player) {
         garbage: garbage_rx,
         shared,
         program,
+        asked: None,
     };
     (control, player)
 }
@@ -240,13 +243,15 @@ impl Control {
     }
 
     pub fn play(&mut self, from: usize) -> Result<(), String> {
-        self.send(Message::Play { from, preroll: 0 })
+        self.play_after(from, 0)
     }
 
     /// Plays from `from` after `preroll` frames of count-in, the metronome
     /// alone with the song standing at `from`, as a take starts.
     pub fn play_after(&mut self, from: usize, preroll: usize) -> Result<(), String> {
-        self.send(Message::Play { from, preroll })
+        self.send(Message::Play { from, preroll })?;
+        self.asked = Some(from);
+        Ok(())
     }
 
     /// Records a stem or the mix into `tap` while the transport rolls, until
@@ -263,7 +268,9 @@ impl Control {
     }
 
     pub fn stop(&mut self) -> Result<(), String> {
-        self.send(Message::Stop)
+        self.send(Message::Stop)?;
+        self.asked = None;
+        Ok(())
     }
 
     pub fn locate(&mut self, to: usize) -> Result<(), String> {
@@ -322,6 +329,14 @@ impl Control {
 
     pub fn playing(&self) -> bool {
         self.shared.playing.load(Relaxed)
+    }
+
+    /// Where a play sent but not yet taken by the audio thread starts, as
+    /// when the driver stopped the stream before its first callback: the
+    /// output opened again plays from there.
+    pub fn play_unheard(&self) -> Option<usize> {
+        let unread = self.inbox.slots() < self.inbox.buffer().capacity();
+        self.asked.filter(|_| unread && !self.playing())
     }
 
     pub fn shared(&self) -> &Arc<Shared> {

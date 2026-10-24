@@ -56,9 +56,13 @@ host.
   (`Audio.strict_output`).
   A stream the driver stops, as cpal does when a device changes its rate
   under it or goes away, is marked dead and opened again, at most once a
-  second. A stream born as the device changes its rate can be stopped by the
-  late notification of that change; the transport waits for its first
-  callback and builds it once more when it died before one.
+  second. A stream that moves its device to another rate is stopped by the
+  late notification of that change, some 450 ms on, after a callback or two
+  or none; the transport watches such a stream for 800 ms and builds it once
+  more when it died, so a play or a take's tap is sent to the stream that
+  lasts. A play the audio thread never took is still known to the control
+  (`Control::play_unheard`), and the output opened again plays it from where
+  it asked.
 - **The input device** is kept and reported and opens nothing: recording
   ([recording](recording.md)) will open it.
 - **Bit depth** is the export's: the menu sets the WAV depth File › Export
@@ -88,7 +92,11 @@ host.
 - `tests/test_host.py`: `daw device list`; `daw device use` on a running
   host, its refusals and that the revision stands; `daw play --output
   BlackHole --device-rate 48000` reporting `resampled` on a 44.1 kHz song,
-  skipped without the device.
+  then at its own rate, skipped without the device. Each `daw` there has a
+  two-minute limit, so a play that never starts fails the test instead of
+  holding the suite.
+- `aaw-engine/tests/player.rs`: a play sent and not yet taken is known with
+  where it starts, and is not once taken or stopped.
 - Swift tests: the defaults round trip, the menu keeping a device that is
   away, the words under the menus, the launch flag.
 - Scripted pictures of the window only. Nothing was heard, no AirPods were
