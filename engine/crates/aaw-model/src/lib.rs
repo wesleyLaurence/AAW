@@ -16,6 +16,7 @@ pub mod length;
 pub mod meter;
 pub mod midi_effects;
 pub mod pyfmt;
+pub mod recipes;
 pub mod rules;
 pub mod schedule;
 pub mod schema;

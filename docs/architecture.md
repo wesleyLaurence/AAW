@@ -252,7 +252,9 @@ track and 1 in any other, which saves byte for byte as it did before MIDI
 tracks; either is read (D63). Unknown fields are rejected, and an edit that
 names one is told the nearest field. Run `daw describe TOPIC` for each field's
 path, bounds and default, `daw describe TOPIC.PART` for one part of it, and
-`--schema` for the exact generated JSON schema.
+`--schema` for the exact generated JSON schema. `daw describe recipes` lists
+the commands for a job in order, from `aaw_model::recipes`, and a test runs
+each on a song it makes from generated audio.
 
 Session: `title`, `tempo`, `time_signature` (`N/D`, 1 to 32 beats over 1, 2, 4,
 8 or 16, `4/4` by default, one for the whole song; see

@@ -210,6 +210,7 @@ uv run daw samples import BASS_ID --project projects/my-beat/song.yaml --id sub 
 uv run daw samples import ~/Music/song.m4a --project projects/my-beat/song.yaml --id song
 uv run daw describe
 uv run daw describe start
+uv run daw describe recipes.drum-bus
 uv run daw describe sampler
 uv run daw describe effects
 uv run daw describe automation

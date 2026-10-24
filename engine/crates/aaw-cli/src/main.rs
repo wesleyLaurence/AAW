@@ -147,6 +147,7 @@ struct Forwarded {
 #[derive(Clone, Copy, ValueEnum)]
 enum Topic {
     Start,
+    Recipes,
     Batch,
     Project,
     Sampler,
@@ -224,7 +225,7 @@ enum Top {
     Copy { project: Song, new_folder: PathBuf },
     /// The authoring contract: what a topic's fields mean and what each takes.
     /// Without a topic, the topics with their parts and sizes; `daw describe
-    /// start` makes a first song.
+    /// start` makes a first song and `daw describe recipes` lists the others.
     Describe {
         /// A topic, or one of its parts after a dot: effects.compressor,
         /// synth.filter.cutoff_hz.
