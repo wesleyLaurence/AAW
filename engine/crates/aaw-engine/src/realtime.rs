@@ -85,6 +85,8 @@ pub struct Transport {
     pub buffer: u32,
     stats: Arc<Stats>,
     opened: Instant,
+    /// Whether opening it moved the device to another rate.
+    moved_rate: bool,
 }
 
 impl Transport {
@@ -107,13 +109,20 @@ impl Transport {
     }
 
     /// Whether the stream has run a callback, waiting a moment for the
-    /// first; false once the driver has stopped it.
+    /// first; false once the driver has stopped it. A stream that moved its
+    /// device to another rate is stopped some 450 ms on as the change lands,
+    /// after a callback or two or none, so it is watched that long: a play
+    /// or a take's tap sent to it would go with it.
     fn running_soon(&self) -> bool {
         let started = Instant::now();
-        while self.stats.callbacks.load(Relaxed) == 0 && !self.stats.dead.load(Relaxed) && started.elapsed() < Duration::from_millis(600) {
+        let watch = Duration::from_millis(if self.moved_rate { 800 } else { 0 });
+        while !self.stats.dead.load(Relaxed)
+            && (self.stats.callbacks.load(Relaxed) == 0 || started.elapsed() < watch)
+            && started.elapsed() < Duration::from_millis(600).max(watch)
+        {
             std::thread::sleep(Duration::from_millis(5));
         }
-        self.stats.callbacks.load(Relaxed) > 0
+        self.stats.callbacks.load(Relaxed) > 0 && !self.stats.dead.load(Relaxed)
     }
 
     /// Whether the driver has stopped the stream: the device went away or
@@ -164,6 +173,7 @@ impl Transport {
                 }
             },
         };
+        let moved_rate = device.default_output_config().map_or(true, |c| c.sample_rate() != device_rate);
         let buffer = settings.buffer;
         if let cpal::SupportedBufferSize::Range { min, max } = range.buffer_size() {
             if buffer < *min || buffer > *max {
@@ -252,6 +262,7 @@ impl Transport {
             buffer,
             stats,
             opened: Instant::now(),
+            moved_rate,
         })
     }
 

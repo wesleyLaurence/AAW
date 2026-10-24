@@ -100,6 +100,25 @@ fn a_song_with_latency_plays_as_its_render_that_much_later() {
 }
 
 #[test]
+fn a_play_the_audio_thread_never_took_is_known_with_where_it_starts() {
+    // As when the driver stops a stream before its first callback: the
+    // output opened again must play, or `daw play --seconds` never ends.
+    let dir = tempfile::tempdir().unwrap();
+    let p = song(dir.path());
+    let (mut control, mut player) = started(&p, 6000);
+    assert!(!control.playing());
+    assert_eq!(control.play_unheard(), Some(6000));
+    pull(&mut player, 128);
+    assert!(control.playing());
+    assert_eq!(control.play_unheard(), None, "taken, so it is playing");
+    control.stop().unwrap();
+    pull(&mut player, 128);
+    control.play(9000).unwrap();
+    control.stop().unwrap();
+    assert_eq!(control.play_unheard(), None, "a stop sent after it");
+}
+
+#[test]
 fn playing_mid_song_fades_in_only_the_sounding_voices() {
     let dir = tempfile::tempdir().unwrap();
     let p = song(dir.path());

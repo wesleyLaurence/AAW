@@ -235,8 +235,9 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 - **Audio settings, by the person at the Mac:** a song at 44.1 kHz heard
   through AirPods Pro, whether the output follows the AirPods connecting and
   the speakers when they are taken off without a break in the beat, a device
-  chosen in Settings › Audio and unplugged while playing, and the buffer menu
-  at its smallest on a heavy song. Scripted runs and a virtual device only
+  chosen in Settings › Audio and unplugged while playing, the buffer menu
+  at its smallest on a heavy song, and play and a take pressed on a device
+  that must change its rate (D153). Scripted runs and a virtual device only
   ([audio settings](features/audio-settings.md)).
 - **`@` mentions, by the person at the Mac:** whether the list over `@`
   reads right with a real song's tracks, clips, samples, sections, markers,
