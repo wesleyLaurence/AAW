@@ -40,8 +40,10 @@ use serde_json::{json, Map, Value as Json};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 type Result<T> = std::result::Result<T, String>;
 
@@ -956,8 +958,57 @@ fn runner() -> Result<Command> {
     Ok(python)
 }
 
+/// The longest a device's Python runs before it is stopped:
+/// `AAW_DEVICE_TIMEOUT` in seconds, or five minutes.
+pub fn time_limit() -> Duration {
+    std::env::var("AAW_DEVICE_TIMEOUT")
+        .ok()
+        .and_then(|s| s.trim().parse::<f64>().ok())
+        .filter(|s| s.is_finite() && *s > 0.0)
+        .map_or(Duration::from_secs(300), Duration::from_secs_f64)
+}
+
+/// Runs the device's Python and reads the JSON it prints: what it raised
+/// as the error, and code that runs past `time_limit` stopped.
 fn run_python(mut command: Command, what: &str) -> Result<Json> {
-    let out = command.output().map_err(|e| format!("Could not start Python for {what}: {e}"))?;
+    let limit = time_limit();
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("Could not start Python for {what}: {e}"))?;
+    // Both pipes are read as the code writes, so that a full one never
+    // holds it.
+    fn drain(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<Vec<u8>> {
+        std::thread::spawn(move || {
+            let mut out = Vec::new();
+            let _ = pipe.read_to_end(&mut out);
+            out
+        })
+    }
+    let stdout = drain(child.stdout.take().expect("piped"));
+    let stderr = drain(child.stderr.take().expect("piped"));
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() >= limit => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let seconds = num(limit.as_secs_f64());
+                let unit = if seconds == "1" { "second" } else { "seconds" };
+                return Err(format!("{what} ran past {seconds} {unit} and was stopped; AAW_DEVICE_TIMEOUT sets the limit in seconds"));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+            Err(e) => return Err(format!("{what}: {e}")),
+        }
+    };
+    let out = std::process::Output {
+        status,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    };
     let stderr = String::from_utf8_lossy(&out.stderr);
     if !out.status.success() {
         let message = stderr
@@ -1400,14 +1451,9 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
             });
         }
     }
-    // Every device's code is part of every identity: a device fed by
-    // another whose code changed is made again.
-    let codes: Vec<String> = {
-        let mut c: Vec<String> = out.iter().filter_map(|i| i.installed.as_ref().ok().map(|d| format!("{}={}", d.manifest.slug, d.code))).collect();
-        c.sort();
-        c.dedup();
-        c
-    };
+    // The code of every device an input passes through is part of its
+    // identity: a device fed by another whose code changed is made again.
+    let codes: HashMap<String, String> = out.iter().filter_map(|i| i.installed.as_ref().ok().map(|d| (d.manifest.slug.clone(), d.code.clone()))).collect();
     for inst in &mut out {
         let Ok(device) = &inst.installed else { continue };
         if !inst.heard || device.realtime() {
@@ -1421,9 +1467,15 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
             inst.identity = instrument_identity(p, &inst.owner, device);
             continue;
         }
-        let Ok(fed) = custom::cut(p, &inst.owner, inst.index) else { continue };
+        // What of the song feeds it, and nothing else, so that an edit of a
+        // channel its input is not made from runs nothing.
+        let Ok(fed) = custom::fed(p, &inst.owner, inst.index) else { continue };
         let mut h = Sha256::new();
         h.update(aaw_model::to_yaml(&fed).as_bytes());
+        h.update([0]);
+        h.update(custom::silences(p).as_bytes());
+        h.update([0]);
+        h.update(stamps(&fed, project).as_bytes());
         h.update([0]);
         // The device's own entry, with its fields, and the lanes on it.
         let (effects, lanes) = owner_parts(p, &inst.owner).expect("the owner");
@@ -1431,14 +1483,46 @@ pub fn instances(p: &Project, project: &Path) -> Vec<Instance> {
         h.update([0]);
         h.update(device.code.as_bytes());
         h.update([0]);
-        h.update(codes.join(",").as_bytes());
+        for slug_of in slugs(&fed) {
+            h.update(format!("{slug_of}={},", codes.get(&slug_of).map_or("", String::as_str)).as_bytes());
+        }
         h.update([0]);
         // What the MIDI effects of the person's own made of the notes,
         // which the song's text does not hold.
-        h.update(made_marks(p).as_bytes());
+        h.update(made_marks(&fed).as_bytes());
         h.update([0]);
         h.update(p.session.sample_rate.to_string().as_bytes());
         inst.identity = Some(hex(&h.finalize()));
+    }
+    out
+}
+
+/// The slugs of the devices of the person's own a song holds, sorted.
+fn slugs(p: &Project) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let chains = p.tracks.iter().map(|t| &t.effects).chain(p.groups.iter().map(|g| &g.effects)).chain(p.returns.iter().map(|r| &r.effects));
+    for effects in chains.chain(std::iter::once(&p.master.effects)) {
+        out.extend(effects.iter().filter_map(|e| match e {
+            Effect::Device(d) => Some(d.name.clone()),
+            _ => None,
+        }));
+    }
+    for midi in p.tracks.iter().filter_map(|t| t.midi.as_ref()) {
+        out.extend(midi.devices().map(|(_, d)| d.name.clone()));
+        out.extend(midi.device().map(|d| d.name.clone()));
+    }
+    out
+}
+
+/// The files a song plays, its samples and frozen tracks, each with its
+/// size and when it last changed, as text: a file replaced on the disk is
+/// another input.
+fn stamps(p: &Project, project: &Path) -> String {
+    let files = p.samples.values().map(|s| s.path.as_str()).chain(p.tracks.iter().filter_map(|t| t.frozen.as_ref().map(|z| z.path.as_str())));
+    let mut out = String::new();
+    for path in files {
+        let meta = std::fs::metadata(project.join(path)).ok();
+        out.push_str(&format!("{path}={:?}@{:?};", meta.as_ref().map(|m| m.len()), meta.and_then(|m| m.modified().ok())));
     }
     out
 }

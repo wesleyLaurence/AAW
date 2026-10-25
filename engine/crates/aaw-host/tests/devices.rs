@@ -165,6 +165,84 @@ fn a_device_s_cache_is_made_by_its_code_and_played_in_the_song_and_a_freeze() {
 }
 
 #[test]
+fn a_device_s_identity_is_what_feeds_it_and_no_more() {
+    let (dir, mut s) = open();
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "tilt"})).unwrap();
+    edit(&mut s, json!({"op": "effect.add", "owner": "returns.plate", "type": "tilt"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "id": "pad"})).unwrap();
+    edit(&mut s, json!({"op": "audio.add", "track": "pad", "sample": "tone", "at": 0})).unwrap();
+    edit(&mut s, json!({"op": "group.add", "id": "kit", "tracks": ["pad"]})).unwrap();
+    edit(&mut s, json!({"op": "effect.add", "owner": "groups.kit", "type": "tilt"})).unwrap();
+    let ids = |s: &Session| -> Vec<String> {
+        let instances = devices::instances(s.project(), dir.path());
+        ["tracks.bass.effects.1", "returns.plate.effects.1", "groups.kit.effects.0"]
+            .iter()
+            .map(|r| instances.iter().find(|i| i.reference == *r).unwrap_or_else(|| panic!("{r}")).identity.clone().expect("installed and heard"))
+            .collect()
+    };
+    let input = |s: &Session| aaw_engine::custom::input(s.project(), dir.path(), "tracks.bass", 1, 4096, &Default::default()).unwrap();
+    let mut before = ids(&s);
+    let heard = input(&s);
+    // What none of them is fed by: the master, the title, the sections, the
+    // markers, and a track of its own with a sample of its own.
+    for e in [
+        json!({"op": "set", "path": "session.master_gain_db", "value": -3}),
+        json!({"op": "set", "path": "session.end_fade_ms", "value": 400}),
+        json!({"op": "set", "path": "session.title", "value": "Other"}),
+        json!({"op": "effect.add", "owner": "master", "type": "limiter"}),
+        json!({"op": "marker.add", "at": 4}),
+        json!({"op": "section.add", "id": "verse", "at": 8, "length_beats": 8}),
+        json!({"op": "track.add", "id": "lead"}),
+        json!({"op": "apply", "patch": {"samples": {"other": {"path": "hit.wav"}}}}),
+        json!({"op": "audio.add", "track": "lead", "sample": "other", "at": 2}),
+    ] {
+        edit(&mut s, e.clone()).unwrap();
+        assert_eq!(ids(&s), before, "{e}");
+    }
+    // Its owner's fader, pan and sends come after a device's input: the
+    // bass's are not the bass's device's, but they feed the plate.
+    for e in [
+        json!({"op": "set", "path": "tracks.bass.gain_db", "value": -6}),
+        json!({"op": "set", "path": "tracks.bass.pan", "value": 0.4}),
+        json!({"op": "send.set", "track": "bass", "to": "plate", "gain_db": -3}),
+    ] {
+        edit(&mut s, e.clone()).unwrap();
+        let now = ids(&s);
+        assert!(now[0] == before[0] && now[1] != before[1] && now[2] == before[2], "{e}");
+        before = now;
+    }
+    assert!(input(&s) == heard, "the bass's device is given what it was");
+    // The pad feeds its group alone.
+    edit(&mut s, json!({"op": "set", "path": "tracks.pad.gain_db", "value": -4})).unwrap();
+    let now = ids(&s);
+    assert!(now[0] == before[0] && now[1] == before[1] && now[2] != before[2]);
+    before = now;
+    // The drums key the bass's compressor, so they feed the bass and what
+    // the bass sends to.
+    edit(&mut s, json!({"op": "clip.move", "clip": "tracks.drums.clips.0", "at": 2})).unwrap();
+    let now = ids(&s);
+    assert!(now[0] != before[0] && now[1] != before[1] && now[2] == before[2]);
+    before = now;
+    // An effect before the device; the bass's sample replaced on the disk.
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.effects.0.threshold_db", "value": -10})).unwrap();
+    let now = ids(&s);
+    assert!(now[0] != before[0] && now[2] == before[2]);
+    before = now;
+    let quieter: Vec<[f32; 2]> = (0..12000).map(|i| [((i as f32) * 0.03).sin() * 0.1; 2]).collect();
+    std::fs::write(dir.path().join("tone.wav"), aaw_engine::wav::float_wav_bytes(&quieter, 48000)).unwrap();
+    let now = ids(&s);
+    assert!(now[0] != before[0] && now[2] != before[2], "the pad plays it too");
+    before = now;
+    // What reaches every channel: the tempo, and a solo anywhere.
+    for e in [json!({"op": "set", "path": "session.tempo", "value": 100}), json!({"op": "set", "path": "tracks.lead.solo", "value": true})] {
+        edit(&mut s, e.clone()).unwrap();
+        let now = ids(&s);
+        assert!(now.iter().zip(&before).all(|(a, b)| a != b), "{e}");
+        before = now;
+    }
+}
+
+#[test]
 fn a_realtime_device_is_built_checked_and_run_in_the_song() {
     let dir = tempfile::tempdir().unwrap();
     let path = write_song(dir.path());

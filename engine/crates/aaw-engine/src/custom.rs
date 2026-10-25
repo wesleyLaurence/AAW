@@ -2,7 +2,7 @@
 //! receives, rendered over the whole song for the host to run the device's
 //! code on, whose result the device then plays from its cache.
 
-use crate::program::{compile_scoped, Cache, Scope, StemKind};
+use crate::program::{channels, compile_scoped, Cache, Scope, StemKind};
 use crate::render::Renderer;
 use aaw_model::rules::{target, Owner, TargetKind};
 use aaw_model::{Effect, Project};
@@ -108,6 +108,90 @@ pub fn cut(p: &Project, owner: &str, index: usize) -> Result<Project, String> {
     let mut keep = kept.into_iter();
     automation.retain(|_| keep.next().unwrap_or(true));
     Ok(out)
+}
+
+/// What of the song the input of the device at `index` of `owner`'s chain
+/// is made from: `cut`, with only the channels its input is rendered from
+/// and the samples and patterns they play, and without what comes after
+/// the owner's tap (its fader, pan and sends, and for a stem the master's
+/// gain, chain and end fade) or what is not heard (the title, the sections
+/// and the markers). Which tracks and groups are muted or soloed reaches
+/// past the channels kept and is `silences`. An edit outside the two leaves
+/// the input as it was.
+pub fn fed(p: &Project, owner: &str, index: usize) -> Result<Project, String> {
+    let (list, name) = split(owner)?;
+    let mut out = cut(p, owner, index)?;
+    out.session.title = String::new();
+    out.sections.clear();
+    out.markers.clear();
+    if list != "master" {
+        let (tracks, groups, returns) = {
+            let (needed, _, groups, returns) = channels(&out, Scope::Channel(name))?;
+            (needed, groups.iter().map(|g| g.id.clone()).collect::<Vec<_>>(), returns.iter().map(|r| r.id.clone()).collect::<Vec<_>>())
+        };
+        out.tracks.retain(|t| tracks.contains(&t.id));
+        out.groups.retain(|g| groups.contains(&g.id));
+        out.returns.retain(|r| returns.contains(&r.id));
+        out.master.effects.clear();
+        out.master.automation.clear();
+        out.session.master_gain_db = 0.0;
+        out.session.end_fade_ms = 0.0;
+        // The input is tapped before the owner's fader.
+        let before_fader = |who: Owner, lanes: &[aaw_model::Lane]| -> Vec<bool> {
+            lanes.iter().map(|lane| !matches!(target(who, &lane.param), Ok(t) if matches!(t.kind, TargetKind::Channel | TargetKind::Send(_)))).collect()
+        };
+        match list {
+            "tracks" => {
+                let t = out.tracks.iter_mut().find(|t| t.id == name).ok_or_else(|| format!("No track {name}"))?;
+                let mut keep = before_fader(Owner::Track(t), &t.automation).into_iter();
+                t.automation.retain(|_| keep.next().unwrap_or(true));
+                (t.gain_db, t.pan) = (0.0, 0.0);
+                t.sends.clear();
+            }
+            "groups" => {
+                let g = out.groups.iter_mut().find(|g| g.id == name).ok_or_else(|| format!("No group {name}"))?;
+                let mut keep = before_fader(Owner::Group(g), &g.automation).into_iter();
+                g.automation.retain(|_| keep.next().unwrap_or(true));
+                (g.gain_db, g.pan) = (0.0, 0.0);
+                g.sends.clear();
+            }
+            _ => {
+                let r = out.returns.iter_mut().find(|r| r.id == name).ok_or_else(|| format!("No return {name}"))?;
+                let mut keep = before_fader(Owner::Return(r), &r.automation).into_iter();
+                r.automation.retain(|_| keep.next().unwrap_or(true));
+                (r.gain_db, r.pan) = (0.0, 0.0);
+            }
+        }
+    }
+    // The samples and patterns the tracks kept play.
+    let mut samples: Vec<&str> = Vec::new();
+    let mut patterns: Vec<&str> = Vec::new();
+    for t in &out.tracks {
+        samples.extend(t.sound_pads().values().map(|pad| pad.sample.as_str()));
+        samples.extend(t.audio.iter().map(|clip| clip.sample.as_str()));
+        if let Some(synth) = t.midi.as_ref().and_then(|m| m.synth()) {
+            samples.extend(synth.oscillators.values().filter_map(|o| o.sample_table()));
+        }
+        patterns.extend(t.clips.iter().map(|c| c.pattern.as_str()));
+    }
+    let samples: Vec<String> = samples.into_iter().map(str::to_string).collect();
+    let patterns: Vec<String> = patterns.into_iter().map(str::to_string).collect();
+    out.samples.retain(|id, _| samples.contains(id));
+    out.patterns.retain(|id, _| patterns.contains(id));
+    Ok(out)
+}
+
+/// Which of the song's tracks and groups are muted or soloed, as text: a
+/// solo anywhere can silence a channel a device's input is made from.
+pub fn silences(p: &Project) -> String {
+    let mut out = String::new();
+    let tracks = p.tracks.iter().map(|t| ("tracks", &t.id, t.mute, t.solo));
+    for (list, id, mute, solo) in tracks.chain(p.groups.iter().map(|g| ("groups", &g.id, g.mute, g.solo))) {
+        if mute || solo {
+            out.push_str(&format!("{list}.{id}:{}{};", if mute { "m" } else { "" }, if solo { "s" } else { "" }));
+        }
+    }
+    out
 }
 
 /// What the device at `index` of `owner`'s chain is given, over the whole

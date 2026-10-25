@@ -305,9 +305,15 @@ devices changed or gone, and runs one device's code at a time off its
 thread, through `agent_daw.device_runner` in the checkout's Python, with
 the caches made so far (`devices::Work`); a run that lands is compiled in
 and played, and `daw status` says what each device is doing under
-`custom_devices`. A cache's identity is the cut song's text, the device's
-entry and lanes, every device's code and the rate; a failure is kept by
-identity until something changes. A track's instrument of the person's own
+`custom_devices`. An effect's cache identity is the text of what feeds it
+(`custom::fed`: the song cut before the device, with only the channels
+`program::channels` compiles for its owner, the samples and patterns they
+play, and without the owner's fader, pan and sends or, for a stem, the
+master), which tracks and groups are muted or soloed, the size and time of
+the files it plays, the device's entry and lanes, the code of the devices
+in what feeds it and the rate; a failure is kept by identity until
+something changes. A run of a device's Python past `devices::time_limit`,
+five minutes or `AAW_DEVICE_TIMEOUT` seconds, is killed and is its error. A track's instrument of the person's own
 comes first among its track's devices, keyed `(tracks.T,
 custom::INSTRUMENT)`; an offline one's identity is the track's notes as
 they play in frames, its entry and the lanes on its fields, its code, the

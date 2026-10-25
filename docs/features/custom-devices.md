@@ -1,4 +1,4 @@
-# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23, stages 5 and 6 October 24
+# Devices anyone builds, to a spec — stages 1 and 2 implemented October 22, 2026, stages 3 and 4 October 23, stages 5 and 6 and the last limits October 24
 
 Asked for by the person on October 19, 2026 (D123): "we need some kind of
 standard almost programming spec where it's like you can code a brand new
@@ -12,7 +12,9 @@ stage, the manifest and the offline tier, is built (D144), the second, the
 real-time tier (D145), the third, instruments (D146), the fourth, MIDI
 effects (D147), the fifth, the spec's version 1 as a reference and how
 a device is shared (D156), and the sixth, FAUST as a real-time effect's
-source (D157).
+source (D157). What feeds an offline effect is judged by the channels its
+input is made from rather than the whole song, and a run has a time limit
+(D159).
 
 ## What
 
@@ -112,10 +114,26 @@ remove SLUG` moves one to the Trash.
   before it. The master's device is given the mix before the end fade.
 - **The cache.** The result is `.daw/devices/IDENTITY.wav` under the
   project, stereo float32 at the song's rate, where the identity is a
-  SHA-256 over the cut song's canonical text, the device's own entry and the
-  lanes on it, the hash of its folder's files, the hashes of every device's
-  code in the song (a device fed by another whose code changed is made
-  again) and the sample rate. A compile reads the caches from
+  SHA-256 over the text of what feeds the device, which tracks and groups
+  are muted or soloed, the size and last change of each file it plays, the
+  device's own entry and the lanes on it, the hash of its folder's files,
+  the hashes of the code of every device in what feeds it (a device fed by
+  another whose code changed is made again), what the MIDI effects of the
+  person's own made on the tracks that feed it, and the sample rate. What
+  feeds it (`custom::fed`) is the song cut before the device with only the
+  channels its input is rendered from, those the engine compiles for the
+  owner's stem (`program::channels`): for a track, itself and the tracks
+  keying its sidechains; for a group, what is under it and their keys; for
+  a return, the tracks and groups sending to it, what is under those
+  groups and the keys of all of them; for the master, the whole song. The
+  samples and patterns those tracks play are kept and the rest dropped, and
+  so are what comes after the owner's tap, its fader, pan and sends with
+  the lanes on them, and for a stem the master's gain, chain and end fade,
+  and what is not heard, the title, the sections and the markers. So an
+  edit of a track that does not feed the device, of the master, or of its
+  own track's fader runs nothing and keeps the cache playing; a mute or a
+  solo anywhere counts, since a solo silences channels outside what feeds
+  it. A compile reads the caches from
   `Cache::set_devices`, by owner and index; the device's `Plan` carries one
   and its signature counts it, so a new cache swaps in through the dip. In
   the chain the device is `aaw_dsp::device::Offline`: rolling, it plays the
@@ -133,7 +151,11 @@ remove SLUG` moves one to the Trash.
   reason, `missing` with the reason, `off` for one bypassed or on a frozen
   track), a `custom_devices` line on the host's feed, and
   `SongObserver::devices` for the app. A failure is kept by identity until
-  something changes. `daw render` and a freeze settle the caches first,
+  something changes. A run of the device's Python, an effect's, an
+  instrument's, a MIDI effect's or `daw plugin check`'s, is stopped when it
+  goes past five minutes, or `AAW_DEVICE_TIMEOUT` seconds
+  (`devices::time_limit`): the process is killed and the failure says it
+  ran past the limit and that `AAW_DEVICE_TIMEOUT` sets it. `daw render` and a freeze settle the caches first,
   synchronously (`devices::settle`), running what is not yet made; a device
   whose code fails refuses the render and the freeze with the reason, so an
   export is never silently dry.
@@ -560,10 +582,11 @@ remove SLUG` moves one to the Trash.
 - The app's entitlements ask for unsigned executable memory, which
   wasmtime's compiled code needs under the hardened runtime a Developer ID
   signs with; nothing has been signed with one to see it run.
-- What feeds a device is judged by the whole song: an edit anywhere, a
-  fader on another track included, renders the device's input again, and
-  the code runs again only when the input's identity changed. A finer
-  dependency would spare the renders.
+- What feeds a device is judged by channel: an edit of a channel its input
+  is made from runs it again whether or not the edit changes what reaches
+  it, such as a sidechain source's fader, and so does a mute or a solo of
+  any track or group. Its input is rendered with the owner's stem whole,
+  as the engine compiles it, not from the narrowed song.
 - An offline device has no latency; neither tier has a sidechain, and a
   device reads only its input and its fields, and knows the tempo but not
   the arrangement.
@@ -580,8 +603,11 @@ remove SLUG` moves one to the Trash.
   one key overlapping are given as they come, two starts and two ends, and
   what the code makes of that is its own. `daw synth audition` is for the
   Synth alone.
-- No timeout on a run: code that never returns holds the host's work on
-  devices, though not the host.
+- A run is stopped at one limit for every device, five minutes unless
+  `AAW_DEVICE_TIMEOUT` says otherwise; the manifest cannot ask for more.
+  Only the Python process is killed, not processes it started. A run is not
+  stopped when an edit makes it stale: it finishes, or reaches the limit,
+  before the next one starts.
 - A MIDI effect runs offline: an edit of the notes it is given is heard
   with its result once the run lands, the notes as written meanwhile, and
   a note played now (the piano roll's previews, the Synth's keys) does not
@@ -599,9 +625,9 @@ remove SLUG` moves one to the Trash.
 
 ## Remaining stages
 
-The six stages are built. What is left is in the backlog's line: a finer
-dependency for an offline device's input than the whole song, and a
-timeout on an offline run (both under Limits).
+None: the six stages are built, and the backlog's last two lines of this
+feature, a finer dependency for an offline device's input and a time limit
+on a run, are built (D159).
 
 ## Open questions
 
