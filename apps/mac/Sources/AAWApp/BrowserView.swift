@@ -74,8 +74,9 @@ final class Browser {
     }
 
     /// The sections, in the order the column lists them: Favorites first,
-    /// since it is what the person keeps at hand.
-    nonisolated static let sections = ["Favorites", "Samples", "Instruments", "MIDI Effects", "Audio Effects", "Folders"]
+    /// since it is what the person keeps at hand, and Generate beside the
+    /// samples it makes more of.
+    nonisolated static let sections = ["Favorites", "Samples", "Generate", "Instruments", "MIDI Effects", "Audio Effects", "Folders"]
 
     /// The favorites, as `daw favorite list` lists them, in the order they
     /// were added; read again when the browser is shown and after a change.
@@ -415,7 +416,7 @@ struct BrowserView: View {
             .padding(.horizontal, 12)
             .frame(height: TimelineLayout.rulerHeight - 1)
             Divider()
-            TextField("Search \(browser.section)", text: Binding(get: { browser.query }, set: { browser.query = $0 }))
+            TextField(browser.section == "Generate" ? "Search Generated" : "Search \(browser.section)", text: Binding(get: { browser.query }, set: { browser.query = $0 }))
                 .textFieldStyle(.roundedBorder)
                 .padding(8)
             if let error = browser.folderError { note(error) }
@@ -462,6 +463,8 @@ struct BrowserView: View {
                 VStack(spacing: 0) {
                     if browser.section == "Favorites" {
                         favoritesList
+                    } else if browser.section == "Generate" {
+                        GenerateView(model: model)
                     } else if browser.section == "Instruments" || browser.section == "MIDI Effects" || browser.section == "Audio Effects" {
                         devices
                     } else {
