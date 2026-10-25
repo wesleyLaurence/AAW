@@ -99,11 +99,23 @@ pub fn content_end(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> B
     end
 }
 
+/// Bars of a song with nothing in it: a phrase to start from, rather than
+/// a bar that a play from the start runs out of.
+pub const EMPTY_BARS: i64 = 8;
+
+/// The length of a song with nothing in it, a bar being `bar` beats.
+pub fn empty_length(bar: &BigRational) -> BigRational {
+    bar * BigRational::from_integer(EMPTY_BARS.into())
+}
+
 /// The song's length as the host keeps it: the next whole bar after
-/// `content_end`, and one bar at the least, so an empty song still has a
-/// ruler.
+/// `content_end`, one bar at the least, and `EMPTY_BARS` for a song with
+/// nothing in it.
 pub fn fitted_length(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> BigRational {
     let bar = p.session.meter().bar();
     let end = content_end(p, file_seconds);
+    if end.is_zero() {
+        return empty_length(&bar);
+    }
     ((end / &bar).ceil() * &bar).max(bar)
 }

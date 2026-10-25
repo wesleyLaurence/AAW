@@ -79,14 +79,14 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(TimelineLayout.edgeRects(of: CGRect(x: 300, y: 72, width: 15, height: 41), start: true, end: true), [])
     }
 
-    func testAClickSnapsToTheGridAndStaysInTheSong() {
+    func testAClickSnapsToTheGridAndMayBePastTheEnd() {
         let l = layout()
         XCTAssertEqual(l.target(atX: l.x(17.9), free: false), 16)
         XCTAssertEqual(l.target(atX: l.x(18.1), free: false), 20)
         XCTAssertEqual(l.target(atX: l.x(17.9), free: true), 17.9, accuracy: 1e-9)
-        // The start position has to be before the end of the song.
-        XCTAssertEqual(l.target(atX: l.x(67), free: false), 60)
-        XCTAssertEqual(l.target(atX: l.x(67), free: true), 63.999, accuracy: 1e-9)
+        // Past the end, where play rolls on through empty bars.
+        XCTAssertEqual(l.target(atX: l.x(67), free: false), 68)
+        XCTAssertEqual(l.target(atX: l.x(67), free: true), 67, accuracy: 1e-9)
         XCTAssertEqual(l.target(atX: 0, free: false), 0)
     }
 
@@ -141,6 +141,18 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.x(30), TimelineLayout.headerWidth + 68, accuracy: 1e-6)
         l.reveal(2)
         XCTAssertEqual(l.scroll.x, 12, accuracy: 1e-6)
+    }
+
+    func testThePlayheadRollingOnPastTheEndStaysInView() {
+        var l = layout()
+        l.pixelsPerBeat = 40
+        // 64 beats and a screen of 17 more: the view scrolls to beat 64.
+        XCTAssertEqual(l.contentWidth - l.lanesWidth, 64 * 40)
+        l.reveal(200)
+        XCTAssertGreaterThan(l.x(200), l.size.width, "off the screen without the played beats")
+        l.playedBeats = 200
+        l.reveal(200)
+        XCTAssertEqual(l.x(200), TimelineLayout.headerWidth + 68, accuracy: 1e-6)
     }
 
     func testPositionsCountFromOne() {

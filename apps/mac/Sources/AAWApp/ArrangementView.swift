@@ -902,6 +902,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let playhead = model.playhead()
         if let playhead, playhead.playing {
             busy = true
+            // Play rolls on past the end, and the view makes room for it.
+            layout.playedBeats = max(model.transport.cue, playhead.beat)
             let before = layout.scroll
             layout.reveal(playhead.beat)
             if layout.scroll != before { needsDisplay = true }

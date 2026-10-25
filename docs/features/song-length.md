@@ -1,6 +1,6 @@
-# A song with no end to hit — implemented 2026-10-20
+# A song with no end to hit — implemented 2026-10-20, play past the end 2026-10-25
 
-Status: implemented (D130). Asked for by the person on October 19, 2026: "I
+Status: implemented (D130, D163). Asked for by the person on October 19, 2026: "I
 don't like the hard boundary of how long a track is ... I like how Ableton
 works where you can just add more clips and it kind of hides the concept of a
 length ... I don't ever want to see a message about a clip being outside the
@@ -17,9 +17,12 @@ the end moves the end to hold it, and a clip taken away from the end lets the
 song shrink back. Nothing is refused or warned for lying past the end, because
 nothing can lie there.
 
-What still reads an end: the loop brace when it is set to the whole song, Play
-from the start to where it stops, `daw render`, `daw export`, `daw timeline`
-and the agent's `daw map`. Each reads the computed end.
+What still reads an end: the loop brace when it is set to the whole song,
+`daw render`, `daw export`, `daw timeline`, the agent's `daw map` and a `daw
+play` that hosts the song for its own duration. Each reads the computed end.
+Play in the window does not stop there: asked for by the person on October
+25, 2026, after hearing a blank song's four clicks and the stop, it rolls on
+through empty bars, the metronome with it, until stopped (D163).
 
 ## How it works
 
@@ -44,6 +47,27 @@ and the agent's `daw map`. Each reads the computed end.
   and `release-cut`, which is a Synth's release past the computed end, not a
   clip. A range command past the end (`daw range clear 32 4` on a 32-beat
   song) changes nothing rather than refusing.
+- **Play past the end.** The player rolls on past the end when the host
+  asks it to (`Control::set_roll_on`), which every host does but the one a
+  `daw play` with no host running opens for its own duration: that one
+  stops at the end and exits, as before. Past the end the transport moves
+  on over nothing (`Renderer::pass`): the playhead and the position go on,
+  the metronome clicks every beat and accents every bar, and what still
+  rings at the end, a reverb's or a Synth's tail, is heard whole, as after
+  a stop. An edit that moves the end past the playhead, a clip dropped
+  ahead of it, is heard when the playhead gets there. A take records on
+  past the end until stopped, and its clip moves the end to hold it. Play
+  and locate take a start position anywhere from the song's start on (`daw
+  play --from` with no host still refuses one at or past the end, where it
+  would have nothing to play); the loop stays inside the song. A marker
+  dropped while play is past the end lands where it is heard and moves the
+  end to hold it.
+- **A new song.** A song with nothing in it is eight bars long
+  (`aaw_model::EMPTY_BARS`), a phrase to start from, so the loop set to all
+  and a render of it have bars to count; once anything is placed, the end is
+  the next whole bar after it, one bar at the least, so a short sketch
+  renders without silent bars. `daw init` and a new Untitled project write
+  the eight bars.
 - **The end fade.** `session.end_fade_ms` fades the last milliseconds of the
   computed end, which is at most a bar after the last sound. A longer fade is
   the last clip's own.
@@ -55,8 +79,8 @@ and the agent's `daw map`. Each reads the computed end.
   section or marker, set after every edit. Place something where the song
   should reach". `daw describe project` says so under `length`; `daw timeline
   --fit` (and `--tail`) is kept for old scripts and does nothing, which its
-  reply says under `fitted`. `daw init` has no `--bars`: a new song is one
-  bar long. `daw map`'s grid runs to the computed end. `daw midi import` and
+  reply says under `fitted`. `daw init` has no `--bars`: a new song is
+  eight bars long until something is put in it. `daw map`'s grid runs to the computed end. `daw midi import` and
   a range copy still say the song grows, which it does, as after any edit.
 - **The window.** The ruler draws bars as far as the view scrolls, one shade,
   and the view scrolls a screen past the end (two bars at the least), so that
@@ -66,9 +90,11 @@ and the agent's `daw map`. Each reads the computed end.
   clip's repeats and an automation point may all go past the end, which
   moves when the edit lands. The transport bar has no bars field; the
   position field keeps its bar.beat.sixteenth, and the tempo and meter light
-  for a change of their own, not for the end moving. A click on the ruler still
-  places the start position inside the song, and the loop brace stays inside
-  it, since that is where there is something to play. The app no longer puts
+  for a change of their own, not for the end moving. A click on the ruler
+  places the start position wherever it lands, past the end too, where play
+  rolls on through empty bars; the loop brace stays inside the song. While
+  play rolls on past the end the view scrolls a screen past the playhead
+  (`TimelineLayout.playedBeats`), so the playhead stays in view. The app no longer puts
   a `set session.length_beats` before an audio clip's edit: the host settles
   every edit.
 
@@ -93,6 +119,15 @@ and the agent's `daw map`. Each reads the computed end.
   and the thin end line at bar 12. The tempo and meter lit up after the drag,
   since the host's length change touched the session; the transport bar now
   lights them only when the tempo, title or time signature changed.
+- Play past the end (D163), in Rust tests of the player: a song played with
+  roll-on equals its render to the end, is silent after it and goes on
+  playing, its position going on, until a stop, and a play from past the end
+  rolls from there; the metronome clicks every beat after the end with bar 9
+  accented, and without roll-on stops with the song; a clip moved past the
+  end while the playhead is past it is heard as its render when reached. In
+  the host: a locate past the end is taken and one before the start refused,
+  and a blank song is eight bars. The app's layout tests hold a click past
+  the end and the view scrolling with the playhead past it.
 - Nothing was tried by hand; see Verify.
 
 ## Open questions, answered alone (D130)

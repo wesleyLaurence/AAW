@@ -49,7 +49,7 @@ instead. It implements:
 
 | Command | Does |
 |---|---|
-| `daw init DIRECTORY [--tempo T] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song one bar long until something is put in it, since the length is the song's content (D130), in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `DIRECTORY.aaw`, the project file with a new ID, `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) and `file` the `.aaw` |
+| `daw init DIRECTORY [--tempo T] [--time-signature N/D]` | Creates `DIRECTORY/song.yaml`, an empty song eight bars long until something is put in it, since the length is the song's content (D130, D163), in 4/4 unless a time signature such as `3/4` or `6/8` is given, and beside it `DIRECTORY.aaw`, the project file with a new ID, `SONG.md`, the song's notes with their four headings, and an `AGENTS.md` that imports them; a file of either name already there is kept. The reply's `notes` is the path of `SONG.md` ([what every session is given](../docs/features/agent-context.md)) and `file` the `.aaw` |
 | `daw projects [--all]` | The projects a host has open, with each one's title, revision and whether its window is in front in the app; `--all` adds the projects the app knows that are not open |
 | `daw move PROJECT NEW_FOLDER`, `daw copy PROJECT NEW_FOLDER` | Saves the project under another name: moves its folder, or copies it and leaves the original, and names the song after the folder; the `.aaw` is named for the new folder, keeping its ID in a move and given a new one in a copy. A running host carries on there; see below |
 | `daw describe [start\|recipes\|batch\|project\|sampler\|synth\|midi\|effects\|automation\|edit\|check\|samples\|beats\|joins\|export\|listen\|reference\|separate\|generate][.PART] [--schema]` | The authoring contract: without a topic, the topics, each with its line, its parts and how many bytes it prints; with one, what its fields mean and a line for each field (its path, what it takes, its default), generated from the schema, with the Synth's modulation and what lanes can move; `start` is the commands from `init` to `listen` that make a first song, with a `batch` file; `recipes` lists the recipes, `start` first, and `recipes.NAME` prints one, its `given`, its `steps` and a `batch` file if it has one, each run as written by `tests/test_recipes.py`; `batch` is every op a batch file takes, the command it is the same as and what each key takes, made from the host's `Command` enum through its JSON Schema (schemars). `TOPIC.PART` prints one part: the semantics entry its first word names, the field lines within it (or `batch`'s ops) and a list of the topic's own by that name, `effects.compressor` the compressor alone, an unknown part refused with the nearest. `--schema` adds the topic's JSON Schema, or the part's, and with no topic prints the whole song's |
@@ -251,7 +251,10 @@ A host holds a song in memory as the authority for it, applies commands one at
 a time, keeps an undo history and a change log, and plays the song with each
 edit heard as it lands. `daw host PROJECT` runs one until interrupted or `daw
 close PROJECT`; `daw play PROJECT` without a running host hosts the project for
-as long as it plays. Each change prints to the host's stderr as a JSON line.
+as long as it plays, and stops at the song's end. A running host's play rolls
+on past the end through empty bars, the metronome with it, until a stop, and
+its start position may be past the end (`Control::set_roll_on`; D163). Each
+change prints to the host's stderr as a JSON line.
 
 Every other command reaches the running host of its project through a Unix
 socket registered under `~/Library/Application Support/AAW/hosts` (or
@@ -275,8 +278,8 @@ track, a group or the mix; `arm` arms such a track, host state like the loop;
 `record.start` arms the tracks named and takes one of every armed track after
 a count-in of so many bars, the player's pre-roll, in which the song stands at
 the start position while the metronome clicks the bars before it whatever its
-toggle; `record.stop`, `stop`, a locate, the loop's end, the song's end, a
-change of devices or the host closing ends the take. An input device is
+toggle; `record.stop`, `stop`, a locate, the loop's end, a change of devices
+or the host closing ends the take, which runs on past the song's end. An input device is
 opened by its own stream (`aaw-engine`'s `capture`), each block headed by
 the instant it was captured, and the output callback publishes an anchor,
 the instant its block plays against the timeline frame heard then, by which
@@ -494,7 +497,8 @@ report `metronome`. This is per-open-project monitoring state, initially off:
 it changes neither revision nor undo history. The real-time player synthesizes
 the click from absolute quarter-note positions at the program's current BPM,
 aligned with its output latency, after the song's master processing. The click
-works with an empty song, follows stop, locate and loop, and is never rendered
+works with an empty song, follows stop, locate and loop, goes on past the
+song's end while play rolls on, and is never rendered
 into the mix or stems. There is no separate CLI metronome subcommand.
 
 A process can embed a host instead of running `daw host`: `host::spawn` runs one

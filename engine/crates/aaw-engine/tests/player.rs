@@ -85,6 +85,54 @@ fn playing_from_the_start_equals_a_render() {
 }
 
 #[test]
+fn rolling_on_plays_past_the_end_until_a_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = song(dir.path());
+    let (mut control, mut player) = started(&p, 0);
+    control.set_roll_on(true).unwrap();
+    let past = 48000;
+    let out = pull(&mut player, p.total + past);
+    assert_eq!(&out[..p.total], &plain(&p, 0, p.total)[..], "the song as its render");
+    assert!(out[p.total..].iter().all(|f| *f == [0.0; 2]), "nothing past the end");
+    assert!(player.playing(), "rolls on past the end");
+    assert_eq!(control.position(), p.total + past, "the playhead goes on");
+    control.stop().unwrap();
+    pull(&mut player, 128);
+    assert!(!player.playing());
+    assert_eq!(control.position(), p.total + past, "stops where it was");
+    // A play from past the end rolls from there.
+    control.play(p.total + 2 * past).unwrap();
+    pull(&mut player, 1280);
+    assert!(player.playing());
+    assert_eq!(control.position(), p.total + 2 * past + 1280);
+}
+
+#[test]
+fn an_edit_past_the_end_while_rolling_on_is_heard_when_reached() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    let p = program(&path, |_| {});
+    // 128 BPM at 48 kHz: 22500 frames a beat, the song's 16 beats 360000.
+    let beat = 22500;
+    assert_eq!(p.total, 16 * beat);
+    let (mut control, mut player) = started(&p, p.total - 1000);
+    control.set_roll_on(true).unwrap();
+    pull(&mut player, 1000 + beat);
+    assert!(player.playing());
+    // The bass clip moved to beat 20, which the song now reaches.
+    let longer = program(&path, |p| {
+        p.tracks[0].clips[0].at = aaw_model::Beat::int(20);
+        p.session.length_beats = aaw_model::Beat::int(36);
+    });
+    control.load(longer.clone()).unwrap();
+    let out = pull(&mut player, 4 * beat);
+    // Beats 17 to 21: silent until the clip's first note at beat 20.
+    assert!(peak(&out[..3 * beat - 100]) < 1e-6, "nothing before the clip");
+    assert!(peak(&out[3 * beat..4 * beat]) > 0.05, "the clip placed past where the end was");
+    assert_eq!(&out[3 * beat + 2000..4 * beat], &plain(&longer, 20 * beat + 2000, beat - 2000)[..]);
+}
+
+#[test]
 fn a_song_with_latency_plays_as_its_render_that_much_later() {
     let dir = tempfile::tempdir().unwrap();
     let p = program(&write_mix_song(dir.path()), |_| {});
@@ -581,6 +629,28 @@ fn metronome_has_exact_beats_and_never_changes_offline_audio() {
         pull(&mut player, 1000);
         assert_eq!(peak(&pull(&mut player, rate as usize)), 0.0);
     }
+}
+
+#[test]
+fn the_metronome_rolls_on_past_the_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let p = empty_metronome_song(dir.path(), 120.0, 48000, false);
+    // 32 beats of 24000 frames.
+    assert_eq!(p.total, 32 * 24000);
+    let (mut control, mut player) = started(&p, p.total - 12000);
+    control.set_metronome(true).unwrap();
+    control.set_roll_on(true).unwrap();
+    let out = pull(&mut player, 12000 + 8 * 24000);
+    let found = clicks(&out);
+    let expected: Vec<(usize, bool)> = (0..8).map(|k| (12000 + k * 24000, k % 4 == 0)).collect();
+    assert_eq!(found, expected, "every beat after the end, bar 9 accented");
+    assert!(player.playing());
+    // Stopping at the end, the click ends with the song.
+    let (mut control, mut player) = started(&p, p.total - 12000);
+    control.set_metronome(true).unwrap();
+    let out = pull(&mut player, 12000 + 2 * 24000);
+    assert!(!player.playing());
+    assert!(clicks(&out).is_empty());
 }
 
 #[test]

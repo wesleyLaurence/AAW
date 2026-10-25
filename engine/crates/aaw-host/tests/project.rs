@@ -159,11 +159,11 @@ fn a_project_is_named_by_its_folder_or_its_song_file() {
     assert_eq!(project::shown(&folder.join("other.yaml")), folder.join("other.yaml"));
     // A second project in the folder is refused.
     assert!(project::create(&folder, 100.0, None, None).unwrap_err().contains("already exists"));
-    // An empty song is one bar of its meter long, and says its meter.
+    // An empty song is eight bars of its meter long, and says its meter.
     let waltz = project::blank(100.0, None, Some("3/4")).unwrap();
-    assert_eq!((waltz.session.time_signature.as_str(), waltz.session.length_exact()), ("3/4", num_rational::BigRational::from_integer(3.into())));
+    assert_eq!((waltz.session.time_signature.as_str(), waltz.session.length_exact()), ("3/4", num_rational::BigRational::from_integer(24.into())));
     let seven = project::blank(100.0, None, Some("7/8")).unwrap();
-    assert_eq!(seven.session.length_exact(), num_rational::BigRational::new(7.into(), 2.into()));
+    assert_eq!(seven.session.length_exact(), num_rational::BigRational::from_integer(28.into()));
     assert!(project::blank(100.0, None, Some("5/3")).unwrap_err().contains("such as 4/4"));
     assert_eq!(aaw_model::to_yaml(&project::blank(100.0, None, Some("4/4")).unwrap()), aaw_model::to_yaml(&project::blank(100.0, None, None).unwrap()));
     // A path that is gone resolves through the folders that are there.
@@ -239,7 +239,7 @@ fn untitled_projects_take_the_lowest_free_name_and_blank_ones_are_swept() {
     let root = project::untitled_root();
     assert_eq!(first, root.join("Untitled/song.yaml"));
     assert_eq!(second, root.join("Untitled 2/song.yaml"));
-    assert_eq!(text(&second), "schema_version: 1\nsession:\n  title: Untitled 2\n  tempo: 120.0\n  length_beats: 4\n");
+    assert_eq!(text(&second), "schema_version: 1\nsession:\n  title: Untitled 2\n  tempo: 120.0\n  length_beats: 32\n");
     // The project file and the folder's icon do not make a project hold something.
     assert!(root.join("Untitled 2/Untitled 2.aaw").is_file());
     std::fs::write(root.join("Untitled 2/Icon\r"), "").unwrap();

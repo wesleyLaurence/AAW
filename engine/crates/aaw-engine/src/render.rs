@@ -794,6 +794,14 @@ impl Renderer {
         self.seek(to, true);
     }
 
+    /// Moves the transport `n` frames on without playing them: past the
+    /// song's end, where the timeline holds nothing, as a transport rolling
+    /// on until a stop does. What still rings is rendered as after a stop.
+    /// Does not allocate.
+    pub fn pass(&mut self, n: usize) {
+        self.cursor += n;
+    }
+
     /// The transport's position: the timeline frame of the voices starting now.
     pub fn position(&self) -> usize {
         self.cursor
