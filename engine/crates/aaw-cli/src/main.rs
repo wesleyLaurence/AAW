@@ -447,9 +447,10 @@ enum Top {
     Plugin(PluginCmd),
     #[command(subcommand)]
     Favorite(FavoriteCmd),
-    /// Generated audio: a sound or a loop from a description through the
-    /// ElevenLabs API at the person's own key, saved in the project as a
-    /// sample and in the workspace's generated folder (daw describe generate).
+    /// Generated audio: a sound, a loop or a song from a description or a
+    /// plan through the ElevenLabs API at the person's own key, saved in the
+    /// project as a sample and in the workspace's generated folder (daw
+    /// describe generate).
     #[command(subcommand)]
     Generate(GenerateCmd),
     /// The person's keys for outside services, kept in the macOS Keychain and
@@ -1001,6 +1002,56 @@ enum GenerateCmd {
         /// what is left of the agent's budget today.
         #[arg(long)]
         estimate: bool,
+    },
+    /// A song from PROMPT, or from a composition plan with --plan, 3 seconds
+    /// to five minutes, made by ElevenLabs and imported into the project as
+    /// the sample --id, with its recipe, its title and the plan used. The
+    /// reply has its beat map and its sections in seconds and bars, to cut it
+    /// into audio clips on its downbeats. Nothing is placed.
+    Music {
+        project: Song,
+        /// What the song is; give this or --plan.
+        prompt: Option<String>,
+        /// With a prompt, the length in seconds, 3 to 300; the model picks
+        /// one unless given, and the budget holds 300 until it says.
+        #[arg(long)]
+        seconds: Option<f64>,
+        /// With a prompt, a song with no voice.
+        #[arg(long)]
+        instrumental: bool,
+        /// A composition plan as a JSON file, from daw generate plan and
+        /// edited; its chunks give the sections and the length.
+        #[arg(long)]
+        plan: Option<std::path::PathBuf>,
+        /// With a plan, a seed, which helps and does not promise the same song.
+        #[arg(long, allow_negative_numbers = true)]
+        seed: Option<i64>,
+        /// music_v2_5 (the newest, unless given), music_v2 or music_v1,
+        /// whose plans have sections in place of chunks.
+        #[arg(long)]
+        model: Option<String>,
+        /// The sample's ID in the song; the song's title unless given.
+        #[arg(long)]
+        id: Option<String>,
+        /// Send nothing: the seconds, the dollars by the documented rate and
+        /// what is left of the agent's budget today.
+        #[arg(long)]
+        estimate: bool,
+    },
+    /// A composition plan from PROMPT, made by ElevenLabs at no cost: its
+    /// chunks, each a section with its lyrics, styles and length, to edit and
+    /// pass to daw generate music --plan. Needs the key and no project.
+    Plan {
+        prompt: String,
+        /// The song's length in seconds, 3 to 300; the model picks one unless given.
+        #[arg(long)]
+        seconds: Option<f64>,
+        /// The model the plan is for; music_v2_5 unless given.
+        #[arg(long)]
+        model: Option<String>,
+        /// Write the plan alone to this file, ready for --plan.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
     },
     /// What this project has generated, newest first, each with its prompt,
     /// length, cost and the sample that plays it.

@@ -105,8 +105,8 @@ trimmed, faded, split, crossfaded and looped; a pad or an audio clip can follow
 the tempo at its own pitch. An armed audio track records from an input device
 or the song's own sound, and a track can be frozen to a file. `daw separate`
 takes a song apart on this Mac into vocals and instrumental, or drums, bass,
-vocals and the rest, and `daw generate sound` makes a sound from a description
-through ElevenLabs at your own key. Standard MIDI files of one part go in and
+vocals and the rest, and `daw generate` makes a sound, or a song to sample from with
+its beat map, from a description or a plan through ElevenLabs at your own key. Standard MIDI files of one part go in and
 out (`daw describe midi`).
 
 **Mixing.** Tracks, groups, returns and the master take insert effects:
