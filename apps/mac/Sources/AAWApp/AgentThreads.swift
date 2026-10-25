@@ -5,7 +5,8 @@ import Foundation
 /// it moves or is saved under another name. Claude Code keeps the
 /// conversations themselves, by the folder they were started in; a thread
 /// the person started in a terminal in the project's folder is listed too
-/// when that list can be read.
+/// when that list can be read, except in an Untitled project, whose folder
+/// earlier Untitled projects had.
 struct ThreadList: Equatable {
     struct Entry: Codable, Equatable, Identifiable {
         /// Claude Code's session ID, which `--resume` takes.
@@ -213,6 +214,20 @@ enum ClaudeTranscripts {
         guard let resolved = realpath(path, nil) else { return path }
         defer { free(resolved) }
         return String(cString: resolved)
+    }
+
+    /// A session's file: in the record of one of the folders given, else in
+    /// any folder's, as `--resume` finds it. A thread started in a project
+    /// stays in the record of the folder it started in when the project is
+    /// saved elsewhere, and Claude Code adds to it there when it resumes.
+    static func file(of id: String, near folders: [URL], config: URL = configFolder()) -> URL? {
+        let name = "\(id).jsonl"
+        let projects = config.appendingPathComponent("projects")
+        let others = (try? FileManager.default.contentsOfDirectory(atPath: projects.path))?.sorted()
+            .map { projects.appendingPathComponent($0) } ?? []
+        return (folders.map { folder(for: $0, config: config) } + others)
+            .map { $0.appendingPathComponent(name) }
+            .first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     /// The sessions recorded for a working folder, newest first; none when
