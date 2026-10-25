@@ -3,7 +3,9 @@ for the ElevenLabs API on this machine: the sound saved in the generated folder
 with its recipe and imported into the project, found by the library, played
 by a pad and rendered with no network; the estimate, the agent's budget and
 the person's requests; the edit undone under a host; the refusals; an MP3
-plan decoded by import; and the key in no output and no file.
+plan decoded by import; and the key in no output and no file. A song from a
+plan made by `daw generate plan`, returned as a multipart reply of a drum
+track at a known tempo, imported with its beat map and cut on its bars.
 
 No request leaves the machine: AAW_GENERATE_URL names the stand-in, and the
 key comes from AAW_TEST_GENERATE_KEY, which is read only for a loopback
@@ -27,10 +29,37 @@ import pytest
 import soundfile as sf
 
 from agent_daw.model import load
-from helpers import cli, daw
+from helpers import beat_song, cli, daw
 
 KEY = "sk_test_key_that_is_never_shown_42"
 RATE = 44100
+BOUNDARY = "aaw-test-boundary-3c9e"
+SONG_BPM = 100.0
+SONG_FIRST = 0.05
+
+
+def drums(seconds, folder):
+    """A drum track at SONG_BPM, its first downbeat SONG_FIRST in, as the
+    headerless stereo 16-bit PCM at 48 kHz the service sends for music."""
+    beat_song(folder / "drums.wav", SONG_BPM, int(seconds / (240 / SONG_BPM)) + 1, SONG_FIRST, seed=3)
+    x, rate = sf.read(folder / "drums.wav")
+    if x.ndim > 1:
+        x = x.mean(axis=1)
+    frames = round(seconds * 48000)
+    y = np.interp(np.arange(frames) / 48000, np.arange(len(x)) / rate, x, right=0.0)
+    stereo = np.stack([y, 0.9 * y], axis=1)
+    return (np.clip(stereo, -1, 1) * 32767).astype("<i2").tobytes()
+
+
+def multipart(meta, audio, audio_type):
+    head = f"--{BOUNDARY}\r\nContent-Type: application/json\r\n\r\n{json.dumps(meta)}\r\n--{BOUNDARY}\r\nContent-Type: {audio_type}\r\n\r\n"
+    return head.encode() + audio + f"\r\n--{BOUNDARY}--\r\n".encode()
+
+
+def quarters(seconds, names=("Intro", "Verse", "Chorus", "Outro")):
+    """A plan of four chunks, each a quarter of `seconds`."""
+    ms = round(seconds * 1000 / 4)
+    return {"chunks": [{"text": f"[{n}]\n{{instrumental}}", "duration_ms": ms, "positive_styles": ["dusty soul", "Rhodes"], "negative_styles": []} for n in names]}
 
 
 def pcm(seconds):
@@ -48,6 +77,8 @@ class StandIn:
         self.delay = 0
         self.seen = []
         self.script = deque()
+        self.folder = Path(tempfile.mkdtemp(prefix="stand-in"))
+        self.mp3 = None
         stand_in = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -79,6 +110,19 @@ class StandIn:
                 if method == "GET" and path == "/v1/user/subscription":
                     sub = {"tier": stand_in.tier, "character_count": 500, "character_limit": 10000, "next_character_count_reset_unix": 1761955200, "status": "active"}
                     return self._reply(200, json.dumps(sub).encode())
+                if method == "POST" and path == "/v1/music/plan":
+                    seconds = ((body or {}).get("music_length_ms") or 38400) / 1000
+                    return self._reply(200, json.dumps(quarters(seconds)).encode())
+                if method == "POST" and path == "/v1/music/detailed":
+                    plan = (body or {}).get("composition_plan") or quarters(((body or {}).get("music_length_ms") or 9600) / 1000)
+                    seconds = sum(c["duration_ms"] for c in plan["chunks"]) / 1000
+                    meta = {"composition_plan": plan, "song_metadata": {"title": "Dusty Soul Ballad", "description": "Slow", "genres": ["soul"], "languages": ["en"], "is_explicit": False}}
+                    if "pcm_48000" in query:
+                        audio, kind = drums(seconds, stand_in.folder), "audio/pcm"
+                    else:
+                        audio, kind = stand_in.mp3, "audio/mpeg"
+                    headers = [("request-id", f"req-{len(stand_in.seen)}"), ("song-id", "song-xyz"), ("content-type", f"multipart/mixed; boundary={BOUNDARY}")]
+                    return self._reply(200, multipart(meta, audio, kind), headers)
                 if method == "POST" and path == "/v1/sound-generation":
                     time.sleep(stand_in.delay)
                     seconds = (body or {}).get("duration_seconds") or 2
@@ -103,6 +147,9 @@ class StandIn:
     def sounds(self):
         return [s for s in self.seen if s["path"] == "/v1/sound-generation"]
 
+    def songs(self):
+        return [s for s in self.seen if s["path"] == "/v1/music/detailed"]
+
 
 @pytest.fixture
 def stand_in(tmp_path, monkeypatch):
@@ -114,6 +161,7 @@ def stand_in(tmp_path, monkeypatch):
     monkeypatch.setenv("AAW_WORKSPACE", str(tmp_path / "workspace"))
     yield service
     service.stop()
+    shutil.rmtree(service.folder, ignore_errors=True)
 
 
 @pytest.fixture
@@ -357,11 +405,14 @@ def test_a_plan_without_pcm_gets_an_mp3_that_import_decodes(tmp_path, stand_in, 
 
 def test_describe_and_help_say_what_the_agent_needs():
     topic = daw("describe", "generate")["semantics"]
-    assert set(topic) >= {"command", "good_for", "result", "files", "recipe", "key", "budget", "formats", "errors", "terms", "limits"}
+    assert set(topic) >= {"command", "music", "plan", "good_for", "result", "files", "recipe", "key", "budget", "formats", "errors", "terms", "limits"}
+    assert "--plan FILE" in topic["music"] and "chunks" in topic["plan"] and "beat_map" in topic["result"]
     assert "daw keys set elevenlabs" in topic["key"] and "never the product" in topic["good_for"]
     assert "generate" in daw("describe")["topics"]
     code, out, _ = run("generate", "--help")
-    assert code == 0 and "sound" in out and "list" in out
+    assert code == 0 and all(word in out for word in ["sound", "music", "plan", "list"])
+    code, out, _ = run("generate", "music", "--help")
+    assert code == 0 and all(flag in out for flag in ["--plan", "--seconds", "--instrumental", "--seed", "--model", "--estimate"])
     code, out, _ = run("generate", "sound", "--help")
     assert code == 0 and "--bars" in out and "--estimate" in out and "--loop" in out
     code, out, _ = run("keys", "--help")
@@ -406,3 +457,117 @@ def test_requests_at_once_cannot_spend_past_the_budget(stand_in, song):
     assert sorted(codes) == [0, 0, 1, 1]
     assert len(stand_in.sounds()) == 2
     assert daw("keys", "status")["budget"]["spent_today"]["agent"] == 4.0
+
+
+def test_a_song_from_a_plan_is_imported_with_its_beat_map_and_cut_on_its_bars(tmp_path, stand_in, song):
+    # A plan, at no cost, written to a file to edit.
+    plan_file = tmp_path / "plan.json"
+    code, out, err = run("generate", "plan", "dusty soul ballad, Rhodes, 100 bpm", "--seconds", 38.4, "--out", plan_file)
+    assert code == 0, err
+    planned = json.loads(out)
+    assert planned["seconds"] == 38.4 and planned["model_id"] == "music_v2_5" and "problem" not in planned
+    assert [s["name"] for s in planned["sections"]] == ["Intro", "Verse", "Chorus", "Outro"]
+    assert planned["sections"][2]["start_seconds"] == 19.2
+    assert stand_in.seen[-1]["body"] == {"prompt": "dusty soul ballad, Rhodes, 100 bpm", "model_id": "music_v2_5", "music_length_ms": 38400}
+    assert json.loads(plan_file.read_text()) == planned["plan"]
+    assert daw("keys", "status")["budget"]["spent_today"] == {"agent": 0.0, "user": 0.0}
+
+    # The song from the plan, edited.
+    plan = json.loads(plan_file.read_text())
+    plan["chunks"][1]["text"] = "[Verse]\nWe kept the radio low"
+    plan_file.write_text(json.dumps(plan))
+    code, out, err = run("generate", "music", song, "--plan", plan_file, "--seed", 7)
+    assert code == 0, err
+    made = json.loads(out)
+    sent = stand_in.songs()[0]
+    assert sent["query"] == "output_format=pcm_48000"
+    assert sent["body"] == {"composition_plan": plan, "seed": 7, "model_id": "music_v2_5", "store_for_inpainting": True}
+    assert made["sample_id"] == "dusty-soul-ballad" and made["title"] == "Dusty Soul Ballad"
+    assert made["song_id"] == "song-xyz" and made["format"] == "pcm_48000"
+    assert (made["sample_rate"], made["channels"], made["seconds"]) == (48000, 2, 38.4)
+    assert made["budget"]["spent_today"]["agent"] == 38.4 and made["placed"] is False
+    assert "notes" not in made, made["notes"]
+    copy = song.parent / made["path"]
+    info = sf.info(copy)
+    assert (info.samplerate, info.channels) == (48000, 2) and abs(info.duration - 38.4) < 0.001
+    assert load(song)["samples"]["dusty-soul-ballad"]["path"] == made["path"]
+    recipe = json.loads((song.parent / made["recipe"]).read_text())
+    assert recipe["kind"] == "music" and recipe["plan"] == plan and recipe["song_id"] == "song-xyz"
+    assert recipe["parameters"]["seed"] == 7 and recipe["genres"] == ["soul"]
+
+    # Its beat map: the drums' tempo, every bar, and each section on its bar.
+    beat_map = made["beat_map"]
+    assert beat_map["tempo"]["bpm"] == pytest.approx(SONG_BPM, abs=0.05)
+    bars = np.array(beat_map["bars"])
+    assert bars[0] == pytest.approx(SONG_FIRST, abs=0.002)
+    assert np.allclose(np.diff(bars), 240 / SONG_BPM, atol=0.002)
+    assert [(s["name"], s["bar"]) for s in made["sections"]] == [("Intro", 1), ("Verse", 5), ("Chorus", 9), ("Outro", 13)]
+    assert made["sections"][2]["bar_seconds"] == pytest.approx(19.25, abs=0.002)
+
+    # Listed with its title; a section cut on its bars plays at the song's tempo.
+    listed = daw("generate", "list", song)["generated"][0]
+    assert (listed["sample_id"], listed["kind"], listed["title"], listed["song_id"]) == ("dusty-soul-ballad", "music", "Dusty Soul Ballad", "song-xyz")
+    daw("track", "add", song, "chop")
+    chorus = made["sections"][2]
+    daw("audio", "add", song, "chop", made["sample_id"], "--at", 0, "--source-start-seconds", chorus["bar_seconds"],
+        "--source-end-seconds", bars[12], "--source-bpm", beat_map["tempo"]["bpm"], "--stretch", "preserve_pitch")
+    before = len(stand_in.seen)
+    assert daw("render", song)["mix"]["peak_dbfs"] > -30
+    assert len(stand_in.seen) == before
+    assert KEY not in out + err
+    assert KEY not in everything_under(tmp_path / "data") + everything_under(tmp_path / "workspace") + everything_under(song.parent)
+
+
+def test_a_song_is_checked_estimated_and_held_against_the_budget(tmp_path, stand_in, song, monkeypatch):
+    estimate = daw("generate", "music", song, "dusty soul", "--seconds", 60, "--estimate")
+    assert (estimate["kind"], estimate["seconds"], estimate["usd"], estimate["allowed"]) == ("music", 60.0, 0.15, True)
+    assert estimate["format"] == "pcm_48000" and estimate["sent"] is False and estimate["sample_id"] == "dusty-soul"
+    assumed = daw("generate", "music", song, "dusty soul", "--estimate")
+    assert assumed["seconds"] == 300 and assumed["seconds_assumed"] is True and assumed["allowed"] is False
+    # With no length the model's is held at five minutes, past the agent's day.
+    message = failure("generate", "music", song, "dusty soul")
+    assert "budget" in message and "give --seconds" in message
+    # Checked before anything is sent.
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps({"chunks": [{"text": "[Intro]", "duration_ms": 1000, "positive_styles": ["soul"]}]}))
+    assert "chunk 1 is 1000 ms" in failure("generate", "music", song, "--plan", bad)
+    good = tmp_path / "good.json"
+    good.write_text(json.dumps(quarters(12)))
+    assert "not both" in failure("generate", "music", song, "soul", "--plan", good)
+    assert "--seconds is for a prompt" in failure("generate", "music", song, "--plan", good, "--seconds", 12)
+    assert "--seed is for a plan" in failure("generate", "music", song, "soul", "--seconds", 12, "--seed", 1)
+    assert "3 to 300" in failure("generate", "music", song, "soul", "--seconds", 400)
+    assert "--model must be" in failure("generate", "music", song, "soul", "--seconds", 12, "--model", "music_v9")
+    assert "music_v1 takes sections" in failure("generate", "music", song, "--plan", good, "--model", "music_v1")
+    assert stand_in.songs() == []
+    # A prompt with a length, as the person, under a host: one undoable edit.
+    with hosted(song, monkeypatch):
+        made = daw("--origin", "user", "generate", "music", song, "dusty soul", "--seconds", 9.6, "--instrumental", "--id", "soul")
+        assert made["revision"] >= 1 and made["origin"] == "user" and made["seconds"] == 9.6
+        assert daw("status", song)["undo"] == {"label": "Generate soul", "origin": "user"}
+        daw("undo", song)
+        assert "soul" not in daw("get", song, "samples")
+    assert stand_in.songs()[0]["body"] == {"prompt": "dusty soul", "music_length_ms": 9600, "force_instrumental": True, "model_id": "music_v2_5", "store_for_inpainting": True}
+    assert made["budget"]["spent_today"] == {"agent": 0.0, "user": 9.6}
+    # A refused prompt's suggestion is text, and nothing is spent.
+    stand_in.script.append((400, {"detail": {"status": "bad_prompt", "message": "No artists", "data": {"prompt_suggestion": "a slow soul ballad"}}}, []))
+    message = failure("generate", "music", song, "like Marvin Gaye", "--seconds", 10)
+    assert "named something it may not" in message and '"a slow soul ballad"' in message
+    assert daw("keys", "status")["budget"]["spent_today"]["agent"] == 0.0
+
+
+def test_a_plan_without_pcm_gets_a_song_as_mp3_that_import_decodes(tmp_path, stand_in, song):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("no MP3 encoder here")
+    mp3 = tmp_path / "song.mp3"
+    out = subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=220:duration=9.6", "-ac", "2", "-ar", "48000", "-b:a", "192k", str(mp3)], capture_output=True)
+    if out.returncode != 0:
+        pytest.skip("ffmpeg could not make an MP3")
+    stand_in.mp3 = mp3.read_bytes()
+    stand_in.tier = "creator"
+    assert daw("keys", "status")["tier"] == "creator"
+    made = daw("generate", "music", song, "a drone", "--seconds", 9.6, "--id", "drone")
+    assert stand_in.songs()[0]["query"] == "output_format=mp3_48000_192"
+    assert made["format"] == "mp3_48000_192" and Path(made["generated_file"]).suffix == ".mp3"
+    assert made["path"].endswith(".wav") and 9.5 < made["seconds"] < 9.8
+    assert load(song)["samples"]["drone"]["path"] == made["path"]

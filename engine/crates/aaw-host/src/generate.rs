@@ -1,5 +1,6 @@
-//! Generated audio: a sound or a loop made from a description by the
-//! ElevenLabs API, at the person's own key, saved in the workspace's generated
+//! Generated audio: a sound, a loop or a song made from a description or a
+//! composition plan by the ElevenLabs API, at the person's own key, saved in
+//! the workspace's generated
 //! folder (`~/Music/AAW/library/generated/`, or under `AAW_WORKSPACE`) with
 //! its recipe beside it, and copied into a project as a sample. The service
 //! is a source of material, never the product: the command places nothing.
@@ -29,12 +30,27 @@ pub const SOUND_MODEL: &str = "eleven_text_to_sound_v2";
 pub const SOUND_CREDITS_PER_SECOND: f64 = 40.0;
 pub const SOUND_MIN_SECONDS: f64 = 0.5;
 pub const SOUND_MAX_SECONDS: f64 = 30.0;
+/// The music model asked for unless another is named: the newest. The
+/// service's own default is still `music_v1`.
+pub const MUSIC_MODEL: &str = "music_v2_5";
+pub const MUSIC_MODELS: &[&str] = &["music_v1", "music_v2", "music_v2_5"];
+/// What a minute of music costs through the API, from its pricing page on
+/// October 24, 2026; the credits are what the reply says.
+pub const MUSIC_USD_PER_MINUTE: f64 = 0.15;
+pub const MUSIC_MIN_SECONDS: f64 = 3.0;
+/// The service's reference allows 600 s and its overview says five minutes;
+/// five until a request shows more holds.
+pub const MUSIC_MAX_SECONDS: f64 = 300.0;
+/// A plan's chunk or section, in milliseconds.
+pub const CHUNK_MIN_MS: i64 = 3_000;
+pub const CHUNK_MAX_MS: i64 = 120_000;
+pub const PLAN_MAX_CHUNKS: usize = 30;
 /// The seconds the agent may generate in a day without asking, unless set.
 pub const DEFAULT_BUDGET_SECONDS: f64 = 120.0;
 pub const SETTINGS_FILE: &str = "generate.json";
 /// The suffix of a recipe, beside its audio.
 pub const RECIPE_SUFFIX: &str = ".generated.json";
-/// The most a reply may be: a minute of 48 kHz stereo PCM is 11.5 MB.
+/// The most a reply may be: five minutes of 48 kHz stereo PCM is 58 MB.
 const REPLY_LIMIT: u64 = 256 * 1024 * 1024;
 
 /// The service's key. It prints as nothing.
@@ -302,6 +318,9 @@ pub enum Format {
     Pcm44100,
     Mp3At192,
     Mp3At128,
+    /// Music's: PCM at 48 kHz, and the service's own MP3 for its v2 models.
+    Pcm48000,
+    Mp3At48k192,
 }
 
 impl Format {
@@ -311,18 +330,28 @@ impl Format {
             Format::Pcm44100 => "pcm_44100",
             Format::Mp3At192 => "mp3_44100_192",
             Format::Mp3At128 => "mp3_44100_128",
+            Format::Pcm48000 => "pcm_48000",
+            Format::Mp3At48k192 => "mp3_48000_192",
         }
     }
 
+    pub fn is_pcm(self) -> bool {
+        matches!(self, Format::Pcm44100 | Format::Pcm48000)
+    }
+
     pub fn extension(self) -> &'static str {
-        match self {
-            Format::Pcm44100 => "wav",
-            Format::Mp3At192 | Format::Mp3At128 => "mp3",
+        if self.is_pcm() {
+            "wav"
+        } else {
+            "mp3"
         }
     }
 
     pub fn sample_rate(self) -> u32 {
-        44_100
+        match self {
+            Format::Pcm48000 | Format::Mp3At48k192 => 48_000,
+            _ => 44_100,
+        }
     }
 
     /// The next format down, when the plan refused this one.
@@ -331,6 +360,17 @@ impl Format {
             Format::Pcm44100 => Some(Format::Mp3At192),
             Format::Mp3At192 => Some(Format::Mp3At128),
             Format::Mp3At128 => None,
+            Format::Pcm48000 => Some(Format::Mp3At48k192),
+            Format::Mp3At48k192 => Some(Format::Mp3At128),
+        }
+    }
+
+    /// The best format a tier allows for music: PCM at 48 kHz on Pro and
+    /// above, else the MP3 the service gives its v2 models by default.
+    pub fn for_music_tier(tier: Option<&str>) -> Format {
+        match Format::for_tier(tier) {
+            Format::Pcm44100 => Format::Pcm48000,
+            _ => Format::Mp3At48k192,
         }
     }
 
@@ -345,14 +385,17 @@ impl Format {
 
     /// The tier a refusal of this format says the plan is at most.
     fn tier_below(self) -> &'static str {
-        match self {
-            Format::Pcm44100 => "creator",
-            Format::Mp3At192 | Format::Mp3At128 => "starter",
+        if self.is_pcm() {
+            "creator"
+        } else {
+            "starter"
         }
     }
 
     pub fn from_name(name: &str) -> Option<Format> {
-        [Format::Pcm44100, Format::Mp3At192, Format::Mp3At128].into_iter().find(|f| f.name() == name)
+        [Format::Pcm44100, Format::Mp3At192, Format::Mp3At128, Format::Pcm48000, Format::Mp3At48k192]
+            .into_iter()
+            .find(|f| f.name() == name)
     }
 }
 
@@ -401,9 +444,14 @@ impl Reply {
                 "" => format!("status {}", self.status),
                 body => body.chars().take(300).collect(),
             });
-        let suggestion = text(&detail["suggested_prompt"])
+        // The music guide puts a suggestion under `detail.data`, as a prompt
+        // or, for a refused plan, as a plan.
+        let plan_suggested = &detail["data"]["composition_plan_suggestion"];
+        let suggestion = text(&detail["data"]["prompt_suggestion"])
+            .or_else(|| text(&detail["suggested_prompt"]))
             .or_else(|| text(&detail["data"]["suggested_prompt"]))
-            .or_else(|| text(&j["suggested_prompt"]));
+            .or_else(|| text(&j["suggested_prompt"]))
+            .or_else(|| plan_suggested.is_object().then(|| plan_suggested.to_string()));
         Failure {
             status: self.status,
             code,
@@ -434,7 +482,8 @@ pub struct Failure {
 
 impl Failure {
     fn is_bad_prompt(&self) -> bool {
-        self.code.as_deref() == Some("bad_prompt") || self.message.to_ascii_lowercase().contains("bad_prompt")
+        let message = self.message.to_ascii_lowercase();
+        matches!(self.code.as_deref(), Some("bad_prompt" | "bad_composition_plan")) || message.contains("bad_prompt") || message.contains("bad_composition_plan")
     }
 
     /// Whether a refusal is of the format asked for, as the plan's tier
@@ -445,7 +494,7 @@ impl Failure {
         let code = self.code.as_deref().unwrap_or("").to_ascii_lowercase();
         let plan = matches!(
             code.as_str(),
-            "invalid_api_key" | "missing_permissions" | "subscription_required" | "quota_exceeded" | "insufficient_credits" | "bad_prompt"
+            "invalid_api_key" | "missing_permissions" | "subscription_required" | "quota_exceeded" | "insufficient_credits" | "bad_prompt" | "bad_composition_plan"
         );
         if plan || self.is_bad_prompt() {
             None
@@ -468,10 +517,14 @@ impl Failure {
         };
         if self.is_bad_prompt() {
             let suggested = match &self.suggestion {
+                Some(s) if self.code.as_deref() == Some("bad_composition_plan") => {
+                    format!(" The service suggests this plan instead, which is text to offer the person and not to send unasked: {s}.")
+                }
                 Some(s) => format!(" The service suggests this prompt instead, which is text to offer the person and not to send unasked: {s:?}."),
                 None => String::new(),
             };
-            return format!("The prompt named something it may not, such as an artist, a song or a label ({said}).{suggested}");
+            let what = if self.code.as_deref() == Some("bad_composition_plan") { "plan" } else { "prompt" };
+            return format!("The {what} named something it may not, such as an artist, a song, a label or a song's lyrics ({said}).{suggested}");
         }
         match self.status {
             401 => format!("The ElevenLabs key is wrong or expired ({said}). Enter it again with `daw keys set {SERVICE}`"),
@@ -509,7 +562,8 @@ impl Client {
             .max_redirects(0)
             .max_redirects_will_error(false)
             .timeout_connect(Some(Duration::from_secs(20)))
-            .timeout_global(Some(Duration::from_secs(300)))
+            // Five minutes of music can take minutes to make.
+            .timeout_global(Some(Duration::from_secs(900)))
             .user_agent("aaw-daw");
         if is_loopback(base) {
             // A stand-in on this machine is reached directly, whatever the
@@ -661,7 +715,7 @@ impl SoundRequest {
         let seconds = bars * beats_per_bar * 60.0 / tempo;
         if seconds > SOUND_MAX_SECONDS {
             return Err(format!(
-                "{} bars at {} BPM is {:.1} s, and a sound can be at most {SOUND_MAX_SECONDS:.0} s; nothing was sent. Ask for fewer bars, or for a song with daw generate music once it is built",
+                "{} bars at {} BPM is {:.1} s, and a sound can be at most {SOUND_MAX_SECONDS:.0} s; nothing was sent. Ask for fewer bars, or for a song with daw generate music",
                 tidy(bars),
                 tidy(tempo),
                 seconds
@@ -752,6 +806,9 @@ fn tidy(x: f64) -> String {
 pub struct Generated {
     pub bytes: Vec<u8>,
     pub format: Format,
+    /// The channels of PCM, which carries no header: 1 for a sound, and for
+    /// music what its length says.
+    pub channels: u16,
     pub request_id: Option<String>,
     /// The credits the service says it cost, from `character-cost` or
     /// `x-character-count`.
@@ -765,38 +822,47 @@ pub struct Generated {
 impl Generated {
     /// The length of PCM from its bytes; None for a compressed format.
     pub fn pcm_seconds(&self) -> Option<f64> {
-        (self.format == Format::Pcm44100).then(|| (self.bytes.len() / 2) as f64 / f64::from(self.format.sample_rate()))
+        self.format
+            .is_pcm()
+            .then(|| (self.bytes.len() / (2 * usize::from(self.channels.max(1)))) as f64 / f64::from(self.format.sample_rate()))
     }
 }
 
-/// Asks for a sound, in the best format the tier allows. A 429 is retried
+/// Asks for a sound, in the best format the tier allows.
+pub fn sound(client: &Client, request: &SoundRequest, tier: Option<&str>) -> Result<Generated> {
+    request.check()?;
+    let (reply, generated) = post_audio(client, "/v1/sound-generation", &request.body(), Format::for_tier(tier), tier)?;
+    Ok(Generated { bytes: reply.body, ..generated })
+}
+
+/// Posts `body` to `path` for audio, from `format` down. A 429 is retried
 /// once after the wait the reply gives. A refusal that names the format is
 /// asked for again one format lower, once a step, and the tier is corrected;
 /// a 403 that does not say why is asked for once lower and the tier left, as
 /// it may be refused for something else. Nothing else is retried, so a
-/// request is paid for at most once.
-pub fn sound(client: &Client, request: &SoundRequest, tier: Option<&str>) -> Result<Generated> {
-    request.check()?;
-    let body = request.body();
-    let mut format = Format::for_tier(tier);
+/// request is paid for at most once. The reply comes back with what was read
+/// of it, its bytes left in the reply.
+fn post_audio(client: &Client, path: &str, body: &Json, mut format: Format, tier: Option<&str>) -> Result<(Reply, Generated)> {
     let mut tier = tier.map(str::to_string);
     let mut notes = Vec::new();
     let mut retried_429 = false;
     let mut retried_unnamed = false;
     loop {
-        let reply = client.post("/v1/sound-generation", &[("output_format", format.name())], &body)?;
+        let reply = client.post(path, &[("output_format", format.name())], body)?;
         if reply.ok() {
             let header = |name: &str| reply.header(name).map(str::to_string);
             let request_id = header("request-id").or_else(|| header("x-request-id"));
             let cost = header("character-cost").or_else(|| header("x-character-count")).and_then(|s| s.trim().parse().ok());
-            return Ok(Generated {
-                bytes: reply.body,
+            let generated = Generated {
+                bytes: Vec::new(),
                 format,
+                channels: 1,
                 request_id,
                 cost,
                 tier,
                 notes,
-            });
+            };
+            return Ok((reply, generated));
         }
         let failure = reply.failure();
         if failure.status == 429 && !retried_429 {
@@ -835,6 +901,532 @@ pub fn sound(client: &Client, request: &SoundRequest, tier: Option<&str>) -> Res
     }
 }
 
+// ---------------------------------------------------------------- music
+
+/// A song to ask for: from a prompt, or from a composition plan.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MusicRequest {
+    pub prompt: Option<String>,
+    /// A composition plan: `chunks` for the v2 models, `sections` for v1.
+    pub plan: Option<Json>,
+    /// With a prompt, the length; the model picks one when it is left out.
+    pub seconds: Option<f64>,
+    /// With a prompt, a song with no voice.
+    pub instrumental: bool,
+    /// With a plan, a seed, which helps and does not promise the same song.
+    pub seed: Option<i64>,
+    pub model: String,
+}
+
+impl MusicRequest {
+    /// Checks the request, and a plan's chunks and lengths, before anything
+    /// is sent.
+    pub fn check(&self) -> Result<()> {
+        if !MUSIC_MODELS.contains(&self.model.as_str()) {
+            return Err(format!("--model must be one of {}; nothing was sent", MUSIC_MODELS.join(", ")));
+        }
+        match (&self.prompt, &self.plan) {
+            (Some(_), Some(_)) => return Err("Give a prompt or --plan, not both: the plan says what the song is".into()),
+            (None, None) => return Err("Give a prompt, or a plan with --plan FILE (daw generate plan makes one)".into()),
+            (Some(p), None) if p.trim().is_empty() => return Err("The prompt is empty".into()),
+            _ => {}
+        }
+        if self.plan.is_some() {
+            if self.seconds.is_some() {
+                return Err("--seconds is for a prompt: a plan's chunks give its length".into());
+            }
+            if self.instrumental {
+                return Err("--instrumental is for a prompt: a plan with no lyrics and a style such as \"instrumental\" asks for the same".into());
+            }
+        } else if self.seed.is_some() {
+            return Err("--seed is for a plan: the service takes no seed with a prompt".into());
+        }
+        if let Some(s) = self.seconds {
+            if !(MUSIC_MIN_SECONDS..=MUSIC_MAX_SECONDS).contains(&s) {
+                return Err(format!("--seconds must be {MUSIC_MIN_SECONDS:.0} to {MUSIC_MAX_SECONDS:.0}; nothing was sent"));
+            }
+        }
+        if let Some(plan) = &self.plan {
+            check_plan(plan, &self.model)?;
+        }
+        Ok(())
+    }
+
+    /// The seconds held against the budget: the plan's length, the length
+    /// asked for, or the most a song can be when the model picks one.
+    pub fn seconds_asked(&self) -> f64 {
+        match &self.plan {
+            Some(plan) => plan_seconds(plan),
+            None => self.seconds.unwrap_or(MUSIC_MAX_SECONDS),
+        }
+    }
+
+    /// The length the request names, when it names one.
+    pub fn seconds_named(&self) -> Option<f64> {
+        match &self.plan {
+            Some(plan) => Some(plan_seconds(plan)),
+            None => self.seconds,
+        }
+    }
+
+    /// The body of `POST /v1/music/detailed`. The song is stored for
+    /// inpainting, so a section can be made again later by its `song-id`.
+    pub fn body(&self) -> Json {
+        let mut m = Map::new();
+        if let Some(prompt) = &self.prompt {
+            m.insert("prompt".into(), json!(prompt.trim()));
+            if let Some(s) = self.seconds {
+                m.insert("music_length_ms".into(), json!((s * 1000.0).round() as i64));
+            }
+            if self.instrumental {
+                m.insert("force_instrumental".into(), json!(true));
+            }
+        }
+        if let Some(plan) = &self.plan {
+            m.insert("composition_plan".into(), plan.clone());
+            if let Some(seed) = self.seed {
+                m.insert("seed".into(), json!(seed));
+            }
+        }
+        m.insert("model_id".into(), json!(self.model));
+        m.insert("store_for_inpainting".into(), json!(true));
+        Json::Object(m)
+    }
+
+    /// `--estimate`: what the request would cost, with nothing sent.
+    pub fn estimate(&self, settings: &Settings, origin: Origin) -> Json {
+        let seconds = self.seconds_asked();
+        json!({
+            "kind": "music",
+            "model_id": self.model,
+            "prompt": self.prompt,
+            "plan": self.plan.as_ref().map(plan_sections),
+            "seconds": round3(seconds),
+            "seconds_assumed": self.seconds_named().is_none(),
+            "usd": (seconds / 60.0 * MUSIC_USD_PER_MINUTE * 100.0).round() / 100.0,
+            "usd_per_minute": MUSIC_USD_PER_MINUTE,
+            "credits": Json::Null,
+            "format": Format::for_music_tier(settings.tier.as_deref()).name(),
+            "tier": settings.tier,
+            "budget": settings.budget_json(),
+            "allowed": settings.allow(origin, seconds).is_ok(),
+            "origin": origin.as_str(),
+            "sent": false,
+        })
+    }
+}
+
+/// Whether a plan is of chunks, the v2 models' shape.
+fn plan_is_chunks(plan: &Json) -> bool {
+    plan.get("chunks").is_some()
+}
+
+/// A chunk's length in milliseconds: its `duration_ms`, or for a chunk of a
+/// stored song, its range.
+fn chunk_ms(chunk: &Json) -> i64 {
+    match chunk.get("song_id") {
+        Some(_) => chunk["range"]["end_ms"].as_i64().unwrap_or(0) - chunk["range"]["start_ms"].as_i64().unwrap_or(0),
+        None => chunk["duration_ms"].as_i64().unwrap_or(0),
+    }
+}
+
+/// A plan's chunks or sections.
+fn plan_parts(plan: &Json) -> &[Json] {
+    let parts = if plan_is_chunks(plan) { &plan["chunks"] } else { &plan["sections"] };
+    parts.as_array().map_or(&[], Vec::as_slice)
+}
+
+/// A plan's length in seconds.
+pub fn plan_seconds(plan: &Json) -> f64 {
+    plan_parts(plan).iter().map(chunk_ms).sum::<i64>() as f64 / 1000.0
+}
+
+/// A chunk's section name: the `[Name]` its text starts with, or a v1
+/// section's `section_name`.
+fn part_name(part: &Json) -> Option<String> {
+    if let Some(name) = part["section_name"].as_str() {
+        return Some(name.to_string());
+    }
+    let text = part["text"].as_str()?.trim_start();
+    let rest = text.strip_prefix('[')?;
+    rest.split_once(']').map(|(name, _)| name.trim().to_string())
+}
+
+/// A plan's parts in order, each with its name, where it starts and how long
+/// it is, in seconds, and its styles.
+pub fn plan_sections(plan: &Json) -> Json {
+    let mut at = 0i64;
+    let rows: Vec<Json> = plan_parts(plan)
+        .iter()
+        .enumerate()
+        .map(|(i, part)| {
+            let ms = chunk_ms(part);
+            let row = json!({
+                "index": i,
+                "name": part_name(part),
+                "start_seconds": at as f64 / 1000.0,
+                "seconds": ms as f64 / 1000.0,
+                "styles": part.get("positive_styles").or_else(|| part.get("positive_local_styles")).cloned().unwrap_or(Json::Null),
+                "kept_from": part.get("song_id").or_else(|| part["source_from"].get("song_id")).cloned().unwrap_or(Json::Null),
+            });
+            at += ms;
+            row
+        })
+        .collect();
+    Json::Array(rows)
+}
+
+/// The text of a part: at most 30 lines after its `[Name]`, each at most 200
+/// characters, and a name of 1 to 100.
+fn check_lines(at: &str, lines: &[&str]) -> Result<()> {
+    if lines.len() > 30 {
+        return Err(format!("{at} has {} lines, and the most is 30", lines.len()));
+    }
+    if let Some(long) = lines.iter().find(|l| l.chars().count() > 200) {
+        return Err(format!("{at} has a line of {} characters, and the most is 200: {:?}", long.chars().count(), long.chars().take(40).collect::<String>()));
+    }
+    Ok(())
+}
+
+fn check_name(at: &str, name: &str) -> Result<()> {
+    let n = name.chars().count();
+    if !(1..=100).contains(&n) {
+        return Err(format!("{at}'s section name is {n} characters, and must be 1 to 100"));
+    }
+    Ok(())
+}
+
+fn check_styles(at: &str, part: &Json, field: &str, required: bool) -> Result<()> {
+    match part.get(field) {
+        None | Some(Json::Null) if !required => Ok(()),
+        Some(Json::Array(styles)) if styles.iter().all(Json::is_string) => {
+            if styles.len() > 50 {
+                return Err(format!("{at} has {} {field}, and the most is 50", styles.len()));
+            }
+            Ok(())
+        }
+        _ => Err(format!("{at} needs {field} as a list of words")),
+    }
+}
+
+fn check_ms(at: &str, ms: Option<i64>) -> Result<()> {
+    match ms {
+        Some(ms) if (CHUNK_MIN_MS..=CHUNK_MAX_MS).contains(&ms) => Ok(()),
+        Some(ms) => Err(format!("{at} is {ms} ms, and a part must be {CHUNK_MIN_MS} to {CHUNK_MAX_MS} ms")),
+        None => Err(format!("{at} needs duration_ms as a whole number")),
+    }
+}
+
+fn check_range(at: &str, value: &Json) -> Result<i64> {
+    if value["song_id"].as_str().is_none_or(|id| id.trim().is_empty()) {
+        return Err(format!("{at} needs the song_id of a stored song"));
+    }
+    let (Some(start), Some(end)) = (value["range"]["start_ms"].as_i64(), value["range"]["end_ms"].as_i64()) else {
+        return Err(format!("{at} needs range.start_ms and range.end_ms as whole numbers"));
+    };
+    if start < 0 || end - start < 50 {
+        return Err(format!("{at}'s range is {start} to {end} ms, and must start at 0 or later and be at least 50 ms"));
+    }
+    Ok(end - start)
+}
+
+fn one_of(at: &str, part: &Json, field: &str, allowed: &[&str]) -> Result<()> {
+    match part.get(field) {
+        None | Some(Json::Null) => Ok(()),
+        Some(v) if v.as_str().is_some_and(|v| allowed.contains(&v)) => Ok(()),
+        Some(v) => Err(format!("{at}'s {field} is {v}, and must be one of {}", allowed.join(", "))),
+    }
+}
+
+/// Checks a plan's shape against the model and the reference's limits: chunks
+/// for the v2 models, at most 30, each 3 to 120 seconds, with at most 30
+/// lines of at most 200 characters; sections with global styles for v1. The
+/// whole is 3 seconds to five minutes.
+pub fn check_plan(plan: &Json, model: &str) -> Result<()> {
+    let refused = |e: String| format!("The plan: {e}; nothing was sent");
+    if !plan.is_object() {
+        return Err(refused("it is not a JSON object".into()));
+    }
+    let v1 = model == "music_v1";
+    if v1 && plan_is_chunks(plan) {
+        return Err(refused("a plan of chunks is for music_v2 and music_v2_5, and music_v1 takes sections; leave out --model or remake the plan for music_v1".into()));
+    }
+    if !v1 && !plan_is_chunks(plan) {
+        let why = if plan.get("sections").is_some() { "a plan of sections is music_v1's; give --model music_v1, or make a plan for this model with daw generate plan" } else { "it has no chunks" };
+        return Err(refused(why.into()));
+    }
+    let parts = if v1 { plan["sections"].as_array() } else { plan["chunks"].as_array() };
+    let Some(parts) = parts.filter(|p| !p.is_empty()) else {
+        return Err(refused(format!("it needs a list of {}", if v1 { "sections" } else { "chunks" })));
+    };
+    if !v1 && parts.len() > PLAN_MAX_CHUNKS {
+        return Err(refused(format!("it has {} chunks, and the most is {PLAN_MAX_CHUNKS}", parts.len())));
+    }
+    if v1 {
+        for field in ["positive_global_styles", "negative_global_styles"] {
+            check_styles("it", plan, field, true).map_err(refused)?;
+        }
+    }
+    for (i, part) in parts.iter().enumerate() {
+        let at = format!("{} {}", if v1 { "section" } else { "chunk" }, i + 1);
+        let check = || -> Result<()> {
+            if v1 {
+                check_name(&at, part["section_name"].as_str().unwrap_or(""))?;
+                check_styles(&at, part, "positive_local_styles", true)?;
+                check_styles(&at, part, "negative_local_styles", true)?;
+                check_ms(&at, part["duration_ms"].as_i64())?;
+                let Some(lines) = part["lines"].as_array().filter(|l| l.iter().all(Json::is_string)) else {
+                    return Err(format!("{at} needs lines as a list of text, empty for none"));
+                };
+                let lines: Vec<&str> = lines.iter().filter_map(Json::as_str).collect();
+                check_lines(&at, &lines)?;
+                if let Some(source) = part.get("source_from").filter(|s| !s.is_null()) {
+                    check_range(&format!("{at}'s source_from"), source)?;
+                }
+                return Ok(());
+            }
+            if part.get("song_id").is_some() {
+                check_range(&at, part)?;
+                return Ok(());
+            }
+            let Some(text) = part["text"].as_str() else {
+                return Err(format!("{at} needs text: a [Section] name, lyric lines and {{directions}}, or of a stored song, song_id and range"));
+            };
+            let mut lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+            if let Some(name) = part_name(part) {
+                check_name(&at, &name)?;
+                if lines.first().is_some_and(|l| l.starts_with('[')) {
+                    let first = lines[0].split_once(']').map_or("", |(_, rest)| rest.trim());
+                    if first.is_empty() {
+                        lines.remove(0);
+                    } else {
+                        lines[0] = first;
+                    }
+                }
+            }
+            check_lines(&at, &lines)?;
+            check_ms(&at, part["duration_ms"].as_i64())?;
+            check_styles(&at, part, "positive_styles", true)?;
+            check_styles(&at, part, "negative_styles", false)?;
+            one_of(&at, part, "context_adherence", &["low", "medium", "high"])?;
+            one_of(&at, part, "condition_strength", &["low", "medium", "high", "xhigh"])?;
+            if let Some(reference) = part.get("conditioning_ref").filter(|r| !r.is_null()) {
+                let ms = check_range(&format!("{at}'s conditioning_ref"), reference)?;
+                if ms > 30_000 {
+                    return Err(format!("{at}'s conditioning_ref is {ms} ms, and the most is 30000"));
+                }
+            }
+            Ok(())
+        };
+        check().map_err(refused)?;
+    }
+    let seconds = plan_seconds(plan);
+    if !(MUSIC_MIN_SECONDS..=MUSIC_MAX_SECONDS).contains(&seconds) {
+        return Err(refused(format!("it is {seconds:.1} s, and a song is {MUSIC_MIN_SECONDS:.0} s to {MUSIC_MAX_SECONDS:.0} s")));
+    }
+    Ok(())
+}
+
+/// A plan given as a file: the plan itself, or the reply of `daw generate
+/// plan`, whose `plan` it is.
+pub fn plan_from(json: Json) -> Json {
+    if !plan_is_chunks(&json) && json.get("sections").is_none() && json["plan"].is_object() {
+        return json["plan"].clone();
+    }
+    json
+}
+
+/// A song as it came back: the audio, and what the service said of it.
+#[derive(Clone, Debug)]
+pub struct Music {
+    pub generated: Generated,
+    /// The plan the service used, from the reply's JSON.
+    pub plan: Json,
+    /// The reply's `song_metadata`: a title, a description, genres, languages
+    /// and whether it is explicit.
+    pub metadata: Json,
+    /// The stored song's ID, from the `song-id` header, for regenerating a
+    /// section of it later.
+    pub song_id: Option<String>,
+    pub notes: Vec<String>,
+}
+
+impl Music {
+    pub fn title(&self) -> Option<&str> {
+        self.metadata["title"].as_str().filter(|t| !t.trim().is_empty())
+    }
+}
+
+/// Asks for a song through `/v1/music/detailed`, whose reply is the plan
+/// used and the audio as `multipart/mixed`. PCM carries no header, so its
+/// channels are whichever makes it as long as the plan the service used,
+/// or the length asked for.
+pub fn music(client: &Client, request: &MusicRequest, tier: Option<&str>) -> Result<Music> {
+    request.check()?;
+    let (reply, mut generated) = post_audio(client, "/v1/music/detailed", &request.body(), Format::for_music_tier(tier), tier)?;
+    let parts = multipart(reply.header("content-type"), &reply.body)?;
+    let song_id = reply.header("song-id").or_else(|| reply.header("x-song-id")).map(str::to_string);
+    let plan = parts.json.as_ref().map_or(Json::Null, |j| j["composition_plan"].clone());
+    let metadata = parts.json.as_ref().map_or(Json::Null, |j| j["song_metadata"].clone());
+    let mut notes = Vec::new();
+    if parts.json.is_none() {
+        notes.push("The reply carried no plan or title, only the audio".to_string());
+    }
+    generated.bytes = parts.audio;
+    if generated.bytes.is_empty() {
+        return Err("ElevenLabs's reply carried no audio; nothing is saved, and the request may still have been charged".into());
+    }
+    if generated.format.is_pcm() {
+        let expected = Some(plan_seconds(&plan)).filter(|s| *s > 0.0).or(request.seconds_named());
+        let (channels, note) = pcm_channels(generated.bytes.len(), generated.format.sample_rate(), expected);
+        generated.channels = channels;
+        notes.extend(note);
+    }
+    Ok(Music {
+        generated,
+        plan,
+        metadata,
+        song_id,
+        notes,
+    })
+}
+
+/// The channels of 16-bit PCM of `len` bytes: 1 or 2, whichever makes it
+/// nearer `expected` seconds. Stereo, with a note, when no length is known
+/// or neither is near it.
+pub fn pcm_channels(len: usize, rate: u32, expected: Option<f64>) -> (u16, Option<String>) {
+    let seconds = |channels: f64| len as f64 / (2.0 * channels * f64::from(rate));
+    let Some(expected) = expected else {
+        return (2, Some("No length was known to tell the PCM's channels by; it is taken as stereo".into()));
+    };
+    let (mono, stereo) = ((seconds(1.0) - expected).abs(), (seconds(2.0) - expected).abs());
+    let channels = if mono < stereo { 1 } else { 2 };
+    let off = mono.min(stereo) / expected.max(1e-9);
+    let note = (off > 0.1).then(|| {
+        format!(
+            "The PCM is {:.1} s as mono and {:.1} s as stereo, and {:.1} s was expected; it is taken as {}",
+            seconds(1.0),
+            seconds(2.0),
+            expected,
+            if channels == 1 { "mono" } else { "stereo" }
+        )
+    });
+    (channels, note)
+}
+
+/// The parts of a `multipart/mixed` reply: its JSON and its audio.
+#[derive(Clone, Debug, Default)]
+pub struct Parts {
+    pub json: Option<Json>,
+    pub audio: Vec<u8>,
+    pub audio_type: Option<String>,
+    pub filename: Option<String>,
+}
+
+/// Splits a multipart reply on its boundary, from the content type or else
+/// its first line. A reply that is not multipart is the audio alone.
+pub fn multipart(content_type: Option<&str>, body: &[u8]) -> Result<Parts> {
+    let declared = content_type.filter(|t| t.to_ascii_lowercase().starts_with("multipart/")).and_then(|t| {
+        t.split(';').map(str::trim).find_map(|p| p.strip_prefix("boundary=").map(|b| b.trim_matches('"').to_string()))
+    });
+    let boundary = match declared {
+        Some(b) if !b.is_empty() => b,
+        _ if body.starts_with(b"--") => {
+            let end = body.iter().position(|&b| b == b'\n').unwrap_or(body.len());
+            String::from_utf8_lossy(&body[2..end]).trim().to_string()
+        }
+        _ => {
+            return Ok(Parts {
+                audio: body.to_vec(),
+                ..Parts::default()
+            })
+        }
+    };
+    let delimiter = format!("--{boundary}").into_bytes();
+    // Where each delimiter starts: at the top, or just after a line's end.
+    let mut at = Vec::new();
+    let mut i = 0;
+    while i + delimiter.len() <= body.len() {
+        if body[i..].starts_with(&delimiter) && (i == 0 || body[i - 1] == b'\n') {
+            at.push(i);
+            i += delimiter.len();
+        } else {
+            i += 1;
+        }
+    }
+    if at.len() < 2 {
+        return Err(format!("ElevenLabs's reply named the boundary {boundary:?} and had {} parts by it", at.len().saturating_sub(1)));
+    }
+    let mut parts = Parts::default();
+    for pair in at.windows(2) {
+        let mut part = &body[pair[0] + delimiter.len()..pair[1]];
+        // The line end before the next delimiter is the delimiter's.
+        part = part.strip_suffix(b"\r\n").or_else(|| part.strip_suffix(b"\n")).unwrap_or(part);
+        part = part.strip_prefix(b"\r\n").or_else(|| part.strip_prefix(b"\n")).unwrap_or(part);
+        let (head, content) = match find(part, b"\r\n\r\n").map(|p| (p, 4)).or_else(|| find(part, b"\n\n").map(|p| (p, 2))) {
+            Some((p, n)) => (&part[..p], &part[p + n..]),
+            None => (&b""[..], part),
+        };
+        let head = String::from_utf8_lossy(head);
+        let header = |name: &str| {
+            head.lines()
+                .find_map(|l| l.split_once(':').filter(|(k, _)| k.trim().eq_ignore_ascii_case(name)).map(|(_, v)| v.trim().to_string()))
+        };
+        let kind = header("content-type").unwrap_or_default();
+        if kind.to_ascii_lowercase().contains("json") && parts.json.is_none() {
+            parts.json = Some(serde_json::from_slice(content).map_err(|e| format!("ElevenLabs's reply had a JSON part that is not JSON ({e})"))?);
+        } else if parts.audio.is_empty() {
+            parts.audio = content.to_vec();
+            parts.audio_type = Some(kind).filter(|k| !k.is_empty());
+            parts.filename = header("content-disposition")
+                .and_then(|d| d.split_once("filename=").map(|(_, f)| f.trim_matches(|c| c == '"' || c == ';').to_string()));
+        }
+    }
+    Ok(parts)
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+/// `daw generate plan`: a composition plan from a prompt, through
+/// `/v1/music/plan`, which costs no credits. A 429 is retried once.
+pub fn compose_plan(client: &Client, prompt: &str, seconds: Option<f64>, model: &str) -> Result<Json> {
+    if prompt.trim().is_empty() {
+        return Err("The prompt is empty".into());
+    }
+    if !MUSIC_MODELS.contains(&model) {
+        return Err(format!("--model must be one of {}; nothing was sent", MUSIC_MODELS.join(", ")));
+    }
+    if let Some(s) = seconds {
+        if !(MUSIC_MIN_SECONDS..=MUSIC_MAX_SECONDS).contains(&s) {
+            return Err(format!("--seconds must be {MUSIC_MIN_SECONDS:.0} to {MUSIC_MAX_SECONDS:.0}; nothing was sent"));
+        }
+    }
+    let mut body = json!({"prompt": prompt.trim(), "model_id": model});
+    if let Some(s) = seconds {
+        body["music_length_ms"] = json!((s * 1000.0).round() as i64);
+    }
+    let mut retried = false;
+    loop {
+        let reply = client.post("/v1/music/plan", &[], &body)?;
+        if reply.ok() {
+            let plan = reply.json();
+            if !plan.is_object() {
+                return Err("ElevenLabs's plan reply was not a JSON object".into());
+            }
+            return Ok(plan);
+        }
+        let failure = reply.failure();
+        if failure.status == 429 && !retried {
+            retried = true;
+            std::thread::sleep(Duration::from_secs_f64(failure.retry_after.unwrap_or(1.0).clamp(0.0, 30.0)));
+            continue;
+        }
+        return Err(failure.explain());
+    }
+}
+
 // ---------------------------------------------------------------- the files
 
 /// A generated sound on disk: its audio and its recipe.
@@ -864,22 +1456,6 @@ pub fn file_stem(id: &str) -> String {
 /// Writes what came back into `folder` as `stem.wav` or `stem.mp3`, PCM given
 /// a WAV header first, with the recipe beside it as `stem.generated.json`.
 pub fn save(generated: &Generated, folder: &Path, stem: &str, request: &SoundRequest, origin: Origin) -> Result<Saved> {
-    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
-    let file = folder.join(format!("{stem}.{}", generated.format.extension()));
-    let channels: u16 = 1;
-    let (bytes, seconds, sample_rate) = match generated.format {
-        Format::Pcm44100 => {
-            let rate = generated.format.sample_rate();
-            let frames = generated.bytes.len() / (2 * channels as usize);
-            (pcm16_wav(&generated.bytes, rate, channels), frames as f64 / f64::from(rate), rate)
-        }
-        _ => (generated.bytes.clone(), 0.0, generated.format.sample_rate()),
-    };
-    write_file(&file, &bytes)?;
-    let (seconds, sample_rate, channels) = match aaw_engine::sndfile::info(&file) {
-        Ok(info) => (info.seconds(), info.rate, info.channels as u16),
-        Err(_) => (seconds, sample_rate, channels),
-    };
     let recipe = json!({
         "service": SERVICE,
         "endpoint": "/v1/sound-generation",
@@ -896,6 +1472,60 @@ pub fn save(generated: &Generated, folder: &Path, stem: &str, request: &SoundReq
         "bars": request.bars,
         "bpm": request.bpm,
         "song_id": Json::Null,
+    });
+    save_with(generated, folder, stem, recipe, origin)
+}
+
+/// Writes a song as `save` writes a sound, its recipe holding the plan the
+/// service used, its title and the stored song's ID.
+pub fn save_music(music: &Music, folder: &Path, stem: &str, request: &MusicRequest, origin: Origin) -> Result<Saved> {
+    let meta = &music.metadata;
+    let recipe = json!({
+        "service": SERVICE,
+        "endpoint": "/v1/music/detailed",
+        "kind": "music",
+        "model_id": request.model,
+        "prompt": request.prompt,
+        "text_sent": request.prompt.as_deref().map(str::trim),
+        "plan_sent": request.plan,
+        "plan": music.plan,
+        "title": meta["title"],
+        "description": meta["description"],
+        "genres": meta["genres"],
+        "languages": meta["languages"],
+        "is_explicit": meta["is_explicit"],
+        "parameters": {
+            "music_length_ms": request.seconds.filter(|_| request.prompt.is_some()).map(|s| (s * 1000.0).round() as i64),
+            "force_instrumental": request.instrumental,
+            "seed": request.seed,
+            "store_for_inpainting": true,
+            "output_format": music.generated.format.name(),
+        },
+        "bars": Json::Null,
+        "bpm": Json::Null,
+        "song_id": music.song_id,
+    });
+    save_with(&music.generated, folder, stem, recipe, origin)
+}
+
+/// Writes the audio and its recipe, `recipe` given what the file says.
+fn save_with(generated: &Generated, folder: &Path, stem: &str, mut recipe: Json, origin: Origin) -> Result<Saved> {
+    std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let file = folder.join(format!("{stem}.{}", generated.format.extension()));
+    let channels = generated.channels.max(1);
+    let (bytes, seconds, sample_rate) = if generated.format.is_pcm() {
+        let rate = generated.format.sample_rate();
+        let frames = generated.bytes.len() / (2 * channels as usize);
+        (pcm16_wav(&generated.bytes, rate, channels), frames as f64 / f64::from(rate), rate)
+    } else {
+        (generated.bytes.clone(), 0.0, generated.format.sample_rate())
+    };
+    write_file(&file, &bytes)?;
+    let (seconds, sample_rate, channels) = match aaw_engine::sndfile::info(&file) {
+        Ok(info) => (info.seconds(), info.rate, info.channels as u16),
+        Err(_) => (seconds, sample_rate, channels),
+    };
+    let fields = json!({
         "request_id": generated.request_id,
         "cost_credits": generated.cost,
         "tier": generated.tier,
@@ -906,6 +1536,9 @@ pub fn save(generated: &Generated, folder: &Path, stem: &str, request: &SoundReq
         "created": timestamp(),
         "origin": origin.as_str(),
     });
+    for (k, v) in fields.as_object().expect("an object") {
+        recipe[k] = v.clone();
+    }
     let recipe_file = folder.join(format!("{stem}{RECIPE_SUFFIX}"));
     write_file(&recipe_file, serde_json::to_string_pretty(&recipe).expect("json").as_bytes())?;
     Ok(Saved {
@@ -920,8 +1553,8 @@ pub fn save(generated: &Generated, folder: &Path, stem: &str, request: &SoundReq
 
 /// Headerless 16-bit little-endian PCM as a WAV file.
 pub fn pcm16_wav(pcm: &[u8], rate: u32, channels: u16) -> Vec<u8> {
-    let data_len = (pcm.len() - pcm.len() % 2) as u32;
     let block = channels * 2;
+    let data_len = (pcm.len() - pcm.len() % usize::from(block)) as u32;
     let mut out = Vec::with_capacity(44 + data_len as usize);
     out.extend_from_slice(b"RIFF");
     out.extend_from_slice(&(36 + data_len).to_le_bytes());
@@ -1001,6 +1634,9 @@ pub fn list(project_dir: &Path, song: Option<&aaw_model::Project>) -> Vec<Json> 
                 "sample_id": sample_id,
                 "prompt": recipe["prompt"],
                 "kind": recipe["kind"],
+                "title": recipe["title"],
+                "model_id": recipe["model_id"],
+                "song_id": recipe["song_id"],
                 "seconds": recipe["seconds"],
                 "bpm": recipe["bpm"],
                 "bars": recipe["bars"],
@@ -1017,8 +1653,8 @@ pub fn list(project_dir: &Path, song: Option<&aaw_model::Project>) -> Vec<Json> 
     rows
 }
 
-/// A sample ID for a description: the first words of it as a slug, given a
-/// number when the song has the name.
+/// A sample ID for a description or a title: the first words of it as a
+/// slug, given a number when the song has the name.
 pub fn default_id(text: &str, taken: impl Fn(&str) -> bool) -> String {
     let words: Vec<&str> = text.split_whitespace().take(3).collect();
     let mut base = slug(&words.join(" "));

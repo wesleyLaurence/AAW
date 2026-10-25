@@ -93,12 +93,10 @@ Items 1–3 are the person's notes from using the app, brought on October
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-16. **Generated audio, stages 2 and 3.** A whole song to sample from a prompt
-    or from a section-by-section plan the agent writes (`daw generate music`,
-    `daw generate plan`), with its beat map in the reply; then a tab of the
-    Settings window with the key's field and the budget, and a Generate tab in the
-    browser that generates, auditions and drags a result while the song plays.
-    Stage 1, the key and `daw generate sound`, is built.
+16. **Generated audio, stage 3.** A tab of the Settings window with the key's
+    field and the budget, and a Generate tab in the browser that generates,
+    auditions and drags a sound or a song while the song plays. Stages 1 and
+    2, the key, `daw generate sound`, `music` and `plan`, are built.
     [features/generated-audio.md](features/generated-audio.md)
 
 ## Verify
@@ -107,6 +105,14 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **A song from ElevenLabs, by the agent and the person with a real key:**
+  `daw generate plan` for a song the person describes, its chunks edited to
+  lengths in bars at the prompt's tempo, `daw generate music --plan` with it,
+  and the result heard; whether the reply's beat map finds the downbeat and
+  the sections land on the bars the plan implies, a section cut on its bars
+  and played against the song; the reply's headers, the PCM's channels, the
+  cost and the `song-id` read and written into the feature's file. Tests
+  against a stand-in only; no request was made.
 - **What feeds a device, and its time limit, by the agent on a real
   song:** an offline device on one track while other tracks, the master
   and the track's own fader are edited, to hear its sound go on with no
