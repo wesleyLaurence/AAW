@@ -1164,20 +1164,18 @@ pub fn compile_cached(p: &Project, directory: &Path, cache: &mut Cache) -> Resul
     compile_scoped(p, directory, cache, Scope::Song)
 }
 
-pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: Scope) -> Result<Program, String> {
-    // What the MIDI effects of the person's own made of the notes is
-    // played by the schedule, from the song they are set on.
-    let attached = crate::custom::attach(p, &cache.devices);
-    let p = attached.as_ref().unwrap_or(p);
-    let rate = p.session.sample_rate;
-    let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
+/// The channels a scope compiles: the tracks needed, those heard, the
+/// groups each after the groups in it, and the returns.
+pub type Channels<'a> = (Vec<String>, Vec<&'a str>, Vec<&'a aaw_model::Group>, Vec<&'a aaw_model::Return>);
+
+/// What `compile_scoped` compiles of the song for `scope`.
+pub fn channels<'a>(p: &'a Project, scope: Scope<'a>) -> Result<Channels<'a>, String> {
     // A preview needs the target's sidechain sources; a group's also needs
     // everything under it and their keys, and a return's its senders, what
     // is under the groups that send to it, and their keys. Only the target
     // is heard. The groups are kept with every group after the groups in
     // it, so that a group's sum is made before its own group's.
     let is_return = |id: &str| p.returns.iter().any(|r| r.id == id);
-    type Channels<'a> = (Vec<String>, Vec<&'a str>, Vec<&'a aaw_model::Group>, Vec<&'a aaw_model::Return>);
     let with_sources = |mut needed: Vec<String>| {
         for id in needed.clone() {
             needed.extend(p.sidechain_sources(&id));
@@ -1193,7 +1191,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
         out
     };
     let ordered = |wanted: &dyn Fn(&aaw_model::Group) -> bool| -> Vec<&aaw_model::Group> { p.group_order().into_iter().filter(|g| wanted(g)).collect() };
-    let (needed, heard, groups, returns): Channels = match scope {
+    Ok(match scope {
         Scope::Song => (
             p.tracks.iter().map(|t| t.id.clone()).collect(),
             p.tracks.iter().map(|t| t.id.as_str()).collect(),
@@ -1226,7 +1224,17 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             (needed, vec![id], Vec::new(), Vec::new())
         }
         Scope::Channel(id) => return Err(format!("Unknown track, group or return: {id}")),
-    };
+    })
+}
+
+pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: Scope) -> Result<Program, String> {
+    // What the MIDI effects of the person's own made of the notes is
+    // played by the schedule, from the song they are set on.
+    let attached = crate::custom::attach(p, &cache.devices);
+    let p = attached.as_ref().unwrap_or(p);
+    let rate = p.session.sample_rate;
+    let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
+    let (needed, heard, groups, returns) = channels(p, scope)?;
     cache.begin();
     let any_solo = p.tracks.iter().any(|t| t.solo) || p.groups.iter().any(|g| g.solo);
     // A group is silent when it or a group over it is muted, or when

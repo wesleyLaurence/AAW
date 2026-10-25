@@ -5,6 +5,7 @@ that is missing or at another version."""
 
 import json
 import os
+import time
 
 import numpy as np
 import pytest
@@ -76,6 +77,19 @@ def test_a_device_in_a_chain_renders_through_its_code_and_a_lane_moves_its_field
     (workspace / "devices" / "tilt-eq" / "device.py").write_text("def process(audio, sample_rate, fields):\n    raise ValueError('no sound today')\n")
     with pytest.raises(ValueError, match="no sound today"):
         run_chain(tmp_path / "broken", [device], x)
+
+
+def test_a_device_whose_code_runs_past_the_limit_is_stopped(tmp_path, workspace, monkeypatch):
+    daw("plugin", "new", "Tilt EQ")
+    code = "import time\n\n\ndef process(audio, sample_rate, fields):\n    time.sleep(60)\n    return audio\n"
+    (workspace / "devices" / "tilt-eq" / "device.py").write_text(code)
+    monkeypatch.setenv("AAW_DEVICE_TIMEOUT", "1")
+    started = time.monotonic()
+    with pytest.raises(ValueError, match="tilt-eq on tracks.chain.effects.0 ran past 1 second and was stopped"):
+        run_chain(tmp_path / "slow", [{"type": "device", "name": "tilt-eq"}], tone(1000))
+    with pytest.raises(ValueError, match="the check of tilt-eq ran past 1 second"):
+        daw("plugin", "check", "tilt-eq")
+    assert time.monotonic() - started < 30
 
 
 def test_a_device_is_added_by_slug_from_the_terminal_and_the_check_warns_of_one_missing(tmp_path, workspace):
