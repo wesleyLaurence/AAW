@@ -425,3 +425,129 @@ pub fn library_samples_at(db: String, paths: Vec<String>) -> Result<Vec<SampleIn
     let found = python::run("samples", &args)?;
     Ok(found.as_array().map(|rows| rows.iter().map(sample).collect()).unwrap_or_default())
 }
+
+/// A sound or a song made by `daw generate`, as the browser's Generate tab
+/// lists it, from the recipe beside its file.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct GeneratedInfo {
+    /// The file to play and drag: the generated folder's copy while it is
+    /// there, which an import names as the project's copy is named, else the
+    /// project's.
+    pub path: String,
+    pub recipe: String,
+    /// Whether the recipe is the project's own, beside its copy.
+    pub in_project: bool,
+    /// The sample that plays it in the song, if the song still has one.
+    pub sample_id: Option<String>,
+    /// `sound`, `loop` or `music`.
+    pub kind: String,
+    /// The description as given; empty for a song made from a plan.
+    pub prompt: String,
+    /// A song's title.
+    pub title: Option<String>,
+    /// The ID the request was named by: the file's name after its hash and
+    /// its date, `crackle` for `2026-10-14-153012-crackle.wav`.
+    pub name: String,
+    pub seconds: f64,
+    /// When it was made, as `2026-10-14T15:30:12Z`.
+    pub created: String,
+    /// The length asked for, if one was: a sound's seconds or a song's.
+    pub asked_seconds: Option<f64>,
+    /// A loop's length in bars, when asked for so.
+    pub bars: Option<f64>,
+    pub instrumental: bool,
+    /// Whether it was made from a composition plan, which the tab cannot ask
+    /// for again.
+    pub from_plan: bool,
+}
+
+/// What the song at `song` has generated, newest first, then what the
+/// generated folder holds that the song does not, newest first.
+#[uniffi::export]
+pub fn library_generated(song: Option<String>) -> Vec<GeneratedInfo> {
+    let mut rows = Vec::new();
+    if let Some(song) = &song {
+        let song = PathBuf::from(song);
+        let project = aaw_model::load(&song, false).ok();
+        let dir = song.parent().map(PathBuf::from).unwrap_or_default();
+        for row in aaw_host::generate::list(&dir, project.as_ref()) {
+            let copy = row["file"].as_str().map(|f| dir.join(f));
+            let original = row["generated_file"].as_str().map(PathBuf::from).filter(|f| f.is_file());
+            let Some(path) = original.or(copy) else { continue };
+            let recipe = row["recipe"].as_str().map(|r| dir.join(r)).unwrap_or_default();
+            rows.push(generated(&row, path, recipe, true));
+        }
+    }
+    let shown: Vec<String> = rows.iter().map(|r| r.path.clone()).collect();
+    let folder = aaw_host::generate::dir();
+    for row in aaw_host::generate::folder_list(&folder) {
+        let Some(path) = row["file"].as_str().map(PathBuf::from) else { continue };
+        if !path.is_file() || shown.contains(&path.to_string_lossy().into_owned()) {
+            continue;
+        }
+        let recipe = PathBuf::from(row["recipe"].as_str().unwrap_or_default());
+        rows.push(generated(&row, path, recipe, false));
+    }
+    rows
+}
+
+fn generated(row: &Json, path: PathBuf, recipe: PathBuf, in_project: bool) -> GeneratedInfo {
+    let parameters = &row["parameters"];
+    let music = row["kind"].as_str() == Some("music");
+    let kind = if music {
+        "music"
+    } else if parameters["loop"].as_bool() == Some(true) {
+        "loop"
+    } else {
+        "sound"
+    };
+    let asked_seconds = if music {
+        parameters["music_length_ms"].as_f64().map(|ms| ms / 1000.0)
+    } else {
+        parameters["duration_seconds"].as_f64()
+    };
+    GeneratedInfo {
+        name: generated_name(&path),
+        path: path.to_string_lossy().into_owned(),
+        recipe: recipe.to_string_lossy().into_owned(),
+        in_project,
+        sample_id: optional(row, "sample_id"),
+        kind: kind.into(),
+        prompt: text(row, "prompt"),
+        title: optional(row, "title"),
+        seconds: row["seconds"].as_f64().unwrap_or(0.0),
+        created: text(row, "created"),
+        asked_seconds,
+        bars: row["bars"].as_f64(),
+        instrumental: parameters["force_instrumental"].as_bool() == Some(true),
+        from_plan: music && row["prompt"].is_null(),
+    }
+}
+
+/// The ID in a generated file's name: after the twelve characters of a
+/// project copy's hash and the date and time, `DATE-TIME-ID`.
+fn generated_name(path: &std::path::Path) -> String {
+    let stem = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let stem = match stem.split_once('_') {
+        Some((hash, rest)) if hash.len() == 12 && hash.chars().all(|c| c.is_ascii_hexdigit()) => rest.to_string(),
+        _ => stem,
+    };
+    // 2026-10-14-153012-: four, two, two and six digits, each with its dash.
+    let parts: Vec<&str> = stem.splitn(5, '-').collect();
+    let dated = parts.len() == 5 && [4, 2, 2, 6].iter().zip(&parts).all(|(n, p)| p.len() == *n && p.chars().all(|c| c.is_ascii_digit()));
+    if dated { parts[4].to_string() } else { stem }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generated_name;
+    use std::path::Path;
+
+    #[test]
+    fn a_generated_name_is_the_id_after_the_hash_and_the_date() {
+        assert_eq!(generated_name(Path::new("/g/2026-10-14-153012-crackle.wav")), "crackle");
+        assert_eq!(generated_name(Path::new("samples/0123456789ab_2026-10-14-153012-tape-hiss.wav")), "tape-hiss");
+        assert_eq!(generated_name(Path::new("samples/kick.wav")), "kick");
+        assert_eq!(generated_name(Path::new("samples/2026-take.wav")), "2026-take");
+    }
+}

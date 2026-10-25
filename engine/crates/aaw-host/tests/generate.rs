@@ -331,6 +331,12 @@ fn a_sound_is_asked_for_saved_with_its_recipe_and_taken_into_the_song() {
     assert_eq!(listed[0]["prompt"], json!("vinyl crackle, warm"));
     assert_eq!(listed[0]["file"], json!(path));
     assert_eq!(listed[0]["generated_file"], json!(saved.file));
+    // The generated folder lists it too, by full paths.
+    let folder_listed = generate::folder_list(&folder);
+    assert_eq!(folder_listed.len(), 1);
+    assert_eq!(folder_listed[0]["file"], json!(saved.file));
+    assert_eq!(folder_listed[0]["recipe"], json!(saved.recipe_file));
+    assert_eq!(folder_listed[0]["prompt"], json!("vinyl crackle, warm"));
     // The project's recipe is beside its copy.
     let stem = Path::new(path).file_stem().unwrap().to_string_lossy().into_owned();
     assert!(dir.path().join(format!("samples/{stem}.generated.json")).is_file());

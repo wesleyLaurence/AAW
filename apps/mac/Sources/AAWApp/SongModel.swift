@@ -335,6 +335,8 @@ public final class SongModel {
     public static let leastDetailHeight: CGFloat = 214
     /// The sample library, for the browser.
     let browser: Browser
+    /// The browser's Generate tab: sounds and songs asked of ElevenLabs.
+    let generator = Generator(daw: Exporter.daw)
 
     /// Called with each new revision, for the arrangement view to animate.
     @ObservationIgnored var onUpdate: ((Update) -> Void)?
@@ -2134,6 +2136,8 @@ public final class SongModel {
         endDrag()
         closeAnalyzers()
         agent.close()
+        // A request the window can no longer show lands in nothing.
+        generator.cancel()
         // After queued commands, so none is sent to a closed host.
         commands.sync { song.close() }
     }

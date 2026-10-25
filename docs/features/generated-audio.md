@@ -1,4 +1,4 @@
-# Generated audio — stage 1 implemented October 14, 2026; stage 2 October 24, 2026
+# Generated audio — stage 1 implemented October 14, 2026; stage 2 October 24, 2026; stage 3 October 25, 2026
 
 `daw generate sound` makes a sound or a loop from a description with the
 ElevenLabs API, at the person's own key, and saves the result as a sample in
@@ -7,9 +7,8 @@ a composition plan that `daw generate plan` writes, and gives its beat map. Each
 also saves a copy to a folder of everything the person has generated, which
 the sample library searches, so a later song can find it. Stage 1, the key and
 sounds from the command line, is built (D120); stage 2, songs and plans, is
-built (D160); the Settings window and Generate tab in the app (stage 3) are
-the remaining Next line in [the backlog](../backlog.md), designed below under
-[Not built yet](#not-built-yet).
+built (D160); the app's ElevenLabs pane in Settings and its Generate tab in
+the browser (stage 3) are built (D161), described under [In the app](#in-the-app).
 
 It is a tool in the kit and never the product. A prompt that returns a
 finished song is the thing this app is not ([concept.md](../concept.md)). What
@@ -242,7 +241,10 @@ a prompt once the person has allowed it, and any other program that asks, the
 `security` tool included, gets a macOS prompt the person answers. So an agent
 that runs commands as the person can use the key through `daw` but cannot
 read it without the person seeing. In this checkout `daw` is signed ad hoc, so
-macOS asks again after a rebuild; "Always Allow" covers that build only.
+macOS asks again after a rebuild; "Always Allow" covers that build only. The
+app's Settings › ElevenLabs writes the key the same way, through the bundle's
+`daw keys set`, so the item names the `daw` that reads it for every request,
+and the app never reads or holds the key itself.
 
 **What never happens.** The key is never a flag or an environment variable,
 never a file in the project, the workspace or the data folder, never a line
@@ -269,7 +271,7 @@ Each second of audio costs credits, and an agent can loop. So:
   asking: 120 unless `daw keys budget --agent-seconds N` set it, 0 to require
   asking every time. The day turns at midnight UTC.
 - **What counts as the agent.** Requests with the agent's origin, the default.
-  A request with `--origin user`, as the app's panel will send it, is the
+  A request with `--origin user`, as the browser's Generate sends it, is the
   person's and does not count; it is still recorded in the day's spend.
 - **Sounds and songs share it.** A song's seconds count as a sound's do; a
   plan from `daw generate plan` costs nothing and is not counted.
@@ -362,34 +364,61 @@ package show: `{detail: {status, message}}`, `{detail: "text"}`, `{detail:
   section cut on its bars and rendered with no request; the estimate, the
   five-minute hold, the checks, the person's song as one undoable edit, a
   refused prompt, and an MP3 song decoded by import.
+- The app: `aaw-ffi/src/library.rs`, `library_generated` over
+  `generate::list` and `generate::folder_list`; `Generate.swift`, with
+  `DawProcess` (the bundle's `daw` off the main thread, its standard input
+  written and closed, stopped by `cancel`), `KeyStatus`,
+  `ElevenLabsAccount`, `GenerateRequest` and `Generator`;
+  `GenerateView.swift`; the pane in `SettingsWindow.swift`, now an
+  `NSTabViewController` of toolbar panes. Swift tests in
+  `GenerateTests.swift` run a shell script standing in for `daw`.
+
+## In the app
+
+**Settings › ElevenLabs.** AAW › Settings… (⌘,) has panes chosen in its
+toolbar, Audio and ElevenLabs, and opens on the one shown last. The
+ElevenLabs pane says whether a key is kept, from `daw keys status` asked each
+time it shows; a secure field and **Save**, which writes what was pasted to
+the standard input of the bundle's `daw keys set elevenlabs` and clears the
+field, so the key is never an argument and the Keychain item is made by the
+`daw` that uses it; **Remove…**, after a question, as `daw keys remove`; the
+plan, its credits left of how many and when they renew; and the agent's
+daily budget as a menu (none, 30 s, one, two, five, ten, thirty or sixty
+minutes, and one set from the command line), set as `daw keys budget
+--agent-seconds`, with what the agent and the person made today. A key the
+service refuses is kept and the refusal said. A link opens ElevenLabs' page
+for making a key.
+
+**The browser's Generate.** A section of the browser after Samples: Sound,
+Loop or Song; a description; a length, a sound's seconds or Auto, a loop's
+bars at the song's tempo and meter, a song's seconds (30 unless changed,
+3 to 300) with Instrumental; and **Generate** (⌘↩). What the command would
+refuse is said before anything is sent. The app runs `daw --origin user
+generate sound|music SONG TEXT …` as a process off the main thread, so the
+request is the person's and does not count against the agent's budget, and
+the song keeps playing; the time so far is shown beside **Cancel**, which
+stops the process: nothing is imported, and what the service made is paid
+for and lost. A song's window closing stops its request the same way. After,
+the line under the form says the sample it added to the song, or the
+command's refusal, a refused prompt's suggestion included, and the reply's
+notes. With no key, the form is a line and **Open Settings…**, which opens
+Settings at ElevenLabs.
+
+Below the form, what this song has generated, then what else the generated
+folder holds, newest first, read from the recipes by `library_generated` in
+the Rust core: a song by its title, anything else by its description, with
+its kind, length and when. A result plays on a click, as a sample does; + or
+a double-click adds it where the samples' + does; and it is dragged onto the
+timeline or a header as a sample is. The file played and dragged is the
+generated folder's while it is there, which an import names as the song's
+copy was named, so adding it again copies nothing; else the song's copy. Its
+menu has **Generate Again**, which fills the form with the recipe's request
+and sends it, and is off for a song made from a plan, and **Show Recipe in
+Finder**. The search field narrows the list by description, title and ID.
 
 ## Not built yet
 
 Each is a backlog line when it is picked up, and this file is rewritten then.
-
-### Stage 3: Settings and the Generate tab
-
-**Settings.** The app menu gets **Settings…** (⌘,), a small native window with
-an **ElevenLabs** section: a secure field and **Save**, which writes the
-Keychain item with an access list (`SecAccessCreate`) naming the app and its
-bundled `daw`, so the two share it without a prompt; **Remove**; the tier,
-the credits left and the reset date through `daw keys status`; the agent's
-daily budget. Saving runs `daw keys status` once. The modern data-protection
-keychain needs an entitlement and a team signature, so it waits for Developer
-ID signing.
-
-**The Generate tab** sits in the browser beside Samples, since a result can go
-to any track, a pad or a slice: a description; the kind, Sound, Loop or Song
-(Loop sets `--loop` and a length in bars); a length, Instrumental for a song,
-and **Generate**. With no key, a line and a button that opens Settings. The app
-runs `daw generate … --origin user` as a process off the main thread
-(`CommandLineTool.swift`) with the time so far shown; **Cancel** stops the
-process and nothing is imported; the song keeps playing. Below the form,
-newest first, this project's results then the generated folder's, each
-auditioned on click and dragged to the timeline or a header with the samples'
-drag type, with **Generate Again** and **Show Recipe** in its menu. Tests:
-layout and state tests in `apps/mac/Tests` and snapshots of no key, a request
-running, an error and results.
 
 ### Later, each its own backlog line
 
@@ -449,15 +478,30 @@ Stage 2, by scripted runs against the stand-in; nothing yet by a person:
   and whether a chunk's length in bars at the prompt's tempo comes back on
   the bar. The headers, the channels and the cost seen are written here.
 
-Stage 3: the Settings window saves, checks and removes the key; the panel
-generates, auditions and drags a result onto the timeline while the song plays.
+Stage 3, by Swift tests and scripted pictures against a stand-in on this
+Mac; nothing yet by a person:
+
+- [x] The ElevenLabs pane shows the key kept, the plan and its credits, and
+  the budget, from `daw keys status`; saving pipes the key to `daw keys set`
+  and never makes it an argument (a test reads what a stand-in `daw` was
+  given).
+- [x] Generate makes a sound in the song as one edit through the host while
+  the window stays live, the time shown; Cancel stops the process and
+  nothing is added; a refused prompt says why with the suggestion.
+- [x] The song's results then the generated folder's are listed, and a click
+  plays one.
+- [ ] A person saves a real key in Settings, generates a sound and a song
+  while the song plays, hears them, drags one onto the timeline and a MIDI
+  track's header, and cancels one. Whether macOS asks for the Keychain at
+  Save, at the first request, or after each build is written here.
 
 ## Open questions
 
 1. **Who reads the Keychain.** `daw` reads it, which works with the app
-   closed. The alternative is that only the app reads it and `daw` asks the
-   app. A spike on a signed and an unsigned build should show what each one
-   prompts for; stage 3's access list naming both is the plan.
+   closed, and the app's Settings writes it through `daw keys set`, so the
+   item's access list names the bundle's `daw` and the app never needs it
+   (D161), in place of the access list naming both that the design planned.
+   What macOS asks on a signed and an unsigned build is still to be seen.
 2. **Formats by plan, seen.** Whether `pcm_44100` really needs Pro for sounds
    and for music, and what the refusal's status and code are; the fallback
    here reads a 403 and any message naming `output_format`. One request on

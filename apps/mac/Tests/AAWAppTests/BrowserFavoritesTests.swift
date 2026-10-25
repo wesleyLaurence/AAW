@@ -43,6 +43,6 @@ final class BrowserFavoritesTests: XCTestCase {
 
     func testFavoritesComeFirstAmongTheSections() {
         XCTAssertEqual(Browser.sections.first, "Favorites")
-        XCTAssertEqual(Browser.sections, ["Favorites", "Samples", "Instruments", "MIDI Effects", "Audio Effects", "Folders"])
+        XCTAssertEqual(Browser.sections, ["Favorites", "Samples", "Generate", "Instruments", "MIDI Effects", "Audio Effects", "Folders"])
     }
 }

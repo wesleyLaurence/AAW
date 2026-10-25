@@ -301,7 +301,7 @@ enum Exporter {
     }
 
     /// A pipe read to its end on another thread.
-    private final class Read: @unchecked Sendable {
+    final class Read: @unchecked Sendable {
         private var data = Data()
         private let group = DispatchGroup()
 

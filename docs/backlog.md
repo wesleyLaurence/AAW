@@ -93,11 +93,6 @@ Items 1–3 are the person's notes from using the app, brought on October
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
     said at the end of a session and written to `taste.md` with evidence.
-16. **Generated audio, stage 3.** A tab of the Settings window with the key's
-    field and the budget, and a Generate tab in the browser that generates,
-    auditions and drags a sound or a song while the song plays. Stages 1 and
-    2, the key, `daw generate sound`, `music` and `plan`, are built.
-    [features/generated-audio.md](features/generated-audio.md)
 
 ## Verify
 
@@ -105,6 +100,14 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Generating in the app, with a real key:** the key pasted into Settings ›
+  ElevenLabs and saved, and whether macOS asks for the Keychain then, at the
+  first request, or again after a build; the plan and credits it shows;
+  a sound, a loop of two bars and a song made from the browser's Generate
+  while the song plays, heard, dragged onto the timeline and onto a MIDI
+  track's header; a request cancelled, and the credits it cost read; Generate
+  Again and Show Recipe in Finder. Seen only in scripted pictures against a
+  stand-in on this Mac; nothing typed, clicked, dragged or heard by hand.
 - **A song from ElevenLabs, by the agent and the person with a real key:**
   `daw generate plan` for a song the person describes, its chunks edited to
   lengths in bars at the prompt's tempo, `daw generate music --plan` with it,

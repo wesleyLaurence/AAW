@@ -109,6 +109,8 @@ struct Launch {
     var exportLevel: ExportOptions.Level?
     /// Open the Settings window, as AAW › Settings… does.
     var settings = false
+    /// The pane it opens on, as `--settings-pane NAME` names it.
+    var settingsPane: SettingsWindowController.Pane?
 
     init(arguments: [String]) {
         var rest = arguments[...]
@@ -157,6 +159,10 @@ struct Launch {
             case "--record-audio":
                 actions.append(.recordAudio)
             case "--settings":
+                settings = true
+            case "--settings-pane":
+                let name = (rest.popFirst() ?? "").lowercased()
+                settingsPane = SettingsWindowController.Pane.allCases.first { $0.rawValue.lowercased() == name }
                 settings = true
             case "--snapshot":
                 snapshot = rest.popFirst().map { URL(fileURLWithPath: $0) }
@@ -237,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         for url in launch.songs { openSong(url) }
         if songs.isEmpty { launched = newProject() }
-        if launch.settings { later(0.3) { $0.openSettings(nil) } }
+        if launch.settings { later(0.3) { $0.openSettings($0.launch.settingsPane) } }
         if !scripted || !launch.actions.isEmpty {
             NSApp.activate(ignoringOtherApps: true)
         }
@@ -494,7 +500,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         CommandLineTool.offer()
     }
 
-    /// Shows the Settings window, made the first time.
+    /// Shows the Settings window, made the first time, at the pane the
+    /// sender names if it names one, as the Generate tab's Open Settings… does.
     @objc func openSettings(_ sender: Any?) {
         if settings == nil {
             settings = SettingsWindowController { [weak self] in
@@ -502,6 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 return (front ?? songs.first)?.model
             }
         }
+        if let pane = sender as? SettingsWindowController.Pane { settings?.show(pane) }
         settings?.showWindow(nil)
         settings?.window?.makeKeyAndOrderFront(nil)
     }

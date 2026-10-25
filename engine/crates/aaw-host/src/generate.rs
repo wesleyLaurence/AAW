@@ -116,7 +116,7 @@ pub fn keychain_address(base: &str) -> Result<()> {
 
 /// What the person is told when there is no key.
 pub fn no_key() -> String {
-    format!("No ElevenLabs key is set: enter one with `daw keys set {SERVICE}` (it is kept in the macOS Keychain and never shown); generating needs a paid plan for music and credits for sounds")
+    format!("No ElevenLabs key is set: enter one with `daw keys set {SERVICE}` or in the Mac app's Settings › ElevenLabs (it is kept in the macOS Keychain and never shown); generating needs a paid plan for music and credits for sounds")
 }
 
 // ---------------------------------------------------------------- settings
@@ -1614,43 +1614,76 @@ pub fn project_recipe(saved: &Saved, project_dir: &Path, imported_path: &str) ->
 /// `daw generate list`: the recipes in a project's `samples/`, newest first,
 /// each with the sample that plays it when the song still has one.
 pub fn list(project_dir: &Path, song: Option<&aaw_model::Project>) -> Vec<Json> {
-    let dir = project_dir.join("samples");
-    let mut rows: Vec<Json> = std::fs::read_dir(&dir)
+    recipes(&project_dir.join("samples"))
         .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.file_name().to_string_lossy().ends_with(RECIPE_SUFFIX))
-        .filter_map(|e| {
-            let text = std::fs::read_to_string(e.path()).ok()?;
-            let recipe: Json = serde_json::from_str(&text).ok()?;
+        .map(|(name, recipe)| {
             let file = recipe["file"].as_str().map(|f| format!("samples/{f}"));
             let sample_id = song.and_then(|p| {
                 let file = file.as_deref()?;
                 p.samples.iter().find(|(_, s)| s.path == file).map(|(id, _)| id.clone())
             });
-            Some(json!({
-                "recipe": format!("samples/{}", e.file_name().to_string_lossy()),
-                "file": file,
-                "sample_id": sample_id,
-                "prompt": recipe["prompt"],
-                "kind": recipe["kind"],
-                "title": recipe["title"],
-                "model_id": recipe["model_id"],
-                "song_id": recipe["song_id"],
-                "seconds": recipe["seconds"],
-                "bpm": recipe["bpm"],
-                "bars": recipe["bars"],
-                "created": recipe["created"],
-                "origin": recipe["origin"],
-                "cost_credits": recipe["cost_credits"],
-                "tier": recipe["tier"],
-                "parameters": recipe["parameters"],
-                "generated_file": recipe["generated_file"],
-            }))
+            let mut row = listed(&recipe);
+            row["recipe"] = json!(format!("samples/{name}"));
+            row["file"] = json!(file);
+            row["sample_id"] = json!(sample_id);
+            row
+        })
+        .collect()
+}
+
+/// The recipes in the generated folder, newest first, as `list` gives a
+/// project's, their `file` and `recipe` the full paths: everything the person
+/// has generated, which the app's Generate tab lists after the song's own.
+pub fn folder_list(folder: &Path) -> Vec<Json> {
+    recipes(folder)
+        .into_iter()
+        .map(|(name, recipe)| {
+            let mut row = listed(&recipe);
+            row["recipe"] = json!(folder.join(name));
+            row["file"] = json!(recipe["file"].as_str().map(|f| folder.join(f)));
+            row["generated_file"] = row["file"].clone();
+            row
+        })
+        .collect()
+}
+
+/// The recipes in a folder by file name, newest first.
+fn recipes(dir: &Path) -> Vec<(String, Json)> {
+    let mut found: Vec<(String, Json)> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.ends_with(RECIPE_SUFFIX) {
+                return None;
+            }
+            let recipe = serde_json::from_str(&std::fs::read_to_string(e.path()).ok()?).ok()?;
+            Some((name, recipe))
         })
         .collect();
-    rows.sort_by(|a, b| b["created"].as_str().unwrap_or("").cmp(a["created"].as_str().unwrap_or("")));
-    rows
+    found.sort_by(|a, b| b.1["created"].as_str().unwrap_or("").cmp(a.1["created"].as_str().unwrap_or("")));
+    found
+}
+
+/// What a listing shows of a recipe.
+fn listed(recipe: &Json) -> Json {
+    json!({
+        "prompt": recipe["prompt"],
+        "kind": recipe["kind"],
+        "title": recipe["title"],
+        "model_id": recipe["model_id"],
+        "song_id": recipe["song_id"],
+        "seconds": recipe["seconds"],
+        "bpm": recipe["bpm"],
+        "bars": recipe["bars"],
+        "created": recipe["created"],
+        "origin": recipe["origin"],
+        "cost_credits": recipe["cost_credits"],
+        "tier": recipe["tier"],
+        "parameters": recipe["parameters"],
+        "generated_file": recipe["generated_file"],
+    })
 }
 
 /// A sample ID for a description or a title: the first words of it as a
