@@ -223,7 +223,7 @@ final class AgentPanel {
     /// Whether the person pressed Stop during this turn.
     @ObservationIgnored private var stopping = false
     /// The folders the project has had, whose records a thread's earlier
-    /// messages may be in.
+    /// messages are looked for in first.
     @ObservationIgnored private var folders: [URL] = []
     @ObservationIgnored private var ids = 0
     /// The environment of the app, which the agent inherits.
@@ -278,7 +278,12 @@ final class AgentPanel {
     func refreshThreads() {
         guard let folder else { return }
         var list = ThreadList(project: folder)
-        list.merge(ClaudeTranscripts.sessions(in: ClaudeTranscripts.folder(for: folder)))
+        // An Untitled project's folder is the app's, and the next Untitled
+        // takes its name again once it is saved elsewhere or deleted, so
+        // Claude Code's record for it is earlier projects' conversations.
+        if song?.untitled != true {
+            list.merge(ClaudeTranscripts.sessions(in: ClaudeTranscripts.folder(for: folder)))
+        }
         threads = list.entries
     }
 
@@ -320,11 +325,7 @@ final class AgentPanel {
         currentID = id
         entries = []
         attachedPaths = []
-        var found = false
-        for folder in folders {
-            let file = ClaudeTranscripts.folder(for: folder).appendingPathComponent("\(id).jsonl")
-            guard FileManager.default.fileExists(atPath: file.path) else { continue }
-            found = true
+        if let file = ClaudeTranscripts.file(of: id, near: folders) {
             for line in ClaudeTranscripts.read(file) {
                 switch line {
                 case .person(let text, let attached):
@@ -333,9 +334,7 @@ final class AgentPanel {
                 case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: summary, result: nil, failed: false))
                 }
             }
-            break
-        }
-        if !found {
+        } else {
             note("Earlier messages are in Claude Code's own record, which was not found here; the conversation goes on from where it stopped.")
         }
         warm()
@@ -449,7 +448,7 @@ final class AgentPanel {
     /// rather than starting it under its ID.
     private func hasRun(_ id: String) -> Bool {
         if let entry = threads.first(where: { $0.id == id }), entry.last > entry.started { return true }
-        return folders.contains { FileManager.default.fileExists(atPath: ClaudeTranscripts.folder(for: $0).appendingPathComponent("\(id).jsonl").path) }
+        return ClaudeTranscripts.file(of: id, near: folders) != nil
     }
 
     /// Starts Claude Code for a thread in the project's folder.

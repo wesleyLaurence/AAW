@@ -103,9 +103,14 @@ menu, and `+` beside it starts a new conversation; choosing one shows it
 where it stopped, drawn from Claude Code's own record of it, under
 `~/.claude/projects/` (or `CLAUDE_CONFIG_DIR`) in a folder named for the
 project's folder, every character that is not a letter or a digit made `-`;
-the next message resumes it. A session the person started in a terminal in
+the next message resumes it. A thread started before Save As… stays in the
+record of the folder it began in, where Claude Code resumes it and adds to
+it, so its file is looked for by its ID in the project's folders and then in
+every folder's record. A session the person started in a terminal in
 the project's folder is in that record too, and is listed under its first
-message, unless it was deleted in the panel. Opening a project shows its
+message, unless it was deleted in the panel. An Untitled project lists no
+such session: its folder takes the name of an earlier Untitled saved
+elsewhere or deleted, and the record for it is theirs (D162). Opening a project shows its
 most recent thread. One thread of a
 project runs at a time: while the agent works, changing conversations and
 deleting the one shown are refused with the reason, and Stop interrupts
@@ -147,7 +152,9 @@ shows (D133).
 - A conversation's earlier messages are drawn from Claude Code's record of
   it; where that cannot be read, the panel says so and the conversation
   still resumes. A copy of a project made with Save As… lists the original's
-  threads and draws them from the original folder's record.
+  threads and draws them from the original folder's record. The search by
+  ID reads the names of every folder under `~/.claude/projects/` when the
+  thread's file is not in the project's own.
 - Delete takes a thread out of the project's list and keeps it out;
   Claude Code's own record of it stays where it was.
 - The approval request's shape was taken from Claude Code's SDK; no card from

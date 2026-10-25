@@ -933,6 +933,52 @@ final class AgentPanelTests: XCTestCase {
     /// A thread renamed and deleted from the panel: the list is saved with
     /// the name, the deleted thread stays out when Claude Code's own list
     /// is merged again, and the one shown becomes a new conversation.
+    /// An Untitled project's folder is used again by the next Untitled, and
+    /// Claude Code's record for it holds the earlier ones' conversations: a
+    /// new Untitled lists none of them, and a thread started there goes
+    /// with it through Save As…, drawn from where it was recorded.
+    func testAnUntitledProjectListsOnlyItsOwnThreads() throws {
+        let made = SongModel.normal(URL(fileURLWithPath: try projectNewUntitled()))
+        let untitled = made.deletingLastPathComponent()
+        let record = ClaudeTranscripts.folder(for: untitled)
+        try FileManager.default.createDirectory(at: record, withIntermediateDirectories: true)
+        let line = { (text: String) in "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"\(text)\"}}\n" }
+        try line("an earlier project's words").write(to: record.appendingPathComponent("earlier.jsonl"), atomically: true, encoding: .utf8)
+
+        let model = try SongModel(url: made)
+        XCTAssertTrue(model.untitled)
+        XCTAssertEqual(model.agent.threads, [])
+        XCTAssertNil(model.agent.currentID)
+        model.agent.send("first short")
+        wait("the first turn") { !model.agent.working }
+        let first = try XCTUnwrap(model.agent.currentID)
+        // Claude Code's record of it, which the stand-in does not keep.
+        try line("first short").write(to: record.appendingPathComponent("\(first).jsonl"), atomically: true, encoding: .utf8)
+
+        let named = scratch.appendingPathComponent("Named")
+        try model.saveAs(named)
+        XCTAssertEqual(model.agent.threads.map(\.id), [first])
+        model.close()
+
+        // The next Untitled has the folder's name again and lists nothing.
+        let next = SongModel.normal(URL(fileURLWithPath: try projectNewUntitled()))
+        XCTAssertEqual(next, made)
+        let other = try SongModel(url: next)
+        XCTAssertEqual(other.agent.threads, [])
+        XCTAssertNil(other.agent.currentID)
+        other.close()
+        try projectDeleteUntitled(path: next.path)
+
+        // Opened again, the saved project shows its own thread, drawn from
+        // the Untitled folder's record.
+        let again = try SongModel(url: named.appendingPathComponent("song.yaml"))
+        defer { again.close() }
+        XCTAssertEqual(again.agent.threads.map(\.id), [first])
+        XCTAssertEqual(again.agent.currentID, first)
+        guard case .person(_, let text, _)? = again.agent.entries.first else { return XCTFail("not drawn: \(again.agent.entries)") }
+        XCTAssertEqual(text, "first short")
+    }
+
     func testAThreadIsRenamedAndDeleted() throws {
         let song = try workspaceAndProject()
         let model = try SongModel(url: song)
