@@ -160,6 +160,52 @@ fn device_report(d: &DeviceReport, effect: &Effect, sections: &[&str]) -> Value 
     dict(out)
 }
 
+/// How many renders of each kind, full mixes and previews of a track or a
+/// section, a project's renders folder keeps.
+pub const KEEP_RENDERS: usize = 3;
+
+/// Removes the oldest renders of the kind just made beyond `KEEP_RENDERS`,
+/// newest by when their report was written, and returns their folders. Only
+/// folders a render named are touched: one whose report's `render_id` begins
+/// with its name. `kept` is the render just made, kept whatever the clock
+/// says; a folder that cannot be read or removed is left as it is.
+fn prune(renders: &Path, kept: &str, full: bool) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(renders) else { return Vec::new() };
+    let mut found = Vec::new();
+    for entry in entries.flatten() {
+        let folder = entry.path();
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name == kept || !folder.is_dir() {
+            continue;
+        }
+        let report = folder.join("report.json");
+        let Some(v) = std::fs::read_to_string(&report).ok().and_then(|t| aaw_model::json_value(&t).ok()) else {
+            continue;
+        };
+        if !matches!(v.get("render_id"), Some(Value::Str(id)) if id.len() > name.len() && id.starts_with(&name)) {
+            continue;
+        }
+        let named = |key: &str| {
+            v.get("target")
+                .and_then(|t| t.get(key))
+                .is_some_and(|x| !matches!(x, Value::None))
+        };
+        if (named("track") || named("section")) == full {
+            continue;
+        }
+        let Ok(written) = std::fs::metadata(&report).and_then(|m| m.modified()) else { continue };
+        found.push((written, name, folder));
+    }
+    // Newest first; the render just made is one of the kept.
+    found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    found
+        .into_iter()
+        .skip(KEEP_RENDERS - 1)
+        .filter(|(_, _, folder)| std::fs::remove_dir_all(folder).is_ok())
+        .map(|(_, _, folder)| folder)
+        .collect()
+}
+
 fn write_text(path: &Path, text: &str) -> Result<(), String> {
     aaw_model::atomic_write(path, text).map_err(|e| e.to_string())
 }
@@ -543,9 +589,20 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
             ("project_sha256", Value::str(&fingerprint)),
         ])) + "\n"),
     )?;
+    // A render under its own name in renders/ is a cache: the oldest of its
+    // kind go once there are more than KEEP_RENDERS.
+    let removed = if opts.output.is_none() {
+        prune(resolved.parent().expect("a render's folder is in renders"), &render_id[..12], latest == "latest.json")
+    } else {
+        Vec::new()
+    };
     let Value::Dict(fields) = manifest else { unreachable!() };
     let mut result = aaw_model::value::Dict::new();
     result.insert(aaw_model::value::Key::str("directory"), Value::str(&resolved.to_string_lossy()));
+    result.insert(
+        aaw_model::value::Key::str("removed_renders"),
+        Value::List(removed.iter().map(|d| Value::str(&d.to_string_lossy())).collect()),
+    );
     result.insert(
         aaw_model::value::Key::str("mix_path"),
         Value::str(&resolved.join("mix.wav").to_string_lossy()),

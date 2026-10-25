@@ -1186,6 +1186,11 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   recipe's sound has been heard.
 - **Signing with a Developer ID and notarizing,** and the app on another Mac
   (Later, under Shipping).
+- **Renders kept to the newest three, on a real song:** a mix pass on a
+  song with many tracks, its `renders/` watched to stay at three full
+  renders and three previews, and `daw compare BEFORE` still finding the
+  render before an edit; an export from the app and the app's playback
+  untouched by a render removed under them. Tested on a generated song only.
 
 ## Later
 

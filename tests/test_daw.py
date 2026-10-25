@@ -357,6 +357,36 @@ def test_output_refuses_different_render(song, tmp_path):
     assert (tmp_path / "shared/mix.wav").read_bytes() == original
 
 
+def test_renders_keep_the_newest_three_of_each_kind(song, tmp_path):
+    path, d = song
+    d["sections"] = [{"id": "a", "at": 0, "length_beats": 2}]
+    renders = path.parent / "renders"
+    # Folders no render named are never removed.
+    (renders / "auditions").mkdir(parents=True)
+    (renders / "mine").mkdir()
+    (renders / "mine/report.json").write_text('{"render_id": "x"}')
+    full, previews = [], []
+    for gain in [-6, -7, -8, -9, -10]:
+        d["session"]["master_gain_db"] = gain
+        save(d, path)
+        made = render(path)
+        full.append(made["directory"])
+        previews.append(render(path, section="a")["directory"])
+        assert len(full) <= 3 or made["removed_renders"] == [full[-4]]
+    left = sorted(str(p) for p in renders.iterdir() if p.is_dir())
+    assert left == sorted([*full[-3:], *previews[-3:], str(renders / "auditions"), str(renders / "mine")])
+    # The same song again is the same render, kept as the newest.
+    d["session"]["master_gain_db"] = -8
+    save(d, path)
+    again = render(path)
+    assert again["directory"] == full[2] and again["removed_renders"] == []
+    # A render named by --output removes nothing.
+    d["session"]["master_gain_db"] = -11
+    save(d, path)
+    assert render(path, tmp_path / "elsewhere")["removed_renders"] == []
+    assert len([p for p in renders.iterdir() if p.is_dir()]) == 8
+
+
 def test_tiny_session_rejected_before_export(tmp_path):
     path = tmp_path / "song.yaml"
     save({"session": {"length_beats": "1/1000000000"}}, path)

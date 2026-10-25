@@ -100,7 +100,7 @@ const RECIPES: &[Recipe] = &[
         given: "The song daw describe start makes, at song.",
         steps: &[
             ("daw check song", "warnings lists what the song itself says may be wrong, each with a code (daw describe check): notes struck twice, clips stacked, releases the end cuts off. Fix or keep each before measuring."),
-            ("daw render song", "The mix and the stems. Keep the reply's directory, BEFORE: a render is kept in it under its own name, and song/renders/latest.json points to the newest."),
+            ("daw render song", "The mix and the stems. Keep the reply's directory, BEFORE: a render is kept in it under its own name, among the newest 3 full renders, and song/renders/latest.json points to the newest."),
             ("daw listen song/renders/latest.json", "overlap.pairs names the stems that crowd the same band at the same moments, the most first: STEM_A and STEM_B are the first pair's a and b. tracks.TRACK.audio.resonances lists each stem's narrow peaks: freq_hz, prominence_db and q, the three numbers a bell takes, and could_be_note, true when the notes may explain it."),
             ("daw listen song/renders/latest.json --overlap STEM_A STEM_B", "The two stems band by band and section by section, with the beats where they contest each band."),
             ("daw effect add song tracks.TRACK --type eq --bands '[{\"shape\": \"bell\", \"freq_hz\": PEAK_HZ, \"gain_db\": PEAK_GAIN, \"q\": PEAK_Q}]'", "A bell on TRACK at PEAK_HZ, a resonance's freq_hz, with PEAK_GAIN its prominence_db made negative, no lower than -24, and PEAK_Q its q, no higher than 18, lowers that peak."),
