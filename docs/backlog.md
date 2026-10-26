@@ -23,22 +23,16 @@ kept.
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Item 1 is the person's note from using the app on October 25, 2026;
-items 2–4 their notes of October 19, 2026 (D123). Items 5–16 are the order
-as it stood.
+Items 1–3 are the person's notes from using the app on October 19, 2026
+(D123). Items 4–15 are the order as it stood.
 
-1. **Play goes on past the song's end.** A blank song is one bar (D130), so
-    play from bar 1 sounds four clicks and stops. With nothing looped,
-    play carries on through empty bars, the metronome with it, until
-    stopped; and a new song is longer than one bar to start from.
-
-2. **The person's skills: reverse-engineer, mix, master, arrange.** Written
+1. **The person's skills: reverse-engineer, mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a sound or a track
     rebuilt from scratch as near as the tool allows, a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-3. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
+2. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
     kick layered under the wrong hits several times in a row, where the
     waveform made them plain, and a mashup of two songs matched in tempo but a
     beat ahead or behind: a song's drum hits as a list and a picture, `daw
@@ -48,53 +42,53 @@ as it stood.
     song with an odd bar, where the downbeat phase flips after it and bar.beat
     labels after it read two beats off, said when it changes or re-fit each
     phrase; each checked on those songs.
-4. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
+3. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
     vocal stem; a smaller model, or Whisper through MLX on this Mac, as a
     command of the tool's own, the lyric's bar still read from the stem.
 
-5. **`daw audio crossfade` with an option, while the app has the project
+4. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-6. **A time selection in the app.** A range of beats dragged across the
+5. **A time selection in the app.** A range of beats dragged across the
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-7. **A MIDI keyboard.** Notes played through the selected track, held and let
+6. **A MIDI keyboard.** Notes played through the selected track, held and let
     go rather than a beat long, through a Synth and through a Sampler, whose
     pitch needs audio prepared on the way; recording into note clips; quantize.
     The person plays a riff and the agent builds around it.
-8. **Sections, the master gain and the end fade in the app.** A section
+7. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-9. **A project made with `daw init` in the app's index,** so a song the agent
+8. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-10. **Turns and A/B.** An agent request's commands grouped, named for the
+9. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-11. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+10. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-12. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+11. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-13. **Key and chord detection,** and swing detection, of samples and songs: a
+12. **Key and chord detection,** and swing detection, of samples and songs: a
     loop matched to the song's key before it is placed.
-14. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+13. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-15. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+14. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-16. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+15. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
@@ -106,6 +100,13 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **Play past the song's end:** Space on a new song, the metronome on,
+  clicking on past bar 9 with the view following and the playhead in view,
+  until Space again; a click in the ruler past the end and play from there;
+  a song ending in a reverb heard ringing out whole past its end line; a
+  clip dropped ahead of the playhead while it rolls past the end, heard
+  when reached; a take recorded on past the end, and M dropping a marker
+  there (D163); only tests, nothing heard.
 - **A new Untitled's threads:** a conversation in an Untitled project,
   Save As… to a name, File › New listing no threads, and the saved project
   opened again showing that conversation's earlier messages and resuming it

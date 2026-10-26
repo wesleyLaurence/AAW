@@ -289,8 +289,11 @@ fn the_app_and_the_agent_share_the_transport() {
     assert_eq!(agent(&path, json!({"op": "status"}))["loop"], json!({"start": 8, "length": 8}));
     song.clear_loop().unwrap();
     assert_eq!(transport(&seen).loop_region, None);
+    // Play rolls on past the end, so the start position may be there.
+    song.locate(99.0).unwrap();
+    assert_eq!(transport(&seen).cue, 99.0);
     // Errors come back as errors, and nothing changed.
-    assert!(song.locate(99.0).unwrap_err().to_string().contains("session end"));
+    assert!(song.locate(-1.0).unwrap_err().to_string().contains("nonnegative"));
     assert!(song.set_loop(30.0, 8.0).is_err());
     song.stop().unwrap();
     // Nothing has played, so there is no playhead.
@@ -2018,7 +2021,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     let (song, seen) = open_at(&folder.to_string_lossy());
     transport(&seen);
     let a = song.arrangement();
-    assert_eq!((a.title.as_str(), a.tempo, a.length_beats, a.tracks.len()), ("Untitled", 120.0, 4.0, 0));
+    assert_eq!((a.title.as_str(), a.tempo, a.length_beats, a.tracks.len()), ("Untitled", 120.0, 32.0, 0));
     // The project the app made has its notes, and still holds nothing.
     assert!(std::fs::read_to_string(folder.join("SONG.md")).unwrap().starts_with("## Vision\n"));
     assert_eq!((song.path(), song.is_untitled(), song.untouched()), (first.clone(), true, true));

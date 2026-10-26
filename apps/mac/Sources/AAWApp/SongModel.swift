@@ -1725,9 +1725,10 @@ public final class SongModel {
     // MARK: Markers
 
     /// Where a marker dropped now lands: where the song is heard while it
-    /// plays, and else the start position.
+    /// plays, and else the start position; past the end, the end moves to
+    /// hold it.
     var markerBeat: Double {
-        if let playhead = playhead(), playhead.playing { return min(max(0, playhead.beat), arrangement.lengthBeats) }
+        if let playhead = playhead(), playhead.playing { return max(0, playhead.beat) }
         return transport.cue
     }
 

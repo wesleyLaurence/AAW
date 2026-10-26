@@ -27,7 +27,7 @@ pub mod yaml_load;
 
 pub use beat::{beat, frame, signed_beat, Beat};
 pub use hash::{fingerprints, hash_matches, project_hash};
-pub use length::{content_end, fitted_length};
+pub use length::{content_end, empty_length, fitted_length, EMPTY_BARS};
 pub use meter::Meter;
 pub use schema::*;
 pub use validate::ValidationError;

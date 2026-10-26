@@ -35,6 +35,10 @@ public struct TimelineLayout: Equatable {
     /// 6/8. The zoom's grid and the brighter lines are at its multiples.
     public var beatUnit: Double = 1
     public var lengthBeats: Double = 16
+    /// How far play has gone past the song's end, in beats, or zero: the
+    /// view scrolls a screen past it as it does past the end, so that the
+    /// playhead rolling on through empty bars stays in view.
+    public var playedBeats: Double = 0
     /// The height of all rows.
     public var contentHeight: CGFloat = 0
 
@@ -50,7 +54,7 @@ public struct TimelineLayout: Equatable {
         guard pixelsPerBeat > 0 else { return 2 * beatsPerBar }
         return max(2 * beatsPerBar, Double(lanesWidth / pixelsPerBeat))
     }
-    public var contentWidth: CGFloat { CGFloat(lengthBeats + tailBeats) * pixelsPerBeat }
+    public var contentWidth: CGFloat { CGFloat(max(lengthBeats, playedBeats) + tailBeats) * pixelsPerBeat }
 
     public func x(_ beat: Double) -> CGFloat {
         Self.headerWidth + CGFloat(beat) * pixelsPerBeat - scroll.x
@@ -129,14 +133,13 @@ public struct TimelineLayout: Equatable {
         return bars
     }
 
-    /// The beat a click at `x` means: on the grid unless `free`, and inside
-    /// the song, where a start position has to be.
+    /// The beat a click at `x` means: on the grid unless `free`, and not
+    /// before the song. It may be past the end, where play rolls on through
+    /// empty bars.
     public func target(atX x: CGFloat, free: Bool) -> Double {
         let raw = beat(atX: x)
         let g = grid
-        var beat = free ? (raw * 1000).rounded() / 1000 : (raw / g).rounded() * g
-        let last = free ? lengthBeats - 0.001 : ((lengthBeats / g).rounded(.up) - 1) * g
-        beat = min(beat, last)
+        let beat = free ? (raw * 1000).rounded() / 1000 : (raw / g).rounded() * g
         return max(0, beat)
     }
 

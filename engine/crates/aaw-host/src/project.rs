@@ -267,10 +267,11 @@ pub fn resolved(path: &Path) -> Result<PathBuf> {
 }
 
 /// An empty song in `meter` (4/4 when None) with everything else at its
-/// default: one bar long, since the length is the song's content (D130).
+/// default: eight bars long until something is put in it, since the length
+/// is the song's content (D130, D163).
 pub fn blank(tempo: f64, title: Option<&str>, meter: Option<&str>) -> Result<Project> {
     let meter = meter.map(aaw_model::Meter::parse).transpose()?.unwrap_or_default();
-    let length = aaw_model::Beat::from_exact(&meter.bar());
+    let length = aaw_model::Beat::from_exact(&aaw_model::empty_length(&meter.bar()));
     let mut session = vec![("tempo", Value::Float(tempo)), ("length_beats", length.to_value())];
     if meter != aaw_model::Meter::COMMON {
         session.push(("time_signature", Value::Str(meter.text())));

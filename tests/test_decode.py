@@ -105,6 +105,8 @@ def test_a_compressed_file_is_decoded_into_the_project(tmp_path, decoder, kind):
     song = load(path)
     song["patterns"] = {"once": {"length_beats": 4, "events": [{"at": 0, "pad": "x"}]}}
     song["tracks"] = [{"id": "song", "pads": {"x": {"sample": "song"}}, "clips": [{"pattern": "once"}]}]
+    # Written to the file, the song keeps its length: one bar, as its content is.
+    song["session"]["length_beats"] = 4
     save(song, path)
     assert daw("check", path)["warnings"] == []
     assert render(path, tmp_path / "out")["mix"]["rms_dbfs"] > -30

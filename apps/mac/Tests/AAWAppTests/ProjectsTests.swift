@@ -257,7 +257,7 @@ final class ProjectsTests: XCTestCase {
         let id = try XCTUnwrap(model.projectID)
         XCTAssertEqual(id.count, 36)
         XCTAssertTrue(FileManager.default.fileExists(atPath: made.deletingLastPathComponent().appendingPathComponent("Untitled.aaw").path))
-        XCTAssertEqual(model.arrangement.lengthBeats, 4, "an empty song is one bar")
+        XCTAssertEqual(model.arrangement.lengthBeats, 32, "an empty song is eight bars")
         XCTAssertTrue(model.untitled && model.untouched)
         XCTAssertEqual(Closing.of(untitled: model.untitled, untouched: model.untouched), .delete)
 

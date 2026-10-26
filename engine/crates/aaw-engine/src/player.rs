@@ -56,6 +56,9 @@ pub enum Message {
     Play { from: usize, preroll: usize },
     Stop,
     Metronome(bool),
+    /// Whether playback rolls on past the song's end until a stop, through
+    /// bars that hold nothing, the metronome with it; else it stops there.
+    RollOn(bool),
     Locate(usize),
     /// Start and end frames; playback reaching the end jumps to the start.
     Loop(Option<(usize, usize)>),
@@ -169,6 +172,8 @@ pub struct Player {
     #[allow(clippy::vec_box)]
     taps: Vec<Box<Tap>>,
     metronome: bool,
+    /// Rolls on past the song's end rather than stopping there.
+    roll_on: bool,
     click_gain: f64,
     click_position: i64,
     fade: Fade,
@@ -206,6 +211,7 @@ pub fn channel(program: Arc<Program>) -> (Control, Player) {
         preroll: 0,
         taps: Vec::with_capacity(MAX_TAPS),
         metronome: false,
+        roll_on: false,
         click_gain: 0.0,
         click_position: 0,
         fade: Fade::None,
@@ -280,6 +286,13 @@ impl Control {
     /// A monitoring click, mixed only by the real-time player.
     pub fn set_metronome(&mut self, enabled: bool) -> Result<(), String> {
         self.send(Message::Metronome(enabled))
+    }
+
+    /// Whether playback rolls on past the song's end until a stop, as a
+    /// window's transport does, or stops at the end, as a `daw play` that
+    /// hosts for its own duration does. It stops there until told.
+    pub fn set_roll_on(&mut self, enabled: bool) -> Result<(), String> {
+        self.send(Message::RollOn(enabled))
     }
 
     pub fn set_loop(&mut self, region: Option<(usize, usize)>) -> Result<(), String> {
@@ -421,7 +434,7 @@ impl Player {
                         self.deck.renderer.jump(start);
                         self.shared.wraps.fetch_add(1, Relaxed);
                     }
-                    _ if self.deck.renderer.finished() => self.playing = false,
+                    _ if self.deck.renderer.finished() && !self.roll_on => self.playing = false,
                     _ => {}
                 }
             }
@@ -488,6 +501,7 @@ impl Player {
             }
             Message::Loop(region) => self.region = region,
             Message::Metronome(enabled) => self.metronome = enabled,
+            Message::RollOn(enabled) => self.roll_on = enabled,
             Message::Preview { track, pitch, velocity, frames, replace } => {
                 // A resting stream wakes for the note.
                 self.resting = false;
@@ -583,7 +597,11 @@ impl Player {
         }
         let heard = self.deck.renderer.heard();
         // During a count-in the song stands still and only the click sounds.
-        let rolling = self.playing && self.preroll == 0;
+        let moving = self.playing && self.preroll == 0;
+        // Past the song's end the transport moves on over nothing, and what
+        // still rings is heard whole, as after a stop.
+        let past = moving && self.deck.renderer.finished();
+        let rolling = moving && !past;
         let old = match &mut self.fade {
             Fade::Cross { old, .. } => Some(&mut old.renderer),
             _ => None,
@@ -617,6 +635,11 @@ impl Player {
             for tap in taps.iter_mut().filter(|t| t.source == TapSource::Master) {
                 tap.feed.push_frames(ChunkTime::Frame(heard), out);
             }
+        }
+        if past {
+            self.deck.renderer.pass(n);
+        }
+        if moving {
             self.shared.played.fetch_add(n as u64, Relaxed);
         }
         let len = self.fade_len as f64;
@@ -644,7 +667,7 @@ impl Player {
         // start counted back from it.
         if self.playing || self.click_gain > 0.0 {
             let p = &program;
-            let target = if (self.metronome && rolling) || (self.playing && self.preroll > 0) { 1.0 } else { 0.0 };
+            let target = if (self.metronome && moving) || (self.playing && self.preroll > 0) { 1.0 } else { 0.0 };
             let click_start = if self.playing { heard - self.preroll as i64 } else { self.click_position };
             let step = 1.0 / self.fade_len.max(1) as f64;
             if target > 0.0 || self.click_gain > 0.0 {
@@ -656,7 +679,7 @@ impl Player {
                         // Before the song: the same bars, counted back.
                         at += ((-at + bar - 1) / bar) * bar;
                     }
-                    if at < p.total.max(bar as usize) as i64 {
+                    if self.roll_on || at < p.total.max(bar as usize) as i64 {
                         let click = metronome_sample(at as usize, p.rate, p.tempo, p.click_beats, p.beats_per_bar) * self.click_gain;
                         frame[0] += click;
                         frame[1] += click;

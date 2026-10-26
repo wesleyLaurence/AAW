@@ -322,7 +322,10 @@ fn transport_settings_without_a_device() {
     assert_eq!(s["loop"], json!({"start": 8, "length": 8}));
     assert!(h.send(json!({"op": "loop", "start": 30, "length": 8})).unwrap_err().contains("after the session end"));
     assert_eq!(h.send(json!({"op": "loop"})).unwrap()["loop"], Json::Null);
-    assert!(h.send(json!({"op": "locate", "at": 40})).unwrap_err().contains("at or after the session end"));
+    // A window's transport rolls on past the end, so the start position may be there.
+    assert_eq!(h.send(json!({"op": "locate", "at": 40})).unwrap()["cue"], json!(40));
+    let e = h.send(json!({"op": "locate", "at": -1})).unwrap_err();
+    assert!(e.contains("nonnegative"), "{e}");
     let _: Command = cmd(json!({"op": "stop"}));
     assert_eq!(h.send(json!({"op": "stop"})).unwrap()["playing"], json!(false));
 }
@@ -411,7 +414,9 @@ fn an_embedded_host_reports_what_changes() {
     assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(8.0, None)));
     ask(json!({"op": "loop", "start": 8, "length": 4})).unwrap();
     assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(8.0, Some((8.0, 4.0)))));
-    assert!(ask(json!({"op": "locate", "at": 99})).unwrap_err().contains("session end"));
+    // Past the end is taken, since play rolls on there.
+    assert_eq!(ask(json!({"op": "locate", "at": 99})).unwrap()["cue"], json!(99));
+    assert_eq!(transport(next(&events, &mut warnings)), transport(stopped(99.0, Some((8.0, 4.0)))));
     // No output has been opened, so there is no playhead yet.
     assert!(running.clock().now().is_none());
 

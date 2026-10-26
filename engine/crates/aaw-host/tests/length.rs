@@ -20,7 +20,7 @@ fn length(s: &Session) -> f64 {
 }
 
 #[test]
-fn the_end_follows_the_last_clip_and_an_empty_song_is_one_bar() {
+fn the_end_follows_the_last_clip_and_an_empty_song_is_eight_bars() {
     // A song saved longer than its content opens as it was, and settles at
     // its first edit: content to beat 32 reads 32 after it.
     let (_d, mut s) = open(&common::SONG.replace("length_beats: 32", "length_beats: 128"));
@@ -36,14 +36,18 @@ fn the_end_follows_the_last_clip_and_an_empty_song_is_one_bar() {
     assert_eq!(length(&s), 164.0);
     edit(&mut s, json!({"op": "clip.remove", "clip": "tracks.keys.clips.late"})).unwrap();
     assert_eq!(length(&s), 32.0);
-    // Everything taken away leaves one bar, of the time signature.
+    // Everything taken away leaves eight bars, of the time signature, a
+    // phrase to start from (D163).
     for clip in ["tracks.drums.clips.1", "tracks.drums.clips.0", "tracks.bass.clips.2", "tracks.bass.clips.1", "tracks.bass.clips.0"] {
         edit(&mut s, json!({"op": "clip.remove", "clip": clip})).unwrap();
     }
     edit(&mut s, json!({"op": "remove", "path": "tracks.bass.automation.0"})).unwrap();
     edit(&mut s, json!({"op": "section.remove", "section": "intro"})).unwrap();
-    assert_eq!(length(&s), 4.0);
+    assert_eq!(length(&s), 32.0);
     edit(&mut s, json!({"op": "set", "path": "session.time_signature", "value": "3/4"})).unwrap();
+    assert_eq!(length(&s), 24.0);
+    // Anything in it, and the end is the next whole bar after it again.
+    edit(&mut s, json!({"op": "clip.add", "track": "keys", "id": "short", "at": 0, "length_beats": 2})).unwrap();
     assert_eq!(length(&s), 3.0);
     // Nobody sets it.
     let e = edit(&mut s, json!({"op": "set", "path": "session.length_beats", "value": 64})).unwrap_err();

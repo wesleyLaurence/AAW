@@ -157,7 +157,7 @@ describe all of this; in short:
 
 | | |
 |---|---|
-| Launch | Opens a blank project called Untitled, 120 BPM and one bar long until something is put in it, kept in `Untitled/` of the app's data folder until it has a name, with a `SONG.md` for what the song is for and an `AGENTS.md` that hands it to an agent ([what every session is given](../../docs/features/agent-context.md)); the app shows neither. There is no welcome window, and closing the last window quits |
+| Launch | Opens a blank project called Untitled, 120 BPM and eight bars long until something is put in it, kept in `Untitled/` of the app's data folder until it has a name, with a `SONG.md` for what the song is for and an `AGENTS.md` that hands it to an agent ([what every session is given](../../docs/features/agent-context.md)); the app shows neither. There is no welcome window, and closing the last window quits |
 | File › New (⌘N) | Another Untitled project, in a window of its own |
 | A `.aaw` double-clicked in the Finder, or `open NAME.aaw` | Opens the project, launching the app on it with no Untitled project shown on the way, or brings its window forward. A `.aaw` that does not read says why and names the song file to open instead |
 | File › Open… (⌘O), Open Recent | A project's `.aaw` or its folder. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again by its bookmark, or by its ID when it is opened at a path the index does not know, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there. A folder duplicated in the Finder is given an ID of its own when opened |
@@ -203,11 +203,11 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 
 | Input | Does |
 |---|---|
-| Click in the ruler or an empty lane | Sets the start position, on the grid; with ⌘, off it. While playing, playback jumps there |
+| Click in the ruler or an empty lane | Sets the start position, on the grid; with ⌘, off it; past the song's end too. While playing, playback jumps there |
 | Click the metronome icon | Turns the beat click on or off. Yellow means on. It sounds during playback, including an empty project, follows BPM and loops, clicks on the note the time signature counts and accents the first beat of each bar. It starts off when a project opens and is excluded from renders and stems |
 | Type in BPM | Sets the session tempo (20–400, decimals accepted). Return or leaving the field applies; Escape cancels. The edit saves and can be undone |
 | Type a time signature | Sets the song's time signature, `3/4` or `6/8`: 1 to 32 beats over 1, 2, 4, 8 or 16. Return or leaving the field applies; Escape cancels. The bars, grid, rulers, position and metronome follow it; the edit saves and can be undone ([time signature](../../docs/features/time-signature.md)) |
-| Space | Plays from the start position, or stops |
+| Space | Plays from the start position, or stops. Play rolls on past the song's end through empty bars, the metronome with it, and the view follows, until stopped |
 | Return | Jumps back to the start position while playing |
 | Drag in the ruler's top strip | Sets the loop |
 | L | Loops the selected clips; with none selected, turns the loop off, or on again |

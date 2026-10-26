@@ -338,23 +338,26 @@ impl Host {
         aaw_model::frame(beats, s.tempo, s.sample_rate).max(0) as usize
     }
 
+    /// With `exit_on_stop`, refuses a start position at or past the song's
+    /// end, where a play that stops at the end has nothing to play. A
+    /// window's transport rolls on past the end, so there a start position
+    /// may be anywhere from the song's start on.
     fn check_in_song(&self, beats: &BigRational, what: &str) -> Result<()> {
-        if beats >= &self.session.project().session.length_exact() {
+        if self.opts.exit_on_stop && beats >= &self.session.project().session.length_exact() {
             return Err(format!("{what} {} is at or after the session end", aaw_model::fraction_str(beats)));
         }
         Ok(())
     }
 
     /// Where a marker dropped now lands: the beat being heard while the song
-    /// plays, to a thousandth, and else the start position; never past the
-    /// song's end.
+    /// plays, to a thousandth, and else the start position; past the song's
+    /// end it moves the end to hold it.
     fn marker_beat(&self) -> Json {
         let heard = match self.clock.now() {
             Some((true, beat)) => aaw_model::beat(&Beat::Float((beat * 1000.0).round() / 1000.0)).ok(),
             _ => None,
         };
-        let length = self.session.project().session.length_exact();
-        let beat = heard.unwrap_or_else(|| self.cue.clone()).min(length);
+        let beat = heard.unwrap_or_else(|| self.cue.clone());
         crate::session::value_json(&beat_value(&beat))
     }
 
@@ -456,6 +459,9 @@ impl Host {
         let mut t = Transport::open(program, &settings)?;
         t.control.set_loop(self.loop_frames())?;
         t.control.set_metronome(self.metronome)?;
+        // A `daw play` hosting for its own duration stops at the song's end;
+        // a window's transport, and `daw host`'s, rolls on until a stop.
+        t.control.set_roll_on(!self.opts.exit_on_stop)?;
         self.transport = Some(t);
         self.publish_clock();
         Ok(())
@@ -1485,7 +1491,8 @@ impl Host {
     }
 
     /// Takes a recording's frames in, and ends it where the loop wraps, where
-    /// the song ends, or when its device stopped.
+    /// the transport stopped, or when its device stopped. A take runs on
+    /// past the song's end, which moves to hold it.
     fn record_tick(&mut self) {
         let Some(recording) = &mut self.recording else { return };
         recording.drain();
@@ -1499,8 +1506,9 @@ impl Host {
         if wrapped {
             self.end_recording(loop_end.map(|f| f as i64));
         } else if !playing && recording.rolled {
-            // The song reached its end.
-            let total = self.program.as_ref().map(|(_, p)| p.total as i64);
+            // The transport stopped under the take: at the song's end when
+            // it stops there.
+            let total = self.opts.exit_on_stop.then(|| self.program.as_ref().map(|(_, p)| p.total as i64)).flatten();
             self.end_recording(total);
         } else if stalled {
             self.warn("the output never started, so the take ends".into());

@@ -536,7 +536,11 @@ keys, the piano roll as notes are drawn, clicked and moved, with `replace`,
 and `daw synth audition --play` from the terminal. While the
 transport stands still the stream is cut by nothing: the end fade and the
 gate at the song's end apply only while it rolls, so a tail or a previewed
-note is heard whole wherever the transport is.
+note is heard whole wherever the transport is. Told to roll on, as every host
+but a `daw play` hosting for its own duration tells it, the player goes on
+past the song's end until a stop: the transport moves over nothing there
+(`Renderer::pass`) and renders as it does standing, so tails ring whole while
+the playhead, the metronome and a take go on (D163).
 
 The metronome is host transport state, initially off, outside the song and its
 undo history. The player mixes its synthesized click after song processing,
