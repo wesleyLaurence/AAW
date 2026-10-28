@@ -1,6 +1,6 @@
-# A song with no end to hit — implemented 2026-10-20, play past the end 2026-10-25
+# A song with no end to hit — implemented 2026-10-20, play past the end 2026-10-25, markers off the end 2026-10-28
 
-Status: implemented (D130, D163). Asked for by the person on October 19, 2026: "I
+Status: implemented (D130, D163, D164). Asked for by the person on October 19, 2026: "I
 don't like the hard boundary of how long a track is ... I like how Ableton
 works where you can just add more clips and it kind of hides the concept of a
 length ... I don't ever want to see a message about a clip being outside the
@@ -30,8 +30,9 @@ through empty bars, the metronome with it, until stopped (D163).
   the one place every reader gets the end from. `aaw_model::content_end` is
   the latest of every clip's end (a pattern clip's last repeat, a note clip's
   length, an audio clip's sound with its fade-out tail, a looped clip's
-  length), every automation point, every section's end and every marker;
-  `fitted_length` rounds it up to a whole bar of the time signature, one bar
+  length), every automation point and every section's end, and not a
+  marker, which plays nothing and is in no render (D164); `fitted_length`
+  rounds it up to a whole bar of the time signature, one bar
   at the least, so an empty song still has a ruler. The host settles it in
   `Session::edit` after validation (`Session::settle`), reading the length of
   a sample's file from the project's folder for an audio clip that plays to
@@ -60,8 +61,8 @@ through empty bars, the metronome with it, until stopped (D163).
   and locate take a start position anywhere from the song's start on (`daw
   play --from` with no host still refuses one at or past the end, where it
   would have nothing to play); the loop stays inside the song. A marker
-  dropped while play is past the end lands where it is heard and moves the
-  end to hold it.
+  dropped while play is past the end lands where it is heard and leaves the
+  end where the sound is.
 - **A new song.** A song with nothing in it is eight bars long
   (`aaw_model::EMPTY_BARS`), a phrase to start from, so the loop set to all
   and a render of it have bars to count; once anything is placed, the end is
@@ -71,13 +72,17 @@ through empty bars, the metronome with it, until stopped (D163).
 - **The end fade.** `session.end_fade_ms` fades the last milliseconds of the
   computed end, which is at most a bar after the last sound. A longer fade is
   the last clip's own.
-- **Sections and markers** extend the song, since a form is laid out before it
-  is filled and a marker is left where something was heard; a marker past
-  the end holds the end there until it is moved or removed.
+- **Sections** extend the song, since a form is laid out before it is
+  filled. **Markers do not** (D164): a marker plays nothing and is in no
+  render, so one left past the end, M pressed while play rolls on through
+  empty bars, lies there without adding silent bars to every render and
+  export; it is listed, drawn in the ruler, which scrolls as far as it, and
+  taken along by `daw range delete`. Until October 28, 2026 a marker held
+  the end at or after it.
 - **The agent.** `daw set session.length_beats` is refused: "The length is the
-  song's content: the next whole bar after the last clip, automation point,
-  section or marker, set after every edit. Place something where the song
-  should reach". `daw describe project` says so under `length`; `daw timeline
+  song's content: the next whole bar after the last clip, automation point
+  or section, set after every edit. Place something where the song should
+  reach". `daw describe project` says so under `length`; `daw timeline
   --fit` (and `--tail`) is kept for old scripts and does nothing, which its
   reply says under `fitted`. `daw init` has no `--bars`: a new song is
   eight bars long until something is put in it. `daw map`'s grid runs to the computed end. `daw midi import` and
@@ -101,11 +106,13 @@ through empty bars, the metronome with it, until stopped (D163).
 ## Done
 
 - A note clip resized past the end moves the end to the bar after it; a
-  marker at beat 33 of a 32-beat song makes it 36 and moving the marker back
-  makes it 32 again; a section moved past the content and back does the same;
-  a pattern clip moved or copied past the end, a point added past it and a
-  marker at beat 400 move the end in the app's bridge, and undo brings it
-  back: Rust tests in `aaw-model`, `aaw-host` and `aaw-ffi`.
+  section moved past the content and back moves the end and brings it back;
+  a marker at beat 33 or 160 of a 32-beat song leaves it 32, moved to 40
+  leaves it 32, and the clip that reached bar 11 removed lets the end back
+  to 32 with the markers past it still there (D164); a pattern clip moved
+  or copied past the end and a point added past it move the end in the
+  app's bridge, and undo brings it back: Rust tests in `aaw-model`,
+  `aaw-host` and `aaw-ffi`.
 - No validation rule reads the length; `song-ends-inside` is gone from the
   code, `daw describe check` and [musical checks](musical-checks.md).
 - `daw timeline --fit` says it does nothing and leaves the file as it was;
@@ -127,7 +134,8 @@ through empty bars, the metronome with it, until stopped (D163).
   end while the playhead is past it is heard as its render when reached. In
   the host: a locate past the end is taken and one before the start refused,
   and a blank song is eight bars. The app's layout tests hold a click past
-  the end and the view scrolling with the playhead past it.
+  the end and the view scrolling with the playhead past it, and a marker
+  at beat 200 of a 64-beat song scrolled to without the song being longer.
 - Nothing was tried by hand; see Verify.
 
 ## Open questions, answered alone (D130)
@@ -135,4 +143,7 @@ through empty bars, the metronome with it, until stopped (D163).
 1. The end is the next whole bar after the last sound, not the sound itself:
    a bar reads on the ruler, and the export's tail is at most a bar.
 2. The end fade stays: one field that does what it did.
-3. A section past the content extends the song.
+3. A section past the content extends the song. A marker did too, until a
+   code review found on October 28, 2026 that M pressed at bar 40 of a
+   16-bar song left rolling past its end made every render and export 24
+   bars of silence longer; it no longer does (D164).

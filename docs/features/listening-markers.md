@@ -21,7 +21,7 @@ markers:
 | Field | Takes |
 |---|---|
 | `id` | Unique among the markers. Left out, the next free `mN` |
-| `at` | The song beat, from 0; past the song's end, the end moves to it ([song-length.md](song-length.md)) |
+| `at` | The song beat, from 0; past the song's end too, where it lies without moving the end ([song-length.md](song-length.md), D164) |
 | `text` | What the person said of that place, up to 200 characters; empty unless given |
 
 A marker plays nothing and is in no render. It is part of the song: saved in
@@ -124,9 +124,10 @@ and a range of some tracks (`--track`) leave them.
 - A marker changes the song's fingerprint, so `daw export` renders again
   after one is left, and an edit with `--expect` of the fingerprint before it
   is refused as after any change.
-- A marker holds the song's end at or after it, since the end is the song's
-  content: move or remove the marker to let the song shrink, or use `daw
-  range delete`, which takes it along.
+- A marker does not move the song's end (D164): one past the end is in
+  `daw marker list`, drawn in the ruler, which scrolls as far as it, and in
+  no render or export; `daw range delete` takes it along. Until October 28,
+  2026 a marker held the end at or after it.
 - `new_markers` reaches an agent through its next edit only; an agent that is
   rendering or measuring hears of a marker when it next edits or reads them.
 - Markers are not copied or pasted, and several are not selected or moved

@@ -39,6 +39,9 @@ public struct TimelineLayout: Equatable {
     /// view scrolls a screen past it as it does past the end, so that the
     /// playhead rolling on through empty bars stays in view.
     public var playedBeats: Double = 0
+    /// The furthest marker's beat, or zero. A marker past the end lies there
+    /// without moving the end (D164), and the view scrolls as far as it.
+    public var markersEnd: Double = 0
     /// The height of all rows.
     public var contentHeight: CGFloat = 0
 
@@ -54,7 +57,7 @@ public struct TimelineLayout: Equatable {
         guard pixelsPerBeat > 0 else { return 2 * beatsPerBar }
         return max(2 * beatsPerBar, Double(lanesWidth / pixelsPerBeat))
     }
-    public var contentWidth: CGFloat { CGFloat(max(lengthBeats, playedBeats) + tailBeats) * pixelsPerBeat }
+    public var contentWidth: CGFloat { CGFloat(max(lengthBeats, playedBeats, markersEnd) + tailBeats) * pixelsPerBeat }
 
     public func x(_ beat: Double) -> CGFloat {
         Self.headerWidth + CGFloat(beat) * pixelsPerBeat - scroll.x

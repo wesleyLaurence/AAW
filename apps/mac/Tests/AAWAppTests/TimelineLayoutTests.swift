@@ -155,6 +155,20 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.x(200), TimelineLayout.headerWidth + 68, accuracy: 1e-6)
     }
 
+    func testAMarkerPastTheEndIsScrolledTo() {
+        var l = layout()
+        l.pixelsPerBeat = 40
+        // A marker at beat 200 of a 64-beat song does not move the end, and
+        // the view scrolls as far as the marker (D164).
+        l.markersEnd = 200
+        XCTAssertEqual(l.lengthBeats, 64)
+        l.reveal(200)
+        XCTAssertEqual(l.x(200), TimelineLayout.headerWidth + 68, accuracy: 1e-6)
+        l.markersEnd = 0
+        l.clamp()
+        XCTAssertGreaterThan(l.x(200), l.size.width, "off the screen without the marker")
+    }
+
     func testPositionsCountFromOne() {
         XCTAssertEqual(TimelineLayout.position(0, beatsPerBar: 4), "1.1.1")
         XCTAssertEqual(TimelineLayout.position(50, beatsPerBar: 4), "13.3.1")
