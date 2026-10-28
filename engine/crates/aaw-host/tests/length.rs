@@ -74,7 +74,8 @@ fn an_audio_clip_counts_its_sound_and_its_tail() {
     // A looped clip lasts its own length.
     edit(&mut s, json!({"op": "clip.loop", "clip": "tracks.song.audio.0", "loop_beats": 0.5, "length": 9})).unwrap();
     assert_eq!(length(&s), 44.0);
-    // A point, a section and a marker hold the end too.
+    // A point and a section hold the end too; a marker, which plays nothing
+    // and is in no render, does not (D164).
     edit(&mut s, json!({"op": "clip.loop", "clip": "tracks.song.audio.0", "loop_beats": "off"})).unwrap();
     assert_eq!(length(&s), 32.0);
     edit(&mut s, json!({"op": "point.add", "owner": "tracks.bass", "param": "sends.plate.gain_db", "at": 50, "value": -6})).unwrap();
@@ -84,5 +85,14 @@ fn an_audio_clip_counts_its_sound_and_its_tail() {
     assert_eq!(length(&s), 40.0);
     edit(&mut s, json!({"op": "section.remove", "section": "outro"})).unwrap();
     edit(&mut s, json!({"op": "marker.add", "at": 33.5})).unwrap();
-    assert_eq!(length(&s), 36.0);
+    assert_eq!(length(&s), 32.0);
+    edit(&mut s, json!({"op": "marker.add", "at": 160})).unwrap();
+    assert_eq!(length(&s), 32.0);
+    // Nor does one hold the end where a clip left it: the clip gone, the
+    // end is where the rest of the song reaches, the markers still there.
+    edit(&mut s, json!({"op": "audio.move", "clip": "tracks.song.audio.0", "at": 40})).unwrap();
+    assert_eq!(length(&s), 44.0);
+    edit(&mut s, json!({"op": "remove", "path": "tracks.song.audio.0"})).unwrap();
+    assert_eq!(length(&s), 32.0);
+    assert_eq!(get(&s, "markers").as_array().unwrap().len(), 2);
 }

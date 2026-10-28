@@ -1799,7 +1799,7 @@ impl<'a> Edit<'a> {
             TrackFreeze { .. } | TrackUnfreeze { .. } => return Err("a freeze is the session's".into()),
             Set { path, value } => {
                 if path == "session.length_beats" {
-                    return Err("The length is the song's content: the next whole bar after the last clip, automation point, section or marker, set after every edit. Place something where the song should reach".into());
+                    return Err("The length is the song's content: the next whole bar after the last clip, automation point or section, set after every edit. Place something where the song should reach".into());
                 }
                 let new = Node::new(&json_value(value)?);
                 // A missing key of a map is added, e.g. a new pad; anything else

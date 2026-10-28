@@ -788,6 +788,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         layout.beatsPerBar = a.barBeats
         layout.beatUnit = a.beatUnit
         layout.lengthBeats = a.lengthBeats
+        layout.markersEnd = a.markers.map(\.at).max() ?? 0
         layout.clamp()
         needsDisplay = true
         link?.isPaused = false

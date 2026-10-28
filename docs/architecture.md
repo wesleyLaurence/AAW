@@ -267,8 +267,9 @@ Session: `title`, `tempo`, `time_signature` (`N/D`, 1 to 32 beats over 1, 2, 4,
 `length_beats`, `master_gain_db`, `end_fade_ms`, and `stretcher` (`signalsmith` or
 `rubberband`; see [time-stretch.md](features/time-stretch.md)). `length_beats` is
 the song's content, not a setting: after every edit the host sets it to the next
-whole bar after the last clip's sound, automation point, section or marker, one
-bar at the least (`aaw_model::fitted_length`), so nothing lies past the end and
+whole bar after the last clip's sound, automation point or section, one bar at
+the least (`aaw_model::fitted_length`); a marker does not move it (D164); so no
+sound lies past the end and
 `daw set session.length_beats` is refused; a song saved longer keeps its length
 until its next edit; see [song-length.md](features/song-length.md).
 

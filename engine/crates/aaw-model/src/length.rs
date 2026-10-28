@@ -55,10 +55,11 @@ impl AudioClip {
 
 /// The beat the song's content ends on: the latest of every clip's end (an
 /// audio clip's with its tail, a looped clip's with its loop), every
-/// automation point, every section's end and every marker; zero for an
-/// empty song. `file_seconds` is the length of a sample's file, which an
-/// audio clip that plays to its file's end needs; such a clip whose file
-/// cannot be read counts from its start.
+/// automation point and every section's end; zero for an empty song. A
+/// marker is not content: it plays nothing and is in no render, so one
+/// past the end lies there without moving it (D164). `file_seconds` is the
+/// length of a sample's file, which an audio clip that plays to its file's
+/// end needs; such a clip whose file cannot be read counts from its start.
 pub fn content_end(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> BigRational {
     let tempo = p.session.tempo;
     let mut end = BigRational::zero();
@@ -92,9 +93,6 @@ pub fn content_end(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> B
     }
     for s in &p.sections {
         reach(s.at_exact() + s.length_exact());
-    }
-    for m in &p.markers {
-        reach(m.at_exact());
     }
     end
 }

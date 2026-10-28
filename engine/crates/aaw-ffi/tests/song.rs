@@ -2682,10 +2682,12 @@ fn the_person_leaves_moves_rewords_and_removes_markers() {
     update(&seen);
     let u = update(&seen);
     assert_eq!((u.arrangement.markers[1].at, u.arrangement.markers[1].text.as_str()), (9.417, "too busy"));
-    // Nothing to remove is no edit; a marker past the end moves the end to it (D130).
+    // Nothing to remove is no edit; a marker past the end lies there and
+    // leaves the end where the sound is (D164).
     assert!(song.edit(Edit::MarkersRemove { markers: vec![] }, None).unwrap().is_empty());
     song.edit(Edit::MarkerAdd { at: 400.0, text: String::new() }, None).unwrap();
-    assert_eq!(update(&seen).arrangement.length_beats, 400.0);
+    let u = update(&seen);
+    assert_eq!((u.arrangement.length_beats, u.arrangement.markers.last().unwrap().at), (32.0, 400.0));
     assert!(std::fs::read_to_string(&path).unwrap().contains("markers:"));
     song.close();
 }
