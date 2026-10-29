@@ -640,7 +640,9 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 - The analyzer's panes are arranged by hand each time rather than from a
   saved set; the agent cannot read its numbers.
 - The agent panel drives the person's own Claude Code, found through their
-  login shell, and says so when it is missing or signed out; no other agent
+  interactive login shell or, when that gives no answer within 15 seconds,
+  the newest copy a plain login shell and the usual places hold, and says so
+  when it is missing or signed out; no other agent
   and no sign-in in the app. One conversation of a project runs at a time.
   It runs in Claude Code's auto mode, so most actions need no approval;
   what auto mode would ask about is a card, unless it is `daw` on the

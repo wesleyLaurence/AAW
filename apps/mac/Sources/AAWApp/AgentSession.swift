@@ -24,15 +24,13 @@ enum ClaudeCode {
         let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
         // An interactive login shell: a version manager such as nvm, which
         // installs Claude Code, is usually set up in the interactive file.
-        for flags in ["-lic", "-lc"] {
-            guard let answer = run(shell, [flags, "printf '%s\\n' \"$(command -v claude)\" \"$PATH\""]) else { continue }
-            let lines = answer.split(separator: "\n").map(String.init)
-            if lines.count >= 2, let program = lines.first(where: { $0.hasPrefix("/") && $0.hasSuffix("claude") }),
-               let path = lines.last(where: { $0.contains(":") }) {
-                return Located(executable: URL(fileURLWithPath: program), path: path)
-            }
-        }
-        // Without a shell's word: the places it is usually installed.
+        if let found = ask(shell, "-lic") { return found }
+        // Without its word, which a slow interactive file can take past the
+        // limit: every copy the other routes find, and the newest of them.
+        // A login shell without that file, or a usual place, can hold a copy
+        // left from an earlier install, too old for the arguments a
+        // conversation is started with, as /usr/local/bin did on this Mac.
+        var found = [ask(shell, "-lc")].compactMap { $0 }
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         var usual = ["\(home)/.claude/local/bin/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"]
         let nvm = "\(home)/.nvm/versions/node"
@@ -41,19 +39,58 @@ enum ClaudeCode {
         }
         for candidate in usual where FileManager.default.isExecutableFile(atPath: candidate) {
             let path = (environment["PATH"] ?? "") + ":" + (candidate as NSString).deletingLastPathComponent
-            return Located(executable: URL(fileURLWithPath: candidate), path: path)
+            found.append(Located(executable: URL(fileURLWithPath: candidate), path: path))
         }
-        return nil
+        return newest(found) { located in
+            run(located.executable.path, ["--version"], path: located.path).flatMap(version)
+        }
+    }
+
+    /// Where a login shell started with `flags` finds `claude`, and its PATH.
+    private static func ask(_ shell: String, _ flags: String) -> Located? {
+        guard let answer = run(shell, [flags, "printf '%s\\n' \"$(command -v claude)\" \"$PATH\""]) else { return nil }
+        let lines = answer.split(separator: "\n").map(String.init)
+        guard lines.count >= 2, let program = lines.first(where: { $0.hasPrefix("/") && $0.hasSuffix("claude") }),
+              let path = lines.last(where: { $0.contains(":") }) else { return nil }
+        return Located(executable: URL(fileURLWithPath: program), path: path)
+    }
+
+    /// The copy whose version is highest, the first of equals; one that
+    /// gives no version counts below any that does. A copy found twice, as
+    /// through a link, is asked once.
+    static func newest(_ found: [Located], version: (Located) -> [Int]?) -> Located? {
+        var seen = Set<String>()
+        var best: (located: Located, version: [Int])?
+        for located in found where seen.insert(located.executable.resolvingSymlinksInPath().path).inserted {
+            let number = version(located) ?? []
+            if best.map({ $0.version.lexicographicallyPrecedes(number) }) ?? true { best = (located, number) }
+        }
+        return best?.located
+    }
+
+    /// The version in what `claude --version` printed, "2.1.312 (Claude
+    /// Code)" as [2, 1, 312], or nil.
+    static func version(_ text: String) -> [Int]? {
+        guard let word = text.split(whereSeparator: \.isWhitespace).first else { return nil }
+        let parts = word.split(separator: ".").map { Int($0) }
+        guard !parts.isEmpty, !parts.contains(nil) else { return nil }
+        return parts.compactMap { $0 }
     }
 
     /// What a program printed, or nil when it could not run, failed, or
     /// took longer than `limit` seconds. It is given no input: an
-    /// interactive shell with the app's input would wait on it.
-    private static func run(_ program: String, _ arguments: [String], limit: Double = 15) -> String? {
+    /// interactive shell with the app's input would wait on it. `path`, when
+    /// given, is its PATH, where a copy of Claude Code run by node finds it.
+    private static func run(_ program: String, _ arguments: [String], path: String? = nil, limit: Double = 15) -> String? {
         let process = Process()
         let out = Pipe()
         process.executableURL = URL(fileURLWithPath: program)
         process.arguments = arguments
+        if let path {
+            var environment = ProcessInfo.processInfo.environment
+            environment["PATH"] = path
+            process.environment = environment
+        }
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = out
         process.standardError = FileHandle.nullDevice
