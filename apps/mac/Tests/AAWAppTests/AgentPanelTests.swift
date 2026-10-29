@@ -1105,6 +1105,24 @@ final class AgentPanelTests: XCTestCase {
         XCTAssertTrue(AgentPanel.isSignedOut("Invalid API key"))
         XCTAssertFalse(AgentPanel.isSignedOut("Rate limited"))
     }
+
+    func testLocateTakesTheNewestCopyWithoutTheShellsWord() {
+        func copy(_ path: String) -> ClaudeCode.Located {
+            ClaudeCode.Located(executable: URL(fileURLWithPath: path), path: "/usr/bin")
+        }
+        let versions = ["/old/claude": [1, 0, 34], "/new/claude": [2, 1, 312], "/same/claude": [2, 1, 312]]
+        let found = [copy("/old/claude"), copy("/broken/claude"), copy("/new/claude"), copy("/same/claude")]
+        XCTAssertEqual(ClaudeCode.newest(found) { versions[$0.executable.path] }, copy("/new/claude"),
+                       "the highest version, the first of equals, whatever the order found")
+        XCTAssertEqual(ClaudeCode.newest([copy("/broken/claude"), copy("/old/claude")]) { versions[$0.executable.path] },
+                       copy("/old/claude"), "one that gives no version is below any that does")
+        XCTAssertEqual(ClaudeCode.newest([copy("/broken/claude")]) { _ in nil }, copy("/broken/claude"))
+        XCTAssertNil(ClaudeCode.newest([]) { _ in [1] })
+        XCTAssertEqual(ClaudeCode.version("2.1.312 (Claude Code)\n"), [2, 1, 312])
+        XCTAssertEqual(ClaudeCode.version("1.0.34 (Claude Code)"), [1, 0, 34])
+        XCTAssertNil(ClaudeCode.version("error: unknown option"))
+        XCTAssertNil(ClaudeCode.version(""))
+    }
 }
 
 extension AgentPanel.Entry {
