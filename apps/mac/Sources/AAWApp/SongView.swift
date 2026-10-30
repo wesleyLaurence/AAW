@@ -302,14 +302,29 @@ struct TransportBar: View {
             }
             .help("Show or hide the sample browser")
 
+            // Stop, a square left of play: stops, and goes back to the
+            // song's very beginning.
+            Button {
+                model.goToBeginning()
+            } label: {
+                Image(systemName: "stop.fill")
+                    .frame(width: 18, height: 18)
+            }
+            .accessibilityLabel("Stop")
+            .help("Stop and go to the beginning (Home)")
+
+            // Play stays a triangle, green while playing, since the square
+            // beside it is stop.
             Button {
                 model.togglePlay()
             } label: {
-                Image(systemName: playing ? "stop.fill" : "play.fill")
+                Image(systemName: "play.fill")
                     .frame(width: 18, height: 18)
                     .foregroundStyle(playing ? Color.green : Color.primary)
             }
-            .help(playing ? "Stop (Space)" : "Play from the start position (Space)")
+            .accessibilityLabel("Play")
+            .accessibilityValue(playing ? "Playing" : "Stopped")
+            .help(playing ? "Stop, back at the start position (Space)" : "Play from the start position (Space)")
 
             // Record: red while a take runs, dim while nothing is armed.
             let recording = model.transport.recording
