@@ -30,7 +30,8 @@ and in the song's fingerprint.
 
 ## In the app
 
-The ruler has a strip for markers, between the sections and the bar numbers.
+The ruler has a strip for markers, between the sections and the bar numbers,
+which have the time under them ([time-ruler.md](time-ruler.md)).
 A marker is a flag on a line at its beat, with its text in the flag as far as
 the next marker leaves room, and a faint line down the lanes under it.
 

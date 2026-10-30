@@ -222,10 +222,51 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(TimelineLayout.liftRange([]), 0...0)
     }
 
-    func testTheRulerHasAStripForMarkersOverTheBars() {
-        XCTAssertEqual(TimelineLayout.rulerHeight, 68)
+    func testTheRulerHasAStripForMarkersOverTheBarsAndTheTimeUnderThem() {
+        XCTAssertEqual(TimelineLayout.rulerHeight, 84)
         XCTAssertEqual(TimelineLayout.markerTop, 34)
-        XCTAssertEqual(TimelineLayout.markerTop + TimelineLayout.markerStrip, TimelineLayout.rulerHeight - TimelineLayout.barStrip)
+        XCTAssertEqual(TimelineLayout.markerTop + TimelineLayout.markerStrip, TimelineLayout.barTop)
+        XCTAssertEqual(TimelineLayout.barTop + TimelineLayout.barStrip, TimelineLayout.timeTop)
+        XCTAssertEqual(TimelineLayout.timeTop + TimelineLayout.timeStrip, TimelineLayout.rulerHeight)
+    }
+
+    func testTimeFollowsTheTempo() {
+        var l = layout()
+        XCTAssertEqual(l.pixelsPerSecond, 20, "10 points a beat at 120 BPM")
+        XCTAssertEqual(l.x(seconds: 2), l.x(4))
+        XCTAssertEqual(l.seconds(atX: l.x(6)), 3, accuracy: 1e-9)
+        l.tempo = 90
+        XCTAssertEqual(l.x(seconds: 2), l.x(3))
+    }
+
+    func testTheTimeLabelsCoarsenAsTheViewZoomsOutLikeTheBarNumbers() {
+        var l = layout()
+        XCTAssertEqual(l.timeLabelStep, 5, "at 20 points a second, two seconds are too close: fives")
+        XCTAssertEqual(l.timeTickStep, 0.5, "ten ticks to a label, 10 points apart")
+        l.pixelsPerBeat = 2
+        XCTAssertEqual(l.timeLabelStep, 15)
+        XCTAssertEqual(l.timeTickStep, 5)
+        l.pixelsPerBeat = 240
+        XCTAssertEqual(l.timeLabelStep, 0.2)
+        XCTAssertEqual(l.timeTickStep, 0.05)
+        l.pixelsPerBeat = 10
+        l.tempo = 60
+        XCTAssertEqual(l.timeLabelStep, 10, "a slower tempo makes a beat longer, so fewer fit between labels")
+        XCTAssertEqual(l.timeTickStep, 1)
+        l.pixelsPerBeat = 0.005
+        XCTAssertEqual(l.timeLabelStep, 14400, "past an hour the step doubles: at 0.005 points a second, four hours")
+        XCTAssertEqual(l.timeTickStep, 3600)
+    }
+
+    func testATimeReadsAsAClock() {
+        XCTAssertEqual(TimelineLayout.clock(0, step: 5), "0:00")
+        XCTAssertEqual(TimelineLayout.clock(65, step: 5), "1:05")
+        XCTAssertEqual(TimelineLayout.clock(3600, step: 60), "1:00:00")
+        XCTAssertEqual(TimelineLayout.clock(3725, step: 300), "1:02:05")
+        XCTAssertEqual(TimelineLayout.clock(1.5, step: 0.5), "0:01.5", "tenths when the labels are under a second apart")
+        XCTAssertEqual(TimelineLayout.clock(0.1 + 0.2, step: 0.1), "0:00.3", "the float's noise is rounded off")
+        XCTAssertEqual(TimelineLayout.clock(61.25, step: 0.05), "1:01.25", "hundredths under a tenth")
+        XCTAssertEqual(TimelineLayout.clock(-3, step: 1), "0:00")
     }
 
     func testAMarkersFlagHoldsItsTextAsFarAsTheNextMarker() {
