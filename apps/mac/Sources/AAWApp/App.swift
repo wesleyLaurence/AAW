@@ -781,6 +781,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         add("Transport", [
             item("Play or Stop", #selector(SongWindowController.togglePlay(_:)), " ", []),
             item("Return to Start Position", #selector(SongWindowController.returnToStart(_:)), "\r", []),
+            item("Go to Beginning", #selector(SongWindowController.goToBeginning(_:)), String(UnicodeScalar(UInt16(NSHomeFunctionKey))!), []),
             item("Loop", #selector(SongWindowController.toggleLoop(_:)), "l", []),
             .separator(),
             item("Record", #selector(SongWindowController.toggleRecord(_:)), "r", []),
@@ -1059,6 +1060,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
 
     @objc func togglePlay(_ sender: Any?) { model.togglePlay() }
     @objc func returnToStart(_ sender: Any?) { model.returnToStart() }
+    @objc func goToBeginning(_ sender: Any?) { model.goToBeginning() }
     @objc func toggleLoop(_ sender: Any?) { model.toggleLoop() }
     @objc func toggleRecord(_ sender: Any?) { model.toggleRecord() }
     @objc func chooseCountIn(_ sender: NSMenuItem) {
@@ -1201,7 +1203,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(addMarker(_:)), #selector(addNamedMarker(_:)): return !typing
         case #selector(deleteAllMarkers(_:)): return !model.arrangement.markers.isEmpty && !typing
         case #selector(returnToStart(_:)): return model.transport.playing && !typing
-        case #selector(togglePlay(_:)): return !typing
+        case #selector(togglePlay(_:)), #selector(goToBeginning(_:)): return !typing
         case #selector(toggleRecord(_:)):
             item.title = model.transport.recording ? "Stop Recording" : "Record"
             return (model.transport.recording || model.canRecord) && !typing

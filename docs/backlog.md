@@ -135,6 +135,9 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The stop button:** the square left of play clicked while playing past
+  the first screen, and Home with a take recording, back at 1.1.1 with the
+  view at bar 1.
 - **The time ruler:** the clock under the bar numbers on a real song, read
   against a render's length, zoomed in to tenths of a second and out to
   minutes, and after the tempo is changed.

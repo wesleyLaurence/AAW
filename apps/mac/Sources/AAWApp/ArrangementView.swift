@@ -427,6 +427,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var contextMenuEvent: TimeInterval?
     /// The tracks drawn armed, to place the rows again when they change.
     private var shownArmed: Set<UInt64> = []
+    /// The stop button was pressed while playing: scroll to the beginning
+    /// when play has stopped.
+    private var beginningPending = false
     private var dropTarget: DropTarget?
     /// The file being dragged over the view and its length, in seconds for an
     /// audio file and in beats for a MIDI file, read once for the outline of
@@ -449,6 +452,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         show(model.arrangement, animated: false)
         model.onUpdate = { [weak self] update in self?.apply(update) }
         model.onTransport = { [weak self] in self?.transportChanged() }
+        model.onBeginning = { [weak self] in self?.revealBeginning() }
         model.onZoom = { [weak self] zoom in self?.zoom(zoom) }
         model.onRefusal = { [weak self] in self?.revert() }
         model.onSelection = { [weak self] in self?.needsDisplay = true }
@@ -841,8 +845,22 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         show(model.arrangement, animated: true)
     }
 
+    /// Scrolls to the song's beginning for the stop button, now when the
+    /// song is stopped, else once the host says play has stopped, so that
+    /// the playhead's last frames do not scroll the view back.
+    private func revealBeginning() {
+        if model.transport.playing {
+            beginningPending = true
+        } else {
+            beginningPending = false
+            layout.reveal(0)
+            needsDisplay = true
+        }
+    }
+
     private func transportChanged() {
         needsDisplay = true
+        if beginningPending && !model.transport.playing { revealBeginning() }
         link?.isPaused = false
         // The arms are drawn in the headers, so a change of them places the
         // rows again.

@@ -341,6 +341,8 @@ public final class SongModel {
     /// Called with each new revision, for the arrangement view to animate.
     @ObservationIgnored var onUpdate: ((Update) -> Void)?
     @ObservationIgnored var onTransport: (() -> Void)?
+    /// The stop button was pressed: the timeline scrolls to the beginning.
+    @ObservationIgnored var onBeginning: (() -> Void)?
     @ObservationIgnored var onClosed: (() -> Void)?
     @ObservationIgnored var onZoom: ((Zoom) -> Void)?
     /// Called when the host refuses an edit, for the view to put back what it
@@ -1873,6 +1875,15 @@ public final class SongModel {
     /// Jumps back to the start position while playing.
     public func returnToStart() {
         locate(transport.cue)
+    }
+
+    /// Stops, and puts the start position at the song's very beginning, at
+    /// bar 1 and no time: the transport bar's stop button and Transport ›
+    /// Go to Beginning. A take running ends as Space ends it.
+    public func goToBeginning() {
+        if transport.playing || transport.recording { stop() }
+        locate(0)
+        onBeginning?()
     }
 
     public func setLoop(start: Double, length: Double) {
