@@ -70,6 +70,7 @@ Built:
 | [the clipper](features/clipper.md) | A `clipper` effect: a ceiling no sample passes, with a knee, a drive and oversampling, and what it took off in the render's report and `daw listen` |
 | [a limiter that holds a true peak](features/true-peak-limiter.md) | `true_peak` on the `limiter`: the level between the samples read as the render's report estimates it, so that `ceiling_db: -1` is −1 dBTP |
 | [listening markers](features/listening-markers.md) | A note the person leaves at a beat while the song plays, with M in the app, in a strip of the ruler; `daw marker list` giving the agent each one's bar, section, text and the clips sounding there; a row in `daw map`, and the markers the person left since the agent's last command in its next edit's reply |
+| [time ruler](features/time-ruler.md) | The ruler's time strip under the bar numbers: the time from the song's start as a clock at the session tempo, its labels and ticks following the zoom, minutes zoomed out and tenths of a second zoomed in |
 | [finding one's way in the CLI](features/cli-navigation.md) | `daw --help` in sections, `daw describe batch`, `daw describe TOPIC.PART`, tested recipes, `daw audio-device` for the Mac's audio devices, and a line for every command, each held by a test |
 
 Proposed, in the order of Next in the backlog:

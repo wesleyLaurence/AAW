@@ -4,15 +4,21 @@ import CoreGraphics
 /// grid a click snaps to. Geometry only; the song itself lives in the host.
 public struct TimelineLayout: Equatable {
     public static let headerWidth: CGFloat = 212
-    /// The ruler's four strips: the loop brace, the sections, the person's
-    /// markers and the bar numbers.
+    /// The ruler's five strips: the loop brace, the sections, the person's
+    /// markers, the bar numbers and the time.
     public static let loopStrip: CGFloat = 16
     public static let sectionStrip: CGFloat = 18
     public static let markerStrip: CGFloat = 16
     public static let barStrip: CGFloat = 18
-    public static let rulerHeight: CGFloat = loopStrip + sectionStrip + markerStrip + barStrip
+    public static let timeStrip: CGFloat = 16
+    public static let rulerHeight: CGFloat = loopStrip + sectionStrip + markerStrip + barStrip + timeStrip
     /// Where the marker strip starts, from the ruler's top.
     public static let markerTop: CGFloat = loopStrip + sectionStrip
+    /// Where the bar numbers start: the start position's flag and the
+    /// playhead's head are drawn from here.
+    public static let barTop: CGFloat = markerTop + markerStrip
+    /// Where the time starts: the strip nearest the lanes.
+    public static let timeTop: CGFloat = barTop + barStrip
     /// A marker's flag, which it has with or without text, and the space
     /// either side of the text in it.
     public static let markerFlag: CGFloat = 9
@@ -34,6 +40,8 @@ public struct TimelineLayout: Equatable {
     /// The note the time signature counts, in those beats: 1 in 3/4, 0.5 in
     /// 6/8. The zoom's grid and the brighter lines are at its multiples.
     public var beatUnit: Double = 1
+    /// The session tempo, in beats a minute: what makes a beat a time.
+    public var tempo: Double = 120
     public var lengthBeats: Double = 16
     /// How far play has gone past the song's end, in beats, or zero: the
     /// view scrolls a screen past it as it does past the end, so that the
@@ -77,6 +85,69 @@ public struct TimelineLayout: Equatable {
 
     public func beat(atX x: CGFloat) -> Double {
         Double((x - Self.headerWidth + scroll.x) / pixelsPerBeat)
+    }
+
+    // MARK: Time
+
+    /// Points a second at this zoom and tempo.
+    public var pixelsPerSecond: CGFloat { pixelsPerBeat * CGFloat(tempo) / 60 }
+
+    /// Where a time from the song's start falls, in the view.
+    public func x(seconds: Double) -> CGFloat { x(seconds * tempo / 60) }
+
+    /// The time from the song's start at `x`, in seconds.
+    public func seconds(atX x: CGFloat) -> Double { beat(atX: x) * 60 / tempo }
+
+    /// The spacings a time label may have, in seconds: tenths and fifths of
+    /// a second to an hour, as a clock is read. Past an hour the step doubles.
+    public static let timeSteps: [Double] = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
+    /// The spacings a tick between the labels may have, in seconds: finer
+    /// than the labels' by hundredths of a second.
+    public static let timeTickSteps: [Double] = [0.01, 0.02, 0.05] + timeSteps
+    /// The least distance between time labels, and between the ticks under
+    /// them, in points.
+    public static let timeLabelSpacing: CGFloat = 56
+    public static let timeTickSpacing: CGFloat = 10
+
+    /// Seconds between the time labels: the finest of the clock's spacings
+    /// whose labels are at least `timeLabelSpacing` apart, so that zoomed in
+    /// the ruler reads in tenths of a second and zoomed out in minutes.
+    public var timeLabelStep: Double {
+        guard pixelsPerSecond > 0 else { return Self.timeSteps.last! }
+        for step in Self.timeSteps where CGFloat(step) * pixelsPerSecond >= Self.timeLabelSpacing {
+            return step
+        }
+        var step = Self.timeSteps.last!
+        while CGFloat(step) * pixelsPerSecond < Self.timeLabelSpacing { step *= 2 }
+        return step
+    }
+
+    /// Seconds between the ticks under the time labels: the finest spacing
+    /// that divides the labels' whole and keeps the ticks `timeTickSpacing`
+    /// apart, else the labels' own.
+    public var timeTickStep: Double {
+        let label = timeLabelStep
+        for step in Self.timeTickSteps where step < label && CGFloat(step) * pixelsPerSecond >= Self.timeTickSpacing {
+            let parts = label / step
+            if abs(parts - parts.rounded()) < 1e-9 { return step }
+        }
+        return label
+    }
+
+    /// A time from the song's start as the ruler writes it: minutes and
+    /// seconds, hours before them past an hour, and after the seconds the
+    /// tenths when the labels are under a second apart and the hundredths
+    /// under a tenth.
+    public static func clock(_ seconds: Double, step: Double) -> String {
+        let places = step < 0.1 ? 2 : step < 1 ? 1 : 0
+        let unit = pow(10.0, Double(places))
+        let total = Int((max(0, seconds) * unit).rounded())
+        let whole = total / Int(unit)
+        let fraction = total % Int(unit)
+        let (h, m, s) = (whole / 3600, whole % 3600 / 60, whole % 60)
+        var text = h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+        if places > 0 { text += "." + String(format: "%0\(places)d", fraction) }
+        return text
     }
 
     /// The view's y for a y among the rows.

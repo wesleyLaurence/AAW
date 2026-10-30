@@ -135,6 +135,9 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The time ruler:** the clock under the bar numbers on a real song, read
+  against a render's length, zoomed in to tenths of a second and out to
+  minutes, and after the tempo is changed.
 - **The agent panel's newest Claude Code:** with an old copy left in
   /usr/local/bin, a conversation started on a launch where the interactive
   shell gave no answer runs the newest copy rather than ending at once.

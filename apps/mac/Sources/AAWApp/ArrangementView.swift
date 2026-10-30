@@ -787,6 +787,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         layout.contentHeight = y
         layout.beatsPerBar = a.barBeats
         layout.beatUnit = a.beatUnit
+        layout.tempo = a.tempo
         layout.lengthBeats = a.lengthBeats
         layout.markersEnd = a.markers.map(\.at).max() ?? 0
         layout.clamp()
@@ -968,7 +969,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     private func placePlayhead(at beat: Double) {
         let x = layout.x(beat)
-        let top = TimelineLayout.rulerHeight - TimelineLayout.barStrip
+        let top = TimelineLayout.barTop
         playheadView.isHidden = x < TimelineLayout.headerWidth || x > bounds.width
         playheadView.frame = CGRect(
             x: x.rounded() - PlayheadView.halfWidth, y: top,
@@ -3157,7 +3158,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let header = TimelineLayout.headerWidth
         let loopStrip = TimelineLayout.loopStrip
         let sectionTop = loopStrip
-        let barTop = TimelineLayout.rulerHeight - TimelineLayout.barStrip
+        let barTop = TimelineLayout.barTop
+        let timeTop = TimelineLayout.timeTop
         let ruler = TimelineLayout.rulerHeight
         fill(CGRect(x: header, y: 0, width: bounds.width - header, height: ruler), Theme.ruler)
         fill(CGRect(x: header, y: 0, width: bounds.width - header, height: loopStrip), Theme.gray(0, 0.22))
@@ -3226,11 +3228,35 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 let x = layout.x(Double(n) * bar).rounded()
                 let labeled = n % step == 0
                 if labeled || CGFloat(bar) * layout.pixelsPerBeat >= 6 {
-                    fill(CGRect(x: x, y: labeled ? barTop : ruler - 5, width: 1, height: labeled ? ruler - barTop : 5),
+                    fill(CGRect(x: x, y: labeled ? barTop : timeTop - 5, width: 1, height: labeled ? timeTop - barTop : 5),
                          Theme.gray(1, labeled ? 0.3 : 0.16))
                 }
                 if labeled {
                     text("\(n + 1)", in: CGRect(x: x + 4, y: barTop + 2, width: 40, height: 13),
+                         font: Self.numberFont, color: Theme.dimText)
+                }
+            }
+        }
+
+        // The time from the song's start, under the bars and at the session
+        // tempo, so that how long the song is can be read off the ruler. Its
+        // labels follow the zoom as the bar numbers do: minutes zoomed out,
+        // tenths of a second zoomed in, with ticks between them.
+        fill(CGRect(x: header, y: timeTop, width: bounds.width - header, height: 1), Theme.gray(1, 0.08))
+        let labelStep = layout.timeLabelStep
+        let tickStep = layout.timeTickStep
+        let firstTick = max(0, Int((layout.seconds(atX: header) / tickStep).rounded(.down)))
+        let lastTick = Int((layout.seconds(atX: bounds.width) / tickStep).rounded(.up))
+        if lastTick >= firstTick {
+            for i in firstTick...lastTick {
+                let seconds = Double(i) * tickStep
+                let x = layout.x(seconds: seconds).rounded()
+                let labels = seconds / labelStep
+                let labeled = abs(labels - labels.rounded()) < 1e-6
+                fill(CGRect(x: x, y: labeled ? timeTop + 1 : ruler - 4, width: 1, height: labeled ? ruler - timeTop - 1 : 4),
+                     Theme.gray(1, labeled ? 0.3 : 0.16))
+                if labeled {
+                    text(TimelineLayout.clock(seconds, step: labelStep), in: CGRect(x: x + 4, y: timeTop + 1, width: 60, height: 13),
                          font: Self.numberFont, color: Theme.dimText)
                 }
             }
