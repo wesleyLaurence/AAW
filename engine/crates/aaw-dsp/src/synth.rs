@@ -1086,6 +1086,17 @@ impl Synth {
         }
     }
 
+    /// Lets go the previewed notes of `pitch` still held, as if that key
+    /// were lifted, and leaves the others held: a chord on the typing
+    /// keyboard loses one note. Does not allocate.
+    pub fn let_go_preview(&mut self, pitch: f64) {
+        for v in self.preview.iter_mut() {
+            if !v.releasing() && (v.pitch - pitch).abs() < 0.5 {
+                v.off = v.frames as f64;
+            }
+        }
+    }
+
     /// Whether a previewed note is sounding.
     pub fn previewing(&self) -> bool {
         !self.preview.is_empty()

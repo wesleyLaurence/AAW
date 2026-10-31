@@ -7,7 +7,7 @@
 use crate::client::Request;
 use crate::command::{beat_value, json_value, Command, Kind, Origin};
 use crate::capture::Capture;
-use crate::record::{Recording, Take};
+use crate::record::{NoteTake, Recording, Take};
 use crate::registry;
 use crate::session::{Change, Doc, History, Session};
 use aaw_engine::capture::{Tap, TapSource};
@@ -204,6 +204,14 @@ pub struct TransportState {
     pub armed: Vec<String>,
 }
 
+/// What an armed track records.
+enum Recordable {
+    /// An audio track, from its input.
+    Audio(Input),
+    /// A MIDI track with an instrument: the notes played through it.
+    Notes,
+}
+
 /// The playhead, readable from any thread without waiting for the host.
 #[derive(Default)]
 pub struct Clock {
@@ -309,6 +317,28 @@ fn beat(j: &Json) -> Result<BigRational> {
         other => return Err(format!("Invalid beat value {}", aaw_model::value::py_repr(&other))),
     };
     aaw_model::beat(&b)
+}
+
+/// A pitch as a command gives it: a MIDI number or a name such as `C4`.
+fn pitch_of(pitch: &Json) -> Result<i64> {
+    let pitch = match pitch {
+        Json::Number(n) => n.as_i64().ok_or_else(|| format!("pitch {n} is not a whole number"))?,
+        Json::String(s) => s.parse::<i64>().or_else(|_| aaw_model::rules::midi(s))?,
+        other => return Err(format!("pitch must be a MIDI number or a note name, not {other}")),
+    };
+    if !(0..=127).contains(&pitch) {
+        return Err(format!("pitch {pitch} is outside 0 to 127"));
+    }
+    Ok(pitch)
+}
+
+/// A velocity as a command gives it, 100 unless given.
+fn velocity_of(velocity: Option<i64>) -> Result<i64> {
+    let velocity = velocity.unwrap_or(100);
+    if !(1..=127).contains(&velocity) {
+        return Err("velocity is 1 to 127".into());
+    }
+    Ok(velocity)
 }
 
 fn round3(x: f64) -> f64 {
@@ -675,27 +705,41 @@ impl Host {
         status
     }
 
-    /// The track with `id` that can record: an audio track with an input.
-    fn recordable(&self, id: &str) -> Result<Input> {
+    /// What the track with `id` records: an audio track its input, a MIDI
+    /// track with an instrument the notes played through it.
+    fn recordable(&self, id: &str) -> Result<Recordable> {
         let p = self.session.project();
         let track = p
             .tracks
             .iter()
             .find(|t| t.id == id)
             .ok_or_else(|| format!("No track {id}; daw inspect lists them"))?;
-        if track.midi.is_some() {
-            return Err(format!("{id} is a MIDI track, which records no audio"));
-        }
         if track.frozen.is_some() {
             return Err(format!("{id} is frozen: daw track unfreeze {id} before recording into it"));
+        }
+        if let Some(midi) = &track.midi {
+            if midi.synth().is_none() && midi.sampler().is_none() && midi.device().is_none() {
+                return Err(format!("{id} has no instrument to record notes through; daw synth add or daw instrument add attaches one"));
+            }
+            return Ok(Recordable::Notes);
         }
         track
             .input
             .clone()
+            .map(Recordable::Audio)
             .ok_or_else(|| format!("{id} has no input; daw set PROJECT tracks.{id}.input names a device, a track, a group or the mix"))
     }
 
-    /// `arm`: a track with an input armed to record, or disarmed.
+    /// The timeline frame being heard: the output's position less what the
+    /// device has yet to play, as the clock reads it; None with no output.
+    fn heard_frame(&self) -> Option<i64> {
+        let shared = self.transport.as_ref()?.control.shared();
+        let (position, ahead) = (shared.position.load(Relaxed), shared.output_latency.load(Relaxed));
+        Some(position.saturating_sub(ahead) as i64)
+    }
+
+    /// `arm`: a track with an input, or a MIDI track with an instrument,
+    /// armed to record, or disarmed.
     fn arm(&mut self, track: &str, armed: bool) -> Result<Json> {
         if armed {
             self.recordable(track)?;
@@ -733,16 +777,28 @@ impl Host {
             self.arm(track, true)?;
         }
         // A track armed earlier that lost its input or went is left out.
-        let armed: Vec<(String, Input)> = self
+        let recordable: Vec<(String, Recordable)> = self
             .armed
             .clone()
             .iter()
             .filter_map(|t| self.recordable(t).ok().map(|i| (t.clone(), i)))
             .collect();
-        self.armed = armed.iter().map(|(t, _)| t.clone()).collect();
-        if armed.is_empty() {
-            return Err("No track is armed; daw record arm PROJECT TRACK arms one with an input, or name the tracks".into());
+        self.armed = recordable.iter().map(|(t, _)| t.clone()).collect();
+        if recordable.is_empty() {
+            return Err("No track is armed; daw record arm PROJECT TRACK arms one with an input or an instrument, or name the tracks".into());
         }
+        let notes: Vec<NoteTake> = recordable
+            .iter()
+            .filter(|(_, r)| matches!(r, Recordable::Notes))
+            .map(|(t, _)| NoteTake::new(t))
+            .collect();
+        let armed: Vec<(String, Input)> = recordable
+            .into_iter()
+            .filter_map(|(t, r)| match r {
+                Recordable::Audio(input) => Some((t, input)),
+                Recordable::Notes => None,
+            })
+            .collect();
         let program = self.program()?;
         // A source that is not heard has nothing to record: said before the
         // output is opened.
@@ -815,16 +871,18 @@ impl Host {
         let loop_end = self.loop_frames().map(|(_, end)| end);
         self.from = self.cue.clone();
         self.transport.as_mut().expect("transport").control.play_after(start, preroll)?;
-        self.recording = Some(Recording::new(takes, start as i64, preroll, loop_end, shared));
+        self.recording = Some(Recording::new(takes, notes, start as i64, preroll, loop_end, shared));
         Ok(self.status())
     }
 
     /// Ends the recording, if one runs: each take written and added to the
-    /// song with its clip as one edit by the person, ending at `end`, a
-    /// song frame, or at each take's last frame. What was recorded, or
+    /// song with its clip, and each MIDI track's notes as a note clip, as
+    /// one edit by the person, ending at `end`, a song frame, or at each
+    /// take's last frame and the frame being heard. What was recorded, or
     /// None when nothing was.
     fn end_recording(&mut self, end: Option<i64>) -> Option<Json> {
         let recording = self.recording.take()?;
+        let now = self.heard_frame().unwrap_or(recording.start);
         // The player hands its taps back at its next block; their last
         // frames are drained once they have.
         if let Some(t) = &mut self.transport {
@@ -846,7 +904,8 @@ impl Host {
         let mut commands = Vec::new();
         let mut reports = Vec::new();
         let mut labels = Vec::new();
-        for result in recording.finish(&dir, &project, rate, end) {
+        let (takes, notes) = recording.finish(&dir, &project, rate, end, now);
+        for result in takes {
             match result {
                 Ok(take) => {
                     if take.lost > 0 {
@@ -869,6 +928,14 @@ impl Host {
                 }
                 Err(e) => self.warn(format!("the take was not kept: {e}")),
             }
+        }
+        for take in notes.into_iter().flatten() {
+            commands.push(Command::ClipAdd {
+                track: take.track.clone(),
+                fields: take.clip(),
+            });
+            labels.push(format!("notes on {}", take.track));
+            reports.push(take.report(tempo));
         }
         if commands.is_empty() {
             return Some(json!([]));
@@ -908,18 +975,8 @@ impl Host {
     /// `replace` the track's earlier previews are let go first, each through
     /// its release, so one is heard at a time, as the piano roll asks.
     fn preview(&mut self, track: &str, pitch: &Json, velocity: Option<i64>, length_beats: Option<&Json>, replace: bool) -> Result<Json> {
-        let pitch = match pitch {
-            Json::Number(n) => n.as_i64().ok_or_else(|| format!("pitch {n} is not a whole number"))?,
-            Json::String(s) => s.parse::<i64>().or_else(|_| aaw_model::rules::midi(s))?,
-            other => return Err(format!("pitch must be a MIDI number or a note name, not {other}")),
-        };
-        if !(0..=127).contains(&pitch) {
-            return Err(format!("pitch {pitch} is outside 0 to 127"));
-        }
-        let velocity = velocity.unwrap_or(100);
-        if !(1..=127).contains(&velocity) {
-            return Err("velocity is 1 to 127".into());
-        }
+        let pitch = pitch_of(pitch)?;
+        let velocity = velocity_of(velocity)?;
         let length = match length_beats {
             Some(l) => beat(l).map_err(|e| format!("length_beats: {e}"))?.to_f64().unwrap_or(0.0),
             None => 1.0,
@@ -927,6 +984,66 @@ impl Host {
         if !(length > 0.0 && length <= 64.0) {
             return Err("length_beats is more than 0 and at most 64".into());
         }
+        self.play_now(track, pitch, velocity, length, replace, false)
+    }
+
+    /// `note.on`: a note held through a MIDI track's instrument until
+    /// `note.off`, a note of the same pitch already held let go first; while
+    /// the track records, taken into its clip at the beat being heard.
+    fn note_on(&mut self, track: &str, pitch: &Json, velocity: Option<i64>) -> Result<Json> {
+        let pitch = pitch_of(pitch)?;
+        let velocity = velocity_of(velocity)?;
+        // Held for an hour at most, which is to say until it is let go.
+        let hour = 3600.0 * self.session.project().session.tempo / 60.0;
+        let mut reply = self.play_now(track, pitch, velocity, hour, false, true)?;
+        if let (Some(frame), Some(recording)) = (self.heard_frame(), &mut self.recording) {
+            if let Some(take) = recording.notes_of(track) {
+                take.on(pitch, velocity, frame);
+                reply["recording"] = json!(true);
+            }
+        }
+        reply["held"] = json!(true);
+        reply.as_object_mut().map(|m| m.remove("length_beats"));
+        Ok(reply)
+    }
+
+    /// `note.off`: the notes of `pitch` held on the track let go, each
+    /// through its release, and ended in the track's take if it records.
+    fn note_off(&mut self, track: &str, pitch: &Json) -> Result<Json> {
+        let pitch = pitch_of(pitch)?;
+        let t = self.session.project().track(track).ok_or_else(|| format!("Unknown track: {track}"))?;
+        let midi = t.midi.as_ref();
+        let synth = midi.and_then(|m| m.synth()).is_some();
+        let device = midi.and_then(|m| m.device()).is_some();
+        if let Some(t) = &mut self.transport {
+            let playing = t.control.program().clone();
+            if let Some(index) = playing.tracks.iter().position(|p| p.id == track && p.synth.is_some() == synth && p.instrument.is_some() == device) {
+                t.control.let_go_preview(index, pitch)?;
+            }
+        }
+        let mut recorded = false;
+        if let (Some(frame), Some(recording)) = (self.heard_frame(), &mut self.recording) {
+            if let Some(take) = recording.notes_of(track) {
+                take.off(pitch, frame);
+                recorded = true;
+            }
+        }
+        let mut reply = json!({
+            "track": track,
+            "pitch": pitch,
+            "note": aaw_model::rules::note_name(pitch).unwrap_or_default(),
+            "held": false,
+        });
+        if recorded {
+            reply["recording"] = json!(true);
+        }
+        Ok(reply)
+    }
+
+    /// Plays a note now through a MIDI track's instrument for `length`
+    /// beats: `note.preview`, and `note.on` with an hour and `retrigger`,
+    /// which lets go a note of the same pitch held on the track first.
+    fn play_now(&mut self, track: &str, pitch: i64, velocity: i64, length: f64, replace: bool, retrigger: bool) -> Result<Json> {
         let session = &self.session.project().session;
         let t = self.session.project().track(track).ok_or_else(|| format!("Unknown track: {track}"))?;
         if t.frozen.is_some() {
@@ -969,6 +1086,9 @@ impl Host {
             },
             None => None,
         };
+        if retrigger {
+            t.control.let_go_preview(index, pitch)?;
+        }
         let sounds = match voice {
             None if silent_why.is_some() => {
                 if replace {
@@ -981,7 +1101,7 @@ impl Host {
                 true
             }
             Some(Some(voice)) => {
-                t.control.preview_voice(index, voice, replace)?;
+                t.control.preview_voice(index, pitch, voice, replace)?;
                 true
             }
             Some(None) => {
@@ -1140,6 +1260,8 @@ impl Host {
             Command::NotePreview { track, pitch, velocity, length_beats, replace } => {
                 self.preview(track, pitch, *velocity, length_beats.as_ref(), replace.unwrap_or(false))
             }
+            Command::NoteOn { track, pitch, velocity } => self.note_on(track, pitch, *velocity),
+            Command::NoteOff { track, pitch } => self.note_off(track, pitch),
             Command::Locate { at } => {
                 let at = beat(at)?;
                 self.check_in_song(&at, "locate")?;

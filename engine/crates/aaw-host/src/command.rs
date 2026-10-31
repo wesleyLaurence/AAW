@@ -678,19 +678,39 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         replace: Option<bool>,
     },
+    /// Holds a note through a MIDI track's instrument until `note.off` lets
+    /// it go: a key of the typing keyboard, or `daw note on`. `pitch` a MIDI
+    /// number or a name, `velocity` 1 to 127 (100 unless given). A note of
+    /// the same pitch already held on the track is let go first. While the
+    /// track records, the note and its end are taken into the clip the
+    /// recording makes, at the beat being heard. Never an edit itself.
+    #[serde(rename = "note.on")]
+    NoteOn {
+        track: String,
+        pitch: Json,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        velocity: Option<i64>,
+    },
+    /// Lets go the notes of `pitch` held on the track by `note.on`, each
+    /// through its release; nothing happens for a pitch not held.
+    #[serde(rename = "note.off")]
+    NoteOff { track: String, pitch: Json },
     /// Monitoring only; never an edit of the song.
     #[serde(rename = "metronome")]
     Metronome { enabled: bool },
-    /// Arms a track to record from its `input` when recording starts, or
-    /// disarms it. Host state, as the loop is: not saved, never an edit.
+    /// Arms a track to record when recording starts, or disarms it: an
+    /// audio track from its `input`, a MIDI track with an instrument the
+    /// notes played through it by `note.on`. Host state, as the loop is:
+    /// not saved, never an edit.
     #[serde(rename = "arm")]
     Arm { track: String, armed: bool },
     /// Arms the tracks named, if any, and records every armed track: the
     /// metronome counts `count_in` bars in from the start position (1
     /// unless given, 0 for none), then the song plays and each take is
-    /// taken from the track's input, a device or the song's own sound, until
-    /// `record.stop`, `stop` or the end of the loop. The end makes one edit:
-    /// the takes as samples and audio clips from the start position.
+    /// taken from the track's input, a device or the song's own sound, or
+    /// from the notes played through a MIDI track, until `record.stop`,
+    /// `stop` or the end of the loop. The end makes one edit: the takes as
+    /// samples and audio clips, and note clips, from the start position.
     #[serde(rename = "record.start")]
     RecordStart {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -849,6 +869,7 @@ impl Command {
         match self {
             Undo | Redo => Kind::History,
             Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } | Audio { .. } => Kind::Transport,
+            NoteOn { .. } | NoteOff { .. } => Kind::Transport,
             Arm { .. } | RecordStart { .. } | RecordStop | CaptureStart { .. } | CaptureStop { .. } => Kind::Transport,
             Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
@@ -873,7 +894,7 @@ impl Kind {
     pub fn of(op: &str) -> Kind {
         match op {
             "undo" | "redo" => Kind::History,
-            "play" | "stop" | "locate" | "loop" | "metronome" | "note.preview" | "audio" => Kind::Transport,
+            "play" | "stop" | "locate" | "loop" | "metronome" | "note.preview" | "note.on" | "note.off" | "audio" => Kind::Transport,
             "arm" | "record.start" | "record.stop" | "capture.start" | "capture.stop" => Kind::Transport,
             "inspect" | "status" | "changes" | "get" | "notes" | "map" | "markers" | "midi.export" => Kind::Read,
             "select" | "front" | "project.move" | "project.copy" | "project.release" | "fmt" | "close" => Kind::Host,

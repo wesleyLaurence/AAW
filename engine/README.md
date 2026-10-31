@@ -72,7 +72,7 @@ instead. It implements:
 | `daw range copy PROJECT START LENGTH --to AT [--insert] [--track T]…`, `daw range insert PROJECT AT LENGTH`, `daw range delete PROJECT START LENGTH`, `daw range clear PROJECT START LENGTH`, `daw section duplicate PROJECT SECTION [--to AT] [--id ID]`, `daw section move\|remove PROJECT SECTION … --with-content` | A range of beats across every track, or the tracks named: its pattern clips, note clips, audio clips, lanes and sections copied over what is at AT or into time opened for it, empty beats opened, beats removed with the gap closed and the clips that meet there made one again, or the range emptied; a clip across an edge is cut there, a pattern clip only between repeats; a section with what is under it duplicated after itself, moved over what is at AT, or deleted. One undo step each; the reply lists what was made, split, moved and removed. See [editing a range of bars](../docs/features/bar-ranges.md) and `daw describe edit` |
 | `daw marker list PROJECT`, `daw marker add PROJECT [AT] [--text TEXT] [--id ID]`, `daw marker move PROJECT MARKER AT`, `daw marker text PROJECT MARKER TEXT`, `daw marker remove PROJECT MARKER... \| --all` | Markers: the notes a person leaves at beats while listening, with M in the app. `list` reads them in time order, each with the bar it is in and the beat of that bar, the section over it, its text and the clips sounding there, a track each; `add` leaves one at AT, or without AT where a running host is playing; `move` and `text` change one and `remove` takes away those named or all. One undo step each. `daw map` has a row of them, and the range commands move them with their beats. See [listening markers](../docs/features/listening-markers.md) |
 | `daw effect add PROJECT tracks.T --type arpeggiator\|chord\|scale\|velocity [--FIELD VALUE...]`, `daw effect remove\|move\|bypass PROJECT tracks.T.midi_effects.REF`, `daw set PROJECT tracks.T.midi_effects.REF.FIELD VALUE` | MIDI effects: devices before a MIDI track's instrument that change the notes as they play, applied in the schedule so playback, a render and a freeze play what they make while the clips keep the notes as written; an arpeggiator on the song's grid, a chord of six shifts, a scale and a velocity. See [MIDI effects](../docs/features/midi-effects.md) and `daw describe midi` |
-| `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
+| `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|remove\|list`, `daw note on\|off PROJECT TRACK PITCH`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; a note held through the instrument now and let go, through a running host, recorded while the track is armed; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
 | `daw clip loop PROJECT CLIP BEATS\|off [--length BEATS]` | A note clip or an audio clip looped: its first so many beats play again and again until its end, which `clip resize` or `audio trim --end` sets, the last repetition cut off; `off` plays it once again. The schedule unrolls the loop, each audio repetition a copy with the clip's fades at the wrap; a looped clip is split only at a wrap. See [looping clips](../docs/features/looping-clips.md) |
 | `daw clip join PROJECT CLIP CLIP...` | One clip of two or more clips of one track that plays what they played, the first kept with its ID and reference: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a loop laid out as notes; pattern clips and audio clips (`tracks.T.audio.N`) only where they meet and are one music, the same pattern with the repeats summed, or the same file played on from where the one before leaves, as `audio split` left them; else refused with the reason |
 | `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE] [--play]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part, an oscillator's `unison`, `unison_detune_cents`, `unison_width_percent` and `table` among them; a matrix entry added, changed or removed; and notes rendered through the patch and its own effects to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply, and with `--play` also played now, one after another, through the running host (`note.preview`). The patch's effects are edited with `daw effect add\|remove\|move\|bypass` on `tracks.T.instrument.synth`. See `daw describe synth` |
@@ -274,7 +274,8 @@ default as it changes and reports `devices` and `audio` in `daw status`
 
 A host records too ([recording](../docs/features/recording.md)). An audio
 track's `input` names an input device's channels or the song's own sound, a
-track, a group or the mix; `arm` arms such a track, host state like the loop;
+track, a group or the mix; `arm` arms such a track, or a MIDI track with an
+instrument, host state like the loop;
 `record.start` arms the tracks named and takes one of every armed track after
 a count-in of so many bars, the player's pre-roll, in which the song stands at
 the start position while the metronome clicks the bars before it whatever its
@@ -288,7 +289,11 @@ reported latency; a stem or the mix is tapped in the player, each block
 headed by its timeline frame, so a resample equals the render's stem. The
 take is cut to its span, written as `samples/TRACK-take-N.wav` and added to
 the song with its audio clip in one batch by the person, which one undo
-takes back; the reply's `recorded` says what landed. `daw record arm`,
+takes back; the reply's `recorded` says what landed. An armed MIDI track
+takes the notes `note.on` and `note.off` play through it meanwhile, at the
+frame being heard, and the recording's end adds them as one note clip from
+the start position, whole bars long, in the same batch
+([typing keyboard](../docs/features/typing-keyboard.md)). `daw record arm`,
 `daw record start`, `daw record stop` and, with no song, `daw record capture`
 are the terminal's way, and `daw status` reports `armed` and `recording`.
 `capture.start {file, input?, channels?}` and `capture.stop {discard?}`
@@ -359,8 +364,8 @@ session refuses an edit of what the file was rendered from while it is
 frozen, by comparing that content before and after every edit: the pads,
 clips, audio clips, instrument, note clips, effects and the lanes on them,
 the patterns the clips play and the samples they name, and, while any track
-is frozen, the tempo, the rate and the stretcher. `arm` and `note.preview`
-on a frozen track are refused in the same words. `track.unfreeze {track}`
+is frozen, the tempo, the rate and the stretcher. `arm`, `note.preview` and
+`note.on` on a frozen track are refused in the same words. `track.unfreeze {track}`
 removes the field and leaves the file. `daw track freeze` and `daw track
 unfreeze` are the terminal's way.
 
@@ -474,7 +479,11 @@ The host also accepts `{"op":"note.preview","track":"lead","pitch":"C4",
 "velocity":100,"length_beats":1}`: a note played now through a MIDI track's
 instrument, its Synth or its Sampler, and the track's chain, from where the
 stream stands, whether or not the song plays, outside the timeline and the
-undo history and in no render. The app's Synth panel sends it from its keys
+undo history and in no render. `{"op":"note.on","track":"lead","pitch":"C4",
+"velocity":100}` holds such a note until `{"op":"note.off","track":"lead",
+"pitch":"C4"}` lets go that pitch alone, the typing keyboard's keys pressed
+and lifted (`Song.note_on`, `Song.note_off`), and while the track records
+they are taken into its clip. The app's Synth panel sends it from its keys
 and the piano roll as notes are drawn, clicked and moved (`Song.preview_note`),
 and `daw synth audition --play` from the terminal. It opens the output if
 nothing has played yet, and refuses a track with no instrument and a note

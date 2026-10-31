@@ -45,7 +45,7 @@ public enum RecordWords {
             return "Stop recording (R). The takes land on their tracks; the song plays on."
         }
         if armed == 0 {
-            return "Record (R). Arm a track first: the dot before its M, with an input chosen in its header's menu."
+            return "Record (R). Arm a track first: the dot before its M, an audio track with an input chosen in its header's menu, a MIDI track with an instrument, which records the notes played from the typing keyboard."
         }
         let tracks = armed == 1 ? "the armed track" : "the \(armed) armed tracks"
         let lead = countIn == 0 ? "at once" : "after a count-in of \(RecordPreferences.name(countIn).lowercased())"

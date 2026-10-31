@@ -92,10 +92,11 @@ October 19, 2026 (D123). Items 10–21 are the order as it stood.
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-12. **A MIDI keyboard.** Notes played through the selected track, held and let
-    go rather than a beat long, through a Synth and through a Sampler, whose
-    pitch needs audio prepared on the way; recording into note clips; quantize.
-    The person plays a riff and the agent builds around it.
+12. **A MIDI keyboard plugged in, and quantize.** The typing keyboard plays
+    and records notes ([typing keyboard](features/typing-keyboard.md)); a
+    keyboard through CoreMIDI, with its velocity and its own latency, is the
+    other half, and `daw note quantize` with a grid and a strength, ⌘Q in
+    the piano roll, snaps what was played.
 13. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
@@ -135,6 +136,15 @@ Merged, and never heard or tried by a person, in the order worth doing: the
 sounds everything else is built from first. Each wants a short session at the
 Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
 
+- **The typing keyboard:** a Synth or a Sampler track armed by its dot, the
+  piano icon lit, a riff played on A to ' with Z and X moving the octave,
+  heard as it is played, chords held and let go; R, the riff played through
+  the count-in and after it, R again, and the clip read against what was
+  played, its notes where the fingers were, with a held note's end at the
+  stop; L, M and A as notes while it is on and as themselves after; the
+  keys typing into the agent panel's field with the keyboard on
+  ([typing keyboard](features/typing-keyboard.md), D168). Scripted keys
+  through BlackHole only; nothing played by hand.
 - **The stop button:** the square left of play clicked while playing past
   the first screen, and Home with a take recording, back at 1.1.1 with the
   view at bar 1.
@@ -1557,6 +1567,10 @@ checkout (D75):
 
 One line each, newest first.
 
+- The piano roll's note held while the mouse is down, as a key is, through
+  `note.on` and `note.off` in place of the beat-long preview; and a key of
+  the typing keyboard pressed while a note is selected setting its pitch.
+  Said by the agent on October 30, 2026, building the typing keyboard.
 - An effect moved to another row by dragging its title onto the header
   without Option, as Option copies it there; the host has no edit that moves
   an effect between chains, so it would be a copy and a remove as one step.

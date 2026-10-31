@@ -359,6 +359,25 @@ struct TransportBar: View {
             .accessibilityValue(model.transport.metronome ? "On" : "Off")
             .help("Metronome: \(model.transport.metronome ? "on" : "off"). Clicks at the session BPM during playback.")
 
+            // The typing keyboard: the Mac's keys as a piano, yellow while on,
+            // with the octave of the A key and the velocity beside it.
+            Button {
+                model.toggleTypingKeyboard()
+            } label: {
+                Image(systemName: "pianokeys")
+                    .frame(width: 18, height: 18)
+                    .foregroundStyle(model.typingKeyboard ? Color.yellow : Color.secondary)
+            }
+            .accessibilityLabel("Typing keyboard")
+            .accessibilityValue(model.typingKeyboard ? "On" : "Off")
+            .help(TypingKeyboard.help(on: model.typingKeyboard, state: model.typing))
+            if model.typingKeyboard {
+                Text("\(model.typing.octaveName) · \(model.typing.velocity)")
+                    .font(.system(size: 12).monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .help("The A key's note and the velocity: Z and X move the octave, C and V the velocity.")
+            }
+
             Text(TimelineLayout.position(model.position, beatsPerBar: a.barBeats, beatUnit: a.beatUnit))
                 .font(.system(size: 15, weight: .medium).monospacedDigit())
                 .frame(minWidth: 74, alignment: .leading)

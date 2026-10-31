@@ -784,6 +784,25 @@ enum ClipCmd {
 /// tracks.keys.clips.clip1.notes.n3, or by @N while a host runs.
 #[derive(Subcommand)]
 enum NoteCmd {
+    /// Hold a note through a MIDI track's instrument now, until `note off`
+    /// lets it go: what a key of the app's typing keyboard does. While the
+    /// track records, the note goes into the clip the recording makes.
+    /// Needs a host.
+    On {
+        project: Song,
+        track: String,
+        /// A MIDI number or a name such as C4.
+        pitch: String,
+        #[arg(long, default_value_t = 100)]
+        velocity: i64,
+    },
+    /// Let go a note held by `note on`, through its release. Needs a host.
+    Off {
+        project: Song,
+        track: String,
+        /// A MIDI number or a name such as C4.
+        pitch: String,
+    },
     /// Add a note: --pitch (a number or a name such as C4), --duration,
     /// optionally --at and --velocity; or --notes with a JSON list of them.
     #[command(after_help = fields_help("Note", &[]))]
@@ -2873,6 +2892,21 @@ fn run(cli: &Cli) -> Result<Json> {
             ),
             NoteCmd::Transpose { project, notes, by } => edit(project, C::NoteTranspose { notes: notes.clone(), by: *by }),
             NoteCmd::Remove { project, notes } => edit(project, C::NoteRemove { notes: notes.clone() }),
+            NoteCmd::On { project, track, pitch, velocity } => edit(
+                project,
+                C::NoteOn {
+                    track: track.clone(),
+                    pitch: Json::String(pitch.clone()),
+                    velocity: Some(*velocity),
+                },
+            ),
+            NoteCmd::Off { project, track, pitch } => edit(
+                project,
+                C::NoteOff {
+                    track: track.clone(),
+                    pitch: Json::String(pitch.clone()),
+                },
+            ),
             NoteCmd::List { project, path, from, to } => edit(
                 project,
                 C::Notes {

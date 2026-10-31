@@ -81,7 +81,8 @@ private struct RowVisual {
     var color: NSColor?
     var mute = false
     var solo = false
-    /// A track armed to record, and whether it has an input to record from.
+    /// A track armed to record, and whether it can be: an audio track with
+    /// an input, a MIDI track with an instrument.
     var armed = false
     var hasInput = false
     /// Whether the row has automation lanes.
@@ -679,7 +680,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             place(.track(track.key), name: track.id, detail: detail, color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
                   kind: .track, height: height, sends: track.sends, depth: path.count,
-                  armed: model.isArmed(track: track.key), hasInput: track.input != nil)
+                  armed: model.isArmed(track: track.key), hasInput: track.input != nil || (track.midi && (track.instrument != nil || track.plugin != nil)))
             for clip in track.clips {
                 liveClips.insert(clip.key)
                 let length = clip.patternBeats * Double(clip.repeats)
@@ -1436,6 +1437,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             guard case .track(let key) = id else { return }
             if row.hasInput {
                 model.arm(track: key, on: !row.armed)
+            } else if model.arrangement.tracks.first(where: { $0.key == key })?.midi == true {
+                // A MIDI track records the notes played through its instrument.
+                model.refuse("\(row.name) has no instrument to record notes through. Drop a Synth, a Sampler or a sample on it first.")
             } else {
                 // Nothing to arm yet: the input is chosen first.
                 model.select(row: id)
@@ -3092,7 +3096,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             badge("M", on: row.mute, color: Theme.mute, in: header.mute, alpha: alpha)
             badge("S", on: row.solo, color: Theme.solo, in: header.solo, alpha: alpha)
             if row.kind == .track {
-                // The record arm: a dot, red while armed, faint without an input.
+                // The record arm: a dot, red while armed, faint on a track
+                // that cannot be armed yet.
                 let box = header.arm
                 fill(rounded: box, (row.armed ? Theme.record : Theme.gray(1)).withAlphaComponent((row.armed ? 1 : 0.07) * alpha))
                 let dot = CGRect(x: box.midX - 3, y: box.midY - 3, width: 6, height: 6)

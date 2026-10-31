@@ -61,7 +61,23 @@ fn a_track_is_armed_through_its_input_and_record_refuses_what_it_cannot_take() {
     assert!(e.contains("drums has no input") && e.contains("tracks.drums.input"), "{e}");
     assert!(ask(json!({"op": "arm", "track": "nobody", "armed": true})).unwrap_err().contains("No track nobody"));
     ask(json!({"op": "track.add", "id": "keys", "type": "midi"})).unwrap();
-    assert!(ask(json!({"op": "arm", "track": "keys", "armed": true})).unwrap_err().contains("MIDI track"));
+    assert!(ask(json!({"op": "arm", "track": "keys", "armed": true})).unwrap_err().contains("has no instrument to record notes"));
+    // With an instrument, a MIDI track is armed: it records the notes played through it.
+    ask(json!({"op": "synth.add", "track": "keys"})).unwrap();
+    assert_eq!(ask(json!({"op": "arm", "track": "keys", "armed": true})).unwrap()["armed"], json!(["keys"]));
+    // A note held is checked as a preview is; letting go a note nothing holds is nothing.
+    let e = ask(json!({"op": "note.on", "track": "nobody", "pitch": 60})).unwrap_err();
+    assert!(e.contains("Unknown track"), "{e}");
+    let e = ask(json!({"op": "note.on", "track": "keys", "pitch": 200})).unwrap_err();
+    assert!(e.contains("outside 0 to 127"), "{e}");
+    let e = ask(json!({"op": "note.on", "track": "keys", "pitch": 60, "velocity": 0})).unwrap_err();
+    assert!(e.contains("velocity"), "{e}");
+    let e = ask(json!({"op": "note.on", "track": "drums", "pitch": 60})).unwrap_err();
+    assert!(e.contains("has no instrument"), "{e}");
+    let off = ask(json!({"op": "note.off", "track": "keys", "pitch": "C4"})).unwrap();
+    assert_eq!(off["held"], json!(false));
+    assert_eq!(off["note"], json!("C4"));
+    assert_eq!(ask(json!({"op": "arm", "track": "keys", "armed": false})).unwrap()["armed"], json!([]));
     let e = ask(json!({"op": "set", "path": "tracks.keys.input", "value": {"master": true}})).unwrap_err();
     assert!(e.contains("not a field"), "{e}");
     let e = ask(json!({"op": "record.start"})).unwrap_err();

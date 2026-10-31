@@ -456,7 +456,14 @@ public final class SongModel {
     }
 
     fileprivate func apply(_ transport: TransportView) {
+        // A MIDI track armed turns the typing keyboard on, so the person can
+        // play at once; the last one disarmed turns it off again, unless it
+        // was turned on by hand.
+        let midiArmed = { (armed: [UInt64]) in armed.contains { key in self.arrangement.tracks.contains { $0.key == key && $0.midi } } }
+        let (was, now) = (midiArmed(self.transport.armed), midiArmed(transport.armed))
         self.transport = transport
+        if now && !was && !typingKeyboard { setTypingKeyboard(true, byArm: true) }
+        if was && !now && typingByArm { setTypingKeyboard(false, byArm: false) }
         if let region = transport.loopRegion { lastLoop = region }
         if !transport.playing { position = transport.cue }
         onTransport?()
@@ -1793,8 +1800,10 @@ public final class SongModel {
         transport.armed.contains(key)
     }
 
-    /// Arms a track with an input to record, or disarms it: the host's
-    /// state, as the loop is. The host refuses a track with no input.
+    /// Arms a track to record, or disarms it: an audio track with an input,
+    /// or a MIDI track with an instrument, which records the notes played
+    /// through it. The host's state, as the loop is; it refuses an audio
+    /// track with no input and a MIDI track with no instrument.
     public func arm(track key: UInt64, on: Bool) {
         send { try $0.arm(track: key, on: on) }
     }
@@ -1811,8 +1820,92 @@ public final class SongModel {
             let countIn = RecordPreferences.shared.countIn
             send { try $0.startRecording(countIn: countIn) }
         } else {
-            refuse("No track is armed. The dot before a track's M arms it, once its header's menu has given it an input.")
+            refuse("No track is armed. The dot before a track's M arms it: an audio track once its header's menu has given it an input, a MIDI track with an instrument.")
         }
+    }
+
+    // MARK: Typing keyboard
+
+    /// Whether the Mac's keys play notes: the transport bar's keyboard icon
+    /// and Transport › Typing Keyboard. It comes on by itself when a MIDI
+    /// track is armed and goes off when the last one is disarmed, unless it
+    /// was turned on by hand.
+    public private(set) var typingKeyboard = false
+    /// The octave the keys start at and how hard they play.
+    public private(set) var typing = TypingKeyboard.State()
+    /// Whether the keyboard came on with an arm, so the disarm takes it off.
+    private var typingByArm = false
+    /// The notes held, by key code: the tracks each plays and its pitch, so
+    /// the key lifted lets go what it pressed, whatever the octave is now.
+    private var heldKeys: [UInt16: (tracks: [UInt64], pitch: Int)] = [:]
+
+    public func toggleTypingKeyboard() {
+        setTypingKeyboard(!typingKeyboard, byArm: false)
+    }
+
+    private func setTypingKeyboard(_ on: Bool, byArm: Bool) {
+        if !on { letGoHeldKeys() }
+        typingKeyboard = on
+        typingByArm = on && byArm
+    }
+
+    /// The MIDI tracks the keys play: the armed ones, else the selected one.
+    var typingTargets: [UInt64] {
+        let midi = arrangement.tracks.filter(\.midi)
+        let armed = midi.filter { transport.armed.contains($0.key) }.map(\.key)
+        if !armed.isEmpty { return armed }
+        if case .track(let key)? = selectedRow, midi.contains(where: { $0.key == key }) { return [key] }
+        return []
+    }
+
+    /// A key pressed while the keyboard is on: a note held through the
+    /// target tracks, or the octave or velocity moved. True when the key is
+    /// the keyboard's and taken, a repeat included, which plays nothing.
+    func typingKeyDown(code: UInt16, characters: String, isRepeat: Bool) -> Bool {
+        guard typingKeyboard, let action = TypingKeyboard.action(for: characters, state: typing) else { return false }
+        if isRepeat { return true }
+        switch action {
+        case .octaveDown: typing.move(octave: -1)
+        case .octaveUp: typing.move(octave: 1)
+        case .velocityDown: typing.move(velocity: -1)
+        case .velocityUp: typing.move(velocity: 1)
+        case .note(let pitch):
+            // A key already down plays nothing more until it is lifted.
+            guard heldKeys[code] == nil else { return true }
+            let targets = typingTargets
+            if targets.isEmpty {
+                refuse("No MIDI track to play. Arm one, or select one with an instrument.")
+                return true
+            }
+            heldKeys[code] = (targets, pitch)
+            let velocity = typing.velocity
+            for track in targets {
+                send { try $0.noteOn(track: track, pitch: Int32(pitch), velocity: UInt32(velocity)) }
+            }
+        }
+        return true
+    }
+
+    /// A key lifted: the note it pressed let go. True when it was the
+    /// keyboard's, so that nothing else sees it.
+    func typingKeyUp(code: UInt16, characters: String) -> Bool {
+        if let held = heldKeys.removeValue(forKey: code) {
+            for track in held.tracks {
+                send { try $0.noteOff(track: track, pitch: Int32(held.pitch)) }
+            }
+            return true
+        }
+        return typingKeyboard && TypingKeyboard.action(for: characters, state: typing) != nil
+    }
+
+    /// Lets go every note the keys hold, as the keyboard goes off.
+    private func letGoHeldKeys() {
+        for (_, held) in heldKeys {
+            for track in held.tracks {
+                send { try $0.noteOff(track: track, pitch: Int32(held.pitch)) }
+            }
+        }
+        heldKeys = [:]
     }
 
     /// Sets where a track records from, or with nil nothing: the song's
