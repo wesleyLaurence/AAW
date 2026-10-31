@@ -18,6 +18,7 @@ const UNTYPED: &[(&str, &str)] = &[
     ("from", "beats"),
     ("to", "beats"),
     ("by", "beats"),
+    ("grid", "beats, counted from the clip's start: 1/4 is a sixteenth note"),
     ("repeats", "integer >=1"),
     ("times", "integer >=1"),
     ("pitch", "a note name such as C4, or a MIDI number"),

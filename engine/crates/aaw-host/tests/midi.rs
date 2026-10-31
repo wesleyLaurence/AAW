@@ -266,3 +266,51 @@ fn a_note_keeps_its_handle_as_others_are_added_and_removed() {
     edit(&mut s, json!({"op": "note.set", "note": before[3].clone(), "velocity": 1})).unwrap();
     assert_eq!(get(&s, "tracks.keys.clips.clip1.notes.n4.velocity"), json!(1));
 }
+
+#[test]
+fn notes_are_quantized_to_a_grid_from_the_clips_start_all_the_way_or_part_of_it() {
+    let (_d, mut s) = open(true);
+    phrase(&mut s);
+    let clip = "tracks.keys.clips.clip1";
+    let n = |i: usize| format!("{clip}.notes.n{i}");
+    // Halfway, on the grid of a sixteenth note unless given: the two notes
+    // around beat 2 close half their distance to it.
+    let r = edit(&mut s, json!({"op": "note.quantize", "notes": [n(4), n(5)], "strength": 50})).unwrap();
+    assert_eq!((&r["label"], &r["moved"]), (&json!("Quantize 2 notes to 1/4 by 50%"), &json!(2)));
+    assert_eq!((&get(&s, &n(4))["at"], &get(&s, &n(5))["at"]), (&json!(1.9875), &json!(2.0125)));
+    // The clip stands for all of its notes; the triplet note at 7/3 goes to
+    // 9/4, the nearest line; lengths stay; a note on a line is not counted.
+    let r = edit(&mut s, json!({"op": "note.quantize", "notes": [clip]})).unwrap();
+    assert_eq!((&r["label"], &r["moved"]), (&json!("Quantize 6 notes to 1/4"), &json!(3)));
+    let notes = get(&s, clip)["notes"].clone();
+    let ats: Vec<Json> = notes.as_array().unwrap().iter().map(|x| x.get("at").cloned().unwrap_or(json!(0))).collect();
+    assert_eq!(ats, vec![json!(0), json!(0), json!(0), json!(2), json!(2), json!(2.25)]);
+    assert_eq!((&notes[3]["duration"], &notes[4]["duration"], &notes[5]["duration"]), (&json!(0.5), &json!("1/3"), &json!("1/3")));
+    // A triplet grid keeps a triplet note where it is, and a note exactly
+    // halfway between two lines goes later.
+    edit(&mut s, json!({"op": "note.set", "note": n(6), "at": "7/3"})).unwrap();
+    edit(&mut s, json!({"op": "note.set", "note": n(4), "at": 1.875})).unwrap();
+    let r = edit(&mut s, json!({"op": "note.quantize", "notes": [n(6), n(4)], "grid": "1/3"})).unwrap();
+    assert_eq!((&r["label"], &r["moved"]), (&json!("Quantize 2 notes to 1/3"), &json!(1)));
+    assert_eq!((&get(&s, &n(6))["at"], &get(&s, &n(4))["at"]), (&json!("7/3"), &json!(2)));
+    edit(&mut s, json!({"op": "note.set", "note": n(4), "at": 1.875})).unwrap();
+    edit(&mut s, json!({"op": "note.quantize", "notes": [n(4)]})).unwrap();
+    assert_eq!(get(&s, &n(4))["at"], json!(2));
+    // The grid is counted from the clip's start, wherever the clip is in
+    // the song, as the piano roll draws it.
+    edit(&mut s, json!({"op": "clip.move", "clip": clip, "at": 4.1})).unwrap();
+    edit(&mut s, json!({"op": "note.set", "note": n(4), "at": 1.9})).unwrap();
+    edit(&mut s, json!({"op": "note.quantize", "notes": [n(4)], "grid": 1})).unwrap();
+    assert_eq!(get(&s, &n(4))["at"], json!(2));
+    // What is refused, before anything moves.
+    for (bad, words) in [
+        (json!({"op": "note.quantize", "notes": [clip], "strength": 101}), "0 to 100"),
+        (json!({"op": "note.quantize", "notes": [clip], "strength": -1}), "0 to 100"),
+        (json!({"op": "note.quantize", "notes": [clip], "grid": 0}), "more than 0"),
+        (json!({"op": "note.quantize", "notes": []}), "Name a note"),
+        (json!({"op": "note.quantize", "notes": ["tracks.keys"]}), "not a note"),
+    ] {
+        let err = edit(&mut s, bad).unwrap_err().to_string();
+        assert!(err.contains(words), "{err}");
+    }
+}

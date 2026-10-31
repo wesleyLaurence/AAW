@@ -102,8 +102,9 @@ the take itself: the notes sound as they are played.
 
 ## Limits
 
-- Notes land where they were played, to a thousandth of a beat: there is no
-  quantize, and no option to record on the grid.
+- Notes land where they were played, to a thousandth of a beat; ⌘U or `daw
+  note quantize` snaps them afterwards ([quantize](quantize.md)), and there
+  is no option to record on the grid.
 - A note played during the count-in lands at the start position.
 - The keys play the armed MIDI tracks or the selected one; there is no
   choice of track apart from that, and no MIDI effect hears a note played

@@ -409,7 +409,11 @@ and stored as 60) and `at` from the clip's start. A clip's ID is unique in the
 song and a note's in its clip; one that arrives without an ID is given the
 next `clipN` or `nN`. A note sounds until its end or its clip's, and one that
 starts before its clip, at a negative `at`, or at or after its end is kept and
-does not play: a clip trimmed from either edge keeps the notes it passes. With
+does not play: a clip trimmed from either edge keeps the notes it passes.
+`note.quantize` moves notes' starts onto the nearest line of a grid counted
+from the clip's start, all the way or by a strength in percent, and leaves
+their lengths; nothing else snaps a written position (see
+[quantize.md](features/quantize.md)). With
 `loop_beats`, the notes of the clip's first so many beats play again and again
 from its start until its end, the last repetition cut off there, a note held
 across the loop's end cut there and one at or after it kept and not played;

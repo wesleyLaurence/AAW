@@ -92,11 +92,11 @@ October 19, 2026 (D123). Items 10–21 are the order as it stood.
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-12. **A MIDI keyboard plugged in, and quantize.** The typing keyboard plays
-    and records notes ([typing keyboard](features/typing-keyboard.md)); a
-    keyboard through CoreMIDI, with its velocity and its own latency, is the
-    other half, and `daw note quantize` with a grid and a strength, ⌘Q in
-    the piano roll, snaps what was played.
+12. **A MIDI keyboard plugged in.** The typing keyboard plays and records
+    notes ([typing keyboard](features/typing-keyboard.md)) and ⌘U or `daw
+    note quantize` snaps what was played ([quantize](features/quantize.md));
+    a keyboard through CoreMIDI, with its velocity and its own latency, is
+    the other half.
 13. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
@@ -145,6 +145,10 @@ Mac, and what is found becomes a fix or a line in [completed.md](completed.md).
   keys typing into the agent panel's field with the keyboard on
   ([typing keyboard](features/typing-keyboard.md), D168). Scripted keys
   through BlackHole only; nothing played by hand.
+- **Quantize:** a riff recorded from the typing keyboard, the piano roll
+  open, ⌘U with nothing selected and the clip heard tight on the grid, ⌘Z
+  and the feel back; a few notes selected and ⌘U on a triplet grid; `daw
+  note quantize SONG CLIP --strength 50` on a take, heard halfway there
 - **The stop button:** the square left of play clicked while playing past
   the first screen, and Home with a take recording, back at 1.1.1 with the
   view at bar 1.
