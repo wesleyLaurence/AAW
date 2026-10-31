@@ -14,6 +14,7 @@ development separately. The [project introduction](../README.md) covers setup.
 | [architecture.md](architecture.md) | How it is built: the parts, the song format, the semantics | Is |
 | [decisions.md](decisions.md) | Why each choice was made, numbered and never rewritten | Because |
 | [completed.md](completed.md) | What was built, when, and what a person tried | Was |
+| [verify.md](verify.md) | What is merged and nobody has heard or tried; the person's, not read by an agent | To try |
 | [archive/](archive/) | Superseded documents, kept for history | — |
 
 More exact than any of these, for what exists: `daw describe` prints the song's

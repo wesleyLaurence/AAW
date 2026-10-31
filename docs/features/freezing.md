@@ -84,7 +84,7 @@ Track while the track is frozen.
   a clip drag refused in the host's words, the fader not, the unfreeze.
 - Swift tests: Freeze Track in a track's menu and Unfreeze Track on a frozen
   one, with the Track menu's key beside it; none on a group.
-- Scripted run of the app: see the Verify line in the backlog for what was
+- Scripted run of the app: see its line in [verify.md](../verify.md) for what was
   and was not seen.
 
 ## Limits

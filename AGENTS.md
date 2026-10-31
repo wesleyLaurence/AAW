@@ -18,8 +18,9 @@ AAW is a local music workspace: a person and an agent edit the same song through
 Read only the applicable guide and references needed for the current operation.
 The README is an introduction and setup guide, not required reading every session.
 Architecture, backlog and feature designs are development references, not music
-prerequisites. When the person proposes future work, record a line under Ideas
-in `docs/backlog.md`; do not create a separate notes or plan file.
+prerequisites. `docs/verify.md` is the person's list of what to try by hand;
+an agent does not read it. When the person proposes future work, record a line
+under Ideas in `docs/backlog.md`; do not create a separate notes or plan file.
 
 ## What a music session is given
 
