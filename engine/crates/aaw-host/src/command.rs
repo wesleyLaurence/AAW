@@ -215,6 +215,18 @@ pub enum Command {
     /// Moves notes up, or down for a negative `by`, by semitones.
     #[serde(rename = "note.transpose")]
     NoteTranspose { notes: Vec<String>, by: i64 },
+    /// Moves notes' starts onto the nearest line of `grid`, beats counted
+    /// from their clip's start as the piano roll draws them, 1/4 (a sixteenth
+    /// note) unless given: all the way, or `strength` percent of the way.
+    /// Lengths stay. A clip in `notes` stands for all of its notes.
+    #[serde(rename = "note.quantize")]
+    NoteQuantize {
+        notes: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grid: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        strength: Option<i64>,
+    },
     #[serde(rename = "note.remove")]
     NoteRemove { notes: Vec<String> },
 
@@ -2423,6 +2435,37 @@ impl<'a> Edit<'a> {
                     self.set_leaf(&loc, "pitch", Value::int(pitch));
                 }
                 out.label = format!("Transpose {} by {} semitones", count(found.len(), "note"), signed(&by.to_string()));
+            }
+            NoteQuantize { notes, grid, strength } => {
+                let grid = match grid {
+                    Some(g) => beat_at(g)?,
+                    None => BigRational::new(1.into(), 4.into()),
+                };
+                if !grid.is_positive() {
+                    return Err("The grid is beats, more than 0: 1/4 is a sixteenth note".into());
+                }
+                let strength = strength.unwrap_or(100);
+                if !(0..=100).contains(&strength) {
+                    return Err(format!("strength is a percentage, 0 to 100, not {strength}"));
+                }
+                let amount = BigRational::new(strength.into(), 100.into());
+                let half = BigRational::new(1.into(), 2.into());
+                let found = self.notes_of(notes)?;
+                let mut moved = 0usize;
+                for (clip, i) in &found {
+                    let loc = [clip.clone(), vec![Step::Key("notes".into()), Step::Index(*i)]].concat();
+                    let at = exact(self.node(&loc).get("at")).unwrap_or_default();
+                    // The nearest line, from the clip's start; halfway goes later.
+                    let line = (&at / &grid + &half).floor() * &grid;
+                    let to = &at + (line - &at) * &amount;
+                    if to != at {
+                        self.set_leaf(&loc, "at", beat_value(&to));
+                        moved += 1;
+                    }
+                }
+                out.report.insert("moved".into(), Json::from(moved));
+                let by = if strength == 100 { String::new() } else { format!(" by {strength}%") };
+                out.label = format!("Quantize {} to {}{by}", count(found.len(), "note"), aaw_model::fraction_str(&grid));
             }
             NoteRemove { notes } => {
                 let mut found = self.notes_of(notes)?;

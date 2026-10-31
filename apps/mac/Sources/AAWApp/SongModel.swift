@@ -1137,6 +1137,27 @@ public final class SongModel {
         effectInHand || eventsInHand || notesInHand || !selectedClips.isEmpty
     }
 
+    /// The notes Quantize acts on: the selected notes of the clip the piano
+    /// roll shows, or all of its notes when none is selected, as in Ableton;
+    /// nil while the piano roll shows no clip with notes.
+    var quantizable: [UInt64]? {
+        guard detail == .pattern, showsDetail, let context = noteContext else { return nil }
+        let notes = selectedNotes.isEmpty ? context.clip.notes.map(\.key) : selectedNoteViews.map(\.key)
+        return notes.isEmpty ? nil : notes.sorted()
+    }
+
+    public var canQuantize: Bool { quantizable != nil }
+
+    /// Moves the notes' starts onto the piano roll's grid, all the way,
+    /// leaving their lengths: one undo step.
+    public func quantizeSelection() {
+        guard let notes = quantizable else {
+            NSSound.beep()
+            return
+        }
+        edit(.notesQuantize(notes: notes, grid: noteGrid, strength: 100))
+    }
+
     /// Copies the selected effect, events or notes, or else clips, to right
     /// after them and selects the copies.
     public func duplicateSelection() {

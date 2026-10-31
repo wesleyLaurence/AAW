@@ -288,6 +288,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Option-scroll, in the piano roll | Zooms up and down: the rows from 5 to 28 points, or as short as all 128 notes in view. Scroll, pinch and Command-scroll scroll and zoom across |
 | The headphones beside the grid | Preview: whether a note is heard as it is drawn, clicked or moved, and as its key is pressed. On a Synth or a Sampler; a track with no instrument plays nothing |
 | Arrow keys, in the piano roll | Move the selected notes a step earlier or later, or a note up or down, playing the first; with Shift, an octave |
+| ⌘U, or Edit › Quantize | Moves the selected notes' starts onto the piano roll's grid, or every note of the clip when none is selected, leaving their lengths: one undo step. Ableton's key. Part of the way is the terminal's, `daw note quantize --strength` |
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
 | Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T; ⌘1, ⌘2 and ⌘3 step through them while the piano roll has the keys. The pattern's Step menu names its steps the same way, a beat to 1/64, and the same keys set it while the pattern has the keys: its 1/16 is a quarter of a beat |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |

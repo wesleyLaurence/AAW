@@ -3533,3 +3533,37 @@ fn a_midi_effect_of_the_person_s_own_is_drawn_from_its_manifest() {
     assert!(t.midi_effects[0].note.as_deref().unwrap_or_default().contains("the notes pass through"), "{:?}", t.midi_effects[0].note);
     song.close();
 }
+
+#[test]
+fn the_app_quantizes_notes_onto_the_piano_rolls_grid() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    let track = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    update(&seen);
+    let clip = song.edit(Edit::ClipNew { track, at: 8.0 }, None).unwrap()[0];
+    update(&seen);
+    // Three notes off the grid, as a take from the typing keyboard leaves them.
+    let add = |at: f64, pitch: i32| Edit::NoteAdd { clip, at, free: true, grid: "1/4".into(), pitch };
+    let early = song.edit(add(0.95, 60), None).unwrap()[0];
+    update(&seen);
+    let late = song.edit(add(2.1, 64), None).unwrap()[0];
+    update(&seen);
+    let far = song.edit(add(2.6, 67), None).unwrap()[0];
+    let u = update(&seen);
+    let ats = |u: &Update| notes_of(&u.arrangement.tracks[2], 0).iter().map(|n| n.2.clone()).collect::<Vec<_>>();
+    assert_eq!(ats(&u), ["0.95", "2.1", "2.6"]);
+    // One selected note, all the way onto the grid of a sixteenth note.
+    song.edit(Edit::NotesQuantize { notes: vec![late], grid: "1/4".into(), strength: 100 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Quantize 1 note to 1/4");
+    assert_eq!(ats(&u), ["0.95", "2", "2.6"]);
+    // All of them, halfway to an eighth note's grid; lengths stay.
+    song.edit(Edit::NotesQuantize { notes: vec![early, late, far], grid: "1/2".into(), strength: 50 }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Quantize 3 notes to 1/2 by 50%");
+    assert_eq!(ats(&u), ["0.975", "2", "2.55"]);
+    assert!(notes_of(&u.arrangement.tracks[2], 0).iter().all(|n| n.3 == "0.25"));
+    // Nothing to quantize is no edit; a grid without a length is refused.
+    assert!(song.edit(Edit::NotesQuantize { notes: vec![], grid: "1/4".into(), strength: 100 }, None).unwrap().is_empty());
+    assert!(song.edit(Edit::NotesQuantize { notes: vec![early], grid: "0".into(), strength: 100 }, None).is_err());
+}

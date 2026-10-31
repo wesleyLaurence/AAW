@@ -203,6 +203,11 @@ pub enum Edit {
         by: f64,
         semitones: i32,
     },
+    /// Moves notes' starts onto the nearest line of `grid`, counted from
+    /// their clip's start, all the way or `strength` percent of the way;
+    /// their lengths stay. What ⌘U does to the selected notes, or to all of
+    /// the clip's when none is selected.
+    NotesQuantize { notes: Vec<u64>, grid: String, strength: u32 },
     /// Changes the velocity of notes by `by`, each within 1 to 127.
     NotesVelocity { notes: Vec<u64>, by: i32 },
     /// Sets fields of notes, as typed: a pitch as a number or a name such as
@@ -1504,6 +1509,14 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             let label = format!("Copy {}", count(found.len(), "note"));
             Ok(batch(vec![json!({"op": "note.add", "clip": handle_text(*clip_key), "notes": copies})], label))
+        }
+        Edit::NotesQuantize { notes, grid, strength } => {
+            if notes.is_empty() {
+                return Ok(Vec::new());
+            }
+            let grid = grid_exact(grid)?;
+            let paths: Vec<String> = notes.iter().map(|k| handle_text(*k)).collect();
+            Ok(vec![json!({"op": "note.quantize", "notes": paths, "grid": beat(&grid), "strength": strength})])
         }
         Edit::NotesVelocity { notes, by } => {
             let tree = doc.tree();

@@ -392,3 +392,18 @@ def test_midi_effects_change_the_notes_the_instrument_plays_and_keep_the_clips(t
     assert "arpeggiator" in described["semantics"]["midi_effects"]
     assert described["fields"]["arpeggiator.rate"].startswith("1/1|1/2|1/4|1/4T|1/8|")
     assert described["fields"]["tracks[].midi_effects"] == "list of MIDI effect: arpeggiator, chord, scale or velocity (daw describe midi), at most 16"
+
+
+def test_notes_are_quantized_onto_a_grid_by_daw(tmp_path):
+    path = phrase(tmp_path)
+    clip = "tracks.keys.clips.clip1"
+    before = [n["duration"] for n in load(path)["tracks"][0]["clips"][0]["notes"]]
+    r = daw("note", "quantize", path, f"{clip}.notes.n4", f"{clip}.notes.n5", "--strength", 50)
+    assert (r["label"], r["moved"]) == ("Quantize 2 notes to 1/4 by 50%", 2)
+    r = daw("note", "quantize", path, clip, "--grid", "1/2")
+    assert (r["label"], r["moved"]) == ("Quantize 6 notes to 1/2", 2)
+    notes = load(path)["tracks"][0]["clips"][0]["notes"]
+    assert [n.get("at", 0) for n in notes] == [0, 0, 0, 2, 2, 3]
+    assert [n["duration"] for n in notes] == before
+    listed = daw("note", "list", path, clip)["clips"][0]["notes"]
+    assert [n["song_at"] for n in listed] == [4, 4, 4, 6, 6, 7]

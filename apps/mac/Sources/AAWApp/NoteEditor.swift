@@ -867,7 +867,7 @@ struct NoteClipHeader: View {
                 }
                 .labelsHidden()
                 .controlSize(.mini)
-                .help("The steps notes are added and moved on, as note values: 1/16 is a sixteenth note and 1/8T an eighth-note triplet. ⌘1 and ⌘2 make them finer and coarser, ⌘3 triplets; with ⌘, a note goes off the grid")
+                .help("The steps notes are added and moved on, as note values: 1/16 is a sixteenth note and 1/8T an eighth-note triplet. ⌘1 and ⌘2 make them finer and coarser, ⌘3 triplets; with ⌘, a note goes off the grid. ⌘U moves the selected notes onto it, or all of them")
                 Toggle(isOn: Binding(get: { model.notePreview }, set: { model.notePreview = $0 })) {
                     Image(systemName: "headphones")
                 }
@@ -887,7 +887,7 @@ struct NoteClipHeader: View {
                     }
                 }
             } else {
-                Text("Double-click to add a note on the grid; with ⌘, off it. Drag a note to move it, with Option to copy it, either end to lengthen it, and around notes to select them. Drag a stalk under them to change velocity.")
+                Text("Double-click to add a note on the grid; with ⌘, off it. Drag a note to move it, with Option to copy it, either end to lengthen it, and around notes to select them. Drag a stalk under them to change velocity. ⌘U moves the notes onto the grid.")
                     .font(.system(size: 10))
                     .foregroundStyle(.tertiary)
                     .fixedSize(horizontal: false, vertical: true)

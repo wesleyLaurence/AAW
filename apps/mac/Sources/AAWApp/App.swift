@@ -762,6 +762,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Duplicate", #selector(SongWindowController.duplicateSelection(_:)), "d"),
             item("Split", #selector(SongWindowController.splitSelection(_:)), "e"),
             item("Join", #selector(SongWindowController.joinSelection(_:)), "j"),
+            // Ableton's key: the selected notes onto the piano roll's grid.
+            item("Quantize", #selector(SongWindowController.quantizeSelection(_:)), "u"),
             item("Delete", #selector(SongWindowController.deleteSelection(_:)), "\u{8}", []),
             .separator(),
             item("Select All", #selector(NSResponder.selectAll(_:)), "a"),
@@ -1165,6 +1167,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
     @objc func splitSelection(_ sender: Any?) { model.splitSelection() }
     @objc func joinSelection(_ sender: Any?) { model.joinSelection() }
+    @objc func quantizeSelection(_ sender: Any?) { model.quantizeSelection() }
     /// Delete, for what has the keys: in the pattern editor the selected
     /// events and nothing else, so that it never takes the clip being edited.
     @objc func deleteSelection(_ sender: Any?) {
@@ -1268,6 +1271,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(paste(_:)): return !typing && model.canPaste(in: editPlace)
         case #selector(splitSelection(_:)): return model.canSplit && !typing
         case #selector(joinSelection(_:)): return model.canJoin && !typing
+        case #selector(quantizeSelection(_:)): return model.canQuantize && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
         case #selector(groupSelection(_:)): return model.canGroup && !typing

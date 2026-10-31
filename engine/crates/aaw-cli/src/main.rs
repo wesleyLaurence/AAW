@@ -836,6 +836,21 @@ enum NoteCmd {
         #[arg(long, allow_hyphen_values = true)]
         by: i64,
     },
+    /// Move notes onto the nearest line of a grid, all the way or part of the
+    /// way; their lengths stay. A clip stands for all of its notes.
+    Quantize {
+        project: Song,
+        #[arg(required = true)]
+        notes: Vec<String>,
+        /// The grid in beats, counted from the clip's start: 1/4 is a
+        /// sixteenth note, 1/3 an eighth-note triplet, 1 a beat.
+        #[arg(long, default_value = "1/4")]
+        grid: String,
+        /// How far each note goes toward its line, as a percentage: 100
+        /// lands on it, 50 goes halfway.
+        #[arg(long, default_value_t = 100)]
+        strength: i64,
+    },
     /// Remove notes; a clip stands for all of its notes.
     Remove {
         project: Song,
@@ -2891,6 +2906,14 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
             NoteCmd::Transpose { project, notes, by } => edit(project, C::NoteTranspose { notes: notes.clone(), by: *by }),
+            NoteCmd::Quantize { project, notes, grid, strength } => edit(
+                project,
+                C::NoteQuantize {
+                    notes: notes.clone(),
+                    grid: Some(parse_value(grid)),
+                    strength: Some(*strength),
+                },
+            ),
             NoteCmd::Remove { project, notes } => edit(project, C::NoteRemove { notes: notes.clone() }),
             NoteCmd::On { project, track, pitch, velocity } => edit(
                 project,
