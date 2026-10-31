@@ -435,6 +435,44 @@ checkout (D75):
 
 One line each, newest first.
 
+- Pitched music written as steps, as drums are: `daw note write CLIP "C2 . G2
+  . | C2 . Bb1 ."`, a token a grid step, `.` a rest, `-` a hold, `|` a bar;
+  and a chord by name, `--chord Am7 --at 8 --duration 4`, in place of its
+  notes as JSON. Said by the agent on October 31, 2026, trying the CLI.
+- `BAR:BEAT` accepted wherever a beat is taken (`--at 17:1`), and printed
+  beside the beat in `note list`, `inspect` and `map`: the person says bars,
+  the agent converts by hand with 1-based bars over 0-based beats. Said by
+  the agent on October 31, 2026, trying the CLI.
+- Relative edits of numbers: `daw set tracks.bass.gain_db -=3`, as "bring
+  the bass down 3 dB" is said, without a read first. Said by the agent on
+  October 31, 2026, trying the CLI.
+- `daw key` and `daw chords` reading the key and the chord by bar from the
+  note clips, later from audio by chroma: `note list` gives numbers and
+  nothing names the harmony. The read half of the theory library in Next.
+  Said by the agent on October 31, 2026, trying the CLI.
+- Undo without a host, from a small journal beside the song, or at least
+  `daw diff PROJECT --since SHA` from the shas every edit returns: alone at a
+  terminal, every edit is written with no way back. Said by the agent on
+  October 31, 2026, trying the CLI.
+- `--brief` on `listen`, `inspect` and `get` (loudness, true peak, band
+  balance, the three worst findings), and `daw render --listen` doing both
+  in one call: a 5-second song's listen is 14 KB, most of it unread in a mix
+  pass. Said by the agent on October 31, 2026, trying the CLI.
+- `daw batch --dry-run` validating every op and reporting every error with
+  nothing written; today the first bad op stops it. Said by the agent on
+  October 31, 2026, trying the CLI.
+- Fixes found trying the CLI on October 31, 2026: `daw effect add SONG bass`
+  says "the song has no bass" where the owner must be `tracks.bass` while
+  `clip add SONG bass` takes the bare name, so accept both everywhere and
+  name the owners in the error; missing-field errors are raw pydantic
+  (`tracks.0.effects.0.compressor.threshold_db Field required`) and the
+  `set` typo error says "did you mean" then dumps pydantic anyway; `daw note
+  set --help` marks `--pitch` and `--duration` required, copied from `add`;
+  `note transpose` wants `--by` where a positional reads naturally; `daw
+  render --help` has blank lines for `--output`, `--track`, `--section`;
+  `daw samples` is argparse while the rest is clap, two help dialects and
+  plain-text failures; `get` prints a pitch as a number where `note list`
+  adds `name`; there is no `effect list` where other parts have one.
 - The piano roll's note held while the mouse is down, as a key is, through
   `note.on` and `note.off` in place of the beat-long preview; and a key of
   the typing keyboard pressed while a note is selected setting its pitch.
