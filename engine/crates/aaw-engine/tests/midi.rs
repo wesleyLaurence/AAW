@@ -236,13 +236,13 @@ fn a_note_previewed_through_the_sampler_sounds_while_stopped_and_through_an_edit
     // The level pad, gated, held a quarter of a beat at full velocity: as a note in a clip.
     assert_eq!(peak(&pull(&mut player, 4800)), 0.0);
     let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 127, 0.25).unwrap().unwrap();
-    control.preview_voice(0, voice, false).unwrap();
+    control.preview_voice(0, 30, voice, false).unwrap();
     let out = pull(&mut player, 24000);
     assert!((out[100][0] - 0.5).abs() < 1e-6, "{}", out[100][0]);
     assert!(out[6000 + 480 + 1..].iter().all(|f| f[0] == 0.0), "released at its note-off");
     // A pitched note: the tone's A3 played as A4.
     let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 69, 100, 2.0).unwrap().unwrap();
-    control.preview_voice(0, voice, false).unwrap();
+    control.preview_voice(0, 69, voice, false).unwrap();
     let out = pull(&mut player, 12000);
     let crossings = out[1000..11000].windows(2).filter(|w| w[0][0] <= 0.0 && w[1][0] > 0.0).count();
     assert!((crossings as f64 / (10000.0 / 48000.0) - 440.0).abs() < 10.0, "{crossings} crossings of an A");
@@ -262,7 +262,7 @@ fn a_note_previewed_through_the_sampler_sounds_while_stopped_and_through_an_edit
     // More previews than slots: the oldest gives its place, freed by the host.
     for _ in 0..20 {
         let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 64, 0.25).unwrap().unwrap();
-        control.preview_voice(0, voice, false).unwrap();
+        control.preview_voice(0, 30, voice, false).unwrap();
         pull(&mut player, 128);
     }
     assert_eq!(control.shared().leaked.load(std::sync::atomic::Ordering::Relaxed), 0);
@@ -273,19 +273,35 @@ fn a_note_previewed_through_the_sampler_sounds_while_stopped_and_through_an_edit
     // 1.0 once the 10 ms release has passed. The track's gain is -6 dB now.
     let one = 0.5 * 10f64.powf(-6.0 / 20.0);
     let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 127, 1.0).unwrap().unwrap();
-    control.preview_voice(0, voice, false).unwrap();
+    control.preview_voice(0, 30, voice, false).unwrap();
     let out = pull(&mut player, 2400);
     assert!((out[2000][0] - one).abs() < 1e-6, "{}", out[2000][0]);
     let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 127, 1.0).unwrap().unwrap();
-    control.preview_voice(0, voice, true).unwrap();
+    control.preview_voice(0, 30, voice, true).unwrap();
     let out = pull(&mut player, 2400);
     assert!(out[100][0] > one + 0.01, "both sound while the first releases: {}", out[100][0]);
     assert!((out[2000][0] - one).abs() < 1e-6, "one left after the release: {}", out[2000][0]);
     // The same without replacing: two sound together.
     let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 127, 1.0).unwrap().unwrap();
-    control.preview_voice(0, voice, false).unwrap();
+    control.preview_voice(0, 30, voice, false).unwrap();
     let out = pull(&mut player, 2400);
     assert!((out[2000][0] - 2.0 * one).abs() < 1e-6, "{}", out[2000][0]);
+    // Two notes held, one let go by its pitch: the level pad's 0.5 leaves
+    // and the tone stays, as a key of a chord lifted on the typing keyboard.
+    let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 30, 127, 100.0).unwrap().unwrap();
+    control.preview_voice(0, 30, voice, true).unwrap();
+    let voice = preview_voice(&project, dir.path(), &mut cache, "keys", 69, 100, 100.0).unwrap().unwrap();
+    control.preview_voice(0, 69, voice, false).unwrap();
+    let mean = |x: &[Frame]| x.iter().map(|f| f[0]).sum::<f64>() / x.len() as f64;
+    let out = pull(&mut player, 4800);
+    assert!((mean(&out[2400..]) - one).abs() < 0.02, "the level under the tone: {}", mean(&out[2400..]));
+    control.let_go_preview(0, 30).unwrap();
+    let out = pull(&mut player, 4800);
+    assert!(mean(&out[2400..]).abs() < 0.02, "the level let go: {}", mean(&out[2400..]));
+    assert!(peak(&out[2400..]) > 0.05, "the tone still held");
+    control.let_go_preview(0, 69).unwrap();
+    pull(&mut player, 4800);
+    assert_eq!(peak(&pull(&mut player, 4800)), 0.0, "both let go");
     // A silent pitch that replaces still lets the sounding ones go.
     assert!(preview_voice(&project, dir.path(), &mut cache, "keys", 20, 100, 1.0).unwrap().is_none());
     control.let_go_previews(0).unwrap();

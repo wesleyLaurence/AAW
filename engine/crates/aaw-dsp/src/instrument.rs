@@ -130,6 +130,20 @@ impl Feed {
         self.previews.clear();
     }
 
+    /// Ends the previewed notes of `pitch` still held and leaves the others.
+    pub fn let_go_preview(&mut self, pitch: f64) {
+        let k = key(pitch.round() as i64);
+        let mut i = 0;
+        while i < self.previews.len() {
+            if self.previews[i].1 == k {
+                self.previews.remove(i);
+                self.due(k, 0);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
     pub fn previewing(&self) -> bool {
         !self.previews.is_empty()
     }
@@ -345,6 +359,10 @@ impl Instrument {
 
     pub fn let_go_previews(&mut self) {
         self.feed.let_go_previews();
+    }
+
+    pub fn let_go_preview(&mut self, pitch: f64) {
+        self.feed.let_go_preview(pitch);
     }
 
     pub fn previewing(&self) -> bool {

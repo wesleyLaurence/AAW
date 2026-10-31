@@ -126,7 +126,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 - `aaw-host`: the session host. It holds an open song, applies edits as commands
   with origins, handles and undo, saves after each, and plays the song as edits land.
   It arms tracks and records them, each take laid on the timeline, written
-  under `samples/` and added with its clip as one edit (`record`), and
+  under `samples/` and added with its clip as one edit, and a MIDI track's
+  notes played through `note.on` and `note.off` taken into a note clip in
+  the same edit (`record`), and
   captures a sound from an input with no track for the agent panel, written
   where it was asked for with the beat it began at (`capture`), and freezes
   a track to a file of what its devices make, holding what the file was
@@ -528,7 +530,10 @@ says so in the reply of its next edit, as `hint`
 `note.preview` is a transport command too: a note of a pitch, velocity and
 length played now through a MIDI track's instrument, a Synth, a Sampler or
 a real-time instrument of the person's own, and the track's chain, from where the stream stands, whether or not the song
-plays, outside the timeline and the undo history and in no render. A
+plays, outside the timeline and the undo history and in no render.
+`note.on` holds such a note until `note.off` lets go that pitch alone, the
+typing keyboard's way, and while the track records they are taken into its
+clip ([typing-keyboard.md](features/typing-keyboard.md)). A
 Sampler's note is prepared by the host, as the same note in a clip would be,
 and handed to the audio thread, which hands it back to be freed. With
 `replace` the track's earlier previews are let go first, each through its

@@ -425,6 +425,79 @@ def test_a_track_records_the_songs_own_sound_as_its_stem(rust_daw, tmp_path, reg
         host.wait(timeout=10)
 
 
+def test_a_midi_track_records_the_notes_played_through_it(rust_daw, tmp_path, registry):
+    """Through BlackHole where the Mac has it: a MIDI track with a Synth is
+    armed, and the notes held through it by `daw note on` and let go by
+    `daw note off` while the recording runs become one note clip from the
+    start position, whole bars long, as one undoable edit; a note still
+    held when the recording ends ends there."""
+    if output_device(rust_daw, "BlackHole") is None:
+        pytest.skip("no BlackHole device on this Mac")
+    path = make_song(random.Random(43), tmp_path)
+    tempo = load(path)["session"]["tempo"]
+    beats = lambda seconds: seconds * tempo / 60
+    host = subprocess.Popen([str(rust_daw), "host", str(path), "--output", "BlackHole"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        wait_for_host(rust_daw, path, host)
+        daw(rust_daw, "track", "add", path, "keys", "--type", "midi")
+        assert "has no instrument" in daw(rust_daw, "record", "arm", path, "keys", check=False)["error"]
+        daw(rust_daw, "synth", "add", path, "keys")
+        assert daw(rust_daw, "record", "arm", path, "keys")["armed"] == ["keys"]
+        revision = daw(rust_daw, "status", path)["revision"]
+        started = daw(rust_daw, "record", "start", path, "--count-in", "0")
+        assert started["recording"]["tracks"] == ["keys"]
+        # Each command takes its own time to reach the host, so the moments
+        # are read from the clock, just before each command is sent.
+        began = time.monotonic()
+        time.sleep(0.6)
+        first_on = time.monotonic() - began
+        on = daw(rust_daw, "note", "on", path, "keys", "C4")
+        assert on["held"] is True and on["recording"] is True and on["sounds"] is True and on["note"] == "C4"
+        time.sleep(0.4)
+        second_on = time.monotonic() - began
+        daw(rust_daw, "note", "on", path, "keys", "E4", "--velocity", "90")
+        time.sleep(0.3)
+        first_off = time.monotonic() - began
+        off = daw(rust_daw, "note", "off", path, "keys", "60")
+        assert off["held"] is False and off["recording"] is True
+        time.sleep(0.3)
+        ended = time.monotonic() - began
+        stopped = daw(rust_daw, "record", "stop", path)
+        assert stopped["recording"] is None and stopped["playing"] is True
+        (take,) = stopped["recorded"]
+        assert take["track"] == "keys" and take["notes"] == 2 and take["at_beat"] == 0
+        project = load(path)
+        keys = project["tracks"][-1]
+        (clip,) = keys["clips"]
+        assert clip["at"] == 0 and clip["length_beats"] == take["length_beats"]
+        bar = 4
+        assert clip["length_beats"] % bar == 0 and clip["length_beats"] >= bar
+        first, second = sorted(clip["notes"], key=lambda n: n["at"])
+        # Within a quarter of a second of when each command was sent, which
+        # a command's own way to the host and the output's latency are under.
+        near = lambda got, seconds: abs(got - beats(seconds)) < beats(0.25)
+        assert first["pitch"] == 60 and first["velocity"] == 100
+        assert near(first["at"], first_on), (first, first_on)
+        assert near(first["at"] + first["duration"], first_off), (first, first_off)
+        assert second["pitch"] == 64 and second["velocity"] == 90
+        assert near(second["at"], second_on), (second, second_on)
+        # Held when the recording ended: it ends there.
+        assert near(second["at"] + second["duration"], ended), (second, ended)
+        status = daw(rust_daw, "status", path)
+        assert status["revision"] == revision + 1
+        assert status["undo"]["label"].startswith("Record notes on keys (") and status["undo"]["origin"] == "user"
+        undone = daw(rust_daw, "undo", path)["revision"]
+        assert load(path)["tracks"][-1]["clips"] == []
+        # A recording in which nothing was played leaves no clip and no edit.
+        daw(rust_daw, "record", "start", path, "--count-in", "0")
+        time.sleep(0.3)
+        assert daw(rust_daw, "stop", path)["recorded"] == []
+        assert daw(rust_daw, "status", path)["revision"] == undone
+    finally:
+        daw(rust_daw, "close", path, check=False)
+        host.wait(timeout=10)
+
+
 def test_a_take_through_the_loopback_lands_on_its_beat_after_a_count_in(rust_daw, tmp_path, registry):
     """Through BlackHole as both output and input: a burst played at beat 2
     is recorded on a track whose input is the device, after a bar of

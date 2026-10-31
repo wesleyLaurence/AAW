@@ -11,9 +11,13 @@
 //! to where the take ended, and written as a 32-bit float WAV under
 //! `samples/`; the host then adds the sample and the clip as one edit.
 
+use crate::command::beat_value;
+use crate::session::value_json;
 use aaw_engine::capture::{Capture, ChunkTime, InputStream};
 use aaw_engine::player::Shared;
 use aaw_model::{Input, Project};
+use num_rational::BigRational;
+use num_traits::ToPrimitive;
 use serde_json::{json, Value as Json};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -226,9 +230,145 @@ impl Finished {
     }
 }
 
+/// The notes a MIDI track takes while the song plays: what the typing
+/// keyboard or `daw note on` plays through its instrument, each with the
+/// timeline frames it began and ended at, which become one note clip when
+/// the recording ends. Nothing is heard from the take itself: the notes
+/// sound as they are played, as previews do.
+pub struct NoteTake {
+    pub track: String,
+    /// Notes held now: pitch, velocity and the frame each began at.
+    held: Vec<(i64, i64, i64)>,
+    /// Notes let go: pitch, velocity, start and end frames.
+    notes: Vec<(i64, i64, i64, i64)>,
+}
+
+impl NoteTake {
+    pub fn new(track: &str) -> NoteTake {
+        NoteTake {
+            track: track.into(),
+            held: Vec::new(),
+            notes: Vec::new(),
+        }
+    }
+
+    /// A note begins at `frame`; one of the same pitch still held ends there.
+    pub fn on(&mut self, pitch: i64, velocity: i64, frame: i64) {
+        self.off(pitch, frame);
+        self.held.push((pitch, velocity, frame));
+    }
+
+    /// The notes of `pitch` held end at `frame`.
+    pub fn off(&mut self, pitch: i64, frame: i64) {
+        let mut i = 0;
+        while i < self.held.len() {
+            if self.held[i].0 == pitch {
+                let (p, v, start) = self.held.remove(i);
+                self.notes.push((p, v, start, frame));
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    /// How many notes were played, held ones included.
+    pub fn count(&self) -> usize {
+        self.held.len() + self.notes.len()
+    }
+
+    /// The clip the notes make, from `start` to `end`, song frames: a note
+    /// still held ends at `end`, one that began before `start` begins
+    /// there, and one left with no length is dropped. Positions are
+    /// rounded to a thousandth of a beat, as the reply's beats are. The
+    /// clip lasts whole bars of `bar_beats` from `start`, one at least.
+    /// None when no note is left.
+    pub fn finish(mut self, start: i64, end: i64, rate: u32, tempo: f64, bar_beats: f64) -> Option<FinishedNotes> {
+        let beats = |frames: i64| -> BigRational {
+            let b = frames as f64 * tempo / 60.0 / rate as f64;
+            BigRational::new(((b * 1000.0).round() as i64).into(), 1000.into())
+        };
+        for (pitch, velocity, began) in std::mem::take(&mut self.held) {
+            self.notes.push((pitch, velocity, began, end));
+        }
+        let at = beats(start);
+        let mut notes: Vec<(i64, i64, BigRational, BigRational)> = self
+            .notes
+            .iter()
+            .filter_map(|&(pitch, velocity, began, ended)| {
+                let (from, to) = (beats(began.max(start)) - &at, beats(ended.min(end)) - &at);
+                (to > from).then(|| {
+                    let duration = &to - &from;
+                    (pitch, velocity, from, duration)
+                })
+            })
+            .collect();
+        if notes.is_empty() {
+            return None;
+        }
+        notes.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(&b.0)));
+        let span = (beats(end) - &at).max(BigRational::from_integer(0.into()));
+        let bars = (span.to_f64().unwrap_or(0.0) / bar_beats).ceil().max(1.0);
+        let length = BigRational::new(((bars * bar_beats * 1000.0).round() as i64).into(), 1000.into());
+        Some(FinishedNotes {
+            track: self.track,
+            count: notes.len(),
+            at,
+            length,
+            notes: notes
+                .into_iter()
+                .map(|(pitch, velocity, from, duration)| {
+                    json!({
+                        "pitch": pitch,
+                        "at": value_json(&beat_value(&from)),
+                        "duration": value_json(&beat_value(&duration)),
+                        "velocity": velocity,
+                    })
+                })
+                .collect(),
+        })
+    }
+}
+
+/// A MIDI track's take as the note clip the host adds.
+#[derive(Clone, Debug)]
+pub struct FinishedNotes {
+    pub track: String,
+    pub count: usize,
+    /// The song beat the clip begins at: the start position.
+    pub at: BigRational,
+    /// The clip's length, whole bars.
+    pub length: BigRational,
+    pub notes: Vec<Json>,
+}
+
+impl FinishedNotes {
+    /// The fields of the `clip.add` that makes the clip.
+    pub fn clip(&self) -> serde_json::Map<String, Json> {
+        let mut fields = serde_json::Map::new();
+        fields.insert("at".into(), value_json(&beat_value(&self.at)));
+        fields.insert("length_beats".into(), value_json(&beat_value(&self.length)));
+        fields.insert("notes".into(), Json::Array(self.notes.clone()));
+        fields
+    }
+
+    /// The take as the reply reports it.
+    pub fn report(&self, tempo: f64) -> Json {
+        let seconds = self.length.to_f64().unwrap_or(0.0) * 60.0 / tempo;
+        json!({
+            "track": self.track,
+            "notes": self.count,
+            "at_beat": value_json(&beat_value(&self.at)),
+            "length_beats": value_json(&beat_value(&self.length)),
+            "seconds": (seconds * 1000.0).round() / 1000.0,
+        })
+    }
+}
+
 /// The takes of one recording, from Record to its end.
 pub struct Recording {
     pub takes: Vec<Take>,
+    /// The notes the armed MIDI tracks take.
+    pub notes: Vec<NoteTake>,
     /// The song frame the takes' clips begin at: the start position.
     pub start: i64,
     /// Frames of count-in before it.
@@ -246,9 +386,10 @@ pub struct Recording {
 }
 
 impl Recording {
-    pub fn new(takes: Vec<Take>, start: i64, count_in: usize, loop_end: Option<usize>, shared: Arc<Shared>) -> Recording {
+    pub fn new(takes: Vec<Take>, notes: Vec<NoteTake>, start: i64, count_in: usize, loop_end: Option<usize>, shared: Arc<Shared>) -> Recording {
         Recording {
             takes,
+            notes,
             start,
             count_in,
             loop_end,
@@ -277,26 +418,40 @@ impl Recording {
         self.takes.iter().any(|t| t.device().is_some())
     }
 
-    /// The tracks recording.
+    /// The tracks recording, the audio takes' then the note takes'.
     pub fn tracks(&self) -> Vec<String> {
-        self.takes.iter().map(|t| t.track.clone()).collect()
+        self.takes.iter().map(|t| t.track.clone()).chain(self.notes.iter().map(|n| n.track.clone())).collect()
     }
 
-    /// Ends the recording: each take written under `dir/samples/`, named
-    /// `TRACK-take-N` after the takes the song has, from the start to
-    /// `end`, or to each take's last frame with None.
-    pub fn finish(self, dir: &Path, project: &Project, song_rate: u32, end: Option<i64>) -> Vec<Result<Finished>> {
+    /// The note take of `track`, if it is recording notes.
+    pub fn notes_of(&mut self, track: &str) -> Option<&mut NoteTake> {
+        self.notes.iter_mut().find(|n| n.track == track)
+    }
+
+    /// Ends the recording: each audio take written under `dir/samples/`,
+    /// named `TRACK-take-N` after the takes the song has, from the start to
+    /// `end`, or to each take's last frame with None; and each note take
+    /// made a clip from the start to `now`, the frame being heard, where
+    /// `end` is None.
+    pub fn finish(self, dir: &Path, project: &Project, song_rate: u32, end: Option<i64>, now: i64) -> (Vec<Result<Finished>>, Vec<Option<FinishedNotes>>) {
         let anchor = self.shared.anchor();
         let mut taken: Vec<String> = project.samples.keys().cloned().collect();
         let start = self.start;
-        self.takes
+        let takes = self
+            .takes
             .into_iter()
             .map(|take| {
                 let id = next_take(&take.track, |id| taken.iter().any(|t| t == id) || dir.join("samples").join(format!("{id}.wav")).exists());
                 taken.push(id.clone());
                 take.finish(dir, &id, song_rate, start, end, anchor)
             })
-            .collect()
+            .collect();
+        let meter = project.session.meter();
+        let bar_beats = meter.beats as f64 * 4.0 / meter.unit.max(1) as f64;
+        let tempo = project.session.tempo;
+        let notes_end = end.unwrap_or(now).max(start);
+        let notes = self.notes.into_iter().map(|n| n.finish(start, notes_end, song_rate, tempo, bar_beats)).collect();
+        (takes, notes)
     }
 }
 
@@ -311,6 +466,54 @@ fn next_take(track: &str, taken: impl Fn(&str) -> bool) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_note_take_becomes_a_clip_of_whole_bars_from_the_start() {
+        // 120 BPM at 48 kHz: a beat is 24000 frames; the take runs from beat 4.
+        let mut take = NoteTake::new("keys");
+        let start = 4 * 24000;
+        // Played during the count-in and held past the start: begins at the start.
+        take.on(60, 100, start - 5000);
+        take.off(60, start + 12000);
+        // A chord, one note let go early; the other is still held at the end.
+        take.on(64, 90, start + 24000);
+        take.on(67, 80, start + 24000);
+        take.off(64, start + 36000);
+        // Ended before the start: dropped.
+        take.on(72, 100, start - 8000);
+        take.off(72, start - 2000);
+        // The same pitch again while held ends the first.
+        take.on(48, 70, start + 48000);
+        take.on(48, 70, start + 60000);
+        take.off(48, start + 72000);
+        assert_eq!(take.count(), 6);
+        let end = start + 5 * 24000;
+        let done = take.finish(start, end, 48000, 120.0, 4.0).unwrap();
+        assert_eq!(done.at, BigRational::from_integer(4.into()));
+        // Five beats of notes: two bars.
+        assert_eq!(done.length, BigRational::from_integer(8.into()));
+        let notes: Vec<(i64, f64, f64)> = done
+            .notes
+            .iter()
+            .map(|n| (n["pitch"].as_i64().unwrap(), n["at"].as_f64().unwrap(), n["duration"].as_f64().unwrap()))
+            .collect();
+        assert_eq!(notes, vec![(60, 0.0, 0.5), (64, 1.0, 0.5), (67, 1.0, 4.0), (48, 2.0, 0.5), (48, 2.5, 0.5)]);
+        assert_eq!(done.notes[1]["velocity"], 90);
+        let report = done.report(120.0);
+        assert_eq!(report["notes"], 5);
+        assert_eq!(report["seconds"], 4.0);
+
+        // Nothing played, or nothing left, is no clip.
+        assert!(NoteTake::new("keys").finish(0, 48000, 48000, 120.0, 4.0).is_none());
+        let mut take = NoteTake::new("keys");
+        take.on(60, 100, 100);
+        take.off(60, 100);
+        assert!(take.finish(0, 48000, 48000, 120.0, 4.0).is_none());
+        // A take that ended before a bar was up is still a bar; 3/4 bars.
+        let mut take = NoteTake::new("keys");
+        take.on(60, 100, 0);
+        assert_eq!(take.finish(0, 2400, 48000, 120.0, 3.0).unwrap().length, BigRational::from_integer(3.into()));
+    }
 
     #[test]
     fn takes_are_numbered_past_the_ones_the_song_has() {

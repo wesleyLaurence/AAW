@@ -772,13 +772,37 @@ impl Song {
         self.transport(json!({"op": "note.preview", "track": id, "pitch": pitch, "velocity": velocity, "length_beats": length_beats, "replace": replace}))
     }
 
+    /// Holds a note through the instrument on the MIDI track at `track`
+    /// until `note_off`: a key of the typing keyboard pressed. A note of the
+    /// same pitch already held on the track is let go first. While the
+    /// track records, the note goes into the clip the recording makes.
+    pub fn note_on(&self, track: u64, pitch: i32, velocity: u32) -> Result<(), SongError> {
+        let id = {
+            let doc = locked(&self.doc);
+            edits::track_id(doc.as_ref().ok_or_else(closed)?, track)?
+        };
+        self.transport(json!({"op": "note.on", "track": id, "pitch": pitch, "velocity": velocity}))
+    }
+
+    /// Lets go the notes of `pitch` held on the track by `note_on`, each
+    /// through its release: the key lifted.
+    pub fn note_off(&self, track: u64, pitch: i32) -> Result<(), SongError> {
+        let id = {
+            let doc = locked(&self.doc);
+            edits::track_id(doc.as_ref().ok_or_else(closed)?, track)?
+        };
+        self.transport(json!({"op": "note.off", "track": id, "pitch": pitch}))
+    }
+
     /// Toggles the playback monitor click without editing the song.
     pub fn set_metronome(&self, enabled: bool) -> Result<(), SongError> {
         self.transport(json!({"op": "metronome", "enabled": enabled}))
     }
 
-    /// Arms the track at `track` to record from its input, or disarms it:
-    /// host state, as the loop is. Refused for a track with no input.
+    /// Arms the track at `track` to record, or disarms it: an audio track
+    /// from its input, a MIDI track with an instrument the notes played
+    /// through it. Host state, as the loop is. Refused for an audio track
+    /// with no input and a MIDI track with no instrument.
     pub fn arm(&self, track: u64, on: bool) -> Result<(), SongError> {
         let id = {
             let doc = locked(&self.doc);

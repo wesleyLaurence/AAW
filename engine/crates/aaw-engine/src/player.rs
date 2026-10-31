@@ -76,10 +76,13 @@ pub enum Message {
     /// A note played now through a track's Sampler, outside the timeline:
     /// the track's place among the program's tracks, and the voice
     /// `program::preview_voice` made for it; `replace` as for `Preview`.
-    PreviewVoice { track: usize, voice: Voice, replace: bool },
+    PreviewVoice { track: usize, pitch: i64, voice: Voice, replace: bool },
     /// Lets go the notes previewed through a track, each through its
     /// release, with nothing played in their place.
     LetGoPreviews { track: usize },
+    /// Lets go the notes of one pitch previewed through a track and leaves
+    /// the others held: a key lifted on the typing keyboard.
+    LetGoPreview { track: usize, pitch: i64 },
     /// Records a stem or the mix into the tap's feed while the transport
     /// rolls. Beyond `MAX_TAPS` the tap is handed straight back.
     Tap(Box<Tap>),
@@ -318,9 +321,9 @@ impl Control {
     /// `track`, whether or not the transport rolls: `note.preview` on a
     /// track with a Sampler, with the voice `program::preview_voice` made.
     /// `replace` as for `preview`.
-    pub fn preview_voice(&mut self, track: usize, voice: Voice, replace: bool) -> Result<(), String> {
+    pub fn preview_voice(&mut self, track: usize, pitch: i64, voice: Voice, replace: bool) -> Result<(), String> {
         self.collect();
-        self.send(Message::PreviewVoice { track, voice, replace })
+        self.send(Message::PreviewVoice { track, pitch, voice, replace })
     }
 
     /// Lets go the notes previewed through the program's track at `track`,
@@ -328,6 +331,13 @@ impl Control {
     /// a replaced preview whose pitch the Sampler's map leaves silent.
     pub fn let_go_previews(&mut self, track: usize) -> Result<(), String> {
         self.send(Message::LetGoPreviews { track })
+    }
+
+    /// Lets go the notes of `pitch` previewed through the program's track at
+    /// `track`, each through its release, and leaves the track's other
+    /// previews held: `note.off`, a key of the typing keyboard lifted.
+    pub fn let_go_preview(&mut self, track: usize, pitch: i64) -> Result<(), String> {
+        self.send(Message::LetGoPreview { track, pitch })
     }
 
     /// The last program sent.
@@ -508,15 +518,16 @@ impl Player {
                 self.quiet = 0;
                 self.deck.renderer.preview(track, pitch, velocity, frames, replace);
             }
-            Message::PreviewVoice { track, voice, replace } => {
+            Message::PreviewVoice { track, pitch, voice, replace } => {
                 self.resting = false;
                 self.quiet = 0;
                 // The voice it takes the place of may hold the last of its audio.
-                if let Some(old) = self.deck.renderer.preview_voice(track, voice, replace) {
+                if let Some(old) = self.deck.renderer.preview_voice(track, pitch, voice, replace) {
                     self.throw(Garbage::Voice(old));
                 }
             }
             Message::LetGoPreviews { track } => self.deck.renderer.let_go_previews(track),
+            Message::LetGoPreview { track, pitch } => self.deck.renderer.let_go_preview(track, pitch),
         }
     }
 

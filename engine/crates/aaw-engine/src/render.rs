@@ -394,6 +394,8 @@ const PREVIEWS: usize = 16;
 /// A note previewed through a track's Sampler, outside the timeline.
 struct Previewed {
     track: usize,
+    /// The MIDI note it was played as, which a key lifted lets go by.
+    pitch: i64,
     voice: Voice,
     cursor: usize,
     /// Its place in the order previews arrived in.
@@ -744,13 +746,29 @@ impl Renderer {
         }
     }
 
+    /// Lets go the notes of `pitch` previewed through the track at `track`
+    /// and leaves the others held: one key of a chord lifted on the typing
+    /// keyboard. Does not allocate.
+    pub fn let_go_preview(&mut self, track: usize, pitch: i64) {
+        if let Some(s) = self.tracks.get_mut(track).and_then(|t| t.synth.as_mut()) {
+            s.let_go_preview(pitch as f64);
+        }
+        if let Some(i) = self.tracks.get_mut(track).and_then(|t| t.instrument.as_mut()) {
+            i.let_go_preview(pitch as f64);
+        }
+        let fade = self.fade;
+        for p in self.previews.iter_mut().flatten().filter(|p| p.track == track && p.pitch == pitch) {
+            p.let_go(fade);
+        }
+    }
+
     /// Plays `voice`, a note of the Sampler of the track at `track` made by
-    /// `program::preview_voice`, now and outside the timeline, as `preview`
-    /// does through a Synth. Returns the voice whose slot it takes, a
+    /// `program::preview_voice` for the MIDI note `pitch`, now and outside
+    /// the timeline, as `preview` does through a Synth. Returns the voice whose slot it takes, a
     /// finished one or else the oldest, for the caller to free off the audio
     /// thread. With `replace` the track's earlier previews are let go first,
     /// so this one sounds alone. Does not allocate.
-    pub fn preview_voice(&mut self, track: usize, voice: Voice, replace: bool) -> Option<Voice> {
+    pub fn preview_voice(&mut self, track: usize, pitch: i64, voice: Voice, replace: bool) -> Option<Voice> {
         if replace {
             self.let_go_previews(track);
         }
@@ -761,6 +779,7 @@ impl Renderer {
         };
         let new = Previewed {
             track,
+            pitch,
             voice,
             cursor: 0,
             number: self.previewed,

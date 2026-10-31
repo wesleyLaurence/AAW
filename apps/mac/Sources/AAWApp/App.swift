@@ -43,19 +43,21 @@ struct Launch {
     }
 
     /// A key press: a key by name, such as `space`, `delete`, `left` or `z`,
-    /// after any of `cmd+`, `shift+` and `opt+`.
+    /// after any of `cmd+`, `shift+` and `opt+`; `up+a` lets the key go.
     struct Key: Equatable {
         var characters: String
         var code: UInt16
         var modifiers: NSEvent.ModifierFlags = []
         /// One character of typed text, rather than a key of its own.
         var typed = false
+        /// The key lifted rather than pressed: a note of the typing keyboard let go.
+        var up = false
 
         /// Where each letter is on the keyboard, which menus match keys by.
         private static let letters: [Character: UInt16] = [
             "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
             "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38,
-            "k": 40, "n": 45, "m": 46,
+            "k": 40, "n": 45, "m": 46, ";": 41, "'": 39,
         ]
         private static let named: [String: (String, UInt16)] = [
             "space": (" ", 49), "return": ("\r", 36), "delete": ("\u{7f}", 51), "escape": ("\u{1b}", 53),
@@ -69,6 +71,10 @@ struct Launch {
             var parts = text.split(separator: "+").map(String.init)
             guard let name = parts.popLast() else { return nil }
             for part in parts {
+                if part == "up" {
+                    up = true
+                    continue
+                }
                 guard let flag = Self.modifierNames[part] else { return nil }
                 modifiers.insert(flag)
             }
@@ -559,12 +565,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             // With Shift, a letter arrives as its capital, which menus match.
             let characters = key.modifiers.contains(.shift) ? key.characters.uppercased() : key.characters
             guard let event = NSEvent.keyEvent(
-                with: .keyDown, location: .zero, modifierFlags: key.modifiers, timestamp: now,
+                with: key.up ? .keyUp : .keyDown, location: .zero, modifierFlags: key.modifiers, timestamp: now,
                 windowNumber: window.windowNumber, context: nil, characters: key.characters,
                 charactersIgnoringModifiers: characters, isARepeat: false, keyCode: key.code
             ) else { return }
+            // A key pressed goes to the window's key equivalents first, as a
+            // person's does: the typing keyboard's notes are taken there.
+            if !key.up, window.performKeyEquivalent(with: event) { return }
             // A key with Command is a menu's, as it is when a person presses it.
-            if key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
+            if !key.up, key.modifiers.contains(.command), NSApp.mainMenu?.performKeyEquivalent(with: event) == true { return }
             // To the window itself, as a click is: the app has no key
             // window while another app, or another AAW, is in front.
             window.sendEvent(event)
@@ -786,6 +795,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator(),
             item("Record", #selector(SongWindowController.toggleRecord(_:)), "r", []),
             countInHolder,
+            // The Mac's keys as a piano, through the armed or selected MIDI track.
+            item("Typing Keyboard", #selector(SongWindowController.toggleTypingKeyboard(_:)), "K"),
             .separator(),
             // A note left where the song is playing, for the agent to read.
             item("Add Marker", #selector(SongWindowController.addMarker(_:)), "m", []),
@@ -862,6 +873,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 /// A project's window. Menu commands reach it through the responder chain.
+/// A song's window. While the typing keyboard is on, its note keys are
+/// taken here, before the menus' key equivalents and the views' keys see
+/// them, and let go as they are lifted, which only the window sees.
+final class SongWindow: NSWindow {
+    var typing: ((NSEvent) -> Bool)?
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if typing?(event) == true { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown || event.type == .keyUp, typing?(event) == true { return }
+        super.sendEvent(event)
+    }
+}
+
 final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuItemValidation {
     let model: SongModel
     /// Called when the window closed, with whether the project was deleted.
@@ -878,7 +906,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     init(model: SongModel, size: CGSize?, asks: Bool = true) {
         self.model = model
         self.asks = asks
-        let window = NSWindow(
+        let window = SongWindow(
             contentRect: CGRect(origin: .zero, size: size ?? CGSize(width: 1280, height: 760)),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
         )
@@ -891,8 +919,24 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         if size == nil { window.setFrameAutosaveName("song") }
         super.init(window: window)
         window.delegate = self
+        window.typing = { [weak self] event in self?.typingKey(event) ?? false }
         model.onClosed = { [weak self] in self?.close() }
         followTitle()
+    }
+
+    /// A key of the typing keyboard, while it is on and no text is being
+    /// typed: pressed, a note held through the MIDI tracks it plays, or the
+    /// octave or velocity moved; lifted, the note let go. True when the key
+    /// was taken, so neither a menu nor a view sees it.
+    func typingKey(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown || event.type == .keyUp, model.typingKeyboard else { return false }
+        guard !(window?.firstResponder is NSText) else { return false }
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty else { return false }
+        let characters = event.charactersIgnoringModifiers ?? ""
+        if event.type == .keyDown {
+            return model.typingKeyDown(code: event.keyCode, characters: characters, isRepeat: event.isARepeat)
+        }
+        return model.typingKeyUp(code: event.keyCode, characters: characters)
     }
 
     @available(*, unavailable)
@@ -1062,6 +1106,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func returnToStart(_ sender: Any?) { model.returnToStart() }
     @objc func goToBeginning(_ sender: Any?) { model.goToBeginning() }
     @objc func toggleLoop(_ sender: Any?) { model.toggleLoop() }
+    @objc func toggleTypingKeyboard(_ sender: Any?) { model.toggleTypingKeyboard() }
     @objc func toggleRecord(_ sender: Any?) { model.toggleRecord() }
     @objc func chooseCountIn(_ sender: NSMenuItem) {
         if let bars = sender.representedObject as? Int { RecordPreferences.shared.countIn = UInt32(bars) }
@@ -1173,6 +1218,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(toggleLoop(_:)):
             item.state = model.transport.loopRegion == nil ? .off : .on
             return !typing
+        case #selector(toggleTypingKeyboard(_:)): item.state = model.typingKeyboard ? .on : .off
         case #selector(toggleActivity(_:)): item.state = model.showsActivity ? .on : .off
         case #selector(toggleAutomation(_:)):
             item.state = model.showsAutomation ? .on : .off
