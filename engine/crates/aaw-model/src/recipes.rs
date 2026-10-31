@@ -35,8 +35,8 @@ const RECIPES: &[Recipe] = &[
             ("daw synth add song bass --patch \"Sub Bass\"", "A new MIDI track playing a factory patch; daw patch list names them all."),
             ("daw clip add song bass --id bassline --length-beats 32", "A note clip of 32 beats at beat 0. Its notes are placed from its start."),
             (
-                "daw note add song tracks.bass.clips.bassline --notes '[{\"pitch\": \"C2\", \"duration\": 3.5}, {\"pitch\": \"A#1\", \"at\": 8, \"duration\": 3.5}, {\"pitch\": \"C2\", \"at\": 16, \"duration\": 3.5}, {\"pitch\": \"A#1\", \"at\": 24, \"duration\": 3.5}]'",
-                "Notes by name or MIDI number, C4 being middle C; at and duration in beats.",
+                "daw note write song tracks.bass.clips.bassline \"c2 - - . | . . . . | a#1 - - . | . . . . | c2 - - . | . . . . | a#1 - - . | . . . .\" --grid 1",
+                "Notes as text: a token a cell of --grid beats, here a beat, a pitch with its octave, - holding it a cell longer, . a rest, and | a bar line that is checked, so a miscount is refused where it is. c2,eb3,g3 is a chord and c2:8 a note of 8 cells; daw describe midi.text has the rest, and daw note add places notes by their fields.",
             ),
             ("daw batch song chords.json", "Runs the commands of the file below as one undo step: a pad track with chords."),
             ("daw effect add song master --type limiter", "A limiter on the master holds the render under full scale."),

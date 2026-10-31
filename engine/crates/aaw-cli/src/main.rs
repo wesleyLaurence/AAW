@@ -812,6 +812,24 @@ enum NoteCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
+    /// Write notes from a text, a token a cell on a grid, rows as voices:
+    /// "c2 . g2 . | c2,eb3,g3 - - -", a pitch with its octave, . a rest,
+    /// - a hold, [c2 d2] a cell split, c2:8 a length in cells, c2@70 a
+    /// velocity, | a bar line that is checked (daw describe midi.text).
+    Write {
+        project: Song,
+        clip: String,
+        text: String,
+        /// Beats after the clip's start where the text begins.
+        #[arg(long, default_value = "0")]
+        at: String,
+        /// A cell's beats: 1/4 is a sixteenth note, 1/2 an eighth, 1 a beat.
+        #[arg(long, default_value = "1/4")]
+        grid: String,
+        /// First remove the clip's notes that start within the text's span.
+        #[arg(long)]
+        replace: bool,
+    },
     /// Change a note's --pitch, --at, --duration or --velocity.
     #[command(after_help = fields_help("Note", &["id"]))]
     Set {
@@ -858,7 +876,9 @@ enum NoteCmd {
         notes: Vec<String>,
     },
     /// The notes of a note clip, or of a MIDI track's clips, with their names
-    /// and song beats; --from and --to keep those starting in a range of song beats.
+    /// and song beats; --from and --to keep those starting in a range of song
+    /// beats. --as text adds each clip's notes as note text, a row a voice,
+    /// and off_grid, the notes --grid could not hold (daw describe midi.text).
     List {
         project: Song,
         path: String,
@@ -866,6 +886,12 @@ enum NoteCmd {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
+        /// text: the notes as note text too.
+        #[arg(long = "as", value_name = "FORM")]
+        form: Option<String>,
+        /// A cell's beats for --as text: 1/4 is a sixteenth note.
+        #[arg(long, default_value = "1/4")]
+        grid: String,
     },
 }
 
@@ -1683,9 +1709,11 @@ fn group_help() -> String {
 
 fn clip_help() -> String {
     format!(
-        "Fields of a pattern clip:\n{}\nFields of a note clip, on a MIDI track:\n{}",
+        "Fields of a pattern clip:\n{}\nFields of a note clip, on a MIDI track:\n{}{}{}",
         takes("Clip", &["pattern"]),
-        takes("NoteClip", &[])
+        takes("NoteClip", &[]),
+        flag_line("text", "note text written from the clip's start, which is as long as the text in whole bars unless --length-beats says (daw describe midi.text)"),
+        flag_line("grid", "a cell of --text in beats, 1/4 unless given")
     )
 }
 
@@ -1941,7 +1969,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
             match command {
                 Command::Inspect => Ok(s.inspect()),
                 Command::Get { path } => s.get(&path),
-                Command::Notes { path, from, to } => s.notes(&path, from.as_ref(), to.as_ref()),
+                Command::Notes { path, from, to, text, grid } => s.notes(&path, from.as_ref(), to.as_ref(), text, grid.as_ref()),
                 Command::Map { per, from, to, tracks, lanes } => s.map(per.as_ref(), from.as_ref(), to.as_ref(), &tracks, lanes),
                 Command::Markers => Ok(s.markers()),
                 Command::MidiExport { clip, file } => s.export_midi(&clip, &file),
@@ -2891,6 +2919,16 @@ fn run(cli: &Cli) -> Result<Json> {
                 };
                 edit(project, C::NoteAdd { clip: clip.clone(), notes, fields })
             }
+            NoteCmd::Write { project, clip, text, at, grid, replace } => edit(
+                project,
+                C::NoteWrite {
+                    clip: clip.clone(),
+                    text: text.clone(),
+                    at: Some(parse_value(at)),
+                    grid: Some(parse_value(grid)),
+                    replace: *replace,
+                },
+            ),
             NoteCmd::Set { project, note, f } => edit(
                 project,
                 C::NoteSet {
@@ -2930,14 +2968,23 @@ fn run(cli: &Cli) -> Result<Json> {
                     pitch: Json::String(pitch.clone()),
                 },
             ),
-            NoteCmd::List { project, path, from, to } => edit(
-                project,
-                C::Notes {
-                    path: path.clone(),
-                    from: from.as_deref().map(parse_value),
-                    to: to.as_deref().map(parse_value),
-                },
-            ),
+            NoteCmd::List { project, path, from, to, form, grid } => {
+                let text = match form.as_deref() {
+                    None => false,
+                    Some("text") => true,
+                    Some(other) => return Err(format!("--as takes text, not {other}")),
+                };
+                edit(
+                    project,
+                    C::Notes {
+                        path: path.clone(),
+                        from: from.as_deref().map(parse_value),
+                        to: to.as_deref().map(parse_value),
+                        text,
+                        grid: text.then(|| parse_value(grid)),
+                    },
+                )
+            }
         },
         Top::Instrument(i) => match i {
             InstrumentCmd::Set { project, track, instrument } => {

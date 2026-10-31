@@ -1,9 +1,9 @@
-# Note text — proposed
+# Note text — implemented October 31, 2026
 
-The first of the backlog's Ideas lines from the agent's session driving the CLI
-on October 31, 2026: pitched music written as the drum rows are, a token a
-cell, in place of a JSON list of notes whose every `at` the agent adds up by
-hand. Planned with the person on October 31, 2026.
+Pitched music written as the drum rows are, a token a cell, in place of a
+JSON list of notes whose every `at` the agent adds up by hand. The first of
+the backlog's Ideas lines from the agent's session driving the CLI on
+October 31, 2026, planned with the person that day (D171).
 
 ## What
 
@@ -12,22 +12,26 @@ hand. Planned with the person on October 31, 2026.
   start, each cell `--grid` beats long (`1/4`, a sixteenth note, unless
   given, as `note quantize` and a pattern's grid). `--replace` first removes
   the clip's notes that start inside the span the text covers, so one bar
-  can be rewritten. A text that runs past the clip's end makes the clip long
-  enough, and the reply says `resized`. One edit, one undo step; the reply
-  lists the paths made, as `note add` does, and `label` is `Write 12 notes
-  to clip b`.
+  can be rewritten, and the reply counts them as `removed`. A text that runs
+  past the clip's end makes the clip long enough, and the reply says
+  `resized` with the new length. One edit, one undo step; the reply lists
+  the paths made, as `note add` does, and `label` is `Write 12 notes to
+  clip b at 0`.
 - **`daw note list ... --as text [--grid 1/4]`** prints the same notation
-  back: `text` for each clip, a row a voice from the highest down, and
-  `off_grid`, the refs of notes whose start or length the grid could not
-  hold, each rounded to its nearest cell in the text. The agent reads what
-  it wrote, and what the person played, as lines of music.
+  back: `text` for each clip, a row a voice from the highest down, `grid`,
+  and `off_grid`, the refs of notes whose start or length the grid could not
+  hold, each written at its nearest cell. The agent reads what it wrote, and
+  what the person played, as lines of music.
 - **`daw clip add SONG TRACK --text TEXT [--grid 1/4]`** makes a note clip
-  as long as the text, in whole bars, and writes it, as one step.
+  as long as the text, in whole bars unless `--length-beats` is given, and
+  writes it, as one step; the reply counts the `notes`.
 - **`note.write`** is the host command, `{"op": "note.write", "clip": PATH,
   "text": "...", "at": 0, "grid": "1/4", "replace": false}`, in `daw batch`
-  and `daw describe batch` too.
+  and `daw describe batch` too; `clip.add` takes `text` and `grid`, and
+  `notes` takes `text: true` and `grid`.
 - **`daw describe midi.text`** is the notation's reference; `midi.commands`
-  and `daw describe start` write the bassline as one line of it.
+  names the commands, and `daw describe start` writes its bassline as one
+  line of it.
 
 ## The notation
 
@@ -44,36 +48,42 @@ c2,g2:32
 - **A pitch** is a name with its octave, `c2`, `bb1`, `f#3`, `C4` (middle C,
   60), in either case, or a MIDI number, `36`. The octave is always written:
   nothing carries from the note before, so each token is read alone. A note
-  starts at its cell and lasts one cell unless held.
+  starts at its cell and lasts one cell unless held or given a length.
 - **A hold `-`** makes the previous cell's note, or every note of its chord,
-  one cell longer. It may follow `|`, so a pad holds across a bar line. A
-  hold after a rest, or first in the text, is refused.
+  one cell longer; inside a split, the split's share. It may follow `|`, so
+  a pad holds across a bar line. A hold after a rest, or first in the text,
+  is refused.
 - **A length `:N`** after a pitch makes its note N cells long, `c2:32`,
   whatever the cells after it hold, so a sustain under a melody needs no
   row of dashes. `c2 - - -` and `c2:4 . . .` are the same four beats on a
   `1` grid.
 - **A chord** is pitches joined by commas with no spaces, `c2,eb3,g3`: one
-  token, one cell, every note at the same start; `:N` after the chord gives
-  all its notes the length, `c2,g2:32`, and after one pitch only that one,
-  `c2:32,e4`.
+  token, one cell, every note at the same start; `:N` on the last pitch is
+  the chord's, for the pitches without one of their own, `c2,g2:32`, and on
+  an earlier pitch its own, `c2:32,e4`.
 - **A split `[ ]`** divides one cell evenly among the tokens inside it:
   `[bb1 c2]` is two thirty-second notes on a sixteenth grid, `[c3 d3 e3]`
-  with `--grid 1` a beat of eighth-note triplets. Splits do not nest.
+  with `--grid 1` a beat of eighth-note triplets. Splits do not nest, and
+  hold no bar line.
 - **Velocity** is `@N` after a pitch or a chord, `c2@70`, `c2,g2@90`, 1 to
   127; 100 unless written, as a note's default. With a length, `c2:4@70`.
 - **A bar line `|`** says the next cell begins a bar. It is optional, and
   where written it is checked: the cells since the last bar line must be a
   bar of the song's time signature at this grid, `row 1, bar 2 has 15
-  cells; a bar of 4/4 on a 1/4 grid has 16`, so a miscount is refused where
-  it is instead of moving every bar after it. `--at` must then be on a bar.
-  A row may stop short; what it does not write is rest.
-- **A comment** runs from `#` to the end of the row, so `--as text` can lead
-  a row with its song beat, `# 16`, and the text paste back.
-- **Reserved:** a token with a capital letter and no octave, `Am7`, is not
-  a pitch today and is refused by name, kept for chord symbols from the
-  backlog's note transformations item.
-- **Every error names its place:** `row 2, bar 2, cell 7: `cb9` is not a
-  pitch`.
+  cells; a bar of 4 beats on a 1/4 grid has 16`, so a miscount is refused
+  where it is instead of moving every bar after it. With bar lines, `--at`
+  is whole bars from the clip's start, and the bar must be whole cells of
+  the grid (a bar of 7/8 is 14 cells of `1/4`, and not whole cells of `1`).
+  A row may stop short; what it does not write is rest. A `|` with no cell
+  since the last is ignored, so a text may begin or end with one.
+- **A comment** runs from a `#` where a token starts to the end of the row;
+  the `#` of `a#4` is a sharp.
+- **Reserved:** a token with a capital A to G and a quality or no octave,
+  `Am7`, `Cmaj7`, `G`, is refused by name and kept for chord symbols from
+  the backlog's note transformations item. `A7` with its octave is the
+  pitch.
+- **Every error names its place:** `row 2, bar 2, cell 7: `h2` is not a
+  pitch: a name with its octave, c2 or F#3, or a MIDI number`.
 
 Positions are exact, as the song's are: a cell at index 5 on a `1/4` grid
 is `5/4`, a split's thirds are fractions, nothing is rounded on the way in.
@@ -103,59 +113,73 @@ to follow, staves stacked only to show what sounds together. Drums on a
 MIDI track, where there is no contour, are a row a pitch already, as
 `pattern steps`.
 
-## Design
+## How it works
 
-- **Parser in `aaw-model`**, beside `step_cells`: `note_text::parse(text,
-  grid, bar_beats, at) -> Result<Vec<NoteFields>, String>`, pure, with the
-  cell index, bar and token in every error. Pitch names through
-  `rules::note_name`'s inverse, the one `note add` uses. The printer,
-  `note_text::print(notes, grid, bar_beats) -> (String, Vec<ref>)`, is its
-  inverse on grid-aligned notes. Voices: the notes sorted by start then
-  pitch, highest first, each put in the first row whose last note has ended
-  by its start, else a new row, so a held dyad takes one row and the melody
-  over it the next; notes of one start and length are a chord token. Rows
-  print from the highest first note down. Holds are `-` within a bar and
-  `:N` when a note crosses a bar line; `[ ]` when the notes in a cell split
-  it evenly; rounding and `off_grid` otherwise.
+- **Parser and printer in `aaw-model`**, `note_text.rs`, beside
+  `step_cells`: `parse(text, grid, bar, at)` is pure and gives `Written`
+  notes in beats from the clip's start and the `span` the text covers, the
+  longest row with rests counted or the last note's end where a length runs
+  past it; every error carries its row, bar and cell. Pitch names go
+  through `rules::midi`, the one `note add` uses. `print(notes, grid, bar)`
+  is its inverse on grid-aligned notes: each note at its nearest cell,
+  halfway later, its length in cells, one at least, and counted `off_grid`
+  when either moved; notes of one start, length and velocity are a chord
+  token; tokens by start then the highest first, each put in the first row
+  whose last note has ended by its start, else a new row, so a held dyad
+  takes one row and the melody over it the next; rows from the highest
+  pitch down. Holds are `-` within a bar and `:N` when a note crosses a bar
+  line; a row stops at its last token, trailing rests left off; a note
+  before the clip is left out and counted. The notation's own examples
+  print back as written.
 - **Host op `NoteWrite {clip, text, at, grid, replace}`** in
   `aaw-host/command.rs`: parses with the song's time signature, removes
-  under `--replace`, then inserts as `NoteAdd` does and names the notes with
-  `name_notes`; resizes the clip when the span passes its end; one label.
+  under `replace` from the last index, then inserts as `NoteAdd` does and
+  names the notes with `name_notes`; sets `length_beats` when the span
+  passes the clip's end; one label. `ClipAdd` on a MIDI track takes `text`
+  and `grid` out of its fields, sets the length to whole bars unless given,
+  and puts the notes in. `Session.notes` prints the kept notes of each clip
+  with `text`.
 - **CLI** in `aaw-cli/main.rs`: `NoteCmd::Write`, `--as text` and `--grid`
-  on `NoteCmd::List`, `--text` on `clip add` composed as a labeled batch of
-  `clip.add` and `note.write`.
-- **Batch** `note.write` in `aaw-ffi/edits.rs`; `describe batch.note` lists
-  it.
-- **`describe`**: a `text` part under `midi` in `aaw-model/contract.rs` with
-  the notation above; `commands` and `timing` updated; the start recipe in
-  `recipes.rs` writes its bassline with `note write`, and the recipe test
-  runs it as written.
-- **The app** is untouched. A text field in the piano roll that shows the
-  clip as text and takes it back is a Later line.
+  on `NoteCmd::List`, `--text` and `--grid` in `clip add --help`.
+- **`describe`**: the `text` part under `midi` in `aaw-model/contract.rs`;
+  `commands` names the three; the start recipe in `recipes.rs` writes its
+  bassline with `note write` on a grid of a beat, and the recipes test runs
+  it as written.
+- **The app** is untouched.
 
-## Done when
+## Checked
 
-- `cargo test` in `aaw-model`: every token kind, a chord held across a bar
-  line, `:N` on a pitch, a chord and one pitch of a chord, a split,
-  velocity, numbers as pitches, a comment, two rows, a row stopping short,
-  the bar check in 4/4, 3/4 and 7/8, each refusal with its place, and
-  `print(parse(t)) == t` for the notation's own examples: a dyad held under
-  a melody reads back as two rows, melody first.
-- `aaw-host/tests/midi.rs`: `note.write` at 0 and at a bar, `replace`
-  clearing only the span, the clip resized and said so, IDs continuing from
-  the clip's, one undo step.
-- `aaw-ffi/tests/song.rs`: the batch op and its refusals.
-- `tests/test_midi.py`: `daw note write`, `daw note list --as text` giving
-  the text back, `off_grid` on a note at 1.975, `daw clip add --text`.
-- `daw describe start` makes its bassline in one line and the recipes test
-  passes as written.
+- `aaw-model/src/note_text.rs`: every token kind, a chord held across a bar
+  line, `:N` on a pitch, a chord and one pitch of a chord, a hold inside
+  and after a split, two rows and a row stopping short, the span, bar
+  lines in 4/4, 3/4 and 7/8 with a miscount refused where it is and `--at`
+  off a bar refused, each refusal with its place, the notation's examples
+  printing back as written, a dyad held under a melody reading back as two
+  rows melody first, and off-grid notes at their nearest cell and counted.
+- `aaw-host/tests/midi.rs`: `clip.add` with a text of two rows at a bar,
+  `notes` with text giving it back, `note.write` at a bar with `replace`
+  taking only the notes in its span and the clip resized, the default grid
+  and an off-grid note named by its ref, one undo step, and what is refused
+  before anything is written.
+- `tests/test_midi.py`: `daw clip add --text`, `daw note list --as text`
+  on two grids with `off_grid`, `daw note write --at --replace` with
+  `removed` and `resized`, a miscount refused with nothing written, and
+  `--as` taking only `text`.
+- `tests/test_recipes.py`: `daw describe start` runs as written with its
+  bassline in one line. `daw describe midi` grew by the text part, from
+  12991 bytes to 15533, so `test_discovery.py`'s budget for it is 16000
+  bytes, from 13000.
+- Tried on a scratch song from the terminal: written, read back, rewritten
+  in place, a batch of `clip.add` with a text and `note.write`, and
+  `daw map` showing the clips. Nothing heard.
 
-## Open questions
+## Limits
 
-- A rest is `.` as the drum rows have it, or `~` as TidalCycles has it. `.`,
-  one convention in one tool.
-- Chords by commas, `c2,eb3,g3`, or by brackets, `[c2 eb3 g3]`, with splits
-  then needing another pair. Commas: a chord stays one token, one cell.
-- Whether `--as text` prints the song beat of each bar at the line's start,
-  `17 | c2 . . .`, for a clip read from the middle of a song. Yes, as a
-  comment the parser ignores, so a line can be pasted back.
+- The printer writes no split: a note between the cells of the grid is
+  `off_grid` and at its nearest cell; a finer `--grid` holds it.
+- Chord symbols are refused by name; writing `Am7` as its notes is the
+  backlog's note transformations item.
+- A `#` where a token starts is a comment, so a MIDI number cannot follow
+  one on the same row.
+- The piano roll has no text field; a clip shown and taken as text in the
+  app is a Later line.

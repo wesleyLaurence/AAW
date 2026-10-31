@@ -11,7 +11,7 @@ use crate::tree::{self, Item, Loc, Node, Step};
 use aaw_model::value::Value;
 use aaw_model::Beat;
 use num_rational::BigRational;
-use num_traits::{Signed, Zero};
+use num_traits::{One, Signed, Zero};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value as Json};
 
@@ -201,6 +201,23 @@ pub enum Command {
         notes: Vec<Fields>,
         #[serde(flatten)]
         fields: Fields,
+    },
+    /// Writes the notes `text` describes, a token a cell on a grid with rows
+    /// as voices (daw describe midi, text), into a note clip from `at` beats
+    /// after its start, 0 unless given, each cell `grid` beats, 1/4 unless
+    /// given. With `replace`, the clip's notes that start within the span
+    /// the text covers go first. A text past the clip's end makes the clip
+    /// long enough.
+    #[serde(rename = "note.write")]
+    NoteWrite {
+        clip: String,
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        at: Option<Json>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grid: Option<Json>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        replace: bool,
     },
     #[serde(rename = "note.set")]
     NoteSet {
@@ -800,7 +817,9 @@ pub enum Command {
     },
     /// The notes of a note clip, or of a MIDI track's clips, with their names
     /// and song beats; `from` and `to` keep those that start in a range of
-    /// song beats.
+    /// song beats. With `text`, each clip's notes as note text too, a token
+    /// a cell of `grid` beats, 1/4 unless given, and which notes the grid
+    /// could not hold.
     #[serde(rename = "notes")]
     Notes {
         path: String,
@@ -808,6 +827,10 @@ pub enum Command {
         from: Option<Json>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         to: Option<Json>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        text: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        grid: Option<Json>,
     },
     /// The song as a grid of tracks by bars: where each plays, the same
     /// music under the same letter, and clips that sound at once. `per` is
@@ -1100,6 +1123,19 @@ pub(crate) fn set(node: &mut Node, key: &str, value: Value) {
     if let Some(map) = node.map_mut() {
         map.insert(key.to_string(), Node::Leaf(value));
     }
+}
+
+/// A written note as a note's fields.
+fn note_fields(n: &aaw_model::note_text::Written) -> Fields {
+    let beat = |x: &BigRational| node_json(&Node::Leaf(beat_value(x)));
+    let mut f = Fields::new();
+    f.insert("pitch".into(), Json::from(n.pitch));
+    f.insert("at".into(), beat(&n.at));
+    f.insert("duration".into(), beat(&n.duration));
+    if n.velocity != 100 {
+        f.insert("velocity".into(), Json::from(n.velocity));
+    }
+    f
 }
 
 /// A beat given to a command, exactly.
@@ -2040,6 +2076,23 @@ impl<'a> Edit<'a> {
                     if !f.contains_key("id") {
                         f.insert("id".into(), Json::String(self.next_clip_id()));
                     }
+                    // A text makes the clip's notes, and its length in whole
+                    // bars unless one is given.
+                    let (text, grid) = (f.shift_remove("text"), f.shift_remove("grid"));
+                    if let Some(text) = text {
+                        let text = match &text {
+                            Json::String(t) => t.clone(),
+                            other => other.to_string(),
+                        };
+                        let parsed = self.written(&text, grid.as_ref(), &BigRational::zero())?;
+                        if !f.contains_key("length_beats") {
+                            let bar = self.meter().bar();
+                            let bars = (&parsed.span / &bar).ceil().max(BigRational::one());
+                            f.insert("length_beats".into(), node_json(&Node::Leaf(beat_value(&(bars * bar)))));
+                        }
+                        f.insert("notes".into(), Json::Array(parsed.notes.iter().map(|n| Json::Object(note_fields(n))).collect()));
+                        out.report.insert("notes".into(), Json::from(parsed.notes.len()));
+                    }
                     let mut node = with_empty(&f, &["notes"], &[])?;
                     self.name_notes(&mut node);
                     out.made.push(self.insert(&loc, "clips", None, node)?);
@@ -2401,6 +2454,43 @@ impl<'a> Edit<'a> {
                 self.name_notes(&mut clip_node);
                 *self.node_mut(&loc) = clip_node;
                 out.label = format!("Add {} to clip {}", count(all.len(), "note"), self.clip_name(&loc));
+            }
+            NoteWrite { clip, text, at, grid, replace } => {
+                let loc = self.note_clip(clip)?;
+                let at = match at {
+                    Some(a) => beat_at(a)?,
+                    None => BigRational::zero(),
+                };
+                let parsed = self.written(text, grid.as_ref(), &at)?;
+                let end = &at + &parsed.span;
+                if *replace {
+                    // From the last, so each index still names its note.
+                    let starts: Vec<usize> = self
+                        .node(&loc)
+                        .get("notes")
+                        .map_or(&[][..], Node::items)
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, n)| exact(n.node.get("at")).is_some_and(|a| a >= at && a < end))
+                        .map(|(i, _)| i)
+                        .collect();
+                    for i in starts.iter().rev() {
+                        self.take(&loc, "notes", *i)?;
+                    }
+                    out.report.insert("removed".into(), Json::from(starts.len()));
+                }
+                let made = parsed.notes.len();
+                for n in &parsed.notes {
+                    out.made.push(self.insert(&loc, "notes", None, map_node(&note_fields(n))?)?);
+                }
+                let mut clip_node = self.node(&loc).clone();
+                self.name_notes(&mut clip_node);
+                *self.node_mut(&loc) = clip_node;
+                if exact(self.node(&loc).get("length_beats")).is_some_and(|l| l < end) {
+                    self.set_leaf(&loc, "length_beats", beat_value(&end));
+                    out.report.insert("resized".into(), node_json(&Node::Leaf(beat_value(&end))));
+                }
+                out.label = format!("Write {} to clip {}", count(made, "note"), self.clip_name(&loc));
             }
             NoteSet { note, fields } => {
                 let (clip, i) = self.member(note, "notes", "a note")?;
@@ -3780,6 +3870,16 @@ impl<'a> Edit<'a> {
     fn audio_clip(&self, path: &str) -> Option<Loc> {
         let (owner, i) = self.member(path, "audio", "an audio clip").ok()?;
         Some([owner, vec![Step::Key("audio".into()), Step::Index(i)]].concat())
+    }
+
+    /// The notes a text writes from `at` beats after a clip's start, on a
+    /// grid of `grid` beats, 1/4 unless given, with the song's bars.
+    fn written(&self, text: &str, grid: Option<&Json>, at: &BigRational) -> Result<aaw_model::note_text::Parsed> {
+        let grid = match grid {
+            Some(g) => beat_at(g)?,
+            None => BigRational::new(1.into(), 4.into()),
+        };
+        aaw_model::note_text::parse(text, &grid, &self.meter().bar(), at)
     }
 
     /// The note clip a path names.

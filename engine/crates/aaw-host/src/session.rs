@@ -1060,7 +1060,10 @@ impl Session {
         }))
     }
 
-    pub fn notes(&self, path: &str, from: Option<&Json>, to: Option<&Json>) -> Result<Json> {
+    /// With `text`, each clip's notes as note text on `grid` beats a cell,
+    /// 1/4 unless given, and `off_grid`, the refs of the notes the grid
+    /// could not hold.
+    pub fn notes(&self, path: &str, from: Option<&Json>, to: Option<&Json>, text: bool, grid: Option<&Json>) -> Result<Json> {
         let p = &self.doc.project;
         let root = self.doc.tree();
         // A track may be named by its ID alone.
@@ -1077,6 +1080,10 @@ impl Session {
         let midi = t.midi.as_ref().ok_or_else(|| format!("{} is not a MIDI track", t.id))?;
         let beat = |j: Option<&Json>| j.map(beat_arg).transpose();
         let (from, to) = (beat(from)?, beat(to)?);
+        let grid = match grid {
+            Some(g) => beat_arg(g)?,
+            None => num_rational::BigRational::new(1.into(), 4.into()),
+        };
         let sampler = midi.sampler();
         let mut clips = Vec::new();
         for (ci, c) in midi.clips.iter().enumerate() {
@@ -1091,12 +1098,14 @@ impl Session {
             ];
             let (at, length) = (c.at_exact(), c.length_exact());
             let mut notes = Vec::new();
+            let mut kept = Vec::new();
             for (ni, n) in c.notes.iter().enumerate() {
                 let song_at = &at + n.at_exact();
                 if from.as_ref().is_some_and(|f| &song_at < f) || to.as_ref().is_some_and(|t| &song_at >= t) {
                     continue;
                 }
                 let note_loc = [clip_loc.to_vec(), vec![tree::Step::Key("notes".into()), tree::Step::Index(ni)]].concat();
+                kept.push(n.clone());
                 let mut row = json!({
                     "ref": self.reference(&root, &note_loc),
                     "id": n.id,
@@ -1118,20 +1127,30 @@ impl Session {
             if only.is_none() && notes.is_empty() && (from.is_some() || to.is_some()) {
                 continue;
             }
-            clips.push(json!({
+            let mut clip = json!({
                 "ref": self.reference(&root, &clip_loc),
                 "path": tree::path_text(&root, &clip_loc),
                 "id": c.id,
                 "at": beat_json(&at),
                 "length_beats": beat_json(&length),
                 "notes": notes,
-            }));
+            });
+            if text {
+                let printed = aaw_model::note_text::print(&kept, &grid, &p.session.meter().bar());
+                clip["text"] = json!(printed.text);
+                clip["off_grid"] = json!(printed.off_grid.iter().map(|i| notes[*i]["ref"].clone()).collect::<Vec<_>>());
+            }
+            clips.push(clip);
         }
-        Ok(json!({
+        let mut out = json!({
             "track": t.id,
             "instrument": midi.instrument.as_ref().map(|i| i.kind()),
             "clips": clips,
-        }))
+        });
+        if text {
+            out["grid"] = beat_json(&grid);
+        }
+        Ok(out)
     }
 
     fn view(&self, node: &Node, full: &Node, loc: &[tree::Step]) -> Json {

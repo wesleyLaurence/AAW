@@ -413,7 +413,10 @@ does not play: a clip trimmed from either edge keeps the notes it passes.
 `note.quantize` moves notes' starts onto the nearest line of a grid counted
 from the clip's start, all the way or by a strength in percent, and leaves
 their lengths; nothing else snaps a written position (see
-[quantize.md](features/quantize.md)). With
+[quantize.md](features/quantize.md)). `note.write`, `clip.add` with `text`
+and `notes` with `text` write and read a clip's notes as note text, a token a
+cell on a grid with checked bar lines and rows as voices, parsed and printed
+by `aaw-model`'s `note_text` (see [note-text.md](features/note-text.md)). With
 `loop_beats`, the notes of the clip's first so many beats play again and again
 from its start until its end, the last repetition cut off there, a note held
 across the loop's end cut there and one at or after it kept and not played;

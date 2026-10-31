@@ -407,3 +407,37 @@ def test_notes_are_quantized_onto_a_grid_by_daw(tmp_path):
     assert [n["duration"] for n in notes] == before
     listed = daw("note", "list", path, clip)["clips"][0]["notes"]
     assert [n["song_at"] for n in listed] == [4, 4, 4, 6, 6, 7]
+
+
+def test_notes_are_written_as_text_and_read_back_by_daw(tmp_path):
+    song = tmp_path / "song"
+    daw("init", song, "--tempo", 120)
+    path = song / "song.yaml"
+    daw("synth", "add", song, "bass", "--patch", "Sub Bass")
+    # A clip from a text, as long as it in whole bars; the text read back.
+    r = daw("clip", "add", song, "bass", "--id", "b", "--text", "c2 . g2 . | c2 . a#1 [a#1 c2]", "--grid", 1)
+    assert (r["path"], r["notes"]) == ("tracks.bass.clips.b", 6)
+    clip = load(path)["tracks"][0]["clips"][0]
+    assert clip["length_beats"] == 8
+    assert [(n["pitch"], n.get("at", 0), n["duration"]) for n in clip["notes"]] == [
+        (36, 0, 1), (43, 2, 1), (36, 4, 1), (34, 6, 1), (34, 7, 0.5), (36, 7.5, 0.5),
+    ]
+    listed = daw("note", "list", song, "bass", "--as", "text", "--grid", "1/2")
+    assert listed["grid"] == 0.5
+    assert listed["clips"][0]["text"] == "c2 - . . g2 - . . | c2 - . . a#1 - a#1 c2"
+    assert listed["clips"][0]["off_grid"] == []
+    # On a coarser grid the split's notes are off it and named.
+    listed = daw("note", "list", song, "tracks.bass.clips.b", "--as", "text", "--grid", 1)
+    assert listed["clips"][0]["text"] == "c2 . g2 . | c2 . a#1 a#1 | c2"
+    assert listed["clips"][0]["off_grid"] == ["tracks.bass.clips.b.notes.n5", "tracks.bass.clips.b.notes.n6"]
+    # Bar 2 rewritten in place, with a length that makes the clip longer.
+    r = daw("note", "write", song, "tracks.bass.clips.b", "f2 . f2 . | g2:8", "--at", 4, "--grid", 1, "--replace")
+    assert (r["label"], r["removed"], r["resized"], len(r["paths"])) == ("Write 3 notes to clip b at 0", 4, 16, 3)
+    listed = daw("note", "list", song, "bass", "--as", "text", "--grid", 1)
+    assert listed["clips"][0]["text"] == "c2 . g2 . | f2 . f2 . | g2:8"
+    # A miscount is refused where it is, and nothing is written.
+    with pytest.raises(ValueError, match="bar 2 has 3 cells; a bar of 4 beats on a 1 grid has 4"):
+        daw("note", "write", song, "tracks.bass.clips.b", "c2 . . . | c2 . . | c2", "--grid", 1)
+    assert len(load(path)["tracks"][0]["clips"][0]["notes"]) == 5
+    with pytest.raises(ValueError, match="--as takes text"):
+        daw("note", "list", song, "bass", "--as", "yaml")
