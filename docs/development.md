@@ -38,7 +38,7 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
   is built. Change it when the direction changes, and record the reason in
   `decisions.md`.
 - `backlog.md` is everything not built, one line an item: Next in the order to
-  build, Verify, Later and Ideas. When the person thinks out loud, put the idea
+  build, Later and Ideas. When the person thinks out loud, put the idea
   under Ideas in a line. Do not start a new notes or plan file.
 - `features/NAME.md` is one feature. Write it when a backlog item is picked up and
   needs a design: status proposed, then What, Why, Design, Done when and Open
@@ -49,12 +49,15 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
 - `decisions.md` is append-only. A choice gets a new numbered entry, and the entry
   it replaces gets "Revised by Dn".
 - `completed.md` is what was built, newest first.
+- `verify.md` is what is merged and nobody has heard or tried by hand. It is
+  the person's and long: do not read it. Add a line at the top of its list
+  without reading the rest, and change other lines only when the person asks.
 - `archive/` holds superseded documents. Do not update them or build from them.
 - Before building, read the backlog item and its feature file. One item to a
   branch and a pull request.
 - The pull request that finishes an item also moves its line from `backlog.md` to
   `completed.md` with the date, the pull request and what a person tried; adds a
-  line under Verify for anything nobody heard or tried by hand; and renumbers Next.
+  line at the top of `verify.md` for anything nobody heard or tried by hand; and renumbers Next.
 - A limit that should be lifted gets a backlog line. A limit that is simply true
   stays in the feature's file.
 
