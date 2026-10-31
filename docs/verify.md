@@ -8,6 +8,12 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **Note text:** `daw note write SONG CLIP "c2 . g2 . | c2,eb3,g3 - - -"
+  --grid 1` on a Synth track, `daw note list SONG CLIP --as text --grid 1`
+  giving it back, a two-row text with a held dyad under a melody through
+  `daw clip add SONG TRACK --text`, and the clips played; a take from the
+  typing keyboard read back with `--as text` and its `off_grid`. Only
+  scripted runs and tests; nothing heard.
 - **The typing keyboard:** a Synth or a Sampler track armed by its dot, the
   piano icon lit, a riff played on A to ' with Z and X moving the octave,
   heard as it is played, chords held and let go; R, the riff played through

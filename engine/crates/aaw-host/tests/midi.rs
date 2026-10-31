@@ -194,7 +194,7 @@ fn clips_move_resize_and_keep_to_their_kind_of_track() {
     assert_eq!(e, "tracks.drums.clips.0 is a pattern clip, not a note clip");
     // Made shorter, the clip keeps the notes past its end, which do not play.
     edit(&mut s, json!({"op": "clip.resize", "clip": clip, "length_beats": 2})).unwrap();
-    let read = s.notes(clip, None, None).unwrap();
+    let read = s.notes(clip, None, None, false, None).unwrap();
     let outside: Vec<&str> = read["clips"][0]["notes"].as_array().unwrap().iter().filter(|n| n["outside"] == json!(true)).map(|n| n["id"].as_str().unwrap()).collect();
     assert_eq!(outside, ["n5", "n6"]);
     assert_eq!(get(&s, clip)["notes"].as_array().unwrap().len(), 6);
@@ -210,14 +210,14 @@ fn notes_are_read_by_clip_or_track_and_by_song_beats() {
     let (_d, mut s) = open(true);
     phrase(&mut s);
     edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.keys.clips.clip1", "at": 16})).unwrap();
-    let all = s.notes("keys", None, None).unwrap();
+    let all = s.notes("keys", None, None, false, None).unwrap();
     assert_eq!(all["clips"].as_array().unwrap().len(), 2);
     let first = &all["clips"][0]["notes"][3];
     assert_eq!((&first["name"], &first["at"], &first["song_at"]), (&json!("D4"), &json!(1.975), &json!(5.975)));
     assert!(first["ref"].as_str().unwrap().starts_with('@'));
     // Notes starting from beat 6 until beat 17: the end of the first clip and
     // the chord of the second.
-    let some = s.notes("tracks.keys", Some(&json!(6)), Some(&json!(17))).unwrap();
+    let some = s.notes("tracks.keys", Some(&json!(6)), Some(&json!(17)), false, None).unwrap();
     let found: Vec<(String, String)> = some["clips"]
         .as_array()
         .unwrap()
@@ -226,7 +226,7 @@ fn notes_are_read_by_clip_or_track_and_by_song_beats() {
         .collect();
     let want = [("clip1", "n5"), ("clip1", "n6"), ("clip2", "n1"), ("clip2", "n2"), ("clip2", "n3")];
     assert_eq!(found, want.map(|(c, n)| (c.to_string(), n.to_string())));
-    let e = s.notes("tracks.drums", None, None).unwrap_err();
+    let e = s.notes("tracks.drums", None, None, false, None).unwrap_err();
     assert_eq!(e, "drums is not a MIDI track");
 }
 
@@ -313,4 +313,56 @@ fn notes_are_quantized_to_a_grid_from_the_clips_start_all_the_way_or_part_of_it(
         let err = edit(&mut s, bad).unwrap_err().to_string();
         assert!(err.contains(words), "{err}");
     }
+}
+
+#[test]
+fn notes_are_written_as_text_and_read_back_as_text() {
+    let (_d, mut s) = open(true);
+    edit(&mut s, json!({"op": "track.add", "id": "keys", "type": "midi"})).unwrap();
+    // A clip from a text is as long as the text in whole bars, with the
+    // text's notes; two rows, a melody over a held dyad.
+    let text = "e4 . g4 a4 . e4 . g4 | a#4 a4 . g4 . e4 . d4\nc2,g2:16";
+    let r = edit(&mut s, json!({"op": "clip.add", "track": "keys", "at": 8, "text": text, "grid": "1/2"})).unwrap();
+    assert_eq!((&r["path"], &r["notes"]), (&json!("tracks.keys.clips.clip1"), &json!(12)));
+    let clip = get(&s, "tracks.keys.clips.clip1");
+    assert_eq!((&clip["at"], &clip["length_beats"], clip["notes"].as_array().unwrap().len()), (&json!(8), &json!(8), 12));
+    assert_eq!(clip["notes"][0], json!({"id": "n1", "pitch": 64, "duration": 0.5}));
+    assert_eq!(clip["notes"][10], json!({"id": "n11", "pitch": 36, "duration": 8}));
+    let listed = s.notes("tracks.keys.clips.clip1", None, None, true, Some(&json!("1/2"))).unwrap();
+    assert_eq!((&listed["grid"], &listed["clips"][0]["text"], &listed["clips"][0]["off_grid"]), (&json!(0.5), &json!(text), &json!([])));
+    // Written at a bar with replace: the notes starting in the text's
+    // span go, bar 2's melody and not the dyad from bar 1, the new ones
+    // land, and a length past the clip's end makes the clip longer.
+    let r = edit(
+        &mut s,
+        json!({"op": "note.write", "clip": "tracks.keys.clips.clip1", "text": "f4 . f4 . | g4:4", "at": 4, "grid": 1, "replace": true}),
+    )
+    .unwrap();
+    assert_eq!((&r["label"], &r["removed"], &r["resized"]), (&json!("Write 3 notes to clip clip1 at 8"), &json!(5), &json!(12)));
+    assert_eq!(r["paths"].as_array().unwrap().len(), 3);
+    let listed = s.notes("tracks.keys.clips.clip1", None, None, true, Some(&json!("1/2"))).unwrap();
+    assert_eq!(listed["clips"][0]["text"], json!("e4 . g4 a4 . e4 . g4 | f4 - . . f4 - . . | g4 - - - - - - -\nc2,g2:16"));
+    // The default grid is a sixteenth note, and at 0; a note off it is
+    // written at its nearest cell and named.
+    edit(&mut s, json!({"op": "note.set", "note": "tracks.keys.clips.clip1.notes.n1", "at": 0.1})).unwrap();
+    let listed = s.notes("tracks.keys.clips.clip1", None, None, true, None).unwrap();
+    assert_eq!((&listed["grid"], &listed["clips"][0]["off_grid"]), (&json!(0.25), &json!([listed["clips"][0]["notes"][0]["ref"]])));
+    assert!(listed["clips"][0]["text"].as_str().unwrap().starts_with("e4 - . . g4 - a4 - . . e4 - . . g4 - | f4 - - - . . . . f4 - - - . . . . | g4"), "{}", listed["clips"][0]["text"]);
+    // One undo step, whoever wrote it.
+    let r = edit(&mut s, json!({"op": "note.write", "clip": "tracks.keys.clips.clip1", "text": "c5 c5 c5 c5"})).unwrap();
+    assert_eq!(r["label"], json!("Write 4 notes to clip clip1 at 8"));
+    s.undo(Origin::User, false).unwrap();
+    assert_eq!(get(&s, "tracks.keys.clips.clip1")["notes"].as_array().unwrap().len(), 10);
+    // What is refused, before anything is written, with its place.
+    for (bad, words) in [
+        (json!({"op": "note.write", "clip": "tracks.keys.clips.clip1", "text": "c2 . . . | c2 . .  | c2", "grid": 1}), "bar 2 has 3 cells"),
+        (json!({"op": "note.write", "clip": "tracks.keys.clips.clip1", "text": "c2 h2"}), "bar 1, cell 2: `h2` is not a pitch"),
+        (json!({"op": "note.write", "clip": "tracks.keys.clips.clip1", "text": "c2 . | c2", "at": 1, "grid": 2}), "at 1 is not a bar's start"),
+        (json!({"op": "note.write", "clip": "tracks.keys.clips.clip1", "text": "c2", "grid": 0}), "more than 0"),
+        (json!({"op": "note.write", "clip": "tracks.keys", "text": "c2"}), "not a clip"),
+    ] {
+        let e = edit(&mut s, bad).unwrap_err();
+        assert!(e.contains(words), "{e}");
+    }
+    assert_eq!(get(&s, "tracks.keys.clips.clip1")["notes"].as_array().unwrap().len(), 10);
 }

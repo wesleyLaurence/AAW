@@ -74,7 +74,7 @@ fn a_note_clip_loops_its_first_beats_until_its_end() {
     // end is kept, and note list and check say it does not play.
     assert_eq!(row(&s, "keys"), ".CCCCC..");
     assert!(legend(&s).contains("C  notes phrase, 20 beats, loops every 4 beats, 2 notes C4–E4; keys bar 2 ×5"), "{}", legend(&s));
-    let listed = s.notes(PHRASE, None, None).unwrap();
+    let listed = s.notes(PHRASE, None, None, false, None).unwrap();
     let outside: Vec<&str> = listed["clips"][0]["notes"].as_array().unwrap().iter().filter(|n| n["outside"] == json!(true)).map(|n| n["id"].as_str().unwrap()).collect();
     assert_eq!(outside, ["n3"]);
     assert_eq!(warnings(&s, "notes-outside-clip"), ["keys.phrase: notes n3 start at or after the loop's end and do not play"]);

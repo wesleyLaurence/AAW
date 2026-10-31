@@ -435,10 +435,24 @@ checkout (D75):
 
 One line each, newest first.
 
-- Pitched music written as steps, as drums are: `daw note write CLIP "C2 . G2
-  . | C2 . Bb1 ."`, a token a grid step, `.` a rest, `-` a hold, `|` a bar;
-  and a chord by name, `--chord Am7 --at 8 --duration 4`, in place of its
-  notes as JSON. Said by the agent on October 31, 2026, trying the CLI.
+- `daw note list --as text` writing a split where a cell's notes divide it
+  evenly, so a take's tuplets and a septuplet read on another grid come
+  back as `[ ]` rather than as neighbours rounded into chords named
+  `off_grid`; the printer today writes no split
+  ([note text](features/note-text.md)). Said by the agent on October 31,
+  2026, after two sketches.
+- A voicing named once in a note text and used by name, `let Q = d3,g3,c4,f4`
+  or the chord symbols of the note transformations item in Next, so that
+  twelve stabs of one quartal stack are not twelve tokens of four pitches.
+  Said by the agent on October 31, 2026, after two sketches.
+- `daw export --to NAME.wav` writes beside the shell, not in the project, so
+  an export from the checkout's root lands at the root; the project's
+  folder, or an exports folder in it, unless the path says otherwise. Found
+  by the agent on October 31, 2026.
+- A chord by name in note text, `Am7` or `--chord Am7 --at 8 --duration 4`,
+  in place of its notes; the token is reserved and refused by name
+  ([note text](features/note-text.md)). Said by the agent on October 31,
+  2026, trying the CLI; the rest of that line was built as note text.
 - `BAR:BEAT` accepted wherever a beat is taken (`--at 17:1`), and printed
   beside the beat in `note list`, `inspect` and `map`: the person says bars,
   the agent converts by hand with 1-based bars over 0-based beats. Said by
