@@ -24,7 +24,10 @@ October 31, 2026, planned with the person that day (D171).
   what the person played, as lines of music.
 - **`daw clip add SONG TRACK --text TEXT [--grid 1/4]`** makes a note clip
   as long as the text, in whole bars unless `--length-beats` is given, and
-  writes it, as one step; the reply counts the `notes`.
+  writes it, as one step; the reply counts the `notes`. The clip's other
+  fields come along, so `--text "d1 . d1 a1 . c2" --grid 1/2 --loop-beats 3
+  --length-beats 32` is a three-beat figure against the bar in one
+  command.
 - **`note.write`** is the host command, `{"op": "note.write", "clip": PATH,
   "text": "...", "at": 0, "grid": "1/4", "replace": false}`, in `daw batch`
   and `daw describe batch` too; `clip.add` takes `text` and `grid`, and
@@ -171,12 +174,21 @@ MIDI track, where there is no contour, are a row a pitch already, as
   bytes, from 13000.
 - Tried on a scratch song from the terminal: written, read back, rewritten
   in place, a batch of `clip.add` with a text and `note.write`, and
-  `daw map` showing the clips. Nothing heard.
+  `daw map` showing the clips. Then two sketches in `projects/`, each
+  rendered and exported: sixteen bars in A minor with chords, bass, melody,
+  kick and hat as text and the snare as drum steps; and twenty-four bars of
+  modal jazz, quartal stacks in a tresillo, 3-, 5- and 7-beat loops against
+  4/4, a triplet ride and quintuplet and septuplet runs. Every part was one
+  command, no `at` computed by hand; `daw map` matched each text's span and
+  `daw check` caught the cut tails and a pad in the bass's octave. The bar
+  check never fired: no miscount that day. Nothing heard.
 
 ## Limits
 
 - The printer writes no split: a note between the cells of the grid is
-  `off_grid` and at its nearest cell; a finer `--grid` holds it.
+  `off_grid` and at its nearest cell; a finer `--grid` holds it, and a
+  septuplet read on a triplet grid comes back as neighbours glued into
+  chords, named off the grid. A split-aware printer is an Ideas line.
 - Chord symbols are refused by name; writing `Am7` as its notes is the
   backlog's note transformations item.
 - A `#` where a token starts is a comment, so a MIDI number cannot follow

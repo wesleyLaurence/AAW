@@ -435,6 +435,20 @@ checkout (D75):
 
 One line each, newest first.
 
+- `daw note list --as text` writing a split where a cell's notes divide it
+  evenly, so a take's tuplets and a septuplet read on another grid come
+  back as `[ ]` rather than as neighbours rounded into chords named
+  `off_grid`; the printer today writes no split
+  ([note text](features/note-text.md)). Said by the agent on October 31,
+  2026, after two sketches.
+- A voicing named once in a note text and used by name, `let Q = d3,g3,c4,f4`
+  or the chord symbols of the note transformations item in Next, so that
+  twelve stabs of one quartal stack are not twelve tokens of four pitches.
+  Said by the agent on October 31, 2026, after two sketches.
+- `daw export --to NAME.wav` writes beside the shell, not in the project, so
+  an export from the checkout's root lands at the root; the project's
+  folder, or an exports folder in it, unless the path says otherwise. Found
+  by the agent on October 31, 2026.
 - A chord by name in note text, `Am7` or `--chord Am7 --at 8 --duration 4`,
   in place of its notes; the token is reserved and refused by name
   ([note text](features/note-text.md)). Said by the agent on October 31,
