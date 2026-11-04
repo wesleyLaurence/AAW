@@ -52,6 +52,14 @@ def played(pad, project, root: Path):
     return speed, (end - pad["start_seconds"]) / speed
 
 
+def repitch(clip) -> float:
+    """How many times as fast as written an audio clip's transpose plays its
+    file: one unless it is transposed by repitching."""
+    if clip.get("stretch", "repitch") != "repitch":
+        return 1.0
+    return 2 ** (clip.get("transpose", 0.0) / 12)
+
+
 def clip_region(track, index, clips, project, root: Path):
     """An audio clip as the engine plays it: from its lead before its beat to where
     it leaves, which is where a clip that follows it starts, and on through its
@@ -60,7 +68,7 @@ def clip_region(track, index, clips, project, root: Path):
 
     def placed(clip):
         """Its speed, the second its beat is on, and how long before it it starts."""
-        speed = tempo / clip["source_bpm"] if clip["source_bpm"] else 1.0
+        speed = (tempo / clip["source_bpm"] if clip["source_bpm"] else 1.0) * repitch(clip)
         beat = float(Fraction(str(clip["at"]))) * 60 / tempo
         return speed, beat, min(clip["lead_ms"] / 1000, clip["source_start_seconds"] / speed, beat)
 
@@ -93,7 +101,7 @@ def repetitions(clip, tempo) -> list[dict]:
     if clip.get("loop_beats") is None:
         return [clip]
     every, length = Fraction(str(clip["loop_beats"])), Fraction(str(clip["length_beats"]))
-    per_beat = 60 / (clip["source_bpm"] or tempo)
+    per_beat = 60 / (clip["source_bpm"] or tempo) * repitch(clip)
     start, out, at = Fraction(str(clip["at"])), [], Fraction(0)
     while at < length:
         beats = min(every, length - at)

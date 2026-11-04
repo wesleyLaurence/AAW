@@ -98,9 +98,10 @@ struct DetailView: View {
     }
 }
 
-/// An audio clip's settings: its level, its fades and their curve, and the
-/// tempo it follows the song's from, with how it is stretched. Each is an edit
-/// to the host, as an agent's `daw set` is.
+/// An audio clip's settings: its level, its fades and their curve, its pitch
+/// in semitones and cents, and the tempo it follows the song's from, with how
+/// it is stretched and moved in pitch. Each is an edit to the host, as an
+/// agent's `daw set` is.
 private struct AudioClipHeader: View {
     let model: SongModel
     let context: AudioContext
@@ -120,6 +121,11 @@ private struct AudioClipHeader: View {
 
     private func set(_ field: String, _ value: FieldValue) {
         model.edit(.audioSet(clip: clip.key, field: field, value: value))
+    }
+
+    /// A signed number with its unit: +3 st, −20 ct, 0 st.
+    private static func signed(_ value: Double, _ unit: String) -> String {
+        (value > 0 ? "+" : value < 0 ? "−" : "") + ValueScale.plain(abs(value)) + " " + unit
     }
 
     /// A number as it is typed: without a fraction where it has none.
@@ -174,15 +180,28 @@ private struct AudioClipHeader: View {
                 }
                 .help("The file's tempo. With one, the clip follows the song's tempo; empty, it plays as it is")
             }
-            row("Stretch") {
+            let pitch = AudioClipLayout.pitch(clip.transpose)
+            row("Pitch") {
+                HStack(spacing: 4) {
+                    KnobBar(model: model, spec: BarSpec(value: pitch.semitones, min: -48, max: 48, unit: "st", initial: 0, live: false, whole: true, text: Self.signed(pitch.semitones, "st"))) { [key = clip.key] value in
+                        .audioSet(clip: key, field: "transpose", value: .number(value: value.rounded() + pitch.cents / 100))
+                    }
+                    .help("Transpose, in semitones. With Repitch a clip moved up plays faster and is shorter; with Stretch it keeps its length")
+                    KnobBar(model: model, spec: BarSpec(value: pitch.cents, min: -50, max: 50, unit: "ct", initial: 0, live: false, whole: true, text: Self.signed(pitch.cents, "ct"))) { [key = clip.key] value in
+                        .audioSet(clip: key, field: "transpose", value: .number(value: pitch.semitones + value.rounded() / 100))
+                    }
+                    .help("Detune, in cents: hundredths of a semitone")
+                }
+            }
+            row("Mode") {
                 Picker("", selection: Binding(get: { clip.stretch }, set: { set("stretch", .text(value: $0)) })) {
                     Text("Repitch").tag("repitch")
-                    Text("Keep pitch").tag("preserve_pitch")
+                    Text("Stretch").tag("preserve_pitch")
+                    Text("Stretch voice").tag("preserve_formants")
                 }
                 .labelsHidden()
                 .controlSize(.mini)
-                .disabled(clip.sourceBpm == nil)
-                .help("How the clip follows the song's tempo: faster and higher, or at its own pitch")
+                .help("Repitch: pitch and speed move together, as a record sped up, so a clip moved up is shorter. Stretch: the pitch moves at the clip's length, and with a tempo it follows the song's at its own pitch. Stretch voice: as Stretch, keeping a voice's formants so it does not sound small")
             }
         }
         .padding(.horizontal, 12)

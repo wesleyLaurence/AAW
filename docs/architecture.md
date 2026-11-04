@@ -301,7 +301,9 @@ Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `cl
 [audio-clips.md](features/audio-clips.md); one with `loop_beats` and
 `length_beats` plays its first beats again at each wrap until its length, each
 repetition a copy with the clip's fades, see
-[looping-clips.md](features/looping-clips.md)), `effects`, `sends`, `automation`, an optional `group`, the
+[looping-clips.md](features/looping-clips.md); one with `transpose` moves its
+pitch, shorter by repitching or at its length by the stretcher, see
+[clip-pitch.md](features/clip-pitch.md)), `effects`, `sends`, `automation`, an optional `group`, the
 group the track's output goes into instead of the master sum, and an optional
 `input`, where the track records from: `{device: NAME, channels: [1]}` an
 input device by part of its name or `default` for the one chosen in the audio
@@ -483,7 +485,9 @@ step intervals. This differs from the older draft's bar.beat.fraction notation.
 Velocity maps linearly to sample amplitude. A target note is relative to the sample's
 explicit root note. Transposition and source-tempo matching use bandlimited repitch:
 changing pitch changes playback duration, unless the pad or audio clip is stretched
-at its own pitch ([time-stretch.md](features/time-stretch.md)). There is no sustain
+at its own pitch ([time-stretch.md](features/time-stretch.md)); an audio clip's
+`transpose` in a stretching mode is moved by the stretcher at its length
+([clip-pitch.md](features/clip-pitch.md)). There is no sustain
 loop or glide. The engine does not detect a sample's root note or tempo;
 `daw samples analyze` measures them ([sample-analysis.md](features/sample-analysis.md)).
 

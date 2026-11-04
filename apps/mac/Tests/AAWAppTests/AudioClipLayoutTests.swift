@@ -10,8 +10,14 @@ final class AudioClipLayoutTests: XCTestCase {
         AudioClipView(
             key: 9, reference: "@9", sample: "song", at: 8, leadBeats: 0, lengthBeats: 32, loopBeats: nil, tailBeats: 2, sourceStartSeconds: 4,
             sourceEndSeconds: 20, secondsPerBeat: 0.5, gainDb: 0, fadeInMs: 500, fadeOutMs: 1000, fadeCurve: "equal_power",
-            sourceBpm: nil, stretch: "repitch", file: 3, active: true
+            sourceBpm: nil, stretch: "repitch", transpose: 0, file: 3, active: true
         )
+    }
+
+    func testATransposeIsShownAsSemitonesAndCents() {
+        let shown = [2.8, 2.6, -2.25, 0.1, -0.5, 0].map { AudioClipLayout.pitch($0) }
+        XCTAssertEqual(shown.map(\.semitones), [3, 3, -2, 0, -1, 0])
+        XCTAssertEqual(shown.map(\.cents), [-20, -40, -25, 10, 50, 0])
     }
 
     func testAClipIsDrawnToWhereItsSoundEndsWithItsFadesInside() {

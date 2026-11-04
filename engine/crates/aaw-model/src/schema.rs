@@ -261,6 +261,10 @@ pub enum Stretch {
     Repitch,
     /// Stretches it in time and keeps its pitch.
     PreservePitch,
+    /// As `PreservePitch`, and an audio clip's transpose keeps the formants
+    /// of a voice where they are, so a voice moved up does not thin. Only an
+    /// audio clip has it.
+    PreserveFormants,
 }
 
 impl Stretch {
@@ -268,7 +272,14 @@ impl Stretch {
         match self {
             Stretch::Repitch => "repitch",
             Stretch::PreservePitch => "preserve_pitch",
+            Stretch::PreserveFormants => "preserve_formants",
         }
+    }
+
+    /// Whether it keeps time and pitch apart: a stretch that follows the
+    /// tempo keeps the pitch, and a transpose keeps the length.
+    pub fn keeps_pitch(self) -> bool {
+        self != Stretch::Repitch
     }
 }
 
@@ -680,6 +691,10 @@ pub struct AudioClip {
     pub fade_curve: FadeCurve,
     pub source_bpm: Option<f64>,
     pub stretch: Stretch,
+    /// Semitones the clip is moved by, a fraction a part of a semitone: with
+    /// `repitch` it plays faster and is shorter, as a record sped up; with
+    /// `preserve_pitch` or `preserve_formants` it keeps its length.
+    pub transpose: f64,
     /// With it, the first `loop_beats` of the clip play again and again from
     /// the clip's start until `length_beats`, each repetition a copy of the
     /// clip with its own lead and fades, the last cut off where the clip ends.
@@ -694,7 +709,7 @@ pub struct AudioClip {
 impl AudioClip {
     const FIELDS: &'static [&'static str] = &[
         "sample", "at", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms",
-        "fade_out_ms", "fade_curve", "source_bpm", "stretch", "loop_beats", "length_beats",
+        "fade_out_ms", "fade_curve", "source_bpm", "stretch", "transpose", "loop_beats", "length_beats",
         "active",
     ];
 
@@ -724,14 +739,13 @@ impl AudioClip {
             v::optional(c, x, |c, x| v::float(c, x, Bounds::ge_le("20", "400")))
         });
         let stretch = f.opt(ctx, "stretch", Stretch::Repitch, |c, x| {
-            v::literal_str(c, x, &["repitch", "preserve_pitch"]).map(|m| {
-                if m == "preserve_pitch" {
-                    Stretch::PreservePitch
-                } else {
-                    Stretch::Repitch
-                }
+            v::literal_str(c, x, &["repitch", "preserve_pitch", "preserve_formants"]).map(|m| match m {
+                "preserve_pitch" => Stretch::PreservePitch,
+                "preserve_formants" => Stretch::PreserveFormants,
+                _ => Stretch::Repitch,
             })
         });
+        let transpose = f.opt(ctx, "transpose", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-48", "48")));
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
         let length_beats = f.opt(ctx, "length_beats", None, |c, x| v::optional(c, x, beat_field));
         let active = f.opt(ctx, "active", true, v::boolean);
@@ -751,6 +765,7 @@ impl AudioClip {
             fade_curve: fade_curve?,
             source_bpm: source_bpm?,
             stretch: stretch?,
+            transpose: transpose?,
             loop_beats: loop_beats?,
             length_beats: length_beats?,
             active: active?,
@@ -795,9 +810,20 @@ impl AudioClip {
 
     /// Seconds of the clip's file that go by in a beat of the song at
     /// `tempo`: a clip with a tempo of its own follows the song's, so a beat
-    /// of the song is a beat of its file.
+    /// of the song is a beat of its file; a transpose by repitching plays the
+    /// file as many times faster as its pitch goes up.
     pub fn seconds_per_beat(&self, tempo: f64) -> f64 {
-        60.0 / self.source_bpm.unwrap_or(tempo)
+        60.0 / self.source_bpm.unwrap_or(tempo) * self.repitch()
+    }
+
+    /// How many times as fast as written its transpose plays the file: one
+    /// unless it is transposed by repitching.
+    pub fn repitch(&self) -> f64 {
+        if self.stretch.keeps_pitch() {
+            1.0
+        } else {
+            2f64.powf(self.transpose / 12.0)
+        }
     }
 
     /// The clip as the engine plays it: itself, or a looped clip as its
@@ -841,6 +867,7 @@ impl AudioClip {
         o.str("fade_curve", self.fade_curve.as_str(), "equal_power");
         o.opt("source_bpm", self.source_bpm.map(Value::Float));
         o.str("stretch", self.stretch.as_str(), "repitch");
+        o.float("transpose", self.transpose, 0.0);
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
         o.opt("length_beats", self.length_beats.as_ref().map(Beat::to_value));
         o.bool("active", self.active, true);

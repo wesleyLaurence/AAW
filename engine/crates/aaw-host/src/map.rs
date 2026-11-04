@@ -5,7 +5,7 @@
 //! `.` nothing.
 
 use crate::tree::Step;
-use aaw_model::{Curve, Lane, Meter, Project, Stretch};
+use aaw_model::{Curve, Lane, Meter, Project};
 use num_traits::ToPrimitive;
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
@@ -181,7 +181,7 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
             .and_then(|s| aaw_engine::sndfile::info(&dir.join(&s.path)).ok())
             .map(|info| info.seconds());
         // A file that cannot be read is given a beat, so it is still seen.
-        let per_beat = 60.0 / c.source_bpm.unwrap_or(p.session.tempo);
+        let per_beat = c.seconds_per_beat(p.session.tempo);
         let mut until = match (c.source_end_seconds, file) {
             (Some(end), Some(file)) => end.min(file),
             (Some(end), None) => end,
@@ -200,12 +200,13 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
         let repeats = onsets.len() as i64;
         out.push(Placed {
             key: format!(
-                "audio|{}|{:.3}|{:.3}|{:?}|{}|{:?}",
+                "audio|{}|{:.3}|{:.3}|{:?}|{}|{}|{:?}",
                 c.sample,
                 c.source_start_seconds,
                 until,
                 c.source_bpm,
-                matches!(c.stretch, Stretch::PreservePitch),
+                c.stretch.as_str(),
+                c.transpose,
                 c.loop_exact().map(|l| aaw_model::fraction_str(&l))
             ),
             loc: at("audio", i),
@@ -216,11 +217,12 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
             continuous: true,
             repeats,
             what: format!(
-                "audio {} {}–{} s, {}{looped}{}",
+                "audio {} {}–{} s, {}{looped}{}{}",
                 c.sample,
                 number(c.source_start_seconds),
                 number(until),
                 beats_text(beats),
+                if c.transpose == 0.0 { String::new() } else { format!(", transposed {}{} st", if c.transpose > 0.0 { "+" } else { "" }, number(c.transpose)) },
                 if file.is_none() { ", its file unread" } else { "" }
             ),
             off: !c.active,

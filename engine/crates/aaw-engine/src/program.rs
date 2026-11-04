@@ -381,6 +381,10 @@ struct PrepKey {
     speed: u64,
     /// How many times as fast it plays at its own pitch, as bits; 1 for none.
     stretch: u64,
+    /// Semitones the stretcher moves it by at its own length, as bits; 0 for none.
+    shift: u64,
+    /// Whether that move keeps a voice's formants.
+    formants: bool,
     stretcher: Stretcher,
     rate: i64,
 }
@@ -525,11 +529,12 @@ impl Job {
             return Err(format!("{}: trim outside sample", self.sample));
         }
         let ch = x.channels;
-        let stretch = f64::from_bits(k.stretch);
+        let (stretch, shift) = (f64::from_bits(k.stretch), f64::from_bits(k.shift));
+        let moved = stretch != 1.0 || shift != 0.0;
         // A stretched region is stretched with some of the file either side of
         // it, which is then cut off, so what the stretcher does at its own start
         // and end is not in the region.
-        let margin = if stretch == 1.0 { 0 } else { (MARGIN_SECONDS * source_rate) as usize };
+        let margin = if moved { (MARGIN_SECONDS * source_rate) as usize } else { 0 };
         let (from, to) = (start.saturating_sub(margin), (end.max(start) + margin).min(frames));
         let rows: Vec<&[f64]> = (from..to).map(|i| &x.data[i * ch..(i + 1) * ch]).collect();
         let (channels, mut data): (usize, Vec<f64>) = if k.mono {
@@ -538,8 +543,8 @@ impl Job {
         } else {
             (ch, rows.concat())
         };
-        if stretch != 1.0 {
-            let whole = stretch::stretch(&data, channels, x.rate, stretch, k.stretcher)
+        if moved {
+            let whole = stretch::stretch(&data, channels, x.rate, stretch, shift, k.formants, k.stretcher)
                 .map_err(|e| format!("{}: {e}", self.sample))?;
             let first = ((start - from) as f64 / stretch).round() as usize;
             let count = ((end.max(start) - start) as f64 / stretch).round() as usize;
@@ -682,12 +687,13 @@ impl<'a> Sampler<'a> {
             semitones += (midi(note)? - root) as f64;
         }
         let follow = (pad.source_bpm, pad.stretch);
-        self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow)
+        self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow, 0.0)
     }
 
     /// Seconds of an audio clip's file to a second of the timeline.
     fn clip_speed(&self, clip: &AudioClip) -> f64 {
-        clip.source_bpm.map_or(1.0, |bpm| self.project.session.tempo / bpm)
+        let tempo = self.project.session.tempo;
+        clip.seconds_per_beat(tempo) * tempo / 60.0
     }
 
     /// The second of the timeline an audio clip's beat is on, before any
@@ -732,11 +738,15 @@ impl<'a> Sampler<'a> {
             return Err(format!("{}: audio clip outside sample", clip.sample));
         }
         let follow = (clip.source_bpm, clip.stretch);
-        self.part(&clip.sample, start, Some(end), false, false, 0.0, follow)
+        // A transpose repitches as a pad's does, or is the stretcher's to
+        // make at the clip's length.
+        let (repitch, shift) = if clip.stretch.keeps_pitch() { (0.0, clip.transpose) } else { (clip.transpose, 0.0) };
+        self.part(&clip.sample, start, Some(end), false, false, repitch, follow, shift)
     }
 
     /// The job for part of a sample: from `start` to `end` seconds of its
-    /// file, moved by `semitones`, and following the tempo as `follow` says.
+    /// file, moved by `semitones`, following the tempo as `follow` says, and
+    /// moved by `shift` semitones more at its own length.
     #[allow(clippy::too_many_arguments)]
     fn part(
         &mut self,
@@ -747,6 +757,7 @@ impl<'a> Sampler<'a> {
         mono: bool,
         semitones: f64,
         follow: (Option<f64>, Stretch),
+        shift: f64,
     ) -> Result<Job, String> {
         let (path, stamp, audio) = self.original(sample)?;
         if !self.originals.contains(&path) {
@@ -758,11 +769,14 @@ impl<'a> Sampler<'a> {
             let ratio = self.project.session.tempo / bpm;
             match follow.1 {
                 Stretch::Repitch => speed *= ratio,
-                Stretch::PreservePitch => stretch = ratio,
+                Stretch::PreservePitch | Stretch::PreserveFormants => stretch = ratio,
             }
         }
         // Audio that is not stretched is the same whichever stretcher the song names.
-        let stretcher = if stretch == 1.0 { Stretcher::Signalsmith } else { self.project.session.stretcher };
+        let moved = stretch != 1.0 || shift != 0.0;
+        let stretcher = if moved { self.project.session.stretcher } else { Stretcher::Signalsmith };
+        // Formants are kept only where the pitch moves.
+        let formants = shift != 0.0 && follow.1 == Stretch::PreserveFormants;
         Ok(Job {
             key: PrepKey {
                 path,
@@ -773,6 +787,8 @@ impl<'a> Sampler<'a> {
                 mono,
                 speed: speed.to_bits(),
                 stretch: stretch.to_bits(),
+                shift: shift.to_bits(),
+                formants,
                 stretcher,
                 rate: self.project.session.sample_rate,
             },

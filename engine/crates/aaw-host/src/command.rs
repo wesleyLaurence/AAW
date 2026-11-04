@@ -1186,8 +1186,13 @@ impl Span {
     pub(crate) fn of(clip: &Node, tempo: f64) -> Result<Span> {
         let at = exact(clip.get("at")).ok_or("An audio clip has no beat")?;
         // A clip with a tempo of its own follows the session's, so a beat of
-        // the session is a beat of its file.
-        let per_beat = 60.0 / number(clip.get("source_bpm")).unwrap_or(tempo);
+        // the session is a beat of its file; one transposed by repitching
+        // plays its file faster as its pitch goes up.
+        let repitch = match clip.get("stretch") {
+            Some(Node::Leaf(Value::Str(s))) if s.as_str() != "repitch" => 1.0,
+            _ => 2f64.powf(number(clip.get("transpose")).unwrap_or(0.0) / 12.0),
+        };
+        let per_beat = 60.0 / number(clip.get("source_bpm")).unwrap_or(tempo) * repitch;
         Ok(Span {
             at,
             start: number(clip.get("source_start_seconds")).unwrap_or(0.0),

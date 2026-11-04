@@ -13,13 +13,16 @@ const RATE: usize = 48000;
 
 /// A song at `tempo` of one track whose audio clips are `clips`, compiled.
 /// `ramp` is two seconds whose every sample is its own time in seconds; `ones`
-/// is two seconds of full level, half as much on the right.
+/// is two seconds of full level, half as much on the right; `tone` is two
+/// seconds of 440 Hz.
 fn program(dir: &Path, tempo: f64, clips: &str) -> Result<Program, String> {
     let ramp: Vec<[f32; 2]> = (0..2 * RATE).map(|i| [i as f32 / RATE as f32; 2]).collect();
     write_sample(dir, "ramp.wav", ramp, RATE as u32);
     write_sample(dir, "ones.wav", vec![[1.0, 0.5]; 2 * RATE], RATE as u32);
+    let tone = |i: usize| (0.3 * (std::f64::consts::TAU * 440.0 * i as f64 / RATE as f64).sin()) as f32;
+    write_sample(dir, "tone.wav", (0..2 * RATE).map(|i| [tone(i); 2]).collect(), RATE as u32);
     let yaml = format!(
-        "session: {{tempo: {tempo}, length_beats: 16}}\nsamples: {{ramp: {{path: ramp.wav}}, ones: {{path: ones.wav}}}}\ntracks:\n- id: song\n  pads: {{}}\n  audio: {clips}\n"
+        "session: {{tempo: {tempo}, length_beats: 16}}\nsamples: {{ramp: {{path: ramp.wav}}, ones: {{path: ones.wav}}, tone: {{path: tone.wav}}}}\ntracks:\n- id: song\n  pads: {{}}\n  audio: {clips}\n"
     );
     let path = dir.join("song.yaml");
     std::fs::write(&path, yaml).unwrap();
@@ -153,6 +156,36 @@ fn a_clip_follows_the_tempo_at_its_own_pitch_or_not() {
     // At its own tempo both are the file as it is.
     let same = &voices(dir.path(), 120.0, &clip("preserve_pitch")).unwrap()[0];
     assert!(same.length == RATE * 3 / 2 && near(same.sample(RATE, 0), 1.0));
+}
+
+/// The frequency of a voice's left channel, by its rising zero crossings.
+fn frequency(v: &Voice) -> f64 {
+    let left: Vec<f64> = (0..v.length).map(|i| v.sample(i, 0)).collect();
+    let rises = left.windows(2).filter(|w| w[0] < 0.0 && w[1] >= 0.0).count();
+    rises as f64 / (v.length as f64 / RATE as f64)
+}
+
+#[test]
+fn a_transpose_repitches_shorter_or_moves_the_pitch_at_the_clip_s_length() {
+    let dir = tempfile::tempdir().unwrap();
+    let clip = |sample: &str, stretch: &str, transpose: f64| {
+        format!("[{{sample: {sample}, source_end_seconds: 1.5, fade_out_ms: 0, stretch: {stretch}, transpose: {transpose}}}]")
+    };
+    // An octave up by repitching: twice as fast, so half as long, and a
+    // quarter second in is half a second of the file.
+    let up = &voices(dir.path(), 120.0, &clip("ramp", "repitch", 12.0)).unwrap()[0];
+    assert!((up.length as i64 - (RATE * 3 / 4) as i64).abs() <= 1, "{}", up.length);
+    assert!((up.sample(RATE / 4, 0) - 0.5).abs() < 1e-3, "{}", up.sample(RATE / 4, 0));
+    let up = &voices(dir.path(), 120.0, &clip("tone", "repitch", 12.0)).unwrap()[0];
+    assert!((frequency(up) - 880.0).abs() < 6.0, "{}", frequency(up));
+    // By the stretcher: the clip's length, at the pitch the semitones give,
+    // with formants kept or not; a fraction is part of a semitone.
+    for (stretch, transpose) in [("preserve_pitch", 12.0), ("preserve_formants", -5.0), ("preserve_pitch", 0.5)] {
+        let v = &voices(dir.path(), 120.0, &clip("tone", stretch, transpose)).unwrap()[0];
+        assert_eq!(v.length, RATE * 3 / 2, "{stretch} {transpose}");
+        let wanted = 440.0 * 2f64.powf(transpose / 12.0);
+        assert!((frequency(v) - wanted).abs() < 4.0, "{stretch} {transpose}: {} for {wanted}", frequency(v));
+    }
 }
 
 #[test]

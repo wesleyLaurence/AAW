@@ -103,7 +103,8 @@ tab is named Audio Clip then.
 | Fade in, Fade out | The fades in milliseconds, as the handles do |
 | Curve | `fade_curve`: equal power or linear |
 | Tempo | `source_bpm`: the file's tempo, with which the clip follows the song's; empty, it plays as it is |
-| Stretch | `stretch`, once the clip has a tempo: repitch, or keep pitch |
+| Pitch | `transpose`, as two bars: whole semitones, and cents from −50 to 50 ([clip-pitch.md](clip-pitch.md)) |
+| Mode | `stretch`: Repitch, Stretch, or Stretch voice, which keeps a voice's formants |
 
 Beside them, in words: the part of the file the clip plays, the file's length,
 and the beat map's tempo when there is one.
