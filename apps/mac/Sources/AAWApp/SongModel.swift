@@ -121,6 +121,9 @@ struct PlacedClip {
     var clip: ClipView?
     var audio: AudioClipView?
     var notes: NoteClipView?
+
+    /// False when the clip is deactivated and plays nothing.
+    var active: Bool { clip?.active ?? audio?.active ?? notes?.active ?? true }
 }
 
 /// The note clip the detail panel edits, with its track.
@@ -1360,6 +1363,21 @@ public final class SongModel {
         edit(.clipsJoin(clips: selectedClips.sorted())) { [weak self] made in
             if let kept = made.first { self?.select(clips: Set(made), focus: kept) }
         }
+    }
+
+    /// What 0 does to the selected clips: deactivates them when any of them
+    /// plays, else activates them all; nil with no clip selected.
+    var clipsActivation: Bool? {
+        let clips = placedClips().filter { selectedClips.contains($0.key) }
+        guard !clips.isEmpty else { return nil }
+        return !clips.contains { $0.active }
+    }
+
+    /// Deactivates the selected clips, so they stay where they are and play
+    /// nothing, or activates them again when all are deactivated: Ableton's 0.
+    public func toggleClipsActive() {
+        guard let active = clipsActivation else { return }
+        edit(.clipsActive(clips: selectedClips.sorted(), active: active))
     }
 
     /// Adds a track under the selected one, or else last, and asks for its

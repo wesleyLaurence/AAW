@@ -491,6 +491,8 @@ pub struct NoteClipView {
     /// again at each wrap until its end.
     pub loop_beats: Option<f64>,
     pub notes: Vec<NoteView>,
+    /// False when the clip is deactivated: it is drawn and plays nothing.
+    pub active: bool,
 }
 
 /// A send from a track to a return.
@@ -511,6 +513,8 @@ pub struct ClipView {
     /// The length of one repeat.
     pub pattern_beats: f64,
     pub repeats: u32,
+    /// False when the clip is deactivated: it is drawn and plays nothing.
+    pub active: bool,
 }
 
 /// An audio clip: part of a sample file on a track's timeline.
@@ -553,6 +557,8 @@ pub struct AudioClipView {
     /// The identity of its file among the arrangement's `files`, or 0 when
     /// the file cannot be read.
     pub file: u64,
+    /// False when the clip is deactivated: it is drawn and plays nothing.
+    pub active: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -1640,6 +1646,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                                     duration_text: n.duration.text(),
                                 })
                                 .collect(),
+                            active: c.active,
                         }
                     })
                     .collect(),
@@ -1656,6 +1663,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             at: float(c.at_exact()),
                             pattern_beats: p.patterns.get(&c.pattern).map_or(0.0, |x| float(x.length_exact())),
                             repeats: c.repeats.max(0) as u32,
+                            active: c.active,
                         }
                     })
                     .collect(),
@@ -1688,6 +1696,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             source_bpm: c.source_bpm,
                             stretch: c.stretch.as_str().to_string(),
                             file: identity,
+                            active: c.active,
                         }
                     })
                     .collect(),

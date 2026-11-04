@@ -292,7 +292,7 @@ def musical_context(project, manifest, offset, count, sections):
             ]
             placements = []
             for clip in track["clips"]:
-                if "pattern" not in clip:
+                if "pattern" not in clip or not clip.get("active", True):
                     continue
                 length = beat(project["patterns"][clip["pattern"]]["length_beats"])
                 for repeat in range(clip["repeats"]):

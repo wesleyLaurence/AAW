@@ -109,7 +109,7 @@ def track_pads(track) -> dict:
     """A track's pads: its own, or the sampler's of a MIDI track."""
     if track.get("type") == "midi":
         instrument = track["instrument"] or {}
-        return instrument.get("sampler", {}).get("pads", {})
+        return (instrument.get("sampler") or {}).get("pads", {})
     return track["pads"]
 
 
@@ -143,7 +143,8 @@ def regions(project, root: Path):
         )
     tempo = project["session"]["tempo"]
     for track in project["tracks"]:
-        audio = [r for clip in track.get("audio", []) for r in repetitions(clip, tempo)]
+        # A deactivated clip plays nothing, and the one before it leaves as if alone.
+        audio = [r for clip in track.get("audio", []) if clip.get("active", True) for r in repetitions(clip, tempo)]
         clips = [clip_region(track["id"], i, audio, project, root) for i in range(len(audio))]
         if clips:
             found[track["id"]] = sorted(found.get(track["id"], []) + clips, key=lambda r: r.start)

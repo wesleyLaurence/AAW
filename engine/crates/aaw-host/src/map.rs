@@ -51,6 +51,9 @@ struct Placed {
     repeats: i64,
     /// What the legend says of the music.
     what: String,
+    /// Deactivated: it has a letter of its own where no other clip plays,
+    /// and nothing in it sounds.
+    off: bool,
 }
 
 /// The cells of `from..to`, each `per` beats, the last one perhaps shorter.
@@ -167,6 +170,7 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
                 beats_text(length),
                 plural(hits.len(), "hit", "hits")
             ),
+            off: !c.active,
         });
     }
     for (i, c) in t.audio.iter().enumerate() {
@@ -219,6 +223,7 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
                 beats_text(beats),
                 if file.is_none() { ", its file unread" } else { "" }
             ),
+            off: !c.active,
         });
     }
     if let Some(midi) = &t.midi {
@@ -261,8 +266,18 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
                 pitches: placed,
                 continuous: false,
                 repeats: repetitions.len() as i64,
+                off: !c.active,
             });
         }
+    }
+    // A deactivated clip is other music than the same clip active, and
+    // nothing in it sounds: it holds its cells as audio does, with no onsets.
+    for c in out.iter_mut().filter(|c| c.off) {
+        c.key = format!("deactivated|{}", c.key);
+        c.what = format!("deactivated: {}", c.what);
+        c.continuous = true;
+        c.onsets.clear();
+        c.pitches.clear();
     }
     out.sort_by(|a, b| a.start.total_cmp(&b.start));
     out
@@ -270,9 +285,13 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
 
 /// What a track's clips make of one cell.
 fn cell(clips: &[&Placed], letter: &dyn Fn(&Placed) -> char, (cs, ce): (f64, f64)) -> char {
-    let here: Vec<&Placed> = clips.iter().copied().filter(|c| c.start < ce - EPS && c.end > cs + EPS).collect();
+    let mut here: Vec<&Placed> = clips.iter().copied().filter(|c| c.start < ce - EPS && c.end > cs + EPS).collect();
     if here.is_empty() {
         return '.';
+    }
+    // A deactivated clip shows only where no clip that plays is.
+    if here.iter().any(|c| !c.off) {
+        here.retain(|c| !c.off);
     }
     for (i, a) in here.iter().enumerate() {
         for b in &here[i + 1..] {
@@ -399,7 +418,7 @@ pub fn marker_place(at: f64, meter: Meter) -> String {
 pub fn sounding(p: &Project, dir: &Path, at: f64, refer: &dyn Fn(&[Step]) -> String) -> Vec<Json> {
     let mut out = Vec::new();
     for (ti, t) in p.tracks.iter().enumerate() {
-        for c in placed(p, dir, ti).iter().filter(|c| c.start <= at + EPS && c.end > at + EPS) {
+        for c in placed(p, dir, ti).iter().filter(|c| !c.off && c.start <= at + EPS && c.end > at + EPS) {
             let mut entry = json!({"track": t.id, "clip": refer(&c.loc), "what": c.what});
             if t.mute {
                 entry["muted"] = json!(true);
@@ -482,9 +501,10 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
             .filter(|(o, _)| in_range(o))
             .map(|&(_, p)| p)
             .collect();
-        let bars = cells
-            .chars()
-            .enumerate()
+        // How busy it is counts the bars where something plays.
+        let playing: Vec<&Placed> = mine.iter().copied().filter(|c| !c.off).collect();
+        let bars = (0..grid.len())
+            .map(|i| (i, cell(&playing, &letter, grid.cell(i))))
             .filter(|(_, ch)| *ch != '.')
             .map(|(i, _)| {
                 let (cs, ce) = grid.cell(i);

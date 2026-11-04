@@ -2351,6 +2351,23 @@ fn a_note_clip_copied_in_the_app_is_its_own() {
     assert_eq!(update(&seen).arrangement.tracks[3].note_clips[0].loop_beats, None);
     assert!(song.edit(Edit::ClipLoop { clip: u.arrangement.tracks[0].clips[0].key, beats: "4".into() }, None).is_err());
 
+    // Deactivated, as 0 does: a pattern clip and a note clip in one step,
+    // undone in one; then one clip, activated again.
+    let pattern = u.arrangement.tracks[0].clips[0].key;
+    song.edit(Edit::ClipsActive { clips: vec![pattern, pasted[0]], active: false }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Deactivate 2 clips");
+    assert!(!u.arrangement.tracks[0].clips[0].active && !u.arrangement.tracks[3].note_clips[0].active);
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.tracks[0].clips[0].active && u.arrangement.tracks[3].note_clips[0].active);
+    song.edit(Edit::ClipsActive { clips: vec![pasted[0]], active: false }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Deactivate clip clip3 at 16");
+    song.edit(Edit::ClipsActive { clips: vec![pasted[0]], active: true }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Activate clip clip3 at 16");
+    assert!(u.arrangement.tracks[3].note_clips[0].active);
+
     // Moved and removed as any clip.
     song.edit(Edit::ClipsMove { clips: vec![pasted[0]], by: -4.0, rows: -1 }, None).unwrap();
     let u = update(&seen);

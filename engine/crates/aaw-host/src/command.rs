@@ -171,6 +171,11 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<Json>,
     },
+    /// Deactivates a clip, or activates it again: a pattern clip, a note
+    /// clip or an audio clip. A deactivated clip stays where it is and plays
+    /// nothing.
+    #[serde(rename = "clip.active")]
+    ClipActive { clip: String, active: bool },
     /// Moves a note clip's start, its end or both to a song beat. Its notes
     /// stay where they are in the song: those the start passes are kept,
     /// before the clip, and do not play.
@@ -2280,6 +2285,24 @@ impl<'a> Edit<'a> {
                     }
                 }
             }
+            ClipActive { clip, active } => {
+                let loc = match self.audio_clip(clip) {
+                    Some(loc) => loc,
+                    None => {
+                        let (owner, i) = self.member(clip, "clips", "a clip")?;
+                        [owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat()
+                    }
+                };
+                // Active is the default, so a clip activated again is written as before.
+                if *active {
+                    if let Some(m) = self.node_mut(&loc).map_mut() {
+                        m.shift_remove("active");
+                    }
+                } else {
+                    self.set_leaf(&loc, "active", Value::Bool(false));
+                }
+                out.label = format!("{} clip {}", if *active { "Activate" } else { "Deactivate" }, self.clip_name(&loc));
+            }
             ClipTrim { clip, start, end } => {
                 let loc = self.note_clip(clip)?;
                 if start.is_none() && end.is_none() {
@@ -2341,6 +2364,16 @@ impl<'a> Edit<'a> {
                     _ => Kind::Pattern,
                 };
                 let loc_of = |i: usize| [owner.clone(), vec![Step::Key(key.into()), Step::Index(i)]].concat();
+                // A deactivated clip and one that plays are not one music.
+                let active = |i: usize| !matches!(self.node(&loc_of(i)).get("active").map(Node::value), Some(Value::Bool(false)));
+                if let Some((_, _, off)) = found.iter().find(|(_, _, i)| active(*i) != active(found[0].2)) {
+                    let (on, off) = if active(found[0].2) { (found[0].2, *off) } else { (*off, found[0].2) };
+                    return Err(format!(
+                        "{} is deactivated and {} is not; activate or deactivate both to join them",
+                        self.clip_name(&loc_of(off)),
+                        self.clip_name(&loc_of(on))
+                    ));
+                }
                 // In the order they play.
                 let mut order: Vec<(BigRational, Option<BigRational>, usize)> = Vec::new();
                 for (_, _, i) in &found {

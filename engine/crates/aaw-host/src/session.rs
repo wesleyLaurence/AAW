@@ -779,12 +779,16 @@ impl Session {
                             tree::Step::Key("clips".into()),
                             tree::Step::Index(ci),
                         ];
-                        json!({
+                        let mut clip = json!({
                             "ref": self.reference(&root, &loc),
                             "pattern": c.pattern,
                             "at": crate::command::node_json(&Node::Leaf(c.at.to_value())),
                             "repeats": c.repeats,
-                        })
+                        });
+                        if !c.active {
+                            clip["active"] = json!(false);
+                        }
+                        clip
                     })
                     .collect();
                 let audio: Vec<Json> = in_order(&t.audio, |c| c.at_exact())
@@ -796,13 +800,17 @@ impl Session {
                             tree::Step::Key("audio".into()),
                             tree::Step::Index(ci),
                         ];
-                        json!({
+                        let mut clip = json!({
                             "ref": self.reference(&root, &loc),
                             "sample": c.sample,
                             "at": crate::command::node_json(&Node::Leaf(c.at.to_value())),
                             "source_start_seconds": c.source_start_seconds,
                             "source_end_seconds": c.source_end_seconds,
-                        })
+                        });
+                        if !c.active {
+                            clip["active"] = json!(false);
+                        }
+                        clip
                     })
                     .collect();
                 if let Some(midi) = &t.midi {
@@ -815,13 +823,17 @@ impl Session {
                                 tree::Step::Key("clips".into()),
                                 tree::Step::Index(ci),
                             ];
-                            json!({
+                            let mut clip = json!({
                                 "ref": self.reference(&root, &loc),
                                 "id": c.id,
                                 "at": beat_json(&c.at_exact()),
                                 "length_beats": beat_json(&c.length_exact()),
                                 "notes": c.notes.len(),
-                            })
+                            });
+                            if !c.active {
+                                clip["active"] = json!(false);
+                            }
+                            clip
                         })
                         .collect();
                     return json!({

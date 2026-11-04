@@ -111,6 +111,8 @@ private struct ClipVisual {
     var muted: Bool
     /// On a frozen track, whose file plays in the clips' place.
     var frozen = false
+    /// False when the clip is deactivated, by 0: it is drawn gray and plays nothing.
+    var active = true
     var at: Animated
     var length: Animated
     var y: Animated
@@ -689,6 +691,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.color = color
                     v.muted = muted
                     v.frozen = frozen
+                    v.active = clip.active
                     if !dragged.contains(clip.key) {
                         v.repeats = Int(clip.repeats)
                         v.at.move(to: clip.at, at: now, over: time)
@@ -700,7 +703,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.pattern, repeats: Int(clip.repeats), color: color, muted: muted, frozen: frozen,
+                        pattern: clip.pattern, repeats: Int(clip.repeats), color: color, muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(clip.at), length: Animated(length), y: Animated(y), alpha: alpha
                     )
                 }
@@ -712,6 +715,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.color = color
                     v.muted = muted
                     v.frozen = frozen
+                    v.active = clip.active
                     v.notes = clip
                     v.loop = clip.loopBeats
                     if !dragged.contains(clip.key) {
@@ -725,7 +729,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.id, repeats: 1, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen,
+                        pattern: clip.id, repeats: 1, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), alpha: alpha,
                         notes: clip, anchor: Animated(clip.at)
                     )
@@ -739,6 +743,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.color = color
                     v.muted = muted
                     v.frozen = frozen
+                    v.active = clip.active
                     v.loop = clip.loopBeats
                     if !dragged.contains(clip.key) {
                         v.audio = clip
@@ -752,7 +757,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.sample, repeats: 1, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen,
+                        pattern: clip.sample, repeats: 1, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), alpha: alpha,
                         audio: clip, anchor: Animated(shape.fileStart)
                     )
@@ -1594,7 +1599,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .audio: editor = "Audio Clip"
         case .notes: editor = "Notes"
         }
-        let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit, canJoin: model.canJoin)
+        let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit, canJoin: model.canJoin,
+                                     activates: model.clipsActivation == true, many: model.selectedClips.count > 1)
         return menu(of: items, #selector(clipMenuAction(_:))) { ClipChoice(action: $0) }
     }
 
@@ -1672,6 +1678,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .duplicate: model.duplicateSelection()
         case .split: model.splitSelection()
         case .join: model.joinSelection()
+        case .activate: model.toggleClipsActive()
         case .loop: model.toggleLoop()
         case .delete: model.deleteSelection()
         }
@@ -2353,6 +2360,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             // A marker where the song is playing; with Shift, one to name.
             case "m": model.addMarker()
             case "M": model.addMarker(ask: true)
+            // Deactivate the selected clips, or activate them, as Ableton's 0.
+            case "0": model.toggleClipsActive()
             case "\u{1b}":
                 if !cancelDrag() {
                     model.select(clips: [])
@@ -2716,17 +2725,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let muted = track.mute || model.groups(over: track.group).contains { $0.mute }
             let color = (muted ? Theme.gray(0.45) : model.color(of: track.key)).withAlphaComponent(0.55 * alpha)
             let y = rect.minY + CGFloat(index) * strip
-            var spans: [(at: Double, length: Double)] = track.clips.map { ($0.at, $0.patternBeats * Double($0.repeats)) }
-            spans += track.noteClips.map { ($0.at, $0.lengthBeats) }
+            var spans: [(at: Double, length: Double, active: Bool)] = track.clips.map { ($0.at, $0.patternBeats * Double($0.repeats), $0.active) }
+            spans += track.noteClips.map { ($0.at, $0.lengthBeats, $0.active) }
             spans += track.audio.map { clip in
                 let shape = audioLayout(clip)
-                return (shape.start, shape.length)
+                return (shape.start, shape.length, clip.active)
             }
             for span in spans {
                 let x = layout.x(span.at)
                 let w = max(2, CGFloat(span.length) * layout.pixelsPerBeat - 1)
                 guard x + w >= rect.minX, x <= rect.maxX else { continue }
-                fill(CGRect(x: x, y: y + 1, width: w, height: max(1, strip - 2)), color)
+                fill(CGRect(x: x, y: y + 1, width: w, height: max(1, strip - 2)),
+                     span.active ? color : Theme.inactiveClip.withAlphaComponent(0.55 * alpha))
             }
         }
     }
@@ -2737,8 +2747,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                             top: layout.y(CGFloat(clip.y.value(at: now))))
         guard rect.maxX >= TimelineLayout.headerWidth, rect.minX <= bounds.width,
               rect.maxY >= TimelineLayout.rulerHeight, rect.minY <= bounds.height else { return }
-        // A frozen track's clips are iced: the file plays in their place.
-        let color = clip.muted ? Theme.gray(0.45) : clip.frozen ? Theme.frozen : clip.color
+        // A deactivated clip is gray and darker than a muted track's, as in
+        // Ableton; a frozen track's clips are iced: the file plays in their place.
+        let color = !clip.active ? Theme.inactiveClip : clip.muted ? Theme.gray(0.45) : clip.frozen ? Theme.frozen : clip.color
         let shape = NSBezierPath(roundedRect: rect, xRadius: 3, yRadius: 3)
         color.withAlphaComponent((selected ? 0.62 : 0.42) * alpha).setFill()
         shape.fill()

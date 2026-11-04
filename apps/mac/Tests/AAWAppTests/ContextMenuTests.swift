@@ -108,7 +108,7 @@ final class ContextMenuTests: XCTestCase {
     func testAClipsMenuNamesItsEditorAndSplitsAndJoinsOnlyWhereItCan() {
         let items = ContextMenu.clip(editor: "Notes", canSplit: false, canJoin: false)
         XCTAssertEqual(actions(items), [
-            .edit, nil, .cut, .copy, .duplicate, .split, .join, nil, .loop, nil, .delete,
+            .edit, nil, .cut, .copy, .duplicate, .split, .join, .activate, nil, .loop, nil, .delete,
         ])
         XCTAssertEqual(items.first?.title, "Edit Notes")
         XCTAssertEqual(items.first { $0.action == .split }?.enabled, false)
@@ -120,6 +120,15 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(ContextMenu.clip(editor: "Pattern", canSplit: false, canJoin: false).first?.title, "Edit Pattern")
         XCTAssertEqual(items.first { $0.action == .loop }?.key, "l")
         XCTAssertEqual(items.first { $0.action == .loop }?.command, false)
+    }
+
+    func testAClipsMenuDeactivatesOrActivatesWithZero() {
+        let one = ContextMenu.clip(editor: "Notes", canSplit: false, canJoin: false)
+        XCTAssertEqual(one.first { $0.action == .activate }?.title, "Deactivate Clip")
+        XCTAssertEqual(one.first { $0.action == .activate }?.key, "0")
+        XCTAssertEqual(one.first { $0.action == .activate }?.command, false)
+        let off = ContextMenu.clip(editor: "Pattern", canSplit: false, canJoin: true, activates: true, many: true)
+        XCTAssertEqual(off.first { $0.action == .activate }?.title, "Activate Clips")
     }
 
     func testAnEffectsMenuPastesOnlyWhatWasCopiedAndNamesItsBypass() {

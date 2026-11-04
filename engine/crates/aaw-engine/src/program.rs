@@ -615,9 +615,10 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
 }
 
 /// A track's audio clips as they play: each looped clip as its repetitions,
-/// so the engine plays what it would play from copies.
+/// so the engine plays what it would play from copies, and none deactivated,
+/// so a clip before one leaves as if nothing followed it.
 fn played_audio(p: &Project, t: &aaw_model::Track) -> Vec<AudioClip> {
-    t.audio.iter().flat_map(|c| c.repetitions(p.session.tempo)).collect()
+    t.audio.iter().filter(|c| c.active).flat_map(|c| c.repetitions(p.session.tempo)).collect()
 }
 
 /// Loads and prepares pad audio through a cache.

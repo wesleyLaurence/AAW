@@ -464,6 +464,7 @@ fn a_tail_rings_through_an_edit_a_locate_and_a_stop() {
             at: aaw_model::Beat::int(0),
             repeats: 1,
             velocity_scale: 0.5,
+            active: true,
         });
     });
     let (_, after_edit) = tail(&mut |c| c.load(edited.clone()).unwrap());

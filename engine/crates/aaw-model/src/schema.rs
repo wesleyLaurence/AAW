@@ -597,10 +597,13 @@ pub struct Clip {
     pub at: Beat,
     pub repeats: i64,
     pub velocity_scale: f64,
+    /// False when the clip is deactivated: it stays where it is and plays
+    /// nothing, as a deactivated clip in Ableton.
+    pub active: bool,
 }
 
 impl Clip {
-    const FIELDS: &'static [&'static str] = &["pattern", "at", "repeats", "velocity_scale"];
+    const FIELDS: &'static [&'static str] = &["pattern", "at", "repeats", "velocity_scale", "active"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Clip> {
         let f = Fields::of(ctx, x, "Clip", Self::FIELDS)?;
@@ -609,6 +612,7 @@ impl Clip {
         let at = f.opt(ctx, "at", Beat::int(0), beat_field);
         let repeats = f.opt(ctx, "repeats", 1, |c, x| v::int(c, x, Bounds::ge_le("1", "10000")));
         let velocity_scale = f.opt(ctx, "velocity_scale", 1.0, |c, x| v::float(c, x, Bounds::gt_le("0", "2")));
+        let active = f.opt(ctx, "active", true, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -618,6 +622,7 @@ impl Clip {
             at: at?,
             repeats: repeats?,
             velocity_scale: velocity_scale?,
+            active: active?,
         })
     }
 
@@ -631,6 +636,7 @@ impl Clip {
         o.beat("at", &self.at, &Beat::int(0));
         o.int("repeats", self.repeats, 1);
         o.float("velocity_scale", self.velocity_scale, 1.0);
+        o.bool("active", self.active, true);
         o.done()
     }
 }
@@ -680,12 +686,16 @@ pub struct AudioClip {
     pub loop_beats: Option<Beat>,
     /// How long a looped clip lasts on the timeline. Only with `loop_beats`.
     pub length_beats: Option<Beat>,
+    /// False when the clip is deactivated: it stays where it is and plays
+    /// nothing, as a deactivated clip in Ableton.
+    pub active: bool,
 }
 
 impl AudioClip {
     const FIELDS: &'static [&'static str] = &[
         "sample", "at", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms",
         "fade_out_ms", "fade_curve", "source_bpm", "stretch", "loop_beats", "length_beats",
+        "active",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<AudioClip> {
@@ -724,6 +734,7 @@ impl AudioClip {
         });
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
         let length_beats = f.opt(ctx, "length_beats", None, |c, x| v::optional(c, x, beat_field));
+        let active = f.opt(ctx, "active", true, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -742,6 +753,7 @@ impl AudioClip {
             stretch: stretch?,
             loop_beats: loop_beats?,
             length_beats: length_beats?,
+            active: active?,
         };
         if clip.source_end_seconds.is_some_and(|end| end <= clip.source_start_seconds) {
             ctx.value_error("source_end_seconds must exceed source_start_seconds");
@@ -831,6 +843,7 @@ impl AudioClip {
         o.str("stretch", self.stretch.as_str(), "repitch");
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
         o.opt("length_beats", self.length_beats.as_ref().map(Beat::to_value));
+        o.bool("active", self.active, true);
         o.done()
     }
 }
@@ -947,10 +960,13 @@ pub struct NoteClip {
     /// In the order they were written. A note that starts before the clip or
     /// at or after its end, or its loop's, is kept and does not play.
     pub notes: Vec<Note>,
+    /// False when the clip is deactivated: it stays where it is and plays
+    /// nothing, as a deactivated clip in Ableton.
+    pub active: bool,
 }
 
 impl NoteClip {
-    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "notes"];
+    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "notes", "active"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<NoteClip> {
         let f = Fields::of(ctx, x, "NoteClip", Self::FIELDS)?;
@@ -960,6 +976,7 @@ impl NoteClip {
         let length_beats = f.req(ctx, "length_beats", beat_field);
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
         let notes = f.opt(ctx, "notes", Vec::new(), |c, x| v::list(c, x, 0, None, Note::validate));
+        let active = f.opt(ctx, "active", true, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -970,6 +987,7 @@ impl NoteClip {
             length_beats: length_beats?,
             loop_beats: loop_beats?,
             notes: notes?,
+            active: active?,
         };
         if !clip.length_exact().is_positive() {
             ctx.value_error("A clip's length must be positive");
@@ -1037,6 +1055,7 @@ impl NoteClip {
         o.req("length_beats", self.length_beats.to_value());
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
         o.coll("notes", list(&self.notes, saved, Note::dump));
+        o.bool("active", self.active, true);
         o.done()
     }
 }

@@ -376,11 +376,12 @@ struct Span {
     music: String,
 }
 
-/// Every clip of track `ti`: pattern clips, audio clips and note clips.
+/// Every clip of track `ti` that plays: pattern clips, audio clips and note
+/// clips, none deactivated.
 fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
     let t = &p.tracks[ti];
     let mut out = Vec::new();
-    for (i, c) in t.clips.iter().enumerate() {
+    for (i, c) in t.clips.iter().enumerate().filter(|(_, c)| c.active) {
         let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
         let start = c.at_exact();
         let span = pattern.length_exact() * BigRational::from_integer(c.repeats.into());
@@ -393,7 +394,7 @@ fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
             music: format!("pattern {}", c.pattern),
         });
     }
-    for (i, c) in t.audio.iter().enumerate() {
+    for (i, c) in t.audio.iter().enumerate().filter(|(_, c)| c.active) {
         let start = c.at_exact();
         let until = c.source_end_seconds.or_else(|| seconds.get(&c.sample).copied());
         let bpm = c.source_bpm.unwrap_or(p.session.tempo);
@@ -412,7 +413,7 @@ fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
         });
     }
     if let Some(midi) = &t.midi {
-        for (i, c) in midi.clips.iter().enumerate() {
+        for (i, c) in midi.clips.iter().enumerate().filter(|(_, c)| c.active) {
             let start = c.at_exact();
             let mut notes: Vec<String> = c
                 .notes
@@ -515,7 +516,7 @@ fn retriggered(t: &Track, midi: &Midi, spans: &[Span], stacked: &HashSet<(usize,
     let span_of: HashMap<usize, usize> =
         spans.iter().enumerate().filter(|(_, s)| !s.audio).map(|(i, s)| (s.index, i)).collect();
     let mut notes: Vec<(i64, BigRational, BigRational, usize)> = Vec::new();
-    for (ci, c) in midi.clips.iter().enumerate() {
+    for (ci, c) in midi.clips.iter().enumerate().filter(|(_, c)| c.active) {
         let (base, length) = (c.at_exact(), c.length_exact());
         for n in c.notes.iter().filter(|n| c.plays(n)) {
             let at = n.at_exact();
@@ -605,7 +606,7 @@ fn shift(p: &Project, pad: &Pad, note: Option<i64>, transpose: f64) -> f64 {
 fn far_from_root(p: &Project, t: &Track, out: &mut Vec<Warning>) {
     // Each hit: the pad, its beat and its repitch.
     let mut hits: Vec<(&str, BigRational, f64)> = Vec::new();
-    for c in &t.clips {
+    for c in t.clips.iter().filter(|c| c.active) {
         let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
         let (length, events) = (pattern.length_exact(), pattern.expanded());
         for r in 0..c.repeats {

@@ -156,6 +156,10 @@ pub enum Edit {
     /// Loops a note clip or an audio clip every so many beats, as typed, until
     /// its end; `off` or nothing plays it once again.
     ClipLoop { clip: u64, beats: String },
+    /// Deactivates clips, so they stay where they are and play nothing, or
+    /// activates them again: pattern clips, note clips and audio clips, as 0
+    /// does.
+    ClipsActive { clips: Vec<u64>, active: bool },
     /// Adds a note to a note clip at a beat of the clip, one step of `grid`
     /// long: on the step under the beat, exactly, unless `free`. The note is
     /// what the edit makes.
@@ -1389,6 +1393,9 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             let off = beats.trim().is_empty() || beats.trim().eq_ignore_ascii_case("off");
             let loop_beats = if off { Json::Null } else { typed_beat(beats) };
             Ok(vec![json!({"op": "clip.loop", "clip": clip(key), "loop_beats": loop_beats})])
+        }
+        Edit::ClipsActive { clips, active } => {
+            Ok(clips.iter().map(|key| json!({"op": "clip.active", "clip": clip(key), "active": active})).collect())
         }
         Edit::NoteAdd { clip: key, at, free, grid, pitch } => {
             let tree = doc.tree();
@@ -2801,6 +2808,7 @@ pub fn label(edit: &Edit, count: usize) -> Option<String> {
         Edit::BandRemove { band, .. } => return Some(format!("Remove band {} of an equalizer", band + 1)),
         Edit::BandSet { band, .. } => return Some(format!("Move band {} of an equalizer", band + 1)),
         _ if count < 2 => return None,
+        Edit::ClipsActive { active, .. } => return Some(format!("{} {count} clips", if *active { "Activate" } else { "Deactivate" })),
         Edit::ClipsMove { .. } => "Move",
         Edit::ClipsDuplicate { .. } => "Duplicate",
         Edit::ClipsCopy { .. } => "Copy",

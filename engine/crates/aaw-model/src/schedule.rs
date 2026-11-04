@@ -56,7 +56,7 @@ pub fn midi_effect_input(midi: &Midi, index: usize) -> Vec<Played> {
 /// The clips' notes as they play, before any MIDI effect, in beats.
 fn written(midi: &Midi) -> Vec<Played> {
     let mut played = Vec::new();
-    for clip in &midi.clips {
+    for clip in midi.clips.iter().filter(|c| c.active) {
         let start = clip.at_exact();
         for (from, plays) in clip.repetitions() {
             let base = &start + &from;
@@ -126,7 +126,7 @@ pub fn track_triggers(p: &Project, ti: usize) -> Vec<Trigger> {
             triggers = sampler_hits(sampler, &track_notes(p, midi), ti, &t.id);
         }
     }
-    for c in &t.clips {
+    for c in t.clips.iter().filter(|c| c.active) {
         let pattern = &p.patterns[&c.pattern];
         let events = pattern.expanded();
         let length = pattern.length_exact();
@@ -230,7 +230,7 @@ pub fn sounded(p: &Project) -> Vec<Sounded> {
                 }
             }
         }
-        for c in &t.clips {
+        for c in t.clips.iter().filter(|c| c.active) {
             let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
             let (length, events) = (pattern.length_exact(), pattern.expanded());
             for r in 0..c.repeats {
