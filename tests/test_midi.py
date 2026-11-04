@@ -258,6 +258,39 @@ def test_a_clip_loops_its_first_beats_and_the_notes_past_the_loop_are_named(tmp_
     assert [(r.start, round(r.length, 3)) for r in found] == [(0.0, 1.008), (1.0, 1.008), (2.0, 1.008), (3.0, 0.508)]
 
 
+def test_clips_are_deactivated_and_activated_by_the_cli_and_play_nothing_meanwhile(tmp_path):
+    path = phrase(tmp_path)
+    clip = "tracks.keys.clips.clip1"
+    daw("synth", "add", path, "keys")
+    out = daw("clip", "deactivate", path, clip)
+    assert out["label"] == "Deactivate clip clip1 at 4"
+    assert load(path)["tracks"][0]["clips"][0]["active"] is False
+    # Rendered, the track is silent; the song keeps the clip's bars.
+    report = daw("render", path, "--output", tmp_path / "off")
+    assert np.abs(stem(tmp_path / "off", "keys")).max() == 0
+    assert load(path)["session"]["length_beats"] == 8
+    assert "deactivated: notes clip1" in "\n".join(daw("map", path)["map"])
+    assert "active: false" in daw("describe", "project")["semantics"]["active"]
+    # A clip and an audio clip as one step; Python's timeline leaves the audio out.
+    from agent_daw.timeline import regions
+
+    sf.write(path.parent / "loop.wav", tone(110.0, seconds=1.0), SR)
+    daw("set", path, "samples.loop", json.dumps({"path": "loop.wav"}))
+    daw("track", "add", path, "drums")
+    daw("audio", "add", path, "drums", "loop", "--at", 0)
+    daw("clip", "activate", path, clip)
+    both = daw("clip", "deactivate", path, clip, "tracks.drums.audio.0")
+    assert both["label"] == "Deactivate 2 clips"
+    assert "drums" not in regions(load(path), path.parent)
+    daw("clip", "activate", path, clip, "tracks.drums.audio.0")
+    assert "active" not in load(path)["tracks"][0]["clips"][0] or load(path)["tracks"][0]["clips"][0]["active"] is True
+    assert [r.start for r in regions(load(path), path.parent)["drums"]] == [0.0]
+    report = daw("render", path, "--output", tmp_path / "on")
+    assert np.abs(stem(tmp_path / "on", "keys")).max() > 0.01
+    with pytest.raises(ValueError):
+        daw("clip", "deactivate", path, "tracks.keys")
+
+
 def test_racks_are_saved_from_a_chain_listed_and_added_to_a_chain_in_another_song(tmp_path, monkeypatch):
     monkeypatch.setenv("AAW_WORKSPACE", str(tmp_path / "ws"))
     listed = daw("rack", "list")

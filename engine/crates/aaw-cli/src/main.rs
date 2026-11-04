@@ -756,6 +756,21 @@ enum ClipCmd {
         #[arg(long)]
         length: Option<String>,
     },
+    /// Deactivate clips: pattern clips, note clips or audio clips
+    /// (tracks.T.audio.N). Each stays where it is and plays nothing, as 0
+    /// does in the app and in Ableton; `clip activate` plays it again.
+    /// Several clips are one step.
+    Deactivate {
+        project: Song,
+        #[arg(required = true, num_args = 1..)]
+        clips: Vec<String>,
+    },
+    /// Activate clips that were deactivated, so they play again.
+    Activate {
+        project: Song,
+        #[arg(required = true, num_args = 1..)]
+        clips: Vec<String>,
+    },
     /// Move a note clip's start or end to a song beat. Its notes stay where
     /// they are in the song; those the start passes are kept and do not play.
     Trim {
@@ -2573,6 +2588,17 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
             ClipCmd::Join { project, clips } => edit(project, C::ClipJoin { clips: clips.clone() }),
+            ClipCmd::Deactivate { project, clips } | ClipCmd::Activate { project, clips } => {
+                // Several clips deactivated or activated are one step.
+                let active = matches!(c, ClipCmd::Activate { .. });
+                let mut commands: Vec<C> = clips.iter().map(|clip| C::ClipActive { clip: clip.clone(), active }).collect();
+                if commands.len() == 1 {
+                    edit(project, commands.remove(0))
+                } else {
+                    let label = format!("{} {} clips", if active { "Activate" } else { "Deactivate" }, commands.len());
+                    edit(project, C::Batch { commands, label: Some(label) })
+                }
+            }
             ClipCmd::Loop { project, clip, beats, length } => edit(
                 project,
                 C::ClipLoop {

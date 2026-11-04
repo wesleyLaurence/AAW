@@ -138,6 +138,11 @@
           "default": null,
           "description": "More than 0. How long a looped clip lasts on the timeline, from at; only with loop_beats. daw clip resize and daw audio trim --end set it.",
           "title": "Length Beats"
+        },
+        "active": {
+          "default": true,
+          "title": "Active",
+          "type": "boolean"
         }
       },
       "required": [
@@ -181,6 +186,11 @@
           "maximum": 2,
           "title": "Velocity Scale",
           "type": "number"
+        },
+        "active": {
+          "default": true,
+          "title": "Active",
+          "type": "boolean"
         }
       },
       "required": [
@@ -1586,6 +1596,11 @@
           },
           "title": "Notes",
           "type": "array"
+        },
+        "active": {
+          "default": true,
+          "title": "Active",
+          "type": "boolean"
         }
       },
       "required": [

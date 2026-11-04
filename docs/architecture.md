@@ -422,7 +422,11 @@ from its start until its end, the last repetition cut off there, a note held
 across the loop's end cut there and one at or after it kept and not played;
 the schedule unrolls the loop, so the engine plays what copies would play. An
 audio clip loops by the same field, with `length_beats` for how long; see
-[looping-clips.md](features/looping-clips.md). `instrument` is
+[looping-clips.md](features/looping-clips.md). A clip of any kind with
+`active: false` is deactivated: it keeps its place and the song's length,
+the schedule and the audio voices skip it, and `clip.active` sets it, as 0
+does in the app (see [clip-activation.md](features/clip-activation.md)).
+`instrument` is
 null, which plays nothing, `{sampler: {pads, map}}`, `{synth: {...}}` or
 `{device: {name, version, fields}}`, an instrument of the person's own (see
 [custom-devices.md](features/custom-devices.md)): pads as below, and map

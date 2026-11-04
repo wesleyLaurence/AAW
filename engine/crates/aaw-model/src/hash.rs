@@ -37,6 +37,8 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // A clip deactivated.
+        vec![added("active", Value::Bool(true))],
         // A MIDI track's MIDI effects.
         vec![added("midi_effects", Value::List(vec![]))],
         // A track frozen to audio.

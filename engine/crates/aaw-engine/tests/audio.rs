@@ -123,6 +123,24 @@ fn a_clip_leaves_from_where_the_next_one_starts() {
 }
 
 #[test]
+fn a_deactivated_clip_plays_nothing_and_the_one_before_leaves_as_if_alone() {
+    let dir = tempfile::tempdir().unwrap();
+    // The second, deactivated, makes no voice; the first fades from its own
+    // end, not from where the second would have started.
+    let one = voices(
+        dir.path(),
+        120.0,
+        "[{sample: ones, source_end_seconds: 1, fade_out_ms: 12}, {sample: ones, at: 2, source_start_seconds: 0.5, lead_ms: 5, active: false}]",
+    )
+    .unwrap();
+    assert_eq!(one.len(), 1);
+    assert_eq!(one[0].length - one[0].release, RATE);
+    // A looped clip deactivated has none of its copies; the mix is silence.
+    let none = rendered(dir.path(), 120.0, "[{sample: ones, loop_beats: 1, length_beats: 8, active: false}]");
+    assert!(none.iter().all(|f| f[0] == 0.0 && f[1] == 0.0));
+}
+
+#[test]
 fn a_clip_follows_the_tempo_at_its_own_pitch_or_not() {
     let dir = tempfile::tempdir().unwrap();
     let clip = |stretch: &str| format!("[{{sample: ramp, source_end_seconds: 1.5, source_bpm: 120, fade_out_ms: 0, stretch: {stretch}}}]");

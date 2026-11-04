@@ -8,6 +8,12 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **Deactivated clips:** in the app, a clip selected and 0 pressed: it
+  turns gray and goes quiet while the rest of its track plays; 0 again and
+  it plays; several clips at once, a mixed selection, ⌘Z after, and the
+  clip's right-click menu. Then `daw clip deactivate SONG CLIP` from a
+  terminal with the app open, and an audio clip deactivated after one it
+  meets, listening that the first fades out cleanly on its own.
 - **Note text:** `daw note write SONG CLIP "c2 . g2 . | c2,eb3,g3 - - -"
   --grid 1` on a Synth track, `daw note list SONG CLIP --as text --grid 1`
   giving it back, a two-row text with a held dyad under a melody through

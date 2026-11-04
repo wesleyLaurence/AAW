@@ -53,11 +53,12 @@ struct Launch {
         /// The key lifted rather than pressed: a note of the typing keyboard let go.
         var up = false
 
-        /// Where each letter is on the keyboard, which menus match keys by.
+        /// Where each letter and digit is on the keyboard, which menus match keys by.
         private static let letters: [Character: UInt16] = [
             "a": 0, "s": 1, "d": 2, "f": 3, "h": 4, "g": 5, "z": 6, "x": 7, "c": 8, "v": 9, "b": 11, "q": 12,
             "w": 13, "e": 14, "r": 15, "y": 16, "t": 17, "o": 31, "u": 32, "i": 34, "p": 35, "l": 37, "j": 38,
             "k": 40, "n": 45, "m": 46, ";": 41, "'": 39,
+            "1": 18, "2": 19, "3": 20, "4": 21, "5": 23, "6": 22, "7": 26, "8": 28, "9": 25, "0": 29,
         ]
         private static let named: [String: (String, UInt16)] = [
             "space": (" ", 49), "return": ("\r", 36), "delete": ("\u{7f}", 51), "escape": ("\u{1b}", 53),
@@ -764,6 +765,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             item("Join", #selector(SongWindowController.joinSelection(_:)), "j"),
             // Ableton's key: the selected notes onto the piano roll's grid.
             item("Quantize", #selector(SongWindowController.quantizeSelection(_:)), "u"),
+            // Ableton's key: the selected clips stay where they are and play nothing.
+            item("Deactivate Clips", #selector(SongWindowController.toggleClipsActive(_:)), "0", []),
             item("Delete", #selector(SongWindowController.deleteSelection(_:)), "\u{8}", []),
             .separator(),
             item("Select All", #selector(NSResponder.selectAll(_:)), "a"),
@@ -1167,6 +1170,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func duplicateSelection(_ sender: Any?) { model.duplicateSelection() }
     @objc func splitSelection(_ sender: Any?) { model.splitSelection() }
     @objc func joinSelection(_ sender: Any?) { model.joinSelection() }
+    @objc func toggleClipsActive(_ sender: Any?) { model.toggleClipsActive() }
     @objc func quantizeSelection(_ sender: Any?) { model.quantizeSelection() }
     /// Delete, for what has the keys: in the pattern editor the selected
     /// events and nothing else, so that it never takes the clip being edited.
@@ -1272,6 +1276,12 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         case #selector(splitSelection(_:)): return model.canSplit && !typing
         case #selector(joinSelection(_:)): return model.canJoin && !typing
         case #selector(quantizeSelection(_:)): return model.canQuantize && !typing
+        case #selector(toggleClipsActive(_:)):
+            let activate = model.clipsActivation
+            let many = model.selectedClips.count > 1
+            item.title = "\(activate == true ? "Activate" : "Deactivate") \(many ? "Clips" : "Clip")"
+            // In the piano roll and the pattern editor the keys are theirs.
+            return activate != nil && editPlace == .clips && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing
         case #selector(groupSelection(_:)): return model.canGroup && !typing

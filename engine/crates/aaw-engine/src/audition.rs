@@ -49,6 +49,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         length_beats: Beat::Str(aaw_model::fraction_str(&(&length * BigRational::from_integer(notes.len().into())))),
         loop_beats: None,
         notes: Vec::new(),
+        active: true,
     };
     for (i, pitch) in notes.iter().enumerate() {
         if !(0..=127).contains(pitch) {

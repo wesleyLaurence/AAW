@@ -67,6 +67,10 @@ fn command_words(op: &str) -> Vec<&str> {
 }
 
 pub fn same_as(cli: &clap::Command, op: &str) -> Option<String> {
+    // One op, with active false or true, is two commands.
+    if op == "clip.active" {
+        return Some("daw clip deactivate, daw clip activate".into());
+    }
     let words = command_words(op);
     let mut at = cli;
     for word in &words {
