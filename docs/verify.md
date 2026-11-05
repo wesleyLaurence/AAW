@@ -8,6 +8,9 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **The loop toggled past the end:** in the app, nothing selected and no
+  loop yet, a ruler click past the song's end and L: the loop brace lands on
+  the song's last bar and play loops it; L again turns it off.
 - **An audio clip's pitch:** in the app, an audio clip selected and
   Pitch's semitone bar dragged to +3 st: it plays higher and, in Repitch,
   shorter; Mode set to Stretch: it is its old length again at the new pitch;

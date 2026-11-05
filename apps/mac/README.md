@@ -211,7 +211,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Return | Jumps back to the start position while playing |
 | Home, the square left of play, or Transport › Go to Beginning | Stops, ending a take as Space does, and puts the start position at the song's very beginning, bar 1 and 0:00; the timeline scrolls there once play has stopped. Stopped, it only goes to the beginning |
 | Drag in the ruler's top strip | Sets the loop |
-| L | Loops the selected clips; with none selected, turns the loop off, or on again |
+| L | Loops the selected clips; with none selected, turns the loop off, or on again: over its last region, else the section at the start position, else that bar, or the song's last bar when the start position is past the end |
 | M, or Transport › Add Marker | Leaves a marker where the song is heard, to a thousandth of a beat, or at the start position while it is stopped, for the agent to read with `daw marker list`. The song plays on and the selection stays. In the arrangement, the pattern editor and the piano roll alike ([listening markers](../../docs/features/listening-markers.md)) |
 | ⇧M, or Transport › Add Marker and Name It | The same, and opens a field at the marker's flag to type what it says, "too busy": Return or a click elsewhere keeps it, Escape leaves the marker without text. The marker is where the song was when the key went down |
 | Double-click in the clear of the marker strip | Leaves a marker there, on the grid or with ⌘ off it, and asks what it says |
