@@ -31,7 +31,8 @@ can have both. An audio clip has:
 | `fade_out_ms` | 8 | The fade after where it leaves |
 | `fade_curve` | `equal_power` | `equal_power` or `linear`, for both fades |
 | `source_bpm` | none | The file's tempo; with it the clip follows `session.tempo` |
-| `stretch` | `repitch` | `repitch` or `preserve_pitch`; see [time-stretch.md](time-stretch.md) |
+| `stretch` | `repitch` | `repitch`, `preserve_pitch` or `preserve_formants`; see [time-stretch.md](time-stretch.md) and [clip-pitch.md](clip-pitch.md) |
+| `transpose` | 0 | Semitones, −48 to 48, a fraction for less; see [clip-pitch.md](clip-pitch.md) |
 
 A clip plays its file as it is: at full level, a mono file on both sides. A pad
 plays a hit at velocity 100 of 127 and pans a mono file 3 dB down, so the same

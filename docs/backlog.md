@@ -435,6 +435,15 @@ checkout (D75):
 
 One line each, newest first.
 
+- A mode for drums, as Ableton's Beats is, for an audio clip's transpose and
+  tempo: slices at its transients, each played at its own pitch, so a drum
+  loop moved keeps its hits (D173).
+- A pad's transpose at its length, with `preserve_pitch` or
+  `preserve_formants`, as an audio clip's is; a pad's transpose and a note
+  still repitch in either mode (D173).
+- An audio clip's transpose automated, and a check that warns of a move past
+  a few semitones at the clip's length, which a stretcher can be heard
+  making (D173).
 - `daw note list --as text` writing a split where a cell's notes divide it
   evenly, so a take's tuplets and a septuplet read on another grid come
   back as `[ ]` rather than as neighbours rounded into chords named

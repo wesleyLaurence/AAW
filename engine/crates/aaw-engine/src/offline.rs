@@ -362,8 +362,10 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     ];
     // A song that stretches names what stretched it; one that does not keeps
     // the identity it had.
-    let stretches = p.tracks.iter().flat_map(|t| t.sound_pads().values()).any(|pad| {
-        pad.stretch == Stretch::PreservePitch && pad.source_bpm.is_some_and(|bpm| bpm != p.session.tempo)
+    let follows = |stretch: Stretch, bpm: Option<f64>| stretch.keeps_pitch() && bpm.is_some_and(|bpm| bpm != p.session.tempo);
+    let stretches = p.tracks.iter().any(|t| {
+        t.sound_pads().values().any(|pad| follows(pad.stretch, pad.source_bpm))
+            || t.audio.iter().any(|c| follows(c.stretch, c.source_bpm) || (c.stretch.keeps_pitch() && c.transpose != 0.0))
     });
     if stretches {
         dependencies.push((
@@ -570,7 +572,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
         ("automation_policy", Value::str("lanes override static values for the whole song, holding the first value before the first point and the last after the last point; a lane whose points share one value renders exactly as that static value; gain, pan and send levels change per frame, compressor, delay and reverb parameters per frame, filter and eq coefficients every 64 frames; no smoothing")),
         (
             "pitch_policy",
-            Value::str("bandlimited repitch; pitch changes duration; source_bpm repitches, or stretches in time at the same pitch where the pad's stretch is preserve_pitch"),
+            Value::str("bandlimited repitch; pitch changes duration; source_bpm repitches, or stretches in time at the same pitch where the pad's stretch is preserve_pitch; an audio clip's transpose repitches, or with preserve_pitch or preserve_formants is moved by the stretcher at its length"),
         ),
     ]);
     write_text(&output.join("report.json"), &(json_dumps_indent(&manifest) + "\n"))?;

@@ -632,7 +632,8 @@ enum GroupCmd {
 #[derive(Subcommand)]
 enum AudioCmd {
     /// Add an audio clip: --at, --source-start-seconds, --source-end-seconds,
-    /// --lead-ms, --fade-in-ms, --fade-out-ms, --source-bpm and --stretch are optional.
+    /// --lead-ms, --fade-in-ms, --fade-out-ms, --source-bpm, --stretch and
+    /// --transpose are optional.
     #[command(after_help = fields_help("AudioClip", &["sample"]))]
     Add {
         project: Song,

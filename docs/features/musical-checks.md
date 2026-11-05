@@ -58,7 +58,7 @@ length in seconds, which an audio clip without an end needs.
 | `note-below-hearing` | A Synth note whose lowest pitched oscillator, with its octave, semitones and detune, is under 20 Hz. One warning a track |
 | `notes-outside-clip`, `notes-unmapped` | Notes that start outside their clip, and notes a sampler maps to no pad |
 | `macro-unused`, `voices-exceeded`, `release-cut` | A Synth macro that moves nothing, more notes at once than voices, a release the song's end cuts |
-| `stretch-without-tempo`, `stretch-audible` | `preserve_pitch` without `source_bpm`, and a stretch past about 8% |
+| `stretch-without-tempo`, `stretch-audible` | `preserve_pitch` (or an audio clip's `preserve_formants`) without `source_bpm` or a transpose, and a stretch past about 8% |
 | `lane-on-bypassed-effect` | A lane that moves a bypassed effect |
 | `sample-unreadable`, `root-note-mismatch` | From Python: a file the engine cannot read, and a root note the audio disagrees with |
 

@@ -21,8 +21,10 @@ the same there ([audio-clips.md](audio-clips.md)).
   `session.tempo`: it plays `tempo / source_bpm` times as fast.
 - `pad.stretch` says how. `repitch`, the default and what the sampler always did,
   plays the sample faster or slower, and its pitch moves with it. `preserve_pitch`
-  stretches it in time and keeps its pitch. `transpose` and an event's `note` still
-  repitch, on top.
+  stretches it in time and keeps its pitch. A pad's `transpose` and an event's
+  `note` still repitch, on top. An audio clip's `transpose` is moved by the
+  stretcher at the clip's length in this mode, and it has a third,
+  `preserve_formants` ([clip-pitch.md](clip-pitch.md)).
 - `session.stretcher` is `signalsmith`, the default, or `rubberband`.
 - A pad without `source_bpm` is not stretched, so a one-shot keeps its length when
   the tempo changes.

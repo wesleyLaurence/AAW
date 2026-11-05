@@ -8,6 +8,12 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **An audio clip's pitch:** in the app, an audio clip selected and
+  Pitch's semitone bar dragged to +3 st: it plays higher and, in Repitch,
+  shorter; Mode set to Stretch: it is its old length again at the new pitch;
+  the cents bar at −20 ct moves it a little down; a vocal moved up five semitones in Stretch
+  and in Stretch voice, to hear whether the voice keeps its character; the
+  panel's rows fit and read well.
 - **Deactivated clips:** in the app, a clip selected and 0 pressed: it
   turns gray and goes quiet while the rest of its track plays; 0 again and
   it plays; several clips at once, a mixed selection, ⌘Z after, and the

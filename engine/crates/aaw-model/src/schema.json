@@ -96,10 +96,18 @@
           "default": "repitch",
           "enum": [
             "repitch",
-            "preserve_pitch"
+            "preserve_pitch",
+            "preserve_formants"
           ],
           "title": "Stretch",
           "type": "string"
+        },
+        "transpose": {
+          "default": 0.0,
+          "maximum": 48,
+          "minimum": -48,
+          "title": "Transpose",
+          "type": "number"
         },
         "loop_beats": {
           "anyOf": [

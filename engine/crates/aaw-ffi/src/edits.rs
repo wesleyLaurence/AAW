@@ -330,9 +330,9 @@ pub enum Edit {
     /// Makes two of each audio clip among `clips` that plays at a beat. The
     /// later halves are what the edit makes.
     AudioSplit { clips: Vec<u64>, at: f64 },
-    /// Sets a field of an audio clip: `gain_db`, `fade_curve`, `source_bpm`
-    /// or `stretch`. An absent `source_bpm` has the clip play at its file's
-    /// own tempo.
+    /// Sets a field of an audio clip: `gain_db`, `fade_curve`, `source_bpm`,
+    /// `stretch` or `transpose`. An absent `source_bpm` has the clip play at
+    /// its file's own tempo.
     AudioSet { clip: u64, field: String, value: FieldValue },
     /// Adds an empty track at `index` among the tracks, under a free name: a
     /// MIDI track of note clips with no instrument when `midi`.
@@ -1998,7 +1998,7 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Ok(commands)
         }
         Edit::AudioSet { clip: key, field, value } => {
-            const FIELDS: [&str; 4] = ["gain_db", "fade_curve", "source_bpm", "stretch"];
+            const FIELDS: [&str; 5] = ["gain_db", "fade_curve", "source_bpm", "stretch", "transpose"];
             if !FIELDS.contains(&field.as_str()) {
                 return Err(format!("An audio clip's {field} is not set here"));
             }

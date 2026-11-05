@@ -50,6 +50,13 @@ public struct AudioClipLayout: Equatable {
         ms / 1000 * tempo / 60
     }
 
+    /// A clip's transpose as Ableton shows one: whole semitones, the nearer,
+    /// and the cents from there, −50 to 50.
+    public static func pitch(_ transpose: Double) -> (semitones: Double, cents: Double) {
+        let semitones = transpose.rounded()
+        return (semitones, ((transpose - semitones) * 100).rounded())
+    }
+
     public static func ms(beats: Double, tempo: Double) -> Double {
         guard tempo > 0 else { return 0 }
         return beats * 60_000 / tempo

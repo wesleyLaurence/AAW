@@ -37,6 +37,8 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // An audio clip's transpose; a pad and an event have the key too.
+        vec![Added { key: "transpose", default: Value::Float(0.0), beside: Some("source_start_seconds"), unless: None }],
         // A clip deactivated.
         vec![added("active", Value::Bool(true))],
         // A MIDI track's MIDI effects.

@@ -552,8 +552,10 @@ pub struct AudioClipView {
     pub fade_curve: String,
     /// The file's tempo, when the clip follows the song's.
     pub source_bpm: Option<f64>,
-    /// `repitch` or `preserve_pitch`.
+    /// `repitch`, `preserve_pitch` or `preserve_formants`.
     pub stretch: String,
+    /// Semitones it is moved by, a fraction a part of one.
+    pub transpose: f64,
     /// The identity of its file among the arrangement's `files`, or 0 when
     /// the file cannot be read.
     pub file: u64,
@@ -1529,7 +1531,7 @@ fn patterns(p: &Project, tree: &Node) -> Vec<PatternView> {
 /// with a tempo of its own follows the song's, so a beat of the song is a beat
 /// of its file.
 pub fn seconds_per_beat(clip: &AudioClip, tempo: f64) -> f64 {
-    60.0 / clip.source_bpm.unwrap_or(tempo)
+    clip.seconds_per_beat(tempo)
 }
 
 /// How long an audio clip sounds after it leaves, in beats: its fade out, as
@@ -1695,6 +1697,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             fade_curve: c.fade_curve.as_str().to_string(),
                             source_bpm: c.source_bpm,
                             stretch: c.stretch.as_str().to_string(),
+                            transpose: c.transpose,
                             file: identity,
                             active: c.active,
                         }

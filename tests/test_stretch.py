@@ -148,3 +148,29 @@ def test_an_edit_sped_up_keeps_its_joins(tmp_path):
     assert abs(join["measured"]["interval_error_ms"]) < 0.5
     assert abs(join["measured"]["before_ms"]) < 2.5
     assert join["flags"] == []
+
+
+def test_an_audio_clip_s_transpose_repitches_shorter_or_keeps_its_length(tmp_path):
+    folder = tmp_path / "song"
+    song = tone_song(folder)
+    project = load(song)
+    project["tracks"] = [{"id": "tone", "pads": {}}]
+    save(project, song)
+    daw("audio", "add", song, "tone", "tone", "--source-end-seconds", 2, "--fade-out-ms", 0, "--transpose", 12)
+    report = render(song, tmp_path / "up")
+    x = stem(tmp_path / "up", "tone")
+    # An octave up by repitching: twice as fast, so a second long.
+    assert pitch(x) == pytest.approx(880, abs=1)
+    assert np.flatnonzero(np.abs(x[:, 0]) > 0.01)[-1] / SR == pytest.approx(1, abs=0.01)
+    assert "stretcher" not in report["dependencies"]
+    # By the stretcher: its two seconds, a fraction of a semitone down,
+    # with formants kept or not.
+    for stretch in ("preserve_pitch", "preserve_formants"):
+        daw("set", song, "tracks.tone.audio.0.stretch", stretch)
+        daw("set", song, "tracks.tone.audio.0.transpose", -2.5)
+        report = render(song, tmp_path / stretch)
+        x = stem(tmp_path / stretch, "tone")
+        assert pitch(x) == pytest.approx(440 * 2 ** (-2.5 / 12), abs=1)
+        assert np.flatnonzero(np.abs(x[:, 0]) > 0.01)[-1] / SR == pytest.approx(2, abs=0.01)
+        assert report["dependencies"]["stretcher"].startswith("signalsmith")
+    assert "transpose: -2.5" in song.read_text()

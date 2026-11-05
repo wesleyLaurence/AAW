@@ -631,7 +631,7 @@ impl<'a> Edit<'a> {
             let more = exact(right.get("length_beats")).unwrap_or_default();
             let music: &[&str] = match kind {
                 Kind::Note => &["notes"],
-                Kind::Audio => &["sample", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms", "fade_out_ms", "fade_curve", "source_bpm", "stretch"],
+                Kind::Audio => &["sample", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms", "fade_out_ms", "fade_curve", "source_bpm", "stretch", "transpose"],
                 Kind::Pattern => return None,
             };
             if !(same("loop_beats") && music.iter().all(|k| same(k)) && every.is_positive() && (&length / &every).is_integer()) {
@@ -654,7 +654,7 @@ impl<'a> Edit<'a> {
             Kind::Audio => {
                 let (l, r) = (Span::of(left, self.tempo()).ok()?, Span::of(right, self.tempo()).ok()?);
                 let continuous = l.end.is_some_and(|end| (end - r.start).abs() < 1e-9);
-                if !(continuous && same("sample") && same("source_bpm") && same("stretch") && same("gain_db") && same("fade_curve")) {
+                if !(continuous && same("sample") && same("source_bpm") && same("stretch") && same("transpose") && same("gain_db") && same("fade_curve")) {
                     return None;
                 }
                 let map = out.map_mut()?;

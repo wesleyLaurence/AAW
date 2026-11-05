@@ -9,7 +9,7 @@ use crate::beat::signed_beat;
 use crate::pyfmt::{float_repr, format_g};
 use crate::rules::{note_name, owners, target, Owner, MIDDLE_C};
 use crate::schedule::track_notes;
-use crate::schema::{Instrument, Midi, Pad, Project, Stretch, Track, Wave};
+use crate::schema::{Instrument, Midi, Pad, Project, Track, Wave};
 use crate::{fraction_str, Beat};
 use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive};
@@ -41,7 +41,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("device-version", "A device the song names is installed at another version than the song was written with; the sound may differ. daw set the effect's version to the installed one once it is heard, or install the version the song names."),
     ("voices-exceeded", "More notes sound at once than the Synth has voices, so the oldest are cut off."),
     ("release-cut", "The last note's release runs past the song's end, and the end fade cuts it."),
-    ("stretch-without-tempo", "A pad or audio clip is to be stretched with preserve_pitch but has no source_bpm, so nothing is stretched."),
+    ("stretch-without-tempo", "A pad or audio clip is to be stretched with preserve_pitch (or an audio clip with preserve_formants) but has no source_bpm and no transpose, so nothing is stretched."),
     ("stretch-audible", "A pad or audio clip is stretched more than about 8% from its source_bpm, which can be heard."),
     ("lane-on-bypassed-effect", "An automation lane moves a field of a bypassed effect."),
     ("sample-unreadable", "A sample's file is not audio the engine reads, so a render fails."),
@@ -190,20 +190,25 @@ fn pad_path(t: &Track, name: &str) -> String {
 fn stretch(p: &Project) -> Vec<Warning> {
     let mut out = Vec::new();
     for t in &p.tracks {
-        let pads = t.sound_pads().iter().map(|(name, pad)| (name.clone(), pad_path(t, name), pad.stretch, pad.source_bpm));
-        let clips = t
-            .audio
-            .iter()
-            .enumerate()
-            .map(|(i, clip)| (format!("audio.{i}"), format!("tracks.{}.audio.{i}", t.id), clip.stretch, clip.source_bpm));
-        for (name, path, stretch, source_bpm) in pads.chain(clips) {
-            if stretch != Stretch::PreservePitch {
+        let pads = t.sound_pads().iter().map(|(name, pad)| (name.clone(), pad_path(t, name), pad.stretch, pad.source_bpm, 0.0));
+        let clips = t.audio.iter().enumerate().map(|(i, clip)| {
+            (format!("audio.{i}"), format!("tracks.{}.audio.{i}", t.id), clip.stretch, clip.source_bpm, clip.transpose)
+        });
+        for (name, path, stretch, source_bpm, transpose) in pads.chain(clips) {
+            if !stretch.keeps_pitch() {
                 continue;
             }
             match source_bpm {
+                // A transposed clip is moved at its length, which is
+                // something to do without a tempo.
+                None if transpose != 0.0 => {}
                 None => out.push(Warning::new(
                     "stretch-without-tempo",
-                    format!("{}.{name}: stretch is preserve_pitch but source_bpm is not set, so nothing is stretched", t.id),
+                    format!(
+                        "{}.{name}: stretch is {} but source_bpm is not set, so nothing is stretched",
+                        t.id,
+                        stretch.as_str()
+                    ),
                     vec![path],
                 )),
                 Some(bpm) => {
@@ -397,10 +402,10 @@ fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
     for (i, c) in t.audio.iter().enumerate().filter(|(_, c)| c.active) {
         let start = c.at_exact();
         let until = c.source_end_seconds.or_else(|| seconds.get(&c.sample).copied());
-        let bpm = c.source_bpm.unwrap_or(p.session.tempo);
+        let per_beat = c.seconds_per_beat(p.session.tempo);
         let end = match c.length_exact() {
             Some(length) => Some(f(&(&start + length))),
-            None => until.map(|u| f(&start) + (u - c.source_start_seconds).max(0.0) * bpm / 60.0),
+            None => until.map(|u| f(&start) + (u - c.source_start_seconds).max(0.0) / per_beat),
         };
         let looped = c.loop_exact().map(|l| format!(" every {}", fraction_str(&l))).unwrap_or_default();
         out.push(Span {

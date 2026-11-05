@@ -1,5 +1,6 @@
 //! Time stretching that keeps pitch: a pad's audio made longer or shorter by a
-//! ratio, for a song played at another tempo than its own.
+//! ratio, for a song played at another tempo than its own; and an audio
+//! clip's pitch moved at its own length.
 //!
 //! It runs where repitching does, when a pad's audio is prepared, so nothing
 //! stretches while audio plays and playback equals the render. Signalsmith
@@ -17,26 +18,48 @@ pub const SIGNALSMITH: &str = "signalsmith-stretch 0.1.3";
 /// off, so the stretcher's start and end are not in what is heard.
 pub const MARGIN_SECONDS: f64 = 0.2;
 
-/// Interleaved audio played `ratio` times as fast at its own pitch:
-/// `frames / ratio` frames, rounded.
-pub fn stretch(data: &[f64], channels: usize, rate: u32, ratio: f64, with: Stretcher) -> Result<Vec<f64>, String> {
+/// Interleaved audio played `ratio` times as fast at its own pitch, then
+/// moved `semitones` at that length, keeping a voice's formants where they
+/// are when `formants`: `frames / ratio` frames, rounded.
+pub fn stretch(
+    data: &[f64],
+    channels: usize,
+    rate: u32,
+    ratio: f64,
+    semitones: f64,
+    formants: bool,
+    with: Stretcher,
+) -> Result<Vec<f64>, String> {
     let frames = data.len() / channels.max(1);
     let wanted = (frames as f64 / ratio).round() as usize;
     if frames == 0 || wanted == 0 {
         return Ok(Vec::new());
     }
     let mut out = match with {
-        Stretcher::Signalsmith => signalsmith(data, channels, rate, wanted)?,
-        Stretcher::Rubberband => rubberband(data, channels, rate, ratio)?,
+        Stretcher::Signalsmith => signalsmith(data, channels, rate, wanted, semitones, formants)?,
+        Stretcher::Rubberband => rubberband(data, channels, rate, ratio, semitones, formants)?,
     };
     out.resize(wanted * channels, 0.0);
     Ok(out)
 }
 
-fn signalsmith(data: &[f64], channels: usize, rate: u32, wanted: usize) -> Result<Vec<f64>, String> {
+fn signalsmith(
+    data: &[f64],
+    channels: usize,
+    rate: u32,
+    wanted: usize,
+    semitones: f64,
+    formants: bool,
+) -> Result<Vec<f64>, String> {
     let input: Vec<f32> = data.iter().map(|&x| x as f32).collect();
     let mut output = vec![0f32; wanted * channels];
     let mut stretcher = signalsmith_stretch::Stretch::preset_default(channels as u32, rate);
+    if semitones != 0.0 {
+        stretcher.set_transpose_factor(2f64.powf(semitones / 12.0) as f32, None);
+        if formants {
+            stretcher.set_formant_factor(1.0, true);
+        }
+    }
     if !stretcher.exact(&input, &mut output) {
         return Err(format!(
             "{:.0} ms is too short to stretch; use stretch: repitch",
@@ -68,12 +91,19 @@ fn wav(data: &[f64], channels: usize, rate: u32) -> Vec<u8> {
     out
 }
 
-fn rubberband(data: &[f64], channels: usize, rate: u32, ratio: f64) -> Result<Vec<f64>, String> {
+fn rubberband(data: &[f64], channels: usize, rate: u32, ratio: f64, semitones: f64, formants: bool) -> Result<Vec<f64>, String> {
     let dir = tempfile::tempdir().map_err(|e| e.to_string())?;
     let (source, target) = (dir.path().join("in.wav"), dir.path().join("out.wav"));
     std::fs::write(&source, wav(data, channels, rate)).map_err(|e| e.to_string())?;
-    let out = Command::new("rubberband")
-        .args(["--quiet", "--fine", "--tempo", &format!("{ratio:.17}")])
+    let mut command = Command::new("rubberband");
+    command.args(["--quiet", "--fine", "--tempo", &format!("{ratio:.17}")]);
+    if semitones != 0.0 {
+        command.args(["--pitch", &format!("{semitones:.17}")]);
+        if formants {
+            command.arg("--formant");
+        }
+    }
+    let out = command
         .arg(&source)
         .arg(&target)
         .output()
@@ -128,7 +158,7 @@ mod tests {
     fn check(with: Stretcher) {
         let data = song(4.0);
         for ratio in [1.04, 0.96] {
-            let out = stretch(&data, 2, RATE, ratio, with).unwrap();
+            let out = stretch(&data, 2, RATE, ratio, 0.0, false, with).unwrap();
             assert_eq!(out.len() / 2, (4.0 * RATE as f64 / ratio).round() as usize);
             // The pitch is the tone's, where repitching would move it by the
             // ratio, to 458 or 422 Hz. The clicks add a few crossings.
@@ -137,22 +167,46 @@ mod tests {
             // The second channel is still half the first.
             let (l, r): (f64, f64) = out.chunks(2).fold((0.0, 0.0), |(l, r), f| (l + f[0] * f[0], r + f[1] * f[1]));
             assert!((r / l - 0.25).abs() < 0.02, "{with:?}: {}", r / l);
-            assert_eq!(stretch(&data, 2, RATE, ratio, with).unwrap(), out, "the same audio stretches the same");
+            assert_eq!(stretch(&data, 2, RATE, ratio, 0.0, false, with).unwrap(), out, "the same audio stretches the same");
+        }
+    }
+
+    /// A transpose at the audio's own length, and at a stretch: the tone
+    /// moves by the semitones and the length is the stretch's, with formants
+    /// kept or not.
+    fn check_transpose(with: Stretcher) {
+        // The tone alone: a click kept at its place by the formants adds
+        // crossings of its own.
+        let data: Vec<f64> = (0..4 * RATE as usize)
+            .flat_map(|i| {
+                let tone = 0.3 * (TAU * 440.0 * i as f64 / RATE as f64).sin();
+                [tone, 0.5 * tone]
+            })
+            .collect();
+        for (ratio, semitones, formants) in [(1.0, 7.0, false), (1.0, -3.5, true), (1.04, 0.3, false)] {
+            let out = stretch(&data, 2, RATE, ratio, semitones, formants, with).unwrap();
+            assert_eq!(out.len() / 2, (4.0 * RATE as f64 / ratio).round() as usize);
+            let tone = crossings(&out);
+            let wanted = 440.0 * 2f64.powf(semitones / 12.0);
+            assert!((tone - wanted).abs() < 6.0, "{with:?} by {semitones}: {tone} Hz for {wanted}");
+            assert_eq!(stretch(&data, 2, RATE, ratio, semitones, formants, with).unwrap(), out);
         }
     }
 
     #[test]
     fn signalsmith_keeps_pitch_and_gives_the_length_asked() {
         check(Stretcher::Signalsmith);
+        check_transpose(Stretcher::Signalsmith);
         let short = song(0.02);
-        assert!(stretch(&short, 2, RATE, 1.04, Stretcher::Signalsmith).unwrap_err().contains("too short"));
-        assert!(stretch(&[], 2, RATE, 1.04, Stretcher::Signalsmith).unwrap().is_empty());
+        assert!(stretch(&short, 2, RATE, 1.04, 0.0, false, Stretcher::Signalsmith).unwrap_err().contains("too short"));
+        assert!(stretch(&[], 2, RATE, 1.04, 0.0, false, Stretcher::Signalsmith).unwrap().is_empty());
     }
 
     #[test]
     fn rubberband_does_the_same_where_it_is_installed() {
         if rubberband_version().is_ok() {
             check(Stretcher::Rubberband);
+            check_transpose(Stretcher::Rubberband);
         }
     }
 }
