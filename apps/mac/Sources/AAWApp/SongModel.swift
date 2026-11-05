@@ -2022,9 +2022,6 @@ public final class SongModel {
         send { try $0.setLoop(start: start, length: length) }
     }
 
-    /// Loops the selected clips. With none selected, turns the loop off, or
-    /// back on over its last region; with no earlier loop, it covers the
-    /// section at the start position, else that bar.
     /// Shows every row's automation lanes, or hides them again.
     public func toggleAutomation() {
         showsAutomation.toggle()
@@ -2037,6 +2034,10 @@ public final class SongModel {
         toggleAutomation()
     }
 
+    /// Loops the selected clips. With none selected, turns the loop off, or
+    /// back on over its last region; with no earlier loop, it covers the
+    /// section at the start position, else that bar, or the song's last bar
+    /// while the start position is past the end.
     public func toggleLoop() {
         if let span = selectedSpan, span.end > span.start {
             let region = LoopRegion(start: span.start, length: span.end - span.start)
@@ -2051,7 +2052,10 @@ public final class SongModel {
             send { try $0.clearLoop() }
             return
         }
-        let region = lastLoop.flatMap(inSong) ?? defaultLoop()
+        guard let region = lastLoop.flatMap(inSong) ?? Self.defaultLoop(
+            cue: transport.cue, sections: arrangement.sections,
+            barBeats: arrangement.barBeats, lengthBeats: arrangement.lengthBeats
+        ) else { return }
         setLoop(start: region.start, length: region.length)
     }
 
@@ -2064,15 +2068,20 @@ public final class SongModel {
         region.start + region.length <= arrangement.lengthBeats ? region : nil
     }
 
-    private func defaultLoop() -> LoopRegion {
-        let cue = transport.cue
-        if let s = arrangement.sections.first(where: { $0.at <= cue && cue < $0.at + $0.lengthBeats }),
-           s.at + s.lengthBeats <= arrangement.lengthBeats {
+    /// The loop L turns on with nothing selected and no earlier loop: the
+    /// section at `cue`, else the bar at `cue`, cut at the song's end, or the
+    /// song's last bar while `cue` is at or past the end, since the host
+    /// refuses a loop that ends after it. None for a song with no length.
+    nonisolated static func defaultLoop(cue: Double, sections: [SectionView], barBeats bar: Double,
+                            lengthBeats end: Double) -> LoopRegion? {
+        guard end > 0, bar > 0 else { return nil }
+        if let s = sections.first(where: { $0.at <= cue && cue < $0.at + $0.lengthBeats }),
+           s.at + s.lengthBeats <= end {
             return LoopRegion(start: s.at, length: s.lengthBeats)
         }
-        let bar = arrangement.barBeats
-        let start = (cue / bar).rounded(.down) * bar
-        return LoopRegion(start: start, length: min(bar, arrangement.lengthBeats - start))
+        let lastBar = ((end / bar).rounded(.up) - 1) * bar
+        let start = min((max(cue, 0) / bar).rounded(.down) * bar, lastBar)
+        return LoopRegion(start: start, length: min(bar, end - start))
     }
 
     /// Gives the host the devices and the buffer chosen in Settings › Audio;
