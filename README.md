@@ -291,7 +291,8 @@ in it: the host sets its length after every edit. See
 `daw joins` checks a rendered edit of a song: whether the beat carries across each
 join, whether the splice shows as a step, the level either side and the file's
 length, with an excerpt of each join to hear. See [docs/features/join-checks.md](docs/features/join-checks.md).
-`daw export` writes the song's render as a named WAV, AAC or MP3 file and reports
+`daw export` writes what is heard of the song, whole or a range of bars, as a named
+WAV, AIFF, FLAC, AAC or MP3 file in the project's `exports/` folder and reports
 the level policy it applied. See [docs/features/export.md](docs/features/export.md).
 Audition exports a short WAV for listening; it does not start playback automatically.
 

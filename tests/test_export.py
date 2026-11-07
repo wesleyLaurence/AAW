@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -161,7 +162,7 @@ def test_only_a_whole_mix_in_a_known_format_is_exported(song, tmp_path):
     code, result = cli("export", song, "--to", tmp_path / "x.wav", "--render", tmp_path / "preview")
     assert code == 1 and "whole mix" in result["error"]
     code, result = cli("export", song, "--to", tmp_path / "x.ogg")
-    assert code == 1 and ".wav, .m4a or .mp3" in result["error"]
+    assert code == 1 and ".wav, .aiff, .flac, .m4a or .mp3" in result["error"]
     code, result = cli("export", song, "--to", tmp_path / "x.m4a", "--bitrate", 999)
     assert code == 1 and "bitrate must be" in result["error"]
     # A render named outright is exported as it is, whatever the song is now.
@@ -173,3 +174,97 @@ def test_only_a_whole_mix_in_a_known_format_is_exported(song, tmp_path):
     assert load(song)["session"]["master_gain_db"] == -12
     # The Rust binary passes the command on.
     assert daw("export", song, "--to", tmp_path / "y.wav", "--render", tmp_path / "full")["sha256"] == made["sha256"]
+
+
+def test_a_range_is_cut_from_the_full_render(song):
+    # Two bars of 4/4 at 120: a bar is two seconds.
+    code, made = cli("export", song, "--to", "bar 2.wav", "--bars", "2")
+    assert code == 0, made
+    to = song.parent / "exports" / "bar 2.wav"
+    assert made["file"] == str(to.resolve())
+    mix = sf.read(f"{made['render']['directory']}/mix.wav")[0]
+    assert np.array_equal(sf.read(to)[0], mix[2 * SR : 4 * SR])
+    assert made["duration_seconds"] == 2
+    assert made["range"] == {
+        "whole_song": False, "start_seconds": 2, "end_seconds": 4,
+        "start_beat": 4, "end_beat": 8, "start": "2:1", "end": "3:1",
+    }
+    assert json.loads((to.parent / "bar 2.wav.json").read_text())["range"] == made["range"]
+    # The level is measured over the range, not the song.
+    assert made["level"]["peak_dbfs"] == pytest.approx(measure(mix[2 * SR : 4 * SR], SR)["peak_dbfs"])
+
+    # BAR:BEAT and beats name the same places; --end is where the file stops.
+    code, places = cli("export", song, "--to", "a.wav", "--start", "1:3", "--end", "2:1")
+    code, beats = cli("export", song, "--to", "b.wav", "--start", 2, "--end", 4)
+    assert places["sha256"] == beats["sha256"] and places["duration_seconds"] == 1
+    assert not places["render"]["rendered_now"]
+    code, until = cli("export", song, "--to", "c.wav", "--end", "1:2.5")
+    assert until["range"]["start_beat"] == 0 and until["range"]["end_beat"] == 1.5
+
+    # A section is a range too.
+    data = load(song)
+    data["sections"] = [{"id": "drop", "at": 4, "length_beats": 2}]
+    save(data, song)
+    code, drop = cli("export", song, "--to", "drop.wav", "--section", "drop")
+    assert code == 0 and drop["range"]["start"] == "2:1" and drop["range"]["end"] == "2:3"
+
+    for bad, reason in [
+        (("--end", "3:2"), "past the song's end at 3:1"),
+        (("--start", 4, "--end", 4), "ends after it starts"),
+        (("--start", "0:1"), "not in a bar"),
+        (("--start", "1:5"), "not in a bar"),
+        (("--bars", "3-2"), "first to last"),
+        (("--bars", "1", "--section", "drop"), "one of them"),
+        (("--section", "verse"), "Unknown or ambiguous section"),
+    ]:
+        code, result = cli("export", song, "--to", "bad.wav", *bad)
+        assert code == 1 and reason in result["error"], (bad, result)
+
+
+def test_what_is_muted_is_not_exported(song):
+    code, both = cli("export", song, "--to", "both.wav", "--bars", "2")
+    daw("set", song, "tracks.tone.mute", True)
+    code, beat = cli("export", song, "--to", "beat.wav", "--bars", "2")
+    assert code == 0 and beat["render"]["rendered_now"]
+    # The tone is the loud part; without it only the beat is left.
+    assert beat["level"]["integrated_lufs"] < both["level"]["integrated_lufs"] - 6
+    daw("set", song, "tracks.beat.mute", True)
+    code, result = cli("export", song, "--to", "none.wav", "--bars", "2")
+    assert code == 1 and "Nothing is heard from 2:1 to 3:1" in result["error"]
+
+
+def test_the_name_place_rate_and_depth_are_chosen(song, tmp_path):
+    # No name: the folder's, as a 24-bit WAV in exports.
+    code, made = cli("export", song)
+    assert code == 0 and made["file"] == str((song.parent / "exports" / "song.wav").resolve())
+    data = load(song)
+    data["session"]["title"] = "My Song"
+    save(data, song)
+    code, titled = cli("export", song)
+    assert titled["file"].endswith("exports/My Song.wav")
+    # A path with a folder goes where it says.
+    code, there = cli("export", song, "--to", tmp_path / "there.wav")
+    assert there["file"] == str((tmp_path / "there.wav").resolve())
+
+    code, low = cli("export", song, "--to", "low.wav", "--sample-rate", 44100, "--bits", 16)
+    assert code == 0 and low["sample_rate"] == 44100 and low["resampled_from"] == SR
+    info = sf.info(song.parent / "exports" / "low.wav")
+    assert info.samplerate == 44100 and info.subtype == "PCM_16" and info.frames == 4 * 44100
+    assert low["duration_seconds"] == 4
+    assert low["level"]["integrated_lufs"] == pytest.approx(made["level"]["integrated_lufs"], abs=0.1)
+
+    for name, bits, subtype in [("f.aiff", 32, "FLOAT"), ("f.aiff", 16, "PCM_16"), ("f.flac", 24, "PCM_24"), ("f.wav", 32, "FLOAT")]:
+        code, made = cli("export", song, "--to", name, "--bits", bits, "--replace", "--bars", "1")
+        assert code == 0, made
+        info = sf.info(song.parent / "exports" / name)
+        assert info.subtype == subtype and info.duration == 2
+        assert made["format"]["container"] == Path(name).suffix[1:]
+
+    for bad, reason in [
+        (("--to", "x.flac", "--bits", 32), ".flac file is 16 or 24 bits"),
+        (("--to", "x.mp3", "--bits", 16), "--bits is for .wav"),
+        (("--to", "x.mp3", "--sample-rate", 96000), "at most 48000 Hz"),
+        (("--to", "x.wav", "--sample-rate", 100), "sample rate must be"),
+    ]:
+        code, result = cli("export", song, *bad)
+        assert code == 1 and reason in result["error"], (bad, result)

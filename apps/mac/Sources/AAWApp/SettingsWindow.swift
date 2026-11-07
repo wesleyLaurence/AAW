@@ -83,19 +83,19 @@ struct AudioSettingsTab: View {
     let frontSong: () -> SongModel?
     @State private var status: AudioStatus?
     @State private var songRate: UInt32?
-    @State private var exportFormat: ExportOptions.Format = ExportOptions(defaults: .standard).format
+    @State private var exportBits = ExportOptions(defaults: .standard).bits
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     /// The song's rates the model allows.
     static let songRates: [UInt32] = [44100, 48000]
 
-    private var bitDepth: Binding<ExportOptions.Format> {
+    private var bitDepth: Binding<Int> {
         Binding(
-            get: { exportFormat == .wav16 ? .wav16 : .wav24 },
-            set: { format in
-                exportFormat = format
+            get: { exportBits },
+            set: { bits in
+                exportBits = bits
                 var options = ExportOptions(defaults: .standard)
-                options.format = format
+                options.bits = bits
                 options.remember(in: .standard)
             }
         )
@@ -141,10 +141,11 @@ struct AudioSettingsTab: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Picker("Bit Depth:", selection: bitDepth) {
-                    Text("24-bit").tag(ExportOptions.Format.wav24)
-                    Text("16-bit").tag(ExportOptions.Format.wav16)
+                    ForEach([16, 24, 32], id: \.self) { bits in
+                        Text(ExportSetup.depthName(bits)).tag(bits)
+                    }
                 }
-                Text("For exported WAV files, as File › Export Audio… offers them. Playback is 32-bit float; the device's own depth is the Mac's to set.")
+                Text("For exported WAV, AIFF and FLAC files, as File › Export Audio… offers them; FLAC is at most 24-bit. Playback is 32-bit float; the device's own depth is the Mac's to set.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
