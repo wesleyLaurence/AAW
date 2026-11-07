@@ -126,6 +126,26 @@ fn a_clip_leaves_from_where_the_next_one_starts() {
 }
 
 #[test]
+fn halves_of_a_split_with_a_lead_meet_on_the_beat_and_play_as_the_whole() {
+    let dir = tempfile::tempdir().unwrap();
+    // A clip whose lead plays 400 ms of the file before its beat, as one
+    // lined up on the grid with its pickup before the downbeat, split on
+    // beat 3: the right half has no lead, so it starts on the beat and the
+    // left leaves there, and the two play the frames the one did.
+    let whole = "[{sample: ramp, at: 2, source_start_seconds: 0.5, lead_ms: 400}]";
+    let split = "[{sample: ramp, at: 2, source_start_seconds: 0.5, source_end_seconds: 1.0, lead_ms: 400, fade_out_ms: 0}, {sample: ramp, at: 3, source_start_seconds: 1.0, fade_in_ms: 0}]";
+    let halves = voices(dir.path(), 120.0, split).unwrap();
+    assert_eq!(halves[0].start, (0.6 * RATE as f64) as i64);
+    assert_eq!(halves[1].start, (1.5 * RATE as f64) as i64);
+    assert_eq!(halves[0].start as usize + halves[0].length, halves[1].start as usize);
+    let (a, b) = (rendered(dir.path(), 120.0, whole), rendered(dir.path(), 120.0, split));
+    assert_eq!(a.len(), b.len());
+    for (i, (x, y)) in a.iter().zip(&b).enumerate() {
+        assert!((x[0] - y[0]).abs() < 1e-6 && (x[1] - y[1]).abs() < 1e-6, "frame {i}: {x:?} {y:?}");
+    }
+}
+
+#[test]
 fn a_deactivated_clip_plays_nothing_and_the_one_before_leaves_as_if_alone() {
     let dir = tempfile::tempdir().unwrap();
     // The second, deactivated, makes no voice; the first fades from its own

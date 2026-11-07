@@ -274,6 +274,34 @@ fn audio_clips_split_and_trim_where_their_audio_is() {
 }
 
 #[test]
+fn a_split_is_on_its_beat_whatever_the_clip_s_lead() {
+    let (_d, mut s) = open(true);
+    let clip = with_song(&mut s);
+    // A lead of 400 ms plays the file before the clip's beat, as for a song
+    // lined up with its pickup before the downbeat. The left half keeps it;
+    // the right half has none, so the cut is on beat 6 and not 400 ms sooner.
+    edit(&mut s, json!({"op": "set", "path": "tracks.song.audio.0.lead_ms", "value": 400})).unwrap();
+    edit(&mut s, json!({"op": "audio.split", "clip": clip, "at": 6})).unwrap();
+    assert_eq!(
+        get(&s, "tracks.song.audio"),
+        json!([
+            {"sample": "song", "at": 4, "source_start_seconds": 1.0, "source_end_seconds": 2.0, "lead_ms": 400.0, "fade_out_ms": 0.0},
+            {"sample": "song", "at": 6, "source_start_seconds": 2.0, "fade_in_ms": 0.0},
+        ])
+    );
+    // The two join back into the one.
+    edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.song.audio.0", "tracks.song.audio.1"]})).unwrap();
+    assert_eq!(
+        get(&s, "tracks.song.audio"),
+        json!([{"sample": "song", "at": 4, "source_start_seconds": 1.0, "lead_ms": 400.0}])
+    );
+    // A range's edge cuts the same way.
+    edit(&mut s, json!({"op": "range.clear", "start": 6, "length": 1, "tracks": ["song"]})).unwrap();
+    let right = get(&s, "tracks.song.audio.1");
+    assert_eq!((right["at"].clone(), right.get("lead_ms")), (json!(7), None), "{right}");
+}
+
+#[test]
 fn an_audio_clip_moves_to_a_beat_and_a_track_with_its_handle() {
     let (_d, mut s) = open(true);
     let clip = with_song(&mut s);
