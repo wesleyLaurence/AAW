@@ -1719,10 +1719,25 @@ public final class SongModel {
         url.deletingLastPathComponent().appendingPathComponent("exports", isDirectory: true)
     }
 
-    /// The range an export starts with: the selected clips' span, else the
-    /// whole song.
+    /// The beats the selected clips sound over: from where the first one's
+    /// sound starts, an audio clip's lead before its beat included, to where
+    /// the last one's ends, its fade's tail included.
+    var selectedSound: (start: Double, end: Double)? {
+        let clips = placedClips().filter { selectedClips.contains($0.key) }
+        guard let start = clips.map({ $0.at - ($0.audio?.leadBeats ?? 0) }).min() else { return nil }
+        return (start, clips.map(\.end).max() ?? start)
+    }
+
+    /// The range an export starts with: what the selected clips sound over,
+    /// else the whole song.
     var exportRange: ExportRange {
-        ExportRange.initial(selection: selectedSpan, length: arrangement.lengthBeats)
+        ExportRange.initial(selection: selectedSound, length: arrangement.lengthBeats)
+    }
+
+    /// A place in the song as the transport writes it, off the grid by
+    /// milliseconds: what the export's banner says of a range.
+    func placeText(_ beats: Double) -> String {
+        ExportRange.text(beats, bar: arrangement.barBeats, unit: arrangement.beatUnit, tempo: arrangement.tempo)
     }
 
     /// What the Export Audio sheet starts with: the options chosen last
@@ -1735,7 +1750,7 @@ public final class SongModel {
         let title = untitled || !["", "Untitled"].contains(a.title.trimmingCharacters(in: .whitespaces)) ? a.title : folder
         return ExportSetup(
             options: options, title: title, range: range,
-            fromSelection: selectedSpan != nil && !range.isWhole(length: a.lengthBeats),
+            fromSelection: selectedSound != nil && !range.isWhole(length: a.lengthBeats),
             barBeats: a.barBeats, beatUnit: a.beatUnit, lengthBeats: a.lengthBeats, tempo: a.tempo,
             timeSignature: a.timeSignature, songRate: Int(a.sampleRate), hasFolder: !untitled
         )

@@ -18,7 +18,7 @@ named WAV, AIFF, FLAC, AAC or MP3 file, as `daw export` does
 | Control | Choices | `daw export` |
 |---|---|---|
 | Name | The song's title, or the project folder's name while the title is still Untitled; the format's extension shown after it | `--to exports/NAME.EXT` |
-| Start, End | A bar and a beat each, the beat the note the meter counts and a decimal for part of one; End is where the file stops; Whole Song puts back the whole song | `--start BEATS --end BEATS`, or nothing for the whole song |
+| Start, End | A bar, a beat and a sixteenth each, as the transport writes a position: the beat the note the meter counts, an eighth in x/8 with two sixteenths; a decimal sixteenth is a place between sixteenths; End is where the file stops; Whole Song puts back the whole song | `--start BEATS --end BEATS`, or nothing for the whole song |
 | Format | WAV, AIFF, FLAC, AAC, MP3 | the extension |
 | Sample Rate | 44.1, 48, 88.2 or 96 kHz and the song's, marked; at most 48 kHz for AAC and MP3 | `--sample-rate`, when not the song's |
 | Bit Depth | 16-bit, 24-bit, 32-bit float; FLAC to 24; shown for WAV, AIFF, FLAC | `--bits`, when not 24 |
@@ -26,14 +26,19 @@ named WAV, AIFF, FLAC, AAC or MP3 file, as `daw export` does
 | Level | As rendered; True peak at … dBTP; Loudness … LUFS; Gain … dB | nothing, `--peak`, `--lufs`, `--gain` |
 | Ceiling | A sample peak in dBFS, -0.1 unless changed; shown once a level is chosen | `--ceiling` |
 
-**The range** starts as the span of the selected clips: drag a rectangle over
-clips, or Shift-click them, and press ⇧⌘R, and Start and End are where the
-first of them begins and the last ends, cut at the song's end. With no clip
+**The range** starts as what the selected clips sound over: drag a
+rectangle over clips, or Shift-click them, and press ⇧⌘R, and Start is where
+the first of them starts sounding, an audio clip's lead before its beat
+included, and End where the last stops, its fade's tail included, cut at the
+song's end. A clip off the grid gives the place it is at, not the nearest
+sixteenth: a clip at beat 4.3 in 4/4 is Start 2 . 1 . 2.2. With no clip
 selected it is the whole song. Under the fields a line says what the range is,
-"Bars 2–35, the selected clips · 1:08" or "The whole song · 2:30". A range
-that ends after the song does, a beat the bar does not have, an end not after
-the start or an empty name is said in orange beside the buttons, and Export
-cannot be pressed until it is fixed.
+"Bars 2–35, the selected clips · 1:08" or "The whole song · 2:30"; a place off
+the grid is written as the nearest sixteenth and how far from it, "1.4.4 +
+55 ms", so it is never read as a sixteenth it is not. A range that ends after
+the song does, a beat the bar does not have, a sixteenth the beat does not
+have, an end not after the start or an empty name is said in orange beside
+the buttons, and Export cannot be pressed until it is fixed.
 
 **Export** writes into the project's `exports/` folder, made if it is not
 there, with no save panel. A file there already is asked about, as every Mac
@@ -50,7 +55,7 @@ While the export runs the transport bar says "Exporting NAME.m4a…" with a
 spinner, and the window stays usable: the song plays, edits land and the
 agent's commands arrive. The menu item is gray until it is done, since one
 export runs at a time, and while the sheet is open. When it is done a banner
-under the transport bar shows the range when it was not the whole song, the
+under the transport bar shows the range when it was not the whole song, written as the sheet writes a place, the
 file's length, its loudness, its true peak, and when a level was asked for,
 the gain applied and how much the ceiling held back, with the warnings
 `daw export` gives, and a Show in Finder button. It stays until its × is
@@ -92,7 +97,7 @@ banner as the message `daw` gives, and the song is not changed.
 **What is heard.** The range is cut from the full render, in which muted and
 solo-muted tracks and deactivated clips are silent, so they are not in the file
 even where they make the song longer than the range. The range is sent in
-beats, the bar and beat fields read in the song's meter (`ExportRange`), so the
+beats, the bar, beat and sixteenth fields read in the song's meter (`ExportRange`), so the
 command and the app agree on where a bar starts in any time signature. No
 track, section preview or stems: stems are a Later line under Export.
 
@@ -130,9 +135,9 @@ Nothing was exported by hand or heard, and the panel with its format, level
 and ceiling was never opened: a save panel waits for a person.
 
 The sheet of November 7, 2026 was checked by Swift tests of the mapping from
-its choices to the command's arguments, the bar and beat of a range in 4/4,
+its choices to the command's arguments, the bar, beat and sixteenth of a range in 4/4,
 6/8 and 7/8, the range from a selection of clips in a song the model opened,
-what the sheet says of a range and when Export is gray, the options
+a range starting at an off-grid clip and at an audio clip's lead, what the sheet says of a range and when Export is gray, the options
 remembered and the older `wav16` read as a 16-bit WAV; and by scripted runs
 of the bundle: the sheet opened by ⇧⌘R and pictured, and a range exported.
 Nothing was pressed, typed or heard by hand.
@@ -144,7 +149,7 @@ Nothing was pressed, typed or heard by hand.
 - One export at a time; a second asked for while one runs is refused with the
   first file's name.
 - `--match SAMPLE`, `--bars`, `--section` and `--render DIR` are the
-  command's alone; the sheet's bar and beat fields reach every range those do.
+  command's alone; the sheet's bar, beat and sixteenth fields reach every range those do.
 - The range ends where End is: what rings past it is cut, as at the song's
   end. A range cannot reach past the song's end.
 - An Untitled project exports where its save panel says, not into its own

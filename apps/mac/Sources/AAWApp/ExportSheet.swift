@@ -10,9 +10,11 @@ final class ExportSetup {
     var options: ExportOptions
     var name: String
     var startBar: Int
-    var startBeat: Double
+    var startBeat: Int
+    var startSixteenth: Double
     var endBar: Int
-    var endBeat: Double
+    var endBeat: Int
+    var endSixteenth: Double
 
     /// A bar and the note the meter counts, in quarter-note beats.
     let barBeats: Double
@@ -42,28 +44,41 @@ final class ExportSetup {
         self.hasFolder = hasFolder
         let start = ExportRange.place(range.start, bar: barBeats, unit: beatUnit)
         let end = ExportRange.place(range.end, bar: barBeats, unit: beatUnit)
-        (startBar, startBeat, endBar, endBeat) = (start.bar, start.beat, end.bar, end.beat)
+        (startBar, startBeat, startSixteenth) = (start.bar, start.beat, start.sixteenth)
+        (endBar, endBeat, endSixteenth) = (end.bar, end.beat, end.sixteenth)
     }
 
     /// The range the fields say.
     var range: ExportRange {
         ExportRange(
-            start: ExportRange.beats(bar: startBar, beat: startBeat, barBeats: barBeats, unit: beatUnit),
-            end: ExportRange.beats(bar: endBar, beat: endBeat, barBeats: barBeats, unit: beatUnit)
+            start: ExportRange.beats(bar: startBar, beat: startBeat, sixteenth: startSixteenth, barBeats: barBeats, unit: beatUnit),
+            end: ExportRange.beats(bar: endBar, beat: endBeat, sixteenth: endSixteenth, barBeats: barBeats, unit: beatUnit)
         )
     }
 
     /// The beats a bar of the meter counts: 4 in 4/4, 6 in 6/8.
-    var beatsInBar: Double { barBeats / beatUnit }
+    var beatsInBar: Int { Int((barBeats / beatUnit).rounded(.up)) }
+
+    /// The sixteenths in a beat the meter counts: 4 in a quarter, 2 in an eighth.
+    var sixteenthsInBeat: Double { beatUnit * 4 }
 
     /// Why Export cannot be pressed, or nil.
     var problem: String? {
-        for beat in [startBeat, endBeat] where beat < 1 || beat >= beatsInBar + 1 {
-            return "A bar of \(timeSignature) has beats 1 to \(ExportOptions.number(beatsInBar))."
-        }
         if startBar < 1 || endBar < 1 { return "Bars count from 1." }
+        for beat in [startBeat, endBeat] where beat < 1 || beat > beatsInBar {
+            return "A bar of \(timeSignature) has beats 1 to \(beatsInBar)."
+        }
+        for sixteenth in [startSixteenth, endSixteenth] where sixteenth < 1 || sixteenth >= sixteenthsInBeat + 1 {
+            let last = ExportOptions.number(sixteenthsInBeat)
+            return "A beat of \(timeSignature) has sixteenths 1 to \(last); a decimal is a place between them."
+        }
         if name.trimmingCharacters(in: .whitespaces).isEmpty { return "The file needs a name." }
-        return range.problem(length: lengthBeats, bar: barBeats, unit: beatUnit)
+        return range.problem(length: lengthBeats, bar: barBeats, unit: beatUnit, tempo: tempo)
+    }
+
+    /// A place as the transport writes it.
+    func text(_ beats: Double) -> String {
+        ExportRange.text(beats, bar: barBeats, unit: beatUnit, tempo: tempo)
     }
 
     /// The range passed to `daw export`, or nil for the whole song.
@@ -73,7 +88,8 @@ final class ExportSetup {
 
     func wholeSong() {
         let end = ExportRange.place(lengthBeats, bar: barBeats, unit: beatUnit)
-        (startBar, startBeat, endBar, endBeat) = (1, 1, end.bar, end.beat)
+        (startBar, startBeat, startSixteenth) = (1, 1, 1)
+        (endBar, endBeat, endSixteenth) = (end.bar, end.beat, end.sixteenth)
     }
 
     /// What the range is, in words: the bars it covers and how long it lasts.
@@ -84,10 +100,10 @@ final class ExportSetup {
         var what: String
         if r.isWhole(length: lengthBeats) {
             what = "The whole song"
-        } else if startBeat == 1, endBeat == 1, endBar > startBar {
+        } else if startBeat == 1, endBeat == 1, startSixteenth == 1, endSixteenth == 1, endBar > startBar {
             what = endBar - startBar == 1 ? "Bar \(startBar)" : "Bars \(startBar)–\(endBar - 1)"
         } else {
-            what = "\(ExportRange.text(r.start, bar: barBeats, unit: beatUnit)) to \(ExportRange.text(r.end, bar: barBeats, unit: beatUnit))"
+            what = "\(text(r.start)) to \(text(r.end))"
         }
         if fromSelection && !r.isWhole(length: lengthBeats) { what += ", the selected clips" }
         return "\(what) · \(Self.duration(seconds))"
@@ -188,18 +204,26 @@ struct ExportSheet: View {
         return f
     }()
 
-    private func place(_ label: String, bar: Binding<Int>, beat: Binding<Double>) -> some View {
-        HStack(spacing: 3) {
+    /// Bar, beat and sixteenth, as the transport writes a position; the
+    /// sixteenth takes a decimal for a place between sixteenths.
+    private func place(_ label: String, bar: Binding<Int>, beat: Binding<Int>, sixteenth: Binding<Double>) -> some View {
+        HStack(spacing: 2) {
             TextField("Bar", value: bar, formatter: Self.whole)
-                .frame(width: 48)
+                .frame(width: 44)
                 .multilineTextAlignment(.trailing)
                 .accessibilityLabel("\(label) bar")
             Text(".").foregroundStyle(.secondary)
-            TextField("Beat", value: beat, formatter: Self.number)
-                .frame(width: 40)
+            TextField("Beat", value: beat, formatter: Self.whole)
+                .frame(width: 30)
                 .multilineTextAlignment(.trailing)
                 .accessibilityLabel("\(label) beat")
+            Text(".").foregroundStyle(.secondary)
+            TextField("Sixteenth", value: sixteenth, formatter: Self.number)
+                .frame(width: 44)
+                .multilineTextAlignment(.trailing)
+                .accessibilityLabel("\(label) sixteenth")
         }
+        .help("Bar, beat and sixteenth, as the transport shows a position; a decimal sixteenth is a place between sixteenths")
     }
 
     var body: some View {
@@ -218,12 +242,13 @@ struct ExportSheet: View {
                 }
                 GridRow {
                     Text("Start:").gridColumnAlignment(.trailing)
-                    HStack(spacing: 14) {
-                        place("Start", bar: $setup.startBar, beat: $setup.startBeat)
+                    HStack(spacing: 10) {
+                        place("Start", bar: $setup.startBar, beat: $setup.startBeat, sixteenth: $setup.startSixteenth)
                         Text("End:")
-                        place("End", bar: $setup.endBar, beat: $setup.endBeat)
+                        place("End", bar: $setup.endBar, beat: $setup.endBeat, sixteenth: $setup.endSixteenth)
                         Button("Whole Song") { setup.wholeSong() }
                             .disabled(setup.range.isWhole(length: setup.lengthBeats))
+                            .fixedSize()
                     }
                 }
                 GridRow {
@@ -337,6 +362,6 @@ struct ExportSheet: View {
         }
         .controlSize(.regular)
         .padding(20)
-        .frame(width: 560, alignment: .leading)
+        .frame(width: 600, alignment: .leading)
     }
 }

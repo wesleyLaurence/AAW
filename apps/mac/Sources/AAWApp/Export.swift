@@ -250,31 +250,40 @@ struct ExportOptions: Equatable {
 
 /// The beats of the song an export covers, from `start` to where it stops,
 /// `end`, in quarter-note beats from the song's start as every position is.
-/// The sheet shows them as bar and beat in the song's meter.
+/// The sheet shows them as bar, beat and sixteenth in the song's meter, as
+/// the transport does, a sixteenth with a decimal for a place between them.
 struct ExportRange: Equatable {
     var start: Double
     var end: Double
 
-    /// A position as a bar and a beat from 1, the beat the note the meter
-    /// counts: beat 8.5 in 4/4 is bar 3, beat 1.5. `bar` and `unit` are in
-    /// quarter-note beats, a bar of 3/4 three, the eighth of 6/8 a half.
-    static func place(_ beats: Double, bar: Double, unit: Double) -> (bar: Int, beat: Double) {
+    /// A position as a bar, a beat and a sixteenth, each from 1, the beat the
+    /// note the meter counts: beat 8.5 in 4/4 is bar 3, beat 1, sixteenth 3.
+    /// `bar` and `unit` are in quarter-note beats, a bar of 3/4 three, the
+    /// eighth of 6/8 a half. The sixteenth has a fraction off the grid.
+    static func place(_ beats: Double, bar: Double, unit: Double) -> (bar: Int, beat: Int, sixteenth: Double) {
         // Rounded to a millionth, so 2.9999999 is bar 2's end, not its last beat.
         let at = (beats * 1e6).rounded() / 1e6
         let index = (at / bar + 1e-9).rounded(.down)
-        let beat = ((at - index * bar) / unit * 1e6).rounded() / 1e6 + 1
-        return (Int(index) + 1, beat)
+        let inBar = at - index * bar
+        let beat = min((inBar / unit + 1e-9).rounded(.down), (bar / unit).rounded(.up) - 1)
+        let sixteenth = ((inBar - beat * unit) * 4 * 1e6).rounded() / 1e6 + 1
+        return (Int(index) + 1, Int(beat) + 1, sixteenth)
     }
 
-    /// A bar and a beat from 1 as beats from the song's start.
-    static func beats(bar: Int, beat: Double, barBeats: Double, unit: Double) -> Double {
-        Double(bar - 1) * barBeats + (beat - 1) * unit
+    /// A bar, a beat and a sixteenth from 1 as beats from the song's start.
+    static func beats(bar: Int, beat: Int, sixteenth: Double, barBeats: Double, unit: Double) -> Double {
+        Double(bar - 1) * barBeats + Double(beat - 1) * unit + (sixteenth - 1) / 4
     }
 
-    /// A position as `bar.beat`, the beat to a hundredth where it is not whole.
-    static func text(_ beats: Double, bar: Double, unit: Double) -> String {
-        let p = place(beats, bar: bar, unit: unit)
-        return "\(p.bar).\(ExportOptions.number((p.beat * 100).rounded() / 100))"
+    /// A position as the transport writes it, bar.beat.sixteenth, at the
+    /// nearest sixteenth, and how far off it the place is in milliseconds
+    /// when it is off the grid: `2.1.1`, `1.4.4 + 55 ms`.
+    static func text(_ beats: Double, bar: Double, unit: Double, tempo: Double) -> String {
+        let grid = (beats * 4).rounded() / 4
+        let base = TimelineLayout.position(grid, beatsPerBar: bar, beatUnit: unit)
+        let ms = ((beats - grid) * 60 / tempo * 1000).rounded()
+        guard ms != 0 else { return base }
+        return "\(base) \(ms > 0 ? "+" : "−") \(Int(abs(ms))) ms"
     }
 
     /// The whole song, or the selected clips' span inside it.
@@ -291,11 +300,11 @@ struct ExportRange: Equatable {
     }
 
     /// Why the range cannot be exported, or nil.
-    func problem(length: Double, bar: Double, unit: Double) -> String? {
+    func problem(length: Double, bar: Double, unit: Double, tempo: Double) -> String? {
         if start < -1e-9 { return "The start is before bar 1." }
         if end <= start + 1e-9 { return "The end must be after the start." }
         if end > length + 1e-9 {
-            return "The song ends at \(Self.text(length, bar: bar, unit: unit)); nothing after it is rendered."
+            return "The song ends at \(Self.text(length, bar: bar, unit: unit, tempo: tempo)); nothing after it is rendered."
         }
         return nil
     }
@@ -312,9 +321,9 @@ struct ExportReport: Equatable {
     var truePeakDbtp: Double?
     var warnings: [String]
     var renderedNow: Bool
-    /// Where the range began and stopped as `bar.beat`, when it was not the
+    /// Where the range began and stopped in beats, when it was not the
     /// whole song.
-    var range: (start: String, end: String)?
+    var range: (start: Double, end: Double)?
 
     var name: String { (file as NSString).lastPathComponent }
 
@@ -339,10 +348,10 @@ struct ExportReport: Equatable {
         truePeakDbtp = level["estimated_true_peak_dbtp"] as? Double
         warnings = (object["warnings"] as? [String]) ?? []
         renderedNow = ((object["render"] as? [String: Any])?["rendered_now"] as? Bool) ?? false
-        // The command writes a place as BAR:BEAT; the app as bar.beat.
+        // In beats, which the app writes as the transport does.
         if let r = object["range"] as? [String: Any], r["whole_song"] as? Bool == false,
-           let start = r["start"] as? String, let end = r["end"] as? String {
-            range = (start.replacingOccurrences(of: ":", with: "."), end.replacingOccurrences(of: ":", with: "."))
+           let start = r["start_beat"] as? Double, let end = r["end_beat"] as? Double {
+            range = (start, end)
         }
     }
 
@@ -371,11 +380,12 @@ struct ExportReport: Equatable {
     }
 
     /// The measurements in a line: the range when it was not the whole
-    /// song, the length, the loudness, the true peak, and when a gain was
-    /// applied, how much, and how much the ceiling held back.
-    var measurements: String {
+    /// song, its places written by `place`, the length, the loudness, the
+    /// true peak, and when a gain was applied, how much, and how much the
+    /// ceiling held back.
+    func measurements(place: (Double) -> String) -> String {
         var parts = [Self.length(durationSeconds)]
-        if let range { parts.insert("\(range.start) to \(range.end)", at: 0) }
+        if let range { parts.insert("\(place(range.start)) to \(place(range.end))", at: 0) }
         if let integratedLufs { parts.append(Self.decibels(integratedLufs, "LUFS")) }
         if let truePeakDbtp { parts.append(Self.decibels(truePeakDbtp, "dBTP")) }
         if policy != "as rendered" {

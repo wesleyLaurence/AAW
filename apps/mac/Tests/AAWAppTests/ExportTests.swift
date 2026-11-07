@@ -79,20 +79,31 @@ final class ExportTests: XCTestCase {
         }
     }
 
-    /// Positions as bar and beat in the song's meter, and back.
-    func testARangeIsBarsAndBeatsInTheMeter() {
-        // 4/4: a bar is 4 beats, a beat a quarter.
-        XCTAssertTrue(ExportRange.place(0, bar: 4, unit: 1) == (1, 1))
-        XCTAssertTrue(ExportRange.place(140, bar: 4, unit: 1) == (36, 1))
-        XCTAssertTrue(ExportRange.place(8.5, bar: 4, unit: 1) == (3, 1.5))
-        XCTAssertTrue(ExportRange.place(3.9999999999, bar: 4, unit: 1) == (2, 1), "a hair under a bar line is the line")
-        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 1, barBeats: 4, unit: 1), 4)
-        XCTAssertEqual(ExportRange.text(1 / 3.0, bar: 4, unit: 1), "1.1.33")
-        // 6/8: a bar is 3 quarter beats, counted in six eighths.
-        XCTAssertTrue(ExportRange.place(4.5, bar: 3, unit: 0.5) == (2, 4))
-        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 4, barBeats: 3, unit: 0.5), 4.5)
+    /// Positions as bar, beat and sixteenth in the song's meter, and back;
+    /// a place off the sixteenths as the nearest one and milliseconds.
+    func testARangeIsBarsBeatsAndSixteenthsInTheMeter() {
+        // 4/4: a bar is 4 beats, a beat a quarter of four sixteenths.
+        XCTAssertTrue(ExportRange.place(0, bar: 4, unit: 1) == (1, 1, 1))
+        XCTAssertTrue(ExportRange.place(140, bar: 4, unit: 1) == (36, 1, 1))
+        XCTAssertTrue(ExportRange.place(8.5, bar: 4, unit: 1) == (3, 1, 3))
+        XCTAssertTrue(ExportRange.place(4.3, bar: 4, unit: 1) == (2, 1, 2.2), "off the grid: a decimal sixteenth")
+        XCTAssertTrue(ExportRange.place(3.9999999999, bar: 4, unit: 1) == (2, 1, 1), "a hair under a bar line is the line")
+        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 1, sixteenth: 1, barBeats: 4, unit: 1), 4)
+        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 1, sixteenth: 2.2, barBeats: 4, unit: 1), 4.3, accuracy: 1e-12)
+        XCTAssertEqual(ExportRange.text(4, bar: 4, unit: 1, tempo: 120), "2.1.1")
+        XCTAssertEqual(ExportRange.text(4.5, bar: 4, unit: 1, tempo: 120), "2.1.3")
+        // 0.3 of a beat is 1.2 sixteenths: the second, and 0.2 of 125 ms after it.
+        XCTAssertEqual(ExportRange.text(4.3, bar: 4, unit: 1, tempo: 120), "2.1.2 + 25 ms")
+        // A lead of 70 ms before bar 2 at 120: 0.14 beats, nearer 1.4.4 than 2.1.1.
+        XCTAssertEqual(ExportRange.text(3.86, bar: 4, unit: 1, tempo: 120), "1.4.4 + 55 ms")
+        XCTAssertEqual(ExportRange.text(3.97, bar: 4, unit: 1, tempo: 120), "2.1.1 − 15 ms")
+        XCTAssertEqual(ExportRange.text(1 / 3.0, bar: 4, unit: 1, tempo: 120), "1.1.2 + 42 ms")
+        // 6/8: a bar is 3 quarter beats, counted in six eighths of two sixteenths.
+        XCTAssertTrue(ExportRange.place(4.75, bar: 3, unit: 0.5) == (2, 4, 2))
+        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 4, sixteenth: 2, barBeats: 3, unit: 0.5), 4.75)
+        XCTAssertEqual(ExportRange.text(4.75, bar: 3, unit: 0.5, tempo: 120), "2.4.2")
         // 7/8: a bar is 3.5.
-        XCTAssertEqual(ExportRange.text(7, bar: 3.5, unit: 0.5), "3.1")
+        XCTAssertEqual(ExportRange.text(7, bar: 3.5, unit: 0.5, tempo: 120), "3.1.1")
     }
 
     /// The selected clips' span inside the song, else the whole song.
@@ -105,10 +116,10 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(ExportRange.initial(selection: (300, 310), length: 300), ExportRange(start: 0, end: 300))
         XCTAssertTrue(ExportRange(start: 0, end: 300).isWhole(length: 300))
         XCTAssertFalse(ExportRange(start: 4, end: 300).isWhole(length: 300))
-        XCTAssertNil(ExportRange(start: 4, end: 140).problem(length: 300, bar: 4, unit: 1))
-        XCTAssertEqual(ExportRange(start: 4, end: 4).problem(length: 300, bar: 4, unit: 1), "The end must be after the start.")
-        XCTAssertEqual(ExportRange(start: 4, end: 304).problem(length: 300, bar: 4, unit: 1),
-                       "The song ends at 76.1; nothing after it is rendered.")
+        XCTAssertNil(ExportRange(start: 4, end: 140).problem(length: 300, bar: 4, unit: 1, tempo: 120))
+        XCTAssertEqual(ExportRange(start: 4, end: 4).problem(length: 300, bar: 4, unit: 1, tempo: 120), "The end must be after the start.")
+        XCTAssertEqual(ExportRange(start: 4, end: 304).problem(length: 300, bar: 4, unit: 1, tempo: 120),
+                       "The song ends at 76.1.1; nothing after it is rendered.")
         XCTAssertEqual(Launch.range("4-12.5"), ExportRange(start: 4, end: 12.5))
         XCTAssertNil(Launch.range("4"))
     }
@@ -118,17 +129,23 @@ final class ExportTests: XCTestCase {
     func testTheSheetShowsTheRangeAsBarsAndSaysWhatIsWrong() {
         let setup = ExportSetup(options: ExportOptions(), title: "Song", range: ExportRange(start: 4, end: 140), fromSelection: true,
                                 barBeats: 4, beatUnit: 1, lengthBeats: 300, tempo: 120, timeSignature: "4/4", songRate: 48000, hasFolder: true)
-        XCTAssertEqual([setup.startBar, setup.endBar], [2, 36])
-        XCTAssertEqual([setup.startBeat, setup.endBeat], [1, 1])
+        XCTAssertEqual([setup.startBar, setup.startBeat, setup.endBar, setup.endBeat], [2, 1, 36, 1])
+        XCTAssertEqual([setup.startSixteenth, setup.endSixteenth], [1, 1])
         XCTAssertEqual(setup.summary, "Bars 2–35, the selected clips · 1:08")
         XCTAssertEqual(setup.exportedRange, ExportRange(start: 4, end: 140))
         XCTAssertNil(setup.problem)
         setup.endBeat = 5
         XCTAssertEqual(setup.problem, "A bar of 4/4 has beats 1 to 4.")
-        setup.endBeat = 2.5
-        XCTAssertEqual(setup.summary, "2.1 to 36.2.5, the selected clips · 1:08")
+        setup.endBeat = 2
+        setup.endSixteenth = 5
+        XCTAssertEqual(setup.problem, "A beat of 4/4 has sixteenths 1 to 4; a decimal is a place between them.")
+        setup.endSixteenth = 3
+        XCTAssertEqual(setup.summary, "2.1.1 to 36.2.3, the selected clips · 1:08")
+        setup.startSixteenth = 2.2
+        XCTAssertEqual(setup.range.start, 4.3, accuracy: 1e-12)
+        XCTAssertEqual(setup.summary, "2.1.2 + 25 ms to 36.2.3, the selected clips · 1:08")
         setup.endBar = 80
-        XCTAssertEqual(setup.problem, "The song ends at 76.1; nothing after it is rendered.")
+        XCTAssertEqual(setup.problem, "The song ends at 76.1.1; nothing after it is rendered.")
         setup.wholeSong()
         XCTAssertEqual(setup.summary, "The whole song · 2:30")
         XCTAssertNil(setup.exportedRange, "the whole song is sent as no range")
@@ -146,6 +163,18 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(setup.bitrate.wrappedValue, 320)
         XCTAssertEqual(ExportSetup.duration(1.25), "0:01.3")
         XCTAssertEqual(ExportSetup.kHz(44100), "44.1 kHz")
+
+        // In 6/8 a beat is an eighth of two sixteenths.
+        let six = ExportSetup(options: ExportOptions(), title: "Song", range: ExportRange(start: 3, end: 4.75), fromSelection: false,
+                              barBeats: 3, beatUnit: 0.5, lengthBeats: 30, tempo: 120, timeSignature: "6/8", songRate: 48000, hasFolder: true)
+        XCTAssertEqual([six.endBar, six.endBeat], [2, 4])
+        XCTAssertEqual(six.endSixteenth, 2)
+        XCTAssertNil(six.problem)
+        six.endBeat = 7
+        XCTAssertEqual(six.problem, "A bar of 6/8 has beats 1 to 6.")
+        six.endBeat = 6
+        six.endSixteenth = 3
+        XCTAssertEqual(six.problem, "A beat of 6/8 has sixteenths 1 to 2; a decimal is a place between them.")
     }
 
     /// ⇧⌘R with clips selected: the range is theirs; with none, the whole
@@ -157,13 +186,21 @@ final class ExportTests: XCTestCase {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
         let song = folder.appendingPathComponent("song.yaml")
+        // kick.wav, half a second.
+        _ = try AgentAttachmentsTests.files(in: folder)
         try """
-        session: {length_beats: 300}
+        session: {length_beats: 300, tempo: 120}
+        samples: {kick: {path: kick.wav}}
         tracks:
+        - id: vox
+          pads: {}
+          clips: []
+          audio:
+          - {sample: kick, at: 8, source_start_seconds: 0.2, lead_ms: 70}
         - id: keys
           type: midi
           clips:
-          - {at: 4, length_beats: 8, id: a, notes: [{pitch: 60, duration: 1}]}
+          - {at: 4.3, length_beats: 7.7, id: a, notes: [{pitch: 60, duration: 1}]}
           - {at: 132, length_beats: 8, id: b, notes: [{pitch: 64, duration: 1}]}
           - {at: 200, length_beats: 8, id: c, notes: [{pitch: 67, duration: 1}]}
 
@@ -171,12 +208,24 @@ final class ExportTests: XCTestCase {
         let model = try SongModel(url: song)
         defer { model.close() }
         XCTAssertEqual(model.exportRange, ExportRange(start: 0, end: model.arrangement.lengthBeats))
-        let clips = model.placedClips().filter { $0.at < 200 }.map(\.key)
+        let clips = model.placedClips().filter { $0.at < 200 && $0.audio == nil }.map(\.key)
         model.select(clips: Set(clips))
-        XCTAssertEqual(model.exportRange, ExportRange(start: 4, end: 140))
+        // A clip off the grid starts the range where it starts.
+        XCTAssertEqual(model.exportRange.start, 4.3, accuracy: 1e-9)
+        XCTAssertEqual(model.exportRange.end, 140)
         let setup = model.exportSetup(options: ExportOptions())
         XCTAssertEqual(setup.name, "Night Drive")
-        XCTAssertEqual([setup.startBar, setup.endBar], [2, 36])
+        XCTAssertEqual([setup.startBar, setup.startBeat, setup.endBar, setup.endBeat], [2, 1, 36, 1])
+        XCTAssertEqual(setup.startSixteenth, 2.2, accuracy: 1e-9)
+        XCTAssertEqual(model.placeText(4.3), "2.1.2 + 25 ms")
+
+        // An audio clip's lead plays before its beat, and is exported: 70 ms
+        // at 120 is 0.14 beats before bar 3.
+        let audio = try XCTUnwrap(model.placedClips().first { $0.audio != nil })
+        model.select(clips: [audio.key])
+        XCTAssertEqual(model.exportRange.start, 7.86, accuracy: 1e-9)
+        XCTAssertEqual(model.placeText(model.exportRange.start), "2.4.4 + 55 ms")
+        XCTAssertEqual(model.selectedSpan?.start, 8, "the loop L sets keeps the clip's beat")
         XCTAssertTrue(setup.fromSelection)
         XCTAssertTrue(setup.hasFolder)
     }
@@ -245,22 +294,23 @@ final class ExportTests: XCTestCase {
         XCTAssertEqual(report.truePeakDbtp, -1)
         XCTAssertTrue(report.renderedNow)
         XCTAssertEqual(report.warnings.count, 1)
-        XCTAssertEqual(report.measurements, "3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied")
+        let place = { (beats: Double) in ExportRange.text(beats, bar: 4, unit: 1, tempo: 120) }
+        XCTAssertEqual(report.measurements(place: place), "3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied")
 
         // As rendered: the gain is not worth a word. A held-back gain is.
         var plain = report
         plain.policy = "as rendered"
         plain.gainDb = 0
-        XCTAssertEqual(plain.measurements, "3:32 · −14.0 LUFS · −1.0 dBTP")
+        XCTAssertEqual(plain.measurements(place: place), "3:32 · −14.0 LUFS · −1.0 dBTP")
         var held = report
         held.policy = "loudness"
         held.heldBackDb = 1.84
-        XCTAssertEqual(held.measurements, "3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied · 1.8 dB held back by the ceiling")
+        XCTAssertEqual(held.measurements(place: place), "3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied · 1.8 dB held back by the ceiling")
 
-        // A range is said first, as the app writes a place.
+        // A range is said first, its places as the transport writes them.
         let ranged = try XCTUnwrap(ExportReport(json: Data(json.replacingOccurrences(
-            of: "\"warnings\"", with: "\"range\": {\"whole_song\": false, \"start\": \"2:1\", \"end\": \"36:1\"}, \"warnings\"").utf8)))
-        XCTAssertEqual(ranged.measurements, "2.1 to 36.1 · 3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied")
+            of: "\"warnings\"", with: "\"range\": {\"whole_song\": false, \"start_beat\": 3.86, \"end_beat\": 140.0, \"start\": \"1:4.86\", \"end\": \"36:1\"}, \"warnings\"").utf8)))
+        XCTAssertEqual(ranged.measurements(place: place), "1.4.4 + 55 ms to 36.1.1 · 3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied")
 
         // A result that is not the command's is no report.
         XCTAssertNil(ExportReport(json: Data("{\"ok\": true}".utf8)))
@@ -300,7 +350,7 @@ final class ExportTests: XCTestCase {
         guard case .done(let report) = Exporter.run(daw: answers, arguments: ["export"], file: "Song.wav") else {
             return XCTFail("no report")
         }
-        XCTAssertEqual(report.measurements, "0:08 · −20.5 LUFS · −6.1 dBTP")
+        XCTAssertEqual(report.measurements(place: { "\($0)" }), "0:08 · −20.5 LUFS · −6.1 dBTP")
 
         let refuses = try daw("echo '{\"error\": \"The render is silent\"}' >&2; exit 1")
         XCTAssertEqual(Exporter.run(daw: refuses, arguments: ["export"], file: "Song.wav"),

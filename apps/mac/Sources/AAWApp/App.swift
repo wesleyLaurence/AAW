@@ -309,7 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                 range: range.isWhole(length: model.arrangement.lengthBeats) ? nil : range) { [weak self] outcome in
             switch outcome {
             case .done(let report):
-                print("Exported \(report.file): \(report.measurements)")
+                print("Exported \(report.file): \(report.measurements(place: model.placeText))")
                 for warning in report.warnings { print("Warning: \(warning)") }
             case .failed(_, let reason):
                 FileHandle.standardError.write(Data("\(reason)\n".utf8))

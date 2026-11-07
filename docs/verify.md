@@ -9,8 +9,9 @@ The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
 - **Export a range:** in the app, drag over the clips from bar 2 to bar 35 of
-  a song with muted tracks running later, ⇧⌘R: the sheet reads Start 2.1 and
-  End 36.1, "Bars 2–35, the selected clips"; choose FLAC, 44.1 kHz, 16-bit,
+  a song with muted tracks running later, ⇧⌘R: the sheet reads Start 2.1.1 and
+  End 36.1.1, "Bars 2–35, the selected clips"; an audio clip lined up with a
+  lead starts the range a little before its beat, "1.4.4 + 55 ms"; choose FLAC, 44.1 kHz, 16-bit,
   Export: the file is in the project's exports folder, starts on bar 2's
   downbeat, has nothing of the muted tracks, and a reverb from before bar 2 is
   heard at its start. Export again under the same name asks to replace; with
