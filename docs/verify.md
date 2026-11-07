@@ -8,6 +8,9 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **A split on its beat:** in the app, a song whose clip was lined up with a
+  long lead, the start position on bar 30 and ⌘E: the later half's block
+  starts on bar 30, and Delete after it leaves the music up to bar 30.
 - **The loop toggled past the end:** in the app, nothing selected and no
   loop yet, a ruler click past the song's end and L: the loop brace lands on
   the song's last bar and play loops it; L again turns it off.

@@ -539,6 +539,11 @@ impl<'a> Edit<'a> {
                 set(&mut right, "at", beat_value(at));
                 set(&mut right, "source_start_seconds", Value::Float(cut));
                 set(&mut right, "fade_in_ms", Value::Float(0.0));
+                // The cut is at the beat: a lead on the right half would start
+                // it, and end the left, that long before the beat.
+                if let Some(m) = right.map_mut() {
+                    m.shift_remove("lead_ms");
+                }
             }
         }
         Ok((left, right))

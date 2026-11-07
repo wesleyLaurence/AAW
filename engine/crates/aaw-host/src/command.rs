@@ -2819,6 +2819,9 @@ impl<'a> Edit<'a> {
                     fields.insert("at".into(), Node::Leaf(beat_value(&at)));
                     fields.insert("source_start_seconds".into(), Node::Leaf(Value::Float(cut)));
                     fields.insert("fade_in_ms".into(), Node::Leaf(Value::Float(0.0)));
+                    // The cut is at the beat: a lead on the right half would
+                    // start it, and end the left, that long before the beat.
+                    fields.shift_remove("lead_ms");
                 }
                 out.made.push(self.insert(&owner, "audio", Some(i + 1), right)?);
                 out.label = format!("Split audio clip {name} at beat {}", beat_text(&at));

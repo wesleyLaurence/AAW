@@ -87,6 +87,8 @@ A clip is named by its path, `tracks.TRACK.audio.N`, or by the `@N` reference
   other tracks are left where they are.
 - **`audio split CLIP --at BEAT`** makes two clips of one, with no fade between
   them. They play exactly as the one did: the same frames at the same places.
+  The cut is on the beat: the left half keeps the clip's lead and the right half
+  has none, so it starts on BEAT and the left leaves there, however long the lead.
 - **`clip join CLIP CLIP...`** makes one clip of two or more that meet and are the
   same file played on, as `audio split` left them, so the one plays exactly what
   they did; clips a cut joined with a crossfade, or of two files, are refused
