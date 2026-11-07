@@ -379,12 +379,28 @@ def parser():
     joins.add_argument("--no-excerpts", action="store_true")
     export = sub.add_parser(
         "export",
-        help="Write the song's render as a named WAV, AAC or MP3 file, at a stated level",
+        help="Write what is heard of the song, whole or a range, as a named WAV, AIFF, FLAC, AAC or MP3 file at a stated level",
+        description="Write what is heard of the song, whole or a range of it, as a named file: "
+        "muted and solo-muted tracks and deactivated clips are not in it. A name alone, or no "
+        "--to, goes in the project's exports/ folder.",
     )
     export.add_argument("project", type=song_file)
-    export.add_argument("--to", type=Path, required=True, help="NAME.wav, .m4a or .mp3")
-    export.add_argument("--bits", type=int, choices=[16, 24], default=24, help="For .wav")
+    export.add_argument(
+        "--to",
+        type=Path,
+        help="NAME.wav, .aiff, .flac, .m4a or .mp3; a name alone is put in exports/; "
+        "exports/TITLE.wav when not given",
+    )
+    export.add_argument("--bits", type=int, choices=[16, 24, 32], help="For .wav, .aiff (24 unless given; 32 is float) and .flac (16 or 24)")
+    export.add_argument("--sample-rate", type=int, help="Hz, such as 44100 or 48000: the song's unless given")
     export.add_argument("--bitrate", type=int, help="kb/s: 256 for .m4a, 320 for .mp3")
+    where = export.add_argument_group(
+        "range", "the whole song unless given; a place is beats from the start (66) or BAR:BEAT (17:1)"
+    )
+    where.add_argument("--start", metavar="PLACE", help="Where the file starts")
+    where.add_argument("--end", metavar="PLACE", help="Where it stops: 36:1 ends after bar 35")
+    where.add_argument("--bars", metavar="A-B", help="Whole bars from 1, both included: 2-35")
+    where.add_argument("--section", metavar="ID", help="One section of the song")
     level = export.add_argument_group(
         "level", "one gain for the whole file, held under --ceiling; as rendered by default"
     ).add_mutually_exclusive_group()
@@ -497,9 +513,17 @@ def execute(a):
 
         if a.bitrate is not None and not 64 <= a.bitrate <= 320:
             raise ValueError("bitrate must be 64–320 kb/s")
+        if a.bars is not None or a.section is not None:
+            if sum(v is not None for v in (a.bars, a.section, a.start or a.end)) > 1:
+                raise ValueError("A range is --start and --end, --bars or --section, one of them")
         return export(
             a.project,
             a.to,
+            start=a.start,
+            end=a.end,
+            bars=a.bars,
+            section=a.section,
+            sample_rate=a.sample_rate,
             bits=a.bits,
             bitrate=a.bitrate,
             gain=a.gain,

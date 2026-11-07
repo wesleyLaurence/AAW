@@ -1713,19 +1713,43 @@ public final class SongModel {
         _ = try song.exportMidiClip(clip: clip, path: url.path)
     }
 
-    /// The folder File › Export Audio… opens in: `exports/` beside the song
-    /// file, which a project with a name keeps its deliverables in.
+    /// The folder File › Export Audio… writes into: `exports/` beside the
+    /// song file, which a project with a name keeps its deliverables in.
     var exportsFolder: URL {
         url.deletingLastPathComponent().appendingPathComponent("exports", isDirectory: true)
     }
 
-    /// Writes the mix as `file` with the bundle's `daw export`, off the main
-    /// thread, and shows what it measured, or why it wrote nothing, until
-    /// dismissed. The export is of the song as the host last saved it, which
-    /// is the song in the window, and changes nothing in it. `replace`
-    /// writes over a file that is there, which the panel asked about. One
-    /// export runs at a time.
-    func export(to file: URL, options: ExportOptions, replace: Bool, then: (@MainActor (ExportOutcome) -> Void)? = nil) {
+    /// The range an export starts with: the selected clips' span, else the
+    /// whole song.
+    var exportRange: ExportRange {
+        ExportRange.initial(selection: selectedSpan, length: arrangement.lengthBeats)
+    }
+
+    /// What the Export Audio sheet starts with: the options chosen last
+    /// time, the song's title as the name and `exportRange`.
+    func exportSetup(options: ExportOptions) -> ExportSetup {
+        let a = arrangement
+        let range = exportRange
+        // The title the song was made with says nothing: the folder's name does.
+        let folder = url.deletingLastPathComponent().lastPathComponent
+        let title = untitled || !["", "Untitled"].contains(a.title.trimmingCharacters(in: .whitespaces)) ? a.title : folder
+        return ExportSetup(
+            options: options, title: title, range: range,
+            fromSelection: selectedSpan != nil && !range.isWhole(length: a.lengthBeats),
+            barBeats: a.barBeats, beatUnit: a.beatUnit, lengthBeats: a.lengthBeats, tempo: a.tempo,
+            timeSignature: a.timeSignature, songRate: Int(a.sampleRate), hasFolder: !untitled
+        )
+    }
+
+    /// Writes what is heard of the song, over `range` or the whole of it,
+    /// as `file` with the bundle's `daw export`, off the main thread, and
+    /// shows what it measured, or why it wrote nothing, until dismissed. The
+    /// export is of the song as the host last saved it, which is the song
+    /// in the window, and changes nothing in it. `replace` writes over a
+    /// file that is there, which the person was asked about. One export
+    /// runs at a time.
+    func export(to file: URL, options: ExportOptions, replace: Bool, range: ExportRange? = nil,
+                then: (@MainActor (ExportOutcome) -> Void)? = nil) {
         let name = file.lastPathComponent
         guard exporting == nil else {
             refuse("\(exporting ?? "An export") is still being written; export again when it is done")
@@ -1733,7 +1757,7 @@ public final class SongModel {
         }
         exporting = name
         exportOutcome = nil
-        let arguments = options.arguments(project: url.path, to: file.path, replace: replace)
+        let arguments = options.arguments(project: url.path, to: file.path, replace: replace, range: range)
         let daw = Exporter.daw
         exports.async { [weak self] in
             let outcome = Exporter.run(daw: daw, arguments: arguments, file: name)

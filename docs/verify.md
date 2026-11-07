@@ -8,6 +8,15 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **Export a range:** in the app, drag over the clips from bar 2 to bar 35 of
+  a song with muted tracks running later, ⇧⌘R: the sheet reads Start 2.1 and
+  End 36.1, "Bars 2–35, the selected clips"; choose FLAC, 44.1 kHz, 16-bit,
+  Export: the file is in the project's exports folder, starts on bar 2's
+  downbeat, has nothing of the muted tracks, and a reverb from before bar 2 is
+  heard at its start. Export again under the same name asks to replace; with
+  nothing selected the sheet offers the whole song; an Untitled project asks
+  where. In a terminal, `daw export SONG --to Edit.wav --bars 2-35` writes the
+  same range into exports.
 - **A split on its beat:** in the app, a song whose clip was lined up with a
   long lead, the start position on bar 30 and ⌘E: the later half's block
   starts on bar 30, and Delete after it leaves the music up to bar 30.

@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 /// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
 /// `--ask TEXT`, `--attach FILE`, `--attach-clips`, `--listen` and `--record-audio`
 /// in the order to perform them, then `--export PATH [--export-level
-/// LEVEL]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
+/// LEVEL] [--export-range START-END]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
 /// `--after SECONDS` and `--size WxH`.
 struct Launch {
     /// Input to feed the first window as if a person made it. Points are in
@@ -114,6 +114,9 @@ struct Launch {
     /// The level of that export: `peak=-1`, `lufs=-14`, `gain=-3` or
     /// `rendered`.
     var exportLevel: ExportOptions.Level?
+    /// The beats of that export, `START-END`, rather than the selected
+    /// clips' span or the whole song.
+    var exportRange: ExportRange?
     /// Open the Settings window, as AAW › Settings… does.
     var settings = false
     /// The pane it opens on, as `--settings-pane NAME` names it.
@@ -186,6 +189,8 @@ struct Launch {
                 export = rest.popFirst().map { URL(fileURLWithPath: $0) }
             case "--export-level":
                 exportLevel = rest.popFirst().flatMap(ExportOptions.Level.parse)
+            case "--export-range":
+                exportRange = rest.popFirst().flatMap(Self.range)
             case _ where argument.hasPrefix("-"):
                 // A default AppKit reads itself, such as -NSQuitAlwaysKeepsWindows NO.
                 if argument.hasPrefix("-NS") || argument.hasPrefix("-Apple") { _ = rest.popFirst() }
@@ -193,6 +198,13 @@ struct Launch {
                 songs.append(URL(fileURLWithPath: argument))
             }
         }
+    }
+
+    /// `START-END` in beats, as `--export-range 4-12` gives a range.
+    static func range(_ text: String) -> ExportRange? {
+        let parts = text.split(separator: "-", maxSplits: 1).compactMap { Double($0) }
+        guard parts.count == 2 else { return nil }
+        return ExportRange(start: parts[0], end: parts[1])
     }
 }
 
@@ -287,9 +299,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func export(to url: URL) {
         guard let controller = songs.first else { exit(1) }
         var options = ExportOptions()
-        options.format = ExportOptions.Format(fileExtension: url.pathExtension) ?? .wav24
+        options.format = ExportOptions.Format(fileExtension: url.pathExtension) ?? .wav
         if let level = launch.exportLevel { options.level = level }
-        controller.model.export(to: url, options: options, replace: false) { [weak self] outcome in
+        // The range ⇧⌘R starts with, the selected clips' span or the whole
+        // song, unless `--export-range` gives one.
+        let model = controller.model
+        let range = launch.exportRange ?? model.exportRange
+        controller.model.export(to: url, options: options, replace: false,
+                                range: range.isWhole(length: model.arrangement.lengthBeats) ? nil : range) { [weak self] outcome in
             switch outcome {
             case .done(let report):
                 print("Exported \(report.file): \(report.measurements)")
@@ -307,9 +324,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Ends a scripted run: as a quit, unless its export failed.
+    /// Ends a scripted run: as a quit, unless its export failed. A sheet
+    /// left open, such as Export Audio's, is closed first: the app does not
+    /// quit past one.
     private func finishRun() {
         if exportFailed { exit(1) }
+        for window in NSApp.windows {
+            if let sheet = window.attachedSheet { window.endSheet(sheet) }
+        }
         NSApp.terminate(nil)
     }
 
@@ -687,6 +709,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return
         }
         var pictures = [(view, url)]
+        // A sheet over the song window, such as Export Audio's, as
+        // `NAME-sheet.png`, drawn from its layers: its SwiftUI text is not in
+        // a picture of the view.
+        if let content = controller.window?.attachedSheet?.contentView {
+            let name = url.deletingPathExtension().lastPathComponent + "-sheet"
+            let file = url.deletingLastPathComponent().appendingPathComponent(name).appendingPathExtension(url.pathExtension)
+            if !Self.layerPicture(of: content, to: file) { pictures.append((content, file)) }
+        }
         // The Settings window, when open, as `NAME-settings.png`.
         if let window = settings?.window, window.isVisible, let content = window.contentView {
             let name = url.deletingPathExtension().lastPathComponent + "-settings"
@@ -708,6 +738,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         }
         finishRun()
+    }
+
+    /// Writes a picture of a view's layers at twice its size; false when it
+    /// has none.
+    private static func layerPicture(of view: NSView, to url: URL) -> Bool {
+        guard let layer = view.layer else { return false }
+        let scale = 2.0
+        let size = view.bounds.size
+        guard let image = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(size.width * scale), pixelsHigh: Int(size.height * scale),
+                                           bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                                           colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+              let context = NSGraphicsContext(bitmapImageRep: image) else { return false }
+        let cg = context.cgContext
+        cg.setFillColor(view.window?.backgroundColor.cgColor ?? NSColor.windowBackgroundColor.cgColor)
+        cg.fill(CGRect(x: 0, y: 0, width: size.width * scale, height: size.height * scale))
+        // Layers draw from the top down, the context from the bottom up.
+        cg.translateBy(x: 0, y: size.height * scale)
+        cg.scaleBy(x: scale, y: -scale)
+        view.effectiveAppearance.performAsCurrentDrawingAppearance { layer.render(in: cg) }
+        return (try? image.representation(using: .png, properties: [:])?.write(to: url)) != nil
     }
 
     // MARK: Menus
@@ -1012,40 +1062,75 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         onClose?(self, finish())
     }
 
-    /// File › Export Audio…: asks for a name and a place, with the format
-    /// and the level beside them, and writes the mix there with `daw
-    /// export`. The panel opens in the project's `exports` folder, made if
-    /// it is not there, with the song's title as the name, and asks about a
-    /// file that is there already, as every Mac app does. The format and
-    /// level chosen are offered next time.
+    /// File › Export Audio…: a sheet with the name, the range, the format,
+    /// the rate, the depth and the level, which writes what is heard with
+    /// `daw export` into the project's `exports` folder, made if it is not
+    /// there. The range starts as the selected clips' span, else the whole
+    /// song. A file there already is asked about, as every Mac app asks; an
+    /// Untitled project, whose folder is the app's, asks where to save. The
+    /// options chosen are offered next time; the name and range are not.
     @objc func exportAudio(_ sender: Any?) {
-        let panel = NSSavePanel()
-        let choice = ExportChoice(options: ExportOptions(defaults: .standard))
-        panel.title = "Export Audio"
-        panel.prompt = "Export"
-        panel.nameFieldLabel = "Name:"
-        panel.canCreateDirectories = true
-        panel.message = "The mix as one file at the level chosen below, with a record of what was measured beside it."
-        panel.allowedContentTypes = [choice.options.format.contentType]
-        panel.nameFieldStringValue = choice.options.fileName(title: model.arrangement.title)
-        if !model.untitled {
-            let folder = model.exportsFolder
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            panel.directoryURL = folder
+        guard let window, window.attachedSheet == nil else { return }
+        let setup = model.exportSetup(options: ExportOptions(defaults: .standard))
+        let sheet = NSPanel(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: true)
+        // The window's dark look, which a panel does not take by itself.
+        sheet.appearance = window.appearance
+        let close = { [weak window, weak sheet] in
+            guard let window, let sheet else { return }
+            window.endSheet(sheet)
         }
-        // The format chooses the extension: the name follows it.
-        choice.onFormat = { [weak panel] format in
-            guard let panel else { return }
-            panel.allowedContentTypes = [format.contentType]
-            let name = (panel.nameFieldStringValue as NSString).deletingPathExtension
-            panel.nameFieldStringValue = "\(name).\(format.fileExtension)"
+        sheet.contentViewController = NSHostingController(rootView: ExportSheet(
+            setup: setup,
+            cancel: close,
+            export: { [weak self] in
+                close()
+                self?.export(setup)
+            }
+        ))
+        window.beginSheet(sheet)
+    }
+
+    /// Writes what the sheet chose: into `exports/`, asking before replacing
+    /// a file there, or where a save panel says for an Untitled project.
+    private func export(_ setup: ExportSetup) {
+        let options = setup.options
+        options.remember(in: .standard)
+        let name = options.fileName(setup.name)
+        let range = setup.exportedRange
+        guard !model.untitled else {
+            let panel = NSSavePanel()
+            panel.title = "Export Audio"
+            panel.prompt = "Export"
+            panel.nameFieldLabel = "Name:"
+            panel.canCreateDirectories = true
+            panel.allowedContentTypes = [options.format.contentType]
+            panel.nameFieldStringValue = name
+            guard let window else { return }
+            panel.beginSheetModal(for: window) { [weak self] response in
+                guard response == .OK, let url = panel.url, let self else { return }
+                // The panel asked about a file that is there.
+                let replace = FileManager.default.fileExists(atPath: url.path)
+                model.export(to: url, options: options, replace: replace, range: range)
+            }
+            return
         }
-        panel.accessoryView = NSHostingView(rootView: ExportAccessory(choice: choice))
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        choice.options.remember(in: .standard)
-        // The panel asked about a file that is there.
-        let replace = FileManager.default.fileExists(atPath: url.path)
-        model.export(to: url, options: choice.options, replace: replace)
+        let folder = model.exportsFolder
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent(name)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            model.export(to: url, options: options, replace: false, range: range)
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "“\(name)” already exists in exports. Do you want to replace it?"
+        alert.informativeText = "A file with the same name is in the project's exports folder. Replacing it overwrites it and the record beside it."
+        alert.addButton(withTitle: "Replace").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            model.export(to: url, options: options, replace: true, range: range)
+        }
     }
 
     /// File › Export MIDI Clip…: writes the selected note clip's notes as a
@@ -1291,7 +1376,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             return model.selectedTrackFrozen != nil && !typing
         case #selector(addTrack(_:)), #selector(addMIDITrack(_:)), #selector(addReturn(_:)), #selector(saveDocumentAs(_:)): return !typing
         case #selector(exportMIDIClip(_:)): return model.exportableClip != nil && !typing
-        case #selector(exportAudio(_:)): return model.exporting == nil && !typing
+        case #selector(exportAudio(_:)): return model.exporting == nil && window?.attachedSheet == nil && !typing
         default: break
         }
         return true

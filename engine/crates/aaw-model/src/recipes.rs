@@ -141,7 +141,7 @@ const RECIPES: &[Recipe] = &[
             ("daw effect add song master --type limiter", "A limiter on the master, so the song stays as loud as it was and nothing clips."),
             ("daw render song", "The edit rendered."),
             ("daw joins song/renders/latest.json", "Each join: where it is in the edit and in the song, its fade, how far the beats on either side are from the grid, and a short excerpt of each to hear; and the edit's length."),
-            ("daw export song --to edit.wav", "The render as a WAV file, at the level it was rendered; --match tune reaches the original's loudness instead."),
+            ("daw export song --to edit.wav", "The render as a WAV file in song/exports, at the level it was rendered; --bars or --start and --end export a range, and --match tune reaches the original's loudness instead."),
         ],
         batch: None,
         semantics: &[("placeholders", "SONG_PATH is the person's file, which is copied and never changed. SAMPLE_PATH, TEMPO, DOWNBEAT and RATE come from the replies, as each step says. daw describe edit says the rest: a clip's lead, the fades, sounds added on top, an edit made faster.")],

@@ -41,7 +41,7 @@ Built:
 | [time stretch](features/time-stretch.md) | A pad or audio clip that follows the tempo at its own pitch |
 | [timeline](features/timeline.md) | `daw timeline`: beats and seconds, end alignment, fitting the length |
 | [join checks](features/join-checks.md) | `daw joins`: each join of an edited song, and the file's length |
-| [export](features/export.md) | `daw export`: a named WAV, AAC or MP3 file from a render |
+| [export](features/export.md) | `daw export`: what is heard of the song, whole or a range, as a named WAV, AIFF, FLAC, AAC or MP3 file in `exports/` |
 | [skills](features/skills.md) | Where a skill and its sounds live, out of Git, and what goes in one |
 | [what every session is given](features/agent-context.md) | `SONG.md` in every project and the `AGENTS.md` that imports it, a project's own skills, the person's instructions and taste under the root's `.claude/rules/`, and what a session started in a project's folder or at the root has |
 | [new and untitled projects](features/new-and-untitled-projects.md) | The app's launch on Untitled, File › New, Save As…, the project index, `daw projects`, `daw move` and `daw copy` |
@@ -59,7 +59,7 @@ Built:
 | [time signature](features/time-signature.md) | One time signature for the song, `3/4` or `6/8`, typed in the transport bar or set with `daw`; positions stay quarter-note beats while the bars, grid, rulers, position, metronome, map, MIDI files and beat map count the meter |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 | [editing a range of bars](features/bar-ranges.md) | `daw range copy\|insert\|delete\|clear` across the tracks with the clips, audio, lanes and sections in a range, and a section duplicated, moved or removed with its content |
-| [export in the app](features/export-in-app.md) | File › Export Audio…: the mix as a named WAV, AAC or MP3 at a stated level through the bundle's `daw export`, with its measurements in a banner |
+| [export in the app](features/export-in-app.md) | File › Export Audio… (⇧⌘R): a sheet with the range as bars and beats from the selected clips, the format, rate, depth and level, writing into `exports/` through the bundle's `daw export`, with its measurements in a banner |
 | [clips that loop](features/looping-clips.md) | A note clip or an audio clip whose content repeats until the clip ends, and `daw clip loop` |
 | [the live analyzer](features/analyzer.md) | An effect that changes nothing and shows the sound passing through it: a strip in the device panel and a window with levels, loudness, spectrum, stereo field, spectrogram and waveform |
 | [comparing with a reference](features/reference-comparison.md) | `daw reference`: a song kept as what good sounds like, as measurements in the workspace library; `daw compare RENDER --reference NAME`: the mix against it, whole and section by section, with the differences in words |

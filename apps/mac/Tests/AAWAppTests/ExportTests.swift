@@ -2,15 +2,16 @@ import XCTest
 @testable import AAWApp
 
 final class ExportTests: XCTestCase {
-    /// The panel's choices as the arguments of the `daw export` that does
-    /// what they say: the format by the name's extension and `--bits`, the
-    /// level by its one option, the ceiling only when changed, and
-    /// `--replace` when the panel asked about a file that is there.
+    /// The sheet's choices as the arguments of the `daw export` that does
+    /// what they say: the format by the name's extension, the range, the
+    /// depth, bitrate and rate only when not the command's own, the level
+    /// by its one option, the ceiling only when changed, and `--replace`
+    /// when the person was asked about a file that is there.
     func testTheChoicesAreTheCommandsArguments() {
         var options = ExportOptions()
         XCTAssertEqual(options.arguments(project: "/p/song.yaml", to: "/p/exports/Song.wav", replace: false),
                        ["export", "/p/song.yaml", "--to", "/p/exports/Song.wav"])
-        options.format = .wav16
+        options.bits = 16
         options.level = .peak(-1)
         XCTAssertEqual(options.arguments(project: "/p/song.yaml", to: "/p/exports/Song.wav", replace: true),
                        ["export", "/p/song.yaml", "--to", "/p/exports/Song.wav", "--bits", "16", "--peak", "-1", "--replace"])
@@ -29,20 +30,155 @@ final class ExportTests: XCTestCase {
                        ["export", "/p/song.yaml", "--to", "/p/exports/Song.mp3"])
     }
 
+    /// A range, a rate, a depth and a bitrate, each where the format has it.
+    func testTheRangeRateAndDepthAreSentWhereTheFormatHasThem() {
+        var options = ExportOptions()
+        let range = ExportRange(start: 4, end: 140)
+        options.sampleRate = 96000
+        options.bits = 32
+        XCTAssertEqual(options.arguments(project: "/p/s.yaml", to: "/p/exports/S.wav", replace: false, range: range),
+                       ["export", "/p/s.yaml", "--to", "/p/exports/S.wav", "--start", "4", "--end", "140", "--bits", "32", "--sample-rate", "96000"])
+        // FLAC is at most 24-bit: 32 is sent as the command's 24, which is not sent.
+        options.format = .flac
+        XCTAssertEqual(options.depth, 24)
+        XCTAssertEqual(options.arguments(project: "/p/s.yaml", to: "/p/exports/S.flac", replace: false, range: ExportRange(start: 2.5, end: 3)),
+                       ["export", "/p/s.yaml", "--to", "/p/exports/S.flac", "--start", "2.5", "--end", "3", "--sample-rate", "96000"])
+        // MP3 has a bitrate and no depth, and is at most 48 kHz.
+        options.format = .mp3
+        options.bitrate = 192
+        XCTAssertNil(options.depth)
+        XCTAssertEqual(options.rate, 48000)
+        XCTAssertEqual(options.arguments(project: "/p/s.yaml", to: "/p/exports/S.mp3", replace: false),
+                       ["export", "/p/s.yaml", "--to", "/p/exports/S.mp3", "--bitrate", "192", "--sample-rate", "48000"])
+        // A bitrate means nothing to a WAV.
+        options.format = .wav
+        options.sampleRate = nil
+        XCTAssertEqual(options.arguments(project: "/p/s.yaml", to: "/p/exports/S.wav", replace: false),
+                       ["export", "/p/s.yaml", "--to", "/p/exports/S.wav", "--bits", "32"])
+    }
+
     func testTheFormatNamesTheFile() {
         var options = ExportOptions()
-        XCTAssertEqual(options.fileName(title: "My Song"), "My Song.wav")
+        XCTAssertEqual(ExportOptions.name(title: "  "), "Untitled")
+        XCTAssertEqual(options.fileName("My Song"), "My Song.wav")
+        XCTAssertEqual(options.fileName("My Song.wav"), "My Song.wav", "the extension is not written twice")
+        XCTAssertEqual(options.fileName(" a/b:c "), "a-b-c.wav", "a name is a file, not a folder")
+        XCTAssertEqual(options.fileName(""), "Untitled.wav")
         options.format = .aac
-        XCTAssertEqual(options.fileName(title: "My Song"), "My Song.m4a")
-        options.format = .mp3
-        XCTAssertEqual(options.fileName(title: "  "), "Untitled.mp3")
-        XCTAssertEqual(ExportOptions.Format(fileExtension: "WAV"), .wav24)
+        XCTAssertEqual(options.fileName("My Song"), "My Song.m4a")
+        options.format = .aiff
+        XCTAssertEqual(options.fileName("My Song.wav"), "My Song.wav.aiff")
+        XCTAssertEqual(ExportOptions.Format(fileExtension: "WAV"), .wav)
+        XCTAssertEqual(ExportOptions.Format(fileExtension: "aif"), .aiff)
+        XCTAssertEqual(ExportOptions.Format(fileExtension: "flac"), .flac)
         XCTAssertEqual(ExportOptions.Format(fileExtension: "m4a"), .aac)
         XCTAssertEqual(ExportOptions.Format(fileExtension: "mp3"), .mp3)
-        XCTAssertNil(ExportOptions.Format(fileExtension: "flac"))
+        XCTAssertNil(ExportOptions.Format(fileExtension: "ogg"))
         for format in ExportOptions.Format.allCases {
             XCTAssertEqual(format.contentType.preferredFilenameExtension, format.fileExtension, format.name)
         }
+    }
+
+    /// Positions as bar and beat in the song's meter, and back.
+    func testARangeIsBarsAndBeatsInTheMeter() {
+        // 4/4: a bar is 4 beats, a beat a quarter.
+        XCTAssertTrue(ExportRange.place(0, bar: 4, unit: 1) == (1, 1))
+        XCTAssertTrue(ExportRange.place(140, bar: 4, unit: 1) == (36, 1))
+        XCTAssertTrue(ExportRange.place(8.5, bar: 4, unit: 1) == (3, 1.5))
+        XCTAssertTrue(ExportRange.place(3.9999999999, bar: 4, unit: 1) == (2, 1), "a hair under a bar line is the line")
+        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 1, barBeats: 4, unit: 1), 4)
+        XCTAssertEqual(ExportRange.text(1 / 3.0, bar: 4, unit: 1), "1.1.33")
+        // 6/8: a bar is 3 quarter beats, counted in six eighths.
+        XCTAssertTrue(ExportRange.place(4.5, bar: 3, unit: 0.5) == (2, 4))
+        XCTAssertEqual(ExportRange.beats(bar: 2, beat: 4, barBeats: 3, unit: 0.5), 4.5)
+        // 7/8: a bar is 3.5.
+        XCTAssertEqual(ExportRange.text(7, bar: 3.5, unit: 0.5), "3.1")
+    }
+
+    /// The selected clips' span inside the song, else the whole song.
+    func testARangeStartsAsTheSelectionOrTheWholeSong() {
+        XCTAssertEqual(ExportRange.initial(selection: nil, length: 300), ExportRange(start: 0, end: 300))
+        XCTAssertEqual(ExportRange.initial(selection: (4, 140), length: 300), ExportRange(start: 4, end: 140))
+        // A clip whose tail rings past the end is cut there.
+        XCTAssertEqual(ExportRange.initial(selection: (280, 310), length: 300), ExportRange(start: 280, end: 300))
+        // A selection wholly past the end is no range.
+        XCTAssertEqual(ExportRange.initial(selection: (300, 310), length: 300), ExportRange(start: 0, end: 300))
+        XCTAssertTrue(ExportRange(start: 0, end: 300).isWhole(length: 300))
+        XCTAssertFalse(ExportRange(start: 4, end: 300).isWhole(length: 300))
+        XCTAssertNil(ExportRange(start: 4, end: 140).problem(length: 300, bar: 4, unit: 1))
+        XCTAssertEqual(ExportRange(start: 4, end: 4).problem(length: 300, bar: 4, unit: 1), "The end must be after the start.")
+        XCTAssertEqual(ExportRange(start: 4, end: 304).problem(length: 300, bar: 4, unit: 1),
+                       "The song ends at 76.1; nothing after it is rendered.")
+        XCTAssertEqual(Launch.range("4-12.5"), ExportRange(start: 4, end: 12.5))
+        XCTAssertNil(Launch.range("4"))
+    }
+
+    /// The sheet's fields, what it says of them and what it sends.
+    @MainActor
+    func testTheSheetShowsTheRangeAsBarsAndSaysWhatIsWrong() {
+        let setup = ExportSetup(options: ExportOptions(), title: "Song", range: ExportRange(start: 4, end: 140), fromSelection: true,
+                                barBeats: 4, beatUnit: 1, lengthBeats: 300, tempo: 120, timeSignature: "4/4", songRate: 48000, hasFolder: true)
+        XCTAssertEqual([setup.startBar, setup.endBar], [2, 36])
+        XCTAssertEqual([setup.startBeat, setup.endBeat], [1, 1])
+        XCTAssertEqual(setup.summary, "Bars 2–35, the selected clips · 1:08")
+        XCTAssertEqual(setup.exportedRange, ExportRange(start: 4, end: 140))
+        XCTAssertNil(setup.problem)
+        setup.endBeat = 5
+        XCTAssertEqual(setup.problem, "A bar of 4/4 has beats 1 to 4.")
+        setup.endBeat = 2.5
+        XCTAssertEqual(setup.summary, "2.1 to 36.2.5, the selected clips · 1:08")
+        setup.endBar = 80
+        XCTAssertEqual(setup.problem, "The song ends at 76.1; nothing after it is rendered.")
+        setup.wholeSong()
+        XCTAssertEqual(setup.summary, "The whole song · 2:30")
+        XCTAssertNil(setup.exportedRange, "the whole song is sent as no range")
+        setup.name = " "
+        XCTAssertEqual(setup.problem, "The file needs a name.")
+        // The song's rate is the one shown unless another is chosen; MP3
+        // offers 48 kHz at most.
+        XCTAssertEqual(setup.rate.wrappedValue, 48000)
+        setup.rate.wrappedValue = 44100
+        XCTAssertEqual(setup.options.sampleRate, 44100)
+        setup.rate.wrappedValue = 48000
+        XCTAssertNil(setup.options.sampleRate)
+        setup.options.format = .mp3
+        XCTAssertEqual(setup.rates, [44100, 48000])
+        XCTAssertEqual(setup.bitrate.wrappedValue, 320)
+        XCTAssertEqual(ExportSetup.duration(1.25), "0:01.3")
+        XCTAssertEqual(ExportSetup.kHz(44100), "44.1 kHz")
+    }
+
+    /// ⇧⌘R with clips selected: the range is theirs; with none, the whole
+    /// song; the name is the song's title, or its folder's while the title
+    /// is the one it was made with.
+    @MainActor
+    func testTheSelectedClipsAreTheRange() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("aaw export \(UUID().uuidString)/Night Drive")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder.deletingLastPathComponent()) }
+        let song = folder.appendingPathComponent("song.yaml")
+        try """
+        session: {length_beats: 300}
+        tracks:
+        - id: keys
+          type: midi
+          clips:
+          - {at: 4, length_beats: 8, id: a, notes: [{pitch: 60, duration: 1}]}
+          - {at: 132, length_beats: 8, id: b, notes: [{pitch: 64, duration: 1}]}
+          - {at: 200, length_beats: 8, id: c, notes: [{pitch: 67, duration: 1}]}
+
+        """.write(to: song, atomically: true, encoding: .utf8)
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        XCTAssertEqual(model.exportRange, ExportRange(start: 0, end: model.arrangement.lengthBeats))
+        let clips = model.placedClips().filter { $0.at < 200 }.map(\.key)
+        model.select(clips: Set(clips))
+        XCTAssertEqual(model.exportRange, ExportRange(start: 4, end: 140))
+        let setup = model.exportSetup(options: ExportOptions())
+        XCTAssertEqual(setup.name, "Night Drive")
+        XCTAssertEqual([setup.startBar, setup.endBar], [2, 36])
+        XCTAssertTrue(setup.fromSelection)
+        XCTAssertTrue(setup.hasFolder)
     }
 
     /// `--export-level` on the command line, and the level as the defaults
@@ -73,8 +209,20 @@ final class ExportTests: XCTestCase {
         options.format = .aac
         options.level = .peak(-1)
         options.ceiling = -0.3
+        options.sampleRate = 44100
+        options.bitrate = 192
+        options.bits = 16
         options.remember(in: defaults)
         XCTAssertEqual(ExportOptions(defaults: defaults), options)
+        options.sampleRate = nil
+        options.bitrate = nil
+        options.remember(in: defaults)
+        XCTAssertEqual(ExportOptions(defaults: defaults), options)
+        // A WAV kept by its depth before the depth was its own.
+        defaults.set("wav16", forKey: "export.format")
+        defaults.removeObject(forKey: "export.bits")
+        XCTAssertEqual(ExportOptions(defaults: defaults).format, .wav)
+        XCTAssertEqual(ExportOptions(defaults: defaults).bits, 16)
     }
 
     /// The command's result as the banner reads it.
@@ -108,6 +256,11 @@ final class ExportTests: XCTestCase {
         held.policy = "loudness"
         held.heldBackDb = 1.84
         XCTAssertEqual(held.measurements, "3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied · 1.8 dB held back by the ceiling")
+
+        // A range is said first, as the app writes a place.
+        let ranged = try XCTUnwrap(ExportReport(json: Data(json.replacingOccurrences(
+            of: "\"warnings\"", with: "\"range\": {\"whole_song\": false, \"start\": \"2:1\", \"end\": \"36:1\"}, \"warnings\"").utf8)))
+        XCTAssertEqual(ranged.measurements, "2.1 to 36.1 · 3:32 · −14.0 LUFS · −1.0 dBTP · +2.3 dB applied")
 
         // A result that is not the command's is no report.
         XCTAssertNil(ExportReport(json: Data("{\"ok\": true}".utf8)))

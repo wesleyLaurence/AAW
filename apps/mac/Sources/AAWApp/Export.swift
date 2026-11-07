@@ -1,20 +1,23 @@
 import AppKit
 import UniformTypeIdentifiers
 
-/// File › Export Audio…: the mix as a named WAV, AAC or MP3 file at a stated
-/// level. The app runs the bundle's `daw export` with the options the panel
-/// chose, so there is one export, the agent's and the person's: the file, the
-/// level policies, the dither, the ceiling and the record beside the file are
-/// the command's, and a change to `daw export` shows up here by itself.
+/// File › Export Audio…: what is heard of the song, whole or a range of it,
+/// as a named WAV, AIFF, FLAC, AAC or MP3 file at a stated rate, depth and
+/// level. The app runs the bundle's `daw export` with the options the sheet
+/// chose, so there is one export, the agent's and the person's: the range,
+/// the file, the level policies, the dither, the ceiling and the record
+/// beside the file are the command's, and a change to `daw export` shows up
+/// here by itself.
 struct ExportOptions: Equatable {
-    /// The file's format, as `--to NAME.EXT` and `--bits` name it.
+    /// The file's format, as `--to NAME.EXT` names it.
     enum Format: String, CaseIterable {
-        case wav24, wav16, aac, mp3
+        case wav, aiff, flac, aac, mp3
 
         var name: String {
             switch self {
-            case .wav24: "WAV 24-bit"
-            case .wav16: "WAV 16-bit"
+            case .wav: "WAV"
+            case .aiff: "AIFF"
+            case .flac: "FLAC"
             case .aac: "AAC"
             case .mp3: "MP3"
             }
@@ -22,7 +25,9 @@ struct ExportOptions: Equatable {
 
         var fileExtension: String {
             switch self {
-            case .wav24, .wav16: "wav"
+            case .wav: "wav"
+            case .aiff: "aiff"
+            case .flac: "flac"
             case .aac: "m4a"
             case .mp3: "mp3"
             }
@@ -30,7 +35,9 @@ struct ExportOptions: Equatable {
 
         var contentType: UTType {
             switch self {
-            case .wav24, .wav16: .wav
+            case .wav: .wav
+            case .aiff: .aiff
+            case .flac: UTType(filenameExtension: "flac") ?? .audio
             // Apple's own M4A type, whose extension is `m4a`; `.mpeg4Audio`
             // would have the panel write `.mp4`.
             case .aac: UTType(filenameExtension: "m4a") ?? .mpeg4Audio
@@ -38,16 +45,37 @@ struct ExportOptions: Equatable {
             }
         }
 
-        /// The format a file's extension names, 24-bit for a WAV.
+        /// AAC and MP3 have a bitrate, not a bit depth, and are at most 48 kHz.
+        var compressed: Bool { self == .aac || self == .mp3 }
+
+        /// The bit depths the format is written at; 32 is float.
+        var depths: [Int] {
+            switch self {
+            case .wav, .aiff: [16, 24, 32]
+            case .flac: [16, 24]
+            case .aac, .mp3: []
+            }
+        }
+
+        /// The format a file's extension names.
         init?(fileExtension: String) {
             switch fileExtension.lowercased() {
-            case "wav": self = .wav24
+            case "wav": self = .wav
+            case "aif", "aiff": self = .aiff
+            case "flac": self = .flac
             case "m4a": self = .aac
             case "mp3": self = .mp3
             default: return nil
             }
         }
     }
+
+    /// The sample rates the sheet offers; the song's is offered too.
+    static let rates = [44100, 48000, 88200, 96000]
+    /// The highest rate AAC and MP3 are written at.
+    static let compressedRate = 48000
+    /// The bitrates the sheet offers, in kb/s.
+    static let bitrates = [128, 192, 256, 320]
 
     /// The level policy: one gain for the whole file, or none.
     enum Level: Equatable {
@@ -114,7 +142,14 @@ struct ExportOptions: Equatable {
         }
     }
 
-    var format = Format.wav24
+    var format = Format.wav
+    /// The bit depth of a WAV, AIFF or FLAC file: 16, 24 or 32 (float).
+    var bits = 24
+    /// The sample rate, or nil for the song's.
+    var sampleRate: Int?
+    /// The bitrate of an AAC or MP3 file in kb/s, or nil for the command's:
+    /// 256 for AAC, 320 for MP3.
+    var bitrate: Int?
     var level = Level.asRendered
     /// The highest sample peak a gain may reach, in dBFS: the command's -0.1
     /// unless changed.
@@ -122,12 +157,28 @@ struct ExportOptions: Equatable {
 
     static let defaultCeiling = -0.1
 
+    /// The bit depth the file is written at: the one chosen, or 24 where
+    /// the format has no such depth; nil for AAC and MP3.
+    var depth: Int? {
+        format.compressed ? nil : format.depths.contains(bits) ? bits : 24
+    }
+
+    /// The rate the file is written at, or nil for the song's: one chosen
+    /// above what AAC and MP3 carry is 48 kHz for them.
+    var rate: Int? {
+        guard let sampleRate else { return nil }
+        return format.compressed ? min(sampleRate, Self.compressedRate) : sampleRate
+    }
+
     /// The arguments of the `daw export` that writes `to` from `project`
-    /// with these options. `replace` writes over a file that is there,
-    /// which the panel asked about.
-    func arguments(project: String, to: String, replace: Bool) -> [String] {
+    /// with these options, over `range` or the whole song. `replace` writes
+    /// over a file that is there, which the person was asked about.
+    func arguments(project: String, to: String, replace: Bool, range: ExportRange? = nil) -> [String] {
         var arguments = ["export", project, "--to", to]
-        if format == .wav16 { arguments += ["--bits", "16"] }
+        if let range { arguments += ["--start", Self.number(range.start), "--end", Self.number(range.end)] }
+        if let depth, depth != 24 { arguments += ["--bits", String(depth)] }
+        if format.compressed, let bitrate { arguments += ["--bitrate", String(bitrate)] }
+        if let rate { arguments += ["--sample-rate", String(rate)] }
         switch level {
         case .asRendered: break
         case .peak(let v): arguments += ["--peak", Self.number(v)]
@@ -144,31 +195,109 @@ struct ExportOptions: Equatable {
         value == value.rounded() && abs(value) < 1e15 ? String(Int(value)) : String(value)
     }
 
-    /// The name the panel offers: the song's title under the format's extension.
-    func fileName(title: String) -> String {
+    /// The name the sheet offers: the song's title.
+    static func name(title: String) -> String {
         let name = title.trimmingCharacters(in: .whitespaces)
-        return "\(name.isEmpty ? "Untitled" : name).\(format.fileExtension)"
+        return name.isEmpty ? "Untitled" : name
+    }
+
+    /// The file a name typed in the sheet is: under the format's extension,
+    /// not twice, with no folder in it.
+    func fileName(_ typed: String) -> String {
+        var name = typed.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+        let suffix = ".\(format.fileExtension)"
+        if name.lowercased().hasSuffix(suffix) { name = String(name.dropLast(suffix.count)) }
+        return "\(name.isEmpty ? "Untitled" : name)\(suffix)"
     }
 
     // MARK: Remembered between exports
 
     private static let formatKey = "export.format"
+    private static let bitsKey = "export.bits"
+    private static let rateKey = "export.rate"
+    private static let bitrateKey = "export.bitrate"
     private static let levelKey = "export.level"
     private static let ceilingKey = "export.ceiling"
 
     init() {}
 
-    /// The options chosen last time, or the defaults.
+    /// The options chosen last time, or the defaults. A format kept before
+    /// the bit depth was its own, `wav24` or `wav16`, is a WAV at that depth.
     init(defaults: UserDefaults) {
-        if let format = defaults.string(forKey: Self.formatKey).flatMap(Format.init(rawValue:)) { self.format = format }
+        switch defaults.string(forKey: Self.formatKey) {
+        case "wav24": format = .wav
+        case "wav16": format = .wav; bits = 16
+        case let name?: if let format = Format(rawValue: name) { self.format = format }
+        case nil: break
+        }
+        if defaults.object(forKey: Self.bitsKey) != nil { bits = defaults.integer(forKey: Self.bitsKey) }
+        if defaults.integer(forKey: Self.rateKey) > 0 { sampleRate = defaults.integer(forKey: Self.rateKey) }
+        if defaults.integer(forKey: Self.bitrateKey) > 0 { bitrate = defaults.integer(forKey: Self.bitrateKey) }
         if let level = defaults.string(forKey: Self.levelKey).flatMap(Level.parse) { self.level = level }
         if defaults.object(forKey: Self.ceilingKey) != nil { ceiling = defaults.double(forKey: Self.ceilingKey) }
     }
 
     func remember(in defaults: UserDefaults) {
         defaults.set(format.rawValue, forKey: Self.formatKey)
+        defaults.set(bits, forKey: Self.bitsKey)
+        defaults.set(sampleRate ?? 0, forKey: Self.rateKey)
+        defaults.set(bitrate ?? 0, forKey: Self.bitrateKey)
         defaults.set(level.text, forKey: Self.levelKey)
         defaults.set(ceiling, forKey: Self.ceilingKey)
+    }
+}
+
+/// The beats of the song an export covers, from `start` to where it stops,
+/// `end`, in quarter-note beats from the song's start as every position is.
+/// The sheet shows them as bar and beat in the song's meter.
+struct ExportRange: Equatable {
+    var start: Double
+    var end: Double
+
+    /// A position as a bar and a beat from 1, the beat the note the meter
+    /// counts: beat 8.5 in 4/4 is bar 3, beat 1.5. `bar` and `unit` are in
+    /// quarter-note beats, a bar of 3/4 three, the eighth of 6/8 a half.
+    static func place(_ beats: Double, bar: Double, unit: Double) -> (bar: Int, beat: Double) {
+        // Rounded to a millionth, so 2.9999999 is bar 2's end, not its last beat.
+        let at = (beats * 1e6).rounded() / 1e6
+        let index = (at / bar + 1e-9).rounded(.down)
+        let beat = ((at - index * bar) / unit * 1e6).rounded() / 1e6 + 1
+        return (Int(index) + 1, beat)
+    }
+
+    /// A bar and a beat from 1 as beats from the song's start.
+    static func beats(bar: Int, beat: Double, barBeats: Double, unit: Double) -> Double {
+        Double(bar - 1) * barBeats + (beat - 1) * unit
+    }
+
+    /// A position as `bar.beat`, the beat to a hundredth where it is not whole.
+    static func text(_ beats: Double, bar: Double, unit: Double) -> String {
+        let p = place(beats, bar: bar, unit: unit)
+        return "\(p.bar).\(ExportOptions.number((p.beat * 100).rounded() / 100))"
+    }
+
+    /// The whole song, or the selected clips' span inside it.
+    static func initial(selection: (start: Double, end: Double)?, length: Double) -> ExportRange {
+        if let s = selection {
+            let range = ExportRange(start: max(0, s.start), end: min(length, s.end))
+            if range.end > range.start { return range }
+        }
+        return ExportRange(start: 0, end: length)
+    }
+
+    func isWhole(length: Double) -> Bool {
+        start <= 1e-9 && abs(end - length) <= 1e-9
+    }
+
+    /// Why the range cannot be exported, or nil.
+    func problem(length: Double, bar: Double, unit: Double) -> String? {
+        if start < -1e-9 { return "The start is before bar 1." }
+        if end <= start + 1e-9 { return "The end must be after the start." }
+        if end > length + 1e-9 {
+            return "The song ends at \(Self.text(length, bar: bar, unit: unit)); nothing after it is rendered."
+        }
+        return nil
     }
 }
 
@@ -183,8 +312,17 @@ struct ExportReport: Equatable {
     var truePeakDbtp: Double?
     var warnings: [String]
     var renderedNow: Bool
+    /// Where the range began and stopped as `bar.beat`, when it was not the
+    /// whole song.
+    var range: (start: String, end: String)?
 
     var name: String { (file as NSString).lastPathComponent }
+
+    static func == (a: ExportReport, b: ExportReport) -> Bool {
+        a.file == b.file && a.durationSeconds == b.durationSeconds && a.policy == b.policy && a.gainDb == b.gainDb
+            && a.heldBackDb == b.heldBackDb && a.integratedLufs == b.integratedLufs && a.truePeakDbtp == b.truePeakDbtp
+            && a.warnings == b.warnings && a.renderedNow == b.renderedNow && a.range?.start == b.range?.start && a.range?.end == b.range?.end
+    }
 
     /// The command's JSON result.
     init?(json data: Data) {
@@ -201,6 +339,11 @@ struct ExportReport: Equatable {
         truePeakDbtp = level["estimated_true_peak_dbtp"] as? Double
         warnings = (object["warnings"] as? [String]) ?? []
         renderedNow = ((object["render"] as? [String: Any])?["rendered_now"] as? Bool) ?? false
+        // The command writes a place as BAR:BEAT; the app as bar.beat.
+        if let r = object["range"] as? [String: Any], r["whole_song"] as? Bool == false,
+           let start = r["start"] as? String, let end = r["end"] as? String {
+            range = (start.replacingOccurrences(of: ":", with: "."), end.replacingOccurrences(of: ":", with: "."))
+        }
     }
 
     init(file: String, durationSeconds: Double, policy: String, gainDb: Double, heldBackDb: Double,
@@ -227,11 +370,12 @@ struct ExportReport: Equatable {
         return "\(text) \(unit)"
     }
 
-    /// The measurements in a line: the length, the loudness, the true peak,
-    /// and when a gain was applied, how much, and how much the ceiling held
-    /// back.
+    /// The measurements in a line: the range when it was not the whole
+    /// song, the length, the loudness, the true peak, and when a gain was
+    /// applied, how much, and how much the ceiling held back.
     var measurements: String {
         var parts = [Self.length(durationSeconds)]
+        if let range { parts.insert("\(range.start) to \(range.end)", at: 0) }
         if let integratedLufs { parts.append(Self.decibels(integratedLufs, "LUFS")) }
         if let truePeakDbtp { parts.append(Self.decibels(truePeakDbtp, "dBTP")) }
         if policy != "as rendered" {

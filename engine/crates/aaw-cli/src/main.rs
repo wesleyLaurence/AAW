@@ -268,7 +268,8 @@ enum Top {
     /// Check a render's joins between parts of a song, and its length.
     #[command(disable_help_flag = true)]
     Joins(Forwarded),
-    /// Write the song's render as a named WAV, AAC or MP3 file, at a stated level.
+    /// Write what is heard of the song, whole or a range, as a named WAV, AIFF,
+    /// FLAC, AAC or MP3 file at a stated level, in the project's exports folder.
     #[command(disable_help_flag = true)]
     Export(Forwarded),
     /// Take a song apart on this Mac into vocals and instrumental, or drums,
