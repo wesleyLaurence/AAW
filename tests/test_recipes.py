@@ -195,6 +195,6 @@ def test_a_recipe_runs_as_written(name, tmp_path, monkeypatch):
         assert [m["text"] for m in reply["markers"]] == ["love this"]
         assert daw("get", song, "tracks.bass.automation")[0]["param"] == "gain_db"
     if name == "finished-edit":
-        assert (work / "edit.wav").exists()
+        assert (work / "song" / "exports" / "edit.wav").exists()
         assert abs(found["TEMPO"] - 120) < 0.5
         assert not (found["SONG_PATH"].with_suffix(".beats.json")).exists()

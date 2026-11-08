@@ -215,8 +215,10 @@ Python, in `src/agent_daw`:
   file's path and hash and no audio; and a render compared with one, whole and
   section by section, with the differences in words; see
   [reference-comparison.md](features/reference-comparison.md).
-- `export.py`: a named deliverable from a render, as WAV, AAC or MP3, with one gain
-  for the level and a record of the render beside it; see [export.md](features/export.md).
+- `export.py`: a named deliverable cut from a render, the whole song or a range of
+  it in beats, bars or a section, in `exports/` unless a path says otherwise, as
+  WAV, AIFF, FLAC, AAC or MP3 at the song's rate or one resampled to, with one
+  gain for the level and a record of the render beside it; see [export.md](features/export.md).
   The Mac app's File › Export Audio… runs it through the bundle's `daw`, so there
   is one export; see [export-in-app.md](features/export-in-app.md).
 - `joins.py`: checks of a rendered edit of a song: each join's beat, splice and

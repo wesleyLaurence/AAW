@@ -208,7 +208,7 @@ struct ExportBanner: View {
                 Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Exported \(report.name)")
-                    Text(report.measurements)
+                    Text(report.measurements(place: model.placeText))
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .textSelection(.enabled)
