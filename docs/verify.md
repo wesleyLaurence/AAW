@@ -8,6 +8,13 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **Key, chords and swing:** `daw samples chords` on a song you know the
+  key and chords of, and `daw samples beats` on one with a swing you know:
+  are the key, the chords by bar and the swing what you hear? Then a loop
+  placed with the `transpose` `daw key PROJECT --sample LOOP` gives: is it
+  in key with the song? Of the six songs of the DJ folder measured, the
+  one known for its shuffle measured straight at 160 BPM: is its beat map
+  at double tempo, or is the swing missed?
 - **Export a range:** in the app, drag over the clips from bar 2 to bar 35 of
   a song with muted tracks running later, ⇧⌘R: the sheet reads Start 2.1.1 and
   End 36.1.1, "Bars 2–35, the selected clips"; an audio clip lined up with a

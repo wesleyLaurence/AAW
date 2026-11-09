@@ -6,7 +6,8 @@ to the transients near its beats, which places it to a fraction of a millisecond
 How far the song's beats stray from that grid is measured, and a song that leaves
 it is followed beat by beat. Which beat of the bar is the downbeat is scored from
 what tends to happen there and reported with its alternatives, since it is the
-least certain part. A bar is four beats unless a meter is given.
+least certain part. A bar is four beats unless a meter is given. How late its
+off-beat notes fall, its swing, is measured against the beats (swing.py).
 
 Every value is an estimate from decoded audio; nothing here listens.
 """
@@ -19,7 +20,10 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-ANALYZER = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:12]
+# The map and its swing (swing.py, which measures on this module's envelope).
+ANALYZER = hashlib.sha256(
+    Path(__file__).read_bytes() + Path(__file__).with_name("swing.py").read_bytes()
+).hexdigest()[:12]
 MIN_BPM, MAX_BPM = 60.0, 200.0
 # Half and double time fit the same onsets, and audio alone does not settle which
 # a song is in. The faster is taken, up to 180 BPM, when most of its beats have a
@@ -526,6 +530,10 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
         if i == 0 or (change[beat] >= 0.25 and change[beat] == change[around].max()):
             phrases.append(int(beat))
 
+    from . import swing
+
+    groove = swing.measure(mono, sr, ends)
+
     beats = [
         {
             "seconds": round(float(t), 6),
@@ -555,6 +563,7 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
         "phrases": [
             {k: beats[i][k] for k in ("seconds", "bar", "change")} for i in phrases
         ],
+        "swing": groove,
         "beat_count": len(beats),
         "beats": beats,
         "assumes": f"{per_bar} beats a bar; bars are counted from the first downbeat, and beats before it are bar 0",

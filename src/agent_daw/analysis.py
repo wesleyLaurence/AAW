@@ -1,5 +1,6 @@
-"""Audio-derived sample measurements: pitch, onsets, tempo, loop/one-shot kind
-and what the sound is like (descriptors.py).
+"""Audio-derived sample measurements: pitch, onsets, tempo, loop/one-shot kind,
+what the sound is like (descriptors.py), its key and a loop's chords
+(harmony.py) and a loop's swing (swing.py).
 
 Every value is measured from decoded audio. Filename hints are only echoed for
 comparison. Pitch is a monophonic estimate; chords and noisy material are reported
@@ -14,10 +15,15 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-from . import descriptors
+from . import beats, descriptors, harmony, swing
 from .model import digest
 
-ANALYZER = hashlib.sha256(Path(__file__).read_bytes() + descriptors.SOURCE).hexdigest()[:12]
+# What measures a sample; a change to any of them measures the library again.
+ANALYZER = hashlib.sha256(
+    b"".join(Path(m.__file__).read_bytes() for m in (harmony, swing, beats))
+    + Path(__file__).read_bytes()
+    + descriptors.SOURCE
+).hexdigest()[:12]
 NOTES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
 MIN_HZ, MAX_HZ = 25.0, 2000.0
 PITCH_SECONDS = 10.0  # analysed from the first sound onward
@@ -291,6 +297,7 @@ def measure_rhythm(mono: np.ndarray, sr: int, bpm_hint=None) -> dict:
                 rivals.append(round(c["bpm"], 2))
         tempo = {
             "bpm": round(best["bpm"], 2),
+            "first_beat_seconds": round(0.0 if best["fits_length"] else origin, 4),
             "bars": best["bars"],
             "fits_whole_bars": best["fits_length"],
             "grid_fit": round(best["grid_fit"], 3),
@@ -353,8 +360,23 @@ def analyze(path: Path, bpm_hint=None) -> dict:
         }
     rhythm = measure_rhythm(mono, sr, bpm_hint)
     sound, loop = dict.fromkeys(descriptors.FIELDS), rhythm["kind"] == "loop"
+    key, chords = None, None
     if bounds:
         sound = descriptors.measure(x, sr, start, end, loop)
+        key = harmony.key_of(mono[start:end], sr)
+    if loop and rhythm["tempo"]:
+        # The loop's beats, from its first, as its tempo puts them.
+        first, period = rhythm["tempo"]["first_beat_seconds"], 60 / rhythm["tempo"]["bpm"]
+        times = first + period * np.arange(int((len(mono) / sr - first) / period + 1e-6) + 1)
+        rhythm["swing"] = swing.measure(mono, sr, times)
+        if key and key["tonal"] and len(times) >= 2:
+            runs = harmony.chords(
+                mono, sr, times, np.arange(len(times)) % 4 == 0, harmony.parse_key(key["name"])
+            )
+            chords = [
+                {"at_beat": r["first_beat"], "beats": r["beats"], "chord": r["chord"], "fit": r["fit"]}
+                for r in runs
+            ]
     return {
         "path": str(path),
         "sha256": digest(path),
@@ -366,6 +388,8 @@ def analyze(path: Path, bpm_hint=None) -> dict:
         "level": level,
         "stereo": stereo,
         "pitch": measure_pitch(mono, sr),
+        "key": key,
+        "chords": chords,
         "rhythm": rhythm,
         "sound": sound,
         "measured_category": descriptors.category(sound, loop),

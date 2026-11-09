@@ -168,3 +168,52 @@ def beat_song(path, bpm=120.0, bars=24, first=0.137, pickup=0, late=None, seed=0
             add(at, note(root * 4, gap * 0.9, 0.08))
     sf.write(path, 0.8 * x / np.abs(x).max(), RATE, subtype="PCM_16")
     return np.round(times * RATE) / RATE
+
+
+def chord_song(path=None, chords=(), bpm=100.0, beats_each=4, drums=True, swing=0.5, grid=0.5, bass=True, seed=0):
+    """A song at 44.1 kHz whose chords and swing are known: each chord, MIDI
+    notes, for `beats_each` beats with its lowest note an octave down under it
+    (or the note `bass` gives for every chord when it is a number), and with
+    `drums` a kick and a snare on the beats and a hat on every `grid` beats,
+    the second of each pair late by `swing` as a pattern's swing is. Writes it
+    to `path` if given and returns the samples."""
+    RATE = 44100
+    rng = np.random.default_rng(seed)
+    beat = 60 / bpm
+
+    def tone(midi, seconds, level):
+        t = np.arange(round(seconds * RATE)) / RATE
+        hz = 440 * 2 ** ((midi - 69) / 12)
+        x = sum(0.6 ** k * np.sin(2 * np.pi * hz * (k + 1) * t) for k in range(6) if hz * (k + 1) < RATE / 2)
+        return level * x * np.minimum(1, t / 0.01) * np.exp(-1.5 * t)
+
+    parts = []
+    for c in chords:
+        seconds = beat * beats_each
+        x = sum(tone(n, seconds, 0.2) for n in c)
+        if bass is not False:
+            x = x + tone(min(c) - 12 if bass is True else bass, seconds, 0.3)
+        parts.append(x)
+    x = np.concatenate(parts) if parts else np.zeros(round(16 * beat * RATE))
+    if drums:
+        t = np.arange(round(0.2 * RATE)) / RATE
+        kick = 0.8 * np.sin(2 * np.pi * np.cumsum(50 + 90 * np.exp(-t * 30)) / RATE) * np.exp(-t * 18)
+        snare = 0.4 * rng.standard_normal(len(t)) * np.exp(-t * 25)
+        h = np.arange(round(0.04 * RATE)) / RATE
+        hat = 0.12 * np.diff(rng.standard_normal(len(h) + 1)) * np.exp(-h * 90)
+
+        def put(sound, at, gain=1.0):
+            start = round(at * RATE)
+            if 0 <= start < len(x):
+                piece = sound[: len(x) - start]
+                x[start : start + len(piece)] += gain * piece
+
+        for cell in range(int(len(x) / RATE / beat / grid)):
+            at = cell * grid + (grid * (2 * swing - 1) if cell % 2 else 0)
+            put(hat, at * beat, 0.6 + 0.4 * rng.random())
+        for b in range(int(len(x) / RATE / beat)):
+            put(kick if b % 2 == 0 else snare, b * beat)
+    x = 0.8 * x / max(float(np.abs(x).max()), 1e-12)
+    if path is not None:
+        sf.write(path, x, RATE, subtype="PCM_16")
+    return x

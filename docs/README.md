@@ -36,6 +36,7 @@ Built:
 | [sample analysis](features/sample-analysis.md) | `daw samples analyze`, measured search filters, root-note warnings |
 | [sound descriptors](features/sound-descriptors.md) | What a sample sounds like in seven numbers and five words, `daw samples search` sorted and filtered by them, `daw samples like`, and a category from the audio |
 | [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
+| [key, chords and swing](features/key-chords-swing.md) | a sample's and a song's key, chords by beat and swing; `daw key`, a song's key and the transpose that puts a loop in it |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
 | [audio clips in the app](features/audio-clips-in-app.md) | A file dropped on the timeline, a clip moved, trimmed, faded and split there, the song growing to hold it, and the beat map on its waveform |
 | [time stretch](features/time-stretch.md) | A pad or audio clip that follows the tempo at its own pitch |

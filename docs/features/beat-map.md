@@ -60,6 +60,10 @@ them.
   `seconds` and `change` from 0 to 1 against the song's largest change. The first
   downbeat is always listed. They are hints: a change is sometimes placed a bar
   from where a person would put it, and a quiet change is missed.
+- `swing`: how late the song's off-beat notes fall against its beats, as a
+  pattern's `swing` writes it, on the 1/8 or the 1/16 grid
+  ([key-chords-swing.md](key-chords-swing.md)). `daw samples chords` gives
+  the song's key and chords on this map.
 - `beats` (with `--all`, and in the saved map): `seconds`, `bar`, `beat` and
   `strength` for each. Bars are counted from the first downbeat, from 1; beats
   before it are a pickup in bar 0. `strength` is the onset on the beat against the

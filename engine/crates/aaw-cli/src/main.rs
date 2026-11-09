@@ -57,7 +57,7 @@ struct Cli {
 /// test holds every command to one heading.
 const SECTIONS: &[(&str, &[&str])] = &[
     ("Start", &["describe", "init", "projects", "move", "copy"]),
-    ("Read the song", &["inspect", "map", "get", "status", "changes", "timeline", "schedule", "check", "model"]),
+    ("Read the song", &["inspect", "map", "get", "status", "changes", "timeline", "schedule", "check", "key", "model"]),
     ("Edit any value", &["set", "toggle", "remove", "apply", "batch", "undo", "redo", "fmt"]),
     (
         "Parts of the song",
@@ -265,6 +265,11 @@ enum Top {
     /// The song in beats and seconds: where its sounds are, conversions, its length.
     #[command(disable_help_flag = true)]
     Timeline(Forwarded),
+    /// The key of what the song plays, measured from its notes and the
+    /// samples it plays; with --sample, the transpose that puts a sample in
+    /// it and the tempo a loop is played at (daw describe samples.key).
+    #[command(disable_help_flag = true)]
+    Key(Forwarded),
     /// Check a render's joins between parts of a song, and its length.
     #[command(disable_help_flag = true)]
     Joins(Forwarded),
@@ -2183,6 +2188,7 @@ fn run(cli: &Cli) -> Result<Json> {
         | Top::Compare(_)
         | Top::Check(_)
         | Top::Timeline(_)
+        | Top::Key(_)
         | Top::Joins(_)
         | Top::Export(_)
         | Top::Separate(_) => {
@@ -3455,6 +3461,7 @@ fn name(top: &Top) -> String {
         Top::Compare(_) => "compare".into(),
         Top::Check(_) => "check".into(),
         Top::Timeline(_) => "timeline".into(),
+        Top::Key(_) => "key".into(),
         Top::Joins(_) => "joins".into(),
         Top::Export(_) => "export".into(),
         Top::Separate(_) => "separate".into(),
@@ -3561,6 +3568,7 @@ fn main() -> ExitCode {
     | Top::Compare(f)
     | Top::Check(f)
     | Top::Timeline(f)
+    | Top::Key(f)
     | Top::Joins(f)
     | Top::Export(f)
     | Top::Separate(f) = &cli.command

@@ -163,7 +163,8 @@ Python, in `src/agent_daw`:
 
 - `model.py`: reads, validates and saves songs through `aaw_py`. A song is plain
   data, the full dump of the validated document.
-- `analysis.py`: audio-derived pitch, onsets, tempo and loop/one-shot kind; see
+- `analysis.py`: audio-derived pitch, onsets, tempo, loop/one-shot kind, key,
+  a loop's chords and swing; see
   [sample-analysis.md](features/sample-analysis.md). Cached in the index by `library.py`.
 - `descriptors.py`: what a sample sounds like, as part of its analysis: the
   centroid, the share of low end, attack, decay, noisiness, the loudest 400 ms
@@ -174,9 +175,17 @@ Python, in `src/agent_daw`:
   filters a search by them, lists the samples nearest one (`daw samples like`)
   and measures the library several files at a time; see
   [sound-descriptors.md](features/sound-descriptors.md).
-- `beats.py`: the beat and downbeat map of a whole song, its phrase changes and a
-  click audition; see [beat-map.md](features/beat-map.md). Kept beside the audio by
-  `library.py`.
+- `beats.py`: the beat and downbeat map of a whole song, its phrase changes,
+  its swing and a click audition; see [beat-map.md](features/beat-map.md). Kept
+  beside the audio by `library.py`.
+- `harmony.py`: a chromagram less its overtones, the key a sound's pitch
+  classes are most like with its candidates, and the chords over a sound's
+  beats; `swing.py`: where the second note of each pair of eighths or
+  sixteenths falls, against a sound's beats. Both are part of a sample's
+  analysis; `daw samples chords` gives a song's on its beat map. `tonality.py`:
+  the key of what a song plays, from its heard notes and its samples' keys
+  moved by their transposes, and the transpose that puts a sample in it
+  (`daw key`); see [key-chords-swing.md](features/key-chords-swing.md).
 - `library.py`: shared folder registration in the app data directory, incremental SQLite filename/folder search, metadata, basic signal
   inspection, audition WAVs and content-addressed project imports.
 - `perception.py`: saved-render loudness, spectrum, stereo and energy analysis;
