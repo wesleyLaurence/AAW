@@ -1318,30 +1318,35 @@ public final class SongModel {
         }
     }
 
-    /// The audio clips a split is of: the selected ones, or with a track
-    /// selected and no clip, that track's.
-    private var splitTargets: [AudioClipView] {
+    /// The clips a split is of, each with the beat it plays until: the
+    /// selected ones, or with a track selected and no clip, that track's. An
+    /// audio clip's fade after its audio is not split.
+    private var splitTargets: [(key: UInt64, at: Double, end: Double)] {
+        let clips: [PlacedClip]
         if !selectedClips.isEmpty {
-            return arrangement.tracks.flatMap(\.audio).filter { selectedClips.contains($0.key) }
+            clips = placedClips().filter { selectedClips.contains($0.key) }
+        } else if case .track(let key) = selectedRow,
+                  let index = arrangement.tracks.firstIndex(where: { $0.key == key }) {
+            clips = placedClips().filter { $0.track == index }
+        } else {
+            return []
         }
-        if case .track(let key) = selectedRow {
-            return arrangement.tracks.first { $0.key == key }?.audio ?? []
-        }
-        return []
+        return clips.map { ($0.key, $0.at, $0.audio.map { $0.at + $0.lengthBeats } ?? $0.end) }
     }
 
-    /// Whether the start position is inside an audio clip a split is of.
+    /// Whether the start position is inside a clip a split is of.
     public var canSplit: Bool {
         let cue = transport.cue
-        return splitTargets.contains { $0.at < cue && cue < $0.at + $0.lengthBeats }
+        return splitTargets.contains { $0.at < cue && cue < $0.end }
     }
 
-    /// Splits those audio clips at the start position, and selects the later
-    /// halves, so that Delete takes what follows the split.
+    /// Splits those clips at the start position, note clips, pattern clips
+    /// and audio clips alike, and selects the later halves, so that Delete
+    /// takes what follows the split.
     public func splitSelection() {
         let clips = splitTargets.map(\.key).sorted()
         guard !clips.isEmpty else { return }
-        edit(.audioSplit(clips: clips, at: transport.cue)) { [weak self] made in
+        edit(.clipsSplit(clips: clips, at: transport.cue)) { [weak self] made in
             if let focus = made.first { self?.select(clips: Set(made), focus: focus) }
         }
     }

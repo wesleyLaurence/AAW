@@ -198,3 +198,35 @@ fn a_looped_clip_against_a_copy_is_the_same_music_only_with_the_same_loop() {
     assert_eq!(warnings(&s, "clips-stacked"), Vec::<String>::new());
     let _: Json = get(&s, "tracks.keys.clips");
 }
+
+#[test]
+fn clip_split_cuts_any_clip_at_a_beat_inside_it() {
+    let (_d, mut s) = open();
+    with_keys(&mut s);
+    with_audio(&mut s);
+    edit(&mut s, json!({"op": "clip.active", "clip": PHRASE, "active": false})).unwrap();
+    // A note clip at beat 8: the note across it held to it on the left, the
+    // rest from the right clip's start, which gets the next free ID. Both
+    // halves stay deactivated.
+    let made = edit(&mut s, json!({"op": "clip.split", "clip": PHRASE, "at": 8})).unwrap();
+    assert_eq!(made["label"], json!("Split clip phrase at 4 at beat 8"));
+    let clips = get(&s, "tracks.keys.clips");
+    assert_eq!((&clips[0]["at"], &clips[0]["length_beats"], &clips[0]["active"]), (&json!(4), &json!(4), &json!(false)));
+    assert_eq!((&clips[1]["id"], &clips[1]["at"], &clips[1]["length_beats"], &clips[1]["active"]), (&json!("clip1"), &json!(8), &json!(4), &json!(false)));
+    let notes = |i: usize| clips[i]["notes"].as_array().unwrap().iter().map(|n| (n["pitch"].clone(), n.get("at").cloned().unwrap_or(json!(0)), n["duration"].clone())).collect::<Vec<_>>();
+    assert_eq!(notes(0), [(json!(60), json!(0), json!(2)), (json!(64), json!(3), json!(1))]);
+    assert_eq!(notes(1), [(json!(64), json!(0), json!(1)), (json!(67), json!(2), json!(1))]);
+    // At a clip's edge or outside it there is nothing to split.
+    let err = edit(&mut s, json!({"op": "clip.split", "clip": PHRASE, "at": 8})).unwrap_err();
+    assert_eq!(err, "Beat 8 is not inside clip phrase at 4");
+    // A looped clip is cut only at a wrap.
+    edit(&mut s, json!({"op": "clip.loop", "clip": "tracks.keys.clips.clip1", "loop_beats": 2})).unwrap();
+    let err = edit(&mut s, json!({"op": "clip.split", "clip": "tracks.keys.clips.clip1", "at": 9})).unwrap_err();
+    assert!(err.starts_with("Beat 9 falls inside a repetition of clip clip1 at 8, which loops every 2 beats"), "{err}");
+    edit(&mut s, json!({"op": "clip.split", "clip": "tracks.keys.clips.clip1", "at": 10})).unwrap();
+    assert_eq!(get(&s, "tracks.keys.clips").as_array().unwrap().len(), 3);
+    // An audio clip is split as audio.split splits it.
+    edit(&mut s, json!({"op": "clip.split", "clip": AUDIO, "at": 12})).unwrap();
+    let halves = get(&s, "tracks.song.audio");
+    assert_eq!((&halves[0]["source_end_seconds"], &halves[1]["at"], &halves[1]["source_start_seconds"]), (&json!(5.0), &json!(12), &json!(5.0)));
+}

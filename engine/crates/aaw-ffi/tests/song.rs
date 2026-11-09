@@ -1348,14 +1348,14 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     assert!(set("fade_out_ms", number(4.0)).is_err(), "fades are set where the clip's end is kept");
 
     // A split makes two that play as the one did; the later half is new.
-    let made = song.edit(Edit::AudioSplit { clips: vec![clip, fill], at: 39.0 }, None).unwrap();
+    let made = song.edit(Edit::ClipsSplit { clips: vec![clip, fill], at: 39.0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.op, "audio.split");
+    assert_eq!(u.change.op, "clip.split");
     let halves = audio(&u, 1);
     assert_eq!(halves.iter().map(|c| (c.key, c.at, c.length_beats)).collect::<Vec<_>>(), [(clip, 35.0, 4.0), (made[0], 39.0, 6.0)]);
     assert_eq!((halves[0].source_end_seconds, halves[1].source_start_seconds), (halves[1].source_start_seconds, 7.0));
-    let outside = song.edit(Edit::AudioSplit { clips: vec![clip, made[0]], at: 39.0 }, None).unwrap_err();
-    assert_eq!(outside.to_string(), "No audio clip to split plays at the start position");
+    let outside = song.edit(Edit::ClipsSplit { clips: vec![clip, made[0]], at: 39.0 }, None).unwrap_err();
+    assert_eq!(outside.to_string(), "No clip to split plays at the start position");
 
     // A copy goes right after what was copied, and can lengthen the song;
     // removing a clip says what it was.
@@ -2107,6 +2107,47 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     assert!(project_delete_untitled(second).unwrap_err().to_string().contains("not an Untitled project"));
     project_delete_untitled(kept.clone()).unwrap();
     assert!(!Path::new(&kept).parent().unwrap().exists());
+}
+
+#[test]
+fn note_clips_and_pattern_clips_split_at_the_start_position_as_audio_clips_do() {
+    let (_dir, path, song, seen) = open();
+    transport(&seen);
+    agent(&path, json!({"op": "batch", "commands": [
+        {"op": "track.add", "id": "keys", "type": "midi"},
+        {"op": "clip.add", "track": "keys", "at": 4, "length_beats": 8, "notes": [
+            {"pitch": "C4", "duration": 1}, {"pitch": "E4", "at": 1, "duration": 4}, {"pitch": "G4", "at": 6, "duration": 1},
+        ]},
+    ]}));
+    let start = update(&seen).arrangement;
+    let (keys, beat) = (start.tracks[2].note_clips[0].key, start.tracks[0].clips[0].key);
+    // ⌘E at beat 8 with both selected: the note clip at the beat, the
+    // pattern clip of four 4-beat repeats between its second and third.
+    let made = song.edit(Edit::ClipsSplit { clips: vec![keys, beat], at: 8.0 }, None).unwrap();
+    assert_eq!(made.len(), 2);
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Split 2 clips");
+    let halves: Vec<_> = u.arrangement.tracks[2].note_clips.iter().map(|c| (c.key, c.at, c.length_beats)).collect();
+    assert_eq!(halves, [(keys, 4.0, 4.0), (halves[1].0, 8.0, 4.0)]);
+    assert!(made.contains(&halves[1].0));
+    let notes = |i: usize| -> Vec<(i32, f64, f64)> {
+        u.arrangement.tracks[2].note_clips[i].notes.iter().map(|n| (n.pitch, n.at, n.duration)).collect()
+    };
+    // The note across the cut is held to it on the left; its rest starts the right.
+    assert_eq!(notes(0), [(60, 0.0, 1.0), (64, 1.0, 3.0)]);
+    assert_eq!(notes(1), [(64, 0.0, 1.0), (67, 2.0, 1.0)]);
+    let repeats: Vec<_> = u.arrangement.tracks[0].clips.iter().map(|c| (c.pattern.as_str(), c.at, c.repeats)).collect();
+    assert_eq!(repeats, [("beat", 0.0, 2), ("beat", 8.0, 2), ("fill", 16.0, 1)]);
+    // Inside a repeat a pattern clip is refused with the reason.
+    let e = song.edit(Edit::ClipsSplit { clips: vec![beat], at: 2.0 }, None).unwrap_err().to_string();
+    assert!(e.contains("a pattern clip is cut only between repeats"), "{e}");
+    // One undo puts back the clips as they were.
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[2].note_clips.len(), 1);
+    assert_eq!(u.arrangement.tracks[2].note_clips[0].notes.len(), 3);
+    assert_eq!(u.arrangement.tracks[0].clips[0].repeats, 4);
+    song.close();
 }
 
 #[test]

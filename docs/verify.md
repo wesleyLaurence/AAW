@@ -8,6 +8,10 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **⌘E on any clip:** select a MIDI clip with a note held across the start
+  position and press ⌘E: two clips, the note ending at the cut on the left and
+  its rest starting the right, playing as before; then a drum pattern clip
+  between two repeats, and one inside a repeat (refused with the reason).
 - **Key, chords and swing:** `daw samples chords` on a song you know the
   key and chords of, and `daw samples beats` on one with a swing you know:
   are the key, the chords by bar and the swing what you hear? Then a loop

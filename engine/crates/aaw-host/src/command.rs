@@ -195,6 +195,13 @@ pub enum Command {
     /// leaves. The first clip is the one kept, with its ID and reference.
     #[serde(rename = "clip.join")]
     ClipJoin { clips: Vec<String> },
+    /// Makes two clips of one at a beat inside it; they play as the one did.
+    /// A note clip's note across the beat is held to it on the left and the
+    /// rest starts the right clip, which gets the next free ID; a pattern
+    /// clip is cut only between repeats; an audio clip as `audio.split`
+    /// splits it. A looped clip is cut only at a wrap.
+    #[serde(rename = "clip.split")]
+    ClipSplit { clip: String, at: Json },
 
     // Notes of note clips
     /// Adds notes to a note clip: `notes`, a list of notes, or one note from
@@ -2333,6 +2340,26 @@ impl<'a> Edit<'a> {
                 }
                 self.set_leaf(&loc, "length_beats", beat_value(&(&to - &from)));
                 out.label = format!("Trim clip {} to beats {} to {}", self.clip_name(&loc), beat_text(&from), beat_text(&to));
+            }
+            ClipSplit { clip, at } => {
+                use crate::range::Kind;
+                if self.audio_clip(clip).is_some() {
+                    return self.run(&AudioSplit { clip: clip.clone(), at: at.clone() });
+                }
+                let (owner, i) = self.member(clip, "clips", "a clip")?;
+                let loc = [owner.clone(), vec![Step::Key("clips".into()), Step::Index(i)]].concat();
+                let kind = if self.is_midi(&owner) { Kind::Note } else { Kind::Pattern };
+                let at = beat_at(at)?;
+                let node = self.node(&loc).clone();
+                let name = self.clip_name(&loc);
+                let (start, end) = self.timed(kind, &node)?;
+                if at <= start || end.is_some_and(|end| at >= end) {
+                    return Err(format!("Beat {} is not inside clip {name}", beat_text(&at)));
+                }
+                let (left, right) = self.split_node(kind, &node, &at, &name)?;
+                *self.node_mut(&loc) = left;
+                out.made.push(self.insert(&owner, "clips", Some(i + 1), right)?);
+                out.label = format!("Split clip {name} at beat {}", beat_text(&at));
             }
             ClipJoin { clips } => {
                 use crate::range::Kind;
