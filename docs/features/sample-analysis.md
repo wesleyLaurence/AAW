@@ -54,6 +54,12 @@ been analyzed.
     onsets almost equally well. Choose among them musically.
   - `filename_bpm_hint` says whether the filename tempo agrees and whether it
     implies a whole number of bars.
+  - `first_beat_seconds` is where the loop's beats start: 0 for a loop of
+    whole bars, its first onset otherwise.
+  - `swing`, for a loop with a tempo: how late its off-beat notes fall.
+- `key`: the key its pitch classes are in, or `tonal: false` and no name;
+  `chords`, for a loop with a key: its chords by beat from its first. Both,
+  and swing, are in [key-chords-swing.md](key-chords-swing.md).
 
 ## Root notes
 
@@ -79,10 +85,11 @@ different root is sometimes wanted.
 
 ## Limits
 
-Pitch is a single-voice estimate. It does not detect keys, chords, scales or
-melodies, and it summarizes a glide as its median. Tempo assumes 4/4 and a steady
-tempo, and reads the first two minutes. It does not detect downbeats, swing, or
-pickups before the first downbeat; for a whole song's beats, downbeats and pickup
+Pitch is a single-voice estimate. It does not detect melodies, and it
+summarizes a glide as its median; a sample's key, a loop's chords and its
+swing are in the same report ([key-chords-swing.md](key-chords-swing.md)).
+Tempo assumes 4/4 and a steady tempo, and reads the first two minutes. It
+does not detect downbeats or pickups before the first downbeat; for a whole song's beats, downbeats and pickup
 use `daw samples beats` ([beat-map.md](beat-map.md)).
 Half and double time cannot be resolved from audio alone. Very short or quiet
 material may return no pitch or no onsets. Analysis never modifies the sample,

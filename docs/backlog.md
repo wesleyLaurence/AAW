@@ -25,7 +25,7 @@ wrong with the sounds everything else is built on.
 Items 1–5 are what a code review of play past the song's end (D163) found
 on October 28, 2026, in the order of how much each one harms a song, each a
 fix of its own. Items 6–8 are the person's notes from using the app on
-October 19, 2026 (D123). Items 9–20 are the order as it stood.
+October 19, 2026 (D123). Items 9–19 are the order as it stood.
 
 1. **A take from a stem tap stops at the end while a device take runs on.**
     Stem taps are fed only while the player rolls, so a track recorded from a
@@ -107,18 +107,16 @@ October 19, 2026 (D123). Items 9–20 are the order as it stood.
     frequencies its data where the model's own knowledge is not to be trusted.
 16. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-17. **Key and chord detection,** and swing detection, of samples and songs: a
-    loop matched to the song's key before it is placed.
-18. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+17. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-19. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+18. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-20. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+19. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
@@ -150,6 +148,12 @@ October 19, 2026 (D123). Items 9–20 are the order as it stood.
   hear the notes as written where the device changes them; read its
   cached notes from `.daw/devices/` as a render does
   ([devices anyone builds](features/custom-devices.md)).
+- Key and chords further: a song's mode named, D dorian rather than C
+  major; a key change within a song found and said by bar; a song's chords
+  by bar from its own notes and samples, as `daw key` gives its key, so a
+  progression is read before a render; a key a fifth off told from the
+  true one, its commonest mistake; swing by section
+  ([key, chords and swing](features/key-chords-swing.md)).
 - A text piano roll of one clip or a few bars.
 - Queries: which bars the bass plays in, every snare off the backbeat.
 - A client library over the host, where a block of calls is one turn.

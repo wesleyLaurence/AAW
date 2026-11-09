@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins`, `export` and `separate`.
+"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins`, `export`, `separate` and `key`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export", "separate")
+COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export", "separate", "key")
 
 
 def engine() -> Path:
@@ -161,6 +161,18 @@ def parser():
     measured.add_argument("--measured-type", choices=library.MEASURED_KINDS)
     measured.add_argument("--measured-bpm", type=float, help="Within ±1 BPM")
     measured.add_argument(
+        "--measured-key",
+        metavar="KEY",
+        help="In this key or its relative, such as A minor, Am or F#; nearest first with --key-within",
+    )
+    measured.add_argument(
+        "--key-within",
+        type=int,
+        default=0,
+        metavar="SEMITONES",
+        help="Also the samples a transpose of up to this many semitones puts in --measured-key (0–6)",
+    )
+    measured.add_argument(
         "--measure",
         type=int,
         default=0,
@@ -250,6 +262,15 @@ def parser():
     )
     beats.add_argument(
         "--seconds", type=float, default=20, help="Length of the --click audition"
+    )
+    chords = ss.add_parser(
+        "chords",
+        help="A whole song's key and its chords by bar and beat, on its beat map",
+    )
+    chords.add_argument("sample")
+    chords.add_argument("--near", help="Only the chords around a time, as seconds or m:ss")
+    chords.add_argument(
+        "--window", type=float, default=10.0, help="Seconds either side of --near"
     )
     inspect = ss.add_parser("inspect")
     inspect.add_argument("sample")
@@ -349,6 +370,20 @@ def parser():
     )
     remove = rs.add_parser("remove", help="Forget a reference; the song's file is left")
     remove.add_argument("name")
+    key = sub.add_parser(
+        "key",
+        help="The key of what the song plays, from its notes and its samples, and with "
+        "--sample the transpose that puts a sample in it",
+    )
+    key.add_argument("project", type=song_file)
+    key.add_argument(
+        "--sample",
+        action="append",
+        default=[],
+        metavar="SAMPLE",
+        help="One of the song's samples by its ID, a file, or a library ID, to fit to the song's key; repeat for several",
+    )
+    key.add_argument("--db", type=Path, default=None, help="The sample library's index")
     timeline = sub.add_parser(
         "timeline",
         help="The song in beats and seconds: where its sounds are, conversions, and its length",
@@ -480,6 +515,8 @@ def execute(a):
         return perception.compare(a.before, a.after, images=not a.no_images)
     if a.command == "reference":
         return reference_command(a)
+    if a.command == "key":
+        return song_key(a)
     if a.command == "check":
         return check(a.project)
     if a.command == "timeline":
@@ -563,6 +600,13 @@ def execute(a):
                 raise ValueError("note-range low note exceeds high note")
         if a.measure < 0:
             raise ValueError("measure must be 0 or more")
+        if not 0 <= a.key_within <= 6:
+            raise ValueError("key-within must be 0–6 semitones")
+        if a.key_within and a.measured_key is None:
+            raise ValueError("--key-within goes with --measured-key")
+        from .harmony import parse_key
+
+        measured_key = None if a.measured_key is None else parse_key(a.measured_key)
         notes = []
         found = library.search(
             a.db,
@@ -587,6 +631,8 @@ def execute(a):
             },
             measure=a.measure,
             notes=notes,
+            measured_key=measured_key,
+            key_within=a.key_within,
         )
         for note in notes:
             print(json.dumps({"note": note}), file=sys.stderr)
@@ -603,6 +649,8 @@ def execute(a):
         return library.analyze(a.db, source, a.refresh)
     if a.action == "beats":
         return beat_map(a, source)
+    if a.action == "chords":
+        return song_chords(a, source)
     if a.action == "inspect":
         return library.inspect(source)
     if a.action == "audition":
@@ -661,6 +709,78 @@ def beat_map(a, source):
         start = report["first_downbeat_seconds"] - 0.5 if at is None else at - a.seconds / 2
         report["click"] = beats.click(source, rows, a.click, start, a.seconds)
     return report
+
+
+def song_chords(a, source):
+    """A song's key and its chords, a run of beats a chord, on its beat map."""
+    from . import beats, harmony, library
+
+    if a.window <= 0:
+        raise ValueError("window must be >0")
+    at = None if a.near is None else beats.seconds(a.near)
+    report = library.beat_map(a.db, source)
+    rows = report["beats"]
+    mono, sr = beats.read(source)
+    key = harmony.key_of(mono, sr)
+    period = 60 / report["tempo"]["bpm"]
+    times = [b["seconds"] for b in rows]
+    times.append(min(times[-1] + period, len(mono) / sr))
+    runs = harmony.chords(
+        mono,
+        sr,
+        times,
+        [b["beat"] == 1 for b in rows],
+        harmony.parse_key(key["name"]) if key["tonal"] else None,
+    )
+    found = []
+    for run in runs:
+        first = rows[run["first_beat"]]
+        end = times[run["first_beat"] + run["beats"]]
+        found.append(
+            {
+                "bar": first["bar"],
+                "beat": first["beat"],
+                "seconds": first["seconds"],
+                "until_seconds": round(end, 6),
+                "beats": run["beats"],
+                "chord": run["chord"],
+                "fit": run["fit"],
+            }
+        )
+    if at is not None:
+        found = [c for c in found if c["until_seconds"] >= at - a.window and c["seconds"] <= at + a.window]
+    key.pop("profile", None)
+    return {
+        "path": str(source),
+        "key": key,
+        "tempo_bpm": report["tempo"]["bpm"],
+        "meter": report["meter"],
+        "first_downbeat_seconds": report["first_downbeat_seconds"],
+        "chords": found,
+        "beat_map": report.get("map"),
+        "source": "measured from decoded audio (mono sum) on the beat map; estimates, not ground truth",
+    }
+
+
+def song_key(a):
+    """`daw key`: the key of what the song plays, and what fits a sample to it."""
+    from . import library, tonality
+    from .model import load
+
+    db = a.db or library.default_db()
+    found = tonality.of_song(a.project)
+    tempo = float(load(a.project, False)["session"]["tempo"])
+    fits = []
+    samples = load(a.project, False)["samples"]
+    for value in a.sample:
+        # One of the song's own samples by its ID, a file, or a library ID.
+        own = samples.get(value)
+        path = a.project.parent / own["path"] if own else library.resolve(db, value)
+        fits.append(tonality.fit(value, found["key"], library.analyze(db, path), tempo))
+    found["key"].pop("profile", None)
+    if fits:
+        found["samples"] = fits
+    return found
 
 
 def import_sample(a, source):

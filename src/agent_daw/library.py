@@ -204,7 +204,10 @@ ROWS = """SELECT s.id,s.name,s.pack,s.duration,s.channels,s.category,s.kind,
   s.bpm_hint,s.key_hint,s.path,a.id AS measured_id,a.pitched,a.note,a.cents,
   a.confidence,a.kind AS measured_kind,a.bpm AS measured_bpm,
   json_extract(a.report, '$.sound') AS sound,
-  json_extract(a.report, '$.measured_category') AS measured_category
+  json_extract(a.report, '$.measured_category') AS measured_category,
+  json_extract(a.report, '$.key.name') AS key_name,
+  json_extract(a.report, '$.key.confidence') AS key_confidence,
+  json_extract(a.report, '$.rhythm.swing.swing') AS swing
   FROM samples s LEFT JOIN analysis a ON a.id = s.id AND a.bytes = s.bytes
   AND a.mtime_ns = s.mtime_ns AND a.analyzer = ?"""
 # A sample named for no category is of the one it measures as.
@@ -226,6 +229,9 @@ def listed(r) -> dict:
         "kind": row.pop("measured_kind"),
         "bpm": row.pop("measured_bpm"),
         "category": row.pop("measured_category"),
+        "key": row.pop("key_name"),
+        "key_confidence": row.pop("key_confidence"),
+        "swing": row.pop("swing"),
     }
     sound = row.pop("sound")
     if row.pop("measured_id") is None:
@@ -262,6 +268,8 @@ def search(
     ranges=None,
     measure=0,
     notes=None,
+    measured_key=None,
+    key_within=0,
 ):
     """Filename search. Measured filters match only samples with a current analysis.
 
@@ -271,7 +279,10 @@ def search(
     `ranges` those whose field lies between a least and a most, either of
     which may be None. A sort or filter by a measurement leaves out what was
     not measured, says how many in `notes`, and refuses when that is all of
-    them; `measure` measures that many of them first.
+    them; `measure` measures that many of them first. `measured_key` keeps
+    the samples measured in that key or its relative, or within `key_within`
+    semitones of one, nearest first, each with `to_key`: the transpose that
+    puts it in the key.
     """
     clauses, args = [], [analysis.ANALYZER]
     if roots:
@@ -318,7 +329,12 @@ def search(
     sql += " ORDER BY s.name,s.path"
     field = SORTS.get(sort)
     ranges = {f: r for f, r in (ranges or {}).items() if r != (None, None)}
-    by_sound = bool(words) or field in descriptors.FIELDS or any(f != "duration" for f in ranges)
+    by_sound = (
+        bool(words)
+        or field in descriptors.FIELDS
+        or any(f != "duration" for f in ranges)
+        or measured_key is not None
+    )
     if not (by_sound or ranges or field or measure):
         # By name alone, the index does all of it.
         con = connect(db)
@@ -370,6 +386,20 @@ def search(
         ]
     for word in words:
         rows = [r for r in rows if r["measured"]["words"].get(WORDS[word]) == word]
+    if measured_key is not None:
+        from .harmony import key_name, transpose_to
+
+        wanted = key_name(*measured_key)
+        keyed = []
+        for r in rows:
+            if r["measured"]["key"] is None:
+                continue
+            r["measured"]["to_key"] = transpose_to(r["measured"]["key"], wanted)
+            if abs(r["measured"]["to_key"]["transpose"]) <= key_within:
+                keyed.append(r)
+        rows = keyed
+        if not field:
+            rows.sort(key=lambda r: abs(r["measured"]["to_key"]["transpose"]))
     if field:
         rows = [r for r in rows if value(r, field) is not None]
         # The rows are by name, which a sort that keeps their order leaves ties in.
