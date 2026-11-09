@@ -800,6 +800,17 @@ enum ClipCmd {
         #[arg(required = true, num_args = 2..)]
         clips: Vec<String>,
     },
+    /// Make two clips of one at a beat inside it, which play as the one did:
+    /// a note clip, a pattern clip or an audio clip (tracks.T.audio.N). A
+    /// note across the beat is held to it on the left and the rest starts the
+    /// right clip, which gets the next free ID; a pattern clip is cut only
+    /// between repeats, a looped clip only at a wrap.
+    Split {
+        project: Song,
+        clip: String,
+        #[arg(long)]
+        at: String,
+    },
 }
 
 /// Notes of note clips, addressed as CLIP.notes.ID, e.g.
@@ -2596,6 +2607,13 @@ fn run(cli: &Cli) -> Result<Json> {
                 },
             ),
             ClipCmd::Join { project, clips } => edit(project, C::ClipJoin { clips: clips.clone() }),
+            ClipCmd::Split { project, clip, at } => edit(
+                project,
+                C::ClipSplit {
+                    clip: clip.clone(),
+                    at: parse_value(at),
+                },
+            ),
             ClipCmd::Deactivate { project, clips } | ClipCmd::Activate { project, clips } => {
                 // Several clips deactivated or activated are one step.
                 let active = matches!(c, ClipCmd::Activate { .. });

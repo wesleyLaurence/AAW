@@ -156,7 +156,7 @@ public enum ContextMenu {
 
     /// A clip's menu: its editor by name, then what the Edit menu does to the
     /// selected clips, and the loop set over them as L sets it. `canSplit` is
-    /// whether the start position is inside an audio clip of the selection,
+    /// whether the start position is inside a clip of the selection,
     /// `canJoin` whether two or more clips of one track and kind are
     /// selected, `activates` whether 0 would activate the selection, every
     /// clip of it being deactivated, rather than deactivate it, and `many`

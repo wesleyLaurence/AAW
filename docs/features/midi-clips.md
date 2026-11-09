@@ -88,7 +88,7 @@ is a Later item.
 `daw clip add`, `move`, `duplicate`, `resize`, `trim` and `remove` place note
 clips, and `daw clip join SONG CLIP CLIP...` makes one of two or more on a
 track, from the first's start to the last's end, with every note that played
-where it played and a loop laid out as notes (the app's ⌘J); `daw note add`, `set`, `move`, `transpose` and `remove` edit notes, a
+where it played and a loop laid out as notes (the app's ⌘J); `daw clip split SONG CLIP --at BEAT` makes two of one at a beat inside it, a note across the beat held to it on the left and its rest starting the right clip, which gets the next free ID (the app's ⌘E, as for audio clips, since November 9, 2026, D178); `daw note add`, `set`, `move`, `transpose` and `remove` edit notes, a
 clip standing for all its notes; `daw note list SONG CLIP|TRACK` reads them with
 names and song beats, between `--from` and `--to` if given. `daw instrument
 set`, `remove` and `map` attach, take off and map the sampler, and `daw pad`

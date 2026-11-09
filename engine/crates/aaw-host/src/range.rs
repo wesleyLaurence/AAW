@@ -451,7 +451,7 @@ impl<'a> Edit<'a> {
     }
 
     /// Two items of one, cut at `at`, which is inside it.
-    fn split_node(&self, kind: Kind, node: &Node, at: &BigRational, path: &str) -> Result<(Node, Node)> {
+    pub(crate) fn split_node(&self, kind: Kind, node: &Node, at: &BigRational, path: &str) -> Result<(Node, Node)> {
         let mut left = node.clone();
         let mut right = node.clone();
         match kind {

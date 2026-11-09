@@ -327,9 +327,10 @@ pub enum Edit {
         fade_in_ms: Option<f64>,
         fade_out_ms: Option<f64>,
     },
-    /// Makes two of each audio clip among `clips` that plays at a beat. The
-    /// later halves are what the edit makes.
-    AudioSplit { clips: Vec<u64>, at: f64 },
+    /// Makes two of each clip among `clips` that plays at a beat, as ⌘E
+    /// does: a note clip, a pattern clip or an audio clip. The later halves
+    /// are what the edit makes.
+    ClipsSplit { clips: Vec<u64>, at: f64 },
     /// Sets a field of an audio clip: `gain_db`, `fade_curve`, `source_bpm`,
     /// `stretch` or `transpose`. An absent `source_bpm` has the clip play at
     /// its file's own tempo.
@@ -1978,22 +1979,28 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             };
             Ok(batch(commands, format!("Set the {what} of audio clip {}", audio.sample)))
         }
-        Edit::AudioSplit { clips, at } => {
+        Edit::ClipsSplit { clips, at } => {
             let tree = doc.tree();
             let at = aaw_model::beat(&Beat::Float(at.max(0.0)))?;
             let commands: Vec<Json> = clips
                 .iter()
                 .filter(|key| {
-                    // Inside what it plays before it leaves: its fade out is not split.
                     placed(&tree, **key).is_ok_and(|p| {
-                        let leaves = p.audio.and_then(|a| Some(song.beat_of(a, song.source_end(a).ok()?)));
-                        p.start < at && leaves.is_some_and(|leaves| at.to_f64().is_some_and(|at| at < leaves - 1e-9))
+                        let ends = match p.audio {
+                            // Inside what it plays before it leaves: its fade out is not split.
+                            Some(a) => match song.source_end(a) {
+                                Ok(end) => song.beat_of(a, end),
+                                Err(_) => return false,
+                            },
+                            None => p.end.to_f64().unwrap_or(0.0),
+                        };
+                        p.start < at && at.to_f64().is_some_and(|at| at < ends - 1e-9)
                     })
                 })
-                .map(|key| json!({"op": "audio.split", "clip": clip(key), "at": beat(&at)}))
+                .map(|key| json!({"op": "clip.split", "clip": clip(key), "at": beat(&at)}))
                 .collect();
             if commands.is_empty() {
-                return Err("No audio clip to split plays at the start position".into());
+                return Err("No clip to split plays at the start position".into());
             }
             Ok(commands)
         }
@@ -2813,7 +2820,7 @@ pub fn label(edit: &Edit, count: usize) -> Option<String> {
         Edit::ClipsDuplicate { .. } => "Duplicate",
         Edit::ClipsCopy { .. } => "Copy",
         Edit::ClipsRemove { .. } => "Remove",
-        Edit::AudioSplit { .. } => "Split",
+        Edit::ClipsSplit { .. } => "Split",
         _ => return None,
     };
     Some(format!("{verb} {count} clips"))
