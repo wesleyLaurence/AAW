@@ -81,6 +81,7 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
+| [reverse-engineering a song](features/reverse-engineer.md) | Next 1–7; proposed |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |

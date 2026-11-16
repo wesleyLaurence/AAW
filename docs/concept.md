@@ -81,6 +81,11 @@ third-party plugins.
   and downbeat, slices, loads a kit, programs patterns and builds an arrangement.
 - Give it a finished song and timecodes and get an edit whose joins cannot be
   heard, exported under a name.
+- Give it a finished song and learn everything in it: its tempo, bars, key
+  and key changes, chords, form and words, the notes of its drums, bass,
+  chords and melodies as MIDI, and how each part sounds; then have its session
+  recreated from the master, compared against it until the differences are
+  said (D182).
 - Ask for a sound. It designs one, renders it and hands over the file, and a sound
   worth keeping goes to the library with its recipe.
 - Program drums, bass, chords and melodies over samples and synths, with groove.
