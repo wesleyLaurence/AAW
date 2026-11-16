@@ -35,10 +35,12 @@ order of how much each one harms a song, each a fix of its own. Item 12 is the
 person's notes from using the app on October 19, 2026 (D123). Items 13–23 are
 the order as it stood.
 
-1. **The drum groove as a pattern.** The kick, snare and hat hits `daw samples
-    hits` gives turned into a pattern clip, a hit's level its velocity and its
-    offset its timing, a pattern for each repeating run of bars with its fills;
-    toms and cymbals by more bands or a drum-transcription model.
+1. **The drum groove as notes.** The kick, snare and hat hits `daw samples
+    hits` gives turned into a note clip on a MIDI track whose Sampler maps the
+    General MIDI drum notes to pads, a hit's level its velocity and its offset
+    its timing; the bars that share a groove and where the fills fall said in
+    the reply, each groove a looped clip and each fill a clip of its own; toms
+    and cymbals by more bands or a drum-transcription model.
 2. **The form: which bars are the same.** Bars compared with every other on
     chords, notes and sound, sections labelled A, B, A′ and named by what they
     hold, each section's key giving the key changes; the meter checked on real
@@ -53,7 +55,7 @@ the order as it stood.
 5. **One analysis file.** A command that runs every measure on a song and its
     stems and writes one JSON with each measure's confidence and a markdown
     summary, which the skill's report and a recreation start from.
-6. **Recreate a session from the master.** The drums as a pattern on the
+6. **Recreate a session from the master.** The drums as note clips on the
     nearest samples, the bass, chords and melodies as note clips on patches,
     the sections arranged and the mix matched, rendered and compared with
     `daw reference` until the differences are said; what no tool does yet
@@ -130,8 +132,8 @@ the order as it stood.
     ([effect racks and instrument racks](features/effect-racks.md)).
 22. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
-    stretch and mono for each pad of a pattern track, which lists its pads and
-    edits none; a loop fitted to the song by its tempo. The Sampler's one pad
+    stretch and mono for each pad of a Sampler of several pads, a drum kit,
+    whose panel lists its pads and edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
 23. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
@@ -156,8 +158,7 @@ the order as it stood.
 - Locks the host enforces: "don't touch the drums".
 - How much the agent may do: Ask, Edit, Propose, Background.
 - The undo history kept across closing a project.
-- Persistent IDs on legacy pattern clips and audio clips; note clips and
-  notes have them.
+- Persistent IDs on audio clips; note clips and notes have them.
 
 ### What the agent reads and writes
 
@@ -225,8 +226,14 @@ the order as it stood.
 - A legacy track converted into a MIDI track when asked: its pads the sampler's,
   each pattern clip a note clip that owns its events, and the sound unchanged
   against generated fixtures (D62). What a track with two pitched pads maps to
-  is its open question.
-- Audio clips that reverse; perhaps one list for pattern clips and audio clips.
+  is its open question. Step 2 of retiring patterns (D184).
+- `daw track add` without `--type` making a MIDI track, as the app already
+  does, rather than a track of pads.
+- Patterns removed once nothing needs them, step 3 of retiring them (D184):
+  `patterns`, pads on a track and pattern clips out of the song, the engine
+  and the host, `daw pattern` and `daw event` gone, the app's pattern editor
+  gone, and a song that has them converted when it is opened.
+- Audio clips that reverse.
   A cut that moves the other tracks with it is `daw range delete`
   ([bar ranges](features/bar-ranges.md)).
 - A join check that places a pad transposed by an event at its transposed length.
@@ -234,11 +241,8 @@ the order as it stood.
 - A trimmed audio clip prepared from audio already at the song's rate. A trim
   of a long file at another rate converts the part again, about half a second
   for two minutes.
-- An event's offset in milliseconds, either side of its beat. A push or a drag
-  is written in beats today, so it changes with the tempo, and a hit cannot sit
-  ahead of its pattern's first beat.
-- A grid for each step row. A pattern has one, so triplet hats over straight
-  kicks are steps for one and events for the other.
+- A note's offset in milliseconds, either side of its beat. A push or a drag
+  is written in beats today, so it changes with the tempo.
 - **More splits for `daw separate`** (stage 2 of
   [stem separation](features/stem-separation.md)): lead from backing vocals,
   a drum kit by its pieces, reverb and echo taken off a vocal, crowd noise,
@@ -260,7 +264,7 @@ the order as it stood.
   installs it, saying whether its code is sandboxed, and a plugin's row has
   Share… (the zip `daw plugin pack` makes), Show in Finder and Move to
   Trash (D156).
-- `daw promote`: a render, slice or pattern into the library with its recipe.
+- `daw promote`: a render, slice or clip into the library with its recipe.
 
 ### Library and perception
 

@@ -27,11 +27,13 @@ const RECIPES: &[Recipe] = &[
             ("daw init song --tempo 96", "Makes song/song.yaml at 96 BPM in 4/4 (--time-signature 3/4 for a waltz), as long as what is put in it: the end follows the last clip, and song/song.aaw, the file that opens the project in the app. song is the PROJECT every other command takes. SONG.md beside it is for what the song is and where it is heading (daw describe project, notes)."),
             ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR. daw describe samples says how to choose between them by what they measure as."),
             ("daw samples import KICK_PATH --project song --id kick", "Copies the file into the project and names it kick in the song. Import the snare and the hat the same way, as snare and hat."),
-            ("daw track add song drums", "A track of pads, played by patterns."),
-            ("daw pad add song drums kick --sample kick", "A pad plays a sample. Add the snare and hat pads the same way; daw describe sampler lists what a pad takes."),
-            ("daw pattern add song beat --length-beats 4", "A one-bar pattern. Its grid is 1/4 of a beat, so a row has sixteen steps of a sixteenth note."),
-            ("daw pattern steps song beat kick \"x... .... x.x. ....\"", "A pad's row: x hits, a dot rests. Then snare \".... x... .... x...\" and hat \"x.x. x.x. x.x. x.x.\"."),
-            ("daw clip add song drums beat --repeats 8", "Plays the pattern eight times in a row from beat 0."),
+            ("daw track add song drums --type midi", "A MIDI track for the drums: its notes play a Sampler of pads, a sound a note, as a drum rack plays them."),
+            ("daw pad add song drums kick --sample kick", "A pad plays a sample; the first one gives the track its Sampler. Add the snare and hat pads the same way; daw describe sampler lists what a pad takes."),
+            ("daw instrument map song drums C2 kick", "C2, note 36, plays the kick as it is. Map D2 (38) to snare and F#2 (42) to hat the same way: the General MIDI drum notes, which a MIDI file of the part keeps."),
+            (
+                "daw clip add song drums --id beat --length-beats 32 --loop-beats 4 --text \"c2 . . . . . . . c2 . c2 . . . . .\n. . . . d2 . . . . . . . d2 . . .\nf#2 . f#2@70 . f#2 . f#2@70 . f#2 . f#2@70 . f#2 . f#2@70 .\"",
+                "A note clip of a one-bar beat played eight times: --loop-beats 4 plays its first bar again to the clip's 32 beats. Each line of the text is a voice, the kick, the snare and the hat, and each token a sixteenth (--grid 1/4 unless given): a note hits, a dot rests and @70 after a note is its velocity, 100 unless written.",
+            ),
             ("daw synth add song bass --patch \"Sub Bass\"", "A new MIDI track playing a factory patch; daw patch list names them all."),
             ("daw clip add song bass --id bassline --length-beats 32", "A note clip of 32 beats at beat 0. Its notes are placed from its start."),
             (
@@ -54,7 +56,7 @@ const RECIPES: &[Recipe] = &[
     Recipe {
         name: "drum-bus",
         about: "Drum tracks grouped, a compressor and a level on the group, a send to a reverb return, and what the compressor took off.",
-        given: "A song at song with three tracks of pads, kick, snare and hat, each playing a pattern of its own pad.",
+        given: "A song at song with three MIDI tracks, kick, snare and hat, each a Sampler of its own sound playing a note clip.",
         steps: &[
             ("daw group add song drums --tracks kick,snare,hat", "A group of the three: they play through its chain, gain and pan, and move together to where kick is. Each track names it as its group."),
             ("daw effect add song groups.drums --type compressor --threshold-db -18 --ratio 4 --attack-ms 10 --release-ms 120", "A compressor on the group, which every drum goes through together; an attack of 10 ms lets the front of each hit through. daw describe effects.compressor says what each field takes."),

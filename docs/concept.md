@@ -78,7 +78,7 @@ third-party plugins.
 - Point it at a folder of samples and ask for "a dark punchy kick" without
   auditioning a thousand files.
 - Give it a song or a sample and say "make a beat with this": it finds the tempo
-  and downbeat, slices, loads a kit, programs patterns and builds an arrangement.
+  and downbeat, slices, loads a kit, programs the drums and builds an arrangement.
 - Give it a finished song and timecodes and get an edit whose joins cannot be
   heard, exported under a name.
 - Give it a finished song and learn everything in it: its tempo, bars, key
@@ -138,13 +138,13 @@ answers at the old path until it closes, and each reply names the new one.
 │         │              │                         │  keep · revert  │
 │         │              │                         │  A/B            │
 │         ├──────────────┴─────────────────────────┤                 │
-│         │ detail: device chain, pads, pattern    │  (collapsible)  │
+│         │ detail: device chain, pads, piano roll │  (collapsible)  │
 └─────────┴────────────────────────────────────────┴─────────────────┘
 ```
 
 The arrangement is Ableton's Arrangement View: tracks stacked, clips left to
 right, returns and the master at the bottom, automation lanes folding out under a
-row. Clicking a row shows its devices and clicking a clip shows its pattern.
+row. Clicking a row shows its devices and clicking a clip shows its notes.
 Device panels are drawn from what each device says of itself, so a new device
 needs no panel built by hand. What the agent changes eases to its new place and
 lights up for a moment, and every change is listed with who made it.

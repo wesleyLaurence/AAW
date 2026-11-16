@@ -713,9 +713,10 @@ enum AudioCmd {
 /// or a note clip's ID, tracks.T.clips.ID.
 #[derive(Subcommand)]
 enum ClipCmd {
-    /// Add a clip: `add SONG TRACK PATTERN`, then --at, --repeats and
-    /// --velocity-scale if wanted. On a MIDI track, a note clip, with no
-    /// pattern: --length-beats, and --at, --id and --notes if wanted.
+    /// Add a clip. On a MIDI track, a note clip: --length-beats, and --at,
+    /// --id, --notes or --text if wanted. On a track of pads, as songs made
+    /// before note clips have, a pattern clip: `add SONG TRACK PATTERN`, then
+    /// --at, --repeats and --velocity-scale if wanted.
     #[command(after_help = clip_help())]
     Add {
         project: Song,
@@ -1420,7 +1421,8 @@ enum MidiCmd {
     Export { project: Song, clip: String, file: PathBuf },
 }
 
-/// Patterns and their events.
+/// Patterns and their events: how songs made before note clips play drums.
+/// A new drum part is a note clip on a MIDI track (daw describe start).
 #[derive(Subcommand)]
 enum PatternCmd {
     /// Add a pattern: --length-beats, and --grid and --swing if wanted; its
@@ -1729,7 +1731,7 @@ fn fields_help(model: &str, skip: &[&str]) -> String {
 fn track_help() -> String {
     format!(
         "Fields:\n{}{}{}",
-        flag_line("type", "midi makes a MIDI track, which holds note clips and an instrument"),
+        flag_line("type", "midi makes a MIDI track, which holds note clips and an instrument; without it, a track of pads and pattern clips, as songs made before note clips have"),
         flag_line("index", "where among the tracks, 0 first; last unless given"),
         takes("Track", &["id"])
     )
