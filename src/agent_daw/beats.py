@@ -20,9 +20,13 @@ from pathlib import Path
 import numpy as np
 import soundfile as sf
 
-# The map and its swing (swing.py, which measures on this module's envelope).
+# The map, its swing (swing.py, which measures on this module's envelope) and its
+# downbeats (downbeats.py, and the model's runner).
 ANALYZER = hashlib.sha256(
-    Path(__file__).read_bytes() + Path(__file__).with_name("swing.py").read_bytes()
+    b"".join(
+        Path(__file__).with_name(name).read_bytes()
+        for name in ("beats.py", "swing.py", "downbeats.py", "downbeat_runner.py")
+    )
 ).hexdigest()[:12]
 MIN_BPM, MAX_BPM = 60.0, 200.0
 # Half and double time fit the same onsets, and audio alone does not settle which
@@ -454,11 +458,28 @@ def bar_of(meter) -> int:
     return beats
 
 
+def requested_times(downbeat) -> list[float]:
+    """The --downbeat times asked for: none, one or several."""
+    if downbeat is None:
+        return []
+    if isinstance(downbeat, (int, float)):
+        return [float(downbeat)]
+    return sorted(float(t) for t in downbeat)
+
+
 def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
     """The beat map of a file. `bpm` settles half or double time; `downbeat` is a
-    time in seconds whose nearest beat is taken as a downbeat; `meter` is the
-    song's time signature, whose beats make a bar, 4/4 unless given."""
-    per_bar = bar_of(meter or "4/4")
+    time in seconds, or a list of them, whose nearest beat is a downbeat; `meter`
+    is the song's time signature, whose beats make a bar.
+
+    Where the downbeat model is installed it leads (downbeats.py), and a bar is
+    the length it hears unless `meter` says; without it a bar is 4/4 unless
+    `meter` says, and one downbeat is scored for the whole song from what tends to
+    happen there."""
+    from . import downbeats
+
+    asked_bar = bar_of(meter) if meter else None
+    asked = requested_times(downbeat)
     mono, sr = read(path)
     duration = len(mono) / sr
     peak = float(np.abs(mono).max())
@@ -472,11 +493,49 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
     envelope = _unit(flux) + _unit(low)
     if len(envelope) < 8 * fps or envelope.max() <= 0:
         raise ValueError(f"Too short for a beat map: {path}")
-    times, coarse, tempo = track(mono, sr, envelope, bpm)
+
+    # The model's frames, where it is installed and runs.
+    found, model = None, {"name": downbeats.NAME, "used": False}
+    why = downbeats.unavailable()
+    if why is None:
+        try:
+            found = downbeats.frames(path)
+            plan = downbeats.plan(found, _unit(flux), fps, bpm)
+            if len(plan["beats"]) < 8:
+                found, why = None, "The downbeat model heard too few beats"
+        except ValueError as exc:
+            found, why = None, str(exc)
+    if found is None:
+        model["note"] = why
+        times, coarse, tempo = track(mono, sr, envelope, bpm)
+    else:
+        times, coarse, tempo = track(mono, sr, envelope, plan["bpm"] or bpm)
+        agreement = downbeats.shared(plan["beats"], times) if plan["factor"] else None
+        model.update(
+            used=True,
+            heard_bpm=round(plan["heard_bpm"], 2),
+            counted={1.0: "as heard", 2.0: "doubled", 0.5: "halved", None: "at --bpm"}[plan["factor"]],
+            beats_from="onsets",
+            agreement=None if agreement is None else round(agreement, 3),
+            device=found["device"],
+            seconds=found["seconds"],
+        )
+        if agreement is not None and agreement < downbeats.SAME_SHARE:
+            times, tempo = downbeats.tempo_of(downbeats.refined(mono, sr, plan["beats"]), mono, sr)
+            coarse = times.copy()
+            model["beats_from"] = "model"
+        # Half and double the tempo, and the onsets' own first choice where it is another.
+        chosen = tempo["bpm"]
+        others = [b for b in (chosen / 2, chosen * 2) if MIN_BPM <= b <= MAX_BPM]
+        own = tempo_options(envelope, fps)[0]
+        if all(abs(np.log(own / b)) > 0.04 for b in [chosen, *others]):
+            others.append(own)
+        tempo["ambiguous_with"] = sorted(round(float(b), 2) for b in others)
     inside = (times >= first_sound - 0.02) & (times < min(last_sound, duration))
     times, coarse = times[inside], coarse[inside]
-    if len(times) < max(8, 2 * per_bar):
+    if len(times) < max(8, 2 * (asked_bar or 4)):
         raise ValueError(f"Too few beats for a beat map: {path}")
+    forced = sorted({int(np.argmin(np.abs(times - t))) for t in asked})
 
     # Each beat's strength: the envelope's peak near it, against the strongest.
     frames = np.round(coarse * fps).astype(int)
@@ -488,62 +547,110 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
     ends = np.append(times, min(times[-1] + 60 / tempo["bpm"], duration))
     floor = max(float(power.max()), 1e-30) * 1e-8
     by_beat = _per_beat(power, fps, ends)
-    levels = 10 * np.log10(by_beat + floor)
-    notes = _per_beat(chroma(mono, sr), sr / CHROMA_HOP, ends)
-    odds = downbeat_odds(
-        [
-            low[reach].max(axis=1),  # a kick or a bass note
-            _change(notes, 2, _cosine_distance)[:-1],  # a change of harmony
-            _change(notes, 4, _cosine_distance)[:-1],
-            _change(levels, 4, _level_distance)[:-1],  # a change of sound
-            _change(levels, PHRASE_BARS * per_bar, _level_distance)[:-1],
-        ],
-        len(times),
-        per_bar,
-    )
-    chosen = int(np.argmax(odds))
-    if downbeat is not None:
-        chosen = int(np.argmin(np.abs(times - downbeat))) % per_bar
-    candidates = [
-        {
-            "first_downbeat_seconds": round(float(times[p]), 6),
-            "confidence": round(float(odds[p]), 3),
-            "chosen": p == chosen,
+
+    if found is not None:
+        # The bars: where the model hears downbeats, in bars of the length it hears.
+        factor = plan["factor"]
+        if asked_bar:
+            per_bar = asked_bar
+        elif factor == 2.0:
+            per_bar = plan["bar"]
+        elif factor == 0.5:
+            per_bar = max(1, plan["bar"] // 2)
+        elif factor is None:
+            per_bar = 4
+        else:
+            per_bar = plan["bar"]
+        length = per_bar * (2 if factor == 2.0 else 1)
+        odds_on = downbeats.likelihood(found["downbeat"], found["fps"], times)
+        # The model's bars up to the first downbeat asked for; from each one asked
+        # for, bars of the map's length to the next.
+        until = forced[0] if forced else len(times)
+        if forced:
+            heard_starts = downbeats.bars(odds_on[: until + 1], length, [until])
+            heard_starts = heard_starts[heard_starts < until]
+        else:
+            heard_starts = downbeats.bars(odds_on, length)
+        model_starts = heard_starts
+        if factor == 2.0 and len(heard_starts):
+            model_starts = downbeats.halves(heard_starts, until, per_bar)
+        asked_starts = downbeats.anchored(len(times), forced, per_bar, back=False) if forced else []
+        starts = np.array([*model_starts, *asked_starts], dtype=int)
+        # A bar a doubled count cut in two is as sure as the bar it came from.
+        sure = np.zeros(0)
+        if len(heard_starts):
+            source = np.clip(np.searchsorted(heard_starts, model_starts, side="right") - 1, 0, None)
+            sure = odds_on[heard_starts[source]]
+        downbeat_report = {
+            "confidence": round(float(np.median(sure)), 3) if len(sure) else None,
+            "set_by": "request" if asked else "model",
+            "uncertain_bars": [int(b) for b in np.flatnonzero(sure < 0.5) + 1],
         }
-        for p in sorted(range(per_bar), key=lambda p: -odds[p])
-    ]
+        meter_set_by = "request" if asked_bar else "model"
+    else:
+        per_bar = asked_bar or 4
+        levels = 10 * np.log10(by_beat + floor)
+        notes = _per_beat(chroma(mono, sr), sr / CHROMA_HOP, ends)
+        odds = downbeat_odds(
+            [
+                low[reach].max(axis=1),  # a kick or a bass note
+                _change(notes, 2, _cosine_distance)[:-1],  # a change of harmony
+                _change(notes, 4, _cosine_distance)[:-1],
+                _change(levels, 4, _level_distance)[:-1],  # a change of sound
+                _change(levels, PHRASE_BARS * per_bar, _level_distance)[:-1],
+            ],
+            len(times),
+            per_bar,
+        )
+        chosen = int(np.argmax(odds)) if not forced else forced[0] % per_bar
+        starts = downbeats.anchored(len(times), forced or [chosen], per_bar)
+        downbeat_report = {
+            "confidence": round(float(odds[chosen]), 3),
+            "set_by": "request" if asked else "measurement",
+            "candidates": [
+                {
+                    "first_downbeat_seconds": round(float(times[p]), 6),
+                    "confidence": round(float(odds[p]), 3),
+                    "chosen": p == chosen,
+                }
+                for p in sorted(range(per_bar), key=lambda p: -odds[p])
+            ],
+        }
+        meter_set_by = "request" if asked_bar else "assumed"
 
     # Phrases: downbeats where what follows differs most from what came before,
     # over four bars, two and one. A change that all three see is on that bar.
     # The bands are wide here, so a bass line that moves is not a change of parts.
     wide = np.add.reduceat(by_beat, np.arange(0, by_beat.shape[1], 4), axis=1)
     parts = 10 * np.log10(wide + floor)
-    downbeats = np.arange(chosen, len(times), per_bar)
     change = np.zeros(len(times))
     for span in (PHRASE_BARS * per_bar, 2 * per_bar, per_bar):
         differs = _change(parts, span, _level_distance)[:-1]
-        change += differs / max(float(differs[downbeats].max()), 1e-30)
-    change = np.round(change / max(float(change[downbeats].max()), 1e-30), 3)
+        change += differs / max(float(differs[starts].max()), 1e-30)
+    change = np.round(change / max(float(change[starts].max()), 1e-30), 3)
     phrases = []
-    for i, beat in enumerate(downbeats):
-        around = downbeats[max(0, i - 2) : i + 3]
+    for i, beat in enumerate(starts):
+        around = starts[max(0, i - 2) : i + 3]
         if i == 0 or (change[beat] >= 0.25 and change[beat] == change[around].max()):
             phrases.append(int(beat))
 
     from . import swing
 
     groove = swing.measure(mono, sr, ends)
-
+    first = set(int(s) for s in starts)
     beats = [
         {
             "seconds": round(float(t), 6),
-            "bar": int((i - chosen) // per_bar + 1),
-            "beat": int((i - chosen) % per_bar + 1),
+            "bar": bar,
+            "beat": beat,
+            "index": index,
             "strength": round(float(s), 3),
-            **({"change": float(change[i])} if (i - chosen) % per_bar == 0 else {}),
+            **({"change": float(change[i])} if i in first else {}),
             **({"phrase_start": True} if i in phrases else {}),
         }
-        for i, (t, s) in enumerate(zip(times, strength))
+        for i, (t, s, (bar, beat, index)) in enumerate(
+            zip(times, strength, downbeats.labels(len(times), starts, per_bar))
+        )
     ]
     return {
         "path": str(path),
@@ -551,22 +658,24 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
         "duration": duration,
         "sample_rate": sr,
         "tempo": tempo,
-        "meter": meter or "4/4",
+        "meter": meter or f"{per_bar}/4",
+        "meter_set_by": meter_set_by,
         "beats_per_bar": per_bar,
+        "odd_bars": downbeats.odd(starts, times, per_bar),
         "first_beat_seconds": beats[0]["seconds"],
-        "first_downbeat_seconds": beats[chosen]["seconds"],
-        "downbeat": {
-            "confidence": round(float(odds[chosen]), 3),
-            "set_by": "request" if downbeat is not None else "measurement",
-            "candidates": candidates,
-        },
+        "first_downbeat_seconds": beats[int(starts[0])]["seconds"],
+        "downbeat": downbeat_report,
+        "model": model,
         "phrases": [
             {k: beats[i][k] for k in ("seconds", "bar", "change")} for i in phrases
         ],
         "swing": groove,
         "beat_count": len(beats),
         "beats": beats,
-        "assumes": f"{per_bar} beats a bar; bars are counted from the first downbeat, and beats before it are bar 0",
+        "assumes": (
+            f"{per_bar} beats a bar but where odd_bars lists another; bars are counted from the "
+            "first downbeat, and beats before it are bar 0"
+        ),
         "source": "measured from decoded audio (mono sum); estimates, not ground truth",
     }
 

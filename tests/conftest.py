@@ -20,6 +20,9 @@ ENGINE = Path(__file__).resolve().parents[1] / "engine"
 @pytest.fixture(scope="session", autouse=True)
 def rust_daw():
     os.environ["AAW_PYTHON"] = sys.executable
+    # Beat maps are measured without the downbeat model unless a test hands one a
+    # stand-in, so an installed model does not change what the tests measure.
+    os.environ["AAW_DOWNBEATS"] = "off"
     override = os.environ.get("AAW_DAW")
     if override:
         return Path(override)

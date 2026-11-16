@@ -178,6 +178,10 @@ Python, in `src/agent_daw`:
 - `beats.py`: the beat and downbeat map of a whole song, its phrase changes,
   its swing and a click audition; see [beat-map.md](features/beat-map.md). Kept
   beside the audio by `library.py`.
+- `downbeats.py`: the beat map led by Beat This!, a downbeat model run in the
+  separation environment by `downbeat_runner.py`: the tempo it counts, its
+  beats or the onsets', and bars of the length it hears with the odd ones
+  listed; see [downbeat-model.md](features/downbeat-model.md).
 - `hits.py`: a song's or a stem's hits in one band, from its filtered level,
   each timed from the file's own attack and placed on the beat map, with the
   counts of their levels and a picture (`daw samples hits`); see

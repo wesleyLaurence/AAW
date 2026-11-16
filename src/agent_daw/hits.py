@@ -178,8 +178,7 @@ class Grid:
         self.times = np.array([r["seconds"] for r in rows], dtype=float)
         self.period = 60 / report["tempo"]["bpm"]
         self.per_bar = int(report["beats_per_bar"])
-        # How many beats the first beat is from bar 1's first.
-        self.first = (rows[0]["bar"] - 1) * self.per_bar + rows[0]["beat"] - 1
+        self.rows = rows
 
     def index(self, seconds):
         """A time as a number of beats from the map's first, a fraction between them."""
@@ -201,10 +200,16 @@ class Grid:
         return t[i] + (index - i) * (t[i + 1] - t[i])
 
     def bar_beat(self, index):
-        """Bar, and beat in it from 1 with its fraction, of a beat index."""
-        count = self.first + index
-        whole = int(np.floor(count))
-        return whole // self.per_bar + 1, whole % self.per_bar + 1 + (count - whole)
+        """Bar, and beat in it from 1 with its fraction, of a beat index: the map's
+        own bar and beat, which can be of a bar of another length, and past either
+        end bars of the map's length."""
+        whole = int(np.floor(index))
+        part = index - whole
+        if 0 <= whole < len(self.rows):
+            return self.rows[whole]["bar"], self.rows[whole]["beat"] + part
+        edge, at = (self.rows[0], 0) if whole < 0 else (self.rows[-1], len(self.rows) - 1)
+        count = edge["beat"] - 1 + whole - at
+        return edge["bar"] + count // self.per_bar, count % self.per_bar + 1 + part
 
     def place(self, seconds):
         """Where a time falls: its bar and beat, its nearest sixteenth as BAR.BEAT.N
@@ -282,14 +287,23 @@ def picture(drawn, output: Path, band_name, near=None):
     if near is not None:
         spans = [(max(0.0, near[0]), min(duration, near[1]))]
     elif grid:
+        # A row from the downbeat of bars 1, 9, 17 and on, so a bar of another
+        # length moves the rows after it with it; before bar 1 and past the map,
+        # rows of eight bars of the map's length.
         bars = grid.per_bar * BARS_A_ROW
-        first = grid.seconds(-grid.first)  # bar 1
-        start_index = -grid.first - bars * int(np.ceil(max(0.0, first) / (bars * grid.period)))
-        spans = []
-        i = start_index
-        while grid.seconds(i) < duration:
-            spans.append((max(0.0, grid.seconds(i)), min(duration, grid.seconds(i + bars))))
-            i += bars
+        starts = [
+            i
+            for i, r in enumerate(grid.rows)
+            if r["beat"] == 1 and r["bar"] >= 1 and (r["bar"] - 1) % BARS_A_ROW == 0
+        ] or [0]
+        while grid.seconds(starts[0]) > 0:
+            starts.insert(0, starts[0] - bars)
+        while grid.seconds(starts[-1] + bars) < duration:
+            starts.append(starts[-1] + bars)
+        spans = [
+            (max(0.0, grid.seconds(a)), min(duration, grid.seconds(b)))
+            for a, b in zip(starts, [*starts[1:], starts[-1] + bars])
+        ]
     else:
         spans = [(s, min(duration, s + SECONDS_A_ROW)) for s in np.arange(0, duration, SECONDS_A_ROW)]
     spans = [s for s in spans if s[1] > s[0]]
