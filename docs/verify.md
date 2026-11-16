@@ -8,6 +8,7 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- The drum groove as notes (D185, PR #183): run `daw transcribe tracks.T.audio.N --drums --project SONG` on a drums stem you know and play the new drums track under the stem. Do the kicks, snares and hats land with the record's? Do the pads, cut from the stem's own clearest hits, sound like its kit? Is groove A the beat you hear, and are the fills where the drummer fills? Try one song with a tempo that moves, and one with toms or open hats, which are not written.
 - **Notes from audio, `daw transcribe` (D183).** Run `daw separate setup` once to add Basic Pitch. Separate a song you know with `--split stems`, run `daw transcribe tracks.T.audio.N --project SONG --line` on its bass stem's audio clip, give the new track a bass patch and play it under the stem: is it the line, in time and in the right octave? Then the other stem without `--line`: are the chords' notes there, and which are missing?
 - **The downbeat model:** run `daw separate setup` once (it adds two packages
   and an 81 MB model), then `daw samples beats` with `--click bars.wav` on songs

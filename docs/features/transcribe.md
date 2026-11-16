@@ -157,4 +157,5 @@ step. Nobody has heard a transcribed part played back.
 - The bars are the beat map's, odd bars included. A note clip in a song of one
   meter places the notes by beats, so after an odd bar the song's bar lines
   and the part's differ.
-- Drums are the next item of the reverse-engineer track, built from `daw samples hits`.
+- Drums are `daw transcribe --drums` ([drum-groove.md](drum-groove.md)), from the
+  hits `daw samples hits` finds rather than Basic Pitch.

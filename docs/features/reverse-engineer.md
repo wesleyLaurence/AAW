@@ -1,8 +1,9 @@
 # Reverse-engineering a song — proposed November 16, 2026
 
 Status: item 1, notes from audio, built November 16, 2026 as `daw transcribe`
-([transcribe.md](transcribe.md), D183); items 2–7 proposed, now Next items 1–6
-of the backlog, in that order (D182).
+([transcribe.md](transcribe.md), D183); item 2, the drum groove, built the
+same day as `daw transcribe --drums` ([drum-groove.md](drum-groove.md), D185);
+items 3–7 proposed, now Next items 1–5 of the backlog, in that order (D182).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
@@ -50,7 +51,7 @@ different is what was missed.
 | A mix against a reference | `daw reference` | Loudness, tone, width and contour by section |
 | Words | the skill, through mlx-whisper | Not a command |
 | Notes of a part | `daw transcribe` | Basic Pitch on a stem, on the beat map (D183); not heard |
-| The drum groove as notes | — | Missing; the hits are there |
+| The drum groove as notes | `daw transcribe --drums` | Kick, snare and hat as notes, grooves and fills, a drum track (D185); not heard |
 | Form: which bars are the same | — | Missing |
 | Effects: reverb, delay, sidechain, compression | — | Missing |
 | One analysis file | — | The skill writes markdown by hand |
@@ -92,6 +93,9 @@ patch under the drums, the person recognizes as the line; and the report says
 how many notes it was sure of.
 
 ### 2. The drum groove as notes
+
+Built November 16, 2026; [drum-groove.md](drum-groove.md) is its reference.
+What follows is the design as proposed.
 
 `daw samples hits` already gives each kick, snare and hat by bar and sixteenth
 with its level and how far it is off the grid. This turns them into notes in a
@@ -177,7 +181,8 @@ the same song, with the differences listed.
    Still open: its accuracy on a full "other" stem against stems6's guitar
    and piano.
 2. Drums beyond kick, snare and hats: more bands, or a drum-transcription
-   model.
+   model. Kick, snare and hat are built from the bands with each drum's sound
+   learned from the part (D185); the rest is a Later line.
 3. The analysis file's name and schema, and whether it lives beside the song
    or in the project.
 4. How a recreated part's sound is matched: a patch searched against the stem,
