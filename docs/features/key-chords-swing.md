@@ -72,8 +72,8 @@ chord's notes. Names are in flats in a key whose signature has flats, else sharp
 
 ## How swing is measured
 
-Swing is written as a pattern's `swing` is: where the second note of a pair
-falls within the pair, 0.5 straight, two thirds a triplet feel, 0.75 at most.
+Swing is where the second note of a pair falls within the pair, 0.5
+straight, two thirds a triplet feel, 0.75 at most.
 
 1. **Onsets:** the beat map's spectral flux, a frame every 256 samples,
    peaks that are the largest within 30 ms, at least 0.04 of the strongest
@@ -91,9 +91,9 @@ falls within the pair, 0.5 straight, two thirds a triplet feel, 0.75 at most.
    fall anywhere, are no swing.
 4. **The grid** is 1/16 when the sixteenths' clustered weight is a quarter
    of the off-beat onsets' or more, and 1/8 otherwise. `feel` is straight
-   under 0.52, triplet within 0.02 of two thirds, swung otherwise. `pattern`
-   is the grid and swing to write on a pattern, and `delay_beats` how far
-   to move each second note when writing notes.
+   under 0.52, triplet within 0.02 of two thirds, swung otherwise. `delay_beats`
+   is how far to move each second note when writing notes, and `pattern` the
+   grid and swing for a pattern of a song made before note clips (D184).
 
 A loop's beats are its measured tempo's, from 0 when the loop is whole bars
 and from its first onset otherwise (`rhythm.tempo.first_beat_seconds`). A

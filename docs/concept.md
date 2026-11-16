@@ -350,7 +350,7 @@ Each entry in `taste.md` carries evidence and dates, and fades unless reconfirme
   as one. The song can be restored to before any turn.
 - **A/B while looping.** One key flips between before and after a turn without
   stopping the loop.
-- **Variations.** "Give me three hat patterns" makes three versions the person
+- **Variations.** "Give me three hat parts" makes three versions the person
   flips through on the loop and keeps one of.
 - **Locks.** "Don't touch the drums" is a rule the host enforces.
 - **Listening markers.** During playback a key drops a note at the playhead: "too
@@ -425,7 +425,7 @@ address that stays valid as other edits land, and every error says how to fix it
 - **Time:** tempo and time signature changes, stretch at pitch, warp markers for
   material whose tempo drifts.
 - **Audio operations:** tempo, downbeat and pitch detection, slicing a break into
-  a kit with the pattern that replays it, stem separation, a beat map of a whole
+  a kit with the notes that replay it, stem separation, a beat map of a whole
   song.
 - **Notes:** transformations (quantize, humanize with a seed, arpeggiate, vary),
   a theory library, MIDI file import and export, and a MIDI keyboard the person
@@ -459,7 +459,7 @@ shared as a patch or a rack is, so the DAW is not limited to what ships in it
   kind, loudness and spectrum, the person's own tags, and search by words and
   filters. Search by description ("dark punchy kick") is added if it measurably
   beats names and measurements.
-- **Promotion.** A render, slice, patch or pattern worth keeping goes to the
+- **Promotion.** A render, slice, patch or clip worth keeping goes to the
   library with where it came from and what made it.
 - **A reference library.** Tracks the person points to as "this is what good
   sounds like", analyzed once and compared against every mix.
