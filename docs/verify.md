@@ -8,6 +8,10 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **Short paths in the agent panel:** ask the agent in a song to read
+  `SONG.md` and run a `daw` command; its lines should read `Read SONG.md` and
+  `daw map .`, not the full path to the project, and a file elsewhere in your
+  home folder should start with `~/`.
 - **⌘E on any clip:** select a MIDI clip with a note held across the start
   position and press ⌘E: two clips, the note ending at the cut on the left and
   its rest starting the right, playing as before; then a drum pattern clip

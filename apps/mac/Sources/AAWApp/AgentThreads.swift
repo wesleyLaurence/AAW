@@ -322,4 +322,30 @@ enum ClaudeTranscripts {
         }
         return input.values.compactMap { $0 as? String }.first ?? ""
     }
+
+    /// A tool's line as the panel shows it: a path in the project's folder
+    /// from that folder, the folder itself as `.`, a `cd` into it at the
+    /// start left out, and the rest of the home folder as `~`. Paths
+    /// written with escaped spaces are shortened too.
+    static func shortened(_ summary: String, folder: URL?, home: String = NSHomeDirectory()) -> String {
+        var text = summary
+        if let folder {
+            let path = folder.standardizedFileURL.path
+            if path != "/" {
+                for written in Set([path, path.replacingOccurrences(of: " ", with: "\\ ")]) {
+                    let quoted = NSRegularExpression.escapedPattern(for: written)
+                    text = text.replacingOccurrences(of: #"^cd\s+(?:"\#(quoted)/?"|'\#(quoted)/?'|\#(quoted)/?)\s*(?:&&|;)\s*"#, with: "", options: .regularExpression)
+                    text = text.replacingOccurrences(of: written + "/", with: "")
+                    text = text.replacingOccurrences(of: quoted + #"(?=$|["';&|)]|\s+(?:$|[-&;|>]))"#, with: ".", options: .regularExpression)
+                }
+            }
+        }
+        let home = URL(fileURLWithPath: home).standardizedFileURL.path
+        if home != "/" {
+            for written in Set([home, home.replacingOccurrences(of: " ", with: "\\ ")]) {
+                text = text.replacingOccurrences(of: written + "/", with: "~/")
+            }
+        }
+        return text
+    }
 }
