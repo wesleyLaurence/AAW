@@ -272,6 +272,39 @@ def parser():
     chords.add_argument(
         "--window", type=float, default=10.0, help="Seconds either side of --near"
     )
+    hits = ss.add_parser(
+        "hits",
+        help="A song's or a stem's hits in one band, each with its time, bar and beat, "
+        "level and the spacing to the next, on its beat map",
+    )
+    hits.add_argument("sample")
+    hits.add_argument(
+        "--band",
+        default="all",
+        help="kick (45-90 Hz), snare (1500-4000), hats (7000-16000), all (the default), "
+        "or LOW-HIGH in Hz",
+    )
+    hits.add_argument("--near", help="Only the hits around a time, as seconds or m:ss")
+    hits.add_argument(
+        "--window", type=float, default=5.0, help="Seconds either side of --near"
+    )
+    hits.add_argument(
+        "--min-level",
+        type=float,
+        default=-20.0,
+        help="List the hits at most this many dB under the band's loudest (-20)",
+    )
+    hits.add_argument(
+        "--min-rise",
+        type=float,
+        default=6.0,
+        help="How many dB a peak rises over the 100 ms before it to be a hit (6)",
+    )
+    hits.add_argument(
+        "--picture",
+        type=Path,
+        help="Draw the band's level with the hits marked, a row of 8 bars at a time, as PNG",
+    )
     inspect = ss.add_parser("inspect")
     inspect.add_argument("sample")
     aud = ss.add_parser("audition")
@@ -651,6 +684,8 @@ def execute(a):
         return beat_map(a, source)
     if a.action == "chords":
         return song_chords(a, source)
+    if a.action == "hits":
+        return song_hits(a, source)
     if a.action == "inspect":
         return library.inspect(source)
     if a.action == "audition":
@@ -760,6 +795,52 @@ def song_chords(a, source):
         "beat_map": report.get("map"),
         "source": "measured from decoded audio (mono sum) on the beat map; estimates, not ground truth",
     }
+
+
+def song_hits(a, source):
+    """A song's or a stem's hits in one band, on its beat map where it has one."""
+    from . import beats, hits, library
+
+    name, low, high = hits.band(a.band)
+    if a.window <= 0:
+        raise ValueError("window must be >0")
+    if a.min_level > 0 or a.min_rise <= 0:
+        raise ValueError("min-level must be 0 or under, and min-rise over 0")
+    at = None if a.near is None else beats.seconds(a.near)
+    if a.picture is not None and a.picture.suffix.lower() != ".png":
+        raise ValueError("picture is a .png file")
+    try:
+        report = library.beat_map(a.db, source)
+        problem = None
+    except ValueError as error:
+        # A loop or a hit too short for a beat map still has hits, in seconds.
+        report, problem = None, str(error)
+    found, drawn = hits.measure(source, low, high, report, a.min_rise, a.min_level)
+    rows = found["hits"]
+    if at is not None:
+        rows = [r for r in rows if abs(r["seconds"] - at) <= a.window]
+    out = {
+        "path": str(source),
+        "band": {"name": name, "low_hz": low, "high_hz": high},
+        "tempo_bpm": None if report is None else report["tempo"]["bpm"],
+        "first_downbeat_seconds": None if report is None else report["first_downbeat_seconds"],
+        "beat_map": None if report is None else report.get("map"),
+        **({"no_beat_map": problem} if problem else {}),
+        "min_level_db": a.min_level,
+        "min_rise_db": a.min_rise,
+        "loudest_dbfs": found["loudest_dbfs"],
+        "levels": found["levels"],
+        "count": len(rows),
+        "hits": rows,
+    }
+    if at is not None:
+        out["near"] = {"seconds": at, "window_seconds": a.window, "of": found["count"]}
+    if a.picture is not None:
+        span = None if at is None else (at - a.window, at + a.window)
+        mono, sr, db, step, _, grid = drawn
+        out["picture"] = hits.picture((mono, sr, db, step, rows, grid), a.picture, name, span)
+    out["source"] = "measured from decoded audio (mono sum) on the beat map; estimates, not ground truth"
+    return out
 
 
 def song_key(a):
