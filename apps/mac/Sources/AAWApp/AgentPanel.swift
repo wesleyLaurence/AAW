@@ -331,7 +331,7 @@ final class AgentPanel {
                 case .person(let text, let attached):
                     entries.append(.person(id: next(), text: text, attachments: stamped(attached)))
                 case .agent(let text): entries.append(.agent(id: next(), text: text))
-                case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: summary, result: nil, failed: false))
+                case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: ClaudeTranscripts.shortened(summary, folder: folder), result: nil, failed: false))
                 }
             }
         } else {
@@ -968,7 +968,7 @@ final class AgentPanel {
                     guard let name = block["name"] as? String else { continue }
                     let input = block["input"] as? [String: Any] ?? [:]
                     let use = block["id"] as? String ?? ""
-                    entries.append(.tool(id: next(), use: use, name: name, summary: ClaudeTranscripts.toolSummary(name: name, input: input), result: nil, failed: false))
+                    entries.append(.tool(id: next(), use: use, name: name, summary: ClaudeTranscripts.shortened(ClaudeTranscripts.toolSummary(name: name, input: input), folder: folder), result: nil, failed: false))
                 default:
                     break
                 }

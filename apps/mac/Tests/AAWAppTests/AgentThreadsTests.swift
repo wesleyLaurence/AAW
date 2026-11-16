@@ -255,4 +255,18 @@ final class AgentThreadsTests: XCTestCase {
         XCTAssertEqual(ClaudeTranscripts.toolSummary(name: "Grep", input: ["pattern": "kick"]), "kick")
         XCTAssertEqual(ClaudeTranscripts.toolSummary(name: "Other", input: ["n": 3]), "")
     }
+
+    func testAToolLineShowsPathsFromTheProject() {
+        let folder = URL(fileURLWithPath: "/Users/me/Music Work/projects/Song")
+        let short = { (text: String) in ClaudeTranscripts.shortened(text, folder: folder, home: "/Users/me") }
+        XCTAssertEqual(short("/Users/me/Music Work/projects/Song/SONG.md"), "SONG.md")
+        XCTAssertEqual(short(#"cd "/Users/me/Music Work/projects/Song" && daw map ."#), "daw map .")
+        XCTAssertEqual(short(#"cd /Users/me/Music\ Work/projects/Song; daw get tracks"#), "daw get tracks")
+        XCTAssertEqual(short(#"daw samples import "/Users/me/Music Work/projects/Song/kick.wav" --project "/Users/me/Music Work/projects/Song""#),
+                       #"daw samples import "kick.wav" --project ".""#)
+        XCTAssertEqual(short("ls /Users/me/Music Work/projects/Song 2/x"), "ls ~/Music Work/projects/Song 2/x")
+        XCTAssertEqual(short("cat /Users/me/Downloads/a.txt /etc/hosts"), "cat ~/Downloads/a.txt /etc/hosts")
+        XCTAssertEqual(short("daw map ."), "daw map .")
+        XCTAssertEqual(ClaudeTranscripts.shortened("/Users/me/a", folder: nil, home: "/Users/me"), "~/a")
+    }
 }
