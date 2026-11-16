@@ -198,6 +198,13 @@ Python, in `src/agent_daw`:
   factorization over 24 bands), placed on the beat map, grouped into grooves
   and fills, and written by one `daw batch` as a MIDI track whose Sampler plays
   the part's own clearest hits; see [drum-groove.md](features/drum-groove.md).
+- `form.py`: `daw samples form`, a song's sections: a matrix of every bar
+  against every other on its pitch classes and band levels, each as a rank,
+  section starts at its checkerboard peaks and where the voice comes in,
+  letters by bar-for-bar matches, the same, varied or moved some semitones,
+  names from the voice and drums parts `daw separate` made, each section's
+  key and the key changes, and checks of the beat's division, the map's pulse
+  and the bars by the drums (with `drums.py`); see [form.md](features/form.md).
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
   beats; `swing.py`: where the second note of each pair of eighths or
