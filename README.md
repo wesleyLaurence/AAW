@@ -82,8 +82,8 @@ host from a native Mac app and sees the agent's changes as they happen. See
 [engine/README.md](engine/README.md) and [apps/mac/README.md](apps/mac/README.md).
 
 **The Mac app** has an arrangement that shows each clip's waveform, a mixer,
-device panels, automation lanes for every row (A shows them all), a pattern
-editor, a piano roll with a velocity lane, a browser of favorites, samples,
+device panels, automation lanes for every row (A shows them all), a piano
+roll with a velocity lane, a pattern editor for songs made before note clips, a browser of favorites, samples,
 instruments, effects, racks and plugins, a live analyzer, and File › Export
 Audio…. Each project's window has an agent panel: a conversation with your own
 Claude Code started in the project's folder, with your skills under `/`, the
@@ -94,9 +94,8 @@ project is a folder with `song.yaml`, its samples and renders, `SONG.md` for
 what the song is for, and an `.aaw` file named for the folder that the Finder
 opens in the app ([the `.aaw` project file](docs/features/project-file.md)).
 
-**Sound sources.** Pattern tracks play samples from pads on a step grid. MIDI
-tracks hold note clips that own their notes, played by a Sampler, by the Synth,
-a polyphonic synthesizer whose sound is a patch in the song (with factory
+**Sound sources.** MIDI tracks hold note clips that own their notes, played by
+a Sampler, drums through a pad for each note, by the Synth, a polyphonic synthesizer whose sound is a patch in the song (with factory
 patches, unison, wavetables and a modulation matrix; `daw describe synth`), or
 by an instrument of your own. MIDI effects before the instrument change the
 notes as they play: an arpeggiator, a chord, a scale and a velocity. A track's
@@ -328,31 +327,43 @@ All musical times are **quarter-note beats**, zero-based. Fractions such as `1/3
 are accepted. At 160 BPM, 80 beats / 20 bars equals exactly 30 seconds.
 
 ```yaml
-schema_version: 1
+schema_version: 2
 session:
   title: A beat
   tempo: 160
 samples:
   kick: {path: samples/kick.wav}
-patterns:
-  groove:
-    length_beats: 8
-    grid: 1/4
-    steps:
-      kick: '9.....8....9....9.....8...9..7..'
+  snare: {path: samples/snare.wav}
 tracks:
 - id: drums
+  type: midi
   gain_db: -6
-  pads:
-    kick: {sample: kick}
+  instrument:
+    sampler:
+      pads:
+        kick: {sample: kick}
+        snare: {sample: snare}
+      map:
+      - {notes: 36, pad: kick}
+      - {notes: 38, pad: snare}
   clips:
-  - {pattern: groove, at: 0, repeats: 1}
+  - id: groove
+    length_beats: 32
+    loop_beats: 4
+    notes:
+    - {pitch: 36, at: 0, duration: 0.25}
+    - {pitch: 38, at: 1, duration: 0.25}
+    - {pitch: 36, at: 2.5, duration: 0.25, velocity: 80}
+    - {pitch: 38, at: 3, duration: 0.25}
 ```
 
-The song has no length to write: it ends at the bar after its last sound. A
-quarter beat grid means sixteenth notes. `x` triggers velocity 100, digits 1–9
-encode increasing velocity, and `.` is a rest. Step rows must exactly span the pattern.
-Pitched/gated patterns use events with `at`, `pad`, `note`, `duration`, and `velocity`.
+The song has no length to write: it ends at the bar after its last sound. The
+drums are a MIDI track whose Sampler plays a pad for each drum note, 36 the kick
+and 38 the snare as in General MIDI, and the clip's first bar loops to its 32
+beats. A note's `at` and `duration` are beats from the clip's start and its
+velocity is 1 to 127, 100 unless written. `daw note write` writes notes as text,
+a token a cell (`daw describe midi.text`). Songs made before note clips play
+drums from `patterns`, step rows on a grid, which keep working.
 
 Effects are listed under a track's or return's `effects` or under `master.effects`.
 Tracks reach shared reverb and delay through `sends` to `returns`. `automation`

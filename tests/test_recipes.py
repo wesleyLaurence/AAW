@@ -87,13 +87,12 @@ def given_drums(work, tmp_path, monkeypatch):
     folder = library(tmp_path, monkeypatch)
     song = work / "song"
     daw("init", song, "--tempo", 96)
-    for name, row in [("kick", "x... .... x.x. ...."), ("snare", ".... x... .... x..."), ("hat", "x.x. x.x. x.x. x.x.")]:
+    for name, row in [("kick", "c2 . . . . . . . c2 . c2 . . . . ."), ("snare", ". . . . c2 . . . . . . . c2 . . ."), ("hat", "c2 . c2 . c2 . c2 . c2 . c2 . c2 . c2 .")]:
         daw("samples", "import", folder / f"{name}.wav", "--project", song, "--id", name)
-        daw("track", "add", song, name)
+        daw("track", "add", song, name, "--type", "midi")
         daw("pad", "add", song, name, name, "--sample", name)
-        daw("pattern", "add", song, name, "--length-beats", 4)
-        daw("pattern", "steps", song, name, name, row)
-        daw("clip", "add", song, name, name, "--repeats", 8)
+        daw("instrument", "map", song, name, "C2", name)
+        daw("clip", "add", song, name, "--length-beats", 32, "--loop-beats", 4, "--text", row)
     return {}
 
 

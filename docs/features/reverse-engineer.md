@@ -18,7 +18,7 @@ From a finished song's audio alone, two things:
    the chords' voicings and the melodies, as MIDI on its bars; and how it
    sounds, each part's tone, width, level and the effects on it.
 2. **Recreate its session.** From that analysis, a session that plays the same
-   music: the drums programmed as a pattern with sounds near the stem's, the
+   music: the drums programmed as note clips with sounds near the stem's, the
    bass, chords and melodies as note clips on instruments, the arrangement in
    its sections, the mix's balance and tone matched, rendered and compared
    against the master until the differences are said and small.
@@ -50,7 +50,7 @@ different is what was missed.
 | A mix against a reference | `daw reference` | Loudness, tone, width and contour by section |
 | Words | the skill, through mlx-whisper | Not a command |
 | Notes of a part | `daw transcribe` | Basic Pitch on a stem, on the beat map (D183); not heard |
-| The drum groove as a pattern | — | Missing; the hits are there |
+| The drum groove as notes | — | Missing; the hits are there |
 | Form: which bars are the same | — | Missing |
 | Effects: reverb, delay, sidechain, compression | — | Missing |
 | One analysis file | — | The skill writes markdown by hand |
@@ -91,17 +91,21 @@ Done when: a bass stem's notes come out as a note clip that, played on a bass
 patch under the drums, the person recognizes as the line; and the report says
 how many notes it was sure of.
 
-### 2. The drum groove as a pattern
+### 2. The drum groove as notes
 
 `daw samples hits` already gives each kick, snare and hat by bar and sixteenth
-with its level and how far it is off the grid. This turns them into a pattern
-clip: pads named for the bands, a hit's level as its velocity, its offset as
-its timing, one pattern per repeating bar run, with the fills where they fall.
+with its level and how far it is off the grid. This turns them into notes in a
+note clip on a MIDI track, as every drum part is now (D184): a Sampler mapping
+the General MIDI drum notes, 36 kick, 38 snare and 42 hat, to pads named for the
+bands, a hit's level as its velocity, its offset as its timing. The reply says
+which bars share a groove and where the fills fall; each groove is a clip
+looped over its bars and each fill a clip of its own. The part is then read and
+edited as note text and goes to another DAW as a MIDI file.
 Toms and cymbals are bands too wide to name today; a band for each is an open
 question, and a drum-transcription model is the alternative if the bands fall
 short.
 
-Done when: the pattern played on a kit with `daw samples like` sounds near the
+Done when: the clip played on a kit with `daw samples like` sounds near the
 stem's, under the original, in time.
 
 ### 3. The form: which bars are the same
@@ -156,7 +160,7 @@ everything the report says.
 ### 7. Recreate a session from the master
 
 The recreate loop, a skill over the commands with whatever they lack added as
-commands: the session at the song's tempo and bars; the drum pattern on a kit
+commands: the session at the song's tempo and bars; the drum clips on a kit
 of the nearest samples; the bass, chords and melodies as note clips on Synth or
 Sampler patches; the sections arranged; the mix balanced by the stems' levels
 and tone; rendered and compared against the master with `daw reference`, and

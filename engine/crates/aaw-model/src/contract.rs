@@ -22,6 +22,7 @@ static SCHEMA: LazyLock<Json> =
 
 const PROJECT: &[(&str, &str)] = &[
     ("time", "All at/duration/length_beats fields are quarter-note beats, whatever the time signature. at is zero-based. Use fraction strings for triplets. session.time_signature is N/D, 1 to 32 beats over 1, 2, 4, 8 or 16, 4/4 unless set: a bar of 3/4 is 3 beats, of 6/8 3 and of 7/8 3.5. It is one for the whole song and sets the bars, the grid, the metronome's count and the beats of an exported MIDI file; daw set PROJECT session.time_signature 3/4 changes it."),
+    ("patterns", "Patterns, the pads of a track that is not type: midi and the pattern clips that play them are how songs made before note clips play drums, and they keep playing as they did. A new part is a note clip on a MIDI track, drums too: a Sampler whose map plays a pad for each drum note, as daw describe start builds one (daw describe midi.drums)."),
     ("steps", "x = velocity 100, digits 1–9 = scaled velocities, dot = rest. Whitespace and | ignored. grid is beats per cell; 1/4 = sixteenth note."),
     ("swing", "0.5 straight, 0.75 maximum; delays odd step cells. Explicit events are unswung."),
     ("pitch", "sample.root_note includes octave, e.g. C2. event.note is target pitch. Repitch changes length. daw samples analyze measures pitch; import --root-note auto uses it; check warns when a declared root disagrees with the audio."),
@@ -424,7 +425,7 @@ const ABOUT: &[(&str, &str)] = &[
     ("recipes", "The commands for a job, in order, with what each reply says: a drum bus, a phrase and its variation, a mix pass, the person's markers answered, an edit of a finished song. Each is run by a test as written."),
     ("batch", "daw batch: every op a batch file takes, the command it is the same as and what each key takes."),
     ("project", "The song: session, samples, patterns, tracks, groups, returns, sections and the person's markers; editing, rendering and playback."),
-    ("sampler", "Pads, samples and pattern events: pitch, gate, choke, stretch, and the app's Sampler."),
+    ("sampler", "Pads and samples: pitch, gate, choke, stretch, the app's Sampler, and the pattern events of songs made before note clips."),
     ("synth", "The Synth: oscillators, filter, envelopes, LFOs, the modulation matrix, macros, patches and recipes."),
     ("midi", "MIDI tracks: note clips, notes, instruments, drum maps and MIDI files."),
     ("effects", "Insert effects and what each takes, sends, returns, groups and racks."),

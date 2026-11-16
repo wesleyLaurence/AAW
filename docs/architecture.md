@@ -479,6 +479,10 @@ semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional
 `choke_group`, `reverse`, optional `source_bpm`, `stretch` (`repitch` or
 `preserve_pitch`), and `mono` for downmixing.
 
+Patterns and pattern clips are the format of songs made before note clips and
+play as they did; a new drum part is a note clip on a MIDI track whose sampler
+maps the drum notes to pads, and nothing teaches patterns (D184).
+
 Pattern: positive `length_beats`, `grid` in beats per step, `steps` mapping pad IDs
 to strings, optional explicit `events`, `swing` (0.5…0.75). Step rows and explicit
 events are additive. Swing delays odd-numbered step cells only; explicit events
