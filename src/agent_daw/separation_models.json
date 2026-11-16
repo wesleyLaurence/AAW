@@ -1,10 +1,14 @@
 {
-  "comment": "The models daw separate runs, and under analysis the ones daw samples beats runs in the same environment: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
+  "comment": "The models daw separate runs, and under analysis the ones daw samples beats and daw transcribe run in the same environment: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
   "runner": {
     "package": "audio-separator",
     "version": "0.47.0",
     "python": "cpython-3.12-macos-aarch64-none",
-    "also": ["audioread", "beat-this==1.1.0", "torchaudio==2.11.1"],
+    "also": [
+      "audioread", "beat-this==1.1.0", "torchaudio==2.11.1",
+      "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3"
+    ],
+    "without_dependencies": ["basic-pitch==0.3.0"],
     "data": [
       {
         "name": "download_checks.json",
@@ -188,6 +192,18 @@
           "sha256": "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331"
         }
       ]
+    },
+    {
+      "name": "basic-pitch",
+      "title": "Basic Pitch (ICASSP 2022)",
+      "task": "notes",
+      "author": "Rachel M. Bittner, Juan José Bosch, David Rubinstein, Gabriel Meseguer-Brocal and Sebastian Ewert (Spotify)",
+      "license": "Apache-2.0, code and weights",
+      "license_url": "https://github.com/spotify/basic-pitch/blob/main/LICENSE",
+      "paper": "A Lightweight Instrument-Agnostic Model for Polyphonic Note Transcription and Multipitch Estimation, ICASSP 2022",
+      "package": "basic-pitch==0.3.0",
+      "note": "Its weights come in its package, which daw separate setup installs from PyPI without its dependencies, since TensorFlow and an older numpy would replace the environment's; it runs its ONNX model through onnxruntime.",
+      "files": []
     }
   ]
 }

@@ -196,23 +196,26 @@ def test_setup_adds_what_an_older_environment_lacks(tmp_path, monkeypatch):
     monkeypatch.setattr(separation, "run_quietly", lambda command: ran.append([str(c) for c in command]))
     status = separation.install_runtime()
     assert status["added_now"] and status["versions"]["beat_this"] == "1.1.0"
-    assert ran == [["/bin/uv", "pip", "install", "--python", str(python), "audioread", "beat-this==1.1.0", "torchaudio==2.11.1"]]
+    assert ran == [
+        ["/bin/uv", "pip", "install", "--python", str(python), "audioread", "beat-this==1.1.0", "torchaudio==2.11.1", "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3"],
+        ["/bin/uv", "pip", "install", "--python", str(python), "--no-deps", "basic-pitch==0.3.0"],
+    ]
     assert json.loads(separation.runtime_file().read_text())["versions"]["beat_this"] == "1.1.0"
     # Once it imports them, nothing is installed.
     monkeypatch.setattr(separation, "probe", lambda: {"beat_this": "1.1.0"})
-    assert not separation.install_runtime().get("added_now") and len(ran) == 1
+    assert not separation.install_runtime().get("added_now") and len(ran) == 2
 
 
 def test_the_model_is_listed_and_unavailable_says_what_to_run(tmp_path, monkeypatch):
     monkeypatch.delenv("AAW_DOWNBEATS")
     monkeypatch.setenv("AAW_DATA_DIR", str(tmp_path))
-    (spec,) = separation.manifest()["analysis"]
+    spec = separation.manifest()["analysis"][0]
     assert spec["name"] == downbeats.NAME and spec["license"].startswith("MIT")
     (file,) = spec["files"]
     assert file["url"].startswith("https://cloud.cp.jku.at/") and file["mirrors"][0].startswith("https://huggingface.co/")
     assert file["bytes"] == 81058141 and len(file["sha256"]) == 64
     listed = separation.listing()["analysis"]
-    assert [(m["name"], m["mb"], m["here"]) for m in listed] == [("beat-this-final0", 81, False)]
+    assert [(m["name"], m["mb"], m["here"]) for m in listed] == [("beat-this-final0", 81, False), ("basic-pitch", 0, False)]
     assert listed[0]["get"] == "daw separate setup --models beat-this-final0"
     assert "daw separate setup" in downbeats.unavailable()
     python = separation.env_python()
@@ -235,7 +238,7 @@ def test_a_mirror_is_tried_when_the_authors_address_fails(tmp_path, monkeypatch)
         target.write_bytes(b"x")
 
     monkeypatch.setattr(separation, "download", download)
-    (spec,) = separation.manifest()["analysis"]
+    spec = separation.manifest()["analysis"][0]
     separation.fetch(spec["files"][0])
     assert tried == [spec["files"][0]["url"], spec["files"][0]["mirrors"][0]]
 

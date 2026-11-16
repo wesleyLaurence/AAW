@@ -23,122 +23,118 @@ kept. What is merged and not yet heard or tried by hand is in
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Items 1–7 are the reverse-engineer track, which the person put before
+Items 1–6 are the reverse-engineer track, which the person put before
 everything on November 16, 2026 (D182): to analyze a finished song from its
 audio alone and know everything about it, then to recreate its session from
 the master. They are built in order, one at a time, each a command the
 reverse-engineer skill orchestrates; see
-[reverse-engineer.md](features/reverse-engineer.md). Items 8–12 are what a code
+[reverse-engineer.md](features/reverse-engineer.md). Its first item, notes
+from audio, is built as `daw transcribe` (D183). Items 7–11 are what a code
 review of play past the song's end (D163) found on October 28, 2026, in the
-order of how much each one harms a song, each a fix of its own. Item 13 is the
-person's notes from using the app on October 19, 2026 (D123). Items 14–24 are
+order of how much each one harms a song, each a fix of its own. Item 12 is the
+person's notes from using the app on October 19, 2026 (D123). Items 13–23 are
 the order as it stood.
 
-1. **Notes from audio: `daw transcribe`.** A stem's notes as MIDI on the
-    song's beat map, the bass line, a melody and the chords' voicings, with
-    velocity, pitch bend and confidence, as note text, a `.mid` file or a note
-    clip; Spotify's Basic Pitch (Apache-2.0) tried first in a throwaway
-    environment on the person's stems, since its README stops at Python 3.11.
-2. **The drum groove as a pattern.** The kick, snare and hat hits `daw samples
+1. **The drum groove as a pattern.** The kick, snare and hat hits `daw samples
     hits` gives turned into a pattern clip, a hit's level its velocity and its
     offset its timing, a pattern for each repeating run of bars with its fills;
     toms and cymbals by more bands or a drum-transcription model.
-3. **The form: which bars are the same.** Bars compared with every other on
+2. **The form: which bars are the same.** Bars compared with every other on
     chords, notes and sound, sections labelled A, B, A′ and named by what they
     hold, each section's key giving the key changes; the meter checked on real
     songs in 3/4 and 6/8, and the drums checking the bars.
-4. **Words by bar as a command.** mlx-whisper over the vocal stem as `daw`
+3. **Words by bar as a command.** mlx-whisper over the vocal stem as `daw`
     does it: each word with its time, bar and beat, the doubtful lines read
     again on short clips with the larger model.
-5. **Sound and effects from audio.** Each stem's tone as an equalizer curve,
+4. **Sound and effects from audio.** Each stem's tone as an equalizer curve,
     sidechain pumping in time with the kick, reverb and delay tails,
     compression from crest and envelope, width by section; estimates checked
     on renders made with known settings.
-6. **One analysis file.** A command that runs every measure on a song and its
+5. **One analysis file.** A command that runs every measure on a song and its
     stems and writes one JSON with each measure's confidence and a markdown
     summary, which the skill's report and a recreation start from.
-7. **Recreate a session from the master.** The drums as a pattern on the
+6. **Recreate a session from the master.** The drums as a pattern on the
     nearest samples, the bass, chords and melodies as note clips on patches,
     the sections arranged and the mix matched, rendered and compared with
     `daw reference` until the differences are said; what no tool does yet
     becomes a line here.
 
-8. **A take from a stem tap stops at the end while a device take runs on.**
+7. **A take from a stem tap stops at the end while a device take runs on.**
     Stem taps are fed only while the player rolls, so a track recorded from a
     stem ends its clip at the song's end and loses its tail, while a
     microphone take in the same recording goes on to the stop; the comment at
     record_tick promises both run on.
-9. **Full DSP runs forever past the end.** The whole renderer graph keeps
+8. **Full DSP runs forever past the end.** The whole renderer graph keeps
     processing silence every block while play rolls on, and the resting path
     engages only when stopped, so a heavy song left playing costs its full
     CPU until someone stops it. Once past the end and quiet for a second, as
     the stopped branch already counts, skip the graph and only pass the
     block, count the beats and click.
-10. **Zero-extent content at beat 0 reads as an empty song.** The fitted
+9. **Zero-extent content at beat 0 reads as an empty song.** The fitted
     length returns eight bars when the content end is zero, so a song whose
     only item is an automation point at 0 or an audio clip at 0 whose file
     is missing flips by 28 beats as a one-beat clip is added and removed.
     Guard on no clips, points or sections instead.
-11. **The timeline's width past the end only grows while playing.** The
+10. **The timeline's width past the end only grows while playing.** The
     played beats are set from the playhead's tick and never reset, so a cue
     located past the end while stopped is drawn beyond the scrollable area,
     and after a stop far past the end the view keeps the empty width until
     the next play. Derive the content width from the largest of the length,
     the cue and the playhead in one place.
-12. **A marker click still clamps the cue.** The marker-click path keeps the
+11. **A marker click still clamps the cue.** The marker-click path keeps the
     cue just under the song's length, the rule D163 removed from the ruler's
     target; dead today, and the old limit in one more place. Replace it with
     a plain locate.
 
 
-13. **The person's skills: mix, master, arrange.** Written
+12. **The person's skills: mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
 
-14. **`daw audio crossfade` with an option, while the app has the project
+13. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-15. **A time selection in the app.** A range of beats dragged across the
+14. **A time selection in the app.** A range of beats dragged across the
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-16. **A MIDI keyboard plugged in.** The typing keyboard plays and records
+15. **A MIDI keyboard plugged in.** The typing keyboard plays and records
     notes ([typing keyboard](features/typing-keyboard.md)) and ⌘U or `daw
     note quantize` snaps what was played ([quantize](features/quantize.md));
     a keyboard through CoreMIDI, with its velocity and its own latency, is
     the other half.
-17. **Sections, the master gain and the end fade in the app.** A section
+16. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-18. **A project made with `daw init` in the app's index,** so a song the agent
+17. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-19. **Turns and A/B.** An agent request's commands grouped, named for the
+18. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-20. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+19. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-21. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+20. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-22. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+21. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-23. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+22. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-24. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+23. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,

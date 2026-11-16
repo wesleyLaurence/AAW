@@ -5,8 +5,8 @@
 //! recorded in its history. Otherwise they run headless: load, apply, save, exit.
 //!
 //! The sample library and the perception tools are Python: `samples`,
-//! `reference`, `listen`, `compare`, `check`, `timeline`, `joins`, `export`
-//! and `separate` run there, with this process's arguments and output.
+//! `reference`, `listen`, `compare`, `check`, `timeline`, `joins`, `export`,
+//! `separate` and `transcribe` run there, with this process's arguments and output.
 //!
 //! Results print to stdout as JSON. Errors print `{"error", "command"}` to stderr
 //! with exit status 1.
@@ -70,7 +70,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
     ("Render and measure", &["render", "listen", "compare", "joins", "export"]),
     (
         "Sounds and libraries",
-        &["samples", "reference", "separate", "generate", "patch", "rack", "favorite", "plugin", "keys"],
+        &["samples", "reference", "separate", "transcribe", "generate", "patch", "rack", "favorite", "plugin", "keys"],
     ),
 ];
 
@@ -282,6 +282,11 @@ enum Top {
     /// models` lists the models and `separate setup` installs them.
     #[command(disable_help_flag = true)]
     Separate(Forwarded),
+    /// The notes a part plays, heard from its audio on this Mac, each with its
+    /// bar and beat on the song's beat map; as note text, a MIDI file or a note
+    /// clip in the song.
+    #[command(disable_help_flag = true)]
+    Transcribe(Forwarded),
     /// Rewrite a project in canonical form.
     Fmt { project: Song },
     /// Validate and atomically replace project fields from a JSON merge patch.
@@ -2202,7 +2207,8 @@ fn run(cli: &Cli) -> Result<Json> {
         | Top::Key(_)
         | Top::Joins(_)
         | Top::Export(_)
-        | Top::Separate(_) => {
+        | Top::Separate(_)
+        | Top::Transcribe(_) => {
             unreachable!("Python commands are forwarded before this")
         }
         Top::Render {
@@ -3483,6 +3489,7 @@ fn name(top: &Top) -> String {
         Top::Joins(_) => "joins".into(),
         Top::Export(_) => "export".into(),
         Top::Separate(_) => "separate".into(),
+        Top::Transcribe(_) => "transcribe".into(),
         Top::Fmt { .. } => "fmt".into(),
         Top::Apply { .. } => "apply".into(),
         Top::Model { .. } => "model".into(),
@@ -3589,7 +3596,8 @@ fn main() -> ExitCode {
     | Top::Key(f)
     | Top::Joins(f)
     | Top::Export(f)
-    | Top::Separate(f) = &cli.command
+    | Top::Separate(f)
+    | Top::Transcribe(f) = &cli.command
     {
         let command = name(&cli.command);
         return forward(&command, &f.args).unwrap_or_else(|error| {

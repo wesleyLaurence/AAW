@@ -186,6 +186,12 @@ Python, in `src/agent_daw`:
   each timed from the file's own attack and placed on the beat map, with the
   counts of their levels and a picture (`daw samples hits`); see
   [song-hits.md](features/song-hits.md).
+- `transcription.py`: `daw transcribe`, the notes a part plays, heard by Basic
+  Pitch in the separation environment through `transcribe_runner.py`, then
+  joined, made one line when asked, given velocities from the part's level and
+  placed on the beat map (a separated part's source's). The clip, the MIDI file
+  and the note text are made by the Rust `daw` from one MIDI file of them; see
+  [transcribe.md](features/transcribe.md).
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
   beats; `swing.py`: where the second note of each pair of eighths or
@@ -258,7 +264,7 @@ Python, in `src/agent_daw`:
   and the start of a sound that ends on a beat; see
   [timeline.md](features/timeline.md).
 - `cli.py`: `samples`, `reference`, `listen`, `compare`, `check`, `timeline`,
-  `joins`, `export` and `separate`. `check` is `inspect` with measured root notes and the
+  `joins`, `export`, `separate` and `transcribe`. `check` is `inspect` with measured root notes and the
   model's warnings, as objects with a code.
   Every other command is passed to the Rust `daw`, which passes these nine back, so
   there is one command either way. A
