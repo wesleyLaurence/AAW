@@ -36,6 +36,7 @@ Built:
 | [sample analysis](features/sample-analysis.md) | `daw samples analyze`, measured search filters, root-note warnings |
 | [sound descriptors](features/sound-descriptors.md) | What a sample sounds like in seven numbers and five words, `daw samples search` sorted and filtered by them, `daw samples like`, and a category from the audio |
 | [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
+| [the downbeat model](features/downbeat-model.md) | Beat This! leading `daw samples beats`: the bars it hears, odd bars listed, corrections that hold |
 | [a song's hits](features/song-hits.md) | `daw samples hits`: a song's or a stem's hits in one band, a kick's or a snare's, by bar and beat, with a picture |
 | [key, chords and swing](features/key-chords-swing.md) | a sample's and a song's key, chords by beat and swing; `daw key`, a song's key and the transpose that puts a loop in it |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |

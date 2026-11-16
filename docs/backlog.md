@@ -24,8 +24,8 @@ wrong with the sounds everything else is built on.
 
 Items 1–5 are what a code review of play past the song's end (D163) found
 on October 28, 2026, in the order of how much each one harms a song, each a
-fix of its own. Items 6–8 are the person's notes from using the app on
-October 19, 2026 (D123). Items 9–19 are the order as it stood.
+fix of its own. Items 6–7 are the person's notes from using the app on
+October 19, 2026 (D123). Items 8–18 are the order as it stood.
 
 1. **A take from a stem tap stops at the end while a device take runs on.**
     Stem taps are fed only while the player rolls, so a track recorded from a
@@ -61,60 +61,52 @@ October 19, 2026 (D123). Items 9–19 are the order as it stood.
     rebuilt from scratch as near as the tool allows, a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-7. **Why the agent missed the downbeat.** A mashup of two songs matched in
-    tempo but a beat ahead or behind: `daw samples beats` chooses one downbeat
-    for the whole song, so on a song with an odd bar the phase flips after it
-    and bar.beat labels after it read two beats off; said where it changes, or
-    re-fit each phrase. Now that `daw samples hits` gives a stem's kicks and
-    snares by bar and beat, a snare on 1 and 3 is one sign of a wrong downbeat
-    (a live rock stem read so at a confidence of 0.77). The kicks half was
-    built as `daw samples hits` ([a song's hits](features/song-hits.md)).
-8. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
+7. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
     vocal stem; a smaller model, or Whisper through MLX on this Mac, as a
     command of the tool's own, the lyric's bar still read from the stem.
 
-9. **`daw audio crossfade` with an option, while the app has the project
+8. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-10. **A time selection in the app.** A range of beats dragged across the
+9. **A time selection in the app.** A range of beats dragged across the
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-11. **A MIDI keyboard plugged in.** The typing keyboard plays and records
+10. **A MIDI keyboard plugged in.** The typing keyboard plays and records
     notes ([typing keyboard](features/typing-keyboard.md)) and ⌘U or `daw
     note quantize` snaps what was played ([quantize](features/quantize.md));
     a keyboard through CoreMIDI, with its velocity and its own latency, is
     the other half.
-12. **Sections, the master gain and the end fade in the app.** A section
+11. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-13. **A project made with `daw init` in the app's index,** so a song the agent
+12. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-14. **Turns and A/B.** An agent request's commands grouped, named for the
+13. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-15. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+14. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-16. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+15. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-17. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+16. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-18. **A pad's settings in the device panel.** Level, pan, transpose, mode,
+17. **A pad's settings in the device panel.** Level, pan, transpose, mode,
     start and end, attack and release, choke group, reverse, source tempo,
     stretch and mono for each pad of a pattern track, which lists its pads and
     edits none; a loop fitted to the song by its tempo. The Sampler's one pad
     has most of them, and `daw pad set` has them all (D81). The app no longer
     makes pads (D85): they are the agent's, through `daw pad add`.
-19. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+18. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
@@ -432,6 +424,10 @@ checkout (D75):
 
 One line each, newest first.
 
+- The drums checking the downbeat model's bars: where a stem's kick-and-snare
+  cycle from `daw samples hits`, or the song's biggest entrances, start a bar
+  elsewhere than the model does, flag those bars (D181; a full mix and its
+  drum stem disagreed on a riff intro).
 - A mode for drums, as Ableton's Beats is, for an audio clip's transpose and
   tempo: slices at its transients, each played at its own pitch, so a drum
   loop moved keeps its hits (D173).

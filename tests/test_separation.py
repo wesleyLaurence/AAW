@@ -358,7 +358,7 @@ def test_the_manifest_names_each_models_source_license_and_hash():
         "package": "audio-separator",
         "version": "0.47.0",
         "python": "cpython-3.12-macos-aarch64-none",
-        "also": ["audioread"],
+        "also": ["audioread", "beat-this==1.1.0", "torchaudio==2.11.1"],
         "data": manifest["runner"]["data"],
     }
     assert [d["name"] for d in manifest["runner"]["data"]] == ["download_checks.json", "mdx_model_data.json", "vr_model_data.json"]

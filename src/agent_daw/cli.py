@@ -249,7 +249,11 @@ def parser():
     beats.add_argument(
         "--bpm", type=float, help="The song's tempo, to settle half or double time"
     )
-    beats.add_argument("--downbeat", help="A time whose nearest beat is a downbeat")
+    beats.add_argument(
+        "--downbeat",
+        action="append",
+        help="A time whose nearest beat is a downbeat; give it again for a bar the map has wrong later on",
+    )
     beats.add_argument(
         "--meter",
         help="The song's time signature, such as 3/4; its beats make a bar (4/4 unless given)",
@@ -380,7 +384,9 @@ def parser():
     add.add_argument("file", type=Path)
     add.add_argument("--name", help="Letters, digits and -; the file's name unless given")
     add.add_argument("--bpm", type=float, help="The song's tempo, to settle half or double time")
-    add.add_argument("--downbeat", help="A time whose nearest beat is a downbeat")
+    add.add_argument(
+        "--downbeat", action="append", help="A time whose nearest beat is a downbeat; again for each"
+    )
     add.add_argument("--meter", help="The song's time signature, such as 3/4; 4/4 unless given")
     add.add_argument("--replace", action="store_true", help="Write over a reference of this name")
     rs.add_parser("list", help="The saved references")
@@ -702,7 +708,7 @@ def reference_command(a):
     if a.action == "add":
         if a.bpm is not None and not beats.MIN_BPM <= a.bpm <= beats.MAX_BPM:
             raise ValueError(f"bpm must be {beats.MIN_BPM:g}–{beats.MAX_BPM:g}")
-        downbeat = None if a.downbeat is None else beats.seconds(a.downbeat)
+        downbeat = None if a.downbeat is None else [beats.seconds(t) for t in a.downbeat]
         return reference.add(a.file, a.name, a.bpm, downbeat, a.meter, a.replace)
     if a.action == "list":
         return reference.listing()
@@ -729,7 +735,7 @@ def beat_map(a, source):
         raise ValueError(f"bpm must be {beats.MIN_BPM:g}–{beats.MAX_BPM:g}")
     if a.window <= 0 or not 0 < a.seconds <= 60:
         raise ValueError("window must be >0, and seconds >0 and <=60")
-    downbeat = None if a.downbeat is None else beats.seconds(a.downbeat)
+    downbeat = None if a.downbeat is None else [beats.seconds(t) for t in a.downbeat]
     at = None if a.near is None else beats.seconds(a.near)
     if a.meter is not None:
         beats.bar_of(a.meter)

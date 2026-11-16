@@ -1,5 +1,11 @@
 # Beat map — implemented October 1, 2026
 
+Since November 16, 2026, the downbeat model leads the map where `daw separate
+setup` has installed it: it hears the beats and the bars, bars can differ in
+length, and `--downbeat` holds from each time given to the next. See
+[downbeat-model.md](downbeat-model.md); what follows is the onset measurement,
+which places the beats and measures the map without the model.
+
 `daw samples beats` measures where the beats of a whole song are: its tempo, the
 time of every beat, which beats start a bar, and where the arrangement changes.
 It answers the question an edit starts with, "which strong beat is nearest 0:41?".

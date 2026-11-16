@@ -113,8 +113,21 @@ def sounding(x, rate):
 
 
 def index_of(row, per_bar) -> int:
-    """A beat's number in the reference's own beats: 0 on its first downbeat."""
+    """A beat's number in the reference's own beats: 0 on its first downbeat. A map
+    made before its beats carried their index had bars of one length."""
+    if "index" in row:
+        return row["index"]
     return (row["bar"] - 1) * per_bar + row["beat"] - 1
+
+
+def bar_at(rows, per_bar, at: float) -> int:
+    """The bar a beat of the map falls in, counted on past either end in bars of `per_bar`."""
+    whole = int(np.floor(round(at, 3)))
+    index = [index_of(r, per_bar) for r in rows]
+    if index[0] <= whole <= index[-1]:
+        return rows[whole - index[0]]["bar"]
+    edge = rows[0] if whole < index[0] else rows[-1]
+    return edge["bar"] + (edge["beat"] - 1 + whole - index_of(edge, per_bar)) // per_bar
 
 
 def beat_seconds(rows, per_bar, at: float) -> float:
@@ -223,7 +236,7 @@ def measured(x, rate, starts, end, whole, beat_map) -> list[dict]:
             at = seconds_beat(rows, per_bar, first / rate)
             section["at"] = round(at, 3)
             section["length_beats"] = round(seconds_beat(rows, per_bar, last / rate) - at, 3)
-            section["bar"] = int(np.floor(round(at, 3) / per_bar)) + 1
+            section["bar"] = bar_at(rows, per_bar, at)
         section["relative_lu"] = perception.delta(
             whole["integrated_lufs"], audio["integrated_lufs"]
         )
@@ -262,6 +275,9 @@ def add(file, name=None, bpm=None, downbeat=None, meter=None, replace=False) -> 
         )
     if meter is not None:
         beats.bar_of(meter)
+    if downbeat is not None:
+        times = beats.requested_times(downbeat)
+        downbeat = times[0] if len(times) == 1 else times or None
     with readable(source) as (audio, decoder), ThreadPoolExecutor(1) as beside:
         x, rate = perception.read_audio(audio)
         first, last = sounding(x, rate)

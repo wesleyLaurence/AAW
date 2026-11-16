@@ -165,11 +165,27 @@ def apple_silicon() -> bool:
     return out.stdout.strip() == "1"
 
 
+PROBE = (
+    "import json, platform, torch, onnxruntime; from importlib.metadata import version; "
+    "print(json.dumps({'audio_separator': version('audio-separator'), 'torch': torch.__version__, "
+    "'onnxruntime': version('onnxruntime'), 'beat_this': version('beat-this'), "
+    "'torchaudio': version('torchaudio'), 'python': platform.python_version(), "
+    "'machine': platform.machine(), 'mps': torch.backends.mps.is_available()}))"
+)
+
+
+def probe() -> dict | None:
+    """The versions the environment imports, or None when one of its packages does not import."""
+    out = subprocess.run([str(env_python()), "-c", PROBE], capture_output=True, text=True)
+    return None if out.returncode else json.loads(out.stdout)
+
+
 def install_runtime() -> dict:
-    """Makes the environment under root() unless it is there; the runtime's status."""
+    """Makes the environment under root() unless it is there, or adds what an older
+    one lacks; the runtime's status."""
     status = runtime()
     if status["installed"]:
-        return {**status, "installed_now": False}
+        return complete_runtime(status)
     if platform.system() != "Darwin":
         raise ValueError("daw separate runs on a Mac")
     if not apple_silicon():
@@ -186,18 +202,32 @@ def install_runtime() -> dict:
     run_quietly([uv, "venv", "--python", spec["python"], env])
     packages = [f"{spec['package']}[cpu]=={spec['version']}", *spec.get("also", [])]
     run_quietly([uv, "pip", "install", "--python", env_python(), *packages])
-    probe = (
-        "import json, platform, torch, onnxruntime; from importlib.metadata import version; "
-        "print(json.dumps({'audio_separator': version('audio-separator'), 'torch': torch.__version__, "
-        "'onnxruntime': version('onnxruntime'), 'python': platform.python_version(), "
-        "'machine': platform.machine(), 'mps': torch.backends.mps.is_available()}))"
-    )
-    out = subprocess.run([str(env_python()), "-c", probe], capture_output=True, text=True)
-    if out.returncode:
-        raise ValueError(f"The separation environment does not import its packages: {out.stderr.strip()}")
-    versions = json.loads(out.stdout)
+    versions = probe()
+    if versions is None:
+        raise ValueError("The separation environment does not import its packages")
     for data in spec.get("data", []):
         download(data["url"], models_dir() / data["name"])
+    return {"installed": True, "installed_now": True, **record_runtime(versions, started)}
+
+
+def complete_runtime(status: dict) -> dict:
+    """An environment made before a package joined the manifest is given it: the
+    downbeat model's, which came after audio-separator's."""
+    if stand_in():
+        return {**status, "installed_now": False}
+    versions = probe()
+    if versions is not None:
+        return {**status, "installed_now": False}
+    started = time.monotonic()
+    note("Adding the packages the environment lacks: " + ", ".join(manifest()["runner"]["also"]))
+    run_quietly([find_uv(), "pip", "install", "--python", env_python(), *manifest()["runner"]["also"]])
+    versions = probe()
+    if versions is None:
+        raise ValueError("The separation environment does not import its packages")
+    return {**status, "installed_now": False, "added_now": True, **record_runtime(versions, started)}
+
+
+def record_runtime(versions: dict, started: float) -> dict:
     record = {
         "root": str(root()),
         "python": str(env_python()),
@@ -206,7 +236,7 @@ def install_runtime() -> dict:
         "seconds": round(time.monotonic() - started, 1),
     }
     runtime_file().write_text(json.dumps(record, indent=2))
-    return {"installed": True, "installed_now": True, **record}
+    return record
 
 
 def run_quietly(command):
@@ -248,12 +278,34 @@ def model_status(model: dict) -> dict:
     }
 
 
+def analysis() -> list[dict]:
+    """The models other commands run in this environment: Beat This! for daw samples beats."""
+    return manifest().get("analysis", [])
+
+
+def analysis_status(model: dict) -> dict:
+    files = [file_status(f) for f in model["files"]]
+    return {
+        "name": model["name"],
+        "title": model["title"],
+        "task": model["task"],
+        "author": model["author"],
+        "license": model["license"],
+        "license_url": model["license_url"],
+        "mb": mb(sum(f["bytes"] for f in model["files"])),
+        "here": all(f["here"] and f["matches"] is not False for f in files),
+        "files": files,
+        "get": f"daw separate setup --models {model['name']}",
+    }
+
+
 def listing(split: str | None = None) -> dict:
     chosen = [m for m in models() if split is None or m["split"] == split]
     return {
         "runtime": runtime(),
         "folder": str(models_dir()),
         "models": [model_status(m) for m in chosen],
+        "analysis": [analysis_status(m) for m in analysis()],
         "defaults": {s: {q: model_for(s, q)["name"] for q in QUALITIES} for s in SPLITS},
         "rights": RIGHTS,
     }
@@ -299,16 +351,36 @@ def get_model(model: dict) -> dict:
             continue
         if status["here"]:
             note(f"{spec['name']} is here but does not match the manifest; downloading it again")
-        note(f"Downloading {spec['name']} ({mb(spec['bytes'])} MB) from {spec['url']}")
-        download(spec["url"], models_dir() / spec["name"], spec)
+        fetch(spec)
         fetched.append(spec["name"])
-    return {**model_status(model), "downloaded": fetched, "kept": kept}
+    status = analysis_status(model) if model in analysis() else model_status(model)
+    return {**status, "downloaded": fetched, "kept": kept}
+
+
+def fetch(spec: dict):
+    """Downloads one file from where its author put it, or else from a mirror; only a
+    file of the manifest's size and hash is kept, wherever it came from."""
+    failures = []
+    for url in [spec["url"], *spec.get("mirrors", [])]:
+        note(f"Downloading {spec['name']} ({mb(spec['bytes'])} MB) from {url}")
+        try:
+            download(url, models_dir() / spec["name"], spec)
+            return
+        except ValueError as exc:
+            failures.append(str(exc))
+            note(str(exc))
+    raise ValueError("; ".join(failures))
 
 
 def setup(names: list[str] | None = None, all_models=False, runtime_only=False) -> dict:
-    chosen = models() if all_models else [model_named(n) for n in names] if names else defaults()
+    """The environment, then the models asked for or the defaults; the analysis
+    models come with the defaults and with --all, or when named."""
+    named = [n for n in names or [] if n not in {m["name"] for m in analysis()}]
+    chosen = models() if all_models else [model_named(n) for n in named] if names else defaults()
+    helpers = analysis() if all_models or not names else [m for m in analysis() if m["name"] in names]
     result = {"root": str(root()), "runtime": install_runtime()}
     if not runtime_only:
+        result["analysis"] = [get_model(m) for m in helpers]
         wanted = [
             m for m in chosen if not model_status(m)["here"]
         ]

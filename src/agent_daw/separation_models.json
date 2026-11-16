@@ -1,10 +1,10 @@
 {
-  "comment": "The models daw separate runs: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
+  "comment": "The models daw separate runs, and under analysis the ones daw samples beats runs in the same environment: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
   "runner": {
     "package": "audio-separator",
     "version": "0.47.0",
     "python": "cpython-3.12-macos-aarch64-none",
-    "also": ["audioread"],
+    "also": ["audioread", "beat-this==1.1.0", "torchaudio==2.11.1"],
     "data": [
       {
         "name": "download_checks.json",
@@ -166,6 +166,26 @@
           "url": "https://github.com/TRvlvr/model_repo/releases/download/all_public_uvr_models/htdemucs_6s.yaml",
           "bytes": 21,
           "sha256": "207405151270af8fd81c2373c25d27950916682ac91dca7884a11ce13dad6f58"
+        }
+      ]
+    }
+  ],
+  "analysis": [
+    {
+      "name": "beat-this-final0",
+      "title": "Beat This! final0",
+      "task": "beats and downbeats",
+      "author": "Francesco Foscarin, Jan Schlüter and Gerhard Widmer (CPJKU, Johannes Kepler University Linz)",
+      "license": "MIT, code and weights",
+      "license_url": "https://github.com/CPJKU/beat_this/blob/main/LICENSE",
+      "paper": "Beat this! Accurate beat tracking without DBN postprocessing, ISMIR 2024",
+      "files": [
+        {
+          "name": "beat_this-final0.ckpt",
+          "url": "https://cloud.cp.jku.at/public.php/dav/files/7ik4RrBKTS273gp/final0.ckpt",
+          "mirrors": ["https://huggingface.co/rtikw/localmusic-assets/resolve/main/analysis/beat_this-final0.ckpt"],
+          "bytes": 81058141,
+          "sha256": "8c328b45f59d8dd3dff219253ff6a8d6482be57d0133a29140e2febbf8eb8331"
         }
       ]
     }

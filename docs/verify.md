@@ -8,6 +8,12 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **The downbeat model:** run `daw separate setup` once (it adds two packages
+  and an 81 MB model), then `daw samples beats` with `--click bars.wav` on songs
+  whose bars you know: a trap song it doubles (is bar 1 where it says?), a
+  hip-hop song whose tempo it changed from the old map's, a rock song's drum
+  stem and its full mix where the bars may shift, and a song in 3/4 or 6/8.
+  Where it is wrong, give `--downbeat` and say what you heard.
 - **A song's hits:** separate a song you know into stems, then run `daw samples
   hits` on its drums stem with `--band kick --picture kick.png` and again with
   `--band snare`. The marks near the top of the picture should be the kicks you
