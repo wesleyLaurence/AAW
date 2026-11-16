@@ -8,6 +8,7 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **Notes from audio, `daw transcribe` (D183).** Run `daw separate setup` once to add Basic Pitch. Separate a song you know with `--split stems`, run `daw transcribe tracks.T.audio.N --project SONG --line` on its bass stem's audio clip, give the new track a bass patch and play it under the stem: is it the line, in time and in the right octave? Then the other stem without `--line`: are the chords' notes there, and which are missing?
 - **The downbeat model:** run `daw separate setup` once (it adds two packages
   and an 81 MB model), then `daw samples beats` with `--click bars.wav` on songs
   whose bars you know: a trap song it doubles (is bar 1 where it says?), a

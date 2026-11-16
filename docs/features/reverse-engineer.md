@@ -1,6 +1,8 @@
 # Reverse-engineering a song — proposed November 16, 2026
 
-Status: proposed, not built. Backlog: Next items 1–7, in that order (D182).
+Status: item 1, notes from audio, built November 16, 2026 as `daw transcribe`
+([transcribe.md](transcribe.md), D183); items 2–7 proposed, now Next items 1–6
+of the backlog, in that order (D182).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
@@ -47,7 +49,7 @@ different is what was missed.
 | Swing | `daw samples beats` | By eighths and sixteenths |
 | A mix against a reference | `daw reference` | Loudness, tone, width and contour by section |
 | Words | the skill, through mlx-whisper | Not a command |
-| Notes of a part | — | Missing |
+| Notes of a part | `daw transcribe` | Basic Pitch on a stem, on the beat map (D183); not heard |
 | The drum groove as a pattern | — | Missing; the hits are there |
 | Form: which bars are the same | — | Missing |
 | Effects: reverb, delay, sidechain, compression | — | Missing |
@@ -61,6 +63,9 @@ not a transform but what is read from it.
 ## Design
 
 ### 1. Notes from audio: `daw transcribe`
+
+Built November 16, 2026; [transcribe.md](transcribe.md) is its reference. What
+follows is the design as proposed.
 
 A stem's notes as MIDI on the song's beat map: each note's pitch, start and
 length in seconds and in bar, beat and sixteenth, its velocity, its pitch bend
@@ -163,9 +168,10 @@ the same song, with the differences listed.
 
 ## Open questions
 
-1. Basic Pitch's install in a Python 3.12 environment, or its ONNX model run
-   directly; its accuracy on a full "other" stem against stems6's guitar and
-   piano.
+1. Answered by the trial (D183): Basic Pitch installs without its
+   dependencies beside the separation environment's and runs its ONNX model.
+   Still open: its accuracy on a full "other" stem against stems6's guitar
+   and piano.
 2. Drums beyond kick, snare and hats: more bands, or a drum-transcription
    model.
 3. The analysis file's name and schema, and whether it lives beside the song

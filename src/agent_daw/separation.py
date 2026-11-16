@@ -169,6 +169,7 @@ PROBE = (
     "import json, platform, torch, onnxruntime; from importlib.metadata import version; "
     "print(json.dumps({'audio_separator': version('audio-separator'), 'torch': torch.__version__, "
     "'onnxruntime': version('onnxruntime'), 'beat_this': version('beat-this'), "
+    "'basic_pitch': version('basic-pitch'), "
     "'torchaudio': version('torchaudio'), 'python': platform.python_version(), "
     "'machine': platform.machine(), 'mps': torch.backends.mps.is_available()}))"
 )
@@ -202,6 +203,7 @@ def install_runtime() -> dict:
     run_quietly([uv, "venv", "--python", spec["python"], env])
     packages = [f"{spec['package']}[cpu]=={spec['version']}", *spec.get("also", [])]
     run_quietly([uv, "pip", "install", "--python", env_python(), *packages])
+    install_without_dependencies(uv)
     versions = probe()
     if versions is None:
         raise ValueError("The separation environment does not import its packages")
@@ -212,19 +214,30 @@ def install_runtime() -> dict:
 
 def complete_runtime(status: dict) -> dict:
     """An environment made before a package joined the manifest is given it: the
-    downbeat model's, which came after audio-separator's."""
+    downbeat model's and Basic Pitch's, which came after audio-separator's."""
     if stand_in():
         return {**status, "installed_now": False}
     versions = probe()
     if versions is not None:
         return {**status, "installed_now": False}
     started = time.monotonic()
-    note("Adding the packages the environment lacks: " + ", ".join(manifest()["runner"]["also"]))
-    run_quietly([find_uv(), "pip", "install", "--python", env_python(), *manifest()["runner"]["also"]])
+    spec = manifest()["runner"]
+    note("Adding the packages the environment lacks: " + ", ".join([*spec["also"], *spec.get("without_dependencies", [])]))
+    run_quietly([find_uv(), "pip", "install", "--python", env_python(), *spec["also"]])
+    install_without_dependencies(find_uv())
     versions = probe()
     if versions is None:
         raise ValueError("The separation environment does not import its packages")
     return {**status, "installed_now": False, "added_now": True, **record_runtime(versions, started)}
+
+
+def install_without_dependencies(uv: Path):
+    """The packages whose own dependencies would replace the environment's, such as
+    Basic Pitch's TensorFlow and older numpy: installed alone, their imports met
+    by what `also` lists."""
+    alone = manifest()["runner"].get("without_dependencies", [])
+    if alone:
+        run_quietly([uv, "pip", "install", "--python", env_python(), "--no-deps", *alone])
 
 
 def record_runtime(versions: dict, started: float) -> dict:
@@ -279,12 +292,20 @@ def model_status(model: dict) -> dict:
 
 
 def analysis() -> list[dict]:
-    """The models other commands run in this environment: Beat This! for daw samples beats."""
+    """The models other commands run in this environment: Beat This! for daw samples
+    beats, Basic Pitch for daw transcribe."""
     return manifest().get("analysis", [])
+
+
+def package_here(spec: str) -> bool:
+    """Whether the environment holds a package, by its import folder."""
+    folder = spec.split("==")[0].replace("-", "_")
+    return any(root().glob(f"env/lib/python*/site-packages/{folder}"))
 
 
 def analysis_status(model: dict) -> dict:
     files = [file_status(f) for f in model["files"]]
+    package = model.get("package")
     return {
         "name": model["name"],
         "title": model["title"],
@@ -293,9 +314,12 @@ def analysis_status(model: dict) -> dict:
         "license": model["license"],
         "license_url": model["license_url"],
         "mb": mb(sum(f["bytes"] for f in model["files"])),
-        "here": all(f["here"] and f["matches"] is not False for f in files),
+        **({"note": model["note"]} if "note" in model else {}),
+        **({"package": package} if package else {}),
+        "here": all(f["here"] and f["matches"] is not False for f in files)
+        and (package is None or bool(stand_in()) or package_here(package)),
         "files": files,
-        "get": f"daw separate setup --models {model['name']}",
+        "get": "daw separate setup" if package else f"daw separate setup --models {model['name']}",
     }
 
 

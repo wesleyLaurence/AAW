@@ -1,4 +1,4 @@
-"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins`, `export`, `separate` and `key`.
+"""The Python part of `daw`: the sample library, references, perception, `check`, `timeline`, `joins`, `export`, `separate`, `transcribe` and `key`.
 
 Every other command belongs to the Rust `daw` and is passed on to it, so `uv run
 daw` and the Rust binary are one command. Results are JSON on stdout; errors go
@@ -13,7 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export", "separate", "key")
+COMMANDS = ("samples", "reference", "listen", "compare", "check", "timeline", "joins", "export", "separate", "transcribe", "key")
 
 
 def engine() -> Path:
@@ -522,6 +522,47 @@ def parser():
     install.add_argument("--models", nargs="+", metavar="NAME", help="These models; the defaults unless given")
     install.add_argument("--all", action="store_true", help="Every model in the manifest")
     install.add_argument("--runtime-only", action="store_true", help="The environment and no model")
+    transcribe = sub.add_parser(
+        "transcribe",
+        help="The notes a part plays, heard from its audio by Basic Pitch on this Mac, each with "
+        "its bar and beat on the song's beat map, velocity and confidence; as note text, a MIDI "
+        "file or a note clip in a song (daw describe beats.transcribe)",
+        description="daw transcribe SOURCE hears the notes of a part, best a stem from daw separate, "
+        "and places them on the song's beat map. SOURCE is a file or a library sample, or with "
+        "--project one of the song's samples by ID or an audio clip as tracks.T.audio.N.",
+    )
+    transcribe.add_argument("source", help="A file or library sample; with --project a sample ID or tracks.T.audio.N")
+    transcribe.add_argument(
+        "--project",
+        type=song_file,
+        help="Add the notes to this song as a note clip: where the audio clip plays them, or with bar 1 at --at",
+    )
+    transcribe.add_argument("--track", help="The MIDI track the clip goes on; a new one named after the part unless given")
+    transcribe.add_argument("--at", type=float, help="The song's beat bar 1 of the part lands on (0)")
+    transcribe.add_argument(
+        "--line", action="store_true", help="One note at a time, for a bass line or a lead: the surest of notes that sound together"
+    )
+    transcribe.add_argument("--range", dest="note_range", metavar="LOW-HIGH", help="Only notes from LOW to HIGH, such as E1-G3")
+    transcribe.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.0,
+        help="Leave out notes the model is less sure of, 0 to 1; sure counts those of 0.5 and more (0: none left out)",
+    )
+    transcribe.add_argument(
+        "--beats",
+        metavar="FILE",
+        help="Place the notes on this file's beat map, the whole song's; a part daw separate made is placed on its source's unless given",
+    )
+    transcribe.add_argument("--near", help="Only the notes around a time, as seconds or m:ss")
+    transcribe.add_argument("--window", type=float, default=10.0, help="Seconds either side of --near")
+    transcribe.add_argument("--midi", type=Path, help="Write the notes as a type 0 MIDI file, bar 1 at bar_one_beat")
+    transcribe.add_argument("--text", action="store_true", help="The notes as note text, a row a voice")
+    transcribe.add_argument("--grid", default="1/4", help="A cell's beats for --text: 1/4 is a sixteenth note")
+    transcribe.add_argument("--db", type=Path, default=None, help="The sample library's index")
+    transcribe.add_argument(
+        "--quantize", metavar="GRID", help="Move the written notes onto a grid in beats, 1/4 a sixteenth, as daw note quantize does"
+    )
     return p
 
 
@@ -584,6 +625,8 @@ def execute(a):
         return separation.separate(
             song_file(a.project), a.source, a.split, a.quality, a.model, a.prefix, a.tracks
         )
+    if a.command == "transcribe":
+        return transcribe(a)
     if a.command == "export":
         from .export import export
 
@@ -847,6 +890,44 @@ def song_hits(a, source):
         out["picture"] = hits.picture((mono, sr, db, step, rows, grid), a.picture, name, span)
     out["source"] = "measured from decoded audio (mono sum) on the beat map; estimates, not ground truth"
     return out
+
+
+def transcribe(a):
+    """`daw transcribe`: a part's notes on the song's beat map."""
+    from . import beats, library, transcription
+    from .model import midi
+
+    if not 0 <= a.min_confidence <= 1 or a.window <= 0:
+        raise ValueError("min-confidence must be 0–1, and window >0")
+    if a.track is not None and a.project is None:
+        raise ValueError("--track goes with --project")
+    if a.at is not None and (a.project is None or a.at < 0):
+        raise ValueError("--at goes with --project, and is a beat of 0 or more")
+    note_range = None
+    if a.note_range:
+        low, sep, high = a.note_range.partition("-")
+        if not sep:
+            raise ValueError("range must look like E1-G3")
+        note_range = (midi(low), midi(high))
+        if note_range[0] > note_range[1]:
+            raise ValueError("range's low note is above its high note")
+    return transcription.transcribe(
+        a.source,
+        song=a.project,
+        track=a.track,
+        at=a.at,
+        line=a.line,
+        note_range=note_range,
+        min_confidence=a.min_confidence,
+        beats_of=a.beats,
+        near=None if a.near is None else beats.seconds(a.near),
+        window=a.window,
+        midi_out=a.midi,
+        text=a.text,
+        grid=a.grid,
+        quantize=a.quantize,
+        db=getattr(a, "db", None) or library.default_db(),
+    )
 
 
 def song_key(a):

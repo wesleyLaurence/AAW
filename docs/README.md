@@ -38,6 +38,7 @@ Built:
 | [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
 | [the downbeat model](features/downbeat-model.md) | Beat This! leading `daw samples beats`: the bars it hears, odd bars listed, corrections that hold |
 | [a song's hits](features/song-hits.md) | `daw samples hits`: a song's or a stem's hits in one band, a kick's or a snare's, by bar and beat, with a picture |
+| [notes from audio](features/transcribe.md) | `daw transcribe`: the notes a part plays, heard by Basic Pitch and placed on the beat map, as note text, a MIDI file or a note clip |
 | [key, chords and swing](features/key-chords-swing.md) | a sample's and a song's key, chords by beat and swing; `daw key`, a song's key and the transpose that puts a loop in it |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
 | [audio clips in the app](features/audio-clips-in-app.md) | A file dropped on the timeline, a clip moved, trimmed, faded and split there, the song growing to hold it, and the beat map on its waveform |

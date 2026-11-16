@@ -169,7 +169,8 @@ The runtime is local and does not call a model or require a Splice connection;
 the one exception, and only when asked.
 
 Three parts are set up only when wanted: `daw separate setup` installs the
-stem-separation models in an environment of their own, `rustup target add
+stem-separation models in an environment of their own, with the beat and note
+models `daw samples beats` and `daw transcribe` run there, `rustup target add
 wasm32-unknown-unknown` lets `daw plugin build` compile a real-time plugin, the
 FAUST compiler (`brew install faust`) lets it compile one written in FAUST, and
 the Mac app needs Xcode 16.2 ([apps/mac/README.md](apps/mac/README.md)).
@@ -183,7 +184,7 @@ x86_64-apple-darwin`.
 
 `daw` is one command. `uv run daw` and `engine/target/release/daw` each pass the
 other the commands it does not own (`samples`, `reference`, `listen`, `compare`,
-`check`, `timeline`, `joins`, `export` and `separate` run in Python), so either works for everything. `uv run daw` runs the release build, or
+`check`, `timeline`, `joins`, `export`, `separate` and `transcribe` run in Python), so either works for everything. `uv run daw` runs the release build, or
 the binary `AAW_DAW` names; the binary runs the Python of this checkout's `.venv`,
 or the one `AAW_PYTHON` names. The Mac app builds with `apps/mac/build.sh`; its
 bundle holds a copy of the binary, which **Install Command Line Tool…** in the app's
