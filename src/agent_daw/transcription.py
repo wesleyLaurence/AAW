@@ -47,7 +47,8 @@ from .hits import Grid
 NAME = "basic-pitch"
 TIMEOUT = 600
 TOGETHER = 0.050  # notes starting this near each other start together
-JOIN_GAP = 0.020  # one pitch again this soon after it ends is the same note
+JOIN_GAP = 0.020  # one pitch again this soon after it ends may be the same note
+PIECE = 0.080  # when one of the two is this short: shorter than any sixteenth to 187 BPM
 DOUBT = 0.75  # an octave this sure against the note kept is said beside it
 SURE = 0.5  # a note this sure is counted as sure
 LEVEL_SECONDS = 0.050  # the stretch at a note's start its level is read over
@@ -72,7 +73,7 @@ def unavailable() -> str | None:
 
     if not separation.env_python().is_file():
         return "The separation environment is not installed; daw separate setup installs it with Basic Pitch"
-    if not any(separation.root().glob("env/lib/python*/site-packages/basic_pitch")):
+    if not separation.package_here("basic-pitch"):
         return "The separation environment lacks Basic Pitch; daw separate setup adds it"
     return None
 
@@ -112,13 +113,18 @@ def heard(path: Path) -> dict:
 
 
 def joined(notes: list[dict]) -> tuple[list[dict], int]:
-    """One pitch that starts again within JOIN_GAP of where it ended, or while it
-    still sounds, is one note: the model splits a held note where it wavers."""
+    """One pitch heard twice at once is one note, and so is one pitch that starts
+    again within JOIN_GAP of where it ended when either piece is shorter than
+    PIECE: the model splits a held note where it wavers. A note struck again
+    legato also ends where the next starts, and is kept: both pieces are as long
+    as the notes played."""
     out, last = [], {}
     count = 0
     for n in sorted(notes, key=lambda n: (n["start"], n["pitch"])):
         before = last.get(n["pitch"])
-        if before is not None and n["start"] <= before["end"] + JOIN_GAP:
+        overlaps = before is not None and n["start"] < before["end"] - 1e-3
+        piece = before is not None and min(before["end"] - before["start"], n["end"] - n["start"]) < PIECE
+        if overlaps or (piece and n["start"] <= before["end"] + JOIN_GAP):
             span = (before["end"] - before["start"]) + (n["end"] - n["start"])
             before["confidence"] = (
                 before["confidence"] * (before["end"] - before["start"]) + n["confidence"] * (n["end"] - n["start"])
@@ -147,10 +153,11 @@ def one_line(notes: list[dict]) -> tuple[list[dict], int]:
         while j < len(notes) and notes[j]["start"] - notes[i]["start"] <= TOGETHER:
             j += 1
         together = notes[i:j]
-        best = dict(max(together, key=lambda n: n["confidence"]))
+        chosen = max(together, key=lambda n: n["confidence"])
+        best = dict(chosen)
         octaves = [
             n for n in together
-            if n is not best and n["pitch"] != best["pitch"] and (n["pitch"] - best["pitch"]) % 12 == 0
+            if n is not chosen and n["pitch"] != best["pitch"] and (n["pitch"] - best["pitch"]) % 12 == 0
             and n["confidence"] >= DOUBT * best["confidence"]
         ]
         if octaves:
@@ -317,15 +324,36 @@ def resolve(value: str, song: Path | None, db: Path) -> tuple[Path, str, dict | 
     return path, path.stem, None
 
 
-def bar_one_beat(clip: dict, downbeat: float) -> tuple[float, int]:
-    """The song's beat where an audio clip plays the file's time `downbeat`, and the
-    semitones its transpose moves what it plays."""
-    keeps = clip.get("stretch", "repitch") in ("preserve_pitch", "preserve_formants")
-    transpose = float(clip.get("transpose", 0) or 0)
-    repitch = 1.0 if keeps else 2 ** (transpose / 12)
-    per_beat = 60 / float(clip.get("source_bpm") or clip["tempo"]) * repitch
-    start = float(clip.get("source_start_seconds", 0) or 0)
-    return float(clip["at"]) + (downbeat - start) / per_beat, round(transpose)
+class Played:
+    """How an audio clip plays its file, as the engine has it (aaw-host's Span::of
+    and the schema's seconds_per_beat): from source_start_seconds on its beat
+    `at`, seconds_per_beat of the file a song beat, faster as a repitched
+    transpose goes up; to source_end_seconds, the end of its loop's first pass,
+    its length_beats or the file's end, whichever comes first."""
+
+    def __init__(self, clip: dict, file_seconds: float):
+        tempo = float(clip["tempo"])
+        repitched = clip.get("stretch", "repitch") == "repitch"
+        transpose = float(clip.get("transpose", 0) or 0)
+        source_bpm = float(clip.get("source_bpm") or 0)
+        self.at = float(clip["at"])
+        self.start = float(clip.get("source_start_seconds", 0) or 0)
+        self.per_beat = 60 / (source_bpm or tempo) * (2 ** (transpose / 12) if repitched else 1.0)
+        # What it is heard moved by: its transpose, and a repitched tempo of its own
+        # played at the song's.
+        self.semitones = transpose + (12 * np.log2(tempo / source_bpm) if repitched and source_bpm else 0.0)
+        ends = [file_seconds]
+        if clip.get("source_end_seconds") is not None:
+            ends.append(float(clip["source_end_seconds"]))
+        for beats_long in (clip.get("loop_beats"), clip.get("length_beats")):
+            if beats_long is not None:
+                ends.append(self.start + float(beats_long) * self.per_beat)
+        self.end = min(ends)
+        self.loops = clip.get("loop_beats") is not None
+
+    def beat(self, seconds: float) -> float:
+        """The song's beat where the clip plays a time of its file."""
+        return self.at + (seconds - self.start) / self.per_beat
 
 
 def transcribe(
@@ -341,17 +369,24 @@ def transcribe(
     window: float = 10.0,
     midi_out: Path | None = None,
     text: bool = False,
-    grid: str = "1/4",
+    grid: str | None = None,
     quantize: str | None = None,
     db: Path | None = None,
 ) -> dict:
     from . import library
 
     db = db or library.default_db()
-    path, label, clip = resolve(source, song, db)
     writes = bool(song is not None or midi_out is not None or text)
-    if midi_out is not None and midi_out.suffix.lower() not in (".mid", ".midi"):
-        raise ValueError("--midi is a .mid file")
+    if quantize is not None and not writes:
+        raise ValueError("--quantize moves the written notes: give it with --text, --midi or --project")
+    if grid is not None and not text:
+        raise ValueError("--grid is the cells of --text")
+    if midi_out is not None:
+        if midi_out.suffix.lower() not in (".mid", ".midi"):
+            raise ValueError("--midi is a .mid file")
+        if not midi_out.resolve().parent.is_dir():
+            raise ValueError(f"--midi: there is no folder {midi_out.resolve().parent}")
+    path, label, clip = resolve(source, song, db)
     if clip is None and at is None and song is not None:
         at = 0.0
     if clip is not None and at is not None:
@@ -365,33 +400,39 @@ def transcribe(
             raise ValueError(f"The notes are written on a beat map, and {of.name} has none: {error}") from None
         report, problem = None, str(error)
     found = heard(path)
-    notes, joins = joined(found["notes"])
-    dropped = 0
-    if line:
-        notes, dropped = one_line(notes)
-    if note_range is not None:
-        outside = [n for n in notes if not note_range[0] <= n["pitch"] <= note_range[1]]
-        notes = [n for n in notes if note_range[0] <= n["pitch"] <= note_range[1]]
-    unsure = [n for n in notes if n["confidence"] < min_confidence]
-    notes = [n for n in notes if n["confidence"] >= min_confidence]
     mono, sr = beats.read(path)
+    played = Played(clip, len(mono) / sr) if clip is not None else None
+    left_out = {}
+    notes = found["notes"]
+    if played is not None:
+        # Only what the clip plays, each note at the pitch it is heard at there.
+        inside = [n for n in notes if played.start <= n["start"] < played.end]
+        left_out["outside_the_clip"] = len(notes) - len(inside)
+        notes = [{**n, "end": min(n["end"], played.end)} for n in inside]
+    notes, left_out["joined"] = joined(notes)
+    if line:
+        notes, left_out["not_the_line"] = one_line(notes)
+    shift = round(played.semitones) if played is not None else 0
+    if shift:
+        for n in notes:
+            n["pitch"] += shift
+            if "octave_doubt" in n:
+                n["octave_doubt"] += shift
+        heard_at = len(notes)
+        notes = [n for n in notes if 0 <= n["pitch"] <= 127]
+        if len(notes) < heard_at:
+            left_out["outside_midi"] = heard_at - len(notes)
+        for n in notes:
+            if "octave_doubt" in n and not 0 <= n["octave_doubt"] <= 127:
+                del n["octave_doubt"]
+    if note_range is not None:
+        kept = [n for n in notes if note_range[0] <= n["pitch"] <= note_range[1]]
+        left_out["outside_range"] = len(notes) - len(kept)
+        notes = kept
+    kept = [n for n in notes if n["confidence"] >= min_confidence]
+    left_out["under_min_confidence"] = len(notes) - len(kept)
+    notes = kept
     velocities(notes, mono, sr)
-    warnings = []
-    transposed = 0
-    if clip is not None and report is not None:
-        at, transposed = bar_one_beat(clip, report["first_downbeat_seconds"])
-        if transposed:
-            for n in notes:
-                n["pitch"] += transposed
-                if "octave_doubt" in n:
-                    n["octave_doubt"] += transposed
-        bpm = report["tempo"]["bpm"]
-        heard_at = float(clip.get("source_bpm") or 0) or clip["tempo"]
-        if abs(heard_at / bpm - 1) > 0.01:
-            warnings.append(
-                f"{clip['ref']} plays the part at {heard_at:g} BPM and its beat map counts {bpm:g}: "
-                "the notes are on the part's beats, so they drift from the clip; give the clip source_bpm"
-            )
     rows = placed(notes, report)
     out = {
         "path": str(path),
@@ -411,19 +452,23 @@ def transcribe(
         "line": line,
         "count": len(rows),
         "sure": sum(1 for r in rows if r["confidence"] >= SURE),
-        "left_out": {
-            "joined": joins,
-            **({"not_the_line": dropped} if line else {}),
-            **({"outside_range": len(outside)} if note_range is not None else {}),
-            "under_min_confidence": len(unsure),
-        },
+        "left_out": left_out,
         "lowest": name(min(n["pitch"] for n in notes)) if notes else None,
         "highest": name(max(n["pitch"] for n in notes)) if notes else None,
     }
-    if transposed:
-        out["transposed_by"] = transposed
+    warnings = []
+    if played is not None:
+        if shift:
+            out["transposed_by"] = shift
+        if abs(played.semitones - shift) >= 0.1:
+            warnings.append(
+                f"{clip['ref']} plays the part {played.semitones:+.2f} semitones from as it was heard; "
+                f"the notes are moved {shift:+d}"
+            )
+        if played.loops:
+            warnings.append(f"{clip['ref']} loops; the note clip holds its first pass")
     if writes:
-        out.update(written(rows, report, label, song, track, at, midi_out, text, grid, quantize))
+        out.update(written(rows, report, label, song, track, at, played, midi_out, text, grid or "1/4", quantize))
     listed = rows
     if near is not None:
         listed = [r for r in rows if r["until_seconds"] >= near - window and r["seconds"] <= near + window]
@@ -437,64 +482,100 @@ def transcribe(
     return out
 
 
-def written(rows, report, label, song, track, at, midi_out, text, grid, quantize) -> dict:
-    """The notes as a note clip in the song, a MIDI file and note text, each made by
-    the Rust daw from one MIDI file of them; what each gave."""
+def written(rows, report, label, song, track, at, played, midi_out, text, grid, quantize) -> dict:
+    """The notes as note text, a MIDI file and a note clip in the song.
+
+    One MIDI file of them, in the part's own beats with bar 1 a whole number of
+    bars in, is read by the Rust daw into a scratch song, quantized there and
+    written back out, and the text is read from it. The song itself is changed
+    once, at the end, by importing the notes at its own beats, so a step that
+    fails leaves it as it was and the clip is one edit to undo.
+    """
+    from fractions import Fraction
+
     from .cli import run_engine
 
+    if not rows:
+        raise ValueError("No note is left to write")
     per_bar = int(report["beats_per_bar"])
-    earliest = min((r["beats"] for r in rows), default=0.0)
-    pickup = per_bar * int(np.ceil(-earliest / per_bar)) if earliest < 0 else 0
+    earliest = min(r["beats"] for r in rows)
+    pickup = float(per_bar * np.ceil(-earliest / per_bar - 1e-9)) if earliest < 0 else 0.0
     out = {}
     with tempfile.TemporaryDirectory() as scratch:
         scratch = Path(scratch)
-        if song is None:
-            target = scratch / "song"
-            run_engine("init", target)
-            target = target / "song.yaml"
-            if report["meter"] != "4/4":
-                run_engine("set", target, "session.time_signature", report["meter"])
-            clip_at, shift = 0.0, float(pickup)
-        else:
-            target = song
-            clip_at = max(0.0, at - pickup)
-            shift = at - clip_at
-        placed_rows = [r for r in rows if r["beats"] + shift >= 0]
-        if len(placed_rows) < len(rows):
-            out["before_the_song"] = len(rows) - len(placed_rows)
-        if not placed_rows:
-            raise ValueError("No note is left to write")
+        sketch = scratch / "song"
+        run_engine("init", sketch)
+        sketch = sketch / "song.yaml"
+        # The map's beats are the scratch song's: a bar of per_bar of them.
+        if per_bar != 4:
+            run_engine("set", sketch, "session.time_signature", f"{per_bar}/4")
         file = scratch / f"{slug(label)}-notes.mid"
-        midi_file(placed_rows, shift, file)
-        args = ["midi", "import", target, file, "--at", round(clip_at, 6)]
-        if track is not None:
-            args += ["--track", track]
-        made = run_engine(*args)
-        # A new track's import names the track and the clip; one on a track, the clip.
-        ref = made.get("path") or next(p for p in made["paths"] if ".clips." in p)
+        midi_file(rows, pickup, file)
+        ref = next(p for p in run_engine("midi", "import", sketch, file)["paths"] if ".clips." in p)
         if quantize is not None:
-            made["project_sha256"] = run_engine("note", "quantize", target, ref, "--grid", quantize)["project_sha256"]
-        if song is not None:
-            out["clip"] = {
-                "ref": ref,
-                "at": round(clip_at, 4),
-                "bar_one_at": round(at, 4),
-                "notes": made["notes"],
-                **({"quantized_to": quantize} if quantize else {}),
-                "project_sha256": made["project_sha256"],
-            }
-        if midi_out is not None:
-            run_engine("midi", "export", target, ref, midi_out.resolve())
-            out["midi"] = {"path": str(midi_out.resolve()), "bar_one_beat": shift}
+            run_engine("note", "quantize", sketch, ref, "--grid", quantize)
+            run_engine("midi", "export", sketch, ref, file)
+            rows = [
+                {
+                    "beats": float(Fraction(str(n["at"]))) - pickup,
+                    "length_beats": float(Fraction(str(n["duration"]))),
+                    "midi": n["pitch"],
+                    "velocity": n["velocity"],
+                }
+                for n in run_engine("note", "list", sketch, ref)["clips"][0]["notes"]
+            ]
         if text:
-            listed = run_engine("note", "list", target, ref, "--as", "text", "--grid", grid)
-            clip_listed = listed["clips"][0]
+            listed = run_engine("note", "list", sketch, ref, "--as", "text", "--grid", grid)["clips"][0]
             out["text"] = {
                 "grid": grid,
-                # The text starts at the clip's start: a bar before bar 1 for each
-                # bar of pickup, or between bar lines when the song cut it short.
-                "from_bar": 1 - int(shift // per_bar) if shift % per_bar == 0 else None,
-                "text": clip_listed["text"],
-                "off_grid": len(clip_listed["off_grid"]),
+                "from_bar": 1 - round(pickup / per_bar),
+                "text": listed["text"],
+                "off_grid": len(listed["off_grid"]),
             }
+        if midi_out is not None:
+            target = midi_out.resolve()
+            target.write_bytes(file.read_bytes())
+            out["midi"] = {"path": str(target), "bar_one_beat": pickup}
+        # Last, so nothing before it can fail with the song changed.
+        if song is not None:
+            out["clip"] = into_song(rows, song, track, at, played, report, per_bar, file, quantize)
+            out.update(out["clip"].pop("left"))
     return out
+
+
+def into_song(rows, song, track, at, played, report, per_bar, file, quantize) -> dict:
+    """The note clip in the song: bar 1 at `at`, or where an audio clip plays the
+    part's first downbeat, each beat of the part as many of the song's beats as
+    the clip plays it in; a bar early for each bar of pickup, and what would come
+    before the song's start left out."""
+    from .cli import run_engine
+
+    scale = 1.0
+    if played is not None:
+        scale = (60 / report["tempo"]["bpm"]) / played.per_beat
+        at = played.beat(report["first_downbeat_seconds"])
+    rows = [{**r, "beats": r["beats"] * scale, "length_beats": r["length_beats"] * scale} for r in rows]
+    earliest = min(r["beats"] for r in rows)
+    bar = per_bar * scale
+    pickup = bar * float(np.ceil(-earliest / bar - 1e-9)) if earliest < 0 else 0.0
+    clip_at = max(0.0, at - pickup)
+    shift = at - clip_at
+    kept = [r for r in rows if r["beats"] + shift >= -1e-9]
+    if not kept:
+        raise ValueError("Every note comes before the song's start")
+    midi_file(kept, shift, file)
+    args = ["midi", "import", song, file, "--at", round(clip_at, 6)]
+    if track is not None:
+        args += ["--track", track]
+    made = run_engine(*args)
+    return {
+        # A new track's import names the track and the clip; one on a track, the clip.
+        "ref": made.get("path") or next(p for p in made["paths"] if ".clips." in p),
+        "at": round(clip_at, 4),
+        "bar_one_at": round(at, 4),
+        "notes": made["notes"],
+        **({"song_beats_a_beat": round(scale, 4)} if abs(scale - 1) > 1e-4 else {}),
+        **({"quantized_to": quantize} if quantize else {}),
+        "project_sha256": made["project_sha256"],
+        "left": {"before_the_song": len(rows) - len(kept)} if len(kept) < len(rows) else {},
+    }

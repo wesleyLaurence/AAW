@@ -558,7 +558,7 @@ def parser():
     transcribe.add_argument("--window", type=float, default=10.0, help="Seconds either side of --near")
     transcribe.add_argument("--midi", type=Path, help="Write the notes as a type 0 MIDI file, bar 1 at bar_one_beat")
     transcribe.add_argument("--text", action="store_true", help="The notes as note text, a row a voice")
-    transcribe.add_argument("--grid", default="1/4", help="A cell's beats for --text: 1/4 is a sixteenth note")
+    transcribe.add_argument("--grid", help="A cell's beats for --text: 1/4, the default, is a sixteenth note")
     transcribe.add_argument("--db", type=Path, default=None, help="The sample library's index")
     transcribe.add_argument(
         "--quantize", metavar="GRID", help="Move the written notes onto a grid in beats, 1/4 a sixteenth, as daw note quantize does"

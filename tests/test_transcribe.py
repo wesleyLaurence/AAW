@@ -5,6 +5,7 @@ written as a MIDI file, note text and a note clip."""
 import json
 import shlex
 import shutil
+from fractions import Fraction
 import sys
 from pathlib import Path
 
@@ -76,13 +77,27 @@ def test_each_note_is_placed_on_the_beat_map(made, tmp_path, model):
 
 def test_one_pitch_split_where_it_wavers_is_one_note(made, tmp_path, model):
     path = part(made, tmp_path)
-    hears(path, [note(at(0), at(1), 42, 0.5), note(at(1) + 0.01, at(2), 42, 0.7), note(at(2) + 0.2, at(3), 42)])
+    hears(
+        path,
+        [
+            # A held note and a short piece of it 10 ms on: one note.
+            note(at(0), at(1), 42, 0.5),
+            note(at(1) + 0.01, at(1) + 0.07, 42, 0.7),
+            # The same pitch heard twice at once: one note.
+            note(at(2), at(3), 45),
+            note(at(2) + 0.02, at(2, 3), 45),
+            # Eighths struck again legato, each ending where the next starts: four notes.
+            *[note(at(4 + k / 2), at(4.5 + k / 2), 40) for k in range(4)],
+        ],
+    )
     code, out = cli("transcribe", path)
     assert code == 0, out
-    assert out["left_out"]["joined"] == 1
-    held, again = out["notes"]
-    assert held["length_beats"] == pytest.approx(2, abs=0.01) and held["confidence"] == pytest.approx(0.6, abs=0.01)
-    assert again["beats"] == pytest.approx(2.4, abs=0.01)
+    assert out["left_out"]["joined"] == 2
+    held, twice, *eighths = out["notes"]
+    assert held["length_beats"] == pytest.approx(1.14, abs=0.01)
+    assert twice["length_beats"] == pytest.approx(1, abs=0.01) and twice["pitch"] == "A2"
+    assert [n["beats"] for n in eighths] == pytest.approx([4, 4.5, 5, 5.5], abs=0.01)
+    assert all(n["length_beats"] == pytest.approx(0.5, abs=0.01) for n in eighths)
 
 
 def test_a_line_keeps_one_note_at_a_time(made, tmp_path, model):
@@ -163,12 +178,27 @@ def test_a_clip_of_the_notes_goes_where_the_audio_clip_plays_them(made, tmp_path
     assert notes[0]["song_at"] == pytest.approx(8 + FIRST / BEAT, abs=0.01)
     assert notes[1]["song_at"] - notes[0]["song_at"] == pytest.approx(4, abs=0.01)
     assert out["clip"]["ref"].startswith("tracks.stem-notes.clips.")
-    # Transposed by repitching, the clip plays the notes two semitones up, sooner.
+    # Transposed by repitching, the clip plays the notes two semitones up and
+    # faster, so they come sooner and closer together.
     daw("set", folder, "tracks.bass.audio.0.transpose", 2)
-    code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder, "--track", "stem-notes")
+    code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder, "--track", "stem-notes", "--range", "G2-A2")
     assert code == 0, out
-    assert out["transposed_by"] == 2 and out["notes"][0]["pitch"] == "G#2"
-    assert out["clip"]["bar_one_at"] == pytest.approx(8 + FIRST / BEAT / 2 ** (2 / 12), abs=0.001)
+    faster = 2 ** (2 / 12)
+    assert out["transposed_by"] == 2 and [n["pitch"] for n in out["notes"]] == ["G#2"]
+    assert out["left_out"]["outside_range"] == 1
+    assert out["clip"]["bar_one_at"] == pytest.approx(8 + FIRST / BEAT / faster, abs=0.001)
+    assert out["clip"]["song_beats_a_beat"] == pytest.approx(1 / faster, abs=0.001)
+    code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder, "--track", "stem-notes")
+    notes = daw("note", "list", folder, out["clip"]["ref"])["clips"][0]["notes"]
+    assert [n["name"] for n in notes] == ["G#2", "A#2"]
+    assert float(Fraction(str(notes[1]["song_at"]))) - float(Fraction(str(notes[0]["song_at"]))) == pytest.approx(
+        4 / faster, abs=0.01
+    )
+    # At its own pitch with preserve_pitch, it plays at the song's tempo again.
+    daw("set", folder, "tracks.bass.audio.0.stretch", "preserve_pitch")
+    code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder, "--track", "stem-notes")
+    assert out["transposed_by"] == 2 and "song_beats_a_beat" not in out["clip"]
+    assert out["clip"]["bar_one_at"] == pytest.approx(8 + FIRST / BEAT, abs=0.001)
     # A sample with --at: bar 1 lands on that beat.
     code, out = cli("transcribe", "stem", "--project", folder, "--at", 16, "--track", "stem-notes")
     assert code == 0, out
@@ -245,6 +275,8 @@ def test_arguments_are_checked(made, tmp_path, model):
         (["--range", "G3-E1"], "low note is above"),
         (["--min-confidence", "2"], "min-confidence"),
         (["--midi", tmp_path / "x.txt"], "--midi is a .mid file"),
+        (["--quantize", "1/4"], "--quantize moves the written notes"),
+        (["--grid", "1/8"], "--grid is the cells of --text"),
     ]:
         hears(path, [note(at(0), at(1), 42)])
         code, out = cli("transcribe", path, *args)
@@ -269,3 +301,72 @@ def test_setup_installs_basic_pitch_alone(tmp_path, monkeypatch):
     assert calls == [["uv", "pip", "install", "--python", str(separation.env_python()), "--no-deps", "basic-pitch==0.3.0"]]
     also = separation.manifest()["runner"]["also"]
     assert {"mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3"} <= set(also)
+
+
+def test_only_what_an_audio_clip_plays_is_written(made, tmp_path, model):
+    folder = tmp_path / "project"
+    daw("init", folder)
+    daw("set", folder, "session.tempo", BPM)
+    stem = folder / "stem.wav"
+    shutil.copy(made, stem)
+    code, imported = cli("samples", "import", stem, "--project", folder / "song.yaml", "--id", "stem")
+    hears(folder / imported["path"], [note(at(k * 4), at(k * 4 + 2), 40 + k) for k in range(6)])
+    daw("track", "add", folder, "bass")
+    # Bars 3 and 4 of the file, at beat 32.
+    daw("audio", "add", folder, "bass", "stem", "--at", 32, "--source-start-seconds", at(8), "--source-end-seconds", at(16))
+    code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder)
+    assert code == 0, out
+    assert [n["pitch"] for n in out["notes"]] == ["F#2", "G2"] and out["left_out"]["outside_the_clip"] == 4
+    notes = daw("note", "list", folder, out["clip"]["ref"])["clips"][0]["notes"]
+    assert [round(n["song_at"], 2) for n in notes] == [32, 36]
+
+
+def test_a_step_that_fails_leaves_the_song_as_it_was(made, tmp_path, model):
+    folder = tmp_path / "project"
+    daw("init", folder)
+    before = (folder / "song.yaml").read_text()
+    path = part(made, tmp_path)
+    hears(path, [note(at(0), at(1), 42)])
+    code, out = cli("transcribe", path, "--project", folder, "--quantize", "nonsense")
+    assert code == 1
+    code, out = cli("transcribe", path, "--project", folder, "--midi", tmp_path / "nowhere" / "x.mid")
+    assert code == 1 and "no folder" in out["error"]
+    assert (folder / "song.yaml").read_text() == before
+    # Quantized, the clip lands once, on the grid.
+    hears(path, [note(at(0) + 0.03, at(1), 42)])
+    code, out = cli("transcribe", path, "--project", folder, "--quantize", "1/4")
+    assert code == 0, out
+    clips = daw("note", "list", folder, out["clip"]["ref"].rsplit(".clips.", 1)[0])["clips"]
+    assert len(clips) == 1 and clips[0]["notes"][0]["at"] == 0
+
+
+def test_a_bar_of_six_beats_is_barred_as_six(made, tmp_path, model):
+    path = part(made, tmp_path)
+    code, _ = cli("samples", "beats", path, "--meter", "6/4")
+    assert code == 0
+    hears(path, [note(at(-1), at(-0.5), 45), note(at(0), at(1), 42), note(at(6), at(7), 44)])
+    code, out = cli("transcribe", path, "--text")
+    assert code == 0, out
+    assert out["meter"] == "6/4"
+    bars = out["text"]["text"].split("|")
+    assert all(len(b.split()) == 24 for b in bars[:-1])
+    # Each note in the cell its beats from bar 1 put it in, bar lines six beats apart.
+    cells = " ".join(bars).split()
+    for n in out["notes"]:
+        cell = round((n["beats"] + 6 * (1 - out["text"]["from_bar"])) * 4)
+        assert cells[cell].startswith(n["pitch"].lower()), (n, out["text"])
+
+
+def test_a_pitch_moved_past_midi_is_left_out(made, tmp_path, model):
+    folder = tmp_path / "project"
+    daw("init", folder)
+    daw("set", folder, "session.tempo", BPM)
+    stem = folder / "stem.wav"
+    shutil.copy(made, stem)
+    code, imported = cli("samples", "import", stem, "--project", folder / "song.yaml", "--id", "stem")
+    hears(folder / imported["path"], [note(at(0), at(1), 100), note(at(1), at(2), 40)])
+    daw("track", "add", folder, "bass")
+    daw("audio", "add", folder, "bass", "stem", "--at", 0, "--transpose", 36, "--stretch", "preserve_pitch")
+    code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder)
+    assert code == 0, out
+    assert [n["midi"] for n in out["notes"]] == [76] and out["left_out"]["outside_midi"] == 1
