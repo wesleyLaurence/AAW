@@ -192,6 +192,12 @@ Python, in `src/agent_daw`:
   placed on the beat map (a separated part's source's). The clip, the MIDI file
   and the note text are made by the Rust `daw` from one MIDI file of them; see
   [transcribe.md](features/transcribe.md).
+- `drums.py`: `daw transcribe --drums`, a drum part's kicks, snares and hats:
+  the moments `hits.py` finds in three bands, each read as a sum of the drums'
+  sounds learned from the part (non-negative least squares and matrix
+  factorization over 24 bands), placed on the beat map, grouped into grooves
+  and fills, and written by one `daw batch` as a MIDI track whose Sampler plays
+  the part's own clearest hits; see [drum-groove.md](features/drum-groove.md).
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
   beats; `swing.py`: where the second note of each pair of eighths or

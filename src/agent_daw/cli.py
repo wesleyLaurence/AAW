@@ -563,6 +563,17 @@ def parser():
     transcribe.add_argument(
         "--quantize", metavar="GRID", help="Move the written notes onto a grid in beats, 1/4 a sixteenth, as daw note quantize does"
     )
+    transcribe.add_argument(
+        "--drums",
+        action="store_true",
+        help="A drum part's kicks, snares and hats as C2, D2 and F#2, the grooves its bars share and its fills; "
+        "in a song a Sampler of its own clearest hits, a looped clip a groove and a clip a fill",
+    )
+    transcribe.add_argument(
+        "--as-played",
+        action="store_true",
+        help="With --drums, write one clip of every hit as played instead of grooves looped and fills",
+    )
     return p
 
 
@@ -903,6 +914,40 @@ def transcribe(a):
         raise ValueError("--track goes with --project")
     if a.at is not None and (a.project is None or a.at < 0):
         raise ValueError("--at goes with --project, and is a beat of 0 or more")
+    if a.as_played and not a.drums:
+        raise ValueError("--as-played goes with --drums")
+    if a.drums:
+        from . import drums
+
+        given = [
+            flag
+            for flag, value in (
+                ("--line", a.line),
+                ("--range", a.note_range),
+                ("--min-confidence", a.min_confidence),
+                ("--quantize", a.quantize),
+            )
+            if value
+        ]
+        if given:
+            raise ValueError(
+                f"{', '.join(given)} {'is' if len(given) == 1 else 'are'} for pitched parts; with --drums each hit is "
+                "written on its sixteenth with its own timing, which daw note quantize moves after"
+            )
+        return drums.transcribe(
+            a.source,
+            song=a.project,
+            track=a.track,
+            at=a.at,
+            beats_of=a.beats,
+            near=None if a.near is None else beats.seconds(a.near),
+            window=a.window,
+            midi_out=a.midi,
+            text=a.text,
+            grid=a.grid,
+            as_played=a.as_played,
+            db=getattr(a, "db", None) or library.default_db(),
+        )
     note_range = None
     if a.note_range:
         low, sep, high = a.note_range.partition("-")
