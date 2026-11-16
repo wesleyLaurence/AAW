@@ -8,6 +8,11 @@ This file is the person's, and it is long: an agent does not read it for a task.
 The pull request that finishes an item adds its line at the top of the list
 without reading the rest. A line is changed or removed only when the person asks.
 
+- **A song's hits:** separate a song you know into stems, then run `daw samples
+  hits` on its drums stem with `--band kick --picture kick.png` and again with
+  `--band snare`. The marks near the top of the picture should be the kicks you
+  hear, on the bars and beats the list gives; say where it marked a hit that is
+  not a kick, or missed one.
 - **Short paths in the agent panel:** ask the agent in a song to read
   `SONG.md` and run a `daw` command; its lines should read `Read SONG.md` and
   `daw map .`, not the full path to the project, and a file elsewhere in your

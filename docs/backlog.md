@@ -61,16 +61,14 @@ October 19, 2026 (D123). Items 9–19 are the order as it stood.
     rebuilt from scratch as near as the tool allows, a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-7. **Why the agent missed the kicks and the downbeat.** Thunderstruck's sub
-    kick layered under the wrong hits several times in a row, where the
-    waveform made them plain, and a mashup of two songs matched in tempo but a
-    beat ahead or behind: a song's drum hits as a list and a picture, `daw
-    samples hits FILE` or on a stem, the transients in a band (a kick's
-    45–90 Hz) with each one's time, level and the spacing to the next, since
-    `daw listen` hits are scheduled hits only; and `daw samples beats` on a
-    song with an odd bar, where the downbeat phase flips after it and bar.beat
-    labels after it read two beats off, said when it changes or re-fit each
-    phrase; each checked on those songs.
+7. **Why the agent missed the downbeat.** A mashup of two songs matched in
+    tempo but a beat ahead or behind: `daw samples beats` chooses one downbeat
+    for the whole song, so on a song with an odd bar the phase flips after it
+    and bar.beat labels after it read two beats off; said where it changes, or
+    re-fit each phrase. Now that `daw samples hits` gives a stem's kicks and
+    snares by bar and beat, a snare on 1 and 3 is one sign of a wrong downbeat
+    (a live rock stem read so at a confidence of 0.77). The kicks half was
+    built as `daw samples hits` ([a song's hits](features/song-hits.md)).
 8. **Lyrics by bar, faster.** Whisper through anaconda takes minutes on a
     vocal stem; a smaller model, or Whisper through MLX on this Mac, as a
     command of the tool's own, the lyric's bar still read from the stem.

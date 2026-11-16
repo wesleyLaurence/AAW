@@ -178,6 +178,10 @@ Python, in `src/agent_daw`:
 - `beats.py`: the beat and downbeat map of a whole song, its phrase changes,
   its swing and a click audition; see [beat-map.md](features/beat-map.md). Kept
   beside the audio by `library.py`.
+- `hits.py`: a song's or a stem's hits in one band, from its filtered level,
+  each timed from the file's own attack and placed on the beat map, with the
+  counts of their levels and a picture (`daw samples hits`); see
+  [song-hits.md](features/song-hits.md).
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
   beats; `swing.py`: where the second note of each pair of eighths or
