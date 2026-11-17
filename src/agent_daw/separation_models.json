@@ -1,12 +1,13 @@
 {
-  "comment": "The models daw separate runs, and under analysis the ones daw samples beats and daw transcribe run in the same environment: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
+  "comment": "The models daw separate runs, and under analysis the ones daw samples beats, daw transcribe and daw transcribe --words run in the same environment: what each is, where its author put it, its size and hash, its author and its license. Nothing here is bundled; daw separate setup downloads a model from its address on the person's Mac and checks it against its hash. Scores are signal-to-distortion ratios in dB from audio-separator's table; compare within a column.",
   "runner": {
     "package": "audio-separator",
     "version": "0.47.0",
     "python": "cpython-3.12-macos-aarch64-none",
     "also": [
       "audioread", "beat-this==1.1.0", "torchaudio==2.11.1",
-      "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3"
+      "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3",
+      "mlx-whisper==0.4.3"
     ],
     "without_dependencies": ["basic-pitch==0.3.0"],
     "data": [
@@ -204,6 +205,60 @@
       "package": "basic-pitch==0.3.0",
       "note": "Its weights come in its package, which daw separate setup installs from PyPI without its dependencies, since TensorFlow and an older numpy would replace the environment's; it runs its ONNX model through onnxruntime.",
       "files": []
+    },
+    {
+      "name": "whisper-large-v3-turbo",
+      "title": "Whisper large-v3-turbo (MLX)",
+      "task": "words",
+      "author": "Alec Radford, Jong Wook Kim, Tao Xu, Greg Brockman, Christine McLeavey and Ilya Sutskever (OpenAI); converted for MLX by the MLX community",
+      "license": "MIT, code and weights",
+      "license_url": "https://github.com/openai/whisper/blob/main/LICENSE",
+      "paper": "Robust Speech Recognition via Large-Scale Weak Supervision, ICML 2023",
+      "package": "mlx-whisper==0.4.3",
+      "note": "Reads the whole voice for daw transcribe --words, on the GPU through Apple's MLX. A file already in the Hugging Face cache with the manifest's hash is linked, not downloaded again.",
+      "files": [
+        {
+          "name": "whisper-large-v3-turbo/config.json",
+          "url": "https://huggingface.co/mlx-community/whisper-large-v3-turbo/resolve/a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb/config.json",
+          "huggingface": {"repo": "mlx-community/whisper-large-v3-turbo", "revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb", "file": "config.json"},
+          "bytes": 268,
+          "sha256": "b34fc29e4e11e0a25e812775dd67f4dd16fc2c8eb43d28ae25ff7d660ecb6379"
+        },
+        {
+          "name": "whisper-large-v3-turbo/weights.safetensors",
+          "url": "https://huggingface.co/mlx-community/whisper-large-v3-turbo/resolve/a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb/weights.safetensors",
+          "huggingface": {"repo": "mlx-community/whisper-large-v3-turbo", "revision": "a4aaeec0636e6fef84abdcbe3544cb2bf7e9f6fb", "file": "weights.safetensors"},
+          "bytes": 1613977612,
+          "sha256": "951ed3fc1203e6a62467abb2144a96ce7eafca8fa77e3704fdb8635ff3e7f8a6"
+        }
+      ]
+    },
+    {
+      "name": "whisper-large-v3",
+      "title": "Whisper large-v3 (MLX)",
+      "task": "words read again",
+      "author": "Alec Radford, Jong Wook Kim, Tao Xu, Greg Brockman, Christine McLeavey and Ilya Sutskever (OpenAI); converted for MLX by the MLX community",
+      "license": "MIT, code and weights",
+      "license_url": "https://github.com/openai/whisper/blob/main/LICENSE",
+      "paper": "Robust Speech Recognition via Large-Scale Weak Supervision, ICML 2023",
+      "package": "mlx-whisper==0.4.3",
+      "note": "Reads again, on clips of 6 to 10 seconds, the stretches of a voice large-v3-turbo was in doubt of; never a whole song, where it writes lines that are not there.",
+      "files": [
+        {
+          "name": "whisper-large-v3/config.json",
+          "url": "https://huggingface.co/mlx-community/whisper-large-v3-mlx/resolve/49e6aa286ad60c14352c404340ded53710378a11/config.json",
+          "huggingface": {"repo": "mlx-community/whisper-large-v3-mlx", "revision": "49e6aa286ad60c14352c404340ded53710378a11", "file": "config.json"},
+          "bytes": 269,
+          "sha256": "34982ce6ae286095000f82ae9583b3431639e8b092bf60c961f203745e6500e3"
+        },
+        {
+          "name": "whisper-large-v3/weights.npz",
+          "url": "https://huggingface.co/mlx-community/whisper-large-v3-mlx/resolve/49e6aa286ad60c14352c404340ded53710378a11/weights.npz",
+          "huggingface": {"repo": "mlx-community/whisper-large-v3-mlx", "revision": "49e6aa286ad60c14352c404340ded53710378a11", "file": "weights.npz"},
+          "bytes": 3083520416,
+          "sha256": "05ff791ce3630fae47e7c51004e9666204d786246ec07cac6110af768099b40d"
+        }
+      ]
     }
   ]
 }

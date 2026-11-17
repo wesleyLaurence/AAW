@@ -17,6 +17,11 @@
    in another key, which is a key change. Any other is a new letter.
 5. Names say what a section holds: with the parts, where the voice sings and
    the drums play; and without them, how loud it is and how often it comes.
+   With the words `daw transcribe --words` kept beside the voice part, the
+   chorus is the music that comes back with its words: a verse comes back
+   with new ones. The words also start sections where the hook's lines begin
+   and end where the music does not change near them, and the sections that
+   sing the hook are one part, as a rap's hooks over the verses' beat.
 6. Each section's key is the key its pitch classes are most like.
 7. Checks: how each beat divides, in two or in three; whether the map's beat
    keeps one length; and with the drums part, whether the kick and the snare
@@ -50,6 +55,11 @@ SUNG_SHARE = 0.5  # a section sings when this share of its bars do
 REST_BARS = 2  # the voice coming in after this many bars' rest starts a section
 FADE_DB = 9.0  # a last section falling this far over its bars fades out
 KEPT_BARS = 8  # a key held to the end this long is a key change
+SAME_WORDS = 0.5  # a letter whose sections' words are this alike comes back with its words
+HOOK_COUNT = 3  # the hook is a line sung at least this often, the most often of all
+HOOK_NEAR = 2  # and the lines that come back sung within this many bars of it
+HOOKED = 0.5  # a section this much of whose bars sing the hook's lines holds the hook
+LEAST_WORDS = 4  # a section of fewer words is not compared by them
 EVEN_SPREAD = 1.3  # a beat this much longer in one place than another counts another pulse
 NEAR = 0.06  # of a beat: an onset this near a place is on it
 OFF_SHARE = 0.6  # the drums play a bar as if moved when this much better so
@@ -164,10 +174,10 @@ def novelty(s, half):
     return out / max(out.max(), 1e-12)
 
 
-def boundaries(curve, required=(), least=MIN_BARS, edge=EDGE_BARS, floor=NOVELTY_FLOOR):
+def boundaries(curve, required=(), least=MIN_BARS, edge=EDGE_BARS, floor=NOVELTY_FLOOR, after=()):
     """The bar indexes sections start at, the song's end last: the bar lines in
-    `required`, then the strongest peaks of `curve`, each at least `least` bars
-    from another and `edge` from the song's ends."""
+    `required`, then the strongest peaks of `curve`, then the bar lines in `after`,
+    each at least `least` bars from another and `edge` from the song's ends."""
     n = len(curve) - 1
     chosen = [0, n]
 
@@ -181,6 +191,9 @@ def boundaries(curve, required=(), least=MIN_BARS, edge=EDGE_BARS, floor=NOVELTY
         if curve[i] < floor:
             break
         if fits(i):
+            chosen.append(int(i))
+    for i in after:
+        if 0 < i < n and fits(i):
             chosen.append(int(i))
     return sorted(chosen)
 
@@ -342,9 +355,127 @@ def entries(sung) -> list[int]:
     return out
 
 
-def named(sections, letters, level, sung=None, played=None) -> list[str]:
+def same_words(sections, letters, bars, heard) -> dict:
+    """For each letter of two sections or more, how alike their words are, 0 to 1:
+    the mean over its pairs of sections of the share of the shorter's words found
+    in the same order in the longer, so a chorus cut short is still its chorus."""
+    from .words import tokens
+
+    said = []
+    for a, b in sections:
+        start, end = bars[a]["seconds"], bars[b - 1]["until"]
+        said.append(tokens(" ".join(w["word"] for w in heard if start <= w["start"] < end)))
+    by_letter = {}
+    for i, l in enumerate(letters):
+        if len(said[i]) >= LEAST_WORDS:
+            by_letter.setdefault(l["letter"], []).append(i)
+    out = {}
+    for letter, idx in by_letter.items():
+        pairs = [(i, j) for k, i in enumerate(idx) for j in idx[k + 1 :]]
+        if pairs:
+            out[letter] = round(
+                float(np.mean([found_in(said[i], said[j]) for i, j in pairs])), 2
+            )
+    return out
+
+
+def hooked_bars(heard, bars) -> np.ndarray:
+    """Which bars sing the hook, from the bar each of its lines starts in to the bar
+    it ends in. The hook is the line sung most often, HOOK_COUNT times or more,
+    with the lines that come back sung around it: those more than half of whose
+    times are within HOOK_NEAR bars of that line's. Another line that comes back
+    elsewhere, a pre-chorus's, is not the hook."""
+    from .words import groups_of, lines, text, tokens
+
+    said = lines(heard)
+    rows = [{"text": text(line), "seconds": line[0]["start"]} for line in said]
+    starts = np.array([b["seconds"] for b in bars])
+
+    def bar(seconds):
+        return max(int(np.searchsorted(starts, seconds, side="right")) - 1, 0)
+
+    groups = sorted(groups_of(rows), key=lambda g: (-len(g), -len(tokens(rows[g[0]]["text"]))))
+    out = np.zeros(len(bars), dtype=bool)
+    if not groups or len(groups[0]) < HOOK_COUNT:
+        return out
+    near = {bar(said[i][0]["start"]) for i in groups[0]}
+    hook = [groups[0]]
+    for g in groups[1:]:
+        close = sum(1 for i in g if any(abs(bar(said[i][0]["start"]) - b) <= HOOK_NEAR for b in near))
+        if 2 * close > len(g):
+            hook.append(g)
+    for g in hook:
+        for i in g:
+            a, b = bar(said[i][0]["start"]), bar(said[i][-1]["end"] - 0.05)
+            out[a : max(a, b) + 1] = True
+    return out
+
+
+def hook_runs(hooked) -> list[tuple[int, int]]:
+    """The runs of MIN_BARS bars or more that sing the hook, a bar's rest within one
+    bridged: each as its first bar's index and the index after its last."""
+    runs, i, n = [], 0, len(hooked)
+    while i < n:
+        if not hooked[i]:
+            i += 1
+            continue
+        j = i
+        while j < n and (hooked[j] or (j + 1 < n and hooked[j + 1])):
+            j += 1
+        if j - i >= MIN_BARS:
+            runs.append((i, j))
+        i = j
+    return runs
+
+
+def joined_by_hook(letters, spans, hooked, chords, sound) -> list[dict]:
+    """Sections that sing the hook are one part, whatever letters the music gave
+    them, and the others keep theirs. That tells apart a rap verse and its hook
+    over one beat, and makes its hooks one. A section whose letter's first section
+    is now another is like that first section again: the same or, its music not
+    matching, varied (′)."""
+    sings = [i for i, (a, b) in enumerate(spans) if float(np.mean(hooked[a:b])) >= HOOKED]
+    if len(sings) < 2:
+        return letters
+    for i in sings:
+        letters[i] = {"letter": "hook", "like": None}
+    first = {}
+    for i, l in enumerate(letters):
+        name = l["letter"]
+        if name not in first:
+            first[name] = i
+            l["like"] = None
+            continue
+        j = first[name]
+        if l["like"] is not None and l["like"]["section"] == j:
+            continue
+        c, s = aligned(chords, spans[i], spans[j]), aligned(sound, spans[i], spans[j])
+        how = "same" if c >= SAME_CHORDS and s >= SAME_SOUND else "varied"
+        l["like"] = {"section": j, "how": how, "semitones": 0, "chords": round(c, 2), "sound": round(s, 2)}
+    # Letters again in the order they first come.
+    order = {}
+    for l in letters:
+        order.setdefault(l["letter"], LETTERS[len(order) % len(LETTERS)])
+    for l in letters:
+        l["letter"] = order[l["letter"]]
+        how = (l["like"] or {}).get("how")
+        l["label"] = l["letter"] + ("′" if how in ("varied", "moved") else "")
+    return letters
+
+
+def found_in(a, b) -> float:
+    """The share of the shorter list's words found, in order, in the longer."""
+    from difflib import SequenceMatcher
+
+    matched = sum(m.size for m in SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks())
+    return matched / max(1, min(len(a), len(b)))
+
+
+def named(sections, letters, level, sung=None, played=None, worded=None) -> list[str]:
     """What each section is, by what it holds: with the parts, where the voice sings
-    and the drums play; without them, by how loud each is and how often it comes."""
+    and the drums play; without them, by how loud each is and how often it comes.
+    `worded` is same_words(): the music that comes back with its words is the
+    chorus, and music that comes back with new words is not."""
     n = len(sections)
     names = [None] * n
     by_letter = {}
@@ -386,12 +517,17 @@ def named(sections, letters, level, sung=None, played=None) -> list[str]:
         return sings is None or np.mean([sings[i] for i in by_letter[l]]) >= 0.5
 
     vocal = sorted((l for l in repeated if sung_letter(l)), key=mean_loud, reverse=True)
-    chorus = vocal[0] if vocal else None
+    worded = worded or {}
+    same = [l for l in vocal if worded.get(l, 0) >= SAME_WORDS]
+    # With the words: of the music that comes back with its words, the loudest;
+    # without them, of the sung music that comes back, the loudest.
+    candidates = same or vocal
+    chorus = candidates[0] if candidates else None
     # A loud section always followed by the same sung one leads into it: that one
     # is the chorus, as a pre-chorus is often the louder.
     if chorus is not None:
         after = {letters[i + 1]["letter"] if i + 1 < n else None for i in by_letter[chorus]}
-        if len(after) == 1 and (following := after.pop()) in vocal and following != chorus:
+        if len(after) == 1 and (following := after.pop()) in candidates and following != chorus:
             chorus = following
     instrumental = [l for l in repeated if not sung_letter(l)]
     drop = max(instrumental, key=mean_loud, default=None)
@@ -400,7 +536,10 @@ def named(sections, letters, level, sung=None, played=None) -> list[str]:
     first = {l: min((i for i in idx if names[i] is None), default=n) for l, idx in by_letter.items()}
     verse = None
     if chorus is not None:
-        others = [l for l in vocal if l != chorus]
+        # A verse comes back with new words.
+        others = [l for l in vocal if l != chorus and worded.get(l, 0) < SAME_WORDS] or [
+            l for l in vocal if l != chorus
+        ]
         earlier = [l for l in others if first[l] < first[chorus]]
         verse = min(earlier or others, key=lambda l: first[l], default=None)
     pre = post = None
@@ -696,18 +835,34 @@ def measure(path: Path, report: dict, parts: dict | None = None) -> dict:
     if "drums" in heard_parts:
         played = against_loudest(heard_parts["drums"][1]) >= PLAYED_DB
     required = entries(sung) if sung is not None else []
-    cut = boundaries(curve, required)
+    heard_words = hooked = None
+    edges = []
+    if "vocals" in heard_parts:
+        from . import words
+
+        heard_words = words.kept(Path(parts["vocals"]))
+        if heard_words is not None:
+            hooked = hooked_bars(heard_words["words"], bars)
+            edges = [i for run in hook_runs(hooked) for i in run]
+    # The hook's edges start sections where the music does not change near them,
+    # as over a rap's one beat; where it does, the music's bar line stands.
+    cut = boundaries(curve, required, after=edges)
     spans = list(zip(cut[:-1], cut[1:]))
     chords_moved = {k: ranks(chords_alike(tones, k), chords_raw) for k in range(1, 12)}
     profiles = [
         pitch[bars[a]["first"] : bars[b - 1]["first"] + bars[b - 1]["beats"], :12].sum(axis=0) for a, b in spans
     ]
     letters = labelled(spans, chords, sounds, chords_moved, profiles)
+    if hooked is not None:
+        letters = joined_by_hook(letters, spans, hooked, chords, sounds)
     # A section moved a bar by its match holds other bars now.
     profiles = [
         pitch[bars[a]["first"] : bars[b - 1]["first"] + bars[b - 1]["beats"], :12].sum(axis=0) for a, b in spans
     ]
-    names = named(spans, letters, loud, sung, played)
+    worded = None
+    if heard_words is not None:
+        worded = same_words(spans, letters, bars, heard_words["words"])
+    names = named(spans, letters, loud, sung, played, worded)
 
     whole = key_of(pitch[:, :12].sum(axis=0))
     song_key = whole["name"]
@@ -727,13 +882,19 @@ def measure(path: Path, report: dict, parts: dict | None = None) -> dict:
             "key_confidence": key["confidence"],
             "key_sure": key["sure"],
             "level_db": round(float(np.mean(loud[a:b])), 1),
-            "starts_by": "the song's start" if a == 0 else ("the voice coming in" if a in required else "a change"),
+            "starts_by": starts_by(a, sung, hooked, required, edges),
             "change": round(float(curve[a]), 2),
         }
         if sung is not None:
             sec["sung"] = round(float(np.mean(sung[a:b])), 2)
         if played is not None:
             sec["drums"] = round(float(np.mean(played[a:b])), 2)
+        if worded is not None:
+            said = [w["word"] for w in heard_words["words"] if sec["seconds"] <= w["start"] < sec["until_seconds"]]
+            sec["words"] = " ".join(x.strip() for x in said[:8]) + (" …" if len(said) > 8 else "")
+            if l["letter"] in worded:
+                sec["same_words"] = worded[l["letter"]]
+            sec["hook"] = round(float(np.mean(hooked[a:b])), 2)
         if l["like"]:
             sec["like"] = {**l["like"], "section": l["like"]["section"] + 1}
         sections.append(sec)
@@ -794,10 +955,8 @@ def measure(path: Path, report: dict, parts: dict | None = None) -> dict:
         "key_sure": whole["sure"],
         "parts": {name: str(p) for name, p in parts.items()},
         **({"silent_parts": absent} if absent else {}),
-        "named_by": "the voice and drums parts, level and repetition"
-        if sung is not None
-        else "level and repetition"
-        + ("; the song has no voice" if "vocals" in absent else "; with the parts from daw separate --split stems, the voice and drums too"),
+        "named_by": named_by(sung is not None, worded is not None, "vocals" in absent, path),
+        **({"words_file": heard_words["file"]} if heard_words is not None else {}),
         "form": " ".join(s["label"] for s in sections),
         "sections": sections,
         "key_changes": changes,
@@ -806,6 +965,29 @@ def measure(path: Path, report: dict, parts: dict | None = None) -> dict:
         "_matrix": s,
         "_bars": bars,
     }
+
+
+def starts_by(a, sung, hooked, required, edges) -> str:
+    if a == 0:
+        return "the song's start"
+    if a in required:
+        return "the voice coming in"
+    if a in edges:
+        return "the hook coming in" if hooked[a] else "the hook ending"
+    return "a change"
+
+
+def named_by(parts: bool, worded: bool, voiceless: bool, path: Path) -> str:
+    if worded:
+        return "the words that come back, the voice and drums parts, level and repetition"
+    if parts:
+        return (
+            "the voice and drums parts, level and repetition; "
+            f"daw transcribe {path.name} --words names the chorus by the words that come back"
+        )
+    if voiceless:
+        return "level and repetition; the song has no voice"
+    return "level and repetition; with the parts from daw separate --split stems, the voice and drums too"
 
 
 def picture(found: dict, output: Path) -> str:

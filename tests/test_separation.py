@@ -360,6 +360,7 @@ def test_the_manifest_names_each_models_source_license_and_hash():
         "python": "cpython-3.12-macos-aarch64-none",
         "also": [
             "audioread", "beat-this==1.1.0", "torchaudio==2.11.1", "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3",
+            "mlx-whisper==0.4.3",
         ],
         "without_dependencies": ["basic-pitch==0.3.0"],
         "data": manifest["runner"]["data"],

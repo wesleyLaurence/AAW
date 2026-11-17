@@ -197,7 +197,7 @@ def test_setup_adds_what_an_older_environment_lacks(tmp_path, monkeypatch):
     status = separation.install_runtime()
     assert status["added_now"] and status["versions"]["beat_this"] == "1.1.0"
     assert ran == [
-        ["/bin/uv", "pip", "install", "--python", str(python), "audioread", "beat-this==1.1.0", "torchaudio==2.11.1", "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3"],
+        ["/bin/uv", "pip", "install", "--python", str(python), "audioread", "beat-this==1.1.0", "torchaudio==2.11.1", "mido==1.3.3", "mir-eval==0.8.2", "pretty-midi==0.2.11.post0", "resampy==0.4.3", "mlx-whisper==0.4.3"],
         ["/bin/uv", "pip", "install", "--python", str(python), "--no-deps", "basic-pitch==0.3.0"],
     ]
     assert json.loads(separation.runtime_file().read_text())["versions"]["beat_this"] == "1.1.0"
@@ -215,7 +215,7 @@ def test_the_model_is_listed_and_unavailable_says_what_to_run(tmp_path, monkeypa
     assert file["url"].startswith("https://cloud.cp.jku.at/") and file["mirrors"][0].startswith("https://huggingface.co/")
     assert file["bytes"] == 81058141 and len(file["sha256"]) == 64
     listed = separation.listing()["analysis"]
-    assert [(m["name"], m["mb"], m["here"]) for m in listed] == [("beat-this-final0", 81, False), ("basic-pitch", 0, False)]
+    assert [(m["name"], m["mb"], m["here"]) for m in listed] == [("beat-this-final0", 81, False), ("basic-pitch", 0, False), ("whisper-large-v3-turbo", 1614, False), ("whisper-large-v3", 3084, False)]
     assert listed[0]["get"] == "daw separate setup --models beat-this-final0"
     assert "daw separate setup" in downbeats.unavailable()
     python = separation.env_python()

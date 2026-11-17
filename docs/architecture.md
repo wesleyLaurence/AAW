@@ -204,7 +204,17 @@ Python, in `src/agent_daw`:
   letters by bar-for-bar matches, the same, varied or moved some semitones,
   names from the voice and drums parts `daw separate` made, each section's
   key and the key changes, and checks of the beat's division, the map's pulse
-  and the bars by the drums (with `drums.py`); see [form.md](features/form.md).
+  and the bars by the drums (with `drums.py`); with the words kept beside the
+  voice part, the hook's sections found and joined and the chorus named by its
+  words; see [form.md](features/form.md).
+- `words.py`: `daw transcribe --words`, the words a voice sings: Whisper
+  large-v3-turbo over the voice part in the separation environment through
+  `words_runner.py` (mlx-whisper, seeded), the loud stretches with no words
+  and the unsure lines read again on 6–10 s clips by large-v3, the surer
+  reading kept, lines, the lines that come back, all placed on the beat map;
+  what was heard kept beside the voice as `NAME.words.json`; see
+  [words.md](features/words.md). `separation.py` links a model file the
+  Hugging Face cache holds with the manifest's hash instead of downloading it.
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
   beats; `swing.py`: where the second note of each pair of eighths or
