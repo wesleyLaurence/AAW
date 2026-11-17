@@ -282,7 +282,9 @@ def parser():
         "and named, each one's key, the key changes, and checks of the meter and the bars",
         description="daw samples form FILE compares every bar of a song with every other on its chords and "
         "sound and gives its sections. With the parts daw separate --split stems made of the song beside it, "
-        "the voice and drums name the sections and the drums check the bars (daw describe beats.form).",
+        "the voice and drums name the sections and the drums check the bars; with the words daw transcribe "
+        "--words kept beside the voice, the hook's sections are found and the chorus named by its words "
+        "(daw describe beats.form).",
     )
     form.add_argument("sample")
     form.add_argument(
@@ -540,7 +542,8 @@ def parser():
         "transcribe",
         help="The notes a part plays, heard from its audio by Basic Pitch on this Mac, each with "
         "its bar and beat on the song's beat map, velocity and confidence; as note text, a MIDI "
-        "file or a note clip in a song (daw describe beats.transcribe)",
+        "file or a note clip in a song (daw describe beats.transcribe); with --words the words a voice "
+        "sings by bar, heard by Whisper (daw describe beats.words)",
         description="daw transcribe SOURCE hears the notes of a part, best a stem from daw separate, "
         "and places them on the song's beat map. SOURCE is a file or a library sample, or with "
         "--project one of the song's samples by ID or an audio clip as tracks.T.audio.N.",
@@ -587,6 +590,21 @@ def parser():
         "--as-played",
         action="store_true",
         help="With --drums, write one clip of every hit as played instead of grooves looped and fills",
+    )
+    transcribe.add_argument(
+        "--words",
+        action="store_true",
+        help="The words a voice sings, heard by Whisper on this Mac, as lines with each word's bar and beat; "
+        "the vocals part daw separate made of a song is read in its place, the doubtful stretches read again "
+        "on short clips by the larger model, and the lines that come back listed (daw describe beats.words)",
+    )
+    transcribe.add_argument("--language", default="en", help="With --words, the language sung, a code such as en or es; '' lets Whisper tell (en)")
+    transcribe.add_argument("--lyrics", type=Path, metavar="OUT.txt", help="With --words, write the lines as text, a line each with its time and bar")
+    transcribe.add_argument(
+        "--once", action="store_true", help="With --words, do not read the doubtful stretches again: one reading, faster"
+    )
+    transcribe.add_argument(
+        "--again", action="store_true", help="With --words, hear the voice again rather than use the words kept beside it"
     )
     return p
 
@@ -948,6 +966,45 @@ def transcribe(a):
         raise ValueError("--at goes with --project, and is a beat of 0 or more")
     if a.as_played and not a.drums:
         raise ValueError("--as-played goes with --drums")
+    worded = [f for f, v in (("--lyrics", a.lyrics), ("--once", a.once), ("--again", a.again)) if v]
+    if worded and not a.words:
+        raise ValueError(f"{', '.join(worded)} {'goes' if len(worded) == 1 else 'go'} with --words")
+    if a.words:
+        from . import words
+
+        given = [
+            flag
+            for flag, value in (
+                ("--drums", a.drums),
+                ("--line", a.line),
+                ("--range", a.note_range),
+                ("--min-confidence", a.min_confidence),
+                ("--quantize", a.quantize),
+                ("--midi", a.midi),
+                ("--text", a.text),
+                ("--grid", a.grid),
+                ("--track", a.track),
+                ("--at", a.at is not None),
+            )
+            if value
+        ]
+        if given:
+            raise ValueError(
+                f"{', '.join(given)} {'is' if len(given) == 1 else 'are'} for notes; --words lists lines and their words, "
+                "and --lyrics writes them as text"
+            )
+        return words.transcribe_words(
+            a.source,
+            song=a.project,
+            beats_of=a.beats,
+            near=None if a.near is None else beats.seconds(a.near),
+            window=a.window,
+            lyrics_out=a.lyrics,
+            language=a.language,
+            again=not a.once,
+            fresh=a.again,
+            db=getattr(a, "db", None) or library.default_db(),
+        )
     if a.drums:
         from . import drums
 

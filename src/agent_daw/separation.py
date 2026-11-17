@@ -170,6 +170,7 @@ PROBE = (
     "print(json.dumps({'audio_separator': version('audio-separator'), 'torch': torch.__version__, "
     "'onnxruntime': version('onnxruntime'), 'beat_this': version('beat-this'), "
     "'basic_pitch': version('basic-pitch'), "
+    "'mlx_whisper': version('mlx-whisper'), "
     "'torchaudio': version('torchaudio'), 'python': platform.python_version(), "
     "'machine': platform.machine(), 'mps': torch.backends.mps.is_available()}))"
 )
@@ -381,9 +382,51 @@ def get_model(model: dict) -> dict:
     return {**status, "downloaded": fetched, "kept": kept}
 
 
+def huggingface_cache() -> Path:
+    """Where the Hugging Face hub keeps what it downloads, as huggingface_hub finds it."""
+    if os.environ.get("HF_HUB_CACHE"):
+        return Path(os.environ["HF_HUB_CACHE"])
+    home = os.environ.get("HF_HOME") or str(Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "huggingface")
+    return Path(home) / "hub"
+
+
+def from_cache(spec: dict) -> bool:
+    """Links a file the Hugging Face cache already holds into the models folder, or
+    copies it where a link cannot be made, when it is the manifest's size and hash;
+    whether it did."""
+    hub = spec.get("huggingface")
+    if not hub:
+        return False
+    found = (
+        huggingface_cache()
+        / f"models--{hub['repo'].replace('/', '--')}"
+        / "snapshots"
+        / hub["revision"]
+        / hub["file"]
+    )
+    try:
+        found = found.resolve(strict=True)
+    except OSError:
+        return False
+    if found.stat().st_size != spec["bytes"] or digest(found) != spec["sha256"]:
+        return False
+    target = models_dir() / spec["name"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.unlink(missing_ok=True)
+    try:
+        os.link(found, target)
+    except OSError:
+        shutil.copyfile(found, target)
+    note(f"{spec['name']} was already in the Hugging Face cache at {found.parent}; linked, not downloaded")
+    return True
+
+
 def fetch(spec: dict):
     """Downloads one file from where its author put it, or else from a mirror; only a
-    file of the manifest's size and hash is kept, wherever it came from."""
+    file of the manifest's size and hash is kept, wherever it came from. A file the
+    Hugging Face cache holds already is taken from there."""
+    if from_cache(spec):
+        return
     failures = []
     for url in [spec["url"], *spec.get("mirrors", [])]:
         note(f"Downloading {spec['name']} ({mb(spec['bytes'])} MB) from {url}")

@@ -4,8 +4,9 @@ Status: item 1, notes from audio, built November 16, 2026 as `daw transcribe`
 ([transcribe.md](transcribe.md), D183); item 2, the drum groove, built the
 same day as `daw transcribe --drums` ([drum-groove.md](drum-groove.md), D185);
 item 3, the form, built the same day as `daw samples form`
-([form.md](form.md), D186); items 4–7 proposed, now Next items 1–4 of the
-backlog, in that order (D182).
+([form.md](form.md), D186); item 4, words by bar, built the same day as
+`daw transcribe --words` ([words.md](words.md), D187); items 5–7 proposed,
+now Next items 1–3 of the backlog, in that order (D182).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
@@ -51,10 +52,10 @@ different is what was missed.
 | Loudness, spectrum, width, resonances, overlap, translation | `daw listen` | Third octaves and seven bands; a stem's own |
 | Swing | `daw samples beats` | By eighths and sixteenths |
 | A mix against a reference | `daw reference` | Loudness, tone, width and contour by section |
-| Words | the skill, through mlx-whisper | Not a command |
+| Words | `daw transcribe --words` | Whisper by bar and beat, the doubtful stretches read again by the larger model, the hook; names the form's chorus (D187); not heard |
 | Notes of a part | `daw transcribe` | Basic Pitch on a stem, on the beat map (D183); not heard |
 | The drum groove as notes | `daw transcribe --drums` | Kick, snare and hat as notes, grooves and fills, a drum track (D185); not heard |
-| Form: which bars are the same | `daw samples form` | Sections labelled and named, keys and key changes, the meter and bars checked (D186); not heard |
+| Form: which bars are the same | `daw samples form` | Sections labelled and named, keys and key changes, the meter and bars checked (D186); the chorus named and the hook's sections found by the words (D187); not heard |
 | Effects: reverb, delay, sidechain, compression | — | Missing |
 | One analysis file | — | The skill writes markdown by hand |
 
@@ -131,6 +132,9 @@ Done when: a pop song's sections come out as the person would name them, a
 repeated chorus marked as the same, and a song with a key change says where.
 
 ### 4. Words by bar: a command
+
+Built November 16, 2026; [words.md](words.md) is its reference. What follows
+is the design as proposed.
 
 The skill runs mlx-whisper today; this makes it a command over the vocal stem:
 each word with its time, bar and beat, the lines, and the doubtful ones read

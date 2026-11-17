@@ -4,8 +4,9 @@ Item 3 of the reverse-engineer track (D182, D186): which bars of a finished
 song are the same music, its sections labelled A, B, A′ and named by what they
 hold, each section's key and where the key changes, with the meter and the bars
 checked. `daw samples form` does it, from the song's audio and, when `daw
-separate` has taken the song apart, its voice and drums. Everything is measured
-on the Mac with numpy; no model is installed.
+separate` has taken the song apart, its voice and drums, and when `daw
+transcribe --words` has heard the voice, its words (D187). Everything is
+measured on the Mac with numpy; no model is installed.
 
 ## Command
 
@@ -70,6 +71,49 @@ folder, the one beside the file's `samples` folder, and lists them in `parts`.
    section to the end over eight bars or more. A key that comes and goes with
    the chords is not called a change.
 
+## With the words
+
+Added November 16, 2026 with [words by bar](words.md) (D187). When `daw
+transcribe --words` has kept the words beside the vocals part, the form reads
+them; it never runs Whisper itself. Without them, with a voice part, `named_by`
+says the command that gets them.
+
+1. **The hook.** The line sung most often, three times or more, compared as
+   the words command compares lines, is the hook. So are the lines that come
+   back sung around it: those more than half of whose times are within two
+   bars of the hook's. A line that comes back elsewhere, a pre-chorus's, is not
+   the hook. Taking in the lines around them in turn spread the hook into a
+   pop record's verse, so only lines near the most-sung line count. A bar
+   sings the hook from the bar one of its lines starts in to the bar it ends
+   in. `hook` is the share of a section's bars that sing it.
+2. **Where the hook comes in and ends.** A run of four bars or more that sing
+   the hook, a bar's rest within it bridged, starts a section at each end
+   where the music does not already start one within four bars (`starts_by`
+   is `the hook coming in` or `the hook ending`). Over a rap's one beat the
+   music changes nowhere near the hook. Where it changes, its bar line stands:
+   taking the hook's first moved a pop record's choruses a bar late.
+3. **The hook is one part.** Sections half or more of whose bars sing the hook
+   take one letter, whichever letters the music gave them, and the sections
+   that shared a letter with them keep theirs. A rap verse and its hook over
+   one beat were one letter by their music, and its two hooks two letters.
+   A section joined is like the letter's first section: the same, or varied,
+   A′, when its chords or sound do not match.
+4. **The chorus comes back with its words.** For each letter of two sections
+   or more, `same_words` is the mean over its pairs of sections of the share
+   of the shorter section's words found, in order, in the longer, so a chorus
+   cut short is still its chorus. Of the sung letters at 0.5 or more, the
+   loudest is the chorus, or what it always leads into. A verse comes back
+   with new words: the verse is the earliest other sung letter under 0.5.
+   Each section also gives `words`, its first eight.
+
+On a rap record (111 BPM map) the music alone gave intro sections, a
+32-bar letter twice named chorus and two outros. With the words it gave verse
+bars 11–31, chorus 32–43 (same words 0.82), verse 44–63 (0.04) and chorus
+64–75. On a pop record the music alone had it right: verse, pre-chorus,
+chorus three times. The words kept that and named the chorus by its words,
+1.0 against the verses' 0.43, which share a refrain line. Nobody has listened
+along.
+
 ## Checks
 
 - **The meter.** `meter` and `odd_bars` as the map has them. `beat.divides_in`
@@ -98,8 +142,9 @@ folder, the one beside the file's `samples` folder, and lists them in `parts`.
 when any, `named_by`, `form` (the labels in order), `sections` (each with
 `label`, `name`, `bars`, `count`, `seconds`, `until_seconds`, `key`,
 `key_confidence`, `key_sure`, `level_db`, `starts_by`, `change`, `sung` and
-`drums` with the parts, and `like` with `section`, `how`, `semitones`,
-`chords` and `sound` for a letter heard before), `key_changes` (`section`,
+`drums` with the parts, `words`, `hook` and `same_words` with the words, and
+`like` with `section`, `how`, `semitones`, `chords` and `sound` for a letter
+heard before), `words_file` with the words, `key_changes` (`section`,
 `bar`, `seconds`, `semitones`, `from`, `to`, `heard_as`), `checks` and
 `warnings`; `picture` with `--picture`. `daw describe beats.form` is the
 contract.
@@ -149,9 +194,10 @@ Nobody has heard a section played against its label.
 
 ## Limits
 
-- The names are guesses from where the voice and drums are and how loud a
-  section is; the words, a later command, will say which section is the
-  chorus more surely, by its lines repeating.
+- Without the words, the names are guesses from where the voice and drums are
+  and how loud a section is. With them, the chorus is the music that comes
+  back with its words. A song whose chorus Whisper hears differently each
+  time, or whose verses share a refrain, can still be misnamed.
 - Sections start on bar lines the map has; a map whose bars are wrong gives
   sections as wrong, which the checks warn of. A boundary can be a bar off,
   and a long verse can come out in two or more sections of their own letters.
