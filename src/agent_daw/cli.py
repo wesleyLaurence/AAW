@@ -292,6 +292,36 @@ def parser():
         type=Path,
         help="Draw the bar matrix, light where two bars are alike, with the sections marked, as PNG",
     )
+    sound = ss.add_parser(
+        "sound",
+        help="How a song and each part daw separate made of it sound: tone as an equalizer, width by "
+        "section, pumping with the kick, reverb and delay tails, and the marks of compression",
+        description="daw samples sound FILE reads a song and, with the parts daw separate --split stems "
+        "made of it beside it, each part, for what a producer sets when mixing it: each one's tone against "
+        "flat as the bands of an eq effect, its width whole and by the form's sections, its level dipping "
+        "with the kick as a sidechain ducks it, the decay of its tails as a reverb's and their repeats as a "
+        "delay's, and its crest and level range. With --against, a part made in a session is compared: the "
+        "eq that turns it into the song's part and how far apart their dynamics are (daw describe beats.sound).",
+    )
+    sound.add_argument("sample")
+    sound.add_argument(
+        "--part",
+        action="append",
+        metavar="NAME",
+        help="Only this part, mix for the song itself; repeat for more",
+    )
+    sound.add_argument(
+        "--against",
+        type=Path,
+        metavar="FILE",
+        help="A part made in a session, such as a render's stem: the eq that turns it into each part read, "
+        "and their dynamics' differences",
+    )
+    sound.add_argument(
+        "--picture",
+        type=Path,
+        help="Draw each part's tone with its eq, its pumping and its tails, as PNG",
+    )
     hits = ss.add_parser(
         "hits",
         help="A song's or a stem's hits in one band, each with its time, bar and beat, "
@@ -780,6 +810,8 @@ def execute(a):
         return song_hits(a, source)
     if a.action == "form":
         return song_form(a, source)
+    if a.action == "sound":
+        return song_sound(a, source)
     if a.action == "inspect":
         return library.inspect(source)
     if a.action == "audition":
@@ -905,6 +937,55 @@ def song_form(a, source):
     found.pop("_bars")
     found["source"] = "measured from decoded audio on the beat map; estimates, not ground truth"
     return found
+
+
+def song_sound(a, source):
+    """How a song and each of its parts sound, on its beat map and its form."""
+    from . import form, library, sound
+
+    if a.picture is not None and a.picture.suffix.lower() != ".png":
+        raise ValueError("picture is a .png file")
+    if a.against is not None and not a.against.is_file():
+        raise ValueError(f"No file {a.against}")
+    try:
+        report = library.beat_map(a.db, source)
+        problem = None
+    except ValueError as error:
+        report, problem = None, str(error)
+    parts = form.parts_of(source)
+    sections, sections_why = None, None
+    if report is not None:
+        try:
+            found = form.measure(source, report, parts)
+            sections = found["sections"]
+        except ValueError as error:
+            sections_why = str(error)
+    out = {
+        "path": str(source),
+        "tempo_bpm": None if report is None else report["tempo"]["bpm"],
+        **({"no_beat_map": problem} if problem else {}),
+        "parts": {name: str(path) for name, path in parts.items()},
+        "sections": None
+        if sections is None
+        else [
+            {k: s[k] for k in ("label", "name", "bars", "seconds", "until_seconds") if k in s}
+            for s in sections
+        ],
+        **({"no_sections": sections_why} if sections_why else {}),
+    }
+    if not parts:
+        out["no_parts"] = (
+            "Only the song is read: daw separate PROJECT FILE --split stems makes its parts, "
+            "and each part's sound is read beside it"
+        )
+    out.update(sound.measure(source, report, parts, sections, a.part, a.against))
+    if a.picture is not None:
+        out["picture"] = sound.picture(out, a.picture)
+    out["source"] = (
+        "measured from decoded audio and the parts daw separate made; estimates, checked on renders "
+        "with known settings, not ground truth"
+    )
+    return out
 
 
 def song_hits(a, source):

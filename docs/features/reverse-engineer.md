@@ -5,8 +5,10 @@ Status: item 1, notes from audio, built November 16, 2026 as `daw transcribe`
 same day as `daw transcribe --drums` ([drum-groove.md](drum-groove.md), D185);
 item 3, the form, built the same day as `daw samples form`
 ([form.md](form.md), D186); item 4, words by bar, built the same day as
-`daw transcribe --words` ([words.md](words.md), D187); items 5–7 proposed,
-now Next items 1–3 of the backlog, in that order (D182).
+`daw transcribe --words` ([words.md](words.md), D187); item 5, sound and
+effects, built November 17, 2026 as `daw samples sound` ([sound.md](sound.md),
+D188); items 6–7 proposed, now Next items 1–2 of the backlog, in that order
+(D182).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
@@ -56,7 +58,7 @@ different is what was missed.
 | Notes of a part | `daw transcribe` | Basic Pitch on a stem, on the beat map (D183); not heard |
 | The drum groove as notes | `daw transcribe --drums` | Kick, snare and hat as notes, grooves and fills, a drum track (D185); not heard |
 | Form: which bars are the same | `daw samples form` | Sections labelled and named, keys and key changes, the meter and bars checked (D186); the chorus named and the hook's sections found by the words (D187); not heard |
-| Effects: reverb, delay, sidechain, compression | — | Missing |
+| Sound and effects | `daw samples sound` | Each part's tone as an eq, width by section, pumping with the kick, reverb decay and delay repeats from its tails, dynamics; checked on renders with known settings (D188); not heard |
 | One analysis file | — | The skill writes markdown by hand |
 
 The Fourier analysis the person asked about is already under most of this:
@@ -144,6 +146,9 @@ Done when: a verse's lines come out with their bars, as the skill gets them now,
 from one command.
 
 ### 5. Sound and effects from audio
+
+Built November 17, 2026; [sound.md](sound.md) is its reference. What follows
+is the design as proposed.
 
 Estimates, each with what it was read from:
 
