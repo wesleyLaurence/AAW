@@ -215,6 +215,13 @@ Python, in `src/agent_daw`:
   what was heard kept beside the voice as `NAME.words.json`; see
   [words.md](features/words.md). `separation.py` links a model file the
   Hugging Face cache holds with the manifest's hash instead of downloading it.
+- `sound.py`: `daw samples sound`, how a song and each part `daw separate`
+  made of it sound: the tone's third octaves fitted with the engine's `eq`
+  biquads (a table of bands, then least squares), the width by band and by the
+  form's sections, the level around the kick for a sidechain's dip and
+  release, against the mix's over the kick's body, the tails where a part stops
+  for a reverb's decay and a delay's repeats, and the dynamics; see
+  [sound.md](features/sound.md).
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
   beats; `swing.py`: where the second note of each pair of eighths or
