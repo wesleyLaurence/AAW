@@ -238,7 +238,7 @@ enum Top {
         schema: bool,
     },
     /// The sample library: folders, search by name and by what a sample
-    /// measures as, analyze, like, a song's beats, chords and hits, inspect,
+    /// measures as, analyze, like, a song's beats, chords, hits and form, inspect,
     /// audition, import (daw describe samples).
     #[command(disable_help_flag = true)]
     Samples(Forwarded),

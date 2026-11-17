@@ -3,7 +3,9 @@
 Status: item 1, notes from audio, built November 16, 2026 as `daw transcribe`
 ([transcribe.md](transcribe.md), D183); item 2, the drum groove, built the
 same day as `daw transcribe --drums` ([drum-groove.md](drum-groove.md), D185);
-items 3–7 proposed, now Next items 1–5 of the backlog, in that order (D182).
+item 3, the form, built the same day as `daw samples form`
+([form.md](form.md), D186); items 4–7 proposed, now Next items 1–4 of the
+backlog, in that order (D182).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
@@ -42,8 +44,8 @@ different is what was missed.
 | Measure | Command | State |
 |---|---|---|
 | Tempo, beats, bars, bars of another length | `daw samples beats` | The downbeat model leads (D181); not heard |
-| Meter | `daw samples beats` | The model's usual bar; untried on a real 3/4 or 6/8 song |
-| Key, chords by bar and beat | `daw samples chords` | Built (D177); key changes read by eye from the chords |
+| Meter | `daw samples beats`, checked by `daw samples form` | The model's usual bar; a real 3/4 held, a real 6/8 did not, and the form's check says so (D186) |
+| Key, chords by bar and beat | `daw samples chords` | Built (D177); key changes by section from `daw samples form` (D186) |
 | Drum hits in a band | `daw samples hits` | Kick, snare, hats by bar and sixteenth (D180) |
 | Stems | `daw separate` | Vocals, drums, bass, other; six with guitar and piano |
 | Loudness, spectrum, width, resonances, overlap, translation | `daw listen` | Third octaves and seven bands; a stem's own |
@@ -52,7 +54,7 @@ different is what was missed.
 | Words | the skill, through mlx-whisper | Not a command |
 | Notes of a part | `daw transcribe` | Basic Pitch on a stem, on the beat map (D183); not heard |
 | The drum groove as notes | `daw transcribe --drums` | Kick, snare and hat as notes, grooves and fills, a drum track (D185); not heard |
-| Form: which bars are the same | — | Missing |
+| Form: which bars are the same | `daw samples form` | Sections labelled and named, keys and key changes, the meter and bars checked (D186); not heard |
 | Effects: reverb, delay, sidechain, compression | — | Missing |
 | One analysis file | — | The skill writes markdown by hand |
 
@@ -113,6 +115,9 @@ Done when: the clip played on a kit with `daw samples like` sounds near the
 stem's, under the original, in time.
 
 ### 3. The form: which bars are the same
+
+Built November 16, 2026; [form.md](form.md) is its reference. What follows
+is the design as proposed.
 
 Each bar is compared with every other on its chords, its notes where item 1
 gives them, and its sound in bands: a self-similarity matrix of the bars. Runs

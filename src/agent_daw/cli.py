@@ -276,6 +276,20 @@ def parser():
     chords.add_argument(
         "--window", type=float, default=10.0, help="Seconds either side of --near"
     )
+    form = ss.add_parser(
+        "form",
+        help="A whole song's sections on its beat map: which bars are the same music, labelled A, B, A′ "
+        "and named, each one's key, the key changes, and checks of the meter and the bars",
+        description="daw samples form FILE compares every bar of a song with every other on its chords and "
+        "sound and gives its sections. With the parts daw separate --split stems made of the song beside it, "
+        "the voice and drums name the sections and the drums check the bars (daw describe beats.form).",
+    )
+    form.add_argument("sample")
+    form.add_argument(
+        "--picture",
+        type=Path,
+        help="Draw the bar matrix, light where two bars are alike, with the sections marked, as PNG",
+    )
     hits = ss.add_parser(
         "hits",
         help="A song's or a stem's hits in one band, each with its time, bar and beat, "
@@ -746,6 +760,8 @@ def execute(a):
         return song_chords(a, source)
     if a.action == "hits":
         return song_hits(a, source)
+    if a.action == "form":
+        return song_form(a, source)
     if a.action == "inspect":
         return library.inspect(source)
     if a.action == "audition":
@@ -855,6 +871,22 @@ def song_chords(a, source):
         "beat_map": report.get("map"),
         "source": "measured from decoded audio (mono sum) on the beat map; estimates, not ground truth",
     }
+
+
+def song_form(a, source):
+    """A song's sections on its beat map, with its parts when daw separate made them."""
+    from . import form, library
+
+    if a.picture is not None and a.picture.suffix.lower() != ".png":
+        raise ValueError("picture is a .png file")
+    report = library.beat_map(a.db, source)
+    found = form.measure(source, report, form.parts_of(source))
+    if a.picture is not None:
+        found["picture"] = form.picture(found, a.picture)
+    found.pop("_matrix")
+    found.pop("_bars")
+    found["source"] = "measured from decoded audio on the beat map; estimates, not ground truth"
+    return found
 
 
 def song_hits(a, source):

@@ -40,6 +40,7 @@ Built:
 | [a song's hits](features/song-hits.md) | `daw samples hits`: a song's or a stem's hits in one band, a kick's or a snare's, by bar and beat, with a picture |
 | [notes from audio](features/transcribe.md) | `daw transcribe`: the notes a part plays, heard by Basic Pitch and placed on the beat map, as note text, a MIDI file or a note clip |
 | [the drum groove as notes](features/drum-groove.md) | `daw transcribe --drums`: a drum part's kicks, snares and hats, the grooves its bars share and its fills, written as a drum track of its own hits |
+| [the form of a song](features/form.md) | `daw samples form`: which bars are the same music, sections labelled and named, the key changes, and checks of the meter and the bars, with a picture |
 | [key, chords and swing](features/key-chords-swing.md) | a sample's and a song's key, chords by beat and swing; `daw key`, a song's key and the transpose that puts a loop in it |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
 | [audio clips in the app](features/audio-clips-in-app.md) | A file dropped on the timeline, a clip moved, trimmed, faded and split there, the song growing to hold it, and the beat map on its waveform |
