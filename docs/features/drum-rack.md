@@ -1,7 +1,7 @@
 # The Drum Rack, and patterns gone
 
 Status: stage 1, the Drum Rack, implemented November 17, 2026 (D189), in [#187](https://github.com/wesleyLaurence/AAW/pull/187).
-Stage 2, patterns converted, implemented November 18, 2026 (D190).
+Stage 2, patterns converted, implemented November 18, 2026 (D190), in [#188](https://github.com/wesleyLaurence/AAW/pull/188).
 Stage 3 is proposed, Next item 1.
 
 ## What
