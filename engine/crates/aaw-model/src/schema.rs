@@ -317,12 +317,18 @@ pub struct Pad {
     pub source_bpm: Option<f64>,
     pub stretch: Stretch,
     pub mono: bool,
+    /// Whether the pad's notes play nothing.
+    pub mute: bool,
+    /// Whether the pad is soloed: when any pad of a sampler is, only those
+    /// play.
+    pub solo: bool,
 }
 
 impl Pad {
     const FIELDS: &'static [&'static str] = &[
         "sample", "mode", "gain_db", "pan", "transpose", "start_seconds", "end_seconds",
-        "attack_ms", "release_ms", "choke_group", "reverse", "source_bpm", "stretch", "mono",
+        "attack_ms", "release_ms", "choke_group", "reverse", "source_bpm", "stretch", "mono", "mute",
+        "solo",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Pad> {
@@ -362,6 +368,8 @@ impl Pad {
             })
         });
         let mono = f.opt(ctx, "mono", false, v::boolean);
+        let mute = f.opt(ctx, "mute", false, v::boolean);
+        let solo = f.opt(ctx, "solo", false, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -381,6 +389,8 @@ impl Pad {
             source_bpm: source_bpm?,
             stretch: stretch?,
             mono: mono?,
+            mute: mute?,
+            solo: solo?,
         };
         if pad.end_seconds.is_some_and(|end| end <= pad.start_seconds) {
             ctx.value_error("end_seconds must exceed start_seconds");
@@ -405,6 +415,8 @@ impl Pad {
         o.opt("source_bpm", self.source_bpm.map(Value::Float));
         o.str("stretch", self.stretch.as_str(), "repitch");
         o.bool("mono", self.mono, false);
+        o.bool("mute", self.mute, false);
+        o.bool("solo", self.solo, false);
         o.done()
     }
 }
@@ -1161,21 +1173,25 @@ impl NoteMap {
 pub struct Sampler {
     pub pads: IndexMap<String, Pad>,
     pub map: Vec<NoteMap>,
+    /// Whether the app draws it as a Drum Rack, a pad a key, rather than as
+    /// the Sampler; it changes nothing that plays.
+    pub drum_rack: bool,
 }
 
 impl Sampler {
-    const FIELDS: &'static [&'static str] = &["pads", "map"];
+    const FIELDS: &'static [&'static str] = &["drum_rack", "pads", "map"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Sampler> {
         let f = Fields::of(ctx, x, "Sampler", Self::FIELDS)?;
         let before = ctx.count();
         let pads = f.opt(ctx, "pads", IndexMap::new(), |c, x| v::str_dict(c, x, Pad::validate));
         let map = f.opt(ctx, "map", Vec::new(), |c, x| v::list(c, x, 0, Some(128), NoteMap::validate));
+        let drum_rack = f.opt(ctx, "drum_rack", false, v::boolean);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
         }
-        Some(Sampler { pads: pads?, map: map? })
+        Some(Sampler { pads: pads?, map: map?, drum_rack: drum_rack? })
     }
 
     /// The map entry a note plays, if any.
@@ -1183,8 +1199,15 @@ impl Sampler {
         self.map.iter().find(|m| m.contains(pitch))
     }
 
+    /// Whether a pad sounds: not muted, and soloed when any pad is.
+    pub fn sounds(&self, pad: &str) -> bool {
+        let Some(p) = self.pads.get(pad) else { return false };
+        !p.mute && (p.solo || !self.pads.values().any(|p| p.solo))
+    }
+
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
+        o.bool("drum_rack", self.drum_rack, false);
         o.coll("pads", str_map(&self.pads, saved, Pad::dump));
         o.coll("map", list(&self.map, saved, NoteMap::dump));
         o.done()

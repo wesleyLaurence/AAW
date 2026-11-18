@@ -171,4 +171,30 @@ final class PianoRollLayoutTests: XCTestCase {
         XCTAssertNil(PianoRollLayout.beats("1/0"))
         XCTAssertNil(PianoRollLayout.beats("x"))
     }
+
+    func testADrumRacksClipFoldsToItsPadsKeysAndNotesNoPadPlays() {
+        XCTAssertEqual(PianoRollLayout.folding(keys: [36, 38, 42], notes: [38, 40, 200]), [42, 40, 38, 36])
+        var l = PianoRollLayout()
+        l.size = CGSize(width: PianoRollLayout.gutter + 640, height: PianoRollLayout.rulerHeight + 198)
+        l.folded = [42, 38, 36]
+        l.fit(pitches: [36])
+        XCTAssertEqual(l.rowCount, 3)
+        XCTAssertEqual(l.scroll.y, 0)
+        XCTAssertEqual(l.row, PianoRollLayout.maxRow, "three rows fill the height as far as a row goes")
+        XCTAssertEqual(l.y(42), PianoRollLayout.rulerHeight, "the highest key at the top")
+        XCTAssertEqual(l.y(36), PianoRollLayout.rulerHeight + 56)
+        XCTAssertEqual(l.pitch(atY: PianoRollLayout.rulerHeight + 30), 38)
+        XCTAssertEqual(l.pitch(atY: 2000), 36, "below the last row, the last")
+        XCTAssertEqual(l.visiblePitches, [42, 38, 36])
+        // A drag goes a row at a time, as far as the rows go.
+        XCTAssertEqual(l.pitch(36, movedRows: 1), 38)
+        XCTAssertEqual(l.pitch(36, movedRows: 5), 42)
+        XCTAssertEqual(l.pitch(42, movedRows: -1), 38)
+        XCTAssertEqual(l.index(40), 1, "a key with no row falls where it would be")
+        // Unfolded, a semitone a row, every key.
+        l.folded = nil
+        XCTAssertEqual(l.rowCount, 128)
+        XCTAssertEqual(l.pitch(60, movedRows: 2), 62)
+        XCTAssertEqual(l.pitch(127, movedRows: 2), 127)
+    }
 }

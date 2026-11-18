@@ -2622,7 +2622,105 @@ fn the_sampler_device_is_loaded_shaped_and_given_a_root_note() {
     }}}));
     let u = update(&seen);
     assert_eq!(u.arrangement.tracks[2].sampler, None);
+    let rack = u.arrangement.tracks[2].drum_rack.clone().expect("a kit of several pads is a Drum Rack");
+    assert_eq!(rack.keys.iter().map(|k| (k.note, k.pad.pad.clone().unwrap())).collect::<Vec<_>>(), [(Some(36), "kick".to_string()), (Some(38), "snare".into())]);
     assert!(song.edit(Edit::SamplerSet { track, field: "attack_ms".into(), value: number(1.0) }, None).is_err());
+    song.close();
+}
+
+#[test]
+fn a_drum_rack_takes_samples_on_its_keys_and_sets_each_pad() {
+    let (dir, path, song, seen, _waves) = open_with_waveforms();
+    transport(&seen);
+    // A read without the refs `get` gives list items.
+    let get = |path_in: &str| {
+        let mut j = agent(&path, json!({"op": "get", "path": path_in}));
+        fn strip(j: &mut Json) {
+            match j {
+                Json::Object(o) => {
+                    o.remove("ref");
+                    o.values_mut().for_each(strip);
+                }
+                Json::Array(a) => a.iter_mut().for_each(strip),
+                _ => {}
+            }
+        }
+        strip(&mut j);
+        j
+    };
+    std::fs::create_dir(dir.path().join("samples")).unwrap();
+    let tone: Vec<[f32; 2]> = (0..24_000).map(|i| [(i as f32 * 0.0575).sin() * 0.3; 2]).collect();
+    for name in ["kick", "snare", "hat"] {
+        std::fs::write(dir.path().join(format!("samples/{name}.wav")), float_wav_bytes(&tone, 48000)).unwrap();
+    }
+    let asset = |name: &str| aaw_ffi::library::Asset {
+        sha256: aaw_model::digest(&dir.path().join(format!("samples/{name}.wav"))).unwrap(),
+        path: format!("samples/{name}.wav"),
+        source: format!("/library/{name}.wav"),
+        source_sha256: None,
+        root_note: Some("A3".into()),
+    };
+    // Dragged from the browser, the Drum Rack is empty, and not the Sampler.
+    let track = song.edit(Edit::DrumRackAdd { track: None }, None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Add Drum Rack track");
+    let t = &u.arrangement.tracks[2];
+    assert_eq!((t.id.as_str(), t.sampler.clone(), t.drum_rack.clone().map(|r| r.keys.len())), ("drums-1", None, Some(0)));
+
+    // A sample dropped on a key is a pad that key plays as it is.
+    song.edit(Edit::DrumPadLoad { track, note: 36, asset: asset("kick"), name: "Kick".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Load kick onto C2 of the Drum Rack on drums-1");
+    let rack = u.arrangement.tracks[2].drum_rack.clone().unwrap();
+    assert_eq!((rack.keys[0].note, rack.keys[0].pitched, rack.keys[0].pad.pad.as_deref(), rack.keys[0].pad.root), (Some(36), false, Some("kick"), None));
+    assert_eq!(rack.keys[0].pad.path, "samples/kick.wav");
+    song.edit(Edit::DrumPadLoad { track, note: 38, asset: asset("snare"), name: "Snare".into() }, None).unwrap();
+    update(&seen);
+    assert_eq!(
+        get("tracks.drums-1.instrument.sampler.map"),
+        json!([{"notes": 36, "pad": "kick"}, {"notes": 38, "pad": "snare"}])
+    );
+
+    // Each pad's fields, its mute and solo too.
+    song.edit(Edit::DrumPadSet { track, pad: "kick".into(), field: "gain_db".into(), value: number(-3.0) }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].drum_rack.as_ref().unwrap().keys[0].gain_db, -3.0);
+    song.edit(Edit::DrumPadSet { track, pad: "snare".into(), field: "solo".into(), value: FieldValue::Flag { value: true } }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Set the solo of snare on drums-1");
+    let rack = u.arrangement.tracks[2].drum_rack.clone().unwrap();
+    assert!(rack.soloed && rack.keys[1].solo && rack.keys[1].sounds && !rack.keys[0].sounds);
+    song.edit(Edit::DrumPadSet { track, pad: "snare".into(), field: "choke_group".into(), value: text(" hats ") }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::DrumPadSet { track, pad: "kick".into(), field: "mute".into(), value: FieldValue::Flag { value: true } }, None).unwrap();
+    update(&seen);
+    assert_eq!(
+        get("tracks.drums-1.instrument.sampler.pads"),
+        json!({"kick": {"sample": "kick", "gain_db": -3.0, "mute": true}, "snare": {"sample": "snare", "choke_group": "hats", "solo": true}})
+    );
+    song.edit(Edit::DrumPadSet { track, pad: "snare".into(), field: "choke_group".into(), value: text("") }, None).unwrap();
+    update(&seen);
+    assert!(song.edit(Edit::DrumPadSet { track, pad: "snare".into(), field: "sample".into(), value: text("kick") }, None).is_err());
+    assert!(song.edit(Edit::DrumPadSet { track, pad: "tom".into(), field: "gain_db".into(), value: number(0.0) }, None).is_err());
+    song.edit(Edit::DrumPadRoot { track, pad: "snare".into(), note: Some("D2".into()) }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Set the root note of snare to D2");
+
+    // Another sample on a key with a pad takes its place, renamed, and keeps
+    // its settings.
+    song.edit(Edit::DrumPadLoad { track, note: 36, asset: asset("hat"), name: "Hat".into() }, None).unwrap();
+    update(&seen);
+    assert_eq!(
+        get("tracks.drums-1.instrument.sampler"),
+        json!({"drum_rack": true, "pads": {"snare": {"sample": "snare", "solo": true}, "hat": {"sample": "hat", "gain_db": -3.0, "mute": true}}, "map": [{"notes": 36, "pad": "hat"}, {"notes": 38, "pad": "snare"}]})
+    );
+    song.undo().unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[2].drum_rack.as_ref().unwrap().keys[0].pad.pad.as_deref(), Some("kick"));
+
+    // A pad taken off goes with its keys; the notes stay.
+    song.edit(Edit::DrumPadRemove { track, pad: "kick".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Remove kick from the Drum Rack on drums-1");
+    assert_eq!(u.arrangement.tracks[2].drum_rack.as_ref().unwrap().keys.len(), 1);
+    assert_eq!(get("tracks.drums-1.instrument.sampler.map"), json!([{"notes": 38, "pad": "snare"}]));
     song.close();
 }
 

@@ -53,7 +53,8 @@ struct DetailView: View {
                     AudioClipInfo(context: context, tempo: model.arrangement.tempo)
                 } else if let context = model.noteContext {
                     NotePane(model: model, context: context, color: model.color(of: context.track.key),
-                             playing: model.transport.playing, selected: model.selectedNotes, grid: model.noteGrid)
+                             playing: model.transport.playing, selected: model.selectedNotes, grid: model.noteGrid,
+                             unfolded: model.unfoldedDrums.contains(context.track.key))
                 } else if let context = model.patternContext {
                     PatternPane(model: model, context: context, color: model.color(of: context.track.key),
                                 playing: model.transport.playing, selected: model.selectedEvents)
@@ -501,6 +502,7 @@ private struct InsertionDrop: DropDelegate {
 
 /// An effect type or a choice as a person reads it: `low_shelf` is "Low shelf".
 func readable(_ name: String) -> String {
+    if name == Browser.drumRackKind { return "Drum Rack" }
     let words = name.replacingOccurrences(of: "_", with: " ")
     return words.prefix(1).uppercased() + words.dropFirst()
 }
@@ -813,8 +815,8 @@ private struct MidiEffectPanel: View {
 
 /// A MIDI track's instrument, first in its chain, and the mark that takes it
 /// off. A sampler that is empty or one pad on every note is the Sampler
-/// device, drawn by `SamplerPanel`; the Synth is drawn by `SynthPanel`; a
-/// sampler of several pads lists them and the notes that play each. The
+/// device, drawn by `SamplerPanel`; a Drum Rack, a sampler flagged so or of
+/// several pads, by `DrumRackPanel`; the Synth by `SynthPanel`. The
 /// notes are kept whatever is done here. A sample dropped here, or on the
 /// track's header, becomes the instrument's, in place of the one it had.
 private struct InstrumentPanel: View {
@@ -828,6 +830,7 @@ private struct InstrumentPanel: View {
     }
 
     private var title: String {
+        if track.drumRack != nil { return "Drum Rack" }
         if track.sampler != nil { return "Sampler" }
         if let synth = track.synth { return synth.patch.map { "Synth · \($0)" } ?? "Synth" }
         if let plugin = track.plugin { return plugin.name ?? "Plugin" }
@@ -835,6 +838,7 @@ private struct InstrumentPanel: View {
     }
 
     private var width: CGFloat {
+        if track.drumRack != nil { return DrumRackPanel.width }
         if track.sampler != nil { return SamplerPanel.width }
         if let synth = track.synth { return SynthPanel.width(synth) }
         return 216
@@ -853,7 +857,7 @@ private struct InstrumentPanel: View {
                 SynthHeader(model: model, track: track, synth: synth)
             } else {
                 HStack(spacing: 5) {
-                    Image(systemName: track.plugin == nil ? "pianokeys" : "puzzlepiece.extension").foregroundStyle(.secondary)
+                    Image(systemName: track.plugin != nil ? "puzzlepiece.extension" : track.drumRack != nil ? "square.grid.4x3.fill" : "pianokeys").foregroundStyle(.secondary)
                     Text(title).font(.system(size: 11, weight: .semibold)).lineLimit(1)
                     Spacer(minLength: 2)
                     if track.instrument != nil {
@@ -871,7 +875,9 @@ private struct InstrumentPanel: View {
                 .frame(height: 24)
                 .background(Color(nsColor: Theme.gray(0.24)))
             }
-            if let sampler = track.sampler {
+            if let rack = track.drumRack {
+                DrumRackPanel(model: model, track: track, rack: rack)
+            } else if let sampler = track.sampler {
                 SamplerPanel(model: model, track: track, sampler: sampler)
             } else if let synth = track.synth {
                 SynthPanel(model: model, track: track, synth: synth, height: model.detailHeight - 16 - 24)

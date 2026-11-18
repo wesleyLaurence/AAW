@@ -537,7 +537,13 @@ length and the seconds played; the file's peaks are sent as an audio clip's
 are. The edits load a sample into it as one batch, carrying the pad's
 settings over, set a field of its pad, and set or take off the sample's root
 note as typed, `C4` or `60`; `library_pitch` measures a file's pitch for it
-through `daw samples analyze`. A track's audio clips are in the arrangement beside its pattern clips, each to
+through `daw samples analyze`. Any other sampler is a Drum Rack
+(`DrumRackView`): each key that plays a pad, low to high, then each pad no key
+plays, with the pad as a `SamplerView` and its level, pan, mute, solo, whether
+it sounds, choke group, mono, source tempo and stretch. Its edits attach an
+empty one, load a sample onto a key as a pad named after it, in place of the
+key's pad with that pad's settings, set any field of a pad, set its sample's
+root note, and take a pad off with its keys. A track's audio clips are in the arrangement beside its pattern clips, each to
 where it leaves and with how long it sounds after that, and so are the files
 they play (`files.rs`): each file's length, and the beats of the map `daw
 samples beats` left beside it, when that map is of the sample the song lists.

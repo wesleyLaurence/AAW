@@ -675,7 +675,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 + lanesHeight(.track(track.key), track.lanes)
             // A MIDI track's chain starts with its instrument, one of the
             // person's own by the name its manifest gives it.
-            let chain = track.midi ? ([track.plugin?.name ?? track.instrument ?? "no instrument"] + [Self.chain(track.effects)]).filter { !$0.isEmpty }.joined(separator: " · ")
+            let chain = track.midi ? ([track.plugin?.name ?? (track.drumRack != nil ? "drum rack" : nil) ?? track.instrument ?? "no instrument"] + [Self.chain(track.effects)]).filter { !$0.isEmpty }.joined(separator: " · ")
                 : Self.chain(track.effects)
             // A frozen track says so before its devices, which its file plays for.
             let detail = frozen ? (["frozen"] + [chain]).filter { !$0.isEmpty }.joined(separator: " · ") : chain

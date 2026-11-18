@@ -75,11 +75,15 @@ fn written(midi: &Midi) -> Vec<Played> {
 
 /// What a sampler plays for notes: the pad each note's map entry names, at the
 /// note's pitch when the entry is pitched, released at the note-off when the
-/// pad is gated. A note no entry maps plays nothing.
+/// pad is gated. A note no entry maps plays nothing, nor one whose pad is
+/// muted, or not soloed while another pad is.
 pub fn sampler_hits(sampler: &Sampler, notes: &[NoteOn], track: usize, track_id: &str) -> Vec<Trigger> {
     let mut triggers = Vec::new();
     for n in notes {
         let Some(entry) = sampler.entry(n.pitch) else { continue };
+        if !sampler.sounds(&entry.pad) {
+            continue;
+        }
         let pad = &sampler.pads[&entry.pad];
         triggers.push(Trigger {
             start: n.start,
@@ -216,7 +220,7 @@ pub fn sounded(p: &Project) -> Vec<Sounded> {
                     }
                     Some(Instrument::Sampler(sampler)) => {
                         let Some(entry) = sampler.entry(n.pitch) else { continue };
-                        let Some(pad) = sampler.pads.get(&entry.pad) else { continue };
+                        let Some(pad) = sampler.pads.get(&entry.pad).filter(|_| sampler.sounds(&entry.pad)) else { continue };
                         if entry.pitched {
                             push(at, until, Some(n.pitch as f64 + pad.transpose), String::new());
                         } else {
@@ -316,5 +320,36 @@ tracks:
         // A sampler's drum entry is a hit, a pitched one a note, and a note
         // nothing maps is silent.
         assert_eq!(of("keys"), vec![(4.0, 5.0, None, "hit 3".into()), (5.0, 6.0, Some(55.0), String::new())]);
+    }
+
+    #[test]
+    fn a_drum_racks_muted_pad_is_silent_and_a_soloed_one_plays_alone() {
+        let song = |pads: &str| {
+            crate::parse(&format!(
+                r#"
+session: {{tempo: 120, length_beats: 4, sample_rate: 48000}}
+samples: {{kick: {{path: kick.wav}}, snare: {{path: snare.wav}}, hat: {{path: hat.wav}}}}
+tracks:
+  - id: drums
+    type: midi
+    instrument:
+      sampler:
+        drum_rack: true
+        pads: {pads}
+        map: [{{notes: C2, pad: kick}}, {{notes: D2, pad: snare}}, {{notes: F#2, pad: hat}}]
+    clips: [{{id: beat, length_beats: 4, notes: [{{pitch: C2, duration: 1}}, {{pitch: D2, at: 1, duration: 1}}, {{pitch: F#2, at: 2, duration: 1}}]}}]
+"#
+            ))
+            .unwrap()
+        };
+        let pads = |p: &crate::Project| -> Vec<String> { schedule(p).into_iter().map(|t| t.pad).collect() };
+        let all = "{kick: {sample: kick}, snare: {sample: snare}, hat: {sample: hat}}";
+        assert_eq!(pads(&song(all)), ["kick", "snare", "hat"]);
+        let muted = "{kick: {sample: kick, mute: true}, snare: {sample: snare}, hat: {sample: hat}}";
+        assert_eq!(pads(&song(muted)), ["snare", "hat"]);
+        let soloed = "{kick: {sample: kick}, snare: {sample: snare, solo: true}, hat: {sample: hat, solo: true, mute: true}}";
+        assert_eq!(pads(&song(soloed)), ["snare"], "mute wins over solo");
+        let p = song(soloed);
+        assert!(p.tracks[0].midi.as_ref().unwrap().sampler().unwrap().drum_rack);
     }
 }

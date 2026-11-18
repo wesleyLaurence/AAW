@@ -1898,6 +1898,16 @@
           "default": false,
           "title": "Mono",
           "type": "boolean"
+        },
+        "mute": {
+          "default": false,
+          "title": "Mute",
+          "type": "boolean"
+        },
+        "solo": {
+          "default": false,
+          "title": "Solo",
+          "type": "boolean"
         }
       },
       "required": [
@@ -2325,6 +2335,11 @@
     "Sampler": {
       "additionalProperties": false,
       "properties": {
+        "drum_rack": {
+          "default": false,
+          "title": "Drum Rack",
+          "type": "boolean"
+        },
         "pads": {
           "additionalProperties": {
             "$ref": "#/$defs/Pad"

@@ -306,6 +306,9 @@ pub struct TrackView {
     pub map: Vec<NoteMapView>,
     /// The instrument as the Sampler device, when it is one.
     pub sampler: Option<SamplerView>,
+    /// The instrument as a Drum Rack, when it is one: a sampler flagged
+    /// `drum_rack`, or of several pads.
+    pub drum_rack: Option<DrumRackView>,
     /// The instrument as the Synth, when it is one.
     pub synth: Option<SynthView>,
     /// The instrument when it is one of the person's own, drawn as a device
@@ -451,6 +454,40 @@ pub struct SamplerView {
     /// file's when the pad has none of its own.
     pub start_seconds: f64,
     pub end_seconds: f64,
+}
+
+/// A MIDI track's sampler drawn as a Drum Rack: a pad a key.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DrumRackView {
+    /// Each key that plays a pad, low to high, and after them each pad no
+    /// key plays.
+    pub keys: Vec<DrumKeyView>,
+    /// Whether any pad is soloed.
+    pub soloed: bool,
+}
+
+/// A key of a Drum Rack and its pad, drawn as the Sampler draws its one
+/// pad.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct DrumKeyView {
+    /// The key, or None for a pad that no key plays.
+    pub note: Option<i32>,
+    /// Whether the key plays its pad at its pitch, as part of a range.
+    pub pitched: bool,
+    pub pad: SamplerView,
+    pub gain_db: f64,
+    pub pan: f64,
+    pub mute: bool,
+    pub solo: bool,
+    /// Whether the pad sounds: not muted, and soloed if any pad is.
+    pub sounds: bool,
+    /// The fields no Sampler panel shows: the group whose pads cut each
+    /// other off, whether it plays as one channel, and the tempo its file
+    /// was made at, which a key plays it at the song's, by `stretch`.
+    pub choke_group: Option<String>,
+    pub mono: bool,
+    pub source_bpm: Option<f64>,
+    pub stretch: String,
 }
 
 /// Notes a sampler's pad plays: from `low` to `high`, inclusive, at their
@@ -1371,6 +1408,9 @@ pub fn root(p: &Project, sample: &str) -> Option<i32> {
 /// pitch, and None for a sampler of several pads or no sampler at all.
 pub fn device(track: &aaw_model::Track) -> Option<Option<(&str, &aaw_model::Pad)>> {
     let s = track.midi.as_ref()?.sampler()?;
+    if s.drum_rack {
+        return None;
+    }
     if s.pads.is_empty() && s.map.is_empty() {
         return Some(None);
     }
@@ -1406,7 +1446,6 @@ fn pad_value(pad: &aaw_model::Pad, name: &str) -> Option<Value> {
 /// identity, when the file can be read.
 fn sampler(p: &Project, track: &aaw_model::Track, file: Option<(u64, f64)>) -> Option<SamplerView> {
     let loaded = device(track)?;
-    let (identity, seconds) = file.unwrap_or((0, 0.0));
     let Some((name, pad)) = loaded else {
         return Some(SamplerView {
             pad: None,
@@ -1421,6 +1460,48 @@ fn sampler(p: &Project, track: &aaw_model::Track, file: Option<(u64, f64)>) -> O
             end_seconds: 0.0,
         });
     };
+    Some(pad_view(p, name, pad, file))
+}
+
+/// A track's sampler as a Drum Rack, when it is not the Sampler device:
+/// each key a pad, with `file` finding each pad's sample.
+fn drum_rack(p: &Project, track: &aaw_model::Track, file: &mut impl FnMut(&str) -> Option<(u64, f64)>) -> Option<DrumRackView> {
+    let s = track.midi.as_ref()?.sampler()?;
+    if device(track).is_some() {
+        return None;
+    }
+    let mut keys = Vec::new();
+    let view = |name: &str, note: Option<i32>, pitched: bool, file: &mut dyn FnMut(&str) -> Option<(u64, f64)>| {
+        let pad = &s.pads[name];
+        DrumKeyView {
+            note,
+            pitched,
+            pad: pad_view(p, name, pad, file(&pad.sample)),
+            gain_db: pad.gain_db,
+            pan: pad.pan,
+            mute: pad.mute,
+            solo: pad.solo,
+            sounds: s.sounds(name),
+            choke_group: pad.choke_group.clone(),
+            mono: pad.mono,
+            source_bpm: pad.source_bpm,
+            stretch: pad.stretch.as_str().to_string(),
+        }
+    };
+    for note in 0..128i64 {
+        let Some(entry) = s.entry(note).filter(|e| s.pads.contains_key(&e.pad)) else { continue };
+        keys.push(view(&entry.pad, Some(note as i32), entry.pitched, &mut *file));
+    }
+    for name in s.pads.keys().filter(|n| !s.map.iter().any(|m| &m.pad == *n)) {
+        keys.push(view(name, None, false, &mut *file));
+    }
+    Some(DrumRackView { keys, soloed: s.pads.values().any(|p| p.solo) })
+}
+
+/// A pad as the Sampler's panel draws it, with its file at `seconds` long
+/// and `file` its identity, when the file can be read.
+fn pad_view(p: &Project, name: &str, pad: &aaw_model::Pad, file: Option<(u64, f64)>) -> SamplerView {
+    let (identity, seconds) = file.unwrap_or((0, 0.0));
     let fields = describe::PAD
         .iter()
         .map(|f| {
@@ -1453,7 +1534,7 @@ fn sampler(p: &Project, track: &aaw_model::Track, file: Option<(u64, f64)>) -> O
         })
         .collect();
     let root_text = p.samples.get(&pad.sample).and_then(|s| s.root_note.clone()).unwrap_or_default();
-    Some(SamplerView {
+    SamplerView {
         pad: Some(name.to_string()),
         sample: Some(pad.sample.clone()),
         path: p.samples.get(&pad.sample).map(|s| s.path.clone()).unwrap_or_default(),
@@ -1468,7 +1549,7 @@ fn sampler(p: &Project, track: &aaw_model::Track, file: Option<(u64, f64)>) -> O
             Some(end) => end.min(seconds),
             None => seconds,
         },
-    })
+    }
 }
 
 /// A step's level as a row writes it: `.`, a digit or `x`.
@@ -1602,6 +1683,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 midi_effects: midi_effects(t.midi.as_ref(), node.map(|n| items(n, "midi_effects")).unwrap_or(&[]), &devices_in(directory)),
                 instrument: t.midi.as_ref().and_then(|m| m.instrument.as_ref()).map(|i| i.kind().to_string()),
                 sampler: sampler(p, t, device_sample(t).and_then(&mut file)),
+                drum_rack: drum_rack(p, t, &mut file),
                 synth,
                 plugin,
                 map: t
