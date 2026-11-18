@@ -25,9 +25,7 @@ pub fn write_sample(dir: &Path, name: &str, frames: Vec<[f32; 2]>, rate: u32) {
     std::fs::write(dir.join(name), float_wav_bytes(&frames, rate)).unwrap();
 }
 
-/// A song with overlapping voices, gates, a choke group, repitching and a
-/// source at another rate.
-pub fn write_song(dir: &Path) -> PathBuf {
+fn write_voices(dir: &Path) {
     let tone: Vec<[f32; 2]> = (0..24000)
         .map(|i| {
             let x = (2.0 * PI * 220.0 * i as f64 / 48000.0).sin() * 0.3;
@@ -37,6 +35,21 @@ pub fn write_song(dir: &Path) -> PathBuf {
     write_sample(dir, "tone.wav", tone, 48000);
     let n = noise(8820, 7);
     write_sample(dir, "hit.wav", n.iter().map(|x| [*x as f32, *x as f32]).collect(), 44100);
+}
+
+/// A song with overlapping voices, gates, a choke group, repitching and a
+/// source at another rate.
+pub fn write_song(dir: &Path) -> PathBuf {
+    write_voices(dir);
+    let path = dir.join("song.yaml");
+    std::fs::write(&path, format!("{HEAD}tracks:\n{BASS}{HATS}{LAYER}")).unwrap();
+    path
+}
+
+/// The same song as a song made before note clips wrote it: pads played by
+/// patterns, as `aaw_model::convert` turns into `write_song`'s.
+pub fn write_pattern_song(dir: &Path) -> PathBuf {
+    write_voices(dir);
     let yaml = r#"
 session: {tempo: 128, length_beats: 16, end_fade_ms: 50}
 samples:
@@ -71,10 +84,135 @@ tracks:
     path
 }
 
+const HEAD: &str = "
+session: {tempo: 128, length_beats: 16, end_fade_ms: 50}
+samples:
+  tone: {path: tone.wav, root_note: A3}
+  hit: {path: hit.wav}
+";
+
+/// The bass line looped four times, gated.
+const BASS: &str = "- id: bass
+  type: midi
+  pan: -0.4
+  instrument:
+    sampler:
+      pads: {t: {sample: tone, mode: gate, attack_ms: 2, release_ms: 30}}
+      map: [{notes: [0, 127], pad: t, pitched: true}]
+  clips:
+  - id: line
+    length_beats: 16
+    loop_beats: 4
+    notes:
+    - {pitch: C3, duration: 1}
+    - {pitch: E3, at: 1/3, duration: 2/3}
+    - {pitch: G2, at: 2, duration: 1.5}
+";
+
+/// Swung hats, choked by one another, looped three times.
+const HATS: &str = "- id: hats
+  type: midi
+  gain_db: -4
+  instrument:
+    sampler:
+      drum_rack: true
+      pads: {h: {sample: hit, choke_group: hh, pan: 0.3, transpose: 3, release_ms: 5}}
+      map: [{notes: 42, pad: h}]
+  clips:
+  - id: hats
+    at: 1
+    length_beats: 12
+    loop_beats: 4
+    notes:
+    - {pitch: 42, at: 0, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 1/2, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 1, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 13/10, duration: 1/4, velocity: 38}
+    - {pitch: 42, at: 3/2, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 2, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 23/10, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 14/5, duration: 1/4, velocity: 90}
+    - {pitch: 42, at: 3, duration: 1/4, velocity: 114}
+    - {pitch: 42, at: 7/2, duration: 1/4, velocity: 90}
+";
+
+/// The bass line again from beat 4, reversed and mono.
+const LAYER: &str = "- id: layer
+  type: midi
+  instrument:
+    sampler:
+      pads: {t: {sample: tone, mono: true, reverse: true}}
+      map: [{notes: [0, 127], pad: t, pitched: true}]
+  clips:
+  - id: layer
+    at: 4
+    length_beats: 8
+    loop_beats: 4
+    notes:
+    - {pitch: C3, duration: 1}
+    - {pitch: E3, at: 1/3, duration: 2/3}
+    - {pitch: G2, at: 2, duration: 1.5}
+";
+
+
 /// The same tracks with every effect: inserts with latency, a sidechain,
 /// pre- and post-fader sends, returns, lanes of each kind and a master limiter.
 pub fn write_mix_song(dir: &Path) -> PathBuf {
     let path = write_song(dir);
+    let tracks = [(HATS, HATS_MIX), (BASS, BASS_MIX), (LAYER, LAYER_MIX)].map(|(t, mix)| format!("{t}{mix}")).concat();
+    std::fs::write(&path, format!("{HEAD}tracks:\n{tracks}{MIX}")).unwrap();
+    path
+}
+
+const HATS_MIX: &str = "  effects:
+  - {type: filter, mode: highpass, cutoff_hz: 300}
+  sends: [{to: room, gain_db: -8}, {to: echo, gain_db: -12, pre_fader: true}]
+";
+
+const BASS_MIX: &str = "  effects:
+  - type: eq
+    id: tone
+    bands: [{shape: bell, freq_hz: 400, gain_db: -3}, {shape: high_shelf, freq_hz: 5000, gain_db: 2}]
+  - {type: compressor, threshold_db: -30, ratio: 8, attack_ms: 1, release_ms: 150, sidechain: hats}
+  - {type: filter, id: sweep, mode: lowpass, cutoff_hz: 8000, slope_db_per_octave: 24}
+  - {type: limiter, ceiling_db: -3, lookahead_ms: 1.5}
+  sends: [{to: room, gain_db: -10}]
+  automation:
+  - param: effects.sweep.cutoff_hz
+    points: [{at: 2, value: 300}, {at: 6, value: 9000}]
+  - param: gain_db
+    points: [{at: 0, value: -3}, {at: 8, value: -9, curve: hold}, {at: 12, value: -2}]
+  - param: sends.room.gain_db
+    points: [{at: 4, value: -30}, {at: 4, value: -6}]
+";
+
+const LAYER_MIX: &str = "  effects:
+  - {type: compressor, threshold_db: -24, sidechain: bass}
+";
+
+/// The returns and the master of the mix song.
+const MIX: &str = "returns:
+- id: room
+  effects:
+  - {type: reverb, decay_seconds: 0.6, predelay_ms: 5}
+  - {type: compressor, threshold_db: -30, sidechain: hats}
+  automation:
+  - param: pan
+    points: [{at: 0, value: -0.5}, {at: 16, value: 0.5}]
+- id: echo
+  gain_db: -3
+  effects:
+  - {type: delay, time_beats: 3/4, feedback_percent: 40, highcut_hz: 4000, ping_pong: true}
+master:
+  effects: [{type: limiter, ceiling_db: -1}]
+  automation:
+  - param: gain_db
+    points: [{at: 14, value: -6}, {at: 16, value: -20}]
+";
+
+/// The mix song as a song made before note clips wrote it.
+pub fn write_pattern_mix_song(dir: &Path) -> PathBuf {
+    let path = write_pattern_song(dir);
     let voices = std::fs::read_to_string(&path).unwrap();
     let (head, _) = voices.split_once("tracks:").unwrap();
     let mix = r#"tracks:
@@ -133,6 +271,11 @@ master:
 
 pub fn song(dir: &Path) -> Arc<Program> {
     program(&write_song(dir), |_| {})
+}
+
+/// A MIDI track's note clips, by the track's place.
+pub fn note_clips(p: &mut aaw_model::Project, track: usize) -> &mut Vec<aaw_model::NoteClip> {
+    &mut p.tracks[track].midi.as_mut().expect("a MIDI track").clips
 }
 
 /// The song at `path` compiled after `edit` changes it.

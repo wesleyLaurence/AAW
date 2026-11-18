@@ -202,13 +202,13 @@ fn a_compile_redoes_only_what_an_edit_changed() {
     }
     assert_ne!(base.structure, mixed.structure, "an effect was removed");
     // A clip edit redoes that track alone, and shares its prepared audio.
-    let moved = compile(&|p| p.tracks[0].clips[0].at = aaw_model::Beat::int(2));
+    let moved = compile(&|p| common::note_clips(p, 0)[0].at = aaw_model::Beat::int(2));
     assert!(!Arc::ptr_eq(&base.tracks[0].voices, &moved.tracks[0].voices));
     assert!(Arc::ptr_eq(&base.tracks[1].voices, &moved.tracks[1].voices));
     assert!(Arc::ptr_eq(&base.tracks[0].voices[0].audio, &moved.tracks[0].voices[0].audio));
     assert_eq!(base.structure, moved.structure);
     // A compile from nothing plays the same.
-    let fresh = program(&path, |p| p.tracks[0].clips[0].at = aaw_model::Beat::int(2));
+    let fresh = program(&path, |p| common::note_clips(p, 0)[0].at = aaw_model::Beat::int(2));
     assert_eq!(render(&moved, 0, &mut || 512), render(&fresh, 0, &mut || 512));
 }
 
