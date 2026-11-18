@@ -157,7 +157,7 @@ fn instruments_are_attached_replaced_and_removed_and_the_notes_stay() {
 fn pads_and_the_map_are_edited_on_a_midi_tracks_sampler() {
     let (_d, mut s) = open(false);
     phrase(&mut s);
-    // A pad added to a track with no instrument makes a sampler for it.
+    // A pad added to a track with no instrument makes a Drum Rack for it.
     edit(&mut s, json!({"op": "pad.add", "track": "keys", "pad": "k", "sample": "hit"})).unwrap();
     edit(&mut s, json!({"op": "pad.add", "track": "keys", "pad": "t", "sample": "tone", "mode": "gate"})).unwrap();
     let r = edit(&mut s, json!({"op": "instrument.map", "track": "keys", "notes": "C2", "pad": "k"})).unwrap();
@@ -167,6 +167,7 @@ fn pads_and_the_map_are_edited_on_a_midi_tracks_sampler() {
     assert_eq!(
         get(&s, "tracks.keys.instrument"),
         json!({"sampler": {
+            "drum_rack": true,
             "pads": {"k": {"sample": "hit"}, "t": {"sample": "tone", "mode": "gate", "release_ms": 40.0}},
             "map": [{"notes": 36, "pad": "k"}, {"notes": [48, 72], "pad": "t", "pitched": true}],
         }})

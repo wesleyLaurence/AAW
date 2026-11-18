@@ -8,13 +8,20 @@ import UniformTypeIdentifiers
 /// note, and a control for each of the pad's fields, drawn from the fields as
 /// an effect's panel is. Empty, it says to drop a sample on it. A sample
 /// dropped on it, from the browser or the Finder, loads it in place of the
-/// one it had and keeps the pad's settings.
+/// one it had and keeps the pad's settings. Given a Drum Rack's key, it is
+/// that key's pad, with the fields no Sampler shows beside the rest, and its
+/// level and pan left to the Drum Rack's list.
 struct SamplerPanel: View {
     let model: SongModel
     let track: TrackView
     let sampler: SamplerView
+    /// The Drum Rack's key whose pad this is, or nil for the Sampler.
+    var drum: DrumKeyView? = nil
 
     static let width: CGFloat = 448
+    /// The width of a Drum Rack's pad, with its column of the fields no
+    /// Sampler shows.
+    static let drumWidth: CGFloat = 448 + 168
     /// The waveform's size, at the panel's left.
     static let waveWidth: CGFloat = 204
     static let waveHeight: CGFloat = 92
@@ -26,7 +33,12 @@ struct SamplerPanel: View {
     }
 
     private func set(_ name: String) -> (FieldValue) -> Edit {
-        { [key = track.key] value in .samplerSet(track: key, field: name, value: value) }
+        Self.setter(track: track.key, pad: drum == nil ? nil : sampler.pad, field: name)
+    }
+
+    /// The edit of a field of the Sampler's pad, or of a Drum Rack's `pad`.
+    static func setter(track: UInt64, pad: String?, field: String) -> (FieldValue) -> Edit {
+        { value in pad.map { .drumPadSet(track: track, pad: $0, field: field, value: value) } ?? .samplerSet(track: track, field: field, value: value) }
     }
 
     /// A field's row: eight of them fit the panel's height.
@@ -41,10 +53,18 @@ struct SamplerPanel: View {
         .frame(height: 18)
     }
 
+    /// What plays the sample, under its waveform.
+    private var played: String {
+        let root = sampler.rootText.isEmpty ? "middle C" : sampler.rootText
+        guard let drum else { return "Played on every key, as it is at \(root)." }
+        guard let note = drum.note else { return "No key plays it." }
+        return drum.pitched ? "Played on \(noteName(midi: note)) at its pitch, from \(root)." : "Played by \(noteName(midi: note)) as it is."
+    }
+
     /// Sets the root note to the pitch `daw samples analyze` measures.
     private func measure() {
         measuring = true
-        model.measureSamplerRoot(track: track.key) { measuring = false }
+        model.measureSamplerRoot(track: track.key, pad: drum == nil ? nil : sampler.pad) { measuring = false }
     }
 
     var body: some View {
@@ -57,7 +77,7 @@ struct SamplerPanel: View {
         } else {
             HStack(alignment: .top, spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    SamplerWave(model: model, track: track.key, sampler: sampler)
+                    SamplerWave(model: model, track: track.key, sampler: sampler, pad: drum == nil ? nil : sampler.pad)
                         .frame(width: Self.waveWidth, height: Self.waveHeight)
                         .help("The part of the file the keys play. Drag a marker to move the start or the end")
                     HStack(spacing: 4) {
@@ -87,7 +107,7 @@ struct SamplerPanel: View {
                     .frame(height: 18)
                     Text(sampler.file == 0
                         ? "\(sampler.sample ?? "") cannot be read."
-                        : "\(sampler.sample ?? ""), \(SamplerLayout.text(sampler.seconds)) s. Played on every key, as it is at \(sampler.rootText.isEmpty ? "middle C" : sampler.rootText).")
+                        : "\(sampler.sample ?? ""), \(SamplerLayout.text(sampler.seconds)) s. \(played)")
                         .font(.system(size: 9))
                         .foregroundStyle(.tertiary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -96,8 +116,9 @@ struct SamplerPanel: View {
                 VStack(spacing: 2) {
                     row("Root") {
                         // Empty, the sample plays as it is at middle C.
-                        TypedValue(text: sampler.rootText, unit: "", clears: true) { [key = track.key] typed in
-                            model.edit(.samplerRoot(track: key, note: typed.isEmpty ? nil : typed))
+                        TypedValue(text: sampler.rootText, unit: "", clears: true) { [key = track.key, pad = drum == nil ? nil : sampler.pad] typed in
+                            let note = typed.isEmpty ? nil : typed
+                            model.edit(pad.map { .drumPadRoot(track: key, pad: $0, note: note) } ?? .samplerRoot(track: key, note: note))
                         } done: {
                             model.onFocus?()
                         }
@@ -122,13 +143,17 @@ struct SamplerPanel: View {
                             .help("One-shot plays the sample to its end; Held stops at the note's end, after the release")
                         }
                     }
-                    ForEach(["transpose", "attack_ms", "release_ms", "gain_db", "pan", "reverse"], id: \.self) { name in
+                    ForEach(drum == nil ? ["transpose", "attack_ms", "release_ms", "gain_db", "pan", "reverse"] : ["transpose", "attack_ms", "release_ms", "reverse"], id: \.self) { name in
                         if let f = field(name) {
                             row(f.label) {
                                 FieldControl(model: model, field: f, edit: set(name))
                             }
                         }
                     }
+                }
+                if let drum {
+                    DrumPadFields(model: model, track: track.key, pad: sampler.pad ?? "", drum: drum)
+                        .frame(width: 160)
                 }
             }
             .padding(.horizontal, 6)
@@ -142,13 +167,15 @@ private struct SamplerWave: NSViewRepresentable {
     let model: SongModel
     let track: UInt64
     let sampler: SamplerView
+    let pad: String?
 
     func makeNSView(context: Context) -> SamplerWaveView {
-        SamplerWaveView(model: model, track: track, sampler: sampler)
+        SamplerWaveView(model: model, track: track, sampler: sampler, pad: pad)
     }
 
     func updateNSView(_ view: SamplerWaveView, context: Context) {
         view.track = track
+        view.pad = pad
         view.sampler = sampler
     }
 }
@@ -161,6 +188,8 @@ private struct SamplerWave: NSViewRepresentable {
 final class SamplerWaveView: NSView {
     private let model: SongModel
     var track: UInt64
+    /// A Drum Rack's pad, or nil for the Sampler's.
+    var pad: String?
     var sampler: SamplerView {
         didSet {
             // The host's values have arrived.
@@ -182,9 +211,10 @@ final class SamplerWaveView: NSView {
     private var shown: (start: Double, end: Double)?
     private var release = 0
 
-    init(model: SongModel, track: UInt64, sampler: SamplerView) {
+    init(model: SongModel, track: UInt64, sampler: SamplerView, pad: String? = nil) {
         self.model = model
         self.track = track
+        self.pad = pad
         self.sampler = sampler
         super.init(frame: .zero)
     }
@@ -243,7 +273,7 @@ final class SamplerWaveView: NSView {
         let at = d.marker == .start ? shown.start : shown.end
         // An end at the file's end is the pad playing to it.
         let value: FieldValue = d.marker == .end && at >= sampler.seconds ? .absent : .number(value: at)
-        model.edit(.samplerSet(track: track, field: field, value: value))
+        model.edit(SamplerPanel.setter(track: track, pad: pad, field: field)(value))
         hold()
     }
 
@@ -311,7 +341,7 @@ final class SamplerWaveView: NSView {
 enum SamplerDrop {
     /// The types a drop on the panel takes: the browser's Sampler, a file
     /// from the Finder, and the browser's sample, which drags as its path.
-    @MainActor static let types = [Browser.deviceType + ".sampler", UTType.fileURL.identifier, UTType.utf8PlainText.identifier, UTType.plainText.identifier]
+    @MainActor static let types = [Browser.deviceType + ".sampler", Browser.deviceType + "." + Browser.drumRackKind, UTType.fileURL.identifier, UTType.utf8PlainText.identifier, UTType.plainText.identifier]
 
     /// Loads what was dropped into the Sampler on `track`, or attaches the
     /// browser's empty Sampler. False for anything else.
@@ -320,6 +350,10 @@ enum SamplerDrop {
         guard let provider = providers.first else { return false }
         if provider.hasItemConformingToTypeIdentifier(Browser.deviceType + ".sampler") {
             model.addBrowserDevice("sampler", to: .track(track.key))
+            return true
+        }
+        if provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + Browser.drumRackKind) {
+            model.addBrowserDevice(Browser.drumRackKind, to: .track(track.key))
             return true
         }
         if let sample = model.browser.dragged {

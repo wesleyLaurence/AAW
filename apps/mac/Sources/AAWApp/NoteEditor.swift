@@ -40,8 +40,9 @@ final class NoteEditor: NSView {
     private var context: NoteContext?
     private var layout = PianoRollLayout()
     private var color = Theme.palette[0]
-    /// The clip the view was last fitted to.
+    /// The clip the view was last fitted to, and whether it was folded.
     private var fitted: UInt64?
+    private var fittedFolded = false
     private var drag: Drag?
     private var held: [UInt64: Held] = [:]
     /// The copies an Option-drag would make, or has made until the host's
@@ -120,8 +121,16 @@ final class NoteEditor: NSView {
         layout.beatUnit = model.arrangement.beatUnit
         layout.grid = PianoRollLayout.beats(model.noteGrid) ?? 0.25
         layout.setSpan(length: context.clip.lengthBeats, notes: notes().map { ($0.at, $0.at + $0.duration) })
-        if fitted != context.clip.key, layout.lanesWidth > 0, layout.lanesHeight > 0 {
+        // A Drum Rack's clip shows only its pads' keys, unless unfolded.
+        if let rack = context.track.drumRack, !model.unfoldedDrums.contains(context.track.key) {
+            layout.folded = PianoRollLayout.folding(keys: rack.keys.compactMap { $0.note.map(Int.init) },
+                                                     notes: notes().map(\.pitch))
+        } else {
+            layout.folded = nil
+        }
+        if fitted != context.clip.key || fittedFolded != (layout.folded != nil), layout.lanesWidth > 0, layout.lanesHeight > 0 {
             fitted = context.clip.key
+            fittedFolded = layout.folded != nil
             layout.fit(pitches: context.clip.notes.map { Int($0.pitch) })
         }
     }
@@ -324,7 +333,10 @@ final class NoteEditor: NSView {
             let by = free ? layout.beats(forDrag: dx) : 0
             // Up and down by notes, as far as every note stays a MIDI note.
             let pitches = notes.map { Int($0.pitch) }
-            let semitones = min(max(layout.semitones(forDrag: dy), -(pitches.min() ?? 0)), 127 - (pitches.max() ?? 127))
+            // Folded, by rows: the grabbed note to the pad a row lands on.
+            let rows = layout.semitones(forDrag: dy)
+            let wanted = layout.folded == nil ? rows : layout.pitch(Int(grabbed.pitch), movedRows: rows) - Int(grabbed.pitch)
+            let semitones = min(max(wanted, -(pitches.min() ?? 0)), 127 - (pitches.max() ?? 127))
             if semitones != was {
                 preview(pitch: Int(grabbed.pitch) + semitones, velocity: Int(grabbed.velocity), duration: grabbed.duration)
             }
@@ -489,11 +501,20 @@ final class NoteEditor: NSView {
 
     /// Moves the selected notes a step earlier or later, or up or down, and
     /// plays the first at its new pitch.
-    private func nudge(steps: Int, semitones: Int) {
+    private func nudge(steps: Int, semitones wanted: Int) {
         let notes = model.selectedNoteViews
         guard !notes.isEmpty else {
             NSSound.beep()
             return
+        }
+        // Folded, up and down go a row, to the next pad.
+        var semitones = wanted
+        if layout.folded != nil, wanted != 0, let first = notes.first {
+            semitones = layout.pitch(Int(first.pitch), movedRows: wanted.signum()) - Int(first.pitch)
+            if semitones == 0 {
+                NSSound.beep()
+                return
+            }
         }
         let pitches = notes.map { Int($0.pitch) }
         guard (pitches.min() ?? 0) + semitones >= 0, (pitches.max() ?? 0) + semitones <= 127 else {
@@ -539,11 +560,7 @@ final class NoteEditor: NSView {
     }
 
     /// The pitches whose rows are in view.
-    private var visiblePitches: ClosedRange<Int> {
-        let high = layout.pitch(atY: PianoRollLayout.rulerHeight)
-        let low = layout.pitch(atY: layout.notesBottom)
-        return low...max(low, high)
-    }
+    private var visiblePitches: [Int] { layout.visiblePitches }
 
     /// Whether the track's instrument plays a note: always, without one, so
     /// that rows are shaded only where an instrument leaves notes silent.
@@ -612,8 +629,8 @@ final class NoteEditor: NSView {
             if !sounds(pitch) {
                 fill(CGRect(x: left, y: y, width: width, height: row), Theme.gray(0, 0.22))
             }
-            if pitch % 12 == 0 {
-                fill(CGRect(x: left, y: (y + row).rounded() - 1, width: width, height: 1), Theme.gray(1, 0.1))
+            if pitch % 12 == 0 || layout.folded != nil {
+                fill(CGRect(x: left, y: (y + row).rounded() - 1, width: width, height: 1), Theme.gray(1, layout.folded == nil ? 0.1 : 0.06))
             }
         }
     }
@@ -754,7 +771,7 @@ final class NoteEditor: NSView {
             if let pad = named {
                 text(pad, in: CGRect(x: 4, y: label.minY, width: gutter - 40, height: 11), font: Self.nameFont, color: Theme.text)
             }
-            if pitch % 12 == 0 || named != nil {
+            if pitch % 12 == 0 || named != nil || layout.folded != nil {
                 text(noteName(midi: Int32(pitch)), in: label, font: Self.numberFont,
                      color: pitch % 12 == 0 ? Theme.text : Theme.dimText, align: .right)
             }
@@ -797,6 +814,8 @@ struct NotePane: NSViewRepresentable {
     /// What the editor draws from the model besides the clip.
     let selected: Set<UInt64>
     let grid: String
+    /// Whether a Drum Rack's clip shows every key rather than its pads'.
+    var unfolded = false
 
     func makeNSView(context: Context) -> NoteEditor {
         NoteEditor(model: model)
@@ -827,7 +846,7 @@ struct NoteClipHeader: View {
     }
 
     private var subtitle: String {
-        switch context.track.plugin?.name ?? context.track.instrument {
+        switch context.track.plugin?.name ?? (context.track.drumRack != nil ? "Drum Rack" : nil) ?? context.track.instrument {
         case nil: "Notes on \(context.track.id), no instrument"
         case let kind?: "Notes on \(context.track.id), by its \(kind)"
         }
@@ -874,6 +893,16 @@ struct NoteClipHeader: View {
                 .toggleStyle(.button)
                 .controlSize(.mini)
                 .help("Preview: hear a note as it is drawn, clicked or moved, and as its key is pressed, one at a time")
+                if context.track.drumRack != nil {
+                    let key = context.track.key
+                    Toggle("Fold", isOn: Binding(
+                        get: { !model.unfoldedDrums.contains(key) },
+                        set: { if $0 { model.unfoldedDrums.remove(key) } else { model.unfoldedDrums.insert(key) } }
+                    ))
+                    .toggleStyle(.button)
+                    .controlSize(.mini)
+                    .help("Show only the keys the Drum Rack's pads are on, named for them; off shows every key")
+                }
             }
             Divider().padding(.vertical, 2)
             let notes = model.selectedNoteViews

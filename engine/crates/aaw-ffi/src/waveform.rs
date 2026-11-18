@@ -131,11 +131,19 @@ impl Worker {
                 })
             })
             .collect();
-        // The files audio clips play, and the ones Sampler devices show.
+        // The files audio clips play, and the ones Sampler devices and
+        // Drum Racks' pads show.
         let mut played: Vec<(u64, PathBuf)> = Vec::new();
         let clips = doc.project.tracks.iter().flat_map(|t| &t.audio).map(|c| c.sample.as_str());
         let samplers = doc.project.tracks.iter().filter_map(crate::view::device_sample);
-        for name in clips.chain(samplers) {
+        let racks = doc
+            .project
+            .tracks
+            .iter()
+            .filter(|t| crate::view::device(t).is_none())
+            .filter_map(|t| t.midi.as_ref()?.sampler())
+            .flat_map(|s| s.pads.values().map(|p| p.sample.as_str()));
+        for name in clips.chain(samplers).chain(racks) {
             let Some(sample) = doc.project.samples.get(name) else { continue };
             let Some(file) = files.of(directory, sample) else { continue };
             if played.iter().all(|(identity, _)| *identity != file.identity) {

@@ -209,6 +209,18 @@ public final class SongModel {
     /// The selected effect of that row, clicked by its title in the device
     /// panel: what Copy, Duplicate and Delete act on while the devices show.
     private(set) var selectedEffect: UInt64?
+    /// The first key each Drum Rack's grid shows, by its track, once moved
+    /// from where it opens; the app's own, not the song's.
+    var drumBanks: [UInt64: Int] = [:]
+    /// The pad selected in each Drum Rack, by its track: a key, or a pad
+    /// that no key plays.
+    var drumSelection: [UInt64: DrumSelection] = [:]
+    /// The tracks whose Drum Rack's clips the piano roll shows unfolded,
+    /// every key, rather than only the pads' keys.
+    var unfoldedDrums: Set<UInt64> = []
+    /// The Drum Rack pad last clicked, while nothing else has been selected
+    /// since: what Delete takes off.
+    private(set) var drumPadInHand: (track: UInt64, pad: String)?
     /// The effect last dragged by its title, of a chain or of a Synth's
     /// patch, set as the drag starts: a strip reads it to say where the
     /// effect would go, since the drag's own data is not readable until it
@@ -877,6 +889,7 @@ public final class SongModel {
     func select(effect: UInt64?) {
         guard effect != selectedEffect else { return }
         selectedEffect = effect
+        if effect != nil { drumPadInHand = nil }
         if effect != nil, !selectedClips.isEmpty || !selectedPoints.isEmpty || selectedMarker != nil {
             selectedClips = []
             selectedPoints = []
@@ -1018,6 +1031,7 @@ public final class SongModel {
         selectedEvents = []
         selectedNotes = []
         selectedEffect = nil
+        drumPadInHand = nil
         if !clips.isEmpty || row != nil {
             selectedPoints = []
             selectedMarker = nil
@@ -1119,7 +1133,10 @@ public final class SongModel {
     /// or notes of the clip being edited, or else the selected clips,
     /// automation points, track or return.
     public func deleteSelection() {
-        if let marker = selectedMarker {
+        if let (track, pad) = drumPadInHand, detail == .devices, showsDetail, deviceChain?.track?.key == track {
+            drumPadInHand = nil
+            edit(.drumPadRemove(track: track, pad: pad))
+        } else if let marker = selectedMarker {
             edit(.markersRemove(markers: [marker]))
         } else if effectInHand, let effect = selectedEffect {
             edit(.effectRemove(effect: effect))
@@ -1444,6 +1461,7 @@ public final class SongModel {
             let edit: Edit
             switch kind {
             case "sampler": edit = .instrumentAdd(track: track)
+            case Browser.drumRackKind: edit = .drumRackAdd(track: track)
             case Browser.instrumentRackKind:
                 guard let rack else { return }
                 edit = .instrumentRackAdd(track: track, rack: rack)
@@ -1602,6 +1620,7 @@ public final class SongModel {
         guard case .track(let key) = selectedRow, let track = arrangement.tracks.first(where: { $0.key == key }) else {
             return "+ adds a new MIDI track with a Sampler of the sample."
         }
+        if track.drumRack != nil { return "+ puts the sample on a free pad of the Drum Rack on \(track.id)." }
         return track.midi
             ? "+ loads the sample into a Sampler on \(track.id)."
             : "+ adds the sample to \(track.id) as an audio clip at the start position."
@@ -1612,10 +1631,82 @@ public final class SongModel {
     /// every note's pitch, as it is at middle C. The file is copied into the
     /// project first, and the pad is named after `name`.
     func loadSampler(path: String, name: String, into track: UInt64) {
+        // A Drum Rack takes it on its selected key while that key is
+        // free, else on the lowest free key from the grid's first.
+        if let t = arrangement.tracks.first(where: { $0.key == track }), let rack = t.drumRack {
+            let taken = Set(rack.keys.compactMap { $0.note.map(Int.init) })
+            var free: Int?
+            if case .key(let note)? = drumSelection[track], !taken.contains(note) { free = note }
+            let bank = drumBank(t)
+            free = free ?? (bank..<128).first { !taken.contains($0) } ?? (0..<bank).reversed().first { !taken.contains($0) }
+            guard let note = free else { return refuse("Every key of the Drum Rack on \(t.id) plays a pad") }
+            loadDrumPad(path: path, name: name, into: track, note: note)
+            select(row: .track(track))
+            detail = .devices
+            return
+        }
         copy(path, note: nil) { model, asset in
             model.edit(.samplerLoad(track: track, asset: asset, name: name)) { [weak model] _ in
                 model?.select(row: .track(track))
                 model?.detail = .devices
+            }
+        }
+    }
+
+    /// Selects a pad of a Drum Rack, clicked on the grid or in its list,
+    /// in place of the clips, points, marker and effect, so that Delete
+    /// takes it off; the track stays selected.
+    func select(drum selection: DrumSelection, on track: TrackView) {
+        drumSelection[track.key] = selection
+        guard let rack = track.drumRack else { return }
+        drumPadInHand = Self.drumKey(selection, in: rack)?.pad.pad.map { (track.key, $0) }
+        if drumPadInHand != nil, !selectedClips.isEmpty || !selectedPoints.isEmpty || selectedMarker != nil || selectedEffect != nil {
+            selectedClips = []
+            selectedPoints = []
+            selectedMarker = nil
+            selectedEffect = nil
+            onSelection?()
+            sendSelection()
+        }
+    }
+
+    /// The selected pad of a Drum Rack: the one clicked, or else the
+    /// lowest key's.
+    func selectedDrumKey(_ track: TrackView) -> DrumKeyView? {
+        guard let rack = track.drumRack else { return nil }
+        if let selection = drumSelection[track.key] { return Self.drumKey(selection, in: rack) }
+        return rack.keys.first
+    }
+
+    /// The selection as a key, or as a pad no key plays.
+    func drumSelectionOrFirst(_ track: TrackView) -> DrumSelection? {
+        if let selection = drumSelection[track.key] { return selection }
+        guard let first = track.drumRack?.keys.first else { return nil }
+        return first.note.map { .key(Int($0)) } ?? first.pad.pad.map { .pad($0) }
+    }
+
+    nonisolated static func drumKey(_ selection: DrumSelection, in rack: DrumRackView) -> DrumKeyView? {
+        switch selection {
+        case .key(let note): rack.keys.first { $0.note == Int32(note) }
+        case .pad(let name): rack.keys.first { $0.pad.pad == name }
+        }
+    }
+
+    /// The first key a Drum Rack's grid shows.
+    func drumBank(_ track: TrackView) -> Int {
+        if let bank = drumBanks[track.key] { return bank }
+        let keys = track.drumRack?.keys.compactMap { $0.note.map(Int.init) } ?? []
+        return DrumRackLayout.opening(keys: keys)
+    }
+
+    /// Loads a sample file onto a key of the Drum Rack on a MIDI track, or
+    /// gives a track with no instrument a Drum Rack of it, and selects the
+    /// key. The file is copied into the project first, and the pad is named
+    /// after `name`.
+    func loadDrumPad(path: String, name: String, into track: UInt64, note: Int) {
+        copy(path, note: nil) { model, asset in
+            model.edit(.drumPadLoad(track: track, note: Int32(note), asset: asset, name: name)) { [weak model] _ in
+                model?.drumSelection[track] = .key(note)
             }
         }
     }
@@ -1654,8 +1745,11 @@ public final class SongModel {
     /// Sets the root note of the Sampler's sample to the pitch `daw samples
     /// analyze` measures from its file, off the main thread; a file with no
     /// one pitch is refused with the reason. `done` is called either way.
-    func measureSamplerRoot(track: UInt64, done: @escaping @MainActor () -> Void) {
-        guard let sampler = arrangement.tracks.first(where: { $0.key == track })?.sampler, let sample = sampler.sample else { return done() }
+    func measureSamplerRoot(track: UInt64, pad: String? = nil, done: @escaping @MainActor () -> Void) {
+        let shown = arrangement.tracks.first(where: { $0.key == track }).flatMap { t in
+            pad == nil ? t.sampler : t.drumRack?.keys.first { $0.pad.pad == pad }?.pad
+        }
+        guard let sampler = shown, let sample = sampler.sample else { return done() }
         guard let library = browser.library else {
             refuse("The library index was not found, so the pitch cannot be measured")
             return done()
@@ -1670,7 +1764,8 @@ public final class SongModel {
                     switch measured {
                     case .failure(let error): self.refuse(Self.reason(error))
                     case .success(nil): self.refuse("No one pitch was measured in \(sample): it plays as it is at middle C")
-                    case .success(let note?): self.edit(.samplerRoot(track: track, note: note))
+                    case .success(let note?):
+                        self.edit(pad.map { .drumPadRoot(track: track, pad: $0, note: note) } ?? .samplerRoot(track: track, note: note))
                     }
                 }
             }

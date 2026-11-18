@@ -39,7 +39,10 @@ final class Browser {
     /// The kind an instrument rack goes by where a device's kind is asked.
     static let instrumentRackKind = "instrument-rack"
     /// The instruments the browser offers, by kind.
-    nonisolated static let instruments = ["sampler", "synth"]
+    nonisolated static let instruments = ["sampler", drumRackKind, "synth"]
+    /// The kind the Drum Rack goes by in the browser and its drags: a
+    /// sampler flagged `drum_rack` in the song.
+    nonisolated static let drumRackKind = "drum-rack"
     /// The MIDI effects the engine offers, by kind: devices before a MIDI
     /// track's instrument that change the notes as they play.
     nonisolated static let midiEffects = browserMidiEffects()

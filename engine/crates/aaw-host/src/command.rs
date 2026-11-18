@@ -3990,7 +3990,9 @@ impl<'a> Edit<'a> {
     fn sampler(&mut self, track: &[Step]) -> Result<Loc> {
         let instrument = self.node(track).get("instrument");
         if matches!(instrument, None | Some(Node::Leaf(Value::None))) {
-            let empty = aaw_model::json_value(r#"{"sampler": {"pads": {}, "map": []}}"#).map_err(|e| e.to_string())?;
+            // Pads added by name, or keys mapped, on a track with no
+            // instrument make a kit: a Drum Rack.
+            let empty = aaw_model::json_value(r#"{"sampler": {"drum_rack": true, "pads": {}, "map": []}}"#).map_err(|e| e.to_string())?;
             self.node_mut(track).map_mut().expect("a track").insert("instrument".into(), Node::new(&empty));
         }
         let loc = [track.to_vec(), vec![Step::Key("instrument".into()), Step::Key("sampler".into())]].concat();

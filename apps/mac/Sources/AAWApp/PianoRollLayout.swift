@@ -44,6 +44,9 @@ public struct PianoRollLayout: Equatable {
     /// The height of a note's row.
     public var row: CGFloat = Self.defaultRow
     public var scroll: CGPoint = .zero
+    /// The notes a folded view shows, a row each from the highest, as a
+    /// Drum Rack's clip shows only its pads' keys; nil shows all 128.
+    public var folded: [Int]? = nil
 
     public init() {}
 
@@ -54,7 +57,38 @@ public struct PianoRollLayout: Equatable {
     public var notesBottom: CGFloat { size.height - velocityHeight }
     public var lanesHeight: CGFloat { max(0, notesBottom - Self.rulerHeight) }
     public var contentWidth: CGFloat { CGFloat(last - first) * pixelsPerBeat }
-    public var contentHeight: CGFloat { CGFloat(Self.notes) * row }
+    public var contentHeight: CGFloat { CGFloat(rowCount) * row }
+    /// The rows: every note, or the folded ones.
+    public var rowCount: Int { folded?.count ?? Self.notes }
+
+    /// The pitches a Drum Rack's clip folds to, highest first: the keys of
+    /// its pads and of any note no pad plays, so that no note is hidden.
+    public static func folding(keys: [Int], notes: [Int]) -> [Int] {
+        Array(Set(keys + notes).filter { (0..<Self.notes).contains($0) }).sorted(by: >)
+    }
+
+    /// The row of a note from the top. Folded, a note without a row of its
+    /// own is placed where it would fall among them.
+    public func index(_ pitch: Int) -> Int {
+        guard let folded else { return Self.notes - 1 - pitch }
+        return folded.firstIndex(of: pitch) ?? folded.firstIndex { $0 < pitch } ?? folded.count
+    }
+
+    /// The note `rows` rows above `pitch`, below for a negative count, as
+    /// far as the rows go: a semitone a row unfolded.
+    public func pitch(_ pitch: Int, movedRows rows: Int) -> Int {
+        guard let folded, !folded.isEmpty else { return min(max(pitch + rows, 0), Self.notes - 1) }
+        return folded[min(max(index(pitch) - rows, 0), folded.count - 1)]
+    }
+
+    /// The notes whose rows are in view, from the highest.
+    public var visiblePitches: [Int] {
+        let top = Int((scroll.y / row).rounded(.down))
+        let bottom = Int(((scroll.y + lanesHeight) / row).rounded(.up))
+        let rows = max(0, top)...max(0, min(bottom, rowCount - 1))
+        guard top < rowCount else { return [] }
+        return rows.map { folded?[$0] ?? Self.notes - 1 - $0 }
+    }
 
     /// Takes the clip's length and the span of its notes, in beats of the
     /// clip: the view takes in what lies outside the clip, a beat at a time.
@@ -75,12 +109,14 @@ public struct PianoRollLayout: Equatable {
 
     /// The top of a note's row in the view.
     public func y(_ pitch: Int) -> CGFloat {
-        Self.rulerHeight + CGFloat(Self.notes - 1 - pitch) * row - scroll.y
+        Self.rulerHeight + CGFloat(index(pitch)) * row - scroll.y
     }
 
-    /// The note whose row is at a height of the view, within 0 to 127.
+    /// The note whose row is at a height of the view, within 0 to 127, or
+    /// among the folded rows.
     public func pitch(atY y: CGFloat) -> Int {
         let down = Int(((y - Self.rulerHeight + scroll.y) / row).rounded(.down))
+        if let folded, !folded.isEmpty { return folded[min(max(down, 0), folded.count - 1)] }
         return min(max(Self.notes - 1 - down, 0), Self.notes - 1)
     }
 
@@ -166,8 +202,14 @@ public struct PianoRollLayout: Equatable {
         let readable = Self.minStep / CGFloat(grid)
         pixelsPerBeat = min(max(fitPixelsPerBeat, readable), Self.maxPixelsPerBeat)
         scroll.x = CGFloat(-first) * pixelsPerBeat
-        let middle = pitches.isEmpty ? 66 : Double(pitches.min()! + pitches.max()!) / 2
         row = Self.defaultRow
+        if folded != nil {
+            // Folded, from the top row.
+            scroll.y = 0
+            clamp()
+            return
+        }
+        let middle = pitches.isEmpty ? 66 : Double(pitches.min()! + pitches.max()!) / 2
         scroll.y = CGFloat(Double(Self.notes) - 0.5 - middle) * row - lanesHeight / 2
         clamp()
     }
@@ -175,7 +217,7 @@ public struct PianoRollLayout: Equatable {
     /// The least height of a row: every note in view, or the least zoom.
     public var minRowHeight: CGFloat {
         guard lanesHeight > 0 else { return Self.minRow }
-        return min(max(Self.minRow, lanesHeight / CGFloat(Self.notes)), Self.maxRow)
+        return min(max(Self.minRow, lanesHeight / CGFloat(max(rowCount, 1))), Self.maxRow)
     }
 
     public mutating func clamp() {

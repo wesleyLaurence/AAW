@@ -37,6 +37,12 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // A pad's own mute and solo, and a sampler drawn as a Drum Rack.
+        vec![
+            Added { key: "mute", default: Value::Bool(false), beside: Some("sample"), unless: None },
+            Added { key: "solo", default: Value::Bool(false), beside: Some("sample"), unless: None },
+            Added { key: "drum_rack", default: Value::Bool(false), beside: Some("map"), unless: None },
+        ],
         // An audio clip's transpose; a pad and an event have the key too.
         vec![Added { key: "transpose", default: Value::Float(0.0), beside: Some("source_start_seconds"), unless: None }],
         // A clip deactivated.
