@@ -86,7 +86,8 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–4 built; the rest Next 1–3 |
+| [the Drum Rack, and patterns gone](features/drum-rack.md) | Next 1–3 |
+| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–5 built; the rest Next 4–5 |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
