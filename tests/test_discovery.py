@@ -190,17 +190,12 @@ def test_a_clipped_render_names_the_loud_stems_and_the_fix(tmp_path):
 
 def test_inspect_lists_clips_in_the_order_they_play(tmp_path):
     song = daw("init", tmp_path / "song")["project"]
-    daw("track", "add", song, "drums")
-    daw("pattern", "add", song, "p", "--length-beats", 4)
-    daw("clip", "add", song, "drums", "p", "--at", 8)
-    daw("clip", "add", song, "drums", "p", "--at", 0)
     daw("synth", "add", song, "keys")
     daw("clip", "add", song, "keys", "--id", "later", "--at", 4, "--length-beats", 4)
     daw("clip", "add", song, "keys", "--id", "first", "--length-beats", 4)
     tracks = daw("inspect", song)["tracks"]
     # Each keeps the reference of its place in the song.
-    assert [(c["ref"], c["at"]) for c in tracks[0]["clips"]] == [("tracks.drums.clips.1", 0), ("tracks.drums.clips.0", 8)]
-    assert [c["id"] for c in tracks[1]["clips"]] == ["first", "later"]
+    assert [c["id"] for c in tracks[0]["clips"]] == ["first", "later"]
 
 
 def test_duplicates_lay_out_in_a_row_and_a_stack_is_mapped_and_checked(tmp_path):
@@ -208,11 +203,10 @@ def test_duplicates_lay_out_in_a_row_and_a_stack_is_mapped_and_checked(tmp_path)
     song = daw("init", tmp_path / "song")["project"]
     sf.write(tmp_path / "song" / "kick.wav", np.zeros(SR // 10), SR)
     daw("set", song, "samples.kick", '{"path": "kick.wav"}')
-    daw("track", "add", song, "drums")
+    daw("track", "add", song, "drums", "--type", "midi")
     daw("pad", "add", song, "drums", "k", "--sample", "kick")
-    daw("pattern", "add", song, "p", "--length-beats", 4)
-    daw("pattern", "steps", song, "p", "k", "x...x...x...x...")
-    daw("clip", "add", song, "drums", "p", "--repeats", 2)
+    daw("instrument", "map", song, "drums", "C2", "k")
+    daw("clip", "add", song, "drums", "--id", "beat", "--length-beats", 8, "--loop-beats", 4, "--text", "c2 . . . c2 . . . c2 . . . c2 . . .")
     for _ in range(3):
         daw("clip", "duplicate", song, "tracks.drums.clips.0")
     out = run("map", song).stdout
@@ -220,8 +214,7 @@ def test_duplicates_lay_out_in_a_row_and_a_stack_is_mapped_and_checked(tmp_path)
     assert '    "drums  AAAAAAAA",' in out.splitlines()
     mapped = json.loads(out)
     assert mapped["map"][0] == "bar    1   5"
-    assert mapped["clips"]["A"].split() == [f"tracks.drums.clips.{i}" for i in range(4)]
-    assert "pattern p, 4 beats, 4 hits; drums bars 1 ×2, 3 ×2, 5 ×2, 7 ×2" in mapped["map"][3]
+    assert len(mapped["clips"]["A"].split()) == 4
     assert "daw map PROJECT" in daw("describe", "project")["semantics"]["map"]
     assert cli("check", song)[1]["warnings"] == []
     # A copy put on a beat where the same clip starts is stacked, and said so.

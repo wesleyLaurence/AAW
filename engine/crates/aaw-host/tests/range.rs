@@ -15,6 +15,21 @@ fn open() -> (tempfile::TempDir, Session) {
     (dir, s)
 }
 
+/// A track's note clips as `ID at length loop`, the loop `-` when it has none.
+fn shape(s: &Session, track: &str) -> Vec<String> {
+    let text = |v: &Json| match v {
+        Json::Null => "-".to_string(),
+        Json::String(x) => x.clone(),
+        other => other.to_string(),
+    };
+    get(s, &format!("tracks.{track}.clips"))
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| format!("{} {} {} {}", text(&c["id"]), text(c.get("at").unwrap_or(&json!(0))), text(&c["length_beats"]), text(c.get("loop_beats").unwrap_or(&Json::Null))))
+        .collect()
+}
+
 fn file(s: &Session) -> String {
     std::fs::read_to_string(s.path()).unwrap()
 }
@@ -59,23 +74,18 @@ fn insert_then_delete_gives_the_song_back() {
     assert_eq!(r["label"], json!("Insert 8 beats at 8"));
     assert_eq!(r["length_beats"], json!(40));
     assert_eq!(get(&s, "session.length_beats"), json!(40));
-    // The drums' first clip of four repeats is two of two, the second moves.
-    assert_eq!(
-        get(&s, "tracks.drums.clips"),
-        json!([{"pattern": "beat", "repeats": 2}, {"pattern": "beat", "at": 16, "repeats": 2}, {"pattern": "beat", "at": 24, "repeats": 4}])
-    );
+    // The drums' first clip, looped four times, is cut at its wrap at 8
+    // into two of two; the second moves.
+    assert_eq!(shape(&s, "drums"), ["beat 0 8 4", "clip1 16 8 4", "beat-2 24 16 4"]);
     // The bass clip that ends at 8 is not cut; the rest move.
-    assert_eq!(
-        get(&s, "tracks.bass.clips"),
-        json!([{"pattern": "bass", "repeats": 2}, {"pattern": "bass", "at": 16}, {"pattern": "bass", "at": 24, "repeats": 2}])
-    );
+    assert_eq!(shape(&s, "bass"), ["bass 0 8 4", "bass-2 16 4 -", "bass-3 24 8 4"]);
     // The note clip from 4 to 12 is cut at 8: the note across it is held to
     // the cut and the rest starts the right clip, which moves to 16.
     assert_eq!(
         get(&s, "tracks.keys.clips"),
         json!([
             {"id": "phrase", "at": 4, "length_beats": 4, "notes": [{"id": "n1", "pitch": 60, "duration": 2}, {"id": "n2", "pitch": 64, "at": 3, "duration": 1}]},
-            {"id": "clip1", "at": 16, "length_beats": 4, "notes": [{"id": "n2", "pitch": 64, "duration": 1}, {"id": "n3", "pitch": 67, "at": 2, "duration": 1}]},
+            {"id": "clip2", "at": 16, "length_beats": 4, "notes": [{"id": "n2", "pitch": 64, "duration": 1}, {"id": "n3", "pitch": 67, "at": 2, "duration": 1}]},
         ])
     );
     // The audio clip is split where its audio is, unfaded at the cut, and
@@ -101,7 +111,7 @@ fn insert_then_delete_gives_the_song_back() {
     );
     // The intro ends at 8 and stays; the verse starts there and moves.
     assert_eq!(get(&s, "sections"), json!([{"id": "intro", "at": 0, "length_beats": 8}, {"id": "verse", "at": 16, "length_beats": 16}]));
-    assert_eq!(r["split"], json!(["tracks.drums.clips.0", "tracks.keys.clips.phrase", "tracks.song.audio.0"]));
+    assert_eq!(r["split"], json!(["tracks.drums.clips.beat", "tracks.keys.clips.phrase", "tracks.song.audio.0"]));
     assert_eq!(r["moved"].as_array().unwrap().len(), 6);
     assert_eq!(r["removed"], json!([]));
     // The same beats deleted close the gap and give the song back, byte for
@@ -127,26 +137,16 @@ fn a_copy_replaces_what_is_at_its_destination_and_owns_its_notes() {
     assert_eq!(r["label"], json!("Copy beats 4–12 to 28"));
     // The drums' second clip, 16 to 32, is cut at 28 and the piece there
     // replaced by two bars of the first clip, which is not touched.
-    assert_eq!(
-        get(&s, "tracks.drums.clips"),
-        json!([
-            {"pattern": "beat", "repeats": 4},
-            {"pattern": "beat", "at": 16, "repeats": 3},
-            {"pattern": "beat", "at": 28, "repeats": 2},
-        ])
-    );
+    assert_eq!(shape(&s, "drums"), ["beat 0 16 4", "beat-2 16 12 4", "clip1 28 8 4"]);
     // The copy of the note clip is a clip of its own with its own notes.
     let keys = get(&s, "tracks.keys.clips");
     assert_eq!(keys[0]["id"], json!("phrase"));
-    assert_eq!(keys[1]["id"], json!("clip1"));
+    assert_eq!(keys[1]["id"], json!("clip4"));
     assert_eq!(keys[1]["at"], json!(28));
     assert_eq!(keys[1]["notes"], keys[0]["notes"]);
-    assert_ne!(refs(&s, "tracks.keys.clips.clip1.notes"), refs(&s, "tracks.keys.clips.phrase.notes"));
+    assert_ne!(refs(&s, "tracks.keys.clips.clip4.notes"), refs(&s, "tracks.keys.clips.phrase.notes"));
     // The bass plays its second repeat and its clip at 8 in the range.
-    assert_eq!(
-        get(&s, "tracks.bass.clips"),
-        json!([{"pattern": "bass", "repeats": 2}, {"pattern": "bass", "at": 8}, {"pattern": "bass", "at": 16, "repeats": 2}, {"pattern": "bass", "at": 28}, {"pattern": "bass", "at": 32}])
-    );
+    assert_eq!(shape(&s, "bass"), ["bass 0 8 4", "bass-2 8 4 -", "bass-3 16 8 4", "clip2 28 4 4", "clip3 32 4 -"]);
     // The bass lane, -24 at 0 to -6 at 16 then held, plays the copied range's
     // ramp from -19.5 to -10.5 at the destination, and holds -6 around it.
     assert_eq!(
@@ -160,9 +160,9 @@ fn a_copy_replaces_what_is_at_its_destination_and_owns_its_notes() {
             {"at": 36, "value": -6.0},
         ])
     );
-    assert_eq!(r["paths"], json!(["tracks.drums.clips.2", "tracks.bass.clips.3", "tracks.bass.clips.4", "tracks.keys.clips.clip1"]));
-    assert_eq!(r["split"], json!(["tracks.drums.clips.1"]));
-    assert_eq!(r["removed"], json!(["tracks.drums.clips.2"]));
+    assert_eq!(r["paths"], json!(["tracks.drums.clips.clip1", "tracks.bass.clips.clip2", "tracks.bass.clips.clip3", "tracks.keys.clips.clip4"]));
+    assert_eq!(r["split"], json!(["tracks.drums.clips.beat-2"]));
+    assert_eq!(r["removed"], json!(["tracks.drums.clips.clip1"]));
     assert_eq!(r["sections"], json!([]));
     // One undo takes the whole copy back.
     s.undo(Origin::User, false).unwrap();
@@ -178,7 +178,7 @@ fn a_copy_can_insert_and_a_copy_past_the_end_grows_the_song() {
     assert_eq!(r["label"], json!("Insert a copy of beats 0–32 at 32"));
     assert_eq!(get(&s, "session.length_beats"), json!(64));
     assert_eq!(get(&s, "tracks.drums.clips").as_array().unwrap().len(), 4);
-    assert_eq!(get(&s, "tracks.drums.clips.3"), json!({"pattern": "beat", "at": 48, "repeats": 4}));
+    assert_eq!(shape(&s, "drums")[3], "clip2 48 16 4");
     // The section is copied under a free name.
     assert_eq!(get(&s, "sections"), json!([{"id": "intro", "at": 0, "length_beats": 8}, {"id": "intro-2", "at": 32, "length_beats": 8}]));
     assert_eq!(r["sections"], json!(["intro-2"]));
@@ -191,10 +191,7 @@ fn a_copy_can_insert_and_a_copy_past_the_end_grows_the_song() {
     // Inserted in the middle, what follows moves later.
     edit(&mut s, json!({"op": "range.copy", "start": 0, "length": 4, "to": 16, "insert": true})).unwrap();
     assert_eq!(get(&s, "session.length_beats"), json!(68));
-    assert_eq!(get(&s, "tracks.drums.clips"), json!([
-        {"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 20, "repeats": 4},
-        {"pattern": "beat", "at": 36, "repeats": 4}, {"pattern": "beat", "at": 52, "repeats": 4}, {"pattern": "beat", "at": 16},
-    ]));
+    assert_eq!(shape(&s, "drums"), ["beat 0 16 4", "beat-2 20 16 4", "clip1 36 16 4", "clip2 52 16 4", "clip6 16 4 4"]);
     assert_eq!(get(&s, "sections.1"), json!({"id": "intro-2", "at": 36, "length_beats": 8}));
     // A copy past the end grows the song to the end of the bar it reaches.
     edit(&mut s, json!({"op": "range.copy", "start": 0, "length": 4, "to": 70})).unwrap();
@@ -208,18 +205,18 @@ fn clear_removes_the_range_and_moves_nothing_and_tracks_limit_a_range() {
     // the bass and the lane untouched.
     let r = edit(&mut s, json!({"op": "range.clear", "start": 16, "length": 8, "tracks": ["drums"]})).unwrap();
     assert_eq!(r["label"], json!("Clear beats 16–24 on drums"));
-    assert_eq!(get(&s, "tracks.drums.clips"), json!([{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 24, "repeats": 2}]));
+    assert_eq!(shape(&s, "drums"), ["beat 0 16 4", "clip1 24 8 4"]);
     assert_eq!(get(&s, "tracks.bass.clips").as_array().unwrap().len(), 3);
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -24.0}, {"at": 16, "value": -6.0}]));
-    assert_eq!(r["removed"], json!(["tracks.drums.clips.1"]));
+    assert_eq!(r["removed"], json!(["tracks.drums.clips.beat-2"]));
     assert_eq!(get(&s, "session.length_beats"), json!(32));
     // Cleared across the song, the lane loses the point inside the range,
     // keeps its values at the edges and runs straight between them; a
     // range that holds no point leaves a lane as it was; the sections stay.
     edit(&mut s, json!({"op": "range.clear", "start": 12, "length": 8})).unwrap();
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -24.0}, {"at": 12, "value": -10.5}, {"at": 20, "value": -6.0}]));
-    assert_eq!(get(&s, "tracks.drums.clips"), json!([{"pattern": "beat", "repeats": 3}, {"pattern": "beat", "at": 24, "repeats": 2}]));
-    assert_eq!(get(&s, "tracks.bass.clips"), json!([{"pattern": "bass", "repeats": 2}, {"pattern": "bass", "at": 8}, {"pattern": "bass", "at": 20}]));
+    assert_eq!(shape(&s, "drums"), ["beat 0 12 4", "clip1 24 8 4"]);
+    assert_eq!(shape(&s, "bass"), ["bass 0 8 4", "bass-2 8 4 -", "clip3 20 4 4"]);
     assert_eq!(get(&s, "sections"), json!([{"id": "intro", "at": 0, "length_beats": 8}]));
     edit(&mut s, json!({"op": "range.clear", "start": 4, "length": 4})).unwrap();
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -24.0}, {"at": 12, "value": -10.5}, {"at": 20, "value": -6.0}]));
@@ -227,19 +224,19 @@ fn clear_removes_the_range_and_moves_nothing_and_tracks_limit_a_range() {
     // its length; the lane begins with the value it had after the range.
     let r = edit(&mut s, json!({"op": "range.delete", "start": 0, "length": 16, "tracks": ["bass"]})).unwrap();
     assert_eq!(r["label"], json!("Delete beats 0–16 on bass"));
-    assert_eq!(get(&s, "tracks.bass.clips"), json!([{"pattern": "bass", "at": 4}]));
+    assert_eq!(shape(&s, "bass"), ["clip3 4 4 4"]);
     assert_eq!(get(&s, "tracks.bass.automation.0.points"), json!([{"at": 0, "value": -8.25}, {"at": 4, "value": -6.0}]));
     assert_eq!(get(&s, "session.length_beats"), json!(32));
-    assert_eq!(get(&s, "tracks.drums.clips.0"), json!({"pattern": "beat"}));
+    assert_eq!(shape(&s, "drums")[0], "beat 0 4 4");
 }
 
 #[test]
-fn a_pattern_clip_cut_inside_a_repeat_is_refused_and_ranges_are_checked() {
+fn a_looped_clip_cut_inside_a_repetition_is_refused_and_ranges_are_checked() {
     let (_d, mut s) = open();
     let e = edit(&mut s, json!({"op": "range.insert", "at": 6, "length": 4})).unwrap_err();
     assert_eq!(
         e,
-        "Beat 6 falls inside a repeat of clip tracks.drums.clips.0, whose pattern beat is 4 beats long; a pattern clip is cut only between repeats"
+        "Beat 6 falls inside a repetition of clip tracks.drums.clips.beat, which loops every 4 beats; a looped clip is cut only at a wrap, or turn its loop off first"
     );
     // Nothing of a refused command lands.
     assert_eq!(get(&s, "session.length_beats"), json!(32));
@@ -263,15 +260,12 @@ fn sections_duplicate_move_and_go_with_their_content() {
         get(&s, "sections"),
         json!([{"id": "intro", "at": 0, "length_beats": 8}, {"id": "verse", "at": 8, "length_beats": 8}, {"id": "verse-2", "at": 16, "length_beats": 8}])
     );
-    assert_eq!(
-        get(&s, "tracks.bass.clips"),
-        json!([{"pattern": "bass", "repeats": 2}, {"pattern": "bass", "at": 8}, {"pattern": "bass", "at": 24, "repeats": 2}, {"pattern": "bass", "at": 16}])
-    );
+    assert_eq!(shape(&s, "bass"), ["bass 0 8 4", "bass-2 8 4 -", "bass-3 24 8 4", "clip2 16 4 -"]);
     // What the keys' phrase, 4 to 12, plays from 8 is copied to 16; the
     // phrase itself is not touched.
     assert_eq!(get(&s, "tracks.keys.clips").as_array().unwrap().len(), 2);
     assert_eq!(get(&s, "tracks.keys.clips.0.length_beats"), json!(8));
-    assert_eq!(get(&s, "tracks.keys.clips.1"), json!({"id": "clip1", "at": 16, "length_beats": 4, "notes": [{"id": "n2", "pitch": 64, "duration": 1}, {"id": "n3", "pitch": 67, "at": 2, "duration": 1}]}));
+    assert_eq!(get(&s, "tracks.keys.clips.1"), json!({"id": "clip3", "at": 16, "length_beats": 4, "notes": [{"id": "n2", "pitch": 64, "duration": 1}, {"id": "n3", "pitch": 67, "at": 2, "duration": 1}]}));
     // Named, and somewhere else.
     let r = edit(&mut s, json!({"op": "section.duplicate", "section": "intro", "to": 40, "id": "outro"})).unwrap();
     assert_eq!(r["label"], json!("Duplicate section intro at 40 as outro"));
@@ -284,14 +278,14 @@ fn sections_duplicate_move_and_go_with_their_content() {
     assert_eq!(r["label"], json!("Remove section verse-2 with its content"));
     assert_eq!(get(&s, "session.length_beats"), json!(40));
     assert_eq!(get(&s, "sections"), json!([{"id": "intro", "at": 0, "length_beats": 8}, {"id": "verse", "at": 8, "length_beats": 8}, {"id": "outro", "at": 32, "length_beats": 8}]));
-    assert_eq!(get(&s, "tracks.bass.clips"), json!([{"pattern": "bass", "repeats": 2}, {"pattern": "bass", "at": 8}, {"pattern": "bass", "at": 16, "repeats": 2}, {"pattern": "bass", "at": 32, "repeats": 2}]));
-    assert_eq!(get(&s, "tracks.drums.clips"), json!([{"pattern": "beat", "repeats": 8}, {"pattern": "beat", "at": 32, "repeats": 2}]));
+    assert_eq!(shape(&s, "bass"), ["bass 0 8 4", "bass-2 8 4 -", "bass-3 16 8 4", "clip5 32 8 4"]);
+    assert_eq!(shape(&s, "drums"), ["beat 0 32 4", "clip4 32 8 4"]);
     // The outro's copy of the phrase's first bar moved earlier with it.
     assert_eq!(
         get(&s, "tracks.keys.clips"),
         json!([
             {"id": "phrase", "at": 4, "length_beats": 8, "notes": [{"id": "n1", "pitch": 60, "duration": 2}, {"id": "n2", "pitch": 64, "at": 3, "duration": 2}, {"id": "n3", "pitch": 67, "at": 6, "duration": 1}]},
-            {"id": "clip2", "at": 36, "length_beats": 4, "notes": [{"id": "n1", "pitch": 60, "duration": 2}, {"id": "n2", "pitch": 64, "at": 3, "duration": 1}]},
+            {"id": "clip6", "at": 36, "length_beats": 4, "notes": [{"id": "n1", "pitch": 60, "duration": 2}, {"id": "n2", "pitch": 64, "at": 3, "duration": 1}]},
         ])
     );
     // Moved with its content, the beats go over what is at the destination
@@ -299,8 +293,8 @@ fn sections_duplicate_move_and_go_with_their_content() {
     let r = edit(&mut s, json!({"op": "section.move", "section": "intro", "at": 24, "with_content": true})).unwrap();
     assert_eq!(r["label"], json!("Move section intro to 24 with its content"));
     assert_eq!(get(&s, "sections.0"), json!({"id": "intro", "at": 24, "length_beats": 8}));
-    assert_eq!(get(&s, "tracks.drums.clips"), json!([{"pattern": "beat", "at": 8, "repeats": 4}, {"pattern": "beat", "at": 32, "repeats": 2}, {"pattern": "beat", "at": 24, "repeats": 2}]));
-    assert_eq!(get(&s, "tracks.bass.clips"), json!([{"pattern": "bass", "at": 8}, {"pattern": "bass", "at": 16, "repeats": 2}, {"pattern": "bass", "at": 32, "repeats": 2}, {"pattern": "bass", "at": 24, "repeats": 2}]));
+    assert_eq!(shape(&s, "drums"), ["clip7 8 16 4", "clip4 32 8 4", "clip9 24 8 4"]);
+    assert_eq!(shape(&s, "bass"), ["bass-2 8 4 -", "bass-3 16 8 4", "clip5 32 8 4", "clip10 24 8 4"]);
     // The label alone still moves alone, and is removed alone.
     edit(&mut s, json!({"op": "section.move", "section": "intro", "at": 0})).unwrap();
     assert_eq!(get(&s, "sections.0.at"), json!(0));
@@ -330,12 +324,13 @@ fn a_copied_range_renders_as_the_clips_it_stands_for() {
     edit(
         &mut s,
         json!({"op": "batch", "commands": [
-            {"op": "clip.add", "track": "drums", "pattern": "beat", "at": 40, "repeats": 2},
-            {"op": "clip.add", "track": "bass", "pattern": "bass", "at": 40, "repeats": 2},
+            {"op": "clip.duplicate", "clip": "tracks.drums.clips.beat", "at": 40},
+            {"op": "clip.resize", "clip": "tracks.drums.clips.clip1", "length_beats": 8},
+            {"op": "clip.duplicate", "clip": "tracks.bass.clips.bass", "at": 40},
             {"op": "clip.duplicate", "clip": "tracks.keys.clips.phrase", "at": 44},
-            {"op": "clip.trim", "clip": "tracks.keys.clips.clip1", "end": 48},
-            {"op": "note.set", "note": "tracks.keys.clips.clip1.notes.n2", "duration": 1},
-            {"op": "note.remove", "notes": ["tracks.keys.clips.clip1.notes.n3"]},
+            {"op": "clip.trim", "clip": "tracks.keys.clips.clip3", "end": 48},
+            {"op": "note.set", "note": "tracks.keys.clips.clip3.notes.n2", "duration": 1},
+            {"op": "note.remove", "notes": ["tracks.keys.clips.clip3.notes.n3"]},
             {"op": "point.add", "owner": "tracks.bass", "param": "sends.plate.gain_db", "at": 40, "value": -6},
             {"op": "point.add", "owner": "tracks.bass", "param": "sends.plate.gain_db", "at": 40, "value": -24},
             {"op": "point.add", "owner": "tracks.bass", "param": "sends.plate.gain_db", "at": 48, "value": -15},

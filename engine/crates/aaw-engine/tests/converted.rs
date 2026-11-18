@@ -184,3 +184,37 @@ fn the_test_songs_are_the_pattern_songs_converted() {
         assert_same(&render(&written, a.path()), &render(&converted, b.path()));
     }
 }
+
+#[test]
+fn pitched_pads_far_apart_share_the_keys_by_the_notes_they_play() {
+    // A pad played from C-1 to G9 would take every key as one range; each
+    // run of its notes is mapped instead, so the other pads find keys too.
+    let dir = tempfile::tempdir().unwrap();
+    let tone: Vec<[f32; 2]> =
+        (0..24000).map(|i| ((2.0 * std::f64::consts::PI * 220.0 * i as f64 / 48000.0).sin() * 0.3) as f32).map(|x| [x, x]).collect();
+    write_sample(dir.path(), "tone.wav", tone, 48000);
+    let yaml = r#"
+session: {tempo: 120, length_beats: 8, sample_rate: 48000, end_fade_ms: 0}
+samples:
+  tone: {path: tone.wav, root_note: A3}
+patterns:
+  line:
+    length_beats: 4
+    events:
+    - {at: 0, pad: g, note: F#1, duration: 1}
+    - {at: 1, pad: g, note: C-1, duration: 1}
+    - {at: 2, pad: g, note: G9, duration: 1}
+    - {at: 1, pad: s, note: C-1, duration: 1}
+    - {at: 3, pad: k}
+tracks:
+- id: lead
+  pads: {g: {sample: tone, mode: gate, release_ms: 5}, s: {sample: tone, mode: gate, release_ms: 5, transpose: -3}, k: {sample: tone}}
+  clips: [{pattern: line, repeats: 2}]
+"#;
+    let path = dir.path().join("song.yaml");
+    std::fs::write(&path, yaml).unwrap();
+    let (new, a, b) = both(&path, |_| {});
+    assert_same(&a, &b);
+    let rack = new.tracks[0].midi.as_ref().unwrap().sampler().unwrap();
+    assert!(rack.map.iter().all(|m| m.high - m.low < 10), "{:?}", rack.map);
+}

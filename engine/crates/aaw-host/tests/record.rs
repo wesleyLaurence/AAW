@@ -8,7 +8,7 @@ mod common;
 use aaw_host::client::Request;
 use aaw_host::command::Origin;
 use aaw_host::host::{self, Event, Options};
-use common::{cmd, write_song};
+use common::{cmd, write_audio_song};
 use serde_json::{json, Value as Json};
 use std::sync::OnceLock;
 
@@ -26,7 +26,7 @@ fn registry_dir() {
 fn a_track_is_armed_through_its_input_and_record_refuses_what_it_cannot_take() {
     registry_dir();
     let dir = tempfile::tempdir().unwrap();
-    let path = write_song(dir.path());
+    let path = write_audio_song(dir.path());
     let (tx, events) = std::sync::mpsc::channel();
     let running = host::spawn(
         &path,

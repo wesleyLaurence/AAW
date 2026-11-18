@@ -251,11 +251,10 @@ def test_a_sound_is_generated_imported_found_by_the_library_and_played(tmp_path,
     listed = daw("generate", "list", song)["generated"]
     assert [(r["sample_id"], r["prompt"], r["seconds"]) for r in listed] == [("crackle", "vinyl crackle, warm", 4.0)]
     # A pad plays it and the song renders with nothing asked of the service.
-    daw("track", "add", song, "tex")
+    daw("track", "add", song, "tex", "--type", "midi")
     daw("pad", "add", song, "tex", "c", "--sample", "crackle")
-    daw("pattern", "add", song, "p", "--length-beats", 4)
-    daw("pattern", "steps", song, "p", "c", "x...............")
-    daw("clip", "add", song, "tex", "p")
+    daw("instrument", "map", song, "tex", "C2", "c")
+    daw("clip", "add", song, "tex", "--length-beats", 4, "--text", "c2")
     before = len(stand_in.seen)
     rendered = daw("render", song)
     assert rendered["mix"]["peak_dbfs"] > -20

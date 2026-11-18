@@ -57,6 +57,58 @@ def in_order(clips):
     return sorted(enumerate(clips), key=lambda item: Fraction(str(item[1]["at"])))
 
 
+def beat_json(x):
+    """A beat as inspect gives it: a whole number, a decimal that is exactly
+    it, else a fraction's text."""
+    f = Fraction(str(x))
+    if f.denominator == 1:
+        return f.numerator
+    return float(f) if Fraction(repr(float(f))) == f else f"{f.numerator}/{f.denominator}"
+
+
+def inspected(t, triggers):
+    """What inspect says of a track of the song as `load` read it."""
+    common = {
+        "events": sum(tr.track == t["id"] for tr in triggers),
+        "gain_db": t["gain_db"],
+        "mute": t["mute"],
+        "solo": t["solo"],
+        "effects": [e["type"] for e in t["effects"]],
+        "sidechain": [e["sidechain"] for e in t["effects"] if e.get("sidechain")],
+        "sends": t["sends"],
+        "automation": [lane["param"] for lane in t["automation"]],
+    }
+    if t.get("type") == "midi":
+        instrument = t["instrument"]
+        clips = [
+            {
+                "ref": f"tracks.{t['id']}.clips.{c['id']}",
+                "id": c["id"],
+                "at": beat_json(c["at"]),
+                "length_beats": beat_json(c["length_beats"]),
+                "notes": len(c["notes"]),
+            }
+            for n, c in in_order(t["clips"])
+        ]
+        kind = next(iter(instrument)) if instrument else None
+        return {"id": t["id"], "type": "midi", "instrument": kind, **common, "clips": clips}
+    clips = [
+        {"ref": f"tracks.{t['id']}.clips.{n}", "pattern": c["pattern"], "at": c["at"], "repeats": c["repeats"]}
+        for n, c in in_order(t["clips"])
+    ]
+    audio = [
+        {
+            "ref": f"tracks.{t['id']}.audio.{n}",
+            "sample": c["sample"],
+            "at": c["at"],
+            "source_start_seconds": c["source_start_seconds"],
+            "source_end_seconds": c["source_end_seconds"],
+        }
+        for n, c in in_order(t["audio"])
+    ]
+    return {"id": t["id"], **common, "clips": clips, "audio": audio}
+
+
 def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
     rng = random.Random(21)
     for i in range(6):
@@ -76,34 +128,7 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
             "duration_seconds": frame(session["length_beats"], session["tempo"], session["sample_rate"]) / session["sample_rate"],
             "samples": len(song["samples"]),
             "patterns": len(song["patterns"]),
-            "tracks": [
-                {
-                    "id": t["id"],
-                    "events": sum(tr.track == t["id"] for tr in triggers),
-                    "gain_db": t["gain_db"],
-                    "mute": t["mute"],
-                    "solo": t["solo"],
-                    "effects": types(t),
-                    "sidechain": keys(t),
-                    "sends": t["sends"],
-                    "automation": params(t),
-                    "clips": [
-                        {"ref": f"tracks.{t['id']}.clips.{n}", "pattern": c["pattern"], "at": c["at"], "repeats": c["repeats"]}
-                        for n, c in in_order(t["clips"])
-                    ],
-                    "audio": [
-                        {
-                            "ref": f"tracks.{t['id']}.audio.{n}",
-                            "sample": c["sample"],
-                            "at": c["at"],
-                            "source_start_seconds": c["source_start_seconds"],
-                            "source_end_seconds": c["source_end_seconds"],
-                        }
-                        for n, c in in_order(t["audio"])
-                    ],
-                }
-                for t in song["tracks"]
-            ],
+            "tracks": [inspected(t, triggers) for t in song["tracks"]],
             "groups": [],
             "returns": [
                 {
@@ -137,12 +162,11 @@ def test_commands_write_the_edited_song(rust_daw, tmp_path, registry):
     path = song_with_routing(random.Random(3), tmp_path)
     daw(rust_daw, "fmt", path)
     track = load(path)["tracks"][0]["id"]
-    pattern = next(iter(load(path)["patterns"]))
     cases = [
         (["set", path, f"tracks.{track}.gain_db", "-4.5"], lambda d: d["tracks"][0].update(gain_db=-4.5)),
         (
-            ["clip", "add", path, track, pattern, "--at", "1/3"],
-            lambda d: d["tracks"][0]["clips"].append({"pattern": pattern, "at": "1/3"}),
+            ["clip", "add", path, track, "--id", "new", "--length-beats", "4", "--at", "1/3"],
+            lambda d: d["tracks"][0]["clips"].append({"id": "new", "at": "1/3", "length_beats": 4}),
         ),
         (
             ["effect", "add", path, "returns.plate", "--type", "delay", "--time-beats", "3/4", "--index", "0"],

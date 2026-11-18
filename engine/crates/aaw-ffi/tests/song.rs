@@ -17,22 +17,20 @@ const SONG: &str = r#"
 session: {title: Demo, tempo: 120, length_beats: 32}
 samples:
   hit: {path: hit.wav}
-patterns:
-  beat:
-    length_beats: 4
-    steps: {h: x.x.x.x.x.x.x.x.}
-  fill:
-    length_beats: 2
-    steps: {h: xxxxxxxx}
 tracks:
 - id: drums
-  pads: {h: {sample: hit}}
-  clips: [{pattern: beat, repeats: 4}, {pattern: fill, at: 16}]
+  type: midi
+  instrument: {sampler: {drum_rack: true, pads: {h: {sample: hit}}, map: [{notes: 36, pad: h}]}}
+  clips:
+  - {id: beat, length_beats: 16, loop_beats: 4, notes: [{pitch: 36, duration: 1/4}, {pitch: 36, at: 1/2, duration: 1/4}, {pitch: 36, at: 1, duration: 1/4}, {pitch: 36, at: 3/2, duration: 1/4}, {pitch: 36, at: 2, duration: 1/4}, {pitch: 36, at: 5/2, duration: 1/4}, {pitch: 36, at: 3, duration: 1/4}, {pitch: 36, at: 7/2, duration: 1/4}]}
+  - {id: fill, at: 16, length_beats: 2, notes: [{pitch: 36, duration: 1/4}, {pitch: 36, at: 1/4, duration: 1/4}, {pitch: 36, at: 1/2, duration: 1/4}, {pitch: 36, at: 3/4, duration: 1/4}, {pitch: 36, at: 1, duration: 1/4}, {pitch: 36, at: 5/4, duration: 1/4}, {pitch: 36, at: 3/2, duration: 1/4}, {pitch: 36, at: 7/4, duration: 1/4}]}
   sends: [{to: plate, gain_db: -12}]
 - id: perc
+  type: midi
   gain_db: -3
-  pads: {h: {sample: hit}}
-  clips: [{pattern: beat, at: 8, repeats: 2}]
+  instrument: {sampler: {drum_rack: true, pads: {h: {sample: hit}}, map: [{notes: 36, pad: h}]}}
+  clips:
+  - {id: beat-2, at: 8, length_beats: 8, loop_beats: 4, notes: [{pitch: 36, duration: 1/4}, {pitch: 36, at: 1/2, duration: 1/4}, {pitch: 36, at: 1, duration: 1/4}, {pitch: 36, at: 3/2, duration: 1/4}, {pitch: 36, at: 2, duration: 1/4}, {pitch: 36, at: 5/2, duration: 1/4}, {pitch: 36, at: 3, duration: 1/4}, {pitch: 36, at: 7/2, duration: 1/4}]}
   effects: [{type: filter, mode: lowpass, cutoff_hz: 800}, {type: delay, time_beats: 0.5, bypass: true}]
 returns:
 - id: plate
@@ -40,11 +38,31 @@ returns:
 sections: [{id: intro, at: 0, length_beats: 8}, {id: drop, at: 8, length_beats: 24}]
 "#;
 
-fn write_song(dir: &Path) -> PathBuf {
+/// The song with its two tracks as audio tracks with nothing on them yet,
+/// for audio clips, which a MIDI track does not hold.
+const AUDIO_SONG: &str = r#"
+session: {title: Demo, tempo: 120, length_beats: 32}
+samples:
+  hit: {path: hit.wav}
+tracks:
+- id: drums
+  pads: {}
+  sends: [{to: plate, gain_db: -12}]
+- id: perc
+  gain_db: -3
+  pads: {}
+  effects: [{type: filter, mode: lowpass, cutoff_hz: 800}, {type: delay, time_beats: 0.5, bypass: true}]
+returns:
+- id: plate
+  effects: [{type: reverb, decay_seconds: 1.5}]
+sections: [{id: intro, at: 0, length_beats: 8}, {id: drop, at: 8, length_beats: 24}]
+"#;
+
+fn write_song_text(dir: &Path, text: &str) -> PathBuf {
     let hit: Vec<[f32; 2]> = (0..4800).map(|i| [(0.5 * (-(i as f64) / 400.0).exp()) as f32; 2]).collect();
     std::fs::write(dir.join("hit.wav"), float_wav_bytes(&hit, 48000)).unwrap();
     let path = dir.join("song.yaml");
-    std::fs::write(&path, SONG).unwrap();
+    std::fs::write(&path, text).unwrap();
     path
 }
 
@@ -111,9 +129,19 @@ fn open() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>) {
 }
 
 fn open_with_waveforms() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>, Receiver<Waveforms>) {
+    open_text(SONG)
+}
+
+/// The song with audio tracks in place of its MIDI ones.
+fn open_audio() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>) {
+    let (dir, path, song, seen, _) = open_text(AUDIO_SONG);
+    (dir, path, song, seen)
+}
+
+fn open_text(text: &str) -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>, Receiver<Waveforms>) {
     registry_dir();
     let dir = tempfile::tempdir().unwrap();
-    let path = write_song(dir.path());
+    let path = write_song_text(dir.path(), text);
     let (tx, rx) = channel();
     let (waves_tx, waves) = channel();
     let watcher = Watcher(Mutex::new(tx), Mutex::new(waves_tx));
@@ -167,8 +195,9 @@ fn the_arrangement_is_what_the_app_draws() {
     assert_eq!(a.tracks.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(), ["drums", "perc"]);
     let drums = &a.tracks[0];
     assert_eq!(drums.sends, [SendView { to: "plate".into(), gain_db: -12.0 }]);
-    let clips: Vec<_> = drums.clips.iter().map(|c| (c.pattern.as_str(), c.at, c.pattern_beats, c.repeats)).collect();
-    assert_eq!(clips, [("beat", 0.0, 4.0, 4), ("fill", 16.0, 2.0, 1)]);
+    assert!(drums.midi && drums.drum_rack.is_some());
+    let clips: Vec<_> = drums.note_clips.iter().map(|c| (c.id.as_str(), c.at, c.length_beats, c.loop_beats, c.notes.len())).collect();
+    assert_eq!(clips, [("beat", 0.0, 16.0, Some(4.0), 8), ("fill", 16.0, 2.0, None, 8)]);
     let perc = &a.tracks[1];
     assert_eq!(perc.gain_db, -3.0);
     let chain: Vec<_> = perc.effects.iter().map(|e| (e.kind.as_str(), e.bypass)).collect();
@@ -180,14 +209,14 @@ fn the_arrangement_is_what_the_app_draws() {
     assert_eq!(sections, [("intro", 0.0, 8.0), ("drop", 8.0, 24.0)]);
     assert_eq!(drums.pads.iter().map(|p| (p.name.as_str(), p.sample.as_str(), p.gate)).collect::<Vec<_>>(), [("h", "hit", false)]);
     // Every object has its own key, and a clip's reference is its handle.
-    let mut keys: Vec<u64> = a.tracks.iter().flat_map(|t| std::iter::once(t.key).chain(t.clips.iter().map(|c| c.key))).collect();
+    let mut keys: Vec<u64> = a.tracks.iter().flat_map(|t| std::iter::once(t.key).chain(t.note_clips.iter().map(|c| c.key))).collect();
     keys.extend(a.returns.iter().map(|r| r.key));
     keys.extend(a.sections.iter().map(|s| s.key));
     assert!(keys.iter().all(|k| *k != 0));
     keys.sort();
     keys.dedup();
     assert_eq!(keys.len(), 8);
-    assert_eq!(drums.clips[0].reference, format!("@{}", drums.clips[0].key));
+    assert_eq!(drums.note_clips[0].reference, format!("@{}", drums.note_clips[0].key));
     song.close();
 }
 
@@ -197,8 +226,7 @@ fn each_change_names_what_it_touched() {
     assert_eq!(transport(&seen), TransportView { metronome: false, playing: false, cue: 0.0, loop_region: None, recording: false, armed: vec![] });
     let start = song.arrangement();
     let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
-    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
-    let perc_clip = start.tracks[1].clips[0].key;
+    let (first, fill) = (start.tracks[0].note_clips[0].key, start.tracks[0].note_clips[1].key);
 
     // A fader: the track, and none of its clips.
     agent(&path, json!({"op": "set", "path": "tracks.drums.gain_db", "value": -6}));
@@ -213,23 +241,21 @@ fn each_change_names_what_it_touched() {
     agent(&path, json!({"op": "clip.move", "clip": format!("@{fill}"), "track": "perc", "at": 20}));
     let u = update(&seen);
     assert_eq!(u.touched, [touch(Part::Clip, fill, Delta::Changed)]);
-    let moved = &u.arrangement.tracks[1].clips[1];
+    let moved = &u.arrangement.tracks[1].note_clips[1];
     assert_eq!((moved.key, moved.at), (fill, 20.0));
 
     // A new clip, then its removal.
-    let made = agent(&path, json!({"op": "clip.add", "track": "drums", "pattern": "fill", "at": 24}));
+    let made = agent(&path, json!({"op": "clip.add", "track": "drums", "length_beats": 2, "at": 24}));
     let u = update(&seen);
-    let added = u.arrangement.tracks[0].clips[1].key;
+    let added = u.arrangement.tracks[0].note_clips[1].key;
     assert_eq!(made["handle"], json!(format!("@{added}")));
     assert_eq!(u.touched, [touch(Part::Clip, added, Delta::Added)]);
     agent(&path, json!({"op": "clip.remove", "clip": format!("@{added}")}));
     assert_eq!(update(&seen).touched, [touch(Part::Clip, added, Delta::Removed)]);
 
-    // A pattern edit touches the clips that play it.
-    agent(&path, json!({"op": "pattern.steps", "pattern": "beat", "pad": "h", "row": "x...x...x...x..."}));
-    let mut clips = update(&seen).touched;
-    clips.sort_by_key(|t| t.key);
-    assert_eq!(clips, [touch(Part::Clip, first, Delta::Changed), touch(Part::Clip, perc_clip, Delta::Changed)]);
+    // A note edit touches the clip that holds it.
+    agent(&path, json!({"op": "note.add", "clip": format!("@{first}"), "pitch": 36, "at": "1/4", "duration": "1/4"}));
+    assert_eq!(update(&seen).touched, [touch(Part::Clip, first, Delta::Changed)]);
 
     // Reordering changes the tracks, not their clips; a rename keeps the key.
     agent(&path, json!({"op": "track.move", "track": "perc", "index": 0}));
@@ -386,21 +412,21 @@ fn clips_move_resize_and_duplicate_on_exact_beats() {
     let (_dir, path, song, seen) = open();
     transport(&seen);
     let start = song.arrangement();
-    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
-    let perc_clip = start.tracks[1].clips[0].key;
-    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(u64, f64, u32)> {
-        a.tracks[track].clips.iter().map(|c| (c.key, c.at, c.repeats)).collect()
+    let (first, fill) = (start.tracks[0].note_clips[0].key, start.tracks[0].note_clips[1].key);
+    let perc_clip = start.tracks[1].note_clips[0].key;
+    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(u64, f64, f64)> {
+        a.tracks[track].note_clips.iter().map(|c| (c.key, c.at, c.length_beats)).collect()
     };
 
     // Two clips move together: later, and one track down.
     song.edit(Edit::ClipsMove { clips: vec![fill], by: 4.0, rows: 1 }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Move clip fill at 20");
-    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 2), (fill, 20.0, 1)]);
+    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 8.0), (fill, 20.0, 2.0)]);
     song.edit(Edit::ClipsMove { clips: vec![perc_clip, fill], by: -0.5, rows: -1 }, None).unwrap();
     let u = update(&seen);
     assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move 2 clips"));
-    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 4), (perc_clip, 7.5, 2), (fill, 19.5, 1)]);
+    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 16.0), (perc_clip, 7.5, 8.0), (fill, 19.5, 2.0)]);
     assert_eq!(u.undo.as_ref().map(|s| s.origin), Some(Who::User));
     // Nothing to do is no change; no track above the first is refused.
     assert!(song.edit(Edit::ClipsMove { clips: vec![fill], by: 0.0, rows: 0 }, None).unwrap().is_empty());
@@ -412,7 +438,7 @@ fn clips_move_resize_and_duplicate_on_exact_beats() {
     update(&seen);
 
     // A clip on a third of a beat stays on thirds when it moves.
-    let third = agent(&path, json!({"op": "clip.add", "track": "perc", "pattern": "fill", "at": "1/3"}));
+    let third = agent(&path, json!({"op": "clip.add", "track": "perc", "length_beats": 2, "at": "1/3"}));
     let third: u64 = third["handle"].as_str().unwrap()[1..].parse().unwrap();
     update(&seen);
     song.edit(Edit::ClipsMove { clips: vec![third], by: 4.0, rows: 0 }, None).unwrap();
@@ -422,22 +448,22 @@ fn clips_move_resize_and_duplicate_on_exact_beats() {
     update(&seen);
     assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{third}.at")})), json!("107/24"));
 
-    song.edit(Edit::ClipRepeats { clip: fill, repeats: 3 }, None).unwrap();
+    song.edit(Edit::ClipLength { clip: fill, beats: "6".into() }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(clips(&u.arrangement, 0)[2], (fill, 19.5, 3));
+    assert_eq!(clips(&u.arrangement, 0)[2], (fill, 19.5, 6.0));
 
     // Copies go right after what was copied: one clip after itself, a group
     // after the group. The edit returns the copies.
     let made = song.edit(Edit::ClipsDuplicate { clips: vec![fill] }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(clips(&u.arrangement, 0)[3], (made[0], 25.5, 3));
+    assert_eq!(clips(&u.arrangement, 0)[3], (made[0], 25.5, 6.0));
     song.undo().unwrap();
     update(&seen);
     let made = song.edit(Edit::ClipsDuplicate { clips: vec![perc_clip, first] }, None).unwrap();
     let u = update(&seen);
     // The group spans beats 0 to 16, so each copy is 16 beats after its original.
-    let copies: Vec<(u64, f64, u32)> = made.iter().map(|k| *clips(&u.arrangement, 0).iter().find(|c| c.0 == *k).unwrap()).collect();
-    assert_eq!(copies, [(made[0], 23.5, 2), (made[1], 16.0, 4)]);
+    let copies: Vec<(u64, f64, f64)> = made.iter().map(|k| *clips(&u.arrangement, 0).iter().find(|c| c.0 == *k).unwrap()).collect();
+    assert_eq!(copies, [(made[0], 23.5, 8.0), (made[1], 16.0, 16.0)]);
     let mut added: Vec<u64> = u.touched.iter().filter(|t| t.delta == Delta::Added).map(|t| t.key).collect();
     added.sort();
     assert_eq!(added, { let mut m = made.clone(); m.sort(); m });
@@ -453,9 +479,9 @@ fn clips_in_a_row_are_joined_into_one_that_plays_the_same() {
     let (_dir, _path, song, seen) = open();
     transport(&seen);
     let start = song.arrangement();
-    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
+    let (first, fill) = (start.tracks[0].note_clips[0].key, start.tracks[0].note_clips[1].key);
     // A copy of the first clip right after it, then the two joined: one clip
-    // of eight repeats, the first, which the edit returns and which is left
+    // of 32 beats, the first, which the edit returns and which is left
     // selected once the other is gone.
     song.edit(Edit::ClipsMove { clips: vec![fill], by: 8.0, rows: 0 }, None).unwrap();
     update(&seen);
@@ -465,12 +491,13 @@ fn clips_in_a_row_are_joined_into_one_that_plays_the_same() {
     assert_eq!(made, [first]);
     let u = update(&seen);
     assert_eq!(u.change.label, "Join 2 clips into beat at 0");
-    let joined: Vec<(u64, f64, u32)> = u.arrangement.tracks[0].clips.iter().map(|c| (c.key, c.at, c.repeats)).collect();
-    assert_eq!(joined, [(first, 0.0, 8), (fill, 24.0, 1)]);
+    let joined: Vec<(u64, f64, f64, usize)> = u.arrangement.tracks[0].note_clips.iter().map(|c| (c.key, c.at, c.length_beats, c.notes.len())).collect();
+    assert_eq!(joined, [(first, 0.0, 32.0, 64), (fill, 24.0, 2.0, 8)]);
     assert!(u.touched.iter().any(|t| t.key == copy && t.delta == Delta::Removed));
-    // Clips of different patterns are refused with the reason, and one clip is nothing to do.
-    let e = song.edit(Edit::ClipsJoin { clips: vec![first, fill] }, None).unwrap_err().to_string();
-    assert_eq!(e, "fill at 24 does not start where beat at 0 ends, at beat 32; clips joined into one meet there");
+    // Clips of two tracks are refused with the reason, and one clip is nothing to do.
+    let perc = u.arrangement.tracks[1].note_clips[0].key;
+    let e = song.edit(Edit::ClipsJoin { clips: vec![first, perc] }, None).unwrap_err().to_string();
+    assert_eq!(e, "The clips are on two tracks; clips joined are on one");
     assert!(song.edit(Edit::ClipsJoin { clips: vec![first] }, None).unwrap().is_empty());
     song.close();
 }
@@ -480,18 +507,18 @@ fn clips_dragged_with_option_are_copied_as_far_as_a_move_goes() {
     let (_dir, path, song, seen) = open();
     transport(&seen);
     let start = song.arrangement();
-    let (first, fill) = (start.tracks[0].clips[0].key, start.tracks[0].clips[1].key);
-    let perc_clip = start.tracks[1].clips[0].key;
-    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(u64, f64, u32)> {
-        a.tracks[track].clips.iter().map(|c| (c.key, c.at, c.repeats)).collect()
+    let (first, fill) = (start.tracks[0].note_clips[0].key, start.tracks[0].note_clips[1].key);
+    let perc_clip = start.tracks[1].note_clips[0].key;
+    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(u64, f64, f64)> {
+        a.tracks[track].note_clips.iter().map(|c| (c.key, c.at, c.length_beats)).collect()
     };
 
     // A copy goes where a move would, and the clip stays.
     let made = song.edit(Edit::ClipsCopy { clips: vec![fill], by: 4.0, rows: 1 }, None).unwrap();
     let u = update(&seen);
     assert_eq!(made.len(), 1);
-    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 4), (fill, 16.0, 1)]);
-    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 2), (made[0], 20.0, 1)]);
+    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 16.0), (fill, 16.0, 2.0)]);
+    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 8.0), (made[0], 20.0, 2.0)]);
     song.undo().unwrap();
     update(&seen);
 
@@ -499,14 +526,14 @@ fn clips_dragged_with_option_are_copied_as_far_as_a_move_goes() {
     let made = song.edit(Edit::ClipsCopy { clips: vec![perc_clip, fill], by: 8.0, rows: 0 }, None).unwrap();
     let u = update(&seen);
     assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Copy 2 clips"));
-    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 4), (fill, 16.0, 1), (made[1], 24.0, 1)]);
-    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 2), (made[0], 16.0, 2)]);
+    assert_eq!(clips(&u.arrangement, 0), [(first, 0.0, 16.0), (fill, 16.0, 2.0), (made[1], 24.0, 2.0)]);
+    assert_eq!(clips(&u.arrangement, 1), [(perc_clip, 8.0, 8.0), (made[0], 16.0, 8.0)]);
     assert!(song.edit(Edit::ClipsCopy { clips: vec![perc_clip, fill], by: 0.0, rows: -1 }, None).is_err());
     song.undo().unwrap();
     update(&seen);
 
     // Exact beats: a copy of a clip on a third stays on thirds.
-    let third = agent(&path, json!({"op": "clip.add", "track": "perc", "pattern": "fill", "at": "1/3"}));
+    let third = agent(&path, json!({"op": "clip.add", "track": "perc", "length_beats": 2, "at": "1/3"}));
     let third: u64 = third["handle"].as_str().unwrap()[1..].parse().unwrap();
     update(&seen);
     let copy = song.edit(Edit::ClipsCopy { clips: vec![third], by: 0.125, rows: 0 }, None).unwrap()[0];
@@ -609,13 +636,13 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     }
 
     // What the person selects, the agent can ask about.
-    let clip = start.tracks[0].clips[1].key;
+    let clip = start.tracks[0].note_clips[1].key;
     song.select(vec![clip, start.tracks[1].key, 9999]).unwrap();
     let selection = agent(&path, json!({"op": "status"}))["selection"].clone();
     assert_eq!(
         selection,
         json!([
-            {"ref": format!("@{clip}"), "path": "tracks.drums.clips.1"},
+            {"ref": format!("@{clip}"), "path": "tracks.drums.clips.fill"},
             {"ref": format!("@{}", start.tracks[1].key), "path": "tracks.perc"},
         ])
     );
@@ -1034,7 +1061,7 @@ fn waveforms_follow_the_audio_of_each_track() {
     assert_eq!((faded.tracks.clone(), faded.peaks.len()), (first.tracks.clone(), 0));
 
     // A moved clip changes its track's audio and no other's.
-    let clip = start.tracks[1].clips[0].key;
+    let clip = start.tracks[1].note_clips[0].key;
     song.edit(Edit::ClipsMove { clips: vec![clip], by: 8.0, rows: 0 }, None).unwrap();
     let moved = waveforms(&waves, 2, &mut have);
     assert_eq!(identity(&moved, drums), identity(&first, drums));
@@ -1076,7 +1103,7 @@ fn audio_add(path: &Path, seen: &Receiver<Seen>, fields: Json) -> Update {
 
 #[test]
 fn audio_clips_are_what_the_app_draws() {
-    let (dir, path, song, seen, waves) = open_with_waveforms();
+    let (dir, path, song, seen, waves) = open_text(AUDIO_SONG);
     transport(&seen);
     with_song_file(dir.path(), &path, &seen);
     let drums = song.arrangement().tracks[0].key;
@@ -1113,7 +1140,6 @@ fn audio_clips_are_what_the_app_draws() {
     let file = u.arrangement.files[0].clone();
     assert_eq!((u.arrangement.files.len(), file.identity, file.seconds, file.bpm, file.beats.len()), (1, clip.file, 10.0, None, 0));
     assert_ne!(file.identity, 0);
-    assert_eq!(u.arrangement.tracks[0].clips.len(), 2, "pattern clips are a list of their own");
 
     // A clip without an end plays to its file's; one with a tempo of its own
     // counts its file in its own beats.
@@ -1152,8 +1178,9 @@ fn audio_clips_are_what_the_app_draws() {
     // The file gets louder: its end peaks higher than its start.
     let finest = &peaks[0].levels[0].data;
     assert!((finest[2 * 7400 + 1] as i8) > (finest[2 * 100 + 1] as i8));
-    // Both tracks have pattern clips, so both still have peaks of their own.
-    assert_eq!(w.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, u.arrangement.tracks[1].key]);
+    // The drums, with no clip left, have peaks of their own, of silence; the
+    // perc, of audio clips alone, has none: its clips draw the file.
+    assert_eq!(w.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums]);
 
     // A track of audio clips alone has none: its clips draw the file.
     agent(&path, json!({"op": "track.add", "id": "edit"}));
@@ -1207,7 +1234,7 @@ fn audio_clips_are_what_the_app_draws() {
 
 #[test]
 fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
-    let (dir, path, song, seen) = open();
+    let (dir, path, song, seen) = open_audio();
     transport(&seen);
     with_song_file(dir.path(), &path, &seen);
     let start = song.arrangement();
@@ -1224,12 +1251,8 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     assert_eq!(audio(&u, 1).iter().map(|c| (c.key, c.at, c.source_start_seconds)).collect::<Vec<_>>(), [(clip, 6.5, 1.0)]);
     assert!(song.edit(Edit::ClipsMove { clips: vec![clip], by: 0.0, rows: 0 }, None).unwrap().is_empty());
     assert!(song.edit(Edit::ClipsMove { clips: vec![clip], by: 0.0, rows: 1 }, None).is_err(), "no track below");
-    // With a pattern clip, each moves as its kind does.
-    let fill = start.tracks[0].clips[1].key;
-    song.edit(Edit::ClipsMove { clips: vec![fill, clip], by: -2.0, rows: 0 }, None).unwrap();
-    let u = update(&seen);
-    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Move 2 clips"));
-    assert_eq!((u.arrangement.tracks[0].clips[1].at, audio(&u, 1)[0].at), (14.0, 4.5));
+    song.edit(Edit::ClipsMove { clips: vec![clip], by: -2.0, rows: 0 }, None).unwrap();
+    assert_eq!(audio(&update(&seen), 1)[0].at, 4.5);
 
     // A clip that ends past the song's end takes the end to the end of that
     // bar, in the same step (D130).
@@ -1261,7 +1284,6 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     assert_eq!((c.at, c.source_start_seconds, c.source_end_seconds, c.length_beats), (2.5, 0.0, 10.0, 20.0));
     assert!(song.edit(Edit::AudioTrim { clip, start: None, end: None }, None).unwrap().is_empty());
     assert!(song.edit(Edit::AudioTrim { clip, start: Some(30.0), end: None }, None).is_err(), "it would end before it starts");
-    assert!(song.edit(Edit::AudioTrim { clip: fill, start: Some(3.0), end: None }, None).is_err(), "a pattern clip has no audio to trim");
     // An end dragged past the song's end takes the song with it.
     song.edit(Edit::ClipsMove { clips: vec![clip], by: 13.5, rows: 0 }, None).unwrap();
     let u = update(&seen);
@@ -1348,7 +1370,7 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     assert!(set("fade_out_ms", number(4.0)).is_err(), "fades are set where the clip's end is kept");
 
     // A split makes two that play as the one did; the later half is new.
-    let made = song.edit(Edit::ClipsSplit { clips: vec![clip, fill], at: 39.0 }, None).unwrap();
+    let made = song.edit(Edit::ClipsSplit { clips: vec![clip], at: 39.0 }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.op, "clip.split");
     let halves = audio(&u, 1);
@@ -1371,9 +1393,9 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
     song.edit(Edit::ClipsRemove { clips: vec![copies[1]] }, None).unwrap();
     let u = update(&seen);
     assert_eq!((u.change.label.as_str(), u.touched.as_slice()), ("Remove audio clip song", &[touch(Part::Clip, copies[1], Delta::Removed)][..]));
-    song.edit(Edit::ClipsRemove { clips: vec![clip, fill] }, None).unwrap();
+    song.edit(Edit::ClipsRemove { clips: vec![clip] }, None).unwrap();
     let u = update(&seen);
-    assert_eq!((u.change.label.as_str(), audio(&u, 1).len(), u.arrangement.tracks[0].clips.len()), ("Remove 2 clips", 3, 1));
+    assert_eq!((u.change.label.as_str(), audio(&u, 1).len()), ("Remove audio clip song", 3));
 
     // A clip's length comes from seconds of its file, and a copy still lands
     // on a beat a person would write: this one sounds for 7.984 beats and
@@ -1392,7 +1414,7 @@ fn audio_clips_move_trim_fade_and_split_as_they_are_dragged() {
 
 #[test]
 fn a_dropped_file_becomes_an_audio_clip_and_the_song_grows_to_hold_it() {
-    let (dir, path, song, seen) = open();
+    let (dir, path, song, seen) = open_audio();
     transport(&seen);
     let start = song.arrangement();
     let drums = start.tracks[0].key;
@@ -1419,7 +1441,7 @@ fn a_dropped_file_becomes_an_audio_clip_and_the_song_grows_to_hold_it() {
     assert_eq!(made, [clip.key]);
     assert_eq!((clip.sample.as_str(), clip.at, clip.length_beats, clip.source_start_seconds, clip.source_end_seconds), ("my-song", 8.0, 20.0, 0.0, 10.0));
     assert_eq!(u.arrangement.length_beats, 32.0, "it fits");
-    assert_eq!(u.arrangement.tracks[0].pads.len(), 1, "no pad is made");
+    assert!(u.arrangement.tracks[0].pads.is_empty(), "no pad is made");
     assert_eq!(
         agent(&path, json!({"op": "get", "path": "samples.my-song"})),
         json!({"path": "samples/ab12_song.wav", "sha256": asset.sha256, "source": "/music/My Song.wav"})
@@ -1485,13 +1507,9 @@ fn open_with_notes() -> (tempfile::TempDir, PathBuf, Arc<Song>, Receiver<Seen>) 
 fn a_pattern_is_what_the_editor_draws() {
     let (_dir, _path, song, _seen) = open_with_notes();
     let a = song.arrangement();
-    assert_eq!(a.patterns.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["beat", "fill", "line"]);
-    let beat = pattern(&a, "beat");
-    assert_eq!((beat.length_beats, beat.grid, beat.grid_text.as_str(), beat.swing, beat.steps, beat.clips), (4.0, 0.25, "1/4", 0.5, Some(16), 2));
-    assert_eq!(beat.length_text, "4");
-    assert_eq!(beat.rows.len(), 1);
-    assert_eq!((beat.rows[0].pad.as_str(), &beat.rows[0].cells[..4]), ("h", &[10u8, 0, 10, 0][..]));
-    assert!(beat.events.is_empty());
+    // The song's own drums were converted when it was read; the pattern the
+    // session made since is the only one.
+    assert_eq!(a.patterns.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), ["line"]);
 
     let line = pattern(&a, "line");
     assert_eq!((line.rows.len(), line.clips), (0, 1));
@@ -1511,44 +1529,6 @@ fn a_pattern_is_what_the_editor_draws() {
     let pads: Vec<_> = a.tracks[2].pads.iter().map(|p| (p.name.as_str(), p.gate, p.root)).collect();
     assert_eq!(pads, [("t", true, Some(45)), ("k", false, None)]);
     assert_eq!((aaw_ffi::note_name(45), aaw_ffi::note_name(61), aaw_ffi::note_name(200)), ("A2".into(), "C#4".into(), String::new()));
-    song.close();
-}
-
-#[test]
-fn steps_are_set_on_a_pattern_s_grid() {
-    let (_dir, path, song, seen) = open();
-    transport(&seen);
-    let steps = |pad: &str, steps: Vec<u32>, level: u32| Edit::Steps { pattern: "beat".into(), pad: pad.into(), steps, level };
-    let row = |pad: &str| agent(&path, json!({"op": "get", "path": format!("patterns.beat.steps.{pad}")}));
-
-    // Steps go on and off where they are, and a row keeps how it was written.
-    agent(&path, json!({"op": "pattern.steps", "pattern": "beat", "pad": "h", "row": "x.x. x.x. | x.x. x.x."}));
-    update(&seen);
-    song.edit(steps("h", vec![1, 2], 10), None).unwrap();
-    let u = update(&seen);
-    assert_eq!((u.change.origin, u.change.label.as_str()), (Who::User, "Set beat steps for h"));
-    assert_eq!(row("h"), json!("xxx. x.x. | x.x. x.x."));
-    song.edit(steps("h", vec![0, 8], 0), None).unwrap();
-    song.edit(steps("h", vec![15], 3), None).unwrap();
-    update(&seen);
-    let u = update(&seen);
-    assert_eq!(row("h"), json!(".xx. x.x. | ..x. x.x3"));
-    assert_eq!(pattern(&u.arrangement, "beat").rows[0].cells[12..], [10, 0, 10, 3]);
-    // Both clips of the pattern play the new steps.
-    assert_eq!(u.touched.iter().filter(|t| t.part == Part::Clip && t.delta == Delta::Changed).count(), 2);
-
-    // A row left without steps goes; clearing nothing is no change.
-    song.edit(steps("h", (0..16).collect(), 0), None).unwrap();
-    assert!(pattern(&update(&seen).arrangement, "beat").rows.is_empty());
-    assert!(song.edit(steps("h", vec![3], 0), None).unwrap().is_empty());
-    // A pad's first step writes its row, a beat to a group.
-    song.edit(steps("h", vec![0, 6], 10), None).unwrap();
-    update(&seen);
-    assert_eq!(row("h"), json!("x... ..x. .... ...."));
-    // No such step, level or pad.
-    assert!(song.edit(steps("h", vec![16], 10), None).unwrap_err().to_string().contains("has 16 steps"));
-    assert!(song.edit(steps("h", vec![0], 11), None).is_err());
-    assert_eq!(song.edit(steps("nope", vec![0], 10), None).unwrap_err().to_string(), "drums: unknown pad nope");
     song.close();
 }
 
@@ -1729,7 +1709,15 @@ fn several_events_move_copy_and_paste_together() {
     assert_eq!(get(pasted[0])["at"], json!(2));
     // Past the pattern's end, or on a pad the pattern's tracks lack, is refused.
     assert!(song.edit(Edit::EventsPaste { events: taken.clone(), pattern: "line".into(), at: Some(3.5) }, None).is_err());
-    assert!(song.edit(Edit::EventsPaste { events: taken, pattern: "beat".into(), at: Some(0.0) }, None).is_err());
+    agent(&path, json!({"op": "batch", "commands": [
+        {"op": "track.add", "id": "hats"},
+        {"op": "pad.add", "track": "hats", "pad": "h", "sample": "hit"},
+        {"op": "pattern.add", "pattern": "hats", "length_beats": 4, "events": [{"at": 0, "pad": "h"}]},
+        {"op": "clip.add", "track": "hats", "pattern": "hats", "at": 0},
+    ]}));
+    update(&seen);
+    let e = song.edit(Edit::EventsPaste { events: taken, pattern: "hats".into(), at: Some(0.0) }, None).unwrap_err().to_string();
+    assert_eq!(e, "hats: unknown pad t");
 
     // Several set and removed at once.
     song.edit(Edit::EventsSet { events: vec![first, kick], at: None, duration: None, velocity: Some(64), transpose: None, note: None }, None).unwrap();
@@ -1744,104 +1732,9 @@ fn several_events_move_copy_and_paste_together() {
 }
 
 #[test]
-fn a_pattern_s_length_grid_and_swing_change_with_its_steps() {
-    let (_dir, path, song, seen) = open_with_notes();
-    let steps = |name: &str| agent(&path, json!({"op": "get", "path": format!("patterns.{name}.steps")}));
-    let length = |pattern: &str, beats: &str| Edit::PatternLength { pattern: pattern.into(), beats: beats.into() };
-    let grid = |pattern: &str, grid: &str| Edit::PatternGrid { pattern: pattern.into(), grid: grid.into() };
-
-    song.edit(Edit::PatternSwing { pattern: "fill".into(), swing: 0.62 }, None).unwrap();
-    assert_eq!(pattern(&update(&seen).arrangement, "fill").swing, 0.62);
-    assert!(song.edit(Edit::PatternSwing { pattern: "fill".into(), swing: 0.9 }, None).is_err());
-    assert!(song.edit(Edit::PatternSwing { pattern: "nope".into(), swing: 0.6 }, None).is_err());
-
-    // A shorter pattern keeps the steps and events that still fit, as one step.
-    song.edit(length("fill", "1"), None).unwrap();
-    let u = update(&seen);
-    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Set the length of pattern fill to 1 beats"));
-    assert_eq!((steps("fill"), pattern(&u.arrangement, "fill").length_beats), (json!({"h": "xxxx"}), 1.0));
-    song.edit(length("fill", "3/2"), None).unwrap();
-    update(&seen);
-    assert_eq!(steps("fill"), json!({"h": "xxxx .."}));
-    song.edit(length("line", "2"), None).unwrap();
-    let u = update(&seen);
-    assert_eq!(pattern(&u.arrangement, "line").events.iter().map(|e| e.at).collect::<Vec<_>>(), [0.0, 4.0 / 3.0]);
-    song.undo().unwrap();
-    assert_eq!(pattern(&update(&seen).arrangement, "line").events.len(), 3);
-    // A length that is not a whole number of steps cannot hold step rows; a
-    // clip made longer than the song takes the song's end with it (D130).
-    assert!(song.edit(length("fill", "1.1"), None).unwrap_err().to_string().contains("whole number of steps"));
-    song.edit(length("beat", "16"), None).unwrap();
-    assert_eq!(update(&seen).arrangement.length_beats, 64.0);
-    song.undo().unwrap();
-    assert_eq!(update(&seen).arrangement.length_beats, 32.0);
-    assert!(song.edit(length("fill", "3/2"), None).unwrap().is_empty());
-
-    // A finer grid spreads the steps out; a coarser one takes them if they fall on it.
-    song.edit(length("fill", "1"), None).unwrap();
-    update(&seen);
-    song.edit(grid("fill", "1/8"), None).unwrap();
-    let u = update(&seen);
-    assert_eq!(u.change.label, "Set the grid of pattern fill to 1/8 beats");
-    assert_eq!((steps("fill"), pattern(&u.arrangement, "fill").steps), (json!({"h": "x.x.x.x."}), Some(8)));
-    song.edit(grid("fill", "1/4"), None).unwrap();
-    update(&seen);
-    assert_eq!(steps("fill"), json!({"h": "xxxx"}));
-    let e = song.edit(grid("fill", "1/2"), None).unwrap_err().to_string();
-    assert_eq!(e, "Step 2 of h does not fall on a grid of 1/2 beats");
-    // Thirds: the steps on whole beats carry over.
-    song.edit(Edit::Steps { pattern: "fill".into(), pad: "h".into(), steps: vec![1, 2, 3], level: 0 }, None).unwrap();
-    update(&seen);
-    song.edit(grid("fill", "1/3"), None).unwrap();
-    assert_eq!((update(&seen).arrangement.patterns[1].grid_text.as_str(), steps("fill")), ("1/3", json!({"h": "x.."})));
-    assert!(song.edit(grid("fill", "0"), None).is_err());
-    song.close();
-}
-
-#[test]
-fn a_clip_gets_a_new_pattern_or_a_copy_of_its_own() {
-    let (_dir, path, song, seen) = open();
-    transport(&seen);
-    let start = song.arrangement();
-    let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
-
-    // A new clip plays a new pattern one bar long, named for its track.
-    let made = song.edit(Edit::ClipNew { track: perc, at: 24.0 }, None).unwrap();
-    let u = update(&seen);
-    assert_eq!((u.change.op.as_str(), u.change.label.as_str()), ("batch", "Add clip perc-1 to perc"));
-    let clip = u.arrangement.tracks[1].clips.last().unwrap();
-    assert_eq!((made.as_slice(), clip.pattern.as_str(), clip.at, clip.pattern_beats), (&[clip.key][..], "perc-1", 24.0, 4.0));
-    assert_eq!(pattern(&u.arrangement, "perc-1").steps, Some(16));
-    // Near the end it is as long as what is left of the song.
-    song.edit(Edit::ClipNew { track: perc, at: 30.0 }, None).unwrap();
-    let u = update(&seen);
-    assert_eq!(pattern(&u.arrangement, "perc-2").length_beats, 2.0);
-    assert!(song.edit(Edit::ClipNew { track: perc, at: 32.0 }, None).is_err());
-    assert!(song.edit(Edit::ClipNew { track: 9999, at: 0.0 }, None).is_err());
-    song.undo().unwrap();
-    let u = update(&seen);
-    assert!(u.arrangement.patterns.iter().all(|p| p.name != "perc-2"));
-
-    // A clip's own pattern: a copy, which the other clips do not play.
-    let second = start.tracks[0].clips[0].key;
-    song.edit(Edit::ClipOwnPattern { clip: second }, None).unwrap();
-    let u = update(&seen);
-    assert_eq!(u.change.label, "Give clip beat at 0 its own pattern beat-2");
-    assert_eq!(u.arrangement.tracks[0].clips[0].pattern, "beat-2");
-    assert_eq!((pattern(&u.arrangement, "beat").clips, pattern(&u.arrangement, "beat-2").clips), (1, 1));
-    assert_eq!(pattern(&u.arrangement, "beat-2").rows, pattern(&u.arrangement, "beat").rows);
-    song.edit(Edit::ClipOwnPattern { clip: second }, None).unwrap();
-    assert_eq!(update(&seen).arrangement.tracks[0].clips[0].pattern, "beat-3");
-    assert_eq!(agent(&path, json!({"op": "get", "path": format!("@{drums}.clips.0.pattern")})), json!("beat-3"));
-    song.close();
-}
-
-#[test]
 fn a_sample_becomes_a_sampler_on_a_midi_track_or_a_new_one() {
     let (dir, path, song, seen) = open();
     transport(&seen);
-    let start = song.arrangement();
-    let drums = start.tracks[0].key;
     agent(&path, json!({"op": "track.add", "id": "keys", "type": "midi"}));
     let keys = update(&seen).arrangement.tracks[2].key;
     // A file as the library's import leaves it: copied into the project.
@@ -1908,8 +1801,10 @@ fn a_sample_becomes_a_sampler_on_a_midi_track_or_a_new_one() {
 
     // A track that is not a MIDI track holds no Sampler: a sample lands on
     // its lane as an audio clip (`SampleClip`), never as a pad.
-    let e = song.edit(add(&kick, "Kick", Some(drums)), None).unwrap_err().to_string();
-    assert_eq!(e, "drums is not a MIDI track: a sample lands on its lane as an audio clip");
+    agent(&path, json!({"op": "track.add", "id": "edit"}));
+    let edit = update(&seen).arrangement.tracks.iter().find(|t| t.id == "edit").unwrap().key;
+    let e = song.edit(add(&kick, "Kick", Some(edit)), None).unwrap_err().to_string();
+    assert_eq!(e, "edit is not a MIDI track: a sample lands on its lane as an audio clip");
     // A file that is not in the project is refused, and nothing changes.
     let missing = aaw_ffi::library::Asset { path: "samples/none.wav".into(), sha256: kick.sha256.clone(), source: String::new(), source_sha256: None, root_note: None };
     assert_eq!(song.edit(add(&missing, "none", Some(keys)), None).unwrap_err().to_string(), "Missing asset none");
@@ -2110,7 +2005,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
 }
 
 #[test]
-fn note_clips_and_pattern_clips_split_at_the_start_position_as_audio_clips_do() {
+fn note_clips_split_at_the_start_position_as_audio_clips_do() {
     let (_dir, path, song, seen) = open();
     transport(&seen);
     agent(&path, json!({"op": "batch", "commands": [
@@ -2120,9 +2015,9 @@ fn note_clips_and_pattern_clips_split_at_the_start_position_as_audio_clips_do() 
         ]},
     ]}));
     let start = update(&seen).arrangement;
-    let (keys, beat) = (start.tracks[2].note_clips[0].key, start.tracks[0].clips[0].key);
-    // ⌘E at beat 8 with both selected: the note clip at the beat, the
-    // pattern clip of four 4-beat repeats between its second and third.
+    let (keys, beat) = (start.tracks[2].note_clips[0].key, start.tracks[0].note_clips[0].key);
+    // ⌘E at beat 8 with both selected: each clip at the beat, the drums'
+    // looped clip between its second and third time round.
     let made = song.edit(Edit::ClipsSplit { clips: vec![keys, beat], at: 8.0 }, None).unwrap();
     assert_eq!(made.len(), 2);
     let u = update(&seen);
@@ -2136,17 +2031,14 @@ fn note_clips_and_pattern_clips_split_at_the_start_position_as_audio_clips_do() 
     // The note across the cut is held to it on the left; its rest starts the right.
     assert_eq!(notes(0), [(60, 0.0, 1.0), (64, 1.0, 3.0)]);
     assert_eq!(notes(1), [(64, 0.0, 1.0), (67, 2.0, 1.0)]);
-    let repeats: Vec<_> = u.arrangement.tracks[0].clips.iter().map(|c| (c.pattern.as_str(), c.at, c.repeats)).collect();
-    assert_eq!(repeats, [("beat", 0.0, 2), ("beat", 8.0, 2), ("fill", 16.0, 1)]);
-    // Inside a repeat a pattern clip is refused with the reason.
-    let e = song.edit(Edit::ClipsSplit { clips: vec![beat], at: 2.0 }, None).unwrap_err().to_string();
-    assert!(e.contains("a pattern clip is cut only between repeats"), "{e}");
+    let drums: Vec<_> = u.arrangement.tracks[0].note_clips.iter().map(|c| (c.at, c.length_beats)).collect();
+    assert_eq!(drums, [(0.0, 8.0), (8.0, 8.0), (16.0, 2.0)]);
     // One undo puts back the clips as they were.
     song.undo().unwrap();
     let u = update(&seen);
     assert_eq!(u.arrangement.tracks[2].note_clips.len(), 1);
     assert_eq!(u.arrangement.tracks[2].note_clips[0].notes.len(), 3);
-    assert_eq!(u.arrangement.tracks[0].clips[0].repeats, 4);
+    assert_eq!(u.arrangement.tracks[0].note_clips[0].length_beats, 16.0);
     song.close();
 }
 
@@ -2168,7 +2060,6 @@ fn a_midi_track_shows_its_note_clips_as_the_agent_makes_them() {
     assert_eq!(clip.reference, format!("@{}", clip.key));
     let notes: Vec<_> = clip.notes.iter().map(|n| (n.id.as_str(), n.pitch, n.at, n.velocity)).collect();
     assert_eq!(notes, [("n1", 60, 0.0, 96), ("n2", 64, 1.975, 100)]);
-    assert!(!u.arrangement.tracks[0].midi);
     // A change to its notes touches the clip, which keeps its key.
     agent(&path, json!({"op": "note.transpose", "notes": [clip.reference.clone()], "by": 12}));
     let u = update(&seen);
@@ -2367,7 +2258,7 @@ fn a_note_clip_copied_in_the_app_is_its_own() {
     song.undo().unwrap();
     let u = update(&seen);
 
-    // Pasted at a beat on another MIDI track; a pattern track will not take it.
+    // Pasted at a beat on another MIDI track.
     let bass = u.arrangement.tracks[3].key;
     let taken = song.copy_clips(vec![original.key]).unwrap();
     let pasted = song.edit(Edit::ClipsPaste { copied: taken.clone(), at: 16.0, track: Some(bass) }, None).unwrap();
@@ -2376,32 +2267,29 @@ fn a_note_clip_copied_in_the_app_is_its_own() {
     let b = &u.arrangement.tracks[3].note_clips[0];
     assert_eq!((b.key, b.at, b.id.as_str()), (pasted[0], 16.0, "clip3"));
     assert_eq!(notes_of(&u.arrangement.tracks[3], 0), before);
-    let drums = u.arrangement.tracks[0].key;
-    assert!(song.edit(Edit::ClipsPaste { copied: taken.clone(), at: 16.0, track: Some(drums) }, None).is_err());
 
     // Its length as typed: a triplet's is kept exactly.
     song.edit(Edit::ClipLength { clip: pasted[0], beats: "11/3".into() }, None).unwrap();
     assert_eq!(update(&seen).arrangement.tracks[3].note_clips[0].length_beats, 11.0 / 3.0);
     assert!(song.edit(Edit::ClipLength { clip: pasted[0], beats: "0".into() }, None).is_err());
 
-    // Looped every so many beats, as typed, and off again; a pattern clip does not loop.
+    // Looped every so many beats, as typed, and off again.
     song.edit(Edit::ClipLoop { clip: pasted[0], beats: "4/3".into() }, None).unwrap();
     let u = update(&seen);
     assert_eq!((u.change.label.as_str(), u.arrangement.tracks[3].note_clips[0].loop_beats), ("Loop clip clip3 at 16 every 4/3 beats", Some(4.0 / 3.0)));
     song.edit(Edit::ClipLoop { clip: pasted[0], beats: "off".into() }, None).unwrap();
     assert_eq!(update(&seen).arrangement.tracks[3].note_clips[0].loop_beats, None);
-    assert!(song.edit(Edit::ClipLoop { clip: u.arrangement.tracks[0].clips[0].key, beats: "4".into() }, None).is_err());
 
-    // Deactivated, as 0 does: a pattern clip and a note clip in one step,
-    // undone in one; then one clip, activated again.
-    let pattern = u.arrangement.tracks[0].clips[0].key;
-    song.edit(Edit::ClipsActive { clips: vec![pattern, pasted[0]], active: false }, None).unwrap();
+    // Deactivated, as 0 does: clips of two tracks in one step, undone in
+    // one; then one clip, activated again.
+    let beat = u.arrangement.tracks[0].note_clips[0].key;
+    song.edit(Edit::ClipsActive { clips: vec![beat, pasted[0]], active: false }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, "Deactivate 2 clips");
-    assert!(!u.arrangement.tracks[0].clips[0].active && !u.arrangement.tracks[3].note_clips[0].active);
+    assert!(!u.arrangement.tracks[0].note_clips[0].active && !u.arrangement.tracks[3].note_clips[0].active);
     song.undo().unwrap();
     let u = update(&seen);
-    assert!(u.arrangement.tracks[0].clips[0].active && u.arrangement.tracks[3].note_clips[0].active);
+    assert!(u.arrangement.tracks[0].note_clips[0].active && u.arrangement.tracks[3].note_clips[0].active);
     song.edit(Edit::ClipsActive { clips: vec![pasted[0]], active: false }, None).unwrap();
     assert_eq!(update(&seen).change.label, "Deactivate clip clip3 at 16");
     song.edit(Edit::ClipsActive { clips: vec![pasted[0]], active: true }, None).unwrap();
@@ -2870,7 +2758,7 @@ fn metronome_is_shared_transport_state_without_a_song_edit() {
 
 #[test]
 fn browser_instruments_are_atomic_and_effects_insert_at_the_drop() {
-    let (_dir, path, song, seen) = open();
+    let (_dir, path, song, seen) = open_audio();
     transport(&seen);
     let drums = song.arrangement().tracks[0].key;
     assert!(
@@ -3086,8 +2974,8 @@ fn the_panel_adds_parts_and_entries_sets_several_fields_saves_a_patch_and_previe
     // song already named the patch, so nothing in it changed.
     assert_eq!(aaw_ffi::library::library_patches("panel".into())[0].description, "From the panel");
     // A note previewed on a track without an instrument is refused before anything opens.
-    let drums = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().key;
-    let e = song.preview_note(drums, 60, 100, 1.0, true).unwrap_err();
+    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap()[0];
+    let e = song.preview_note(audio, 60, 100, 1.0, true).unwrap_err();
     assert!(e.to_string().contains("no instrument"), "{e}");
 }
 
@@ -3127,15 +3015,16 @@ fn the_browsers_synth_and_its_patches_are_dropped_on_tracks_and_under_them() {
     let loaded = u.arrangement.tracks.iter().find(|t| t.id == "synth-1").unwrap().clone();
     assert_eq!(loaded.synth.as_ref().unwrap().patch.as_deref(), Some("Kick"));
     assert_eq!(loaded.note_clips.len(), 1);
-    // Synth dropped on a MIDI track with a sampler takes its place; on a pattern track it is refused.
+    // Synth dropped on a MIDI track with a sampler takes its place; on an audio track it is refused.
     song.edit(Edit::InstrumentAdd { track: None }, None).unwrap();
     let u = update(&seen);
     let sampler = u.arrangement.tracks.iter().find(|t| t.instrument.as_deref() == Some("sampler")).unwrap().clone();
     song.edit(Edit::SynthAdd { track: Some(sampler.key), patch: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, format!("Attach a Synth to {}", sampler.id));
-    let drums = u.arrangement.tracks.iter().find(|t| t.id == "drums").unwrap().key;
-    let e = song.edit(Edit::SynthAdd { track: Some(drums), patch: Some("Hat".into()) }, None).unwrap_err();
+    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap()[0];
+    update(&seen);
+    let e = song.edit(Edit::SynthAdd { track: Some(audio), patch: Some("Hat".into()) }, None).unwrap_err();
     assert!(e.to_string().contains("not a MIDI track"), "{e}");
     let e = song.edit(Edit::SynthAdd { track: None, patch: Some("no-such".into()) }, None).unwrap_err();
     assert!(e.to_string().contains("No patch named"), "{e}");
@@ -3481,7 +3370,9 @@ fn an_instrument_rack_is_listed_and_loaded_from_the_browser() {
     let u = update(&seen);
     let t = u.arrangement.tracks.iter().find(|t| t.key == sampler).unwrap();
     assert_eq!((t.instrument.as_deref(), t.effects[0].kind.as_str()), (Some("synth"), "rack"));
-    let e = song.edit(Edit::InstrumentRackAdd { track: Some(u.arrangement.tracks[0].key), rack: name }, None).unwrap_err().to_string();
+    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap()[0];
+    update(&seen);
+    let e = song.edit(Edit::InstrumentRackAdd { track: Some(audio), rack: name }, None).unwrap_err().to_string();
     assert!(e.contains("MIDI"), "{e}");
     song.close();
 }
@@ -3568,7 +3459,7 @@ fn a_group_of_groups_is_a_row_over_their_rows() {
 #[test]
 fn a_tracks_input_is_set_from_the_header_and_the_arm_is_shared_transport_state() {
     use aaw_ffi::edits::InputChoice;
-    let (_dir, path, song, seen) = open();
+    let (_dir, path, song, seen) = open_audio();
     transport(&seen);
     let a = song.arrangement();
     let (drums, bass) = (a.tracks[0].key, a.tracks[1].key);
@@ -3631,7 +3522,7 @@ fn a_track_is_frozen_from_the_header_and_its_clips_are_held() {
     transport(&seen);
     let a = song.arrangement();
     let (perc, perc_id) = (a.tracks[1].key, a.tracks[1].id.clone());
-    let clip = a.tracks[1].clips[0].key;
+    let clip = a.tracks[1].note_clips[0].key;
     assert!(!a.tracks[1].frozen);
     song.edit(Edit::TrackFreeze { track: perc }, None).unwrap();
     let u = update(&seen);
@@ -3640,7 +3531,7 @@ fn a_track_is_frozen_from_the_header_and_its_clips_are_held() {
     assert!(dir.path().join("frozen").join(format!("{perc_id}.wav")).is_file());
     // The clips and devices stay in the view, and a drag of a clip is refused
     // in the host's words; the fader is not.
-    assert_eq!(u.arrangement.tracks[1].clips.len(), 1);
+    assert_eq!(u.arrangement.tracks[1].note_clips.len(), 1);
     assert_eq!(u.arrangement.tracks[1].effects.len(), 2);
     let e = song.edit(Edit::ClipsMove { clips: vec![clip], by: 4.0, rows: 0 }, None).unwrap_err();
     assert!(e.to_string().contains(&format!("{perc_id} is frozen")), "{e}");
@@ -3651,7 +3542,7 @@ fn a_track_is_frozen_from_the_header_and_its_clips_are_held() {
     assert!(!u.arrangement.tracks[1].frozen);
     assert_eq!(u.change.label, format!("Unfreeze {perc_id}"));
     song.edit(Edit::ClipsMove { clips: vec![clip], by: 4.0, rows: 0 }, None).unwrap();
-    assert_eq!(update(&seen).arrangement.tracks[1].clips[0].at, 12.0);
+    assert_eq!(update(&seen).arrangement.tracks[1].note_clips[0].at, 12.0);
     song.close();
 }
 

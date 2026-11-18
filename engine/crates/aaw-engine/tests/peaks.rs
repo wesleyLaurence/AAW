@@ -131,11 +131,10 @@ fn a_tracks_identity_changes_only_with_what_its_voices_are_made_from() {
     project.tracks[2].mute = true;
     assert_eq!(before, ids(&project, &mut cache));
     // A moved clip changes its track and no other; so does a note.
-    let clips = |p: &mut aaw_model::Project, t: usize| &mut p.tracks[t].midi.as_mut().unwrap().clips;
-    clips(&mut project, 1)[0].at = aaw_model::Beat::int(2);
+    common::note_clips(&mut project, 1)[0].at = aaw_model::Beat::int(2);
     let moved = ids(&project, &mut cache);
     assert_eq!((moved[0] == before[0], moved[1] == before[1], moved[2] == before[2]), (true, false, true));
-    clips(&mut project, 0)[0].notes.pop();
+    common::note_clips(&mut project, 0)[0].notes.pop();
     let edited = ids(&project, &mut cache);
     assert_eq!((edited[0] == moved[0], edited[1] == moved[1], edited[2] == moved[2]), (false, true, true));
     // The session length is part of it, since nothing sounds past the end.

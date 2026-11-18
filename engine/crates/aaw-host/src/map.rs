@@ -251,17 +251,27 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
                     playing.iter().filter(move |n| n.at_exact() < *plays).map(move |n| (start + f(from) + f(&n.at_exact()), n.pitch))
                 })
                 .collect();
+            // A clip that loops a whole number of times is its loop played
+            // so many times, the same music however many, as a pattern
+            // clip's repeats were; its length is then said by the bars.
+            let whole = c.loop_exact().filter(|l| (&length / l).is_integer());
             let looped = c.loop_exact().map(|l| format!(", loops every {}", beats_text(f(&l)))).unwrap_or_default();
+            let (key, long) = match &whole {
+                Some(l) => (format!("loop|{}|{key}", aaw_model::fraction_str(l)), String::new()),
+                None => (
+                    format!("notes|{}|{:?}|{key}", aaw_model::fraction_str(&length), c.loop_exact().map(|l| aaw_model::fraction_str(&l))),
+                    format!(", {}", beats_text(f(&length))),
+                ),
+            };
             out.push(Placed {
-                key: format!("notes|{}|{:?}|{key}", aaw_model::fraction_str(&length), c.loop_exact().map(|l| aaw_model::fraction_str(&l))),
+                key,
                 loc: at("clips", i),
                 start,
                 end: start + f(&length),
                 onsets: placed.iter().map(|(at, _)| *at).collect(),
                 what: format!(
-                    "notes {}, {}{looped}, {}{}",
+                    "notes {}{long}{looped}, {}{}",
                     c.id,
-                    beats_text(f(&length)),
                     plural(playing.len(), "note", "notes"),
                     span(&playing.iter().map(|n| n.pitch).collect::<Vec<_>>()).map(|s| format!(" {s}")).unwrap_or_default()
                 ),
@@ -520,6 +530,8 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
                     Some(name) => format!("synth \"{name}\""),
                     None => "synth".into(),
                 },
+                // A Drum Rack by its pads, as a track of pads was.
+                Some(aaw_model::Instrument::Sampler(s)) if s.drum_rack => format!("drum rack {}", s.pads.keys().cloned().collect::<Vec<_>>().join(" ")),
                 Some(aaw_model::Instrument::Sampler(s)) => format!("sampler of {}", plural(s.pads.len(), "pad", "pads")),
                 Some(aaw_model::Instrument::Device(d)) => format!("plugin {}", d.name),
                 None => "no instrument".into(),

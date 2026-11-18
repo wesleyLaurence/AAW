@@ -64,6 +64,35 @@ pub fn write_song(dir: &Path) -> PathBuf {
     path
 }
 
+/// A song of two audio tracks with the names and mixers of `SONG`'s, for
+/// what only an audio track has: an input, recording, audio clips.
+pub const AUDIO_SONG: &str = r#"
+session: {tempo: 120, length_beats: 32}
+samples:
+  tone: {path: tone.wav, root_note: A3}
+  hit: {path: hit.wav}
+tracks:
+- id: drums
+  pads: {}
+  audio: [{sample: hit, at: 0}, {sample: hit, at: 16}]
+- id: bass
+  pads: {}
+  audio: [{sample: tone, at: 0}, {sample: tone, at: 16}]
+  effects: [{type: compressor, threshold_db: -20, sidechain: drums}]
+  sends: [{to: plate, gain_db: -12}]
+returns:
+- id: plate
+  effects: [{type: reverb, decay_seconds: 1.5}]
+sections: [{id: intro, at: 0, length_beats: 8}]
+"#;
+
+/// Writes `AUDIO_SONG` and the samples into `dir`.
+pub fn write_audio_song(dir: &Path) -> PathBuf {
+    let path = write_song(dir);
+    std::fs::write(&path, AUDIO_SONG).unwrap();
+    path
+}
+
 /// Parses a command from JSON.
 pub fn cmd(j: Json) -> Command {
     serde_json::from_value(j).expect("command")

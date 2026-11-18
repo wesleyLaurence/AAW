@@ -202,10 +202,14 @@ def test_project_hash_fingerprints_the_saved_form(song):
     # A field added later and left at its default is not saved, so it must not
     # change the fingerprint that renders and apply --expect rely on.
     path, _ = song
+    # Read once, the song is converted and saved as it now is, a MIDI track's
+    # song of version 2, which the fingerprint holds as a version 1 song's
+    # does not.
+    project = load(path)
     saved = yaml.safe_load(path.read_text())
-    del saved["schema_version"]
+    assert saved["schema_version"] == 2
     expected = hashlib.sha256(json.dumps(saved, sort_keys=True).encode()).hexdigest()
-    assert project_hash(load(path)) == expected
+    assert project_hash(project) == expected
 
 
 def projects_by_schema():

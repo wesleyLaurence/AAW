@@ -297,7 +297,7 @@ fn many_swaps_and_moves_never_allocate_or_leak() {
         let mut p = aaw_model::load(&mix, true).unwrap();
         p.tracks[1].gain_db = -(i as f64);
         if i % 2 == 1 {
-            common::note_clips(p, 0)[0].at = aaw_model::Beat::int(2);
+            common::note_clips(&mut p, 0)[0].at = aaw_model::Beat::int(2);
         }
         if i % 3 == 2 {
             p.master.effects.clear();

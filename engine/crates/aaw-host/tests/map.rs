@@ -58,7 +58,7 @@ fn three_duplicates_on_one_beat_show_as_stacked() {
     let clips: Vec<&str> = m["clips"]["A"].as_str().unwrap().split(' ').collect();
     assert_eq!(clips.len(), 5);
     assert!(clips.iter().all(|c| c.starts_with('@')));
-    assert!(t.contains("A  pattern beat, 4 beats, 8 hits; drums bars 1 ×4, 5 ×4, 9 ×4, 9 ×4, 9 ×4"));
+    assert!(t.contains("A  notes beat, loops every 4 beats, 8 notes C2; drums bars 1 ×4, 5 ×4, 9 ×4, 9 ×4, 9 ×4"), "{t}");
 }
 
 #[test]
@@ -153,7 +153,7 @@ fn ranges_cells_and_errors() {
     assert_eq!(row(t, "drums"), "AAA");
     assert_eq!(row(t, "bar"), "3");
     // Clips are named by their paths without a host.
-    assert_eq!(m["clips"]["A"], json!("tracks.drums.clips.0 tracks.drums.clips.1"));
+    assert_eq!(m["clips"]["A"], json!("tracks.drums.clips.beat tracks.drums.clips.beat-2"));
     let e = s.map(None, None, None, &["nope".into()], false).unwrap_err();
     assert_eq!(e, "No track nope; the tracks are drums, bass");
     let e = s.map(Some(&json!("loud")), None, None, &[], false).unwrap_err();
@@ -183,13 +183,19 @@ tracks:
 fn eight_tracks_of_sixty_four_bars_map_in_under_two_thousand_characters() {
     let mut yaml = String::from(
         "session: {tempo: 120, length_beats: 256}\nsamples: {hit: {path: hit.wav}}\n\
-         patterns:\n  beat: {length_beats: 4, steps: {h: x...x...x...x...}}\n  fill: {length_beats: 4, steps: {h: x.x.x.x.xxxxxxxx}}\n\
          sections: [{id: intro, at: 0, length_beats: 32}, {id: verse, at: 32, length_beats: 64}, {id: chorus, at: 96, length_beats: 64}, {id: bridge, at: 160, length_beats: 32}, {id: outro, at: 192, length_beats: 64}]\ntracks:\n",
     );
+    let beat = "[{pitch: 36, duration: 1/4}, {pitch: 36, at: 1, duration: 1/4}, {pitch: 36, at: 2, duration: 1/4}, {pitch: 36, at: 3, duration: 1/4}]";
+    let fill: Vec<String> = [0, 1, 2, 3].map(|b| format!("{{pitch: 36, at: {b}/2, duration: 1/4}}")).into_iter().chain((8..16).map(|s| format!("{{pitch: 36, at: {s}/4, duration: 1/4}}"))).collect();
+    let fill = format!("[{}]", fill.join(", "));
     for name in ["kick", "snare", "hats"] {
         let _ = write!(
             yaml,
-            "- id: {name}\n  pads: {{h: {{sample: hit}}}}\n  clips: [{{pattern: beat, at: 32, repeats: 15}}, {{pattern: fill, at: 92}}, {{pattern: beat, at: 96, repeats: 24}}, {{pattern: beat, at: 192, repeats: 16}}]\n"
+            "- id: {name}\n  type: midi\n  instrument: {{sampler: {{drum_rack: true, pads: {{h: {{sample: hit}}}}, map: [{{notes: 36, pad: h}}]}}}}\n  clips:\n  \
+             - {{id: {name}, at: 32, length_beats: 60, loop_beats: 4, notes: {beat}}}\n  \
+             - {{id: {name}-f, at: 92, length_beats: 4, notes: {fill}}}\n  \
+             - {{id: {name}-b, at: 96, length_beats: 96, loop_beats: 4, notes: {beat}}}\n  \
+             - {{id: {name}-c, at: 192, length_beats: 64, loop_beats: 4, notes: {beat}}}\n"
         );
     }
     for (k, name) in ["bass", "keys", "pad", "lead", "arp"].iter().enumerate() {

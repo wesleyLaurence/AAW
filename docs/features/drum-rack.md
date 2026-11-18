@@ -1,7 +1,8 @@
 # The Drum Rack, and patterns gone
 
 Status: stage 1, the Drum Rack, implemented November 17, 2026 (D189), in [#187](https://github.com/wesleyLaurence/AAW/pull/187).
-Stages 2 and 3 are proposed, Next items 1–2, one pull request each, in order.
+Stage 2, patterns converted, implemented November 18, 2026 (D190).
+Stage 3 is proposed, Next item 1.
 
 ## What
 
@@ -108,22 +109,75 @@ choked together, played by a looped note clip, in place of a track a drum, and
 describe pads on a track and patterns say they are only the format of older
 songs until stage 3 removes them.
 
-### Stage 2: patterns converted
+### Stage 2: patterns converted (implemented November 18, 2026)
 
-When a song with patterns is read by the host or any command, before anything
-else, each track of pads becomes a MIDI track of the same name and place whose
-Drum Rack holds its pads. A pad with one note gets that note; the rest get
-keys from 36 up, in the track's order, skipping the keys of the General MIDI
-drum map they do not take, so a pad named kick lands on C2, snare on D2,
-hat on F♯2 and an open hat on A♯2 when no note says otherwise. A pitched pad,
-one whose events give notes, keeps a range of its own for those notes,
-pitched. Each pattern clip becomes a note clip with the pattern's events as
-notes (an event's velocity, duration or the pad's gate length, its transpose
-as the note's pitch on a pitched pad), looped over the pattern's length as
-the clip repeats it, and swing written into the notes' times. The converted
-song is written beside a copy of the old one, `song.before-drum-rack.yaml`,
-and a render of each converted track is compared with the old one's in
-tests, sample for sample within the engine's tolerance.
+A song with a track of pads or pattern clips is converted the first time it
+is read from its file: by `aaw_model::load`, which every `daw` command, the
+Python package and a render read through, and by the host's session when it
+opens a song or loads an edit made outside it. `aaw_model::convert` writes
+the file as it was beside the song as `song.before-drum-rack.yaml`, numbered
+when that name is taken, and the converted song over it; read again, nothing
+changes. Text given to `aaw_model::parse` is not converted, so the model's
+corpus still reads what it is given, and a render's `song.snapshot.yaml` is
+read as it was written, so an old render of a song of patterns still
+verifies against its report, and a pattern clip an edit adds inside a
+running session stays one until the song is next read.
+
+Each such track becomes a MIDI track of the same ID, place, mixer, chain,
+sends, lanes and group, whose instrument is a sampler with `drum_rack: true`
+holding its pads; their own mute and solo are cleared, since a track's pads
+never had them. Keys are given in this order:
+
+1. A pad played with notes keeps a pitched range of the notes it played, from
+   its lowest to its highest, at those notes when they are free and otherwise
+   moved to the nearest free range, the pad copied and moved back to match.
+   When such ranges would collide or leave too few keys for the drums, as a
+   pad played at C-1 and at G9 would take every key, each pad keeps instead
+   each run of the notes it plays.
+2. A pad whose name says a General MIDI drum takes that drum's key when it is
+   free: kick C2, rim C♯2, snare D2, clap D♯2, closed hat F♯2, pedal hat
+   G♯2, open hat A♯2, the toms, crash C♯3, ride D♯3, tambourine, cowbell and
+   shaker.
+3. The rest take the lowest free keys from C2 up, then below it, in the
+   track's order: pads as they are first, then copies.
+
+A hit its event transposes plays a copy of its pad moved as far, named for it
+(`kick-2`, `hat+0.5`) on a key of its own, and a pitched hit's fraction of a
+semitone the same way, so every hit sounds as it did; a pad played by
+nothing gets a key so that it shows in the rack.
+
+Each pattern clip becomes a note clip named after its pattern (`hook`,
+`hook-2`), at its place, active or not as it was, holding the pattern's hits
+as notes: steps and events alike, at their times with swing written in. A
+time a pattern worked out, as a swung step's, is written as the plainest
+fraction within a billionth of a beat that starts on the same frame in every
+repetition, so a step swung by 0.6 is at 13/10. A clip that repeats loops
+over the pattern's length, unless a gated hit lasts past the pattern's end,
+which a loop would cut, and then its repetitions are written out and the clip
+lasts to that hit's end. A hit with no length is a step long, within the
+pattern; only a gated pad's lengths are heard. A clip's `velocity_scale` is
+rounded into its notes' velocities, so 42 scaled by 0.9 is 38 rather than
+37.8, at most 0.05 dB from what it was. Two hits of one pad at once in a
+choke group are played in order of their lengths, so the one written last,
+which choked the others, is the longest.
+
+A MIDI track holds no audio clips, so a track of pads that also had audio
+clips or an input gives them to a track `ID-audio` right after it with the
+same mixer, chain, sends, lanes and group; a frozen one's `ID-audio` is muted,
+since the frozen file holds both. The patterns go.
+
+Tests render each case as written and converted and compare them sample for
+sample, the last bits of a float apart, and the clip's velocity scale within
+its rounding; the person's one song with patterns, made in the app on
+November 17, renders its drums the same to the bit.
+
+Limits that are simply true: two tracks summed through one chain sound as one
+track did only through a chain that is linear, so the `ID-audio` split is not
+exact through a compressor, limiter, gate, clipper or overdrive, and a
+sidechain keyed by the track no longer hears its audio clips; hits of one pad
+at once from two overlapping pattern clips, or of a pitched pad at two
+pitches, in a choke group may choke in another order. None of the person's
+songs has any of these.
 
 ### Stage 3: patterns removed
 

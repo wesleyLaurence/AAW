@@ -68,8 +68,8 @@ fn set_toggle_and_remove() {
     edit(&mut s, json!({"op": "toggle", "path": "tracks.bass.solo"})).unwrap();
     assert_eq!(get(&s, "tracks.bass.solo"), json!(true));
     // A new map key: a pad.
-    edit(&mut s, json!({"op": "set", "path": "tracks.drums.pads.k", "value": {"sample": "hit", "gain_db": -2}})).unwrap();
-    assert_eq!(get(&s, "tracks.drums.pads.k.gain_db"), json!(-2.0));
+    edit(&mut s, json!({"op": "set", "path": "tracks.drums.instrument.sampler.pads.k", "value": {"sample": "hit", "gain_db": -2}})).unwrap();
+    assert_eq!(get(&s, "tracks.drums.instrument.sampler.pads.k.gain_db"), json!(-2.0));
     // Removing a field resets it to its default.
     edit(&mut s, json!({"op": "remove", "path": "tracks.drums.gain_db"})).unwrap();
     assert_eq!(get(&s, "tracks.drums.gain_db"), json!(0.0));
@@ -155,21 +155,22 @@ fn clips_by_handle_survive_other_edits() {
 }
 
 #[test]
-fn clips_add_repeat_and_duplicate() {
+fn clips_add_and_duplicate() {
     let (_d, mut s) = open(true);
-    let r = edit(&mut s, json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": 8, "repeats": 2})).unwrap();
-    assert_eq!(r["path"], json!("tracks.drums.clips.2"));
+    let bar = json!([{"pitch": 36, "duration": 1}, {"pitch": 36, "at": 2, "duration": 1}]);
+    let r = edit(&mut s, json!({"op": "clip.add", "track": "drums", "at": 8, "length_beats": 4, "notes": bar})).unwrap();
+    assert_eq!(r["path"], json!("tracks.drums.clips.clip1"));
     let h = r["handle"].as_str().unwrap().to_string();
-    edit(&mut s, json!({"op": "clip.repeats", "clip": h, "repeats": 1})).unwrap();
     // A copy goes right after the original: beat 8 + 4 beats.
     let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": h})).unwrap();
-    assert_eq!(r["path"], json!("tracks.drums.clips.3"));
-    assert_eq!(get(&s, "tracks.drums.clips.3"), json!({"pattern": "beat", "at": 12}));
+    assert_eq!(r["path"], json!("tracks.drums.clips.clip2"));
+    assert_eq!(get(&s, "tracks.drums.clips.clip2.at"), json!(12));
+    assert_eq!(get(&s, "tracks.drums.clips.clip2.notes"), get(&s, "tracks.drums.clips.clip1.notes"));
     // Thirds stay exact.
-    edit(&mut s, json!({"op": "clip.add", "track": "bass", "pattern": "bass", "at": "1/3"})).unwrap();
-    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.bass.clips.3"})).unwrap();
-    assert_eq!(get(&s, r["path"].as_str().unwrap()), json!({"pattern": "bass", "at": "13/3"}));
-    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.bass.clips.1", "at": 4.5})).unwrap();
+    edit(&mut s, json!({"op": "clip.add", "track": "bass", "id": "third", "at": "1/3", "length_beats": 4})).unwrap();
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.bass.clips.third"})).unwrap();
+    assert_eq!(get(&s, &format!("{}.at", r["path"].as_str().unwrap())), json!("13/3"));
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.bass.clips.bass-2", "at": 4.5})).unwrap();
     assert_eq!(get(&s, &format!("{}.at", r["path"].as_str().unwrap())), json!(4.5));
     edit(&mut s, json!({"op": "clip.remove", "clip": h})).unwrap();
     assert_eq!(get(&s, "tracks.drums.clips").as_array().unwrap().len(), 3);
@@ -178,7 +179,7 @@ fn clips_add_repeat_and_duplicate() {
 #[test]
 fn duplicating_again_lays_the_copies_in_a_row() {
     let (_d, mut s) = open(false);
-    edit(&mut s, json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": 40})).unwrap();
+    edit(&mut s, json!({"op": "clip.add", "track": "drums", "id": "bar", "at": 40, "length_beats": 4})).unwrap();
     let starts = |s: &Session| -> Vec<Json> {
         let clips = get(s, "tracks.drums.clips");
         clips.as_array().unwrap().iter().map(|c| c["at"].clone()).collect()
@@ -188,7 +189,7 @@ fn duplicating_again_lays_the_copies_in_a_row() {
     // as pressing ⌘D three times does.
     let mut made = Vec::new();
     for _ in 0..3 {
-        let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2"})).unwrap();
+        let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.bar"})).unwrap();
         made.push(get(&s, &format!("{}.at", r["path"].as_str().unwrap())));
     }
     assert_eq!(made, [json!(44), json!(48), json!(52)]);
@@ -196,24 +197,24 @@ fn duplicating_again_lays_the_copies_in_a_row() {
     // in the order they play.
     assert_eq!(starts(&s)[2..6], [json!(40), json!(44), json!(48), json!(52)]);
     // --times makes copies in a row as one step, past those already there.
-    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2})).unwrap();
-    assert_eq!(r["label"], json!("Duplicate clip beat at 40 2 times"));
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.bar", "times": 2})).unwrap();
+    assert_eq!(r["label"], json!("Duplicate clip bar at 40 2 times"));
     let paths: Vec<&str> = r["paths"].as_array().unwrap().iter().map(|p| p.as_str().unwrap()).collect();
     let ats: Vec<Json> = paths.iter().map(|p| get(&s, &format!("{p}.at"))).collect();
     assert_eq!(ats, [json!(56), json!(60)]);
     assert_eq!(starts(&s).len(), before.len() + 5);
     // With a beat, the copies go from it, one after another.
-    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "at": "1/3", "times": 2})).unwrap();
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.bar", "at": "1/3", "times": 2})).unwrap();
     let ats: Vec<Json> = r["paths"].as_array().unwrap().iter().map(|p| get(&s, &format!("{}.at", p.as_str().unwrap()))).collect();
     assert_eq!(ats, [json!("1/3"), json!("13/3")]);
     // Copies that run past the song take its end with them (D130); an ID for several is refused.
-    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2})).unwrap();
+    let r = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.bar", "times": 2})).unwrap();
     assert_eq!(r["paths"].as_array().unwrap().len(), 2);
     assert!(get(&s, "session.length_beats").as_f64().unwrap() > 64.0);
     s.undo(Origin::Agent, false).unwrap();
-    let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 2, "id": "x"})).unwrap_err();
+    let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.bar", "times": 2, "id": "x"})).unwrap_err();
     assert!(e.contains("id names one copy"), "{e}");
-    let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.2", "times": 0})).unwrap_err();
+    let e = edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.bar", "times": 0})).unwrap_err();
     assert!(e.contains("times is a number of copies from 1 to 1000"), "{e}");
 }
 
@@ -310,14 +311,16 @@ fn an_audio_clip_moves_to_a_beat_and_a_track_with_its_handle() {
     assert_eq!(r["label"], json!("Move audio clip song to beat \"25/3\" on song"));
     assert_eq!(get(&s, "tracks.song.audio.0"), json!({"sample": "song", "at": "25/3", "source_start_seconds": 1.0}));
     // To another track, last among its clips, and to a beat at once.
-    let r = edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "drums", "at": 2})).unwrap();
-    assert_eq!(r["label"], json!("Move audio clip song to beat 2 on drums"));
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let r = edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "vox", "at": 2})).unwrap();
+    assert_eq!(r["label"], json!("Move audio clip song to beat 2 on vox"));
     assert_eq!(get(&s, "tracks.song.audio"), json!([]));
-    assert_eq!(get(&s, "tracks.drums.audio"), json!([{"sample": "song", "at": 2, "source_start_seconds": 1.0}]));
-    assert_eq!(refs(&s, "tracks.drums.audio"), vec![clip.clone()]);
-    // Its own track is no move, and neither is nothing.
-    edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "drums"})).unwrap();
-    assert_eq!(get(&s, "tracks.drums.audio").as_array().unwrap().len(), 1);
+    assert_eq!(get(&s, "tracks.vox.audio"), json!([{"sample": "song", "at": 2, "source_start_seconds": 1.0}]));
+    assert_eq!(refs(&s, "tracks.vox.audio"), vec![clip.clone()]);
+    // Its own track is no move, and neither is nothing; a MIDI track takes none.
+    edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "vox"})).unwrap();
+    assert_eq!(get(&s, "tracks.vox.audio").as_array().unwrap().len(), 1);
+    assert!(edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "drums"})).is_err());
     assert_eq!(edit(&mut s, json!({"op": "audio.move", "clip": clip})).unwrap_err(), "Move needs a beat or a track");
     assert!(edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "nobody"})).is_err());
     assert!(edit(&mut s, json!({"op": "audio.move", "clip": "tracks.drums.clips.0", "at": 2})).is_err());
@@ -396,30 +399,6 @@ fn a_crossfade_sets_the_fades_of_a_join() {
     // A clip past the end moves the end to hold it (D130).
     edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 32})).unwrap();
     assert!(get(&s, "session.length_beats").as_f64().unwrap() > 32.0);
-}
-
-#[test]
-fn patterns_events_and_pads() {
-    let (_d, mut s) = open(true);
-    edit(&mut s, json!({"op": "pattern.add", "pattern": "fill", "length_beats": 2, "grid": "1/8"})).unwrap();
-    edit(&mut s, json!({"op": "pattern.steps", "pattern": "fill", "pad": "h", "row": "x.x.xxxx x.x.xxxx"})).unwrap();
-    assert!(edit(&mut s, json!({"op": "pattern.add", "pattern": "fill"})).unwrap_err().contains("already exists"));
-    edit(&mut s, json!({"op": "pattern.steps", "pattern": "fill", "pad": "h"})).unwrap();
-    assert_eq!(get(&s, "patterns.fill.steps"), json!({}));
-    let r = edit(&mut s, json!({"op": "event.add", "pattern": "bass", "at": 3, "pad": "t", "note": "E3", "duration": "1/2"})).unwrap();
-    let e = r["handle"].as_str().unwrap().to_string();
-    edit(&mut s, json!({"op": "event.set", "event": e, "velocity": 90, "note": null})).unwrap();
-    assert_eq!(get(&s, "patterns.bass.events.2"), json!({"at": 3, "pad": "t", "velocity": 90, "duration": "1/2"}));
-    edit(&mut s, json!({"op": "pattern.duplicate", "pattern": "bass", "to": "bass2"})).unwrap();
-    assert_eq!(get(&s, "patterns.bass2"), get(&s, "patterns.bass"));
-    // The copy's events are new objects.
-    assert_ne!(refs(&s, "patterns.bass2.events"), refs(&s, "patterns.bass.events"));
-    edit(&mut s, json!({"op": "event.remove", "event": e})).unwrap();
-    assert_eq!(get(&s, "patterns.bass.events").as_array().unwrap().len(), 2);
-    edit(&mut s, json!({"op": "pad.set", "track": "bass", "pad": "t", "release_ms": 50, "transpose": 12})).unwrap();
-    assert_eq!(get(&s, "tracks.bass.pads.t.transpose"), json!(12.0));
-    let e = edit(&mut s, json!({"op": "pad.remove", "track": "bass", "pad": "t"})).unwrap_err();
-    assert!(e.contains("bass: unknown pad t"), "{e}");
 }
 
 #[test]
@@ -555,7 +534,7 @@ fn undo_and_redo_are_logged_with_their_origin() {
 fn saves_are_canonical_and_headless_matches_hosted() {
     let edits = [
         json!({"op": "set", "path": "tracks.drums.gain_db", "value": -4.5}),
-        json!({"op": "clip.add", "track": "bass", "pattern": "bass", "at": "20/3"}),
+        json!({"op": "clip.add", "track": "bass", "at": "20/3", "length_beats": 4}),
         json!({"op": "effect.add", "owner": "master", "type": "limiter", "ceiling_db": -1}),
         json!({"op": "section.add", "id": "b", "at": 8, "length_beats": 8}),
     ];
@@ -580,7 +559,7 @@ fn handles_need_a_host() {
     let (_d, mut s) = open(false);
     let e = edit(&mut s, json!({"op": "clip.remove", "clip": "@3"})).unwrap_err();
     assert!(e.starts_with("Handles such as @12 exist only while a host runs"), "{e}");
-    assert_eq!(refs(&s, "tracks.drums.clips"), ["tracks.drums.clips.0", "tracks.drums.clips.1"]);
+    assert_eq!(refs(&s, "tracks.drums.clips"), ["tracks.drums.clips.beat", "tracks.drums.clips.beat-2"]);
 }
 
 #[test]
@@ -631,10 +610,13 @@ fn external_edits_load_as_undoable_steps() {
 fn apply_merges_into_the_song_and_keeps_handles() {
     let (_d, mut s) = open(true);
     let clips = refs(&s, "tracks.drums.clips");
-    let patch = json!({"session": {"tempo": 90}, "tracks": [
-        {"id": "drums", "pads": {"h": {"sample": "hit"}}, "clips": [{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 16, "repeats": 4}], "gain_db": -1},
-        {"id": "bass", "pads": {"t": {"sample": "tone", "mode": "gate", "release_ms": 20}}, "clips": [{"pattern": "bass"}]},
-    ]});
+    // The tracks list is replaced whole: the drums as they are but for the
+    // fader, the bass with its first clip alone.
+    let mut drums = get(&s, "tracks.drums");
+    drums["gain_db"] = json!(-1);
+    let mut bass = get(&s, "tracks.bass");
+    bass["clips"] = json!([bass["clips"][0].clone()]);
+    let patch = json!({"session": {"tempo": 90}, "tracks": [drums, bass]});
     let r = s.edit(&Command::Apply { patch, label: None }, Origin::Agent, None, None).unwrap().0;
     assert_eq!(r["label"], json!("Apply a merge patch"));
     assert_eq!(refs(&s, "tracks.drums.clips"), clips);
@@ -651,16 +633,15 @@ fn reordering_keys_is_a_change_although_the_sha_is_the_same() {
     let (_d, mut s) = open(true);
     edit(&mut s, json!({"op": "pad.add", "track": "drums", "pad": "k", "sample": "hit"})).unwrap();
     let sha = s.doc().sha.clone();
-    let patch = json!({"tracks": [
-        {"id": "drums", "pads": {"k": {"sample": "hit"}, "h": {"sample": "hit"}}, "clips": [{"pattern": "beat", "repeats": 4}, {"pattern": "beat", "at": 16, "repeats": 4}]},
-        get(&s, "tracks.bass"),
-    ]});
+    let mut drums = get(&s, "tracks.drums");
+    drums["instrument"]["sampler"]["pads"] = json!({"k": {"sample": "hit"}, "h": {"sample": "hit"}});
+    let patch = json!({"tracks": [drums, get(&s, "tracks.bass")]});
     let r = s.edit(&Command::Apply { patch, label: None }, Origin::Agent, None, None).unwrap().0;
     assert_eq!(r["changed"], json!(true));
     assert_eq!(s.doc().sha, sha);
     s.save().unwrap();
     let saved = aaw_model::load(s.path(), false).unwrap();
-    assert_eq!(saved.tracks[0].pads.keys().collect::<Vec<_>>(), ["k", "h"]);
+    assert_eq!(saved.tracks[0].sound_pads().keys().collect::<Vec<_>>(), ["k", "h"]);
 }
 
 /// An edit that is part of a drag, as the app sends it.
@@ -761,18 +742,18 @@ fn a_batch_reports_what_it_made() {
     let r = edit(
         &mut s,
         json!({"op": "batch", "commands": [
-            {"op": "clip.repeats", "clip": clips[1], "repeats": 2},
+            {"op": "clip.resize", "clip": clips[1], "length_beats": 8},
             {"op": "clip.duplicate", "clip": clips[1]},
             {"op": "clip.duplicate", "clip": clips[0], "at": 8},
         ]}),
     )
     .unwrap();
-    assert_eq!(r["paths"], json!(["tracks.drums.clips.3", "tracks.drums.clips.1"]));
+    assert_eq!(r["paths"], json!(["tracks.drums.clips.clip1", "tracks.drums.clips.clip2"]));
     let made: Vec<&str> = r["handles"].as_array().unwrap().iter().map(|h| h.as_str().unwrap()).collect();
     let now = refs(&s, "tracks.drums.clips");
     assert_eq!(made, [now[3].as_str(), now[1].as_str()]);
-    assert_eq!(get(&s, "tracks.drums.clips.3.at"), json!(24));
-    assert_eq!(r["label"].as_str().unwrap().matches("Duplicate clip beat at").count(), 2);
+    assert_eq!(get(&s, "tracks.drums.clips.clip1.at"), json!(24));
+    assert_eq!(r["label"].as_str().unwrap().matches("Duplicate clip beat").count(), 2);
     // A batch can say what it does as a whole.
     let named = json!({"op": "batch", "label": "Thin the drums", "commands": [
         {"op": "clip.remove", "clip": now[3]},

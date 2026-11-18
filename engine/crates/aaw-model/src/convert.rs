@@ -143,8 +143,8 @@ struct Rack {
     map: Vec<NoteMap>,
     /// For a hit, its key by (pad, transpose).
     keys: HashMap<(String, u64), i64>,
-    /// For a pitched hit, how far its range was moved, by (pad, rest).
-    shifts: HashMap<(String, u64), i64>,
+    /// For a pitched hit, how far its keys were moved, by (pad, rest, key).
+    shifts: HashMap<(String, u64, i64), i64>,
     /// The copies made of pads, by (pad, how far moved).
     copies: HashMap<(String, u64), String>,
 }
@@ -174,10 +174,53 @@ impl Rack {
     }
 }
 
+/// Puts each pitched pad's notes on keys: the whole span of its notes, or
+/// with `runs` each run of notes next to one another it plays.
+fn pitch_ranges(
+    t: &Track,
+    pitched: &IndexMap<(String, u64), (f64, std::collections::BTreeSet<i64>)>,
+    runs: bool,
+    r: &mut Rack,
+    free: &mut [bool; 128],
+) -> Result<(), String> {
+    for ((pad, rest_bits), (rest, notes)) in pitched {
+        let (Some(&first), Some(&last)) = (notes.first(), notes.last()) else { continue };
+        let mut spans = vec![(first, last)];
+        if runs {
+            spans.clear();
+            for &n in notes {
+                match spans.last_mut() {
+                    Some((_, high)) if *high + 1 == n => *high = n,
+                    _ => spans.push((n, n)),
+                }
+            }
+        }
+        let base = t.pads[pad].transpose;
+        for (low, high) in spans {
+            let shift = (0..128i64)
+                .flat_map(|d| [d, -d])
+                .find(|k| {
+                    let (lo, hi) = (low + k, high + k);
+                    lo >= 0 && hi <= 127 && (lo..=hi).all(|n| free[n as usize]) && (-36.0..=36.0).contains(&(base + rest - *k as f64))
+                })
+                .ok_or_else(|| format!("no free keys for pad {pad}'s notes"))?;
+            let name = r.pad(t, pad, rest - shift as f64)?;
+            for n in low + shift..=high + shift {
+                free[n as usize] = false;
+            }
+            r.map.push(NoteMap { low: low + shift, high: high + shift, range: high > low, pad: name, pitched: true });
+            for n in low..=high {
+                r.shifts.insert((pad.clone(), *rest_bits, n), shift);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn rack(p: &Project, t: &Track) -> Result<Rack, String> {
     // What each pad plays, in the order first played.
     let mut hits: IndexMap<String, Vec<f64>> = t.pads.keys().map(|k| (k.clone(), Vec::new())).collect();
-    let mut pitched: IndexMap<(String, u64), (f64, i64, i64)> = IndexMap::new();
+    let mut pitched: IndexMap<(String, u64), (f64, std::collections::BTreeSet<i64>)> = IndexMap::new();
     for c in &t.clips {
         for e in p.patterns[&c.pattern].expanded() {
             match slot(&e)? {
@@ -188,9 +231,7 @@ fn rack(p: &Project, t: &Track) -> Result<Rack, String> {
                     }
                 }
                 Slot::Pitched(key, rest) => {
-                    let range = pitched.entry((e.pad.clone(), bits(rest))).or_insert((rest, key, key));
-                    range.1 = range.1.min(key);
-                    range.2 = range.2.max(key);
+                    pitched.entry((e.pad.clone(), bits(rest))).or_insert((rest, Default::default())).1.insert(key);
                 }
             }
         }
@@ -201,26 +242,26 @@ fn rack(p: &Project, t: &Track) -> Result<Rack, String> {
             list.push(0.0);
         }
     }
-    let mut r = Rack { pads: IndexMap::new(), map: Vec::new(), keys: HashMap::new(), shifts: HashMap::new(), copies: HashMap::new() };
-    let mut free = [true; 128];
-    // Pitched ranges first, at their own notes when those are free, else
-    // moved to the nearest free range with the pad moved back to match.
-    for ((pad, rest_bits), (rest, low, high)) in &pitched {
-        let base = t.pads[pad].transpose;
-        let shift = (0..128i64)
-            .flat_map(|d| [d, -d])
-            .find(|k| {
-                let (lo, hi) = (low + k, high + k);
-                lo >= 0 && hi <= 127 && (lo..=hi).all(|n| free[n as usize]) && (-36.0..=36.0).contains(&(base + rest - *k as f64))
-            })
-            .ok_or_else(|| format!("no free keys for pad {pad}'s notes"))?;
-        let name = r.pad(t, pad, rest - shift as f64)?;
-        for n in low + shift..=high + shift {
-            free[n as usize] = false;
+    // Pitched ranges first: each pad's from its lowest note to its highest,
+    // or, when those leave too few keys or collide, each run of the notes it
+    // plays; at their own notes when free, else moved to the nearest free
+    // keys with the pad moved back to match.
+    let hit_keys: usize = hits.values().map(Vec::len).sum();
+    let mut placed = None;
+    for runs in [false, true] {
+        let mut r = Rack { pads: IndexMap::new(), map: Vec::new(), keys: HashMap::new(), shifts: HashMap::new(), copies: HashMap::new() };
+        let mut free = [true; 128];
+        match pitch_ranges(t, &pitched, runs, &mut r, &mut free) {
+            Ok(()) if free.iter().filter(|f| **f).count() >= hit_keys => {
+                placed = Some((r, free));
+                break;
+            }
+            Ok(()) if runs => return Err("more pads and notes than keys".into()),
+            Err(e) if runs => return Err(e),
+            _ => {}
         }
-        r.map.push(NoteMap { low: low + shift, high: high + shift, range: high > low, pad: name, pitched: true });
-        r.shifts.insert((pad.clone(), *rest_bits), shift);
     }
+    let (mut r, mut free) = placed.expect("placed or refused");
     // Then each hit: a pad as it is on its General MIDI key when that is
     // free, the rest on the lowest free key from C2 up, then below it.
     let place = |r: &mut Rack, free: &mut [bool; 128], pad: &str, by: f64, key: i64| -> Result<(), String> {
@@ -317,7 +358,7 @@ fn clip(p: &Project, t: &Track, c: &Clip, r: &Rack, id: String) -> Result<NoteCl
         let at = exact(&written);
         let pitch = match slot(&e)? {
             Slot::Hit(by) => r.keys[&(e.pad.clone(), bits(by))],
-            Slot::Pitched(key, rest) => key + r.shifts[&(e.pad.clone(), bits(rest))],
+            Slot::Pitched(key, rest) => key + r.shifts[&(e.pad.clone(), bits(rest), key)],
         };
         // A hit with no length is as long as a step, within the pattern;
         // only a gated pad's hits have lengths that are heard.

@@ -73,6 +73,22 @@ def lanes(automation):
     ]
 
 
+def drum_track(track_id, pad, sample, length_beats, hits, loop_beats=None, **fields):
+    """A MIDI track whose Drum Rack plays `sample` as pad `pad` on C2, at each
+    beat of `hits` in one clip named for the track, looped over `loop_beats`
+    when given."""
+    clip = {"id": track_id, "length_beats": length_beats, "notes": [{"pitch": 36, "at": at, "duration": "1/4"} for at in hits]}
+    if loop_beats is not None:
+        clip["loop_beats"] = loop_beats
+    return {
+        "id": track_id,
+        "type": "midi",
+        "instrument": {"sampler": {"drum_rack": True, "pads": {pad: {"sample": sample}}, "map": [{"notes": 36, "pad": pad}]}},
+        "clips": [clip],
+        **fields,
+    }
+
+
 def run_chain(directory, effects, x, automation=None, keys=None, tempo=120, block_size=None):
     """Stereo audio through an effect chain alone: (output, effect reports).
 
@@ -90,8 +106,9 @@ def run_chain(directory, effects, x, automation=None, keys=None, tempo=120, bloc
     for track in tracks:
         name = track["id"]
         sf.write(directory / f"{name}.wav", samples[name], SR, subtype="DOUBLE")
-        track["pads"] = {"x": {"sample": name, **pad}}
-        track["clips"] = [{"pattern": "once"}]
+        track["type"] = "midi"
+        track["instrument"] = {"sampler": {"drum_rack": True, "pads": {"x": {"sample": name, **pad}}, "map": [{"notes": 36, "pad": "x"}]}}
+        track["clips"] = [{"id": f"{name}-once", "length_beats": length, "notes": [{"pitch": 36, "duration": length, "velocity": 127}]}]
     song = {
         "session": {
             "tempo": tempo,
@@ -100,12 +117,6 @@ def run_chain(directory, effects, x, automation=None, keys=None, tempo=120, bloc
             "end_fade_ms": 0,
         },
         "samples": {name: {"path": f"{name}.wav"} for name in samples},
-        "patterns": {
-            "once": {
-                "length_beats": length,
-                "events": [{"at": 0, "pad": "x", "velocity": 127}],
-            }
-        },
         "tracks": tracks,
     }
     save(song, directory / "song.yaml")

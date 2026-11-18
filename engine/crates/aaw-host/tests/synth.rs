@@ -39,8 +39,9 @@ fn a_synth_is_added_to_a_new_track_or_an_existing_midi_track_and_saved() {
     assert_eq!(get(&s, "tracks.keys.instrument.synth.oscillators"), json!({"a": {}}));
     assert_eq!(get(&s, "tracks.keys.instrument.sampler"), Json::Null);
     assert_eq!(get(&s, "tracks.keys.clips.clip1.notes.n1.pitch"), json!(60));
-    // Not on a track of patterns.
-    let e = edit(&mut s, json!({"op": "synth.add", "track": "bass"})).unwrap_err();
+    // Not on an audio track.
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let e = edit(&mut s, json!({"op": "synth.add", "track": "vox"})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     s.save().unwrap();
     let text = std::fs::read_to_string(s.path()).unwrap();

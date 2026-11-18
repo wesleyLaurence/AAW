@@ -119,7 +119,7 @@ const HATS: &str = "- id: hats
       pads: {h: {sample: hit, choke_group: hh, pan: 0.3, transpose: 3, release_ms: 5}}
       map: [{notes: 42, pad: h}]
   clips:
-  - id: hats
+  - id: swung
     at: 1
     length_beats: 12
     loop_beats: 4
@@ -144,7 +144,7 @@ const LAYER: &str = "- id: layer
       pads: {t: {sample: tone, mono: true, reverse: true}}
       map: [{notes: [0, 127], pad: t, pitched: true}]
   clips:
-  - id: layer
+  - id: again
     at: 4
     length_beats: 8
     loop_beats: 4

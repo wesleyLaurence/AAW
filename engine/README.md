@@ -636,6 +636,14 @@ SHAs carried over. It reads YAML with PyYAML's YAML 1.1 rules (`010` is 8, `1e5`
 is a string, `yes` is true, merge keys apply), applies pydantic's coercions, and
 writes with a port of PyYAML's emitter.
 
+`aaw_model::load` converts a song with tracks of pads or pattern clips once,
+as it reads it from its file, and writes it back with the file as it was
+kept as `song.before-drum-rack.yaml`; the host's `Session` does the same when
+it opens a song or loads an outside edit (`aaw_model::convert`, D190). Each
+such track becomes a MIDI track of the same ID with a Drum Rack and note
+clips that play the same hits. `aaw_model::parse` converts nothing, so the
+corpus below still reads documents as they are written.
+
 `daw model PATH...` prints each document's canonical YAML and fingerprints, or its
 validation errors as `{loc, type, msg}`, which are pydantic's. Before the Python
 model was deleted the two agreed on a generated corpus of 6,133 documents: valid

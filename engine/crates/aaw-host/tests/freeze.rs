@@ -32,7 +32,8 @@ fn a_track_is_frozen_to_a_file_and_unfrozen() {
     assert_eq!(get(&s, "tracks.bass.effects.0.type"), "compressor");
     // Saved with the song.
     s.save().unwrap();
-    assert!(std::fs::read_to_string(s.path()).unwrap().contains("frozen:\n    path: frozen/bass.wav"));
+    let text = std::fs::read_to_string(s.path()).unwrap();
+    assert!(text.contains("frozen: {path: frozen/bass.wav}"), "{text}");
 
     // The file plays in the content's place: the program compiles with no
     // inserts on bass.
@@ -58,9 +59,9 @@ fn a_frozen_track_s_content_cannot_change_and_its_mixer_can() {
     assert_eq!(refused(&mut s, json!({"op": "clip.move", "clip": "tracks.bass.clips.0", "at": 4})), content);
     assert_eq!(refused(&mut s, json!({"op": "set", "path": "tracks.bass.effects.0.threshold_db", "value": -30})), content);
     assert_eq!(refused(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "filter", "mode": "lowpass", "cutoff_hz": 800})), content);
-    assert_eq!(refused(&mut s, json!({"op": "set", "path": "tracks.bass.pads.t.gain_db", "value": -3})), content);
-    // The pattern its clips play, and the sample its pad names.
-    assert_eq!(refused(&mut s, json!({"op": "set", "path": "patterns.bass.length_beats", "value": 8})), content);
+    assert_eq!(refused(&mut s, json!({"op": "set", "path": "tracks.bass.instrument.sampler.pads.t.gain_db", "value": -3})), content);
+    // Its notes, and the sample its pad names.
+    assert_eq!(refused(&mut s, json!({"op": "set", "path": "tracks.bass.clips.0.notes.0.velocity", "value": 80})), content);
     assert_eq!(refused(&mut s, json!({"op": "set", "path": "samples.tone.root_note", "value": "C3"})), content);
     // A lane on an effect is content; one on the fader is not.
     assert_eq!(
@@ -73,15 +74,14 @@ fn a_frozen_track_s_content_cannot_change_and_its_mixer_can() {
         refused(&mut s, json!({"op": "set", "path": "session.tempo", "value": 100})),
         "bass is frozen: unfreeze before changing the tempo, the sample rate or the stretcher"
     );
-    // The fader, pan, mute, solo, sends and the input are live; so are the
-    // other tracks and the pattern they alone play.
+    // The fader, pan, mute, solo and sends are live; so are the other
+    // tracks and their notes.
     edit(&mut s, json!({"op": "set", "path": "tracks.bass.gain_db", "value": -3})).unwrap();
     edit(&mut s, json!({"op": "set", "path": "tracks.bass.pan", "value": 0.2})).unwrap();
     edit(&mut s, json!({"op": "toggle", "path": "tracks.bass.mute"})).unwrap();
     edit(&mut s, json!({"op": "set", "path": "tracks.bass.sends.0.gain_db", "value": -6})).unwrap();
-    edit(&mut s, json!({"op": "set", "path": "tracks.bass.input", "value": {"track": "drums"}})).unwrap();
     edit(&mut s, json!({"op": "clip.move", "clip": "tracks.drums.clips.0", "at": 4})).unwrap();
-    edit(&mut s, json!({"op": "set", "path": "patterns.beat.swing", "value": 0.55})).unwrap();
+    edit(&mut s, json!({"op": "set", "path": "tracks.drums.clips.0.notes.0.velocity", "value": 90})).unwrap();
     // Renamed, the track is still held to its file.
     edit(&mut s, json!({"op": "track.rename", "track": "bass", "to": "low"})).unwrap();
     assert_eq!(get(&s, "tracks.low.frozen"), json!({"path": "frozen/bass.wav"}));
@@ -90,7 +90,7 @@ fn a_frozen_track_s_content_cannot_change_and_its_mixer_can() {
         "low is frozen: daw track unfreeze low before changing its clips, pads, instrument, effects or their automation"
     );
     // Undo takes the freeze back with the rest.
-    for _ in 0..10 {
+    for _ in 0..9 {
         s.undo(Origin::Agent, false).unwrap();
     }
     assert_eq!(get(&s, "tracks.bass.frozen"), json!(null));

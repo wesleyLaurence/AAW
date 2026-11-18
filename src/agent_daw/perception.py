@@ -17,7 +17,7 @@ import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
 from . import dynamics, overlap, spectrum, translation
-from .model import atomic_text, beat, digest, frame, hash_matches, load, schedule
+from .model import atomic_text, beat, digest, frame, hash_matches, load_snapshot, schedule
 
 VERSION = 1
 BANDS = {
@@ -183,7 +183,7 @@ def context(folder, x, rate):
     manifest = json.loads((folder / "report.json").read_text())
     if digest(folder / "mix.wav") != manifest["audio_sha256"]:
         raise ValueError("Render mix hash mismatch")
-    project = load(folder / "song.snapshot.yaml", verify_assets=False)
+    project = load_snapshot(folder / "song.snapshot.yaml")
     if not hash_matches(project, manifest["project_sha256"]):
         raise ValueError("Render snapshot hash mismatch")
     session = project["session"]

@@ -7,10 +7,11 @@ once on a track with those effects; the track's stem is the chain's output.
 import numpy as np
 import pytest
 import soundfile as sf
+import yaml
 from scipy.signal import butter, sosfilt
 from agent_daw.model import load, save, validate
 from agent_daw.perception import compare, listen
-from helpers import SR, cli, daw, level_db, render, run_chain, stem
+from helpers import SR, cli, daw, drum_track, level_db, render, run_chain, stem
 
 
 def impulse(seconds, amp=0.5):
@@ -141,25 +142,19 @@ def mix(tmp_path):
     data = {
         "session": {"tempo": 120, "length_beats": 8, "master_gain_db": -6},
         "samples": {"kick": {"path": "kick.wav"}, "click": {"path": "click.wav"}},
-        "patterns": {
-            "four": {"length_beats": 4, "steps": {"k": "x...x...x...x..."}},
-            "hit": {"length_beats": 4, "steps": {"s": "............x..."}},
-        },
         "tracks": [
-            {
-                "id": "snare",
-                "pads": {"s": {"sample": "click"}},
-                "clips": [{"pattern": "hit"}],
-                "sends": [
+            drum_track(
+                "snare",
+                "s",
+                "click",
+                4,
+                [3],
+                sends=[
                     {"to": "plate", "gain_db": -6},
                     {"to": "echo", "gain_db": -12},
                 ],
-            },
-            {
-                "id": "kick",
-                "pads": {"k": {"sample": "kick"}},
-                "clips": [{"pattern": "four", "repeats": 2}],
-            },
+            ),
+            drum_track("kick", "k", "kick", 8, [0, 1, 2, 3], loop_beats=4),
         ],
         "returns": [
             {"id": "plate", "effects": [{"type": "reverb", "decay_seconds": 1}]},
@@ -272,15 +267,7 @@ def test_return_compressor_ducks_under_sidechain(mix, tmp_path):
     path, data = mix
     sf.write(path.parent / "pad.wav", noise(4, amp=0.2)[:, 0], SR, subtype="FLOAT")
     data["samples"]["pad"] = {"path": "pad.wav"}
-    data["patterns"]["hold"] = {"length_beats": 8, "steps": {"p": "x" + "." * 31}}
-    data["tracks"].append(
-        {
-            "id": "pad",
-            "pads": {"p": {"sample": "pad"}},
-            "clips": [{"pattern": "hold"}],
-            "sends": [{"to": "plate"}],
-        }
-    )
+    data["tracks"].append(drum_track("pad", "p", "pad", 8, [0], sends=[{"to": "plate"}]))
     data["returns"][0]["effects"].append(
         {
             "type": "compressor",
@@ -374,7 +361,7 @@ def test_routing_round_trip_and_cli(mix, tmp_path):
     text = path.read_text()
     save(load(path), path)
     assert path.read_text() == text
-    assert "- {to: plate, gain_db: -6.0}" in text
+    assert yaml.safe_load(text)["tracks"][0]["sends"][0] == {"to": "plate", "gain_db": -6.0}
     assert "time_beats: 3/4" in text
     code, inspected = cli("inspect", path)
     assert code == 0, inspected
@@ -453,7 +440,7 @@ def test_a_group_sums_its_tracks_through_its_own_chain_and_has_a_stem(mix, tmp_p
 
 def test_a_group_of_groups_sums_them_and_is_made_from_the_command_line(mix, tmp_path):
     path, data = mix
-    data["tracks"].insert(1, {"id": "pad", "pads": {"k": {"sample": "kick"}}})
+    data["tracks"].insert(1, drum_track("pad", "k", "kick", 4, []) | {"clips": []})
     save(data, path)
     base = render(path, tmp_path / "base")
     daw("group", "add", path, "drums", "--tracks", "snare,kick")
@@ -493,7 +480,7 @@ def test_a_group_of_groups_sums_them_and_is_made_from_the_command_line(mix, tmp_
 
 def test_a_group_is_made_and_described_from_the_command_line(mix, tmp_path):
     path, data = mix
-    data["tracks"].insert(1, {"id": "pad", "pads": {"k": {"sample": "kick"}}})
+    data["tracks"].insert(1, drum_track("pad", "k", "kick", 4, []) | {"clips": []})
     save(data, path)
     daw("group", "add", path, "drums", "--tracks", "snare,kick", "--gain-db", "-3")
     song = load(path)

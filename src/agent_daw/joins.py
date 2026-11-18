@@ -14,7 +14,7 @@ import numpy as np
 import soundfile as sf
 
 from . import beats, perception
-from .model import digest, load
+from .model import digest, load_snapshot
 from .timeline import Region, regions
 
 BEATS = 8  # beats measured either side of a join
@@ -150,7 +150,7 @@ def check(source, limit=None, seconds=4.0, excerpts=True):
         raise ValueError("Join checks need a render of the whole song")
     if digest(audio_path) != manifest["audio_sha256"]:
         raise ValueError("Render mix hash mismatch")
-    project = load(folder / "song.snapshot.yaml", verify_assets=False)
+    project = load_snapshot(folder / "song.snapshot.yaml")
     song_file = Path(manifest.get("project_file", ""))
     root = song_file.parent if song_file.is_file() else folder.parent.parent
     mix, rate = sf.read(audio_path, always_2d=True, dtype="float64")

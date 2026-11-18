@@ -54,7 +54,10 @@ fn markers_are_kept_in_time_order_and_read_with_what_plays_there() {
     };
     assert_eq!(
         playing(&list[0]),
-        [("drums".to_string(), "pattern beat, 4 beats, 8 hits".to_string()), ("bass".to_string(), "pattern bass, 4 beats, 2 hits".to_string())]
+        [
+            ("drums".to_string(), "notes beat, loops every 4 beats, 8 notes C2".to_string()),
+            ("bass".to_string(), "notes bass, loops every 4 beats, 2 notes G2–C3".to_string())
+        ]
     );
     // Beat 17.5 is bar 5, beat 2.5, in no section, with the clips from beat 16.
     assert_eq!((&list[1]["bar"], &list[1]["beat"], &list[1]["section"], &list[1]["text"]), (&json!(5), &json!(2.5), &Json::Null, &json!("too busy")));

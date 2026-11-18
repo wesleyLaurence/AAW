@@ -57,6 +57,13 @@ def load(path: Path, verify_assets=True) -> dict:
     return aaw_py.load(Path(path), verify_assets)
 
 
+def load_snapshot(path: Path) -> dict:
+    """The full dump of a render's snapshot as it was written: a record of
+    what was rendered, so a song of patterns in it is not converted, and
+    the file is never written back (D190)."""
+    return aaw_py.parse(Path(path).read_text())
+
+
 def to_yaml(project) -> str:
     return aaw_py.to_yaml(project)
 

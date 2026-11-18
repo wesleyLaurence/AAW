@@ -9,7 +9,7 @@ import pytest
 import soundfile as sf
 from agent_daw.model import load, save, validate
 from agent_daw.perception import oversampled_peak
-from helpers import SR, cli, daw, level_db, render, run_chain, stem, tone
+from helpers import SR, cli, daw, drum_track, level_db, render, run_chain, stem, tone
 
 
 def highpass(cutoff, slope=12, **kw):
@@ -314,15 +314,9 @@ def beat(tmp_path):
     data = {
         "session": {"tempo": 120, "length_beats": 8, "master_gain_db": 0},
         "samples": {"kick": {"path": "kick.wav"}, "bass": {"path": "bass.wav"}},
-        "patterns": {
-            "four": {"length_beats": 4, "steps": {"k": "x...x...x...x..."}},
-            "hold": {"length_beats": 4, "steps": {"b": "x..............."}},
-        },
         "tracks": [
-            {
-                "id": "bass",
-                "pads": {"b": {"sample": "bass"}},
-                "clips": [{"pattern": "hold", "repeats": 2}],
+            drum_track("bass", "b", "bass", 8, [0], loop_beats=4)
+            | {
                 "effects": [
                     {"type": "filter", "mode": "highpass", "cutoff_hz": 40},
                     {
@@ -335,11 +329,7 @@ def beat(tmp_path):
                     },
                 ],
             },
-            {
-                "id": "kick",
-                "pads": {"k": {"sample": "kick"}},
-                "clips": [{"pattern": "four", "repeats": 2}],
-            },
+            drum_track("kick", "k", "kick", 8, [0, 1, 2, 3], loop_beats=4),
         ],
     }
     path = tmp_path / "song.yaml"

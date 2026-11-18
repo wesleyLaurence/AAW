@@ -1,6 +1,6 @@
 //! `clip.join`: one clip of clips of one track that plays what they played,
 //! as ⌘J makes it. Note clips join across gaps with their loops laid out;
-//! pattern clips and audio clips only where they meet and are one music.
+//! audio clips only where they meet and are one music.
 
 mod common;
 
@@ -111,29 +111,6 @@ fn a_looped_note_clip_is_laid_out_as_notes_when_joined() {
 }
 
 #[test]
-fn pattern_clips_that_meet_become_one_with_the_repeats_summed() {
-    let (_d, mut s) = open();
-    let before = refs(&s, "tracks.drums.clips");
-    let r = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.drums.clips.0", "tracks.drums.clips.1"]})).unwrap();
-    assert_eq!(r["label"], json!("Join 2 clips into beat at 0"));
-    assert_eq!(get(&s, "tracks.drums.clips"), json!([{"pattern": "beat", "repeats": 8}]));
-    assert_eq!(refs(&s, "tracks.drums.clips"), [before[0].clone()]);
-    // Clips with a gap between them are refused, and so are different patterns.
-    let e = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.bass.clips.1", "tracks.bass.clips.2"]})).unwrap_err();
-    assert_eq!(e, "bass at 16 does not start where bass at 8 ends, at beat 12; clips joined into one meet there");
-    edit(&mut s, json!({"op": "pattern.duplicate", "pattern": "bass", "to": "bass2"})).unwrap();
-    edit(&mut s, json!({"op": "clip.add", "track": "bass", "pattern": "bass2", "at": 12})).unwrap();
-    let e = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.bass.clips.1", "tracks.bass.clips.3"]})).unwrap_err();
-    assert_eq!(e, "bass at 8 and bass2 at 12 play different patterns, so one clip cannot play what they play");
-    // Three in a row, named in any order, as one step.
-    edit(&mut s, json!({"op": "clip.remove", "clip": "tracks.bass.clips.3"})).unwrap();
-    edit(&mut s, json!({"op": "clip.add", "track": "bass", "pattern": "bass", "at": 12})).unwrap();
-    let r = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.bass.clips.2", "tracks.bass.clips.0", "tracks.bass.clips.3", "tracks.bass.clips.1"]})).unwrap();
-    assert_eq!(r["label"], json!("Join 4 clips into bass at 0"));
-    assert_eq!(get(&s, "tracks.bass.clips"), json!([{"pattern": "bass", "repeats": 6}]));
-}
-
-#[test]
 fn audio_clips_join_back_into_what_a_split_divided() {
     let (_d, mut s) = open();
     let song: Vec<[f32; 2]> = (0..480000).map(|i| [((i % 4800) as f32 / 4800.0 - 0.5) * 0.2; 2]).collect();
@@ -171,7 +148,4 @@ fn joins_are_of_one_track_and_one_kind() {
     assert_eq!(e, "Name two or more clips of one track to join");
     let e = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.drums.clips.0", "tracks.drums.clips.0"]})).unwrap_err();
     assert_eq!(e, "Name two or more clips of one track to join");
-    edit(&mut s, json!({"op": "audio.add", "track": "drums", "sample": "tone", "at": 31})).unwrap();
-    let e = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.drums.clips.1", "tracks.drums.audio.0"]})).unwrap_err();
-    assert_eq!(e, "Pattern clips and audio clips are not joined into one; join each kind by itself");
 }

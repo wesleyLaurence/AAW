@@ -23,10 +23,10 @@ kept. What is merged and not yet heard or tried by hand is in
 Between items, the sessions at the top of Verify come first: they find what is
 wrong with the sounds everything else is built on.
 
-Items 1–2 are the end of patterns, which the person put first on November
-17, 2026 with the Drum Rack, now built (D189), one pull request each, in
-order; see [drum-rack.md](features/drum-rack.md).
-Items 3–4 are the reverse-engineer track, which the person put before
+Item 1 is the end of patterns, which the person put first on November
+17, 2026 with the Drum Rack (D189) and songs' patterns converted when read
+(D190), both built; see [drum-rack.md](features/drum-rack.md).
+Items 2–3 are the reverse-engineer track, which the person put before
 everything else on November 16, 2026 (D182): to analyze a finished song from its
 audio alone and know everything about it, then to recreate its session from
 the master. They are built in order, one at a time, each a command the
@@ -36,97 +36,93 @@ are built: notes from audio as `daw transcribe` (D183), the drum groove as
 `daw transcribe --drums` (D185), the form as `daw samples form` (D186),
 words by bar as `daw transcribe --words` (D187) and sound and effects as
 `daw samples sound` (D188).
-Items 5–9 are what a code review of play past the song's end (D163) found on
+Items 4–8 are what a code review of play past the song's end (D163) found on
 October 28, 2026, in the order of how much each one harms a song, each a fix
-of its own. Item 10 is the person's notes from using the app on October 19,
-2026 (D123). Items 11–20 are the order as it stood.
+of its own. Item 9 is the person's notes from using the app on October 19,
+2026 (D123). Items 10–19 are the order as it stood.
 
-1. **Patterns converted.** A song with patterns, read by the host or any
-    command, becomes once MIDI tracks whose Drum Racks hold its pads and note
-    clips that play its pattern clips, with the sound unchanged and a copy of
-    the song as it was. Step 2 of retiring patterns (D184).
-2. **Patterns removed.** `patterns`, pads on a track and pattern clips out of
+1. **Patterns removed.** `patterns`, pads on a track and pattern clips out of
     the song, the engine and the host, `daw pattern` and `daw event` gone, the
     app's pattern editor gone, and `daw track add` making a MIDI track. Step 3
     of retiring patterns (D184).
 
-3. **One analysis file.** A command that runs every measure on a song and its
+2. **One analysis file.** A command that runs every measure on a song and its
     stems and writes one JSON with each measure's confidence and a markdown
     summary, which the skill's report and a recreation start from.
-4. **Recreate a session from the master.** The drums as note clips on the
+3. **Recreate a session from the master.** The drums as note clips on the
     nearest samples, the bass, chords and melodies as note clips on patches,
     the sections arranged and the mix matched, rendered and compared with
     `daw reference` until the differences are said; what no tool does yet
     becomes a line here.
 
-5. **A take from a stem tap stops at the end while a device take runs on.**
+4. **A take from a stem tap stops at the end while a device take runs on.**
     Stem taps are fed only while the player rolls, so a track recorded from a
     stem ends its clip at the song's end and loses its tail, while a
     microphone take in the same recording goes on to the stop; the comment at
     record_tick promises both run on.
-6. **Full DSP runs forever past the end.** The whole renderer graph keeps
+5. **Full DSP runs forever past the end.** The whole renderer graph keeps
     processing silence every block while play rolls on, and the resting path
     engages only when stopped, so a heavy song left playing costs its full
     CPU until someone stops it. Once past the end and quiet for a second, as
     the stopped branch already counts, skip the graph and only pass the
     block, count the beats and click.
-7. **Zero-extent content at beat 0 reads as an empty song.** The fitted
+6. **Zero-extent content at beat 0 reads as an empty song.** The fitted
     length returns eight bars when the content end is zero, so a song whose
     only item is an automation point at 0 or an audio clip at 0 whose file
     is missing flips by 28 beats as a one-beat clip is added and removed.
     Guard on no clips, points or sections instead.
-8. **The timeline's width past the end only grows while playing.** The
+7. **The timeline's width past the end only grows while playing.** The
     played beats are set from the playhead's tick and never reset, so a cue
     located past the end while stopped is drawn beyond the scrollable area,
     and after a stop far past the end the view keeps the empty width until
     the next play. Derive the content width from the largest of the length,
     the cue and the playhead in one place.
-9. **A marker click still clamps the cue.** The marker-click path keeps the
+8. **A marker click still clamps the cue.** The marker-click path keeps the
     cue just under the song's length, the rule D163 removed from the ruler's
     target; dead today, and the old limit in one more place. Replace it with
     a plain locate.
 
-10. **The person's skills: mix, master, arrange.** Written
+9. **The person's skills: mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-11. **`daw audio crossfade` with an option, while the app has the project
+10. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-12. **A time selection in the app.** A range of beats dragged across the
+11. **A time selection in the app.** A range of beats dragged across the
     tracks and copied, inserted, deleted or cleared as `daw range` does it,
     and a section dragged with its content; which gesture makes it is the
     open question in [features/bar-ranges.md](features/bar-ranges.md).
-13. **A MIDI keyboard plugged in.** The typing keyboard plays and records
+12. **A MIDI keyboard plugged in.** The typing keyboard plays and records
     notes ([typing keyboard](features/typing-keyboard.md)) and ⌘U or `daw
     note quantize` snaps what was played ([quantize](features/quantize.md));
     a keyboard through CoreMIDI, with its velocity and its own latency, is
     the other half.
-14. **Sections, the master gain and the end fade in the app.** A section
+13. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-15. **A project made with `daw init` in the app's index,** so a song the agent
+14. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-16. **Turns and A/B.** An agent request's commands grouped, named for the
+15. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-17. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+16. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-18. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+17. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-19. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+18. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-20. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+19. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
@@ -449,6 +445,30 @@ checkout (D75):
   frame would need; one level was what was asked for (D139).
 
 One line each, newest first.
+
+- What comes in, part by part: a command that reads each stem `daw separate`
+  made bar by bar and lists where its level, register or note density jumps
+  against the bars before ("other: bar 13, a line comes in at G♯4–C6, +3 dB,
+  7 notes a bar"), with a piano-roll picture of each stem's notes from
+  `daw transcribe`. On "oh yeah?" the reverse-engineer run missed a lead synth
+  entering at 0:41 that the person called very obvious by ear, though the other
+  stem's notes above G♯4 went from 0–2 a bar to 6–10 there. Said by the person
+  and the agent on November 17, 2026.
+- Register in `daw samples form`: pitch height beside each bar's pitch classes,
+  so a line an octave above the chords, playing their own tones, counts as a
+  change; the chroma alone left "oh yeah?"'s lead invisible and called bars
+  4–44 one section (November 17, 2026).
+- An instrument timeline: a tagging model such as PANNs or CLAP over each stem
+  a bar or two at a time, naming what plays and when ("synthesizer from
+  0:41"); a trial on the person's songs first, as for each new model
+  (November 17, 2026).
+- The foreground followed: a melody extraction over the whole mix giving the
+  pitch the ear is on by bar, and where it goes on while `daw transcribe
+  --words` hears no words, which part has the lead; Whisper's "loud voice with
+  no words" at 0:40–1:06 on "oh yeah?" was the lead synth (November 17, 2026).
+- In the reverse-engineer skill, the person listens once and drops markers
+  where something stands out, and the analysis accounts for each one before
+  the report is written (November 17, 2026).
 
 - A mode for drums, as Ableton's Beats is, for an audio clip's transpose and
   tempo: slices at its transients, each played at its own pitch, so a drum

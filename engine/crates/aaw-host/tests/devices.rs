@@ -70,7 +70,7 @@ fn a_device_is_added_by_its_slug_and_held_to_its_manifest() {
     // Saved as written.
     s.save().unwrap();
     let text = std::fs::read_to_string(s.path()).unwrap();
-    assert!(text.contains("{type: device, name: tilt, version: '0.1', fields: {gain_db: 3.0, tone_hz: 20000.0, warmth_percent: 0.0, mode: mono,\n      invert: false}}"), "{text}");
+    assert!(text.contains("{type: device, name: tilt, version: '0.1',\n      fields: {gain_db: 3.0, tone_hz: 20000.0, warmth_percent: 0.0, mode: mono, invert: false}}"), "{text}");
     // Its state without a host: waiting, since nothing has run.
     let status = devices::status_headless(s.project(), s.dir());
     assert_eq!(status.len(), 2);
@@ -512,7 +512,8 @@ fn a_midi_effect_is_added_by_slug_held_to_its_manifest_and_kept_in_its_place() {
     edit(&mut s, json!({"op": "set", "path": "tracks.keys.midi_effects.1.fields.pitch", "value": "octave_up"})).unwrap();
     // A MIDI effect goes before a MIDI track's instrument and nowhere else;
     // an effect or an instrument does not go there.
-    assert!(refused(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "echo"})).contains("echo is a MIDI effect: it goes on a MIDI track"));
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    assert!(refused(&mut s, json!({"op": "effect.add", "owner": "tracks.vox", "type": "echo"})).contains("echo is a MIDI effect: it goes on a MIDI track"));
     assert!(refused(&mut s, json!({"op": "apply", "patch": {"master": {"effects": [{"type": "device", "name": "echo"}]}}})).contains("echo is a MIDI effect, which changes a MIDI track's notes"));
     assert!(refused(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": "echo"})).contains("echo is a MIDI effect"));
     let among = |name: &str| json!({"op": "set", "path": "tracks.keys.midi_effects", "value": [{"type": "device", "name": name}]});

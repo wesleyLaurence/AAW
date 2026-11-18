@@ -344,7 +344,8 @@ fn an_instrument_rack_carries_a_sampler_with_its_files_and_a_chain_into_another_
     let saved = aaw_host::instruments::find(&name).unwrap();
     assert_eq!((saved.kind(), saved.tags.as_slice()), ("sampler", &["keys".to_string()][..]));
     assert!(aaw_host::instruments::matches(&saved, "sampler reverb keys"));
-    let e = edit(&mut s, json!({"op": "instrument.rack.save", "track": "drums", "name": "X"})).unwrap_err();
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let e = edit(&mut s, json!({"op": "instrument.rack.save", "track": "vox", "name": "X"})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     let e = edit(&mut s, json!({"op": "instrument.rack.save", "track": "keys", "name": name})).unwrap_err();
     assert!(e.contains("already saved"), "{e}");
@@ -380,7 +381,8 @@ fn an_instrument_rack_carries_a_sampler_with_its_files_and_a_chain_into_another_
     assert_eq!(get(&third, "samples.tone.path"), json!("samples/tone.wav"));
     assert!(d3.path().join("samples/tone.wav").is_file());
     assert_eq!(get(&third, "tracks.lead.instrument.sampler.pads.t.sample"), json!("tone"));
-    let e = edit(&mut third, json!({"op": "instrument.rack.load", "track": "drums", "rack": name})).unwrap_err();
+    edit(&mut third, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let e = edit(&mut third, json!({"op": "instrument.rack.load", "track": "vox", "rack": name})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     let e = edit(&mut third, json!({"op": "instrument.rack.load", "track": "lead", "rack": "Nothing Here"})).unwrap_err();
     assert!(e.contains("No instrument rack named"), "{e}");

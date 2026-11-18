@@ -102,9 +102,10 @@ impl Drop for Running {
 #[test]
 fn a_note_preview_is_refused_before_the_output_opens_and_is_no_edit() {
     let h = Running::start();
+    h.send(json!({"op": "track.add", "id": "vox"})).unwrap();
     h.send(json!({"op": "synth.add", "track": "lead"})).unwrap();
     // The note is checked, and the track, before any audio device is touched.
-    let e = h.send(json!({"op": "note.preview", "track": "bass", "pitch": "C3"})).unwrap_err();
+    let e = h.send(json!({"op": "note.preview", "track": "vox", "pitch": "C3"})).unwrap_err();
     assert!(e.contains("has no instrument"), "{e}");
     let e = h.send(json!({"op": "note.preview", "track": "nobody", "pitch": 60})).unwrap_err();
     assert!(e.contains("Unknown track"), "{e}");
@@ -118,7 +119,7 @@ fn a_note_preview_is_refused_before_the_output_opens_and_is_no_edit() {
     assert!(e.contains("length_beats"), "{e}");
     // Nothing of it reached the song or the history.
     let status = h.send(json!({"op": "status"})).unwrap();
-    assert_eq!(status["revision"], json!(1));
+    assert_eq!(status["revision"], json!(2));
     assert_eq!(status["undo"]["label"], json!("Add Synth track lead"));
 }
 
@@ -483,13 +484,13 @@ fn status_lists_what_the_person_selected() {
     let r = h.send(json!({"op": "select", "items": [clip, "tracks.drums", clip]})).unwrap();
     let selection = r["selection"].as_array().unwrap();
     assert_eq!(selection.len(), 2);
-    assert_eq!(selection[0], json!({"ref": clip, "path": "tracks.bass.clips.2"}));
+    assert_eq!(selection[0], json!({"ref": clip, "path": "tracks.bass.clips.bass-3"}));
     assert_eq!(selection[1]["path"], json!("tracks.drums"));
     // The selection follows its objects through edits, and forgets removed ones.
     h.send(json!({"op": "clip.remove", "clip": "tracks.bass.clips.0"})).unwrap();
     h.send(json!({"op": "track.rename", "track": "drums", "to": "kit"})).unwrap();
     let status = h.send(json!({"op": "status"})).unwrap();
-    assert_eq!(status["selection"], json!([{"ref": clip, "path": "tracks.bass.clips.1"}, {"ref": selection[1]["ref"], "path": "tracks.kit"}]));
+    assert_eq!(status["selection"], json!([{"ref": clip, "path": "tracks.bass.clips.bass-3"}, {"ref": selection[1]["ref"], "path": "tracks.kit"}]));
     h.send(json!({"op": "clip.remove", "clip": clip})).unwrap();
     assert_eq!(h.send(json!({"op": "status"})).unwrap()["selection"].as_array().unwrap().len(), 1);
     // Only objects can be selected, and selecting is not a change.
