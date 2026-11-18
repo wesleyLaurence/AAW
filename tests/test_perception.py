@@ -194,7 +194,8 @@ def test_mix_and_snapshot_tamper_rejected(rendered):
 
 
 def test_reports_from_earlier_engines_still_verify(rendered):
-    # Earlier engines hashed the full dump before a clip could be
+    # Earlier engines hashed the full dump before a pad had its own mute
+    # and solo and a sampler could be a Drum Rack, before a clip could be
     # deactivated, before a track could be frozen,
     # before a track had an input,
     # before a group could be in a
@@ -214,6 +215,12 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     dump = copy.deepcopy(p)
     track = dump["tracks"][0]
     forms = [copy.deepcopy(dump)]
+    for each in dump["tracks"]:
+        sampler = ((each.get("instrument") or {}).get("sampler")) or {}
+        sampler.pop("drum_rack", None)
+        for pad in [*each.get("pads", {}).values(), *sampler.get("pads", {}).values()]:
+            del pad["mute"], pad["solo"]
+    forms.append(copy.deepcopy(dump))
     for each in dump["tracks"]:
         for clip in [*each["clips"], *each["audio"]]:
             del clip["active"]

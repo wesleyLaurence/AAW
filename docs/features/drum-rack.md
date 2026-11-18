@@ -1,7 +1,7 @@
 # The Drum Rack, and patterns gone
 
-Status: proposed November 17, 2026 (D189). Next items 1–3, one pull request
-each, in order.
+Status: stage 1, the Drum Rack, implemented November 17, 2026 (D189), PR_LINK.
+Stages 2 and 3 are proposed, Next items 1–2, one pull request each, in order.
 
 ## What
 
@@ -49,7 +49,8 @@ Drum Rack is not an empty Sampler. A pad of a Drum Rack is one map entry of
 one note, not pitched: `{notes: 36, pad: kick}`. A sampler without the flag
 that is neither empty nor one pad on every note, such as a kit `daw instrument
 map` or `daw transcribe --drums` made before this, is drawn as a Drum Rack
-too; the flag is written by the first edit the Drum Rack makes. A map entry
+too; the flag is written when the Drum Rack next takes a sample on a key, and
+`daw pad add` on a track with no instrument writes it from the start. A map entry
 of a range shows its pad on each key of the range.
 
 Each pad gains `mute` and `solo`, both false unless given. A muted pad's
@@ -71,7 +72,7 @@ From the left, as in Ableton:
   its key's name, as the song names notes (C4 is middle C, so the kick on 36 is
   C2 where Ableton says C1). A pad with a sample shows the pad's name and, along
   its foot, M, ▶ and S: mute, play it at velocity 100, solo. A click selects
-  it; a key played on the typing keyboard selects its pad too. A sample
+  it. A sample
   dropped on an empty pad, from the browser or the Finder, adds a pad named
   for the sample on that key; dropped on a pad with a sample, it takes that
   one's place and keeps the pad's settings, as the Sampler does. Delete, or
@@ -150,3 +151,5 @@ pattern editor and its step grid, the CLI its verbs and topics.
   item.
 - Dragging a pad onto another to swap their keys, and renaming a pad in the
   grid: later lines.
+- A key played on the typing keyboard or a MIDI keyboard selecting its pad,
+  as Ableton's does: not built.
