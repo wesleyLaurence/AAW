@@ -9,8 +9,9 @@ import json
 import numpy as np
 import pytest
 import soundfile as sf
+import yaml
 from agent_daw.model import load, save, validate
-from helpers import SR, cli, render, run_chain, stem, tone
+from helpers import SR, cli, drum_track, render, run_chain, stem, tone
 
 TEMPO = 120  # one beat is 24000 frames
 
@@ -227,12 +228,9 @@ def song(tmp_path):
     data = {
         "session": {"tempo": TEMPO, "length_beats": 8, "master_gain_db": 0},
         "samples": {"hum": {"path": "hum.wav"}},
-        "patterns": {"hold": {"length_beats": 8, "steps": {"h": "x" + "." * 31}}},
         "tracks": [
-            {
-                "id": "pad",
-                "pads": {"h": {"sample": "hum"}},
-                "clips": [{"pattern": "hold"}],
+            drum_track("pad", "h", "hum", 8, [0])
+            | {
                 "effects": [
                     {
                         "type": "filter",
@@ -611,7 +609,7 @@ def test_automation_round_trip_and_cli(song):
     save(load(path), path)
     assert path.read_text() == text
     assert "- {at: 15/2, value: 50.0}" in text
-    assert "- {type: filter, id: sweep, mode: lowpass, cutoff_hz: 8000.0}" in text
+    assert yaml.safe_load(text)["tracks"][0]["effects"] == [{"type": "filter", "id": "sweep", "mode": "lowpass", "cutoff_hz": 8000.0}]
     inspected = ok("inspect", path)
     assert inspected["tracks"][0]["automation"] == ["gain_db"]
     assert inspected["returns"][0]["automation"] == ["effects.echo.feedback_percent"]

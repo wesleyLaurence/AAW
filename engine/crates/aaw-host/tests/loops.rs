@@ -72,8 +72,8 @@ fn a_note_clip_loops_its_first_beats_until_its_end() {
     assert_eq!((&clip["loop_beats"], &clip["length_beats"]), (&json!(4), &json!(20)));
     // The map shows one clip of five bars, looping; the note past the loop's
     // end is kept, and note list and check say it does not play.
-    assert_eq!(row(&s, "keys"), ".CCCCC..");
-    assert!(legend(&s).contains("C  notes phrase, 20 beats, loops every 4 beats, 2 notes C4–E4; keys bar 2 ×5"), "{}", legend(&s));
+    assert_eq!(row(&s, "keys"), ".DDDDD..");
+    assert!(legend(&s).contains("D  notes phrase, loops every 4 beats, 2 notes C4–E4; keys bar 2 ×5"), "{}", legend(&s));
     let listed = s.notes(PHRASE, None, None, false, None).unwrap();
     let outside: Vec<&str> = listed["clips"][0]["notes"].as_array().unwrap().iter().filter(|n| n["outside"] == json!(true)).map(|n| n["id"].as_str().unwrap()).collect();
     assert_eq!(outside, ["n3"]);
@@ -93,14 +93,12 @@ fn a_note_clip_loops_its_first_beats_until_its_end() {
     assert_eq!(r["label"], json!("Loop clip phrase at 4 off"));
     let clip = get(&s, PHRASE);
     assert!(clip.get("loop_beats").is_none() && clip["length_beats"] == json!(20));
-    assert_eq!(row(&s, "keys"), ".CC:::..");
+    assert_eq!(row(&s, "keys"), ".DD:::..");
     // Refusals.
     let err = edit(&mut s, json!({"op": "clip.loop", "clip": PHRASE, "loop_beats": 0})).unwrap_err();
     assert_eq!(err, "A loop is longer than 0 beats, or off");
     let err = edit(&mut s, json!({"op": "clip.loop", "clip": PHRASE, "loop_beats": 4, "length": 16})).unwrap_err();
     assert_eq!(err, "Clip phrase at 4 is a note clip, whose length clip resize sets");
-    let err = edit(&mut s, json!({"op": "clip.loop", "clip": "tracks.drums.clips.0", "loop_beats": 4})).unwrap_err();
-    assert_eq!(err, "tracks.drums.clips.0 is a pattern clip, not a note clip");
 }
 
 #[test]
@@ -142,8 +140,8 @@ fn an_audio_clip_loops_as_copies_of_its_first_beats() {
     assert_eq!(r["label"], json!("Loop clip song at 4 every 8 beats"));
     let clip = get(&s, AUDIO);
     assert_eq!((&clip["loop_beats"], &clip["length_beats"], &clip["source_end_seconds"]), (&json!(8), &json!(16), &json!(9.0)));
-    assert_eq!(row(&s, "song"), ".CCCC...");
-    assert!(legend(&s).contains("C  audio song 1–5 s, 16 beats, loops every 8 beats; song bar 2 ×2"), "{}", legend(&s));
+    assert_eq!(row(&s, "song"), ".DDDD...");
+    assert!(legend(&s).contains("D  audio song 1–5 s, 16 beats, loops every 8 beats; song bar 2 ×2"), "{}", legend(&s));
     // Resize and trim --end say how long it plays; its start cannot be trimmed.
     edit(&mut s, json!({"op": "clip.resize", "clip": AUDIO, "length_beats": 40})).unwrap();
     assert_eq!(get(&s, &format!("{AUDIO}.length_beats")), json!(40));
@@ -192,9 +190,9 @@ fn a_looped_clip_against_a_copy_is_the_same_music_only_with_the_same_loop() {
     with_keys(&mut s);
     edit(&mut s, json!({"op": "clip.loop", "clip": PHRASE, "loop_beats": 4})).unwrap();
     edit(&mut s, json!({"op": "clip.duplicate", "clip": PHRASE, "at": 16})).unwrap();
-    assert_eq!(row(&s, "keys"), ".CC.CC..");
+    assert_eq!(row(&s, "keys"), ".DD.DD..");
     edit(&mut s, json!({"op": "clip.loop", "clip": "tracks.keys.clips.clip1", "loop_beats": 2})).unwrap();
-    assert_eq!(row(&s, "keys"), ".CC.DD..");
+    assert_eq!(row(&s, "keys"), ".DD.EE..");
     assert_eq!(warnings(&s, "clips-stacked"), Vec::<String>::new());
     let _: Json = get(&s, "tracks.keys.clips");
 }

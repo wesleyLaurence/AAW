@@ -121,7 +121,7 @@ fn an_edit_past_the_end_while_rolling_on_is_heard_when_reached() {
     assert!(player.playing());
     // The bass clip moved to beat 20, which the song now reaches.
     let longer = program(&path, |p| {
-        p.tracks[0].clips[0].at = aaw_model::Beat::int(20);
+        common::note_clips(p, 0)[0].at = aaw_model::Beat::int(20);
         p.session.length_beats = aaw_model::Beat::int(36);
     });
     control.load(longer.clone()).unwrap();
@@ -199,7 +199,7 @@ fn an_edit_is_heard_after_the_crossfade() {
     let before = program(&path, |_| {});
     let after = program(&path, |p| {
         p.tracks[0].gain_db = -6.0;
-        p.tracks[1].clips[0].at = aaw_model::Beat::int(2);
+        common::note_clips(p, 1)[0].at = aaw_model::Beat::int(2);
     });
     let (mut control, mut player) = started(&before, 0);
     let head = pull(&mut player, 40000);
@@ -297,7 +297,7 @@ fn many_swaps_and_moves_never_allocate_or_leak() {
         let mut p = aaw_model::load(&mix, true).unwrap();
         p.tracks[1].gain_db = -(i as f64);
         if i % 2 == 1 {
-            p.tracks[0].clips[0].at = aaw_model::Beat::int(2);
+            common::note_clips(&mut p, 0)[0].at = aaw_model::Beat::int(2);
         }
         if i % 3 == 2 {
             p.master.effects.clear();
@@ -333,13 +333,11 @@ session: {tempo: 120, length_beats: 8, master_gain_db: -6}
 samples:
   long: {path: long.wav}
   hit: {path: long.wav}
-patterns:
-  drone: {length_beats: 8, events: [{at: 0, pad: t, duration: 8}]}
-  pulse: {length_beats: 8, events: [{at: 6, pad: t, duration: 1}]}
 tracks:
 - id: drone
-  pads: {t: {sample: long, mode: gate, attack_ms: 20, release_ms: 50}}
-  clips: [{pattern: drone}]
+  type: midi
+  instrument: {sampler: {drum_rack: true, pads: {t: {sample: long, mode: gate, attack_ms: 20, release_ms: 50}}, map: [{notes: 36, pad: t}]}}
+  clips: [{id: drone, length_beats: 8, notes: [{pitch: 36, duration: 8}]}]
   effects:
   - {type: eq, bands: [{shape: bell, freq_hz: 110, gain_db: 3}]}
   - {type: compressor, threshold_db: -20, ratio: 3}
@@ -347,9 +345,10 @@ tracks:
   - {type: delay, time_beats: 1/3, feedback_percent: 30, mix_percent: 20, highcut_hz: 3000}
   sends: [{to: room, gain_db: -12}]
 - id: pulse
+  type: midi
   mute: true
-  pads: {t: {sample: hit, mode: gate, attack_ms: 20, release_ms: 50}}
-  clips: [{pattern: pulse}]
+  instrument: {sampler: {drum_rack: true, pads: {t: {sample: hit, mode: gate, attack_ms: 20, release_ms: 50}}, map: [{notes: 36, pad: t}]}}
+  clips: [{id: pulse, length_beats: 8, notes: [{pitch: 36, at: 6, duration: 1}]}]
 returns:
 - id: room
   effects: [{type: reverb, decay_seconds: 0.8, mix_percent: 100}]
@@ -459,13 +458,11 @@ fn a_tail_rings_through_an_edit_a_locate_and_a_stop() {
     // An edit of another track's clips, a level and a tempo-free knob.
     let edited = tone(&path, &mut cache, |p| {
         quiet(p);
-        p.tracks[0].clips.push(aaw_model::Clip {
-            pattern: "drone".into(),
-            at: aaw_model::Beat::int(0),
-            repeats: 1,
-            velocity_scale: 0.5,
-            active: true,
-        });
+        let clips = common::note_clips(p, 0);
+        let mut copy = clips[0].clone();
+        copy.id = "drone-2".into();
+        copy.notes.iter_mut().for_each(|n| n.velocity = 50);
+        clips.push(copy);
     });
     let (_, after_edit) = tail(&mut |c| c.load(edited.clone()).unwrap());
     assert!(max_diff(&after_edit, &reference) < 1e-9, "the tail is cut or changed by {}", max_diff(&after_edit, &reference));

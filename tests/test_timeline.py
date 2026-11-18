@@ -17,13 +17,25 @@ def song(tmp_path):
         {
             "session": {"tempo": 96, "length_beats": 32},
             "samples": {"long": {"path": "long.wav"}, "hit": {"path": "hit.wav"}},
-            "patterns": {
-                "a": {"length_beats": 10, "events": [{"at": 0, "pad": "x"}, {"at": 6, "pad": "x"}]},
-                "b": {"length_beats": 10, "events": [{"at": 9, "pad": "h"}]},
-            },
             "tracks": [
-                {"id": "pads", "pads": {"x": {"sample": "long"}, "half": {"sample": "long", "end_seconds": 0.75}}, "clips": [{"pattern": "a"}]},
-                {"id": "hits", "pads": {"h": {"sample": "hit"}}, "clips": [{"pattern": "b"}]},
+                {
+                    "id": "pads",
+                    "type": "midi",
+                    "instrument": {
+                        "sampler": {
+                            "drum_rack": True,
+                            "pads": {"x": {"sample": "long"}, "half": {"sample": "long", "end_seconds": 0.75}},
+                            "map": [{"notes": 36, "pad": "x"}, {"notes": 37, "pad": "half"}],
+                        }
+                    },
+                    "clips": [{"id": "a", "length_beats": 10, "notes": [{"pitch": 36, "duration": "1/4"}, {"pitch": 36, "at": 6, "duration": "1/4"}]}],
+                },
+                {
+                    "id": "hits",
+                    "type": "midi",
+                    "instrument": {"sampler": {"drum_rack": True, "pads": {"h": {"sample": "hit"}}, "map": [{"notes": 36, "pad": "h"}]}},
+                    "clips": [{"id": "b", "length_beats": 10, "notes": [{"pitch": 36, "at": 9, "duration": "1/4"}]}],
+                },
             ],
         },
         tmp_path / "song.yaml",
@@ -81,11 +93,11 @@ def test_the_length_is_the_songs_content_and_fit_does_nothing(song):
     assert song.read_text() == before
     code, result = cli("set", song, "session.length_beats", 32)
     assert code == 1 and "the song's content" in result["error"]
-    # A longer pattern keeps the song longer; a shorter one lets it shrink,
+    # A longer clip keeps the song longer; a shorter one lets it shrink,
     # to the next whole bar after the last clip.
-    daw("set", song, "patterns.b.length_beats", 16)
+    daw("set", song, "tracks.hits.clips.b.length_beats", 16)
     assert load(song)["session"]["length_beats"] == 16
-    daw("set", song, "patterns.b.length_beats", 10)
+    daw("set", song, "tracks.hits.clips.b.length_beats", 10)
     code, report = cli("timeline", song)
     assert report["length"]["beats"] == load(song)["session"]["length_beats"] == 12
 

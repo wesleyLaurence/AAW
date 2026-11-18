@@ -98,14 +98,12 @@ def rendered(tmp_path):
         {
             "session": {"tempo": 120, "length_beats": 8, "end_fade_ms": 0},
             "samples": {"tone": {"path": "source.wav"}},
-            "patterns": {
-                "hit": {"length_beats": 4, "events": [{"at": 0, "pad": "tone"}]}
-            },
             "tracks": [
                 {
                     "id": "bass",
-                    "pads": {"tone": {"sample": "tone"}},
-                    "clips": [{"pattern": "hit", "repeats": 2}],
+                    "type": "midi",
+                    "instrument": {"sampler": {"drum_rack": True, "pads": {"tone": {"sample": "tone"}}, "map": [{"notes": 36, "pad": "tone"}]}},
+                    "clips": [{"id": "hit", "length_beats": 8, "loop_beats": 4, "notes": [{"pitch": 36, "duration": "1/4"}]}],
                 }
             ],
             "sections": [
@@ -138,7 +136,6 @@ def test_snapshot_sections_preview_and_hashes(rendered):
     assert b["timeline"]["energy"][0]["at_beat"] == 4
     regions = a["musical_context"]["tracks"]["bass"]["regions"]
     assert regions[0]["trigger_count"] == 2
-    assert regions[0]["pattern_occurrences"] == {"hit": 2}
     assert b["musical_context"]["tracks"]["bass"]["regions"][0]["trigger_count"] == 1
     assert a["tracks"]["bass"]["hash_verified_against_render"]
     stem = full / "stems" / "bass.wav"
@@ -196,7 +193,7 @@ def test_mix_and_snapshot_tamper_rejected(rendered):
 def test_reports_from_earlier_engines_still_verify(rendered):
     # Earlier engines hashed the full dump before a pad had its own mute
     # and solo and a sampler could be a Drum Rack, before a clip could be
-    # deactivated, before a track could be frozen,
+    # deactivated, before a MIDI track had MIDI effects, before a track could be frozen,
     # before a track had an input,
     # before a group could be in a
     # group, before markers, before groups, before points had a shape,
@@ -213,23 +210,32 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     manifest["python"] = "3.12.4"
     manifest["dependencies"] = {"numpy": "2.2.0", "scipy": "1.15.0", "soundfile": "0.13.0"}
     dump = copy.deepcopy(p)
-    track = dump["tracks"][0]
     forms = [copy.deepcopy(dump)]
-    for each in dump["tracks"]:
+    # A MIDI track has no pads, audio clips or input of its own.
+    def pads(each):
         sampler = ((each.get("instrument") or {}).get("sampler")) or {}
-        sampler.pop("drum_rack", None)
-        for pad in [*each.get("pads", {}).values(), *sampler.get("pads", {}).values()]:
+        return [*each.get("pads", {}).values(), *sampler.get("pads", {}).values()]
+
+    for each in dump["tracks"]:
+        sampler = (each.get("instrument") or {}).get("sampler") or {}
+        # Left out only at its default, as a field an engine did not know is.
+        if sampler.get("drum_rack") is False:
+            del sampler["drum_rack"]
+        for pad in pads(each):
             del pad["mute"], pad["solo"]
     forms.append(copy.deepcopy(dump))
     for each in dump["tracks"]:
-        for clip in [*each["clips"], *each["audio"]]:
+        for clip in [*each["clips"], *each.get("audio", [])]:
             del clip["active"]
+    forms.append(copy.deepcopy(dump))
+    for each in dump["tracks"]:
+        each.pop("midi_effects", None)
     forms.append(copy.deepcopy(dump))
     for each in dump["tracks"]:
         del each["frozen"]
     forms.append(copy.deepcopy(dump))
     for each in dump["tracks"]:
-        del each["input"]
+        each.pop("input", None)
     forms.append(copy.deepcopy(dump))
     for each in dump["groups"]:
         del each["group"]
@@ -244,22 +250,9 @@ def test_reports_from_earlier_engines_still_verify(rendered):
         for point in (point for lane in owner["automation"] for point in lane["points"]):
             del point["shape"]
     forms.append(copy.deepcopy(dump))
-    for each in dump["tracks"]:
-        del each["audio"]
-    forms.append(copy.deepcopy(dump))
-    del dump["session"]["stretcher"]
-    for pad in (pad for t in dump["tracks"] for pad in t["pads"].values()):
-        del pad["stretch"]
-    forms.append(copy.deepcopy(dump))
-    for sample in dump["samples"].values():
-        del sample["source_sha256"]
-    forms.append(copy.deepcopy(dump))
-    del track["automation"], dump["master"]["automation"]
-    forms.append(copy.deepcopy(dump))
-    del track["sends"], dump["returns"]
-    forms.append(copy.deepcopy(dump))
-    del track["effects"], dump["master"]
-    forms.append(dump)
+    # The forms before tracks had audio clips are of engines that knew no
+    # MIDI track, so they are of songs of pads only, which are converted when
+    # read and are not this song.
     for form in forms:
         encoded = json.dumps(form, sort_keys=True).encode()
         manifest["project_sha256"] = hashlib.sha256(encoded).hexdigest()
@@ -313,12 +306,10 @@ def test_reports_from_before_previews_are_full_renders(rendered):
 
 def test_localized_changes_and_musical_deltas(rendered):
     path, p, full, _ = rendered
-    p["patterns"]["busier"] = copy.deepcopy(p["patterns"]["hit"])
-    p["patterns"]["busier"]["events"].append({"at": 2, "pad": "tone"})
-    p["tracks"][0]["clips"] = [
-        {"pattern": "hit", "at": 0},
-        {"pattern": "busier", "at": 4},
-    ]
+    hit = {"id": "hit", "length_beats": 4, "notes": [{"pitch": 36, "duration": "1/4"}]}
+    busier = copy.deepcopy(hit) | {"id": "busier", "at": 4}
+    busier["notes"].append({"pitch": 36, "at": 2, "duration": "1/4"})
+    p["tracks"][0]["clips"] = [hit, busier]
     p["tracks"][0]["gain_db"] = -3
     save(p, path)
     after = render(path)
@@ -330,7 +321,6 @@ def test_localized_changes_and_musical_deltas(rendered):
     regions = result["musical_context_delta"]["bass"]
     assert regions[1]["trigger_count_delta"] == 0
     assert regions[2]["trigger_count_delta"] == 1
-    assert regions[2]["pattern_occurrences_after"] == {"busier": 1}
     assert result["tracks"]["bass"]["sections"]["intro"]["actual_delta"][
         "rms_dbfs"
     ] == pytest.approx(-3, abs=1e-5)

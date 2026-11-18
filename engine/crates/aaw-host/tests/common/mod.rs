@@ -13,22 +13,30 @@ session: {tempo: 120, length_beats: 32}
 samples:
   tone: {path: tone.wav, root_note: A3}
   hit: {path: hit.wav}
-patterns:
-  beat:
-    length_beats: 4
-    steps: {h: x.x.x.x.x.x.x.x.}
-  bass:
-    length_beats: 4
-    events:
-    - {at: 0, pad: t, note: C3, duration: 1}
-    - {at: 2, pad: t, note: G2, duration: 1}
 tracks:
 - id: drums
-  pads: {h: {sample: hit}}
-  clips: [{pattern: beat, repeats: 4}, {pattern: beat, at: 16, repeats: 4}]
+  type: midi
+  instrument: {sampler: {drum_rack: true, pads: {h: {sample: hit}}, map: [{notes: 36, pad: h}]}}
+  clips:
+  - id: beat
+    length_beats: 16
+    loop_beats: 4
+    notes: [{pitch: 36, duration: 1/4}, {pitch: 36, at: 1/2, duration: 1/4}, {pitch: 36, at: 1, duration: 1/4}, {pitch: 36, at: 3/2, duration: 1/4}, {pitch: 36, at: 2, duration: 1/4}, {pitch: 36, at: 5/2, duration: 1/4}, {pitch: 36, at: 3, duration: 1/4}, {pitch: 36, at: 7/2, duration: 1/4}]
+  - id: beat-2
+    at: 16
+    length_beats: 16
+    loop_beats: 4
+    notes: [{pitch: 36, duration: 1/4}, {pitch: 36, at: 1/2, duration: 1/4}, {pitch: 36, at: 1, duration: 1/4}, {pitch: 36, at: 3/2, duration: 1/4}, {pitch: 36, at: 2, duration: 1/4}, {pitch: 36, at: 5/2, duration: 1/4}, {pitch: 36, at: 3, duration: 1/4}, {pitch: 36, at: 7/2, duration: 1/4}]
 - id: bass
-  pads: {t: {sample: tone, mode: gate, release_ms: 20}}
-  clips: [{pattern: bass, repeats: 2}, {pattern: bass, at: 8}, {pattern: bass, at: 16, repeats: 2}]
+  type: midi
+  instrument:
+    sampler:
+      pads: {t: {sample: tone, mode: gate, release_ms: 20}}
+      map: [{notes: [0, 127], pad: t, pitched: true}]
+  clips:
+  - {id: bass, length_beats: 8, loop_beats: 4, notes: [{pitch: C3, duration: 1}, {pitch: G2, at: 2, duration: 1}]}
+  - {id: bass-2, at: 8, length_beats: 4, notes: [{pitch: C3, duration: 1}, {pitch: G2, at: 2, duration: 1}]}
+  - {id: bass-3, at: 16, length_beats: 8, loop_beats: 4, notes: [{pitch: C3, duration: 1}, {pitch: G2, at: 2, duration: 1}]}
   effects: [{type: compressor, threshold_db: -20, sidechain: drums}]
   sends: [{to: plate, gain_db: -12}]
   automation:
@@ -53,6 +61,35 @@ pub fn write_song(dir: &Path) -> PathBuf {
     std::fs::write(dir.join("hit.wav"), float_wav_bytes(&hit, 48000)).unwrap();
     let path = dir.join("song.yaml");
     std::fs::write(&path, SONG).unwrap();
+    path
+}
+
+/// A song of two audio tracks with the names and mixers of `SONG`'s, for
+/// what only an audio track has: an input, recording, audio clips.
+pub const AUDIO_SONG: &str = r#"
+session: {tempo: 120, length_beats: 32}
+samples:
+  tone: {path: tone.wav, root_note: A3}
+  hit: {path: hit.wav}
+tracks:
+- id: drums
+  pads: {}
+  audio: [{sample: hit, at: 0}, {sample: hit, at: 16}]
+- id: bass
+  pads: {}
+  audio: [{sample: tone, at: 0}, {sample: tone, at: 16}]
+  effects: [{type: compressor, threshold_db: -20, sidechain: drums}]
+  sends: [{to: plate, gain_db: -12}]
+returns:
+- id: plate
+  effects: [{type: reverb, decay_seconds: 1.5}]
+sections: [{id: intro, at: 0, length_beats: 8}]
+"#;
+
+/// Writes `AUDIO_SONG` and the samples into `dir`.
+pub fn write_audio_song(dir: &Path) -> PathBuf {
+    let path = write_song(dir);
+    std::fs::write(&path, AUDIO_SONG).unwrap();
     path
 }
 

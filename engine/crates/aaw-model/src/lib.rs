@@ -9,6 +9,7 @@
 pub mod beat;
 pub mod check;
 pub mod contract;
+pub mod convert;
 pub mod describe;
 pub mod hash;
 pub mod hint;
@@ -49,13 +50,16 @@ pub enum ModelError {
     Validation(ValidationError),
     /// A referenced sample is missing or changed.
     Asset(String),
+    /// A song's patterns could not be converted, or the converted song not
+    /// written.
+    Convert(String),
     Io(std::io::Error),
 }
 
 impl fmt::Display for ModelError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ModelError::Yaml(e) | ModelError::Json(e) | ModelError::Asset(e) => f.write_str(e),
+            ModelError::Yaml(e) | ModelError::Json(e) | ModelError::Asset(e) | ModelError::Convert(e) => f.write_str(e),
             ModelError::Validation(e) => e.fmt(f),
             ModelError::Io(e) => e.fmt(f),
         }
@@ -128,10 +132,12 @@ pub fn verify_assets(project: &Project, root: &Path) -> Result<(), ModelError> {
     Ok(())
 }
 
-/// Reads and validates a song, and optionally verifies its samples.
+/// Reads and validates a song, and optionally verifies its samples. A song
+/// with tracks of pads is converted once, written back with a copy of it as
+/// it was beside it (`convert::upgrade`).
 pub fn load(path: &Path, check_assets: bool) -> Result<Project, ModelError> {
     let text = std::fs::read_to_string(path)?;
-    let project = parse(&text)?;
+    let (project, _) = convert::upgrade(path, &text, parse(&text)?).map_err(ModelError::Convert)?;
     if check_assets {
         verify_assets(&project, path.parent().unwrap_or(Path::new(".")))?;
     }

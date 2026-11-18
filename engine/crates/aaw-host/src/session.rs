@@ -142,7 +142,18 @@ fn parse(path: &Path, bytes: &[u8]) -> Result<Project> {
 
 fn read_project(path: &Path) -> Result<(Project, Vec<u8>)> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    Ok((parse(path, &bytes)?, bytes))
+    let project = parse(path, &bytes)?;
+    converted(path, project, bytes)
+}
+
+/// A song as read, converted and written back once when it holds tracks
+/// of pads (`aaw_model::convert::upgrade`), with the bytes now in the file.
+fn converted(path: &Path, project: Project, bytes: Vec<u8>) -> Result<(Project, Vec<u8>)> {
+    let text = String::from_utf8_lossy(&bytes).into_owned();
+    match aaw_model::convert::upgrade(path, &text, project)? {
+        (project, Some(yaml)) => Ok((project, yaml.into_bytes())),
+        (project, None) => Ok((project, bytes)),
+    }
 }
 
 impl Session {
@@ -152,8 +163,8 @@ impl Session {
             Some(d) if !d.as_os_str().is_empty() => d.to_path_buf(),
             _ => PathBuf::from("."),
         };
-        let stamp = Stamp::of(path);
         let (project, bytes) = read_project(path)?;
+        let stamp = Stamp::of(path);
         aaw_model::verify_assets(&project, &dir).map_err(|e| e.to_string())?;
         let mut next = 0;
         let handles = tree::handles(&tree::carry(&project.dump(false), None, &mut next));
@@ -591,6 +602,20 @@ impl Session {
             self.verify_changed(&p)?;
             Ok(p)
         });
+        // An edit that brings tracks of pads is converted as a song opened
+        // with them is, and the file then holds the converted song.
+        let (loaded, bytes) = match loaded {
+            Ok(p) => match converted(&self.path, p, bytes.clone()) {
+                Ok((p, written)) => {
+                    if written != bytes {
+                        self.disk_stamp = Stamp::of(&self.path);
+                    }
+                    (Ok(p), written)
+                }
+                Err(e) => (Err(e), bytes),
+            },
+            Err(e) => (Err(e), bytes),
+        };
         self.disk_bytes = bytes;
         match loaded {
             Err(e) => {

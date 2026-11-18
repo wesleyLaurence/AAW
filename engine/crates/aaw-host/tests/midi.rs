@@ -176,8 +176,9 @@ fn pads_and_the_map_are_edited_on_a_midi_tracks_sampler() {
     assert!(e.contains("note 60 (C4) is mapped to both t and k"), "{e}");
     let e = edit(&mut s, json!({"op": "pad.remove", "track": "keys", "pad": "k"})).unwrap_err();
     assert!(e.contains("the map names unknown pad k"), "{e}");
-    let e = edit(&mut s, json!({"op": "instrument.map", "track": "drums", "notes": 60, "pad": "h"})).unwrap_err();
-    assert_eq!(e, "drums is not a MIDI track");
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let e = edit(&mut s, json!({"op": "instrument.map", "track": "vox", "notes": 60, "pad": "h"})).unwrap_err();
+    assert_eq!(e, "vox is not a MIDI track");
 }
 
 #[test]
@@ -187,12 +188,9 @@ fn clips_move_resize_and_keep_to_their_kind_of_track() {
     let clip = "tracks.keys.clips.clip1";
     edit(&mut s, json!({"op": "clip.move", "clip": clip, "at": "33/4"})).unwrap();
     assert_eq!(get(&s, &format!("{clip}.at")), json!("33/4"));
-    let e = edit(&mut s, json!({"op": "clip.move", "clip": clip, "track": "drums"})).unwrap_err();
-    assert_eq!(e, "A note clip moves only to a MIDI track, and drums is not one");
-    let e = edit(&mut s, json!({"op": "clip.move", "clip": "tracks.drums.clips.0", "track": "keys"})).unwrap_err();
-    assert_eq!(e, "A pattern clip cannot move to MIDI track keys");
-    let e = edit(&mut s, json!({"op": "clip.resize", "clip": "tracks.drums.clips.0", "length_beats": 2})).unwrap_err();
-    assert_eq!(e, "tracks.drums.clips.0 is a pattern clip, not a note clip");
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let e = edit(&mut s, json!({"op": "clip.move", "clip": clip, "track": "vox"})).unwrap_err();
+    assert_eq!(e, "A note clip moves only to a MIDI track, and vox is not one");
     // Made shorter, the clip keeps the notes past its end, which do not play.
     edit(&mut s, json!({"op": "clip.resize", "clip": clip, "length_beats": 2})).unwrap();
     let read = s.notes(clip, None, None, false, None).unwrap();
@@ -227,8 +225,9 @@ fn notes_are_read_by_clip_or_track_and_by_song_beats() {
         .collect();
     let want = [("clip1", "n5"), ("clip1", "n6"), ("clip2", "n1"), ("clip2", "n2"), ("clip2", "n3")];
     assert_eq!(found, want.map(|(c, n)| (c.to_string(), n.to_string())));
-    let e = s.notes("tracks.drums", None, None, false, None).unwrap_err();
-    assert_eq!(e, "drums is not a MIDI track");
+    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    let e = s.notes("tracks.vox", None, None, false, None).unwrap_err();
+    assert_eq!(e, "vox is not a MIDI track");
 }
 
 #[test]

@@ -1,4 +1,4 @@
-//! Clips deactivated, as 0 does in the app: a pattern clip, a note clip or
+//! Clips deactivated, as 0 does in the app: a note clip or
 //! an audio clip that stays where it is and plays nothing, through the
 //! session's command, the file, the schedule, the map, the checks and join.
 
@@ -58,12 +58,12 @@ fn a_deactivated_clip_stays_and_plays_nothing_until_activated() {
     let drums = hits(&s, 0);
     assert_eq!(notes(&s), 2);
 
-    // A pattern clip: its hits are gone, the clip and its place are kept.
+    // A drum clip: its hits are gone, the clip and its place are kept.
     let r = edit(&mut s, json!({"op": "clip.active", "clip": "tracks.drums.clips.0", "active": false})).unwrap();
     assert_eq!(r["label"], json!("Deactivate clip beat at 0"));
     assert_eq!(get(&s, "tracks.drums.clips.0")["active"], json!(false));
     assert_eq!(hits(&s, 0), drums / 2);
-    assert_eq!(s.project().tracks[0].clips.len(), 2);
+    assert_eq!(s.project().tracks[0].midi.as_ref().unwrap().clips.len(), 2);
 
     // A note clip: none of its notes play.
     let r = edit(&mut s, json!({"op": "clip.active", "clip": "tracks.keys.clips.riff", "active": false})).unwrap();
@@ -106,8 +106,8 @@ fn an_audio_clip_is_deactivated_by_its_path() {
     let r = edit(&mut s, json!({"op": "clip.active", "clip": "tracks.song.audio.0", "active": false})).unwrap();
     assert!(r["label"].as_str().unwrap().starts_with("Deactivate clip "), "{r}");
     assert!(!s.project().tracks[2].audio[0].active);
-    assert_eq!(row(&s, "song"), ".C......");
-    assert!(map_text(&s).contains("C  deactivated: audio song 0–1 s, 2 beats; song bar 2"), "{}", map_text(&s));
+    assert_eq!(row(&s, "song"), ".D......");
+    assert!(map_text(&s).contains("D  deactivated: audio song 0–1 s, 2 beats; song bar 2"), "{}", map_text(&s));
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn the_map_shows_a_deactivated_clip_as_its_own_music_under_one_that_plays() {
     let off = drums.chars().nth(4).unwrap();
     assert_eq!(&drums[..4], "AAAA");
     assert!(drums[4..].chars().all(|c| c == off) && off != 'A', "{text}");
-    assert!(text.contains(&format!("{off}  deactivated: pattern beat, 4 beats, 8 hits; drums bar 5 ×4")), "{text}");
+    assert!(text.contains(&format!("{off}  deactivated: notes beat-2, loops every 4 beats, 8 notes C2; drums bar 5 ×4")), "{text}");
     // A clip that plays is drawn over a deactivated one under it, and the
     // two sound at once nowhere.
     edit(&mut s, json!({"op": "clip.duplicate", "clip": "tracks.drums.clips.0", "at": 16})).unwrap();
@@ -142,7 +142,7 @@ fn a_deactivated_clip_and_one_that_plays_are_not_joined() {
     let (_d, mut s) = open();
     edit(&mut s, json!({"op": "clip.active", "clip": "tracks.bass.clips.1", "active": false})).unwrap();
     let e = edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.bass.clips.0", "tracks.bass.clips.1"]})).unwrap_err();
-    assert_eq!(e, "bass at 8 is deactivated and bass at 0 is not; activate or deactivate both to join them");
+    assert_eq!(e, "bass-2 at 8 is deactivated and bass at 0 is not; activate or deactivate both to join them");
     // Both deactivated, they join, and the clip they make is deactivated.
     edit(&mut s, json!({"op": "clip.active", "clip": "tracks.bass.clips.0", "active": false})).unwrap();
     edit(&mut s, json!({"op": "clip.join", "clips": ["tracks.bass.clips.0", "tracks.bass.clips.1"]})).unwrap();

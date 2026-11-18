@@ -509,9 +509,30 @@ semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional
 `choke_group`, `reverse`, optional `source_bpm`, `stretch` (`repitch` or
 `preserve_pitch`), and `mono` for downmixing.
 
-Patterns and pattern clips are the format of songs made before note clips and
-play as they did; a new drum part is a note clip on a MIDI track whose sampler
-maps the drum notes to pads, and nothing teaches patterns (D184).
+Patterns and pattern clips are the format of songs made before note clips; a
+new drum part is a note clip on a MIDI track whose sampler maps the drum notes
+to pads, and nothing teaches patterns (D184). A song with a track of pads or
+pattern clips is converted the first time it is read from its file, by
+`aaw_model::load` (every command, the Python package and renders) and by the
+host's `Session` when it opens a song or loads an outside edit:
+`aaw_model::convert` makes each such track a MIDI track of the same ID whose
+Drum Rack holds its pads and each pattern clip a note clip of the same hits,
+writes the song as it was to `song.before-drum-rack.yaml` beside it and the
+converted song over it, and the patterns go (D190). A pad named as a General
+MIDI drum takes that drum's key, the rest the lowest free keys from C2 up; a
+pad played with notes keeps a pitched range of them, and a hit its event
+transposes plays a copy of its pad moved as far (`kick-2`), so every hit
+sounds as it did. A pattern clip that repeats is a clip looped over the
+pattern, unless a gated hit lasts past the pattern's end, which a loop would
+cut, and then the repetitions are written out. A clip's `velocity_scale` is
+rounded into its notes' velocities, 0.05 dB at most. Audio clips and an input
+on such a track go to a track `ID-audio` after it with the same mixer, chain,
+sends and lanes, which sums as one track did through a chain that is linear
+(an equalizer, a filter, a delay, a reverb) and not exactly through a
+compressor, and a sidechain keyed by the track no longer hears them. Text
+parsed with `aaw_model::parse` is not converted, so the model's corpus reads
+what it is given, and an edit inside a running session that adds a pattern
+clip is not converted until the song is read again.
 
 Pattern: positive `length_beats`, `grid` in beats per step, `steps` mapping pad IDs
 to strings, optional explicit `events`, `swing` (0.5…0.75). Step rows and explicit

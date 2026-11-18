@@ -23,12 +23,18 @@ def tone_song(folder, tempo=120.0, stretch="preserve_pitch", stretcher="signalsm
         {
             "session": {"tempo": tempo, "length_beats": 8, "master_gain_db": 0, "end_fade_ms": 0, "stretcher": stretcher},
             "samples": {"tone": {"path": "tone.wav"}},
-            "patterns": {"once": {"length_beats": 8, "events": [{"at": 0, "pad": "x", "velocity": 127}]}},
             "tracks": [
                 {
                     "id": "tone",
-                    "pads": {"x": {"sample": "tone", "source_bpm": 120, "stretch": stretch, "attack_ms": 0, "release_ms": 0}},
-                    "clips": [{"pattern": "once"}],
+                    "type": "midi",
+                    "instrument": {
+                        "sampler": {
+                            "drum_rack": True,
+                            "pads": {"x": {"sample": "tone", "source_bpm": 120, "stretch": stretch, "attack_ms": 0, "release_ms": 0}},
+                            "map": [{"notes": 36, "pad": "x"}],
+                        }
+                    },
+                    "clips": [{"id": "once", "length_beats": 8, "notes": [{"pitch": 36, "duration": 8, "velocity": 127}]}],
                 }
             ],
         },
@@ -88,7 +94,7 @@ def test_check_warns_of_a_stretch_that_can_be_heard(tmp_path):
         "tone.x: stretched +10.0% from 120 BPM; more than about 8% can be heard"
     ]
     project = load(song)
-    project["tracks"][0]["pads"]["x"]["source_bpm"] = None
+    project["tracks"][0]["instrument"]["sampler"]["pads"]["x"]["source_bpm"] = None
     save(project, song)
     assert "nothing is stretched" in cli("check", song)[1]["warnings"][0]["message"]
 

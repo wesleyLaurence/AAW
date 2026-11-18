@@ -65,7 +65,10 @@ the next whole bar after its last sound ([song-length.md](song-length.md)).
 The same music means the same content, not the same clip:
 
 - a note clip's notes that play, each by its beat from the clip's start, its
-  pitch, its length and its velocity, and the clip's length;
+  pitch, its length and its velocity, and the clip's length; a clip that
+  loops a whole number of times is its loop and its notes, so copies of it
+  looped more or fewer times share its letter, as a pattern clip's repeats
+  did, and its legend line says the loop and not the length (D190);
 - a pattern clip's pattern, its hits as the pattern expands them, and its
   velocity scale. A clip's repeats are the same music again, so they share its
   letter, and copies of it with other repeats share it too;
@@ -99,7 +102,7 @@ notes with their lowest and highest note, and where it is, by track and bar,
 `17` or `5 ×12` for a pattern clip that repeats. Tracks that have it in the same
 places are named together. Six places are listed and the rest counted.
 
-**A line a track:** what plays it (the pads, a synth and its patch's name, a
+**A line a track:** what plays it (the pads, a Drum Rack by its pads' names as `drum rack kick snare hat`, a synth and its patch's name, a
 sampler and its pads, or audio), its gain, its lowest and highest note, and its
 hits or notes per bar, counted over the bars it plays in the range shown. This
 is what is needed to judge a part without listing its notes.
