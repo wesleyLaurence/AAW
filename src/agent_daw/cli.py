@@ -322,6 +322,30 @@ def parser():
         type=Path,
         help="Draw each part's tone with its eq, its pumping and its tails, as PNG",
     )
+    study = ss.add_parser(
+        "study",
+        help="Every measure of a song and its parts in one analysis: grid, key and chords, tuning, words, "
+        "form, notes, drums, sound and master, as study.json with each measure's confidence and study.md",
+        description="daw samples study FILE runs every measure the reverse-engineer track has on a song and "
+        "the parts daw separate --split stems made of it, in the order each needs the last, and writes one "
+        "JSON of them all, each with its state and confidence and a table of the bars, a markdown summary, "
+        "and the measures' pictures, MIDI files and lyrics beside them. A measure that cannot run says why, "
+        "and the rest run on (daw describe beats.study).",
+    )
+    study.add_argument("sample")
+    study.add_argument(
+        "--out",
+        type=Path,
+        metavar="DIR",
+        help="The folder the study is written to; study/NAME in the song's project unless given",
+    )
+    study.add_argument(
+        "--skip",
+        action="append",
+        metavar="MEASURE",
+        help="Leave a measure out: harmony, tuning, words, form, notes, drums, sound or master; repeat for more",
+    )
+    study.add_argument("--language", default="en", help="The language sung, for the words (en); '' lets Whisper tell")
     hits = ss.add_parser(
         "hits",
         help="A song's or a stem's hits in one band, each with its time, bar and beat, "
@@ -812,6 +836,10 @@ def execute(a):
         return song_form(a, source)
     if a.action == "sound":
         return song_sound(a, source)
+    if a.action == "study":
+        from . import study
+
+        return study.run(source, a.db, a.out, a.skip or (), a.language)
     if a.action == "inspect":
         return library.inspect(source)
     if a.action == "audition":
@@ -880,34 +908,7 @@ def song_chords(a, source):
         raise ValueError("window must be >0")
     at = None if a.near is None else beats.seconds(a.near)
     report = library.beat_map(a.db, source)
-    rows = report["beats"]
-    mono, sr = beats.read(source)
-    key = harmony.key_of(mono, sr)
-    period = 60 / report["tempo"]["bpm"]
-    times = [b["seconds"] for b in rows]
-    times.append(min(times[-1] + period, len(mono) / sr))
-    runs = harmony.chords(
-        mono,
-        sr,
-        times,
-        [b["beat"] == 1 for b in rows],
-        harmony.parse_key(key["name"]) if key["tonal"] else None,
-    )
-    found = []
-    for run in runs:
-        first = rows[run["first_beat"]]
-        end = times[run["first_beat"] + run["beats"]]
-        found.append(
-            {
-                "bar": first["bar"],
-                "beat": first["beat"],
-                "seconds": first["seconds"],
-                "until_seconds": round(end, 6),
-                "beats": run["beats"],
-                "chord": run["chord"],
-                "fit": run["fit"],
-            }
-        )
+    key, found = harmony.on_the_map(source, report)
     if at is not None:
         found = [c for c in found if c["until_seconds"] >= at - a.window and c["seconds"] <= at + a.window]
     key.pop("profile", None)

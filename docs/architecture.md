@@ -222,9 +222,17 @@ Python, in `src/agent_daw`:
   release, against the mix's over the kick's body, the tails where a part stops
   for a reverb's decay and a delay's repeats, and the dynamics; see
   [sound.md](features/sound.md).
+- `study.py`: `daw samples study`, every measure above run on a song and its
+  parts in the order each needs the last (beats, chords, tuning, words, form,
+  notes, drums, sound, the master's `daw listen` figures), each kept in one
+  `study.json` with its state and confidence, a table of the bars side by
+  side, and a markdown summary, in `study/NAME/` of the song's project; a
+  measure that cannot run or fails is kept as such and the rest run on; see
+  [study.md](features/study.md).
 - `harmony.py`: a chromagram less its overtones, the key a sound's pitch
   classes are most like with its candidates, and the chords over a sound's
-  beats; `swing.py`: where the second note of each pair of eighths or
+  beats, and the tuning, the circular mean of the loudest partials' distance
+  from equal temperament on A 440; `swing.py`: where the second note of each pair of eighths or
   sixteenths falls, against a sound's beats. Both are part of a sample's
   analysis; `daw samples chords` gives a song's on its beat map. `tonality.py`:
   the key of what a song plays, from its heard notes and its samples' keys

@@ -7,8 +7,9 @@ item 3, the form, built the same day as `daw samples form`
 ([form.md](form.md), D186); item 4, words by bar, built the same day as
 `daw transcribe --words` ([words.md](words.md), D187); item 5, sound and
 effects, built November 17, 2026 as `daw samples sound` ([sound.md](sound.md),
-D188); items 6–7 proposed, now Next items 1–2 of the backlog, in that order
-(D182).
+D188); item 6, one analysis file, built November 18, 2026 as
+`daw samples study` ([study.md](study.md), D192); item 7 proposed, now Next
+item 1 of the backlog (D182).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
@@ -59,7 +60,8 @@ different is what was missed.
 | The drum groove as notes | `daw transcribe --drums` | Kick, snare and hat as notes, grooves and fills, a drum track (D185); not heard |
 | Form: which bars are the same | `daw samples form` | Sections labelled and named, keys and key changes, the meter and bars checked (D186); the chorus named and the hook's sections found by the words (D187); not heard |
 | Sound and effects | `daw samples sound` | Each part's tone as an eq, width by section, pumping with the kick, reverb decay and delay repeats from its tails, dynamics; checked on renders with known settings (D188); not heard |
-| One analysis file | — | The skill writes markdown by hand |
+| Tuning | `daw samples study` | Cents from A 440 on the other part, with how alike the partials are (D192); not heard |
+| One analysis file | `daw samples study` | Every measure above in `study.json`, each with its state and confidence, the bars side by side, and `study.md` (D192); not read by the person |
 
 The Fourier analysis the person asked about is already under most of this:
 `daw listen` measures each stem in 31 third octaves, the beat map and the hits
@@ -166,6 +168,9 @@ settings, and said as an estimate on a real song.
 
 ### 6. One analysis file
 
+Built November 18, 2026 as `daw samples study`; [study.md](study.md) is its
+reference. What follows is the design as proposed.
+
 `daw study FILE` (name open) runs every measure above on a song and its stems
 and writes one JSON, sections, bars, chords, notes, drums, words and sound, in
 one schema with each measure's confidence, and a markdown summary of it. The
@@ -197,8 +202,8 @@ the same song, with the differences listed.
 2. Drums beyond kick, snare and hats: more bands, or a drum-transcription
    model. Kick, snare and hat are built from the bands with each drum's sound
    learned from the part (D185); the rest is a Later line.
-3. The analysis file's name and schema, and whether it lives beside the song
-   or in the project.
+3. Answered (D192): `daw samples study`, schema 1, in `study/NAME/` of the
+   song's project or `--out`.
 4. How a recreated part's sound is matched: a patch searched against the stem,
    or a sample of the stem itself where the person wants it.
 5. What "the same" means for the recreation's comparison: which differences

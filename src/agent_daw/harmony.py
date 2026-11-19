@@ -293,6 +293,40 @@ def chords(mono, sr, times, downbeats, key=None) -> list[dict]:
     return runs
 
 
+
+def on_the_map(path, report) -> tuple[dict, list[dict]]:
+    """A song's key and its chords on its beat map `report` (with its beats): a
+    run of beats a chord, each with its bar, beat, seconds and fit."""
+    rows = report["beats"]
+    mono, sr = beatmap.read(path)
+    key = key_of(mono, sr)
+    period = 60 / report["tempo"]["bpm"]
+    times = [b["seconds"] for b in rows]
+    times.append(min(times[-1] + period, len(mono) / sr))
+    runs = chords(
+        mono,
+        sr,
+        times,
+        [b["beat"] == 1 for b in rows],
+        parse_key(key["name"]) if key["tonal"] else None,
+    )
+    found = []
+    for run in runs:
+        first = rows[run["first_beat"]]
+        end = times[run["first_beat"] + run["beats"]]
+        found.append(
+            {
+                "bar": first["bar"],
+                "beat": first["beat"],
+                "seconds": first["seconds"],
+                "until_seconds": round(end, 6),
+                "beats": run["beats"],
+                "chord": run["chord"],
+                "fit": run["fit"],
+            }
+        )
+    return key, found
+
 def transpose_to(sample_key: str, song_key: str) -> dict:
     """The semitones, from -6 to 5, that move a sample's notes onto a key's: its
     scale onto the key's scale, so a sample in a key's relative needs none.
@@ -306,4 +340,64 @@ def transpose_to(sample_key: str, song_key: str) -> dict:
         "transpose": shift,
         "then_key": moved,
         "relation": "same key" if moved == key_name(target_tonic, target_mode) else "relative key",
+    }
+
+
+# --- tuning ----------------------------------------------------------------------
+
+TUNING_HZ = (80.0, 2000.0)  # the partials read for the tuning: low harmonics, which sit on the notes
+TUNING_PEAKS = 20  # the loudest partials of a frame that are read
+TUNING_UNDER_DB = 30.0  # a partial this far under its frame's loudest is not read
+
+
+def tuning(mono, sr) -> dict:
+    """How far the music sits from equal temperament on A 440, in cents: each
+    frame's loudest partials from 80 Hz to 2 kHz, each placed between its FFT
+    bins by a parabola through its log magnitudes, each partial's distance from
+    the nearest note on a circle of 100 cents, and their mean over the song
+    weighted by level. `concentration` is that mean's length, from 0 (the
+    partials fall anywhere, no tuning) to 1 (every one the same distance from
+    its note); `spread_cents` is the circular spread it makes."""
+    x = np.asarray(mono, dtype=np.float64)[: int(SECONDS * sr)]
+    if len(x) < FFT:
+        raise ValueError("too short to read a tuning")
+    window = np.hanning(FFT)
+    hz = np.fft.rfftfreq(FFT, 1 / sr)
+    inside = np.flatnonzero((hz >= TUNING_HZ[0]) & (hz <= TUNING_HZ[1]))
+    lo, hi = int(inside[0]), int(inside[-1])
+    frames = np.lib.stride_tricks.sliding_window_view(x, FFT)[::HOP]
+    z_sum, w_sum, count = 0j, 0.0, 0
+    for start in range(0, len(frames), 256):
+        mag = np.abs(np.fft.rfft(frames[start : start + 256] * window, axis=1))
+        level = 20 * np.log10(mag + 1e-12)
+        mid = level[:, lo : hi + 1]
+        left, right = level[:, lo - 1 : hi], level[:, lo + 1 : hi + 2]
+        peak = (mid > left) & (mid >= right) & (mid >= level.max(axis=1, keepdims=True) - TUNING_UNDER_DB)
+        peak &= mag[:, lo : hi + 1] > 1e-6
+        for row in range(len(mid)):
+            found = np.flatnonzero(peak[row])
+            if not len(found):
+                continue
+            found = found[np.argsort(-mid[row, found])[:TUNING_PEAKS]]
+            a, b, c = left[row, found], mid[row, found], right[row, found]
+            bend = a - 2 * b + c
+            delta = np.where(bend < 0, 0.5 * (a - c) / np.where(bend < 0, bend, -1), 0.0)
+            freq = (found + lo + delta) * sr / FFT
+            cents = 1200 * np.log2(freq / 440.0)
+            weight = mag[row, found + lo]
+            z_sum += np.sum(weight * np.exp(2j * np.pi * cents / 100))
+            w_sum += float(weight.sum())
+            count += len(found)
+    if count == 0 or w_sum <= 0:
+        raise ValueError("no steady partial to read a tuning from")
+    z = z_sum / w_sum
+    length = float(abs(z))
+    offset = float(np.angle(z) * 100 / (2 * np.pi))
+    spread = float(np.sqrt(-2 * np.log(max(length, 1e-12))) * 100 / (2 * np.pi))
+    return {
+        "cents": round(offset, 1),
+        "a4_hz": round(440.0 * 2 ** (offset / 1200), 2),
+        "concentration": round(length, 3),
+        "spread_cents": round(spread, 1),
+        "partials": count,
     }

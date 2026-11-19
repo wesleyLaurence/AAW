@@ -302,10 +302,17 @@ def labelled(spans, chords, sound, chords_moved, profiles) -> list[dict]:
 def parts_of(path: Path) -> dict:
     """The parts `daw separate` made of this file, by the recipe in the project's
     `separated` folder beside it: part name to file."""
+    return split_of(path)[0]
+
+
+def split_of(path: Path) -> tuple[dict, dict | None]:
+    """The parts `daw separate` made of this file, part name to file, and the
+    recipe they were read from: of the splits beside it, the one of the most
+    parts, the newest of those."""
     from .library import digest
 
     sha = None
-    best, made = {}, ""
+    best, made, chosen = {}, "", None
     for project in (path.parent.parent, path.parent):
         folder = project / "separated"
         if not folder.is_dir():
@@ -327,8 +334,8 @@ def parts_of(path: Path) -> dict:
             }
             key = (len(parts), record.get("made", ""))
             if parts and key > (len(best), made):
-                best, made = parts, record.get("made", "")
-    return best
+                best, made, chosen = parts, record.get("made", ""), {**record, "_path": recipe}
+    return best, chosen
 
 
 def bar_levels(mono, sr, bars) -> np.ndarray:
