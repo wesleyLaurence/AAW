@@ -224,44 +224,6 @@ def random_project(rng):
         if pitched or rng.random() < 0.3:
             s["root_note"] = rng.choice(NOTES)
         samples[name] = s
-    patterns = {}
-    for n in range(rng.randint(1, 3)):
-        plen = rng.choice([4, 8, 2])
-        grid = rng.choice(["1/4", 0.25, "1/3", 1, "0.5", 0.5])
-        from fractions import Fraction
-
-        cells = int(Fraction(plen) / Fraction(str(grid)))
-        steps = {}
-        for pad in rng.sample(["k", "s"], rng.randint(0, 2)):
-            row = "".join(rng.choice(".x123456789") for _ in range(cells))
-            if rng.random() < 0.5 and len(row) >= 4:
-                row = " ".join(row[i : i + 4] for i in range(0, len(row), 4))
-            if rng.random() < 0.3:
-                row = "|" + row + "|"
-            steps[pad] = row
-        events = []
-        for _ in range(rng.randint(0, 4)):
-            pad = rng.choice(["k", "s", "g"])
-            ev = {"at": beat(rng, rng.randrange(plen * 4) / 4), "pad": pad}
-            if pad == "g" or rng.random() < 0.3:
-                ev["duration"] = beat(rng, rng.choice([0.25, 0.5, 1, 1 / 3]))
-            if rng.random() < 0.4:
-                ev["velocity"] = rng.choice([1, 64, 127, "100", 90.0])
-            if pitched and rng.random() < 0.5:
-                ev["note"] = rng.choice(NOTES)
-            if rng.random() < 0.3:
-                ev["transpose"] = number(rng, -36, 36)
-            events.append(ev)
-        p = {"length_beats": rng.choice([plen, float(plen), str(plen)])}
-        if grid != "1/4" or rng.random() < 0.3:
-            p["grid"] = grid
-        if steps or rng.random() < 0.3:
-            p["steps"] = steps
-        if events or rng.random() < 0.3:
-            p["events"] = events
-        if rng.random() < 0.4:
-            p["swing"] = rng.choice([0.5, 0.55, 0.6666, 0.75, "0.6", 0.66])
-        patterns[f"p{n}"] = p
     return_ids = [f"r{i}" for i in range(rng.randint(0, 2))]
     track_ids = rng.sample(["drums", "bass", "Keys-2", "a_b", "t1", "t2", "lead"], rng.randint(1, 4))
     tracks = []
@@ -293,7 +255,13 @@ def random_project(rng):
             if rng.random() < 0.15:
                 pd["source_bpm"] = number(rng, 20, 400)
             pads[pad] = pd
-        t = {"id": tid, "pads": pads}
+        # A Drum Rack: the kick and snare on their General MIDI keys, and a
+        # gated pad played at the notes' pitches over two octaves.
+        keymap = [{"notes": 36, "pad": "k"}, {"notes": "D2", "pad": "s"}, {"notes": [48, 72], "pad": "g", "pitched": True}]
+        sampler = {"pads": pads, "map": keymap}
+        if rng.random() < 0.5:
+            sampler["drum_rack"] = rng.choice([True, False])
+        t = {"id": tid, "type": "midi", "instrument": {"sampler": sampler}}
         for field, low, high in [("gain_db", -96, 24), ("pan", -1, 1)]:
             if rng.random() < 0.4:
                 t[field] = number(rng, low, high)
@@ -302,17 +270,24 @@ def random_project(rng):
                 t[flag] = rng.choice([True, False, "on", 0])
         clips = []
         for _ in range(rng.randint(0, 3)):
-            name = rng.choice(list(patterns))
-            plen = float(patterns[name]["length_beats"])
-            repeats = rng.choice([1, 2, 4])
-            start = rng.randrange(0, int(length - plen * repeats) + 1)
-            c = {"pattern": name}
+            clen = rng.choice([4, 8, 2])
+            start = rng.randrange(0, int(length - clen) + 1)
+            c = {"length_beats": rng.choice([clen, float(clen), str(clen)])}
             if start or rng.random() < 0.3:
                 c["at"] = beat(rng, start)
-            if repeats > 1 or rng.random() < 0.2:
-                c["repeats"] = repeats
             if rng.random() < 0.2:
-                c["velocity_scale"] = number(rng, 0.1, 2)
+                c["loop_beats"] = beat(rng, rng.choice([1, 2, 0.5]))
+            notes = []
+            for _ in range(rng.randint(0, 4)):
+                pitch = rng.choice([36, "C2", 38, "D2", 60, "E4", 49])
+                n = {"pitch": pitch, "at": beat(rng, rng.randrange(clen * 4) / 4), "duration": beat(rng, rng.choice([0.25, 0.5, 1, 1 / 3]))}
+                if rng.random() < 0.4:
+                    n["velocity"] = rng.choice([1, 64, 127, "100", 90.0])
+                notes.append(n)
+            if notes or rng.random() < 0.3:
+                c["notes"] = notes
+            if rng.random() < 0.15:
+                c["active"] = rng.choice([True, False])
             clips.append(c)
         if clips or rng.random() < 0.2:
             t["clips"] = clips
@@ -335,7 +310,7 @@ def random_project(rng):
         if auto:
             t["automation"] = auto
         tracks.append(t)
-    project = {"session": session, "samples": samples, "patterns": patterns, "tracks": tracks}
+    project = {"session": session, "samples": samples, "tracks": tracks}
     if rng.random() < 0.5:
         project = {"schema_version": 1, **project}
     returns = []
@@ -490,16 +465,21 @@ EDGE_CASES = [
     "session: {}\nsamples: {s: {path: a.wav, root_note: C10}}",
     "session: {}\nsamples: {s: {path: 5}}",
     "session: {}\nsamples: {1: {path: a.wav}}",
-    "session: {}\npatterns: {p: {length_beats: 4, steps: {k: 'x..y'}}}",
+    # A song of patterns is refused: a file of one is converted on read (D191).
     "session: {}\npatterns: {p: {length_beats: 4, steps: {k: 'x...'}}}",
-    "session: {}\npatterns: {p: {length_beats: 4, grid: 0, steps: {}}}",
-    "session: {}\npatterns: {p: {length_beats: abc}}",
-    "session: {}\npatterns: {p: {length_beats: 4, events: [{at: 4, pad: k}]}}",
-    "session: {}\npatterns: {p: {length_beats: 4, events: [{at: -1, pad: k}]}}",
-    "session: {}\npatterns: {p: {length_beats: 4, events: [{at: 0, pad: k, velocity: 100.5}]}}",
-    "session: {}\npatterns: {p: {length_beats: 4, events: [{at: 0, pad: k, velocity: '1e2'}]}}",
-    "session: {}\npatterns: {p: {length_beats: 4, events: [{at: [1], pad: k, duration: {}}]}}",
-    "session: {}\npatterns: {p: {length_beats: 4, swing: 0.8}}",
+    # Note clips.
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 128, duration: 1}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: H2, duration: 1}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 36, duration: 0}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 0}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: abc}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 36, at: 4, duration: 1}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 36, at: -1, duration: 1}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 36, duration: 1, velocity: 100.5}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 36, duration: 1, velocity: '1e2'}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, notes: [{pitch: 36, at: [1], duration: {}}]}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4, loop_beats: 0}]}]",
+    "session: {}\ntracks: [{id: a, type: midi, clips: [{id: c, length_beats: 4}, {id: c, at: 4, length_beats: 4}]}]",
     "session: {}\ntracks: [{id: 1a, pads: {}}]",
     "session: {}\ntracks: [{id: a, pads: {}}, {id: a, pads: {}}]",
     "session: {}\ntracks: [{id: a}]",
@@ -547,14 +527,17 @@ EDGE_CASES = [
     "session: {}\nsections: [{id: a, at: 14, length_beats: 4}]",
     "session: {}\nsections: [{id: a, at: x, length_beats: 0}]",
     "session: {}\nsections: [{id: a, at: 0, length_beats: 0}]",
+    # Pads on a track and pattern clips are refused as patterns are.
     "session: {}\ntracks: [{id: a, pads: {k: {sample: s}}}]",
     "session: {}\ntracks: [{id: a, pads: {}, clips: [{pattern: p}]}]",
-    "session: {length_beats: 4}\nsamples: {s: {path: a.wav}}\npatterns: {p: {length_beats: 4, steps: {k: x...}}}\ntracks: [{id: a, pads: {k: {sample: s}}, clips: [{pattern: p, at: 1}]}]",
-    "session: {}\nsamples: {s: {path: a.wav}}\npatterns: {p: {length_beats: 4, steps: {q: x...}}}\ntracks: [{id: a, pads: {k: {sample: s}}, clips: [{pattern: p}]}]",
-    "session: {}\nsamples: {s: {path: a.wav}}\npatterns: {p: {length_beats: 4, events: [{at: 0, pad: k, note: C3}]}}\ntracks: [{id: a, pads: {k: {sample: s}}, clips: [{pattern: p}]}]",
-    "session: {}\nsamples: {s: {path: a.wav}}\npatterns: {p: {length_beats: 4, steps: {k: x...}}}\ntracks: [{id: a, pads: {k: {sample: s, mode: gate}}, clips: [{pattern: p}]}]",
-    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, pads: {k: {sample: s, start_seconds: 2, end_seconds: 1}}}]",
-    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, pads: {k: {sample: s, mode: loop}}}]",
+    # Drum Racks.
+    "session: {}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s}}, map: [{notes: 36, pad: k}]}}}]",
+    "session: {length_beats: 4}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s}}, map: [{notes: 36, pad: k}]}}, clips: [{id: c, at: 1, length_beats: 4, notes: [{pitch: 36, duration: 1/4}]}]}]",
+    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s}}, map: [{notes: 36, pad: q}]}}}]",
+    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s}}, map: [{notes: 36, pad: k}]}}, clips: [{id: c, length_beats: 4, notes: [{pitch: C3, duration: 1}]}]}]",
+    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s, mode: gate}}, map: [{notes: [36, 60], pad: k, pitched: true}]}}, clips: [{id: c, length_beats: 4, notes: [{pitch: C3, duration: 1}]}]}]",
+    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s, start_seconds: 2, end_seconds: 1}}, map: [{notes: 36, pad: k}]}}}]",
+    "session: {}\nsamples: {s: {path: a.wav}}\ntracks: [{id: a, type: midi, instrument: {sampler: {drum_rack: true, pads: {k: {sample: s, mode: loop}}, map: [{notes: 36, pad: k}]}}}]",
     "session: {}\ntracks: [{id: a, pads: {}, effects: " + json.dumps([{"type": "limiter"}] * 33) + "}]",
     "session: {}\ntracks: [{id: a, pads: {}, effects: [{type: eq, bands: " + json.dumps([{"shape": "x"}] * 17) + "}]}]",
     "session: {}\ntracks: {a: 1}",

@@ -39,15 +39,25 @@ def hat(amp=0.2):
     return np.column_stack([x, x]).clip(-0.9, 0.9)
 
 
-def pads(*names):
-    return {name: {"sample": name, "attack_ms": 0, "release_ms": 0} for name in names}
+# Each pad's key in a Drum Rack.
+KEYS = {"kick": 36, "hat": 42, "line": 36}
+
+
+def rack(*names):
+    """A Drum Rack of these pads, each on its key, each playing its sample from its first frame to its last."""
+    pads = {name: {"sample": name, "attack_ms": 0, "release_ms": 0} for name in names}
+    return {"sampler": {"drum_rack": True, "pads": pads, "map": [{"notes": KEYS[name], "pad": name} for name in names]}}
+
+
+def hit(pad, at, velocity=127):
+    return {"pitch": KEYS[pad], "at": at, "duration": "1/4", "velocity": velocity}
 
 
 def every(pad, step, length=4, start=0):
-    return [{"at": start + step * i, "pad": pad, "velocity": 127} for i in range(round((length - start) / step))]
+    return [hit(pad, start + step * i) for i in range(round((length - start) / step))]
 
 
-def song(directory, samples, tracks, patterns, **more):
+def song(directory, samples, tracks, **more):
     """A song of these tracks at 120, and its render."""
     directory.mkdir(parents=True, exist_ok=True)
     for name, x in samples.items():
@@ -55,7 +65,6 @@ def song(directory, samples, tracks, patterns, **more):
     document = {
         "session": {"tempo": 120, "length_beats": BEATS, "master_gain_db": 0, "end_fade_ms": 0},
         "samples": {name: {"path": f"{name}.wav"} for name in samples},
-        "patterns": patterns,
         "tracks": tracks,
         **more,
     }
@@ -63,14 +72,17 @@ def song(directory, samples, tracks, patterns, **more):
     return Path(render(directory / "song.yaml")["directory"])
 
 
-FOUR = {"four": {"length_beats": 4, "events": every("kick", 1)}}
+def four():
+    """A kick on every beat, the bar looped over the song."""
+    return [{"id": "four", "length_beats": BEATS, "loop_beats": 4, "notes": every("kick", 1)}]
 
 
 def kicks(effects=(), **more):
     return {
         "id": "kick",
-        "pads": pads("kick"),
-        "clips": [{"pattern": "four", "repeats": BEATS // 4}],
+        "type": "midi",
+        "instrument": rack("kick"),
+        "clips": four(),
         "effects": list(effects),
         **more,
     }
@@ -126,9 +138,9 @@ def test_the_range_and_the_loudest_seconds_of_a_tone_at_two_levels(tmp_path):
 
 
 def test_a_compressor_s_attack_decides_how_hard_a_kick_hits(tmp_path):
-    fast = song(tmp_path / "fast", {"kick": kick()}, [kicks([squeeze(0.1)])], FOUR, sections=HALVES)
-    slow = song(tmp_path / "slow", {"kick": kick()}, [kicks([squeeze(30)])], FOUR, sections=HALVES)
-    plain = song(tmp_path / "plain", {"kick": kick()}, [kicks()], FOUR, sections=HALVES)
+    fast = song(tmp_path / "fast", {"kick": kick()}, [kicks([squeeze(0.1)])], sections=HALVES)
+    slow = song(tmp_path / "slow", {"kick": kick()}, [kicks([squeeze(30)])], sections=HALVES)
+    plain = song(tmp_path / "plain", {"kick": kick()}, [kicks()], sections=HALVES)
     read = {name: listen(folder, images=False)["tracks"]["kick"]["hits"] for name, folder in (("fast", fast), ("slow", slow), ("plain", plain))}
     assert [hits["count"] for hits in read.values()] == [BEATS] * 3
     # A fast attack takes the front of the kick off, and a slow one lets it through
@@ -158,9 +170,9 @@ def test_a_compressor_s_attack_decides_how_hard_a_kick_hits(tmp_path):
 
 def test_a_kick_under_a_held_tone_hits_at_its_stem_and_not_in_the_mix(tmp_path):
     samples = {"kick": kick(), "held": tone(300, BEATS / 2, 0.3)}
-    held = {"id": "held", "pads": {}, "audio": [{"sample": "held", "at": 0}]}
-    alone = song(tmp_path / "alone", samples, [kicks()], FOUR)
-    under = song(tmp_path / "under", samples, [kicks(), held], FOUR)
+    held = {"id": "held", "audio": [{"sample": "held", "at": 0}]}
+    alone = song(tmp_path / "alone", samples, [kicks()])
+    under = song(tmp_path / "under", samples, [kicks(), held])
     a = listen(alone, images=False)["tracks"]["kick"]["hits"]
     report = listen(under, images=False)
     b = report["tracks"]["kick"]["hits"]
@@ -189,14 +201,14 @@ def test_a_kick_under_a_held_tone_hits_at_its_stem_and_not_in_the_mix(tmp_path):
 def test_a_kit_s_drums_are_read_apart_and_through_their_group(tmp_path):
     # A kick on one and three, hats on the eighths, and a second hat 5 ms
     # after the one on two: a flam, which is one hit.
-    beat = {"length_beats": 4, "events": [*every("kick", 2), *every("hat", 0.5), {"at": 1.01, "pad": "hat"}]}
-    kit = {"id": "kit", "pads": pads("kick", "hat"), "clips": [{"pattern": "beat", "repeats": BEATS // 4}], "group": "drums"}
+    beat = [*every("kick", 2), *every("hat", 0.5), hit("hat", 1.01, 100)]
+    clip = {"id": "beat", "length_beats": BEATS, "loop_beats": 4, "notes": beat}
+    kit = {"id": "kit", "type": "midi", "instrument": rack("kick", "hat"), "clips": [clip], "group": "drums"}
     plate = {"id": "plate", "effects": [{"type": "reverb", "decay_seconds": 0.5}]}
     folder = song(
         tmp_path,
         {"kick": kick(), "hat": hat()},
         [kit | {"sends": [{"to": "plate", "gain_db": -12}]}],
-        {"beat": beat},
         groups=[{"id": "drums", "effects": [squeeze(0.1)]}],
         returns=[plate],
     )
@@ -228,7 +240,7 @@ def test_a_synth_s_chords_are_hits_and_its_patch_s_limiter_is_under_its_track(tm
         "clips": [{"id": "c", "length_beats": 8, "notes": chord}],
         "effects": [{"type": "filter", "mode": "lowpass", "cutoff_hz": 8000}],
     }
-    folder = song(tmp_path, {}, [lead], {})
+    folder = song(tmp_path, {}, [lead])
     report = listen(folder, images=False)
     assert report["tracks"]["lead"]["hits"]["count"] == 4
     (device,) = report["effects"]["tracks"]["lead"]
@@ -240,13 +252,13 @@ def loud_in_the_second_half(directory, ceiling=-6.0, more=()):
     """A tone under the ceiling, and over it from beat 18 to 30."""
     quiet, loud = tone(220, 9, 0.25), tone(220, 6, 0.9)
     x = np.concatenate([quiet, loud, tone(220, 1, 0.25)])
-    track = {"id": "line", "pads": pads("line"), "clips": [{"pattern": "once"}], "effects": list(more)}
-    key = {"id": "kick", "pads": pads("kick"), "clips": [{"pattern": "four", "repeats": BEATS // 4}], "gain_db": -30}
+    once = {"id": "once", "length_beats": BEATS, "notes": [hit("line", 0)]}
+    track = {"id": "line", "type": "midi", "instrument": rack("line"), "clips": [once], "effects": list(more)}
+    key = kicks(gain_db=-30)
     return song(
         directory,
         {"line": x, "kick": kick()},
         [track, key],
-        {"once": {"length_beats": BEATS, "events": [{"at": 0, "pad": "line", "velocity": 127}]}} | FOUR,
         sections=HALVES,
         master={"effects": [{"type": "filter", "mode": "highpass", "cutoff_hz": 20}, {"type": "limiter", "id": "lim", "ceiling_db": ceiling}]},
     )

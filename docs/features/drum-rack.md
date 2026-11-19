@@ -1,8 +1,9 @@
-# The Drum Rack, and patterns gone
+# The Drum Rack, and patterns gone — implemented November 17–18, 2026
 
 Status: stage 1, the Drum Rack, implemented November 17, 2026 (D189), in [#187](https://github.com/wesleyLaurence/AAW/pull/187).
 Stage 2, patterns converted, implemented November 18, 2026 (D190), in [#188](https://github.com/wesleyLaurence/AAW/pull/188).
-Stage 3 is proposed, Next item 1.
+Stage 3, patterns removed, implemented November 18, 2026 (D191). Feature
+files written before it describe patterns as they were on their dates.
 
 ## What
 
@@ -179,12 +180,47 @@ at once from two overlapping pattern clips, or of a pitched pad at two
 pitches, in a choke group may choke in another order. None of the person's
 songs has any of these.
 
-### Stage 3: patterns removed
+### Stage 3: patterns removed (implemented November 18, 2026)
 
-Everything in stage 3 of D184's list, once stage 2 has converted every song
-that is opened: the model refuses `patterns`, track pads and pattern clips
-after converting them, the engine and the host lose their code, the app its
-pattern editor and its step grid, the CLI its verbs and topics.
+The song holds no patterns. The model has no `patterns`, no pads on a track
+and no pattern clips: a track is a MIDI track, `type: midi`, or an audio
+track, of audio clips and an input. A document that holds any is refused
+with the reason, that such a song is converted when it is read from its
+file; an audio track written with an empty `pads: {}` or `clips: []`, as
+every audio track was written until now, is read and written without them.
+Conversion reads what the model no longer holds from the song's text
+(`aaw_model::legacy`) and makes of it exactly what stage 2 made: the model's
+tests pin, for the songs stage 2 rendered both ways and found the same,
+what that conversion wrote, and the engine's tests render those converted
+songs against the MIDI songs the other tests play. A render's snapshot of a
+song of patterns no longer reads, and so such a render no longer verifies.
+
+The fingerprints keep the removed keys: `aaw_model::hash` puts an audio
+track's `pads: {}` back into the saved form, and its `clips: []` and the
+song's `patterns: {}` into the full dump, so a report written before
+verifies its song, and a frozen track's identity keeps them too, so a
+frozen file stays current.
+
+The engine schedules a hit as its pad, velocity and the note a pitched map
+entry plays; it has no pattern events. The host loses `pattern.add`,
+`pattern.steps`, `pattern.duplicate`, `event.add`, `event.set`,
+`event.remove` and `clip.repeats`; `clip.add` and `clip.move` take a note
+clip to a MIDI track only, and `pad.add`, `pad.set` and `pad.remove` edit a
+MIDI track's sampler, refusing an audio track. `track.add` makes a MIDI
+track unless `type: audio` asks for an audio track, which is written with no
+type, so `daw track add SONG ID` makes a MIDI track and `--type audio` an
+audio one. `daw inspect` lists an audio track's audio clips and no pattern
+clips or count of patterns, `daw map` no pattern clips, and the swing reply
+no `pattern`. `daw pattern`, `daw pattern event` and `daw clip repeats` are
+gone, the batch ops with them, and `daw describe` teaches only the Drum
+Rack: `project.patterns` says how an older song is converted, and the
+topics of steps and swing in a pattern are gone.
+
+The app has no pattern editor, step grid or pattern clips: a clip is a note
+clip on a MIDI track or an audio clip on an audio track, a double click on
+an empty part of an audio track adds nothing, and the FFI has no pattern
+views or edits. A MIDI track's voices draw its peaks; an audio track's
+clips draw their own file.
 
 ## Done when
 
@@ -196,7 +232,7 @@ pattern editor and its step grid, the CLI its verbs and topics.
 2. The kit the agent made on November 17, opened in the app, is a Drum Rack
    with its pads on their keys, playing as before.
 3. No `daw` command, describe topic, batch op or app view makes or shows a
-   pattern, and every song in `projects/` opens and renders as before.
+   pattern, and every song in `projects/` opens and plays as before.
 
 ## Open questions
 

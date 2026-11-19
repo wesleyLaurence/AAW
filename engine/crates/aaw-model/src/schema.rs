@@ -137,7 +137,7 @@ fn opt_str(s: &Option<String>) -> Option<Value> {
 // Helpers shared by field validators
 
 /// A beat field with the `beat()` after-validator.
-fn beat_field(ctx: &mut Ctx, x: &Value) -> Option<Beat> {
+pub(crate) fn beat_field(ctx: &mut Ctx, x: &Value) -> Option<Beat> {
     let b = v::beat(ctx, x)?;
     match exact_beat(&b) {
         Ok(_) => Some(b),
@@ -160,7 +160,7 @@ fn signed_beat_field(ctx: &mut Ctx, x: &Value) -> Option<Beat> {
     }
 }
 
-fn note_field(ctx: &mut Ctx, x: &Value) -> Option<String> {
+pub(crate) fn note_field(ctx: &mut Ctx, x: &Value) -> Option<String> {
     let s = v::string(ctx, x)?;
     match rules::midi(&s) {
         Ok(_) => Some(s),
@@ -183,7 +183,7 @@ fn opt_string(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
     v::optional(ctx, x, v::string)
 }
 
-fn exact(b: &Beat) -> BigRational {
+pub(crate) fn exact(b: &Beat) -> BigRational {
     exact_beat(b).expect("validated beat")
 }
 
@@ -331,7 +331,7 @@ impl Pad {
         "solo",
     ];
 
-    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Pad> {
+    pub(crate) fn validate(ctx: &mut Ctx, x: &Value) -> Option<Pad> {
         let f = Fields::of(ctx, x, "Pad", Self::FIELDS)?;
         let before = ctx.count();
         let sample = f.req(ctx, "sample", v::string);
@@ -421,246 +421,12 @@ impl Pad {
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct Event {
-    pub at: Beat,
-    pub pad: String,
-    pub velocity: i64,
-    pub note: Option<String>,
-    pub duration: Option<Beat>,
-    pub transpose: f64,
-}
-
-impl Event {
-    const FIELDS: &'static [&'static str] = &["at", "pad", "velocity", "note", "duration", "transpose"];
-
-    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Event> {
-        let f = Fields::of(ctx, x, "Event", Self::FIELDS)?;
-        let before = ctx.count();
-        let at = f.req(ctx, "at", beat_field);
-        let pad = f.req(ctx, "pad", v::string);
-        let velocity = f.opt(ctx, "velocity", 100, |c, x| v::int(c, x, Bounds::ge_le("1", "127")));
-        let note = f.opt(ctx, "note", None, |c, x| v::optional(c, x, note_field));
-        let duration = f.opt(ctx, "duration", None, |c, x| v::optional(c, x, beat_field));
-        let transpose = f.opt(ctx, "transpose", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-36", "36")));
-        f.finish(ctx);
-        if ctx.count() > before {
-            return None;
-        }
-        Some(Event {
-            at: at?,
-            pad: pad?,
-            velocity: velocity?,
-            note: note?,
-            duration: duration?,
-            transpose: transpose?,
-        })
-    }
-
-    pub fn dump(&self, saved: bool) -> Value {
-        let mut o = Out::new(saved);
-        o.req("at", self.at.to_value());
-        o.req("pad", Value::str(&self.pad));
-        o.int("velocity", self.velocity, 100);
-        o.opt("note", opt_str(&self.note));
-        o.opt("duration", self.duration.as_ref().map(Beat::to_value));
-        o.float("transpose", self.transpose, 0.0);
-        o.done()
-    }
-
-    pub fn at_exact(&self) -> BigRational {
-        exact(&self.at)
-    }
-
-    pub fn duration_exact(&self) -> Option<BigRational> {
-        self.duration.as_ref().map(exact)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Pattern {
-    pub length_beats: Beat,
-    pub grid: Beat,
-    pub steps: IndexMap<String, String>,
-    pub events: Vec<Event>,
-    pub swing: f64,
-}
-
-/// Step cells: whitespace and bar lines removed, as `"".join(row.split())`.
-pub fn step_cells(row: &str) -> Vec<char> {
-    row.chars()
-        .filter(|c| !crate::pyfmt::is_py_space(*c) && *c != '|')
-        .collect()
-}
-
-/// Velocity for a step digit: `round(int(c) * 127 / 9)`.
-const STEP_VELOCITY: [i64; 10] = [0, 14, 28, 42, 56, 71, 85, 99, 113, 127];
-
-impl Pattern {
-    const FIELDS: &'static [&'static str] = &["length_beats", "grid", "steps", "events", "swing"];
-
-    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Pattern> {
-        let f = Fields::of(ctx, x, "Pattern", Self::FIELDS)?;
-        let before = ctx.count();
-        let length_beats = f.req(ctx, "length_beats", v::beat);
-        let grid = f.opt(ctx, "grid", Beat::Str("1/4".into()), v::beat);
-        let steps = f.opt(ctx, "steps", IndexMap::new(), |c, x| v::str_dict(c, x, v::string));
-        let events = f.opt(ctx, "events", Vec::new(), |c, x| v::list(c, x, 0, None, Event::validate));
-        let swing = f.opt(ctx, "swing", 0.5, |c, x| v::float(c, x, Bounds::ge_le("0.5", "0.75")));
-        f.finish(ctx);
-        if ctx.count() > before {
-            return None;
-        }
-        let p = Pattern {
-            length_beats: length_beats?,
-            grid: grid?,
-            steps: steps?,
-            events: events?,
-            swing: swing?,
-        };
-        if let Err(msg) = p.timing_valid() {
-            ctx.value_error(msg);
-            return None;
-        }
-        Some(p)
-    }
-
-    fn timing_valid(&self) -> Result<(), String> {
-        let length = exact_beat(&self.length_beats)?;
-        let grid = exact_beat(&self.grid)?;
-        if !length.is_positive() || !grid.is_positive() {
-            return Err("Pattern length and grid must be positive".into());
-        }
-        for (pad, row) in &self.steps {
-            let cells = step_cells(row);
-            if cells.iter().any(|c| !".x123456789".contains(*c)) {
-                return Err(format!("Invalid step character in {pad}"));
-            }
-            if BigRational::from_integer(cells.len().into()) * &grid != length {
-                return Err(format!("Step row {pad} must span length_beats exactly"));
-            }
-        }
-        if self.events.iter().any(|e| e.at_exact() >= length) {
-            return Err("Pattern event starts outside pattern".into());
-        }
-        Ok(())
-    }
-
-    pub fn length_exact(&self) -> BigRational {
-        exact(&self.length_beats)
-    }
-
-    pub fn grid_exact(&self) -> BigRational {
-        exact(&self.grid)
-    }
-
-    /// Explicit events, then step-row events in row order, as `Pattern.expanded`.
-    pub fn expanded(&self) -> Vec<Event> {
-        let mut result = self.events.clone();
-        let grid = self.grid_exact();
-        let swing = crate::beat::float_fraction(2.0 * self.swing - 1.0);
-        for (pad, row) in &self.steps {
-            for (i, c) in step_cells(row).into_iter().enumerate() {
-                if c == '.' {
-                    continue;
-                }
-                let mut at = BigRational::from_integer(i.into()) * &grid;
-                if i % 2 == 1 {
-                    at += &grid * &swing;
-                }
-                let velocity = if c == 'x' {
-                    100
-                } else {
-                    STEP_VELOCITY[c.to_digit(10).expect("step digit") as usize]
-                };
-                result.push(Event {
-                    at: Beat::Str(fraction_str(&at)),
-                    pad: pad.clone(),
-                    velocity,
-                    note: None,
-                    duration: None,
-                    transpose: 0.0,
-                });
-            }
-        }
-        result
-    }
-
-    pub fn dump(&self, saved: bool) -> Value {
-        let mut o = Out::new(saved);
-        o.req("length_beats", self.length_beats.to_value());
-        o.beat("grid", &self.grid, &Beat::Str("1/4".into()));
-        o.coll(
-            "steps",
-            Value::Dict(
-                self.steps
-                    .iter()
-                    .map(|(k, r)| (Key::str(k), Value::str(r)))
-                    .collect(),
-            ),
-        );
-        o.coll("events", list(&self.events, saved, Event::dump));
-        o.float("swing", self.swing, 0.5);
-        o.done()
-    }
-}
-
 /// Python `str(Fraction)`.
 pub fn fraction_str(x: &BigRational) -> String {
     if x.denom() == &1.into() {
         x.numer().to_string()
     } else {
         format!("{}/{}", x.numer(), x.denom())
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct Clip {
-    pub pattern: String,
-    pub at: Beat,
-    pub repeats: i64,
-    pub velocity_scale: f64,
-    /// False when the clip is deactivated: it stays where it is and plays
-    /// nothing, as a deactivated clip in Ableton.
-    pub active: bool,
-}
-
-impl Clip {
-    const FIELDS: &'static [&'static str] = &["pattern", "at", "repeats", "velocity_scale", "active"];
-
-    fn validate(ctx: &mut Ctx, x: &Value) -> Option<Clip> {
-        let f = Fields::of(ctx, x, "Clip", Self::FIELDS)?;
-        let before = ctx.count();
-        let pattern = f.req(ctx, "pattern", v::string);
-        let at = f.opt(ctx, "at", Beat::int(0), beat_field);
-        let repeats = f.opt(ctx, "repeats", 1, |c, x| v::int(c, x, Bounds::ge_le("1", "10000")));
-        let velocity_scale = f.opt(ctx, "velocity_scale", 1.0, |c, x| v::float(c, x, Bounds::gt_le("0", "2")));
-        let active = f.opt(ctx, "active", true, v::boolean);
-        f.finish(ctx);
-        if ctx.count() > before {
-            return None;
-        }
-        Some(Clip {
-            pattern: pattern?,
-            at: at?,
-            repeats: repeats?,
-            velocity_scale: velocity_scale?,
-            active: active?,
-        })
-    }
-
-    pub fn at_exact(&self) -> BigRational {
-        exact(&self.at)
-    }
-
-    pub fn dump(&self, saved: bool) -> Value {
-        let mut o = Out::new(saved);
-        o.req("pattern", Value::str(&self.pattern));
-        o.beat("at", &self.at, &Beat::int(0));
-        o.int("repeats", self.repeats, 1);
-        o.float("velocity_scale", self.velocity_scale, 1.0);
-        o.bool("active", self.active, true);
-        o.done()
     }
 }
 
@@ -3818,15 +3584,14 @@ pub struct Track {
     pub pan: f64,
     pub mute: bool,
     pub solo: bool,
-    pub pads: IndexMap<String, Pad>,
-    pub clips: Vec<Clip>,
+    /// An audio track's audio clips; a MIDI track has none.
     pub audio: Vec<AudioClip>,
     pub effects: Vec<Effect>,
     pub sends: Vec<Send>,
     pub automation: Vec<Lane>,
-    /// A MIDI track's instrument and note clips. Such a track has no pads,
-    /// pattern clips or audio clips of its own; it is written with
-    /// `type: midi` and its note clips under `clips`.
+    /// A MIDI track's instrument and note clips. Such a track has no audio
+    /// clips of its own; it is written with `type: midi` and its note clips
+    /// under `clips`. A track without it is an audio track.
     pub midi: Option<Midi>,
     /// The group the track's output goes into instead of the master sum,
     /// one of `groups[]`; None for a track that goes to the master.
@@ -3839,6 +3604,25 @@ pub struct Track {
 }
 
 static NO_PADS: LazyLock<IndexMap<String, Pad>> = LazyLock::new(IndexMap::new);
+
+/// What a key that songs before note clips had must hold now: nothing. An
+/// audio track was written with `pads: {}` until patterns were removed
+/// (D191), so an empty one is read and not written again.
+fn gone(ctx: &mut Ctx, x: &Value, what: &str) -> Option<()> {
+    let empty = match x {
+        Value::Dict(d) => d.is_empty(),
+        Value::List(l) => l.is_empty(),
+        Value::None => true,
+        _ => false,
+    };
+    if empty {
+        return Some(());
+    }
+    ctx.value_error(format!(
+        "{what} are how songs before note clips played drums, and are gone: a kit is a Drum Rack on a MIDI track played by note clips (daw describe sampler.drum_rack). A song that holds them is converted when it is read from its file."
+    ));
+    None
+}
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
@@ -3870,7 +3654,7 @@ impl Track {
         let group = f.opt(ctx, "group", None, opt_id);
         let input = if midi { Some(None) } else { f.opt(ctx, "input", None, |c, x| v::optional(c, x, Input::validate)) };
         let frozen = f.opt(ctx, "frozen", None, |c, x| v::optional(c, x, Frozen::validate));
-        let (pads, clips, audio, notes) = if midi {
+        let (audio, notes) = if midi {
             let instrument = f.opt(ctx, "instrument", None, |c, x| v::optional(c, x, Instrument::validate));
             let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, NoteClip::validate));
             let midi_effects = f.opt(ctx, "midi_effects", Vec::new(), |c, x| {
@@ -3886,12 +3670,12 @@ impl Track {
                 (Some(instrument), Some(clips), Some(midi_effects)) => Some(Some(Midi { instrument, clips, midi_effects, made: Default::default() })),
                 _ => None,
             };
-            (Some(IndexMap::new()), Some(Vec::new()), Some(Vec::new()), notes)
+            (Some(Vec::new()), notes)
         } else {
-            let pads = f.req(ctx, "pads", |c, x| v::str_dict(c, x, Pad::validate));
-            let clips = f.opt(ctx, "clips", Vec::new(), |c, x| v::list(c, x, 0, None, Clip::validate));
+            f.opt(ctx, "pads", (), |c, x| gone(c, x, "Pads on a track"));
+            f.opt(ctx, "clips", (), |c, x| gone(c, x, "Pattern clips"));
             let audio = f.opt(ctx, "audio", Vec::new(), |c, x| v::list(c, x, 0, None, AudioClip::validate));
-            (pads, clips, audio, Some(None))
+            (audio, Some(None))
         };
         let effects = effects_field(ctx, &f);
         let sends = f.opt(ctx, "sends", Vec::new(), |c, x| v::list(c, x, 0, Some(16), Send::validate));
@@ -3906,8 +3690,6 @@ impl Track {
             pan: pan?,
             mute: mute?,
             solo: solo?,
-            pads: pads?,
-            clips: clips?,
             audio: audio?,
             effects: effects?,
             sends: sends?,
@@ -3923,12 +3705,9 @@ impl Track {
         self.effects.iter().filter_map(Effect::sidechain).collect()
     }
 
-    /// The pads its sounds come from: a MIDI track's sampler's, or its own.
+    /// The pads its sounds come from: a MIDI track's sampler's, or none.
     pub fn sound_pads(&self) -> &IndexMap<String, Pad> {
-        match &self.midi {
-            Some(m) => m.sampler().map_or(&NO_PADS, |s| &s.pads),
-            None => &self.pads,
-        }
+        self.midi.as_ref().and_then(Midi::sampler).map_or(&NO_PADS, |s| &s.pads)
     }
 
     pub fn dump(&self, saved: bool) -> Value {
@@ -3952,11 +3731,7 @@ impl Track {
                 o.coll("midi_effects", list(&m.midi_effects, saved, MidiEffect::dump));
                 o.coll("clips", list(&m.clips, saved, NoteClip::dump));
             }
-            None => {
-                o.req("pads", str_map(&self.pads, saved, Pad::dump));
-                o.coll("clips", list(&self.clips, saved, Clip::dump));
-                o.coll("audio", list(&self.audio, saved, AudioClip::dump));
-            }
+            None => o.coll("audio", list(&self.audio, saved, AudioClip::dump)),
         }
         o.coll("effects", list(&self.effects, saved, Effect::dump));
         o.coll("sends", list(&self.sends, saved, Send::dump));
@@ -4333,7 +4108,6 @@ impl Session {
 pub struct Project {
     pub session: Session,
     pub samples: IndexMap<String, Sample>,
-    pub patterns: IndexMap<String, Pattern>,
     pub tracks: Vec<Track>,
     pub groups: Vec<Group>,
     pub returns: Vec<Return>,
@@ -4371,7 +4145,7 @@ impl Project {
         let schema = f.opt(ctx, "schema_version", 1, |c, x| v::literal_int(c, x, &[1, 2]));
         let session = f.req(ctx, "session", Session::validate);
         let samples = f.opt(ctx, "samples", IndexMap::new(), |c, x| v::str_dict(c, x, Sample::validate));
-        let patterns = f.opt(ctx, "patterns", IndexMap::new(), |c, x| v::str_dict(c, x, Pattern::validate));
+        f.opt(ctx, "patterns", (), |c, x| gone(c, x, "Patterns"));
         let tracks = f.opt(ctx, "tracks", Vec::new(), |c, x| v::list(c, x, 0, None, Track::validate));
         let groups = f.opt(ctx, "groups", Vec::new(), |c, x| v::list(c, x, 0, None, Group::validate));
         let returns = f.opt(ctx, "returns", Vec::new(), |c, x| v::list(c, x, 0, None, Return::validate));
@@ -4401,7 +4175,6 @@ impl Project {
         Some(Project {
             session: session?,
             samples: samples?,
-            patterns: patterns?,
             tracks,
             groups: groups?,
             returns: returns?,
@@ -4428,7 +4201,6 @@ impl Project {
         o.int("schema_version", self.schema_version(), 1);
         o.req("session", self.session.dump(saved));
         o.coll("samples", str_map(&self.samples, saved, Sample::dump));
-        o.coll("patterns", str_map(&self.patterns, saved, Pattern::dump));
         o.coll("tracks", list(&self.tracks, saved, Track::dump));
         o.coll("groups", list(&self.groups, saved, Group::dump));
         o.coll("returns", list(&self.returns, saved, Return::dump));
@@ -4446,10 +4218,9 @@ impl Project {
         self.tracks.iter().find(|t| t.id == id)
     }
 
-    /// What a track's frozen file was rendered from, as a value: its pads,
-    /// clips and audio clips or its instrument and note clips, its effects,
-    /// the lanes on them, the patterns its clips play and the samples they
-    /// name. The fader, pan, mute, solo, sends and their lanes are not in
+    /// What a track's frozen file was rendered from, as a value: its audio
+    /// clips or its instrument and note clips, its effects, the lanes on
+    /// them and the samples they name. The fader, pan, mute, solo, sends and their lanes are not in
     /// it: they stay live while the track is frozen. What keys its
     /// sidechains from other tracks is not in it either.
     pub fn frozen_content(&self, track: &Track) -> Value {
@@ -4462,8 +4233,11 @@ impl Project {
                 d.insert(Key::str("clips"), Value::List(m.clips.iter().map(|c| c.dump(false)).collect()));
             }
             None => {
-                d.insert(Key::str("pads"), Value::Dict(track.pads.iter().map(|(k, p)| (Key::str(k), p.dump(false))).collect()));
-                d.insert(Key::str("clips"), Value::List(track.clips.iter().map(|c| c.dump(false)).collect()));
+                // An audio track's pads and pattern clips, empty, as frozen
+                // files were made before patterns were removed, so that
+                // they stay current.
+                d.insert(Key::str("pads"), Value::Dict(Dict::new()));
+                d.insert(Key::str("clips"), Value::List(Vec::new()));
                 d.insert(Key::str("audio"), Value::List(track.audio.iter().map(|c| c.dump(false)).collect()));
             }
         }
@@ -4472,13 +4246,7 @@ impl Project {
             Key::str("automation"),
             Value::List(track.automation.iter().filter(|l| !mixer(l)).map(|l| l.dump(false)).collect()),
         );
-        let mut patterns = Dict::new();
-        for c in &track.clips {
-            if let Some(p) = self.patterns.get(&c.pattern) {
-                patterns.entry(Key::str(&c.pattern)).or_insert_with(|| p.dump(false));
-            }
-        }
-        d.insert(Key::str("patterns"), Value::Dict(patterns));
+        d.insert(Key::str("patterns"), Value::Dict(Dict::new()));
         let mut samples = Dict::new();
         for name in track.sound_pads().values().map(|p| &p.sample).chain(track.audio.iter().map(|c| &c.sample)) {
             if let Some(s) = self.samples.get(name) {
@@ -4656,7 +4424,6 @@ impl Default for Project {
                 stretcher: Stretcher::Signalsmith,
             },
             samples: IndexMap::new(),
-            patterns: IndexMap::new(),
             tracks: Vec::new(),
             groups: Vec::new(),
             returns: Vec::new(),

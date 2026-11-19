@@ -1,0 +1,85 @@
+schema_version: 2
+session:
+  tempo: 100.0
+  length_beats: 32
+  end_fade_ms: 0.0
+samples:
+  hit:
+    path: hit.wav
+  tone:
+    path: tone.wav
+    root_note: A3
+tracks:
+- {id: drums, type: midi, gain_db: -2.0, instrument: {sampler: {drum_rack: true, pads: {kick: {sample: hit, gain_db: -1.0},
+        snare: {sample: hit, pan: 0.2, transpose: 7.0}, hat: {sample: hit, transpose: 12.0, release_ms: 4.0, choke_group: hats},
+        ohat: {sample: hit, transpose: 10.0, choke_group: hats}, spare: {sample: tone}, kick-2: {sample: hit, gain_db: -1.0,
+          transpose: -2.0}, kick+0.5: {sample: hit, gain_db: -1.0, transpose: 0.5}}, map: [{notes: 36, pad: kick},
+        {notes: 37, pad: spare}, {notes: 38, pad: snare}, {notes: 39, pad: kick-2}, {notes: 40, pad: kick+0.5},
+        {notes: 42, pad: hat}, {notes: 46, pad: ohat}]}}, clips: [{id: beat, length_beats: 12, loop_beats: 4, notes: [
+        {id: n1, pitch: 36, duration: 1/4, velocity: 50}, {id: n2, pitch: 42, duration: 1/4, velocity: 50}, {id: n3,
+          pitch: 42, at: 31/100, duration: 1/4, velocity: 64}, {id: n4, pitch: 42, at: 1/2, duration: 1/4, velocity: 50},
+        {id: n5, pitch: 46, at: 1/2, duration: 1/4, velocity: 50}, {id: n6, pitch: 42, at: 81/100, duration: 1/4,
+          velocity: 64}, {id: n7, pitch: 39, at: 1, duration: 1/4, velocity: 45}, {id: n8, pitch: 42, at: 1, duration: 1/4,
+          velocity: 50}, {id: n9, pitch: 42, at: 131/100, duration: 1/4, velocity: 64}, {id: n10, pitch: 42, at: 3/2,
+          duration: 1/4, velocity: 50}, {id: n11, pitch: 46, at: 1.5, duration: 1/8, velocity: 60}, {id: n12, pitch: 46,
+          at: 1.5, duration: 1/8, velocity: 15}, {id: n13, pitch: 46, at: 3/2, duration: 1/4, velocity: 50}, {id: n14,
+          pitch: 42, at: 181/100, duration: 1/4, velocity: 64}, {id: n15, pitch: 36, at: 2, duration: 1/4, velocity: 50},
+        {id: n16, pitch: 38, at: 2, duration: 1/4, velocity: 50}, {id: n17, pitch: 42, at: 2, duration: 1/4, velocity: 50},
+        {id: n18, pitch: 42, at: 231/100, duration: 1/4, velocity: 64}, {id: n19, pitch: 36, at: 5/2, duration: 1/4,
+          velocity: 36}, {id: n20, pitch: 42, at: 5/2, duration: 1/4, velocity: 50}, {id: n21, pitch: 46, at: 5/2,
+          duration: 1/4, velocity: 50}, {id: n22, pitch: 42, at: 281/100, duration: 1/4, velocity: 64}, {id: n23,
+          pitch: 40, at: 3, duration: 1/4, velocity: 50}, {id: n24, pitch: 42, at: 3, duration: 1/4, velocity: 50},
+        {id: n25, pitch: 42, at: 331/100, duration: 1/4, velocity: 64}, {id: n26, pitch: 42, at: 7/2, duration: 1/4,
+          velocity: 50}, {id: n27, pitch: 46, at: 7/2, duration: 1/4, velocity: 50}, {id: n28, pitch: 42, at: 381/100,
+          duration: 19/100, velocity: 64}]}, {id: beat-2, at: 12, length_beats: 4, notes: [{id: n1, pitch: 36, duration: 1/4},
+        {id: n2, pitch: 42, duration: 1/4}, {id: n3, pitch: 42, at: 31/100, duration: 1/4, velocity: 127}, {id: n4,
+          pitch: 42, at: 1/2, duration: 1/4}, {id: n5, pitch: 46, at: 1/2, duration: 1/4}, {id: n6, pitch: 42, at: 81/100,
+          duration: 1/4, velocity: 127}, {id: n7, pitch: 39, at: 1, duration: 1/4, velocity: 90}, {id: n8, pitch: 42,
+          at: 1, duration: 1/4}, {id: n9, pitch: 42, at: 131/100, duration: 1/4, velocity: 127}, {id: n10, pitch: 42,
+          at: 3/2, duration: 1/4}, {id: n11, pitch: 46, at: 1.5, duration: 1/8, velocity: 120}, {id: n12, pitch: 46,
+          at: 1.5, duration: 1/8, velocity: 30}, {id: n13, pitch: 46, at: 3/2, duration: 1/4}, {id: n14, pitch: 42,
+          at: 181/100, duration: 1/4, velocity: 127}, {id: n15, pitch: 36, at: 2, duration: 1/4}, {id: n16, pitch: 38,
+          at: 2, duration: 1/4}, {id: n17, pitch: 42, at: 2, duration: 1/4}, {id: n18, pitch: 42, at: 231/100, duration: 1/4,
+          velocity: 127}, {id: n19, pitch: 36, at: 5/2, duration: 1/4, velocity: 71}, {id: n20, pitch: 42, at: 5/2,
+          duration: 1/4}, {id: n21, pitch: 46, at: 5/2, duration: 1/4}, {id: n22, pitch: 42, at: 281/100, duration: 1/4,
+          velocity: 127}, {id: n23, pitch: 40, at: 3, duration: 1/4}, {id: n24, pitch: 42, at: 3, duration: 1/4},
+        {id: n25, pitch: 42, at: 331/100, duration: 1/4, velocity: 127}, {id: n26, pitch: 42, at: 7/2, duration: 1/4},
+        {id: n27, pitch: 46, at: 7/2, duration: 1/4}, {id: n28, pitch: 42, at: 381/100, duration: 19/100, velocity: 127}],
+      active: false}, {id: beat-3, at: 16, length_beats: 8, loop_beats: 4, notes: [{id: n1, pitch: 36, duration: 1/4},
+        {id: n2, pitch: 42, duration: 1/4}, {id: n3, pitch: 42, at: 31/100, duration: 1/4, velocity: 127}, {id: n4,
+          pitch: 42, at: 1/2, duration: 1/4}, {id: n5, pitch: 46, at: 1/2, duration: 1/4}, {id: n6, pitch: 42, at: 81/100,
+          duration: 1/4, velocity: 127}, {id: n7, pitch: 39, at: 1, duration: 1/4, velocity: 90}, {id: n8, pitch: 42,
+          at: 1, duration: 1/4}, {id: n9, pitch: 42, at: 131/100, duration: 1/4, velocity: 127}, {id: n10, pitch: 42,
+          at: 3/2, duration: 1/4}, {id: n11, pitch: 46, at: 1.5, duration: 1/8, velocity: 120}, {id: n12, pitch: 46,
+          at: 1.5, duration: 1/8, velocity: 30}, {id: n13, pitch: 46, at: 3/2, duration: 1/4}, {id: n14, pitch: 42,
+          at: 181/100, duration: 1/4, velocity: 127}, {id: n15, pitch: 36, at: 2, duration: 1/4}, {id: n16, pitch: 38,
+          at: 2, duration: 1/4}, {id: n17, pitch: 42, at: 2, duration: 1/4}, {id: n18, pitch: 42, at: 231/100, duration: 1/4,
+          velocity: 127}, {id: n19, pitch: 36, at: 5/2, duration: 1/4, velocity: 71}, {id: n20, pitch: 42, at: 5/2,
+          duration: 1/4}, {id: n21, pitch: 46, at: 5/2, duration: 1/4}, {id: n22, pitch: 42, at: 281/100, duration: 1/4,
+          velocity: 127}, {id: n23, pitch: 40, at: 3, duration: 1/4}, {id: n24, pitch: 42, at: 3, duration: 1/4},
+        {id: n25, pitch: 42, at: 331/100, duration: 1/4, velocity: 127}, {id: n26, pitch: 42, at: 7/2, duration: 1/4},
+        {id: n27, pitch: 46, at: 7/2, duration: 1/4}, {id: n28, pitch: 42, at: 381/100, duration: 19/100, velocity: 127}]}],
+  effects: [{type: eq, bands: [{shape: bell, freq_hz: 400.0, gain_db: -3.0}]}]}
+- id: drums-audio
+  gain_db: -2.0
+  pads: {}
+  audio:
+  - sample: tone
+    at: 24
+  effects:
+  - {type: eq, bands: [{shape: bell, freq_hz: 400.0, gain_db: -3.0}]}
+- {id: bass, type: midi, instrument: {sampler: {drum_rack: true, pads: {bass: {sample: tone, mode: gate, transpose: -1.0,
+          release_ms: 20.0}, bass+0.25: {sample: tone, mode: gate, transpose: -0.75, release_ms: 20.0}}, map: [
+        {notes: 36, pad: bass}, {notes: [43, 48], pad: bass, pitched: true}, {notes: 52, pad: bass+0.25, pitched: true}]}},
+  clips: [{id: line, at: 2, length_beats: 11, notes: [{id: n1, pitch: 48, duration: 1}, {id: n2, pitch: 52, at: 0.5,
+          duration: 1}, {id: n3, pitch: 36, at: 1, duration: 1/4, velocity: 50}, {id: n4, pitch: 43, at: 1.5, duration: 1.5},
+        {id: n5, pitch: 48, at: 2, duration: 1}, {id: n6, pitch: 52, at: 5/2, duration: 1}, {id: n7, pitch: 36,
+          at: 3, duration: 1/4, velocity: 50}, {id: n8, pitch: 43, at: 7/2, duration: 1.5}, {id: n9, pitch: 48,
+          at: 4, duration: 1}, {id: n10, pitch: 52, at: 9/2, duration: 1}, {id: n11, pitch: 36, at: 5, duration: 1/4,
+          velocity: 50}, {id: n12, pitch: 43, at: 11/2, duration: 1.5}, {id: n13, pitch: 48, at: 6, duration: 1},
+        {id: n14, pitch: 52, at: 13/2, duration: 1}, {id: n15, pitch: 36, at: 7, duration: 1/4, velocity: 50}, {
+          id: n16, pitch: 43, at: 15/2, duration: 1.5}, {id: n17, pitch: 48, at: 8, duration: 1}, {id: n18, pitch: 52,
+          at: 17/2, duration: 1}, {id: n19, pitch: 36, at: 9, duration: 1/4, velocity: 50}, {id: n20, pitch: 43,
+          at: 19/2, duration: 1.5}]}, {id: line-2, at: 20, length_beats: 3, notes: [{id: n1, pitch: 48, duration: 1},
+        {id: n2, pitch: 52, at: 0.5, duration: 1}, {id: n3, pitch: 36, at: 1, duration: 1/4, velocity: 50}, {id: n4,
+          pitch: 43, at: 1.5, duration: 1.5}]}]}

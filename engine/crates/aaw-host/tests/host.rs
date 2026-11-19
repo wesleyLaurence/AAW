@@ -102,7 +102,7 @@ impl Drop for Running {
 #[test]
 fn a_note_preview_is_refused_before_the_output_opens_and_is_no_edit() {
     let h = Running::start();
-    h.send(json!({"op": "track.add", "id": "vox"})).unwrap();
+    h.send(json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     h.send(json!({"op": "synth.add", "track": "lead"})).unwrap();
     // The note is checked, and the track, before any audio device is touched.
     let e = h.send(json!({"op": "note.preview", "track": "vox", "pitch": "C3"})).unwrap_err();

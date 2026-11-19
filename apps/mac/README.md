@@ -2,11 +2,11 @@
 
 The native macOS app of [docs/archive/Rust-Swift-Update.md](../../docs/archive/Rust-Swift-Update.md),
 through its last milestone, M9, and what was built since: it opens on a blank
-project or on one it is given, shows its arrangement with what
-each clip plays as a waveform, plays it with its effects and automation, shows
-each change as it lands, whoever makes it, and lets the person edit the mixer,
-the clips, the tracks and returns, each row's effects and its automation lanes,
-and each pattern's steps and events. An audio file dropped on the timeline is an
+project or on one it is given, shows its arrangement with each audio clip's
+waveform and each note clip's notes, plays it with its effects and automation,
+shows each change as it lands, whoever makes it, and lets the person edit the
+mixer, the clips, the tracks and returns, each row's effects and its automation
+lanes. An audio file dropped on the timeline is an
 audio clip, which is moved, trimmed, faded and split there. A key leaves a
 marker where the song is playing, for the agent to read. A MIDI track's note
 clips are made, moved, trimmed and copied, and their notes drawn and edited in a
@@ -188,12 +188,11 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Transport bar | Stop, a square that stops and goes to the beginning, play, a triangle that is green while playing and stops as Space does, Record, red while a take runs and dim while no track is armed, loop, a metronome toggle, the position as bar.beat.sixteenth with the beat the time signature counts, tempo, the time signature, the timeline's grid as a note value with its menu, "Exporting NAME…" while File › Export Audio… writes a file, and "Agent editing" while an agent's changes land |
 | Ruler | Five strips: the loop brace, the sections, the person's markers, each a yellow flag at its beat with what it says in it as far as the next marker leaves room, the bar numbers, with the start position as an orange flag, and the time from the song's start as a clock, `0:00`, `1:15`, `1:00:00` past an hour, at the session tempo, its labels and ticks following the zoom as the bar numbers do, minutes zoomed out and tenths of a second zoomed in ([time-ruler.md](../../docs/features/time-ruler.md)). A marker has a faint line down the lanes under it |
 | Headers | Each track's name, effect chain, record arm (a dot, red while armed, faint on a track that cannot be armed yet: an audio track with no input, a MIDI track with no instrument), mute, solo, volume and pan, and under a track unfolded with the mark by its name, its send to each return; a group as a row of the same kind above its tracks, which sit in from the edge under it, with a mark before its name that folds them away and shows them again; a group in a group set in once more, with everything under it; then the returns and the master |
-| Lanes | Pattern clips as blocks named by their pattern, divided at each repeat, each with the waveform of what it plays; audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track, or of a track in a muted group, are gray, and selected clips are outlined. A group's lane shows its tracks' clips small, a strip a track, folded or not |
+| Lanes | Audio clips as blocks named by their sample, with the file's waveform, their fades and the beats of the file's beat map; a MIDI track's note clips as blocks named by their ID, with each note a bar from the lowest pitch to the highest; a looped note clip or audio clip with ↻ after its name, a mark at each wrap and its notes or its waveform drawn again from each. Clips of a muted track, or of a track in a muted group, are gray, and selected clips are outlined. A group's lane shows its tracks' clips small, a strip a track, folded or not |
 | Automation | Under every row while A has shown them: a lane for each automated parameter, with its name and range in the header and its points on the timeline joined as the song plays them, a shaped segment as its curve |
-| Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Pattern for a pattern clip, Audio Clip for an audio clip, Notes for a note clip |
-| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, a fold mark in its title that turns it into a strip with its name along it and a click on the strip opening it out; a rack as a frame around its effects' panels, with strips between them, under a title bar with its name, bypass, a mark that folds them all, Save…, Unrack, the moves and ×, an effect of the chain dragged onto a rack's strip moving into it and one of the rack onto the chain's strip leaving it, Make Rack and Unrack in the effects' menus; and for a track its pads; an equalizer as one curve of its bands over the spectrum of what it puts out while the song plays, a numbered point for each band, and under the curve the selected band's fields; an analyzer as a strip with the two channels' levels, the momentary loudness and the spectrum of what passes through it, and Open Window under them. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a header naming its patch, a column for its own fields and an octave of keys, one for each oscillator with its wave or its table's cycle drawn, the filter with its response, each envelope drawn with its handles, each LFO with its shape, the macros, the matrix's entries with their amounts, a line under each control an entry moves, and one for each of the patch's own effects; the Drum Rack, a sampler flagged `drum_rack` or of several pads, as Ableton's: an overview of the 128 keys whose frame a click or a drag moves, a grid of 4 × 4 pads from the frame's first key at the bottom left, each with its pad's name or its key's, M, ▶ and S, a sample dropped on it played by its key and Remove in its menu, a list of the pads with each one's key, name, ▶, level, pan, M and S, and the selected pad's sample as the Sampler shows it, with its choke group, mono, source tempo and stretch beside; or No instrument |
+| Detail panel | Under the arrangement, one of two editors, which the two marks at its top left change between. A row's header shows Devices and a clip shows the clip: Audio Clip for an audio clip, Notes for a note clip |
+| Devices | The effect chain of the row last selected: a panel for each effect with a control for each of its fields, a fold mark in its title that turns it into a strip with its name along it and a click on the strip opening it out; a rack as a frame around its effects' panels, with strips between them, under a title bar with its name, bypass, a mark that folds them all, Save…, Unrack, the moves and ×, an effect of the chain dragged onto a rack's strip moving into it and one of the rack onto the chain's strip leaving it, Make Rack and Unrack in the effects' menus; an equalizer as one curve of its bands over the spectrum of what it puts out while the song plays, a numbered point for each band, and under the curve the selected band's fields; an analyzer as a strip with the two channels' levels, the momentary loudness and the spectrum of what passes through it, and Open Window under them. A MIDI track's chain starts with its instrument: the Sampler, with its sample's waveform, the part of it the keys play, its root note and the pad's fields; the Synth, with a header naming its patch, a column for its own fields and an octave of keys, one for each oscillator with its wave or its table's cycle drawn, the filter with its response, each envelope drawn with its handles, each LFO with its shape, the macros, the matrix's entries with their amounts, a line under each control an entry moves, and one for each of the patch's own effects; the Drum Rack, a sampler flagged `drum_rack` or of several pads, as Ableton's: an overview of the 128 keys whose frame a click or a drag moves, a grid of 4 × 4 pads from the frame's first key at the bottom left, each with its pad's name or its key's, M, ▶ and S, a sample dropped on it played by its key and Remove in its menu, a list of the pads with each one's key, name, ▶, level, pan, M and S, and the selected pad's sample as the Sampler shows it, with its choke group, mono, source tempo and stretch beside; or No instrument |
 | Audio Clip | The audio clip last selected: its gain, fades, fade curve, the file's tempo and how it is stretched, and in words the part of the file it plays and the file's beat map |
-| Pattern | The pattern of the clip last selected, with a row for each pad of the clip's track: steps as cells, events as bars, by note for a pad whose sample has a root note. Beside it the pattern's length, step and swing, and the selected event's velocity, beat, length and note, or the velocity of several. While the clip plays, a line shows where |
 | Notes | The piano roll of the note clip last selected: a row for every MIDI note, 127 at the top, with each C named and a drum pad's note by its pad, or on a Drum Rack only the keys of its pads and of notes no pad plays, a row each by its pad's name, until Fold beside it is turned off, darker where the instrument plays nothing; the notes as bars by velocity, gray outside the clip, before its start or past its end, where they are kept and do not play, and past the end of a looped clip's loop, which is shaded with a mark at the wrap. Under the notes, a lane of each note's velocity as a stalk at its start. Beside it the clip's ID, its length, its loop in beats or off, the grid, Preview, and the selected note's pitch, place, length and velocity, or the velocity of several. While the clip plays, a line shows where |
 | Settings window | AAW › Settings… (⌘,), its panes chosen in the toolbar and the last one shown opened again: Audio, with the output and input device, the song's sample rate, the bit depth of exported files and the output buffer as menus of what the Mac offers, kept across launches and given to every open song's host at once, and a line saying what plays through what and at which rate ([audio settings](../../docs/features/audio-settings.md)); ElevenLabs, with the key, pasted and saved through the bundle's `daw keys set`, which keeps it in the Keychain and checks it with the service, Remove…, the plan, its credits and when they renew, and the agent's daily budget as a menu, with what the agent and the person made today ([generated audio](../../docs/features/generated-audio.md)) |
 | Analyzer window | A window of its own for each analyzer opened from its strip or with View › Analyzer Window (⌥⌘L), titled for the row and the song: the levels, the loudness with its history, the spectrum with its peaks held, the stereo field, and the last twenty seconds scrolling as a waveform of each channel and as a spectrogram, as panes in three columns, drawn at the display's rate while the window can be seen, resizing freely, going full screen with the green button and staying open whatever the song's window selects; closed when the effect goes or the project closes ([the analyzer](../../docs/features/analyzer.md)) |
@@ -212,7 +211,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Home, the square left of play, or Transport › Go to Beginning | Stops, ending a take as Space does, and puts the start position at the song's very beginning, bar 1 and 0:00; the timeline scrolls there once play has stopped. Stopped, it only goes to the beginning |
 | Drag in the ruler's top strip | Sets the loop |
 | L | Loops the selected clips; with none selected, turns the loop off, or on again: over its last region, else the section at the start position, else that bar, or the song's last bar when the start position is past the end |
-| M, or Transport › Add Marker | Leaves a marker where the song is heard, to a thousandth of a beat, or at the start position while it is stopped, for the agent to read with `daw marker list`. The song plays on and the selection stays. In the arrangement, the pattern editor and the piano roll alike ([listening markers](../../docs/features/listening-markers.md)) |
+| M, or Transport › Add Marker | Leaves a marker where the song is heard, to a thousandth of a beat, or at the start position while it is stopped, for the agent to read with `daw marker list`. The song plays on and the selection stays. In the arrangement and the piano roll alike ([listening markers](../../docs/features/listening-markers.md)) |
 | ⇧M, or Transport › Add Marker and Name It | The same, and opens a field at the marker's flag to type what it says, "too busy": Return or a click elsewhere keeps it, Escape leaves the marker without text. The marker is where the song was when the key went down |
 | Double-click in the clear of the marker strip | Leaves a marker there, on the grid or with ⌘ off it, and asks what it says |
 | Click a marker; drag it | Selects it, in place of the clips, rows and points, and sets the start position to it; moves it to the grid line under the pointer, or with ⌘ anywhere, one undo step. Delete removes the selected marker |
@@ -226,20 +225,19 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | The piano icon in the transport bar, or Transport › Typing Keyboard (⇧⌘K) | Turns the typing keyboard on or off: the Mac's keys as a piano in Ableton's layout, A S D F G H J K L ; ' the white keys from C4 and W E T Y U O P the black keys, held and let go through the armed MIDI tracks, or the selected MIDI track when none is armed; Z and X move the octave, C and V the velocity by twenty, shown beside the icon as `C4 · 100`. Yellow while on, and on by itself when a MIDI track is armed, off again when the last one is disarmed unless it was turned on by hand. While it is on the note keys are the piano's, L, M and A among them; Space, Return, Home, R, Escape, Delete, the arrows and every key with ⌘ are as they were, and a text being typed has the keys |
 | Input in a track's menu | Where the track records from: No Input, each input device the Mac has, mono or as its first two channels, the one chosen in Settings › Audio first as Input Device, the song's other tracks, its groups and the master, the choice in force checked. An edit of the song's `tracks[].input`; a MIDI track has none |
 | R, Record in the transport bar, or Transport › Record | Records every armed track from the start position after the count-in, the metronome counting the bars in with the song standing still, then the song plays, an audio track taking its input and a MIDI track the notes played from the typing keyboard, which become one note clip from the start position, whole bars long; pressed again, ends the takes with the song playing on, and Space ends them with the song. Each take lands on its track as an audio clip of a new sample under `samples/`, one undo step. Transport › Count-In chooses None, 1 Bar, 2 Bars or 4 Bars, kept across launches ([recording](../../docs/features/recording.md)) |
-| Click a clip; Shift-click | Selects it and shows its pattern, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
-| Double-click a clip | Opens its editor in the detail panel, shown if it was hidden: a pattern clip's pattern, an audio clip's settings or a note clip's piano roll |
+| Click a clip; Shift-click | Selects it and shows its notes, or an audio clip's settings; adds it to the selection or takes it out. ⌘A selects every clip, Escape none |
+| Double-click a clip | Opens its editor in the detail panel, shown if it was hidden: an audio clip's settings or a note clip's piano roll |
 | Right-click or Control-click a clip | Selects it, or keeps a selection it is part of, and offers its editor, Cut, Copy, Duplicate, Split at Start Position, Join, Deactivate Clip, Loop Selection and Delete, each as the menus do them |
 | Drag in the clear of the timeline | Selects the clips a rectangle touches, across tracks; with Shift, as well as those selected. The press sets the start position |
-| Double-click an empty part of a track | Adds a clip there, in the grid step under the pointer, with a new pattern one bar long to fill in; on a MIDI track, an empty note clip a bar long |
+| Double-click an empty part of a MIDI track | Adds an empty note clip a bar long there, in the grid step under the pointer. An audio track takes its clips from files, so a double-click there adds nothing |
 | Drag a clip | Moves the selected clips by grid steps, and to other tracks; with ⌘, off the grid; with Option, copies them there, outlined on the way, and leaves them, whichever part of the clip was pressed. An audio clip can pass the song's end, which grows with it |
-| Point at a clip's edge | The pointer becomes the resize cursor where a drag trims or resizes instead of moving: a pattern clip's end, a note clip's either edge, and an audio clip's edges and the handles at its top corners |
-| Drag a pattern clip's end | Changes its repeats |
+| Point at a clip's edge | The pointer becomes the resize cursor where a drag trims instead of moving: a note clip's either edge, and an audio clip's edges and the handles at its top corners |
 | Drag a note clip's start or end | Moves that edge, on the grid or with ⌘ off it. The notes stay where they are in the song: those an edge passes are kept outside the clip and do not play, and come back when it moves back. A looped clip's end sets how many times its loop plays |
 | Drag an audio clip's edge | Trims it: the audio stays where it is and the clip shows more or less of it, as far as the file goes; with ⌘, off the grid. The start is where the sound starts, and a clip's lead comes with it |
 | Drag the handle at an audio clip's top corner | Sets its fade in or its fade out. The clip still ends where it did: a longer fade out starts earlier |
-| ⌘E | Splits the selected clips at the start position, note clips, pattern clips (between repeats) and audio clips alike, or with a track selected and no clip, that track's, and selects the later halves |
-| ⌘J | Joins the selected clips, two or more on one track, into one that plays what they played, and selects it: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a looped clip laid out as notes; pattern clips and audio clips only where they meet and are one music, the same pattern or the same file played on as a split left it, else refused with the reason. The first clip is the one kept |
-| 0, or Edit › Deactivate Clip | Deactivates the selected clips, gray and silent where they are, or activates them when all are deactivated: one undo step. Ableton's key. The title says which; not in the piano roll or the pattern editor |
+| ⌘E | Splits the selected clips at the start position, note clips and audio clips alike, or with a track selected and no clip, that track's, and selects the later halves |
+| ⌘J | Joins the selected clips, two or more on one track, into one that plays what they played, and selects it: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a looped clip laid out as notes; audio clips only where they meet and are one music, the same file played on as a split left it, else refused with the reason. The first clip is the one kept |
+| 0, or Edit › Deactivate Clip | Deactivates the selected clips, gray and silent where they are, or activates them when all are deactivated: one undo step. Ableton's key. The title says which; not in the piano roll |
 | Arrow keys | Move the selected clips a grid step, or to the next track |
 | ⌘D, Delete | Copies the selected clips to right after them; deletes them, or else the selected track, group or return; a deleted group leaves its tracks. In the piano roll, the selected notes |
 | ⌘C, ⌘X, ⌘V | Copies or cuts the selected clips, and pastes them at the start position, on the track whose lane was clicked last or else the tracks they came from; the start position moves to their end. In the piano roll, notes, pasted where the clip was last clicked in the clear, or else right after themselves. A copy is its own: changing it changes nothing else |
@@ -262,7 +260,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Add Effect, in the device panel | Adds an effect to the end of the chain, with a place to start; on a MIDI track the MIDI effects follow the audio effects in the menu and go before the instrument |
 | A MIDI effect's panel, before a MIDI track's instrument | An arpeggiator, a chord, a scale or a velocity that changes the notes as they play, the clips keeping them as written: its bypass, ◀ ▶ among the MIDI effects, × and a control for each field; no field takes a lane |
 | Drag a bar in a device | Changes the field; with Shift, ten times finer. Double-click puts back the default. Levels and knobs are heard as they move; a field that reshapes the device, such as a delay's time or a reverb's decay, is sent when the drag ends |
-| Click a bar's number | Opens a field over it with the number selected, as the tempo's: type a value, in the bar's unit or without it (`880`, `2.5k`, `-6 dB`), and Return or a click elsewhere applies it, held to the bar's range; Escape cancels. Every bar has it: an effect's fields, the Synth's knobs, a Sampler's pad, an audio clip's gain, a pattern's swing and a note's or an event's velocity |
+| Click a bar's number | Opens a field over it with the number selected, as the tempo's: type a value, in the bar's unit or without it (`880`, `2.5k`, `-6 dB`), and Return or a click elsewhere applies it, held to the bar's range; Escape cancels. Every bar has it: an effect's fields, the Synth's knobs, a Sampler's pad, an audio clip's gain and a note's velocity |
 | The marks in a device's title | Bypass, move earlier or later in the chain, remove; an equalizer also adds a band |
 | Drag a point on an equalizer's curve | Moves the band's frequency across and its gain up and down, or for a highpass or lowpass band, whose point sits at its corner, its resonance; heard as it moves, one undo step. With Option, up narrows the band and down widens it, q doubling each 40 points. A click on a point or on a number under the curve selects the band, whose shape, frequency, q and gain or slope show there ([parametric EQ](../../docs/features/parametric-eq.md)) |
 | Double-click an equalizer's curve | In the clear, adds a bell band at that frequency and gain, up to 16; on a point, removes its band, unless it is the last. The spectrum under the curve is the equalizer's output, read from the audio thread while the song plays and falling away once it stops |
@@ -270,17 +268,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Drag an effect's title | Onto a strip between two devices of its chain: moves the effect there, the strip lit on the way, as the ◂ ▸ marks and `daw effect move` move it; the two strips beside the effect light nothing. With Option, copies the effect onto the header it lands on, any track, return or the master, at the end of that chain, or onto a strip. Without Option a header takes nothing |
 | Right-click or Control-click an effect's title | Selects it and offers Cut, Copy, Paste After, Duplicate, Bypass and Delete, each as the menus do them |
 | The diamond by a field | Adds a lane for the field, or removes it; filled while a lane moves the field |
-| ⌥⌘D, ⌥⌘P | Show the devices or the pattern in the detail panel, or hide the panel when it shows them already |
-| Click a step | Turns it on or off; a drag along the row takes the steps it passes with it. A drag up or down on a step that is on sets how hard it plays, 1 to 9 |
-| Double-click a row of held hits or of notes | Adds an event on the step under the pointer, at the note under it, held for a step on a pad that is held. With ⌘, a click adds one off the grid, in a row of steps too |
-| Click an event; Shift-click; drag in the clear of a row of events | Selects it; adds it to the selection or takes it out; selects the events a rectangle touches, in any row. ⌘A selects every event, Escape none. A click in the clear sets where events are pasted |
-| Drag an event; drag its end | Moves the selected events by steps of the pattern's grid, as far as each stays in the pattern, and those in rows of notes up and down by notes; with ⌘ off the grid; with Option, copies them there and leaves them. Its end ends that event alone on a line of the grid |
-| Arrow keys, in the pattern | Move the selected events a step earlier or later, or a note up or down; with Shift, an octave |
-| Double-click an event, or Delete | Removes it, or Delete the selected events |
-| ⌘D, ⌘C, ⌘X, ⌘V, in the pattern | Copies the selected events to right after them; copies or cuts them, and pastes them into the pattern shown, where it was last clicked in the clear, or else right after themselves in their own pattern and at their own beats in another. A pad the pattern's tracks lack is refused with the reason |
-| Type a length; choose a step; drag the swing | Change the pattern: step rows grow or shrink with its length, and are written on a new grid when their hits fall on it |
-| Own Copy, by a pattern's name | Gives the clip a copy of the pattern, so that editing it leaves the other clips that play it as they are |
-| Scroll, pinch, Command-scroll, in the pattern | Scroll and zoom the pattern |
+| ⌥⌘D, ⌥⌘P | Show the devices or the clip in the detail panel, or hide the panel when it shows them already. View › Devices and the item after it, named after the clip last selected, as its tab is |
 | Double-click in the piano roll | Adds a note at the note under the pointer, on the step of the grid under it or with ⌘ where it is, a step long, and plays it. Double-click a note to remove it |
 | Click a key, or drag along the keys | Plays the note through the track's instrument |
 | Click a note; Shift-click; drag around notes | Selects it and plays it; adds it to the selection or takes it out; selects the notes the rectangle touches. ⌘A selects every note, Escape none. A click in the clear sets where notes are pasted |
@@ -291,7 +279,7 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Arrow keys, in the piano roll | Move the selected notes a step earlier or later, or a note up or down, playing the first; with Shift, an octave |
 | ⌘U, or Edit › Quantize | Moves the selected notes' starts onto the piano roll's grid, or every note of the clip when none is selected, leaving their lengths: one undo step. Ableton's key. Part of the way is the terminal's, `daw note quantize --strength` |
 | Type a note, a place or a length; drag Velocity | Sets the selected note's pitch (C4 or 60, kept as 60), place and length (1.975, 1/3), and how hard it plays; Velocity sets several at once |
-| Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T; ⌘1, ⌘2 and ⌘3 step through them while the piano roll has the keys. The pattern's Step menu names its steps the same way, a beat to 1/64, and the same keys set it while the pattern has the keys: its 1/16 is a quarter of a beat |
+| Choose a grid | The steps the piano roll adds and moves notes on, named as note values: 1 Bar, 1/2 and 1/4 to 1/64, with triplets such as 1/8T; ⌘1, ⌘2 and ⌘3 step through them while the piano roll has the keys |
 | ⌥⌘B, or the mark at the left of the transport bar | Shows or hides the browser |
 | ⌥⌘C, View › Agent, or the sidebar mark at the right of the transport bar | Shows or hides the agent panel, at the right; kept between projects. The column's one mark: the mark is in the agent's color while it works, and the activity panel has none |
 | ⌥⌘A, Window › Activity | Shows or hides the activity panel, under the agent panel or in its place; hidden when a project opens |
@@ -358,12 +346,6 @@ so is a track's instrument of the person's own, `TrackView.plugin`, whose
 fields are set through `Edit.pluginInstrumentSet` and whose state comes by
 its reference, `tracks.T.instrument`.
 
-A pattern clip's waveform is what its track's sampler plays over the clip's
-span, before the track's effects and fader, so a level or an effect does not
-change it. The host works it out again for the tracks an edit changed; until it
-has, a clip keeps the waveform it had, which moves with the clip, and a new clip
-shows a line.
-
 An audio clip's waveform is its file's, from where the clip starts in the file
 and at the clip's gain, so it is there while an edge is dragged outward. The
 host reads a file's peaks once. The clip is drawn from where its sound starts,
@@ -372,13 +354,6 @@ and the ticks at its foot are the beats `daw samples beats` measured, when its
 map is beside the file.
 [docs/features/audio-clips-in-app.md](../../docs/features/audio-clips-in-app.md)
 has the rest: what each drag writes to the song, and when the song grows.
-
-A pad's row in the pattern editor is steps when the pad plays its sample
-through at one pitch, bars of events when the pad is held (`mode: gate`), and
-notes when the pad's sample has a root note. Steps and events of one pad both
-play; steps are on the grid at one of ten levels, and events are anywhere, with
-a velocity, a length and a note. A pattern is shared by every clip that plays
-it, and they all light up when an agent changes it.
 
 A sample added to the song is copied into the project's `samples` folder first,
 as `daw samples import` copies it; the library is never changed. An `.m4a` or
@@ -427,12 +402,12 @@ the drop. Each device addition is one undo step. See
 
 An edit shows at once and goes to the host, whose song the window then follows.
 A drag of a level is one undo step, however long, and the song is saved when it
-pauses. An edit the host refuses, such as a clip dragged to a track without the
-pads its pattern plays, is put back and the reason shown for a few seconds.
+pauses. An edit the host refuses, such as a change to a frozen track's clips,
+is put back and the reason shown for a few seconds.
 
 When a change lands, rows and clips ease to their new places and values. What a
 change by the agent or an edit of the file touched lights up in that origin's
-color for a moment. A clip also lights up when its pattern changed. A
+color for a moment. A
 `song.yaml` edited outside the app that does not load is reported in a banner
 and the last valid song stays open. `daw close PROJECT` closes the window.
 
@@ -497,22 +472,19 @@ start 109 points down, under a ruler whose marker strip is from 75 to 91 points
 down: 46 for each track, more while its sends or lanes show
 (46 for each lane). The detail panel is the bottom 214 points until the line
 above it is dragged (`--drag 700,384,700,204` on a window 600 high makes it
-394), its devices from x = 212. The pattern editor's rows start 16 points down the panel and 96 points
-further right, at x = 308: a row of steps or hits is 24 points high, and rows
-of notes share the rest. A pattern of a few bars fills the panel's width, and
-a longer one scrolls. While the samples show, everything else is 361 points
-further right.
+394), its devices from x = 212. While the samples show, everything else is
+361 points further right.
 A menu, such as Add Effect, a choice in a device, + Lane or a header's or a
 clip's context menu, waits for a person
 and cannot be scripted, and neither can a drag from the samples or the Finder:
 `--drop` does what a drag from the Finder does when it ends, without the
 outline shown on the way, and the + by a sample or a `daw` command does the
-rest. The piano roll's notes start 96 points right of the panel's left, as
-the pattern's rows do, under a 16-point ruler; a note is 10 points high, and the
+rest. The piano roll's notes start 96 points right of the panel's left, at
+x = 308, under a 16-point ruler; a note is 10 points high, and the
 clip opens fitted to the width with its notes in the middle of the height, so
 read a picture to find a note's place. The velocity lane is the panel's bottom
 56 points, a note's stalk a point right of its start. The selected note's fields are at the
-panel's left: Note, At and Length, and Velocity, 21 points apart. A clip's title strip is 14 points high, with its waveform under it; an
+panel's left: Note, At and Length, and Velocity, 21 points apart. A clip's title strip is 14 points high, with its notes or its waveform under it; an
 audio clip's fade handles are in the top third of the waveform, at the corners
 until it has fades. Install
 Command Line Tool asks in an alert, which also waits for a person, and so do
@@ -561,8 +533,6 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/SamplerLayout.swift` | Where the Sampler's markers are on its waveform, which one a point takes hold of and how far a drag goes, tested in `Tests` |
 | `Sources/AAWApp/SynthPanel.swift` | The Synth: its header with the patch and the menu that saves and loads, a column of controls for each part of the patch drawn from its fields, the wave, filter, envelope and LFO drawings as AppKit views where they are dragged, the keys, the matrix's entries, the source tabs and their drops, and the lane mark beside a field |
 | `Sources/AAWApp/SynthLayout.swift` | Where the Synth's drawings put things and what a drag means: the filter's response and its corner, an envelope's handles, a wave or an LFO over a cycle, the keys and an entry's reach, tested in `Tests` |
-| `Sources/AAWApp/PatternEditor.swift` | The pattern editor, an AppKit view, and the fields beside it |
-| `Sources/AAWApp/PatternLayout.swift` | Where a pattern's rows, steps and events are, and what a click or drag on them means, tested in `Tests` |
 | `Sources/AAWApp/NoteEditor.swift` | The piano roll, an AppKit view, and the fields beside it |
 | `Sources/AAWApp/PianoRollLayout.swift` | Where a note clip's notes are in the piano roll, and how the grid and a drag move them, tested in `Tests` |
 | `Sources/AAWApp/BrowserView.swift` | The browser: favorites, shared folders, sample search, the device lists, the Synth's patches and the effect racks |
@@ -593,23 +563,14 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
   not drawn ([recording](../../docs/features/recording.md)).
 - Track colors are given out in the order tracks are first seen and are not
   saved; the song format has no color.
-- A waveform shows a track's sampler before its effects, fader and sends, with
-  full scale at the clip's height; louder is drawn as full scale.
-- A pad's own settings, such as its level, tuning and whether it is held, are
-  set with `daw pad set` on a track of patterns and in a kit of several pads
-  on a MIDI track; the device panel lists those pads. The Sampler's one pad
-  is set in its panel.
-- A new track has no pads until a sample is added to it, and a sample added
-  from the browser plays at its own tempo: a loop is fitted to the song with
-  `daw pad set SONG TRACK PAD --source-bpm BPM`, and an audio clip with the
-  Tempo in its panel.
+- A sample added from the browser plays at its own tempo: a loop in a Sampler
+  is fitted to the song with `daw pad set SONG TRACK PAD --source-bpm BPM`,
+  and an audio clip with the Tempo in its panel.
 - Audio clips that overlap on a track both play, and nothing crossfades them. A
   clip's lead is drawn but set with `daw`. The window does not zoom out when the
   song grows.
 - A trim or a fade out of a long file at another sample rate than the song's
   takes the engine a moment: about half a second for two minutes of audio.
-- Steps are not selected or copied, and an event's transpose is set with
-  `daw`. Events of two patterns are not moved or copied together.
 - A sample on a MIDI track's header or its Sampler makes a sampler of one pad
   on every note, played as it is at middle C whatever its pitch until Root is
   set; a kit of pads on notes is made with `daw instrument map`. The Sampler
@@ -627,8 +588,6 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
   automated it, and an effect of a Synth's own chain is not copied, dragged
   or duplicated; the patch's + menu adds one. An effect is not moved to
   another row by dragging.
-- A row of notes shows the notes its events play with two more either side; a
-  drag goes as far as that, and the arrow keys further.
 - A sample is played from its file by the system, not through the song's
   engine, so it is heard at its own level, pitch and tempo.
 - Names are IDs: letters, digits, `-` and `_`, starting with a letter.

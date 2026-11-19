@@ -102,8 +102,9 @@ private struct RowVisual {
 }
 
 private struct ClipVisual {
-    var pattern: String
-    var repeats: Int
+    /// The name drawn in its title: a note clip's ID or an audio clip's
+    /// sample's name.
+    var title: String
     /// A note clip's or an audio clip's loop, when it has one: its first so
     /// many beats play again at each wrap until its end, where a mark is drawn.
     var loop: Double? = nil
@@ -118,14 +119,10 @@ private struct ClipVisual {
     var y: Animated
     var alpha: Animated
     var removing = false
-    /// What the clip plays: its track's waveform from the beat the clip was
-    /// at when the waveform was made. It moves with the clip, and is replaced
-    /// when the host has worked out what the clip plays where it is now.
-    var wave: (peaks: Waveform, at: Double)?
     /// An audio clip as it is shown: the host's, or the person's while they
-    /// drag a fade. It draws its file, and `pattern` is its sample's name.
+    /// drag a fade. It draws its file.
     var audio: AudioClipView?
-    /// A note clip as it is shown, drawing its notes; `pattern` is its ID.
+    /// A note clip as it is shown, drawing its notes.
     var notes: NoteClipView?
     /// The beat an audio clip's file starts on, which its waveform is drawn
     /// from, or a note clip's start, which its notes are placed from: it
@@ -135,13 +132,11 @@ private struct ClipVisual {
 
 /// A clip under the pointer.
 private enum ClipHit {
-    case pattern(ClipView)
     case audio(AudioClipView)
     case notes(NoteClipView)
 
     var key: UInt64 {
         switch self {
-        case .pattern(let clip): clip.key
         case .audio(let clip): clip.key
         case .notes(let clip): clip.key
         }
@@ -344,7 +339,6 @@ private enum Drag {
     case loop(anchor: CGFloat, region: (start: Double, length: Double)?)
     case slider(SliderDrag)
     case clips(ClipDrag)
-    case resize(clip: ClipView, repeats: Int)
     case trim(TrimDrag)
     case noteTrim(NoteTrimDrag)
     case fade(FadeDrag)
@@ -471,7 +465,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             guard let self else { return }
             self.window?.makeFirstResponder(self)
         }
-        model.onWaveforms = { [weak self] in self?.takeWaveforms() }
+        // An audio clip draws its file's waveform once the host has sent it.
+        model.onWaveforms = { [weak self] in self?.needsDisplay = true }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
             [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.pluginType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
@@ -533,7 +528,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private var draggedClips: Set<UInt64> {
         switch drag {
         case .clips(let d) where d.moved && !d.copy: Set(d.origin.keys)
-        case .resize(let clip, _): [clip.key]
         case .trim(let d): [d.clip.key]
         case .noteTrim(let d): [d.clip.key]
         case .fade(let d): [d.clip.key]
@@ -683,35 +677,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
                   kind: .track, height: height, sends: track.sends, depth: path.count,
                   armed: model.isArmed(track: track.key), hasInput: track.input != nil || (track.midi && (track.instrument != nil || track.plugin != nil)))
-            for clip in track.clips {
-                liveClips.insert(clip.key)
-                let length = clip.patternBeats * Double(clip.repeats)
-                if var v = clips[clip.key], !v.removing {
-                    v.pattern = clip.pattern
-                    v.color = color
-                    v.muted = muted
-                    v.frozen = frozen
-                    v.active = clip.active
-                    if !dragged.contains(clip.key) {
-                        v.repeats = Int(clip.repeats)
-                        v.at.move(to: clip.at, at: now, over: time)
-                        v.length.move(to: length, at: now, over: time)
-                        v.y.move(to: y, at: now, over: time)
-                    }
-                    clips[clip.key] = v
-                } else {
-                    var alpha = Animated(animated ? 0 : 1)
-                    alpha.move(to: 1, at: now, over: time)
-                    clips[clip.key] = ClipVisual(
-                        pattern: clip.pattern, repeats: Int(clip.repeats), color: color, muted: muted, frozen: frozen, active: clip.active,
-                        at: Animated(clip.at), length: Animated(length), y: Animated(y), alpha: alpha
-                    )
-                }
-            }
             for clip in track.noteClips {
                 liveClips.insert(clip.key)
                 if var v = clips[clip.key], !v.removing {
-                    v.pattern = clip.id
+                    v.title = clip.id
                     v.color = color
                     v.muted = muted
                     v.frozen = frozen
@@ -729,7 +698,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.id, repeats: 1, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
+                        title: clip.id, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), alpha: alpha,
                         notes: clip, anchor: Animated(clip.at)
                     )
@@ -739,7 +708,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 liveClips.insert(clip.key)
                 let shape = audioLayout(clip, in: a)
                 if var v = clips[clip.key], !v.removing {
-                    v.pattern = clip.sample
+                    v.title = clip.sample
                     v.color = color
                     v.muted = muted
                     v.frozen = frozen
@@ -757,7 +726,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        pattern: clip.sample, repeats: 1, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
+                        title: clip.sample, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), alpha: alpha,
                         audio: clip, anchor: Animated(shape.fileStart)
                     )
@@ -792,7 +761,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if !animated { dropRemoved(at: now) }
         if let renaming, !liveRows.contains(renaming.row) { endRename(commit: false) }
         if clips.count != clipOrder.count || !liveClips.isSubset(of: clipOrder) { clipOrder = clips.keys.sorted() }
-        takeWaveforms()
 
         layout.contentHeight = y
         layout.beatsPerBar = a.barBeats
@@ -825,17 +793,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         }
         link?.isPaused = false
-    }
-
-    /// Gives each clip the waveform of what it plays, for the tracks whose
-    /// waveforms have arrived for the revision shown. Until then a clip keeps
-    /// the one it had, which moves with it, and a new clip has none.
-    private func takeWaveforms() {
-        for track in model.arrangement.tracks {
-            guard let peaks = model.waveform(of: track.key) else { continue }
-            for clip in track.clips { clips[clip.key]?.wave = (peaks, clip.at) }
-        }
-        needsDisplay = true
     }
 
     /// Puts back what was shown ahead of the host, after the host refused it.
@@ -1133,7 +1090,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// The height of a clip's title strip.
     private static let titleHeight: CGFloat = 14
 
-    /// What a clip shows under its title: its waveform.
+    /// What a clip shows under its title: its notes or its file's waveform.
     private func body(of rect: CGRect) -> CGRect {
         CGRect(x: rect.minX, y: rect.minY + Self.titleHeight + 1, width: rect.width, height: rect.height - Self.titleHeight - 2)
     }
@@ -1161,9 +1118,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
-            for clip in track.clips {
-                take(.pattern(clip), clipRect(at: clip.at, length: clip.patternBeats * Double(clip.repeats), top: frame.top))
-            }
             for clip in track.audio {
                 let shape = audioLayout(clip)
                 take(.audio(clip), clipRect(at: shape.start, length: shape.length, top: frame.top))
@@ -1180,8 +1134,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         var keys: [UInt64] = []
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
-            let rects = track.clips.map { ($0.key, clipRect(at: $0.at, length: $0.patternBeats * Double($0.repeats), top: frame.top)) }
-                + track.audio.map { clip in
+            let rects = track.audio.map { clip in
                     let shape = audioLayout(clip)
                     return (clip.key, clipRect(at: shape.start, length: shape.length, top: frame.top))
                 }
@@ -1209,7 +1162,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         audioLayout(clip).part(at: p, in: body(of: rect))
     }
 
-    /// Whether a point is on the end of a clip, where a drag changes its repeats.
+    /// Whether a point is on the end of a clip, where a drag trims a note clip.
     private func onResizeEdge(_ p: CGPoint, of rect: CGRect) -> Bool {
         rect.width >= 16 && p.x >= rect.maxX - TimelineLayout.resizeEdge
     }
@@ -1220,9 +1173,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// Where the pointer becomes the resize cursor, so a trim is told from a
-    /// move before the drag begins: a pattern clip's end, a note clip's
-    /// either edge, and an audio clip's edges and fade handles, of the clips
-    /// in the lanes. These are cursor rects rather than a cursor set as the
+    /// move before the drag begins: a note clip's either edge, and an audio
+    /// clip's edges and fade handles, of the clips in the lanes. These are cursor rects rather than a cursor set as the
     /// pointer moves: under the SwiftUI window a cursor set in `mouseMoved`
     /// is put back to the arrow at once, while the window keeps its cursor
     /// rects, as the dividers' and the panels' are kept.
@@ -1231,10 +1183,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         var rects: [CGRect] = []
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
-            for clip in track.clips {
-                let rect = clipRect(at: clip.at, length: clip.patternBeats * Double(clip.repeats), top: frame.top)
-                rects += TimelineLayout.edgeRects(of: rect, start: false, end: true)
-            }
             for clip in track.audio {
                 let shape = audioLayout(clip)
                 let rect = clipRect(at: shape.start, length: shape.length, top: frame.top)
@@ -1295,10 +1243,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             // Clips are pasted on the track whose lane was clicked last.
             if let track = track(atLane: p) { model.cueTrack = track }
             if event.clickCount == 2, let track = track(atLane: p) {
-                // Twice on an empty part of a track: a new clip in the grid
-                // step under the pointer, with a new pattern to fill in, or
-                // on a MIDI track an empty note clip.
-                model.addClip(to: track, at: layout.step(atX: p.x, free: free))
+                // Twice on an empty part of a MIDI track: an empty note clip
+                // in the grid step under the pointer. An audio track takes
+                // its clips from files.
+                if model.arrangement.tracks.first(where: { $0.key == track })?.midi == true {
+                    model.addClip(to: track, at: layout.step(atX: p.x, free: free))
+                }
                 return
             }
             model.locate(layout.target(atX: p.x, free: free))
@@ -1595,7 +1545,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         if !model.selectedClips.contains(key) { model.select(clips: [key], focus: key) } else { model.select(clips: model.selectedClips, focus: key) }
         let editor: String
         switch hit.hit {
-        case .pattern: editor = "Pattern"
         case .audio: editor = "Audio Clip"
         case .notes: editor = "Notes"
         }
@@ -1672,7 +1621,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         switch choice.action {
         case .edit:
             model.showsDetail = true
-            model.detail = .pattern
+            model.detail = .clip
         case .cut: model.cutSelection(in: .clips)
         case .copy: model.copySelection(in: .clips)
         case .duplicate: model.duplicateSelection()
@@ -1764,13 +1713,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let key = hit.key
         // An edge or a fade's handle is of one clip, which it selects alone.
         var grabbed = AudioClipLayout.Part.body
-        var resize = false
         // A note clip's start, or else its end.
         var edge: Bool?
         // With Option held the press copies, whichever part of the clip it is on.
         switch hit {
         case _ where event.modifierFlags.contains(.option): break
-        case .pattern: resize = onResizeEdge(p, of: rect)
         case .audio(let clip): grabbed = part(of: clip, at: p, in: rect)
         case .notes:
             if onResizeEdge(p, of: rect) { edge = false } else if onStartEdge(p, of: rect) { edge = true }
@@ -1778,11 +1725,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.cueTrack = nil
         if event.clickCount == 2 {
             // Twice on a clip: the clip's editor in the detail panel, shown
-            // if it was hidden: a pattern clip's pattern, an audio clip's
-            // settings or a note clip's piano roll.
+            // if it was hidden: an audio clip's settings or a note clip's
+            // piano roll.
             model.select(clips: [key], focus: key)
             model.showsDetail = true
-            model.detail = .pattern
+            model.detail = .clip
             return
         }
         var selection = model.selectedClips
@@ -1794,7 +1741,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.select(clips: selection)
                 return
             }
-        } else if !selection.contains(key) || resize || grabbed != .body || edge != nil {
+        } else if !selection.contains(key) || grabbed != .body || edge != nil {
             selection = [key]
         } else if selection.count > 1 {
             collapse = key
@@ -1803,9 +1750,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.select(clips: selection, focus: key)
         if selection.count == 1 {
             switch hit {
-            case .pattern(let clip) where resize:
-                drag = .resize(clip: clip, repeats: Int(clip.repeats))
-                return
             case .notes(let clip) where edge != nil:
                 let start = edge == true
                 drag = .noteTrim(NoteTrimDrag(clip: clip, start: start, beat: start ? clip.at : clip.at + clip.lengthBeats))
@@ -1937,13 +1881,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 if d.fadeIn { clips[d.clip.key]?.audio?.fadeInMs = ms } else { clips[d.clip.key]?.audio?.fadeOutMs = ms }
             }
             drag = .fade(d)
-        case .resize(let clip, let repeats):
-            let wanted = layout.repeats(atX: p.x, clipAt: clip.at, patternBeats: clip.patternBeats)
-            if wanted != repeats {
-                clips[clip.key]?.repeats = wanted
-                clips[clip.key]?.length = Animated(clip.patternBeats * Double(wanted))
-                drag = .resize(clip: clip, repeats: wanted)
-            }
         case .points(var d):
             // The grabbed point goes to the grid line under the pointer, or
             // with ⌘ anywhere, and to the height of it; the others as far.
@@ -2042,8 +1979,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             } else if let key = d.collapse {
                 model.select(clips: [key])
             }
-        case .resize(let clip, let repeats):
-            if repeats != Int(clip.repeats) { model.edit(.clipRepeats(clip: clip.key, repeats: UInt32(repeats))) }
         case .trim(let d):
             // Sent when the drag ends, as a move is: each trim has the engine
             // prepare another part of the file.
@@ -2125,7 +2060,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// Drops a drag that has sent nothing yet. True if there was one.
     private func cancelDrag() -> Bool {
         switch drag {
-        case .clips, .resize, .trim, .noteTrim, .fade, .reorder, .loop, .marquee:
+        case .clips, .trim, .noteTrim, .fade, .reorder, .loop, .marquee:
             drag = nil
             show(model.arrangement, animated: true)
             return true
@@ -2725,8 +2660,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let muted = track.mute || model.groups(over: track.group).contains { $0.mute }
             let color = (muted ? Theme.gray(0.45) : model.color(of: track.key)).withAlphaComponent(0.55 * alpha)
             let y = rect.minY + CGFloat(index) * strip
-            var spans: [(at: Double, length: Double, active: Bool)] = track.clips.map { ($0.at, $0.patternBeats * Double($0.repeats), $0.active) }
-            spans += track.noteClips.map { ($0.at, $0.lengthBeats, $0.active) }
+            var spans: [(at: Double, length: Double, active: Bool)] = track.noteClips.map { ($0.at, $0.lengthBeats, $0.active) }
             spans += track.audio.map { clip in
                 let shape = audioLayout(clip)
                 return (shape.start, shape.length, clip.active)
@@ -2759,14 +2693,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             NSGraphicsContext.saveGraphicsState()
             shape.addClip()
             fill(title, color.withAlphaComponent(alpha))
-            // Each repeat of the pattern, or each wrap of a loop.
-            if clip.repeats > 1, rect.width / CGFloat(clip.repeats) >= 4 {
-                for i in 1..<clip.repeats {
-                    let x = rect.minX + rect.width * CGFloat(i) / CGFloat(clip.repeats)
-                    fill(CGRect(x: x.rounded(), y: title.maxY, width: 1, height: rect.height - title.height),
-                         Theme.gray(0, 0.35 * alpha))
-                }
-            }
+            // Each wrap of a loop.
             for wrap in Self.wraps(of: clip, at: now) {
                 let x = layout.x(wrap).rounded()
                 fill(CGRect(x: x, y: title.maxY, width: 1, height: rect.height - title.height), Theme.gray(0, 0.35 * alpha))
@@ -2777,13 +2704,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 drawAudio(audio, of: clip, in: body(of: rect), alpha: alpha, handles: selected || hoverClip == key, at: now)
             } else if let notes = clip.notes {
                 drawNotes(notes, of: clip, in: body(of: rect), alpha: alpha, at: now)
-            } else {
-                drawWaveform(of: clip, in: body(of: rect), alpha: alpha)
             }
             // The name is cut where the clip ends: a clip too narrow for a
             // few letters has none.
             if rect.width >= 16 {
-                let label = clip.repeats > 1 ? "\(clip.pattern) ×\(clip.repeats)" : clip.loop != nil ? "\(clip.pattern) ↻" : clip.pattern
+                let label = clip.loop != nil ? "\(clip.title) ↻" : clip.title
                 _ = TextLines.shared.draw(label, in: CGRect(x: rect.minX + 4, y: rect.minY, width: rect.width - 6, height: 13),
                                           font: Self.clipFont, color: Theme.gray(0.08, alpha), cuts: true)
             }
@@ -2957,22 +2882,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             box.lineWidth = 1
             box.stroke()
         }
-    }
-
-    /// What a clip plays, under its title: its waveform, or while the host is
-    /// still working that out, a line in its place.
-    private func drawWaveform(of clip: ClipVisual, in body: CGRect, alpha: CGFloat) {
-        guard body.height >= 8 else { return }
-        guard let wave = clip.wave else {
-            fill(CGRect(x: body.minX, y: body.midY.rounded(), width: body.width, height: 1), Theme.waveform.withAlphaComponent(0.3 * alpha))
-            return
-        }
-        let visible = CGRect(x: TimelineLayout.headerWidth, y: body.minY, width: bounds.width - TimelineLayout.headerWidth, height: body.height)
-        let columns = wave.peaks.columns(in: body, clippedTo: visible, fromBeat: wave.at, pixelsPerBeat: layout.pixelsPerBeat,
-                                         step: 1 / (window?.backingScaleFactor ?? 2))
-        guard !columns.isEmpty, let context = NSGraphicsContext.current?.cgContext else { return }
-        context.setFillColor(Theme.waveform.withAlphaComponent(0.78 * alpha).cgColor)
-        context.fill(columns)
     }
 
     /// A lane's values over time: a line through its points, which holds the

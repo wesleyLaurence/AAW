@@ -13,6 +13,7 @@ pub mod convert;
 pub mod describe;
 pub mod hash;
 pub mod hint;
+pub(crate) mod legacy;
 pub mod length;
 pub mod meter;
 pub mod midi_effects;
@@ -81,10 +82,18 @@ impl From<std::io::Error> for ModelError {
 }
 
 /// Validates YAML text as `Project.model_validate(yaml.safe_load(text))`.
+/// A song that holds patterns or a track of pads is refused: it is
+/// converted only when read from its file (`load`, `convert::upgrade`).
 pub fn parse(text: &str) -> Result<Project, ModelError> {
     let value = yaml_load::load(text).map_err(ModelError::Yaml)?;
+    if convert::needed(&value) {
+        return Err(ModelError::Convert(UNCONVERTED.into()));
+    }
     Ok(Project::validate(&value)?)
 }
+
+/// Why a song's text that holds patterns is not read as it is.
+pub const UNCONVERTED: &str = "This song holds patterns or a track of pads, how songs before note clips played drums. It is converted to a Drum Rack and note clips when it is read from its file: run any daw command on the project, or open it in the app.";
 
 /// The canonical document `save` writes.
 pub fn to_yaml(project: &Project) -> String {
@@ -133,11 +142,11 @@ pub fn verify_assets(project: &Project, root: &Path) -> Result<(), ModelError> {
 }
 
 /// Reads and validates a song, and optionally verifies its samples. A song
-/// with tracks of pads is converted once, written back with a copy of it as
-/// it was beside it (`convert::upgrade`).
+/// with patterns or tracks of pads is converted once, written back with a
+/// copy of it as it was beside it (`convert::upgrade`).
 pub fn load(path: &Path, check_assets: bool) -> Result<Project, ModelError> {
     let text = std::fs::read_to_string(path)?;
-    let (project, _) = convert::upgrade(path, &text, parse(&text)?).map_err(ModelError::Convert)?;
+    let (project, _) = convert::upgrade(path, &text)?;
     if check_assets {
         verify_assets(&project, path.parent().unwrap_or(Path::new(".")))?;
     }

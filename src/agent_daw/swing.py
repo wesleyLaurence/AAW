@@ -1,7 +1,6 @@
 """How late a song's or a loop's off-beat notes fall: its swing.
 
-Swing is said as a pattern's `swing` says it: where the second note of a pair
-falls within the pair, 0.5 straight, two thirds a triplet feel, 0.75 a dotted
+Swing is where the second note of a pair falls within the pair, 0.5 straight, two thirds a triplet feel, 0.75 a dotted
 note and its short one. The pair is a beat for swung eighths and half a beat for
 swung sixteenths. The onsets of the sound are placed against its beats, and the
 ones between beats are read as the second eighth of a beat, or as the second or
@@ -146,6 +145,5 @@ def measure(mono, sr, beat_times) -> dict:
         "grid": "1/16" if grid == 0.25 else "1/8",
         "swing": swing,
         "feel": feel,
-        "pattern": {"grid": grid, "swing": float(np.clip(round(swing, 2), 0.5, 0.75))},
         "delay_beats": round((2 * swing - 1) * grid, 4),
     }

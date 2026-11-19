@@ -125,7 +125,6 @@ samples:
   tone: {path: tone.wav}
 tracks:
 - id: vox
-  pads: {}
   audio:
   - {sample: tone, at: 0}
   - {sample: tone, at: 8}
@@ -170,7 +169,6 @@ session: {tempo: 120, length_beats: 8}
 samples: {tone: {path: tone.wav}}
 tracks:
 - id: vox
-  pads: {}
   audio: [{sample: tone, at: 15/2}]
 "#;
     let (_d, s) = song(yaml);

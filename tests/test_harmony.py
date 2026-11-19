@@ -116,12 +116,11 @@ def test_chords_follow_the_beats_and_change_on_the_bar():
     "grid, amount, feel",
     [(0.5, 0.5, "straight"), (0.5, 0.58, "swung"), (0.5, 2 / 3, "triplet"), (0.25, 0.5, "straight"), (0.25, 0.6, "swung"), (0.25, 0.72, "swung")],
 )
-def test_swing_is_said_as_a_pattern_says_it(bpm, grid, amount, feel):
+def test_swing_is_where_the_second_note_of_a_pair_falls(bpm, grid, amount, feel):
     x = chord_song(None, [[48, 52, 55]] * 8, bpm=bpm, swing=amount, grid=grid, seed=bpm)
     found = swing.measure(x, RATE, np.arange(33) * 60 / bpm)
     assert found["grid"] == ("1/8" if grid == 0.5 else "1/16")
     assert found["swing"] == pytest.approx(amount, abs=0.015) and found["feel"] == feel
-    assert found["pattern"] == {"grid": grid, "swing": pytest.approx(round(amount, 2), abs=0.02)}
     assert found["delay_beats"] == pytest.approx((2 * amount - 1) * grid, abs=0.01)
     side = found["eighths" if grid == 0.5 else "sixteenths"]
     assert side["onsets"] >= 30 and side["late_ms"] == pytest.approx((amount - 0.5) * 60 / bpm * grid * 2000, abs=4)
@@ -222,7 +221,7 @@ def song_with(tmp_path, notes_text=None, loop=None, **loop_clip):
     if loop is not None:
         sf.write(tmp_path / "loop.wav", loop, RATE)
         assert cli("samples", "--db", tmp_path / "db.sqlite", "import", tmp_path / "loop.wav", "--project", song, "--id", "loop")[0] == 0
-        daw("track", "add", song, "loops")
+        daw("track", "add", song, "loops", "--type", "audio")
         daw("audio", "add", song, "loops", "loop", *[str(v) for kv in loop_clip.items() for v in (f"--{kv[0].replace('_', '-')}", kv[1])])
     return song
 

@@ -12,7 +12,7 @@ from agent_daw.export import ENCODERS
 from agent_daw.library import decode
 from agent_daw.model import load, save
 from agent_daw.perception import measure
-from helpers import SR, cli, daw, render
+from helpers import SR, cli, daw, drum_track, render
 
 
 @pytest.fixture
@@ -28,13 +28,9 @@ def song(tmp_path):
         {
             "session": {"tempo": 120, "length_beats": 8, "master_gain_db": 0, "end_fade_ms": 0},
             "samples": {"tone": {"path": "tone.wav"}, "hit": {"path": "hit.wav"}},
-            "patterns": {
-                "once": {"length_beats": 8, "events": [{"at": 0, "pad": "x"}]},
-                "beat": {"length_beats": 8, "grid": 1, "steps": {"h": "xxxxxxxx"}},
-            },
             "tracks": [
-                {"id": "tone", "gain_db": -9, "pads": {"x": {"sample": "tone"}}, "clips": [{"pattern": "once"}]},
-                {"id": "beat", "gain_db": -6, "pads": {"h": {"sample": "hit"}}, "clips": [{"pattern": "beat"}]},
+                drum_track("tone", "x", "tone", 8, [0], gain_db=-9),
+                drum_track("beat", "h", "hit", 8, range(8), gain_db=-6),
             ],
         },
         folder / "song.yaml",

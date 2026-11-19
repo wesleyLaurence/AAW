@@ -59,7 +59,7 @@ fn an_audio_clip_counts_its_sound_and_its_tail() {
     let (_d, mut s) = open(common::SONG);
     // tone.wav is half a second: a beat at 120. At beat 31 with a 300 ms
     // fade out, which has nothing of the file to fade over, it ends at 32.
-    edit(&mut s, json!({"op": "track.add", "id": "song"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "song"})).unwrap();
     edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "tone", "at": 31})).unwrap();
     assert_eq!(length(&s), 32.0);
     edit(&mut s, json!({"op": "audio.move", "clip": "tracks.song.audio.0", "at": 31.5})).unwrap();

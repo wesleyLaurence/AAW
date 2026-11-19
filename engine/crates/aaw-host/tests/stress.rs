@@ -87,7 +87,7 @@ fn random_edits_during_playback_never_allocate_on_the_audio_thread() {
             3 => json!({"op": "clip.move", "clip": "tracks.bass.clips.1", "at": rng.next(24)}),
             4 => json!({"op": "pad.set", "track": "bass", "pad": "t", "transpose": rng.next(13) as f64 - 6.0}),
             5 => json!({"op": "set", "path": "session.tempo", "value": 90 + rng.next(60)}),
-            6 => json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": rng.next(28)}),
+            6 => json!({"op": "clip.add", "track": "drums", "length_beats": 4, "at": rng.next(28)}),
             7 => json!({"op": "set", "path": "session.master_gain_db", "value": -(n / 100.0)}),
             _ => json!({"op": "undo"}),
         };

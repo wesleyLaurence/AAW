@@ -20,9 +20,9 @@ final class GridTests: XCTestCase {
         // The timeline's zoom can give a grid of two bars, which the list lacks.
         XCTAssertEqual(Grid.finer("8"), "4")
         XCTAssertNil(Grid.coarser("8"))
-        // A pattern's steps go from a beat to a sixty-fourth note.
-        XCTAssertNil(Grid.coarser("1", in: Grid.patternValues))
-        XCTAssertEqual(Grid.finer("1", in: Grid.patternValues), "1/2")
+        // In a shorter list, its own ends.
+        XCTAssertNil(Grid.coarser("1", in: ["1", "1/2", "1/4"]))
+        XCTAssertEqual(Grid.finer("1", in: ["1", "1/2", "1/4"]), "1/2")
         XCTAssertNil(Grid.finer("x"))
     }
 

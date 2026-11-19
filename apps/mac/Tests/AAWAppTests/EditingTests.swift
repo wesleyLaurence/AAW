@@ -31,16 +31,6 @@ final class EditingTests: XCTestCase {
         XCTAssertEqual(l.move(byX: 40, free: false, within: free), 0.75)
     }
 
-    func testAClipsEndSnapsToItsRepeats() {
-        let l = layout()
-        // A clip at beat 8 of a 4-beat pattern.
-        XCTAssertEqual(l.repeats(atX: l.x(19), clipAt: 8, patternBeats: 4), 3)
-        XCTAssertEqual(l.repeats(atX: l.x(21), clipAt: 8, patternBeats: 4), 3)
-        XCTAssertEqual(l.repeats(atX: l.x(2), clipAt: 8, patternBeats: 4), 1, "never none")
-        XCTAssertEqual(l.repeats(atX: l.x(90), clipAt: 8, patternBeats: 4), 21, "past the end, which moves to hold them")
-        XCTAssertEqual(l.repeats(atX: l.x(90), clipAt: 8, patternBeats: 24), 3)
-    }
-
     func testAHeadersPartsAreWhereTheyAreDrawn() {
         let track = HeaderLayout(kind: .track, top: 100, sends: 2, folds: true)
         XCTAssertEqual(track.height, TimelineLayout.trackHeight + 2 * HeaderLayout.sendHeight + HeaderLayout.sendPadding)

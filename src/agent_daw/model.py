@@ -59,8 +59,8 @@ def load(path: Path, verify_assets=True) -> dict:
 
 def load_snapshot(path: Path) -> dict:
     """The full dump of a render's snapshot as it was written: a record of
-    what was rendered, so a song of patterns in it is not converted, and
-    the file is never written back (D190)."""
+    what was rendered, never converted or written back (D190). A render of a
+    song of patterns, made before they were removed, is refused (D191)."""
     return aaw_py.parse(Path(path).read_text())
 
 

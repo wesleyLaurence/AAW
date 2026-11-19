@@ -12,7 +12,7 @@ import pytest
 import soundfile as sf
 
 from agent_daw.model import save
-from helpers import beat_song, cli, daw, render
+from helpers import beat_song, cli, daw, drum_track, render
 
 BEAT = 0.5
 FIRST = 0.137
@@ -34,38 +34,44 @@ def edit(folder, shift=0.0, enters=24, out_ms=12, in_ms=4, cut=0.0, mapped=True,
         {
             "session": {"tempo": 120, "sample_rate": 44100, "length_beats": 4 + 16 + rest + 2, "master_gain_db": -3},
             "samples": {"song": {"path": "song.wav"}, "hat": {"path": "hat.wav"}},
-            "patterns": {
-                "edit": {
-                    "length_beats": 4 + 16 + rest + 2,
-                    "events": [
-                        {"at": 4 - lead / BEAT, "pad": "first"},
-                        {"at": 20 - lead / BEAT, "pad": "second"},
-                    ],
-                },
-                "hats": {"length_beats": 4, "grid": "1/4", "steps": {"h": "x.x.x.x.x.x.x.x."}},
-            },
             "tracks": [
                 {
                     "id": "song",
-                    "pads": {
-                        "first": {
-                            "sample": "song",
-                            "start_seconds": FIRST - lead,
-                            "end_seconds": FIRST - lead + 16 * BEAT + out_ms / 1000,
-                            "attack_ms": 2,
-                            "release_ms": out_ms,
-                        },
-                        "second": {
-                            "sample": "song",
-                            "start_seconds": FIRST - lead + enters * BEAT + shift,
-                            "attack_ms": in_ms,
-                            "release_ms": 20,
-                        },
+                    "type": "midi",
+                    "instrument": {
+                        "sampler": {
+                            "drum_rack": True,
+                            "pads": {
+                                "first": {
+                                    "sample": "song",
+                                    "start_seconds": FIRST - lead,
+                                    "end_seconds": FIRST - lead + 16 * BEAT + out_ms / 1000,
+                                    "attack_ms": 2,
+                                    "release_ms": out_ms,
+                                },
+                                "second": {
+                                    "sample": "song",
+                                    "start_seconds": FIRST - lead + enters * BEAT + shift,
+                                    "attack_ms": in_ms,
+                                    "release_ms": 20,
+                                },
+                            },
+                            "map": [{"notes": 36, "pad": "first"}, {"notes": 37, "pad": "second"}],
+                        }
                     },
-                    "clips": [{"pattern": "edit"}],
+                    "clips": [
+                        {
+                            "id": "edit",
+                            "length_beats": 4 + 16 + rest + 2,
+                            "notes": [
+                                {"pitch": 36, "at": 4 - lead / BEAT, "duration": "1/4"},
+                                {"pitch": 37, "at": 20 - lead / BEAT, "duration": "1/4"},
+                            ],
+                        }
+                    ],
                 },
                 # A drum hit after another is not a join.
-                {"id": "hats", "gain_db": -12, "pads": {"h": {"sample": "hat"}}, "clips": [{"pattern": "hats", "repeats": 4}]},
+                drum_track("hats", "h", "hat", 16, [n / 2 for n in range(8)], loop_beats=4, gain_db=-12),
             ],
         },
         folder / "song.yaml",

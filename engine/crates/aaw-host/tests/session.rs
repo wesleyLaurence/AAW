@@ -22,8 +22,8 @@ fn file(s: &Session) -> String {
 fn every_command_round_trips_as_json() {
     let commands = [
         json!({"op": "set", "path": "tracks.drums.gain_db", "value": -3}),
-        json!({"op": "track.add", "id": "keys", "index": 1, "gain_db": -6}),
-        json!({"op": "clip.add", "track": "drums", "pattern": "beat", "at": "1/3"}),
+        json!({"op": "track.add", "type": "audio", "id": "keys", "index": 1, "gain_db": -6}),
+        json!({"op": "clip.add", "track": "drums", "length_beats": 4, "at": "1/3"}),
         json!({"op": "clip.move", "clip": "@4", "at": 8}),
         json!({"op": "audio.add", "track": "drums", "sample": "tone", "at": 4, "source_start_seconds": 0.1}),
         json!({"op": "audio.move", "clip": "@9", "track": "bass", "at": "13/3"}),
@@ -97,7 +97,7 @@ fn invalid_edits_are_refused_with_the_models_message_and_change_nothing() {
 #[test]
 fn tracks_add_move_rename_and_remove() {
     let (_d, mut s) = open(true);
-    edit(&mut s, json!({"op": "track.add", "id": "keys", "index": 0, "gain_db": -6})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "keys", "index": 0, "gain_db": -6})).unwrap();
     assert_eq!(get(&s, "tracks.0.id"), json!("keys"));
     edit(&mut s, json!({"op": "track.move", "track": "keys", "index": 2})).unwrap();
     assert_eq!(get(&s, "tracks.2.id"), json!("keys"));
@@ -108,6 +108,14 @@ fn tracks_add_move_rename_and_remove() {
     // Removing a track that a sidechain names is refused.
     let e = edit(&mut s, json!({"op": "track.remove", "track": "kit"})).unwrap_err();
     assert!(e.contains("bass: unknown sidechain track kit"), "{e}");
+    // A track is a MIDI track unless an audio track is asked for.
+    edit(&mut s, json!({"op": "track.add", "id": "lead"})).unwrap();
+    assert_eq!(get(&s, "tracks.lead.type"), json!("midi"));
+    let e = edit(&mut s, json!({"op": "audio.add", "track": "lead", "sample": "tone"})).unwrap_err();
+    assert!(e.contains("lead is a MIDI track; an audio clip goes on an audio track"), "{e}");
+    let e = edit(&mut s, json!({"op": "track.add", "id": "x", "type": "video"})).unwrap_err();
+    assert!(e.contains("midi or audio"), "{e}");
+    edit(&mut s, json!({"op": "track.remove", "track": "lead"})).unwrap();
     edit(&mut s, json!({"op": "track.remove", "track": "keys"})).unwrap();
     assert_eq!(get(&s, "tracks").as_array().unwrap().len(), 2);
 }
@@ -225,7 +233,7 @@ fn with_song(s: &mut Session) -> String {
     let dir = s.path().parent().unwrap().to_path_buf();
     std::fs::write(dir.join("song.wav"), aaw_engine::wav::float_wav_bytes(&song, 48000)).unwrap();
     edit(s, json!({"op": "set", "path": "samples.song", "value": {"path": "song.wav"}})).unwrap();
-    edit(s, json!({"op": "track.add", "id": "song"})).unwrap();
+    edit(s, json!({"op": "track.add", "type": "audio", "id": "song"})).unwrap();
     let made = edit(s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 4, "source_start_seconds": 1})).unwrap();
     assert_eq!(made["path"], json!("tracks.song.audio.0"));
     assert_eq!(made["label"], json!("Add audio clip of song to song"));
@@ -311,7 +319,7 @@ fn an_audio_clip_moves_to_a_beat_and_a_track_with_its_handle() {
     assert_eq!(r["label"], json!("Move audio clip song to beat \"25/3\" on song"));
     assert_eq!(get(&s, "tracks.song.audio.0"), json!({"sample": "song", "at": "25/3", "source_start_seconds": 1.0}));
     // To another track, last among its clips, and to a beat at once.
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     let r = edit(&mut s, json!({"op": "audio.move", "clip": clip, "track": "vox", "at": 2})).unwrap();
     assert_eq!(r["label"], json!("Move audio clip song to beat 2 on vox"));
     assert_eq!(get(&s, "tracks.song.audio"), json!([]));
@@ -483,18 +491,17 @@ fn a_batch_is_one_step_and_all_or_nothing() {
     let built = json!({"op": "batch", "commands": [
         {"op": "track.add", "id": "lead"},
         {"op": "pad.add", "track": "lead", "pad": "t", "sample": "tone"},
+        {"op": "instrument.map", "track": "lead", "notes": "C2", "pad": "t"},
         {"op": "effect.add", "owner": "tracks.lead", "type": "limiter"},
-        {"op": "pattern.add", "pattern": "riff", "length_beats": 2},
-        {"op": "pattern.steps", "pattern": "riff", "pad": "t", "row": "x...x..."},
-        {"op": "event.add", "pattern": "riff", "at": 1.5, "pad": "t"},
-        {"op": "clip.add", "track": "lead", "pattern": "riff", "at": 4},
+        {"op": "clip.add", "track": "lead", "id": "riff", "at": 4, "length_beats": 2},
+        {"op": "note.add", "clip": "tracks.lead.clips.riff", "pitch": "C2", "at": 1.5, "duration": "1/4"},
         {"op": "return.add", "id": "room"},
         {"op": "effect.add", "owner": "returns.room", "type": "reverb"},
         {"op": "send.set", "track": "lead", "to": "room", "gain_db": -6},
     ]});
     edit(&mut s, built).unwrap();
-    assert_eq!(get(&s, "tracks.lead.clips"), json!([{"pattern": "riff", "at": 4}]));
-    assert_eq!(get(&s, "patterns.riff"), json!({"length_beats": 2, "steps": {"t": "x...x..."}, "events": [{"at": 1.5, "pad": "t"}]}));
+    assert_eq!(get(&s, "tracks.lead.clips.riff.notes.n1.at"), json!(1.5));
+    assert_eq!(get(&s, "tracks.lead.instrument.sampler.map.0.pad"), json!("t"));
     assert_eq!(get(&s, "returns.room.effects.0.type"), json!("reverb"));
 }
 
@@ -580,16 +587,18 @@ fn external_edits_load_as_undoable_steps() {
     assert!(s.sync().is_none(), "the host's own write is not external");
     // A raw edit: the tempo changes and a clip is appended.
     let text = file(&s).replace("tempo: 120.0", "tempo: 100").replace(
-        "- {pattern: bass, at: 16, repeats: 2}",
-        "- {pattern: bass, at: 16, repeats: 2}\n  - {pattern: bass, at: 28}",
+        "{id: bass-3, at: 16,",
+        "{id: late, at: 28, length_beats: 4}, {id: bass-3, at: 16,",
     );
+    assert!(text.contains("id: late"), "{text}");
     std::thread::sleep(std::time::Duration::from_millis(10));
     std::fs::write(s.path(), &text).unwrap();
     let c = s.sync().expect("external change");
     assert_eq!((c.origin, c.op.as_str()), (Origin::External, "reload"));
     assert_eq!(get(&s, "session.tempo"), json!(100.0));
     // Existing clips keep their handles; the file is left as written.
-    assert_eq!(&refs(&s, "tracks.bass.clips")[..3], &handles[..]);
+    let now = refs(&s, "tracks.bass.clips");
+    assert_eq!([&now[0], &now[1], &now[3]], [&handles[0], &handles[1], &handles[2]], "late is new, before bass-3");
     assert_eq!(file(&s), text);
     // An invalid edit pauses edits until fixed.
     std::fs::write(s.path(), text.replace("tempo: 100", "tempo: 9999")).unwrap();

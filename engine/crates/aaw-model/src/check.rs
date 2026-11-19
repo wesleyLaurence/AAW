@@ -32,7 +32,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("note-retriggered", "Notes start while a note of the same pitch on the same track is still sounding, so the pitch is struck again before it ends. Shorten the earlier note or remove the later."),
     ("track-empty", "A track has an instrument and nothing to play, notes and no instrument, or nothing at all."),
     ("register-crowded", "Two tracks hold notes in the same octave below C3 in the same bars, listed. Two low parts in one register are the most common cause of a muddy mix: move one an octave, or give those bars to one."),
-    ("pad-far-from-root", "A sample is repitched more than two octaves from its root, by the note, the event's and the pad's transpose, where it sounds artificial."),
+    ("pad-far-from-root", "A sample is repitched more than two octaves from its root, by the note and the pad's transpose, where it sounds artificial."),
     ("note-below-hearing", "A Synth note's lowest oscillator is under 20 Hz, which is felt rather than heard."),
     ("notes-outside-clip", "Notes start before their clip or at or after its end; they are kept and do not play."),
     ("notes-unmapped", "A sampler maps no pad to notes of a clip, which are silent."),
@@ -178,11 +178,7 @@ pub fn check(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
 }
 
 fn pad_path(t: &Track, name: &str) -> String {
-    if t.midi.is_some() {
-        format!("tracks.{}.instrument.sampler.pads.{name}", t.id)
-    } else {
-        format!("tracks.{}.pads.{name}", t.id)
-    }
+    format!("tracks.{}.instrument.sampler.pads.{name}", t.id)
 }
 
 /// Pads and audio clips stretched far enough to hear, or with nothing to
@@ -381,24 +377,11 @@ struct Span {
     music: String,
 }
 
-/// Every clip of track `ti` that plays: pattern clips, audio clips and note
-/// clips, none deactivated.
+/// Every clip of track `ti` that plays: audio clips and note clips, none
+/// deactivated.
 fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
     let t = &p.tracks[ti];
     let mut out = Vec::new();
-    for (i, c) in t.clips.iter().enumerate().filter(|(_, c)| c.active) {
-        let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
-        let start = c.at_exact();
-        let span = pattern.length_exact() * BigRational::from_integer(c.repeats.into());
-        out.push(Span {
-            path: format!("tracks.{}.clips.{i}", t.id),
-            index: i,
-            audio: false,
-            end: Some(f(&(&start + span))),
-            start,
-            music: format!("pattern {}", c.pattern),
-        });
-    }
     for (i, c) in t.audio.iter().enumerate().filter(|(_, c)| c.active) {
         let start = c.at_exact();
         let until = c.source_end_seconds.or_else(|| seconds.get(&c.sample).copied());
@@ -582,19 +565,18 @@ fn empty(t: &Track, out: &mut Vec<Warning>) {
                 _ => None,
             }
         }
-        None if !t.clips.is_empty() || !t.audio.is_empty() => None,
-        None if !t.pads.is_empty() => Some("pads and no clips to play them".to_string()),
-        None => Some("no pads, clips or audio".to_string()),
+        None if !t.audio.is_empty() => None,
+        None => Some("no audio clips".to_string()),
     };
     if let Some(m) = message {
         out.push(Warning::new("track-empty", format!("{}: {m}", t.id), vec![format!("tracks.{}", t.id)]));
     }
 }
 
-/// A sample's repitch for a hit: the pad's and the event's transpose, and the
-/// note against the sample's root, or middle C when it has none.
-fn shift(p: &Project, pad: &Pad, note: Option<i64>, transpose: f64) -> f64 {
-    let mut semitones = pad.transpose + transpose;
+/// A sample's repitch for a hit: the pad's transpose, and the note against
+/// the sample's root, or middle C when it has none.
+fn shift(p: &Project, pad: &Pad, note: Option<i64>) -> f64 {
+    let mut semitones = pad.transpose;
     if let Some(note) = note {
         let root = p.samples[&pad.sample]
             .root_note
@@ -611,23 +593,11 @@ fn shift(p: &Project, pad: &Pad, note: Option<i64>, transpose: f64) -> f64 {
 fn far_from_root(p: &Project, t: &Track, out: &mut Vec<Warning>) {
     // Each hit: the pad, its beat and its repitch.
     let mut hits: Vec<(&str, BigRational, f64)> = Vec::new();
-    for c in t.clips.iter().filter(|c| c.active) {
-        let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
-        let (length, events) = (pattern.length_exact(), pattern.expanded());
-        for r in 0..c.repeats {
-            let base = c.at_exact() + BigRational::from_integer(r.into()) * &length;
-            for e in &events {
-                let Some((name, pad)) = t.pads.get_key_value(&e.pad) else { continue };
-                let note = e.note.as_deref().filter(|n| !n.is_empty()).and_then(|n| crate::rules::midi(n).ok());
-                hits.push((name.as_str(), &base + e.at_exact(), shift(p, pad, note, e.transpose)));
-            }
-        }
-    }
     if let Some(sampler) = t.midi.as_ref().and_then(|m| m.sampler()) {
         for n in track_notes(p, t.midi.as_ref().expect("a sampler is a MIDI track's")) {
             let Some(entry) = sampler.entry(n.pitch) else { continue };
             let Some((name, pad)) = sampler.pads.get_key_value(&entry.pad) else { continue };
-            hits.push((name.as_str(), n.at.clone(), shift(p, pad, entry.pitched.then_some(n.pitch), 0.0)));
+            hits.push((name.as_str(), n.at.clone(), shift(p, pad, entry.pitched.then_some(n.pitch))));
         }
     }
     let mut far: BTreeMap<&str, (usize, BigRational, f64)> = BTreeMap::new();
@@ -696,8 +666,8 @@ fn below_hearing(p: &Project, t: &Track, out: &mut Vec<Warning>) {
 }
 
 /// A track's pitched notes as they sound, (start, end, pitch) in beats: a
-/// Synth's notes, a sampler's notes that a pitched entry plays, and pattern
-/// events with a note. Drum maps and hits without a note have no register.
+/// Synth's notes and a sampler's notes that a pitched entry plays. Drum
+/// maps have no register.
 fn pitched(p: &Project, t: &Track) -> Vec<(f64, f64, i64)> {
     let mut out = Vec::new();
     if let Some(midi) = &t.midi {
@@ -710,22 +680,6 @@ fn pitched(p: &Project, t: &Track) -> Vec<(f64, f64, i64)> {
         for n in track_notes(p, midi) {
             if keep(n.pitch) {
                 out.push((f(&n.at), f(&(&n.at + &n.beats)), n.pitch));
-            }
-        }
-    }
-    for c in &t.clips {
-        let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
-        let (length, events) = (pattern.length_exact(), pattern.expanded());
-        for r in 0..c.repeats {
-            let base = c.at_exact() + BigRational::from_integer(r.into()) * &length;
-            for e in &events {
-                let Some(pitch) = e.note.as_deref().filter(|n| !n.is_empty()).and_then(|n| crate::rules::midi(n).ok()) else {
-                    continue;
-                };
-                let at = &base + e.at_exact();
-                // A hit without a duration rings for its sample; a beat stands in.
-                let until = &at + e.duration_exact().unwrap_or_else(|| BigRational::from_integer(1.into()));
-                out.push((f(&at), f(&until), pitch));
             }
         }
     }

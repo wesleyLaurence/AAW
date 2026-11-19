@@ -1,7 +1,7 @@
 """Generated songs with generated audio, for tests that render.
 
 Samples are short tones, noise bursts and clicks in every format the engine
-reads; songs use every pad, pattern, clip and mixer field, and `add_mix` gives
+reads; songs use every pad, note clip and mixer field on Drum Racks, and `add_mix` gives
 one effects, sends, returns and automation. Nothing here is personal material.
 """
 
@@ -72,33 +72,27 @@ def make_song(rng, directory):
         if rng.random() < 0.2:
             p["source_bpm"] = rng.choice([90, 120.5, 140])
         pads[pad] = p
-    patterns = {}
-    for n in range(2):
-        steps = {pad: "".join(rng.choice(".x.3x9") for _ in range(16)) for pad in rng.sample(["a", "b"], rng.randint(1, 2))}
-        events = []
-        for _ in range(rng.randint(0, 4)):
-            pad = rng.choice(["a", "b", "g"])
-            e = {"at": rng.choice([0, "1/3", 1.5, "5/4", 2, 3.75]), "pad": pad}
-            if pad == "g" or rng.random() < 0.3:
-                e["duration"] = rng.choice([0.25, "1/3", 1, 2.5])
-            if rng.random() < 0.4:
-                e["note"] = rng.choice(["C3", "G#2", "D4"])
-            if rng.random() < 0.3:
-                e["velocity"] = rng.randint(1, 127)
-            if rng.random() < 0.2:
-                e["transpose"] = rng.choice([-12, 0.5, 5])
-            events.append(e)
-        patterns[f"p{n}"] = {"length_beats": 4, "steps": steps, "events": events, "swing": rng.choice([0.5, 0.58, 2 / 3])}
+    # A Drum Rack: a and b on their keys as they are, g played at the notes'
+    # pitches and held for them.
+    keys = [{"notes": 36, "pad": "a"}, {"notes": "D2", "pad": "b"}, {"notes": [48, 74], "pad": "g", "pitched": True}]
+    instrument = {"sampler": {"drum_rack": True, "pads": pads, "map": keys}}
     tracks = []
     for i in range(rng.randint(1, 5)):
-        t = {"id": f"t{i}", "pads": pads}
+        t = {"id": f"t{i}", "type": "midi", "instrument": instrument}
         clips = []
-        for _ in range(rng.randint(1, 3)):
-            repeats = rng.choice([1, 2])
-            at = rng.randrange(0, length - 4 * repeats + 1)
-            c = {"pattern": rng.choice(list(patterns)), "at": rng.choice([at, str(at)]), "repeats": repeats}
-            if rng.random() < 0.3:
-                c["velocity_scale"] = round(rng.uniform(0.2, 1.5), 3)
+        for n in range(rng.randint(1, 3)):
+            beats = rng.choice([4, 8])
+            at = rng.randrange(0, length - beats + 1)
+            notes = []
+            for _ in range(rng.randint(1, 6)):
+                note = {"pitch": rng.choice([36, "D2", "C3", "G#2", 62]), "at": rng.choice([0, "1/3", 1.5, "5/4", 2, 3.75, "13/10"])}
+                note["duration"] = rng.choice([0.25, "1/3", 1, 2.5])
+                if rng.random() < 0.4:
+                    note["velocity"] = rng.randint(1, 127)
+                notes.append(note)
+            c = {"id": f"t{i}c{n}", "at": rng.choice([at, str(at)]), "length_beats": beats, "notes": notes}
+            if beats == 8 and rng.random() < 0.5:
+                c["loop_beats"] = 4
             clips.append(c)
         t["clips"] = clips
         for field, low, high in [("gain_db", -18, 0), ("pan", -1, 1)]:
@@ -119,7 +113,6 @@ def make_song(rng, directory):
     song = {
         "session": session,
         "samples": {k: {"path": v["path"], "root_note": v["root_note"]} for k, v in samples.items()},
-        "patterns": patterns,
         "tracks": tracks,
         "sections": [{"id": "a", "at": 0, "length_beats": 4}, {"id": "b", "at": "10/3", "length_beats": 4}],
     }

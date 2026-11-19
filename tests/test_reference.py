@@ -73,11 +73,13 @@ def mix(tmp_path, **changes):
         {
             "session": {"tempo": BPM, "length_beats": BARS * 4, "end_fade_ms": 0},
             "samples": {"song": {"path": "source.wav"}},
-            "patterns": {
-                "all": {"length_beats": BARS * 4, "events": [{"at": 0, "pad": "song"}]}
-            },
             "tracks": [
-                {"id": "song", "pads": {"song": {"sample": "song"}}, "clips": [{"pattern": "all"}]}
+                {
+                    "id": "song",
+                    "type": "midi",
+                    "instrument": {"sampler": {"drum_rack": True, "pads": {"song": {"sample": "song"}}, "map": [{"notes": 36, "pad": "song"}]}},
+                    "clips": [{"id": "all", "length_beats": BARS * 4, "notes": [{"pitch": 36, "at": 0, "duration": "1/4"}]}],
+                }
             ],
             "sections": [
                 {"id": "verse", "at": 0, "length_beats": BARS * 2},

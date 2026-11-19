@@ -7,9 +7,9 @@
 //!
 //! A range is `[start, start + length)`. A clip that crosses an edge is cut
 //! there first, so that the range holds exactly what plays in it: a note clip
-//! becomes two with the note across the cut divided, an audio clip is split as
-//! `audio.split` splits it, and a pattern clip is split between repeats or the
-//! command is refused. A lane gains a point at each edge with the value it had
+//! becomes two with the note across the cut divided, and an audio clip is
+//! split as `audio.split` splits it; a looped clip is cut only at a wrap, or
+//! the command is refused. A lane gains a point at each edge with the value it had
 //! there, so the curve outside the range is unchanged.
 
 use crate::command::{beat_text, beat_value, exact, number, set, unique, Edit, Outcome, Span};
@@ -32,7 +32,6 @@ const CUT_FADE_OUT_MS: f64 = 12.0;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Kind {
-    Pattern,
     Note,
     Audio,
 }
@@ -426,7 +425,7 @@ impl<'a> Edit<'a> {
     fn lists(&self, track: &[Step]) -> Vec<(&'static str, Kind)> {
         let mut out = Vec::new();
         if self.node(track).get("clips").is_some() {
-            out.push(("clips", if self.is_midi(track) { Kind::Note } else { Kind::Pattern }));
+            out.push(("clips", Kind::Note));
         }
         if self.node(track).get("audio").is_some() {
             out.push(("audio", Kind::Audio));
@@ -455,28 +454,6 @@ impl<'a> Edit<'a> {
         let mut left = node.clone();
         let mut right = node.clone();
         match kind {
-            Kind::Pattern => {
-                let start = exact(node.get("at")).unwrap_or_default();
-                let pattern = node.field("pattern").unwrap_or_default().to_string();
-                let length = exact(self.root.get("patterns").and_then(|p| p.get(&pattern)).and_then(|p| p.get("length_beats")))
-                    .ok_or_else(|| format!("{path}: pattern {pattern} has no length"))?;
-                let repeats = match node.get("repeats") {
-                    Some(Node::Leaf(Value::Int(n))) => n.to_i64().unwrap_or(1),
-                    _ => 1,
-                };
-                let k = (at - &start) / &length;
-                if !k.is_integer() {
-                    return Err(format!(
-                        "Beat {} falls inside a repeat of clip {path}, whose pattern {pattern} is {} beats long; a pattern clip is cut only between repeats",
-                        beat_text(at),
-                        beat_text(&length)
-                    ));
-                }
-                let k = k.to_integer().to_i64().unwrap_or(0);
-                set(&mut left, "repeats", Value::int(k));
-                set(&mut right, "at", beat_value(at));
-                set(&mut right, "repeats", Value::int(repeats - k));
-            }
             Kind::Note => {
                 let start = exact(node.get("at")).unwrap_or_default();
                 let length = exact(node.get("length_beats")).unwrap_or_default();
@@ -620,8 +597,7 @@ impl<'a> Edit<'a> {
         Ok(())
     }
 
-    /// One clip of two that meet, when they are one music: a pattern clip and
-    /// its continuation, an audio clip and the rest of its file as it was
+    /// One clip of two that meet, when they are one music: an audio clip and the rest of its file as it was
     /// playing, a note clip and the one that follows it, with a note divided
     /// at the join made whole again.
     pub(crate) fn merged(&self, kind: Kind, left: &Node, right: &Node) -> Option<Node> {
@@ -637,7 +613,6 @@ impl<'a> Edit<'a> {
             let music: &[&str] = match kind {
                 Kind::Note => &["notes"],
                 Kind::Audio => &["sample", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms", "fade_out_ms", "fade_curve", "source_bpm", "stretch", "transpose"],
-                Kind::Pattern => return None,
             };
             if !(same("loop_beats") && music.iter().all(|k| same(k)) && every.is_positive() && (&length / &every).is_integer()) {
                 return None;
@@ -646,16 +621,6 @@ impl<'a> Edit<'a> {
             return Some(out);
         }
         match kind {
-            Kind::Pattern => {
-                if !(same("pattern") && same("velocity_scale")) {
-                    return None;
-                }
-                let repeats = |n: &Node| match n.get("repeats") {
-                    Some(Node::Leaf(Value::Int(n))) => n.to_i64().unwrap_or(1),
-                    _ => 1,
-                };
-                set(&mut out, "repeats", Value::int(repeats(left) + repeats(right)));
-            }
             Kind::Audio => {
                 let (l, r) = (Span::of(left, self.tempo()).ok()?, Span::of(right, self.tempo()).ok()?);
                 let continuous = l.end.is_some_and(|end| (end - r.start).abs() < 1e-9);

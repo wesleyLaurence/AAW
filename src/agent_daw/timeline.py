@@ -114,11 +114,11 @@ def repetitions(clip, tempo) -> list[dict]:
 
 
 def track_pads(track) -> dict:
-    """A track's pads: its own, or the sampler's of a MIDI track."""
+    """A track's pads: the sampler's of a MIDI track; an audio track has none."""
     if track.get("type") == "midi":
         instrument = track["instrument"] or {}
         return (instrument.get("sampler") or {}).get("pads", {})
-    return track["pads"]
+    return {}
 
 
 def regions(project, root: Path):

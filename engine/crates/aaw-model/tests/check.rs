@@ -13,13 +13,11 @@ samples:
   kick: {path: kick.wav}
   piano: {path: piano.wav, root_note: C4}
   song: {path: song.wav}
-patterns:
-  beat: {length_beats: 4, events: [{at: 0, pad: kick}, {at: 2, pad: kick}]}
-  fill: {length_beats: 4, events: [{at: 3, pad: kick}]}
 tracks:
   - id: drums
-    pads: {kick: {sample: kick}}
-    clips: [{pattern: beat, at: 0, repeats: 8}]
+    type: midi
+    instrument: {sampler: {drum_rack: true, pads: {kick: {sample: kick}}, map: [{notes: 36, pad: kick}]}}
+    clips: [{id: beat, length_beats: 32, loop_beats: 4, notes: [{pitch: 36, duration: 1}, {pitch: 36, at: 2, duration: 1}]}]
   - id: bass
     type: midi
     instrument: {synth: {oscillators: {a: {}}}}
@@ -51,6 +49,18 @@ fn with_track(track: &str) -> String {
     format!("{SONG}{track}")
 }
 
+/// The drums' clip as SONG writes it.
+const BEAT: &str = "clips: [{id: beat, length_beats: 32, loop_beats: 4, notes: [{pitch: 36, duration: 1}, {pitch: 36, at: 2, duration: 1}]}]";
+
+/// A clip of the drums' beat looped a bar, or of a fill on beat 3.
+fn beat(id: &str, at: u32, beats: u32) -> String {
+    format!("{{id: {id}, at: {at}, length_beats: {beats}, loop_beats: 4, notes: [{{pitch: 36, duration: 1}}, {{pitch: 36, at: 2, duration: 1}}]}}")
+}
+
+fn fill(id: &str, at: u32) -> String {
+    format!("{{id: {id}, at: {at}, length_beats: 4, notes: [{{pitch: 36, at: 3, duration: 1}}]}}")
+}
+
 fn found(text: &str, code: &str) -> Vec<Warning> {
     check(&song(text), &HashMap::new()).into_iter().filter(|w| w.code == code).collect()
 }
@@ -62,12 +72,12 @@ fn the_song_raises_nothing() {
 
 #[test]
 fn clips_stacked_by_duplicating_onto_one_beat() {
-    let stacked = edit("clips: [{pattern: beat, at: 0, repeats: 8}]", "clips: [{pattern: beat, at: 0, repeats: 4}, {pattern: beat, at: 16, repeats: 4}, {pattern: beat, at: 16}, {pattern: beat, at: 16}]");
+    let stacked = edit(BEAT, &format!("clips: [{}, {}, {}, {}]", beat("a", 0, 16), beat("b", 16, 16), beat("c", 16, 16), beat("d", 16, 4)));
     let w = found(&stacked, "clips-stacked");
     assert_eq!(w.len(), 1, "{w:?}");
-    assert_eq!(w[0].paths, ["tracks.drums.clips.1", "tracks.drums.clips.2", "tracks.drums.clips.3"]);
+    assert_eq!(w[0].paths, ["tracks.drums.clips.b", "tracks.drums.clips.c", "tracks.drums.clips.d"]);
     assert_eq!(w[0].to_json()["at"], json!(16));
-    assert_eq!(w[0].message, "drums: tracks.drums.clips.1, tracks.drums.clips.2 and tracks.drums.clips.3 start on beat 16 with the same music, so it plays 3 times at once");
+    assert_eq!(w[0].message, "drums: tracks.drums.clips.b, tracks.drums.clips.c and tracks.drums.clips.d start on beat 16 with the same music, so it plays 3 times at once");
     // Stacked clips are not also reported as overlapping.
     assert_eq!(found(&stacked, "clips-overlap"), []);
     // Two note clips with the same notes on one beat, and their notes are not
@@ -76,20 +86,20 @@ fn clips_stacked_by_duplicating_onto_one_beat() {
     assert_eq!(found(&notes, "clips-stacked")[0].paths, ["tracks.bass.clips.copy", "tracks.bass.clips.line"]);
     assert_eq!(found(&notes, "note-retriggered"), []);
     // The same beat with other music is an overlap, not a stack.
-    let other = edit("clips: [{pattern: beat, at: 0, repeats: 8}]", "clips: [{pattern: beat, at: 0, repeats: 8}, {pattern: fill, at: 0}]");
+    let other = edit(BEAT, &format!("clips: [{}, {}]", beat("a", 0, 32), fill("f", 0)));
     assert_eq!(found(&other, "clips-stacked"), []);
 }
 
 #[test]
 fn clips_overlap_is_information() {
-    let fill = edit("clips: [{pattern: beat, at: 0, repeats: 8}]", "clips: [{pattern: beat, at: 0, repeats: 8}, {pattern: fill, at: 28}]");
-    let w = found(&fill, "clips-overlap");
+    let both = edit(BEAT, &format!("clips: [{}, {}]", beat("a", 0, 32), fill("f", 28)));
+    let w = found(&both, "clips-overlap");
     assert_eq!(w.len(), 1, "{w:?}");
     assert_eq!((w[0].level, w[0].to_json()["level"].clone()), (Level::Info, json!("info")));
-    assert_eq!(w[0].paths, ["tracks.drums.clips.0", "tracks.drums.clips.1"]);
-    assert_eq!(w[0].message, "drums: tracks.drums.clips.0 and tracks.drums.clips.1 sound at once from beat 28 to 32");
+    assert_eq!(w[0].paths, ["tracks.drums.clips.a", "tracks.drums.clips.f"]);
+    assert_eq!(w[0].message, "drums: tracks.drums.clips.a and tracks.drums.clips.f sound at once from beat 28 to 32");
     // One after the other, they only meet.
-    let after = edit("clips: [{pattern: beat, at: 0, repeats: 8}]", "clips: [{pattern: beat, at: 0, repeats: 7}, {pattern: fill, at: 28}]");
+    let after = edit(BEAT, &format!("clips: [{}, {}]", beat("a", 0, 28), fill("f", 28)));
     assert_eq!(found(&after, "clips-overlap"), []);
 }
 
@@ -110,7 +120,7 @@ fn nothing_is_said_of_an_audio_clip_past_the_song_s_length() {
     // The length is the song's content, which a host settles after every
     // edit (D130); a file saved longer or shorter than its content is not
     // warned about, and no code is about the end.
-    let audio = |clip: &str| with_track(&format!("  - id: edit\n    pads: {{}}\n    audio: [{clip}]\n"));
+    let audio = |clip: &str| with_track(&format!("  - id: edit\n    audio: [{clip}]\n"));
     let long = song(&audio("{sample: song, at: 24, source_end_seconds: 6}"));
     let seconds = HashMap::from([("song".to_string(), 6.0)]);
     assert!(check(&long, &seconds).iter().all(|w| !w.code.contains("ends") && !w.message.contains("cut off")), "{:?}", check(&long, &seconds));
@@ -123,15 +133,15 @@ fn tracks_with_nothing_to_play() {
         ("  - {id: pad, type: midi, instrument: {synth: {oscillators: {a: {}}}}}\n", "pad: a synth and no notes for it to play"),
         ("  - {id: pad, type: midi}\n", "pad: no instrument and no notes"),
         ("  - {id: pad, type: midi, clips: [{length_beats: 4, notes: [{pitch: 60, duration: 1}]}]}\n", "pad: 1 note and no instrument, so nothing is heard"),
-        ("  - {id: pad, pads: {kick: {sample: kick}}}\n", "pad: pads and no clips to play them"),
-        ("  - {id: pad, pads: {}}\n", "pad: no pads, clips or audio"),
+        ("  - {id: pad, type: midi, instrument: {sampler: {pads: {kick: {sample: kick}}, map: [{notes: 36, pad: kick}]}}}\n", "pad: a sampler and no notes for it to play"),
+        ("  - {id: pad}\n", "pad: no audio clips"),
     ];
     for (track, message) in cases {
         let w = found(&with_track(track), "track-empty");
         assert_eq!(w.iter().map(|w| w.message.as_str()).collect::<Vec<_>>(), [message]);
         assert_eq!(w[0].paths, ["tracks.pad"]);
     }
-    assert_eq!(found(&with_track("  - {id: pad, pads: {}, audio: [{sample: song}]}\n"), "track-empty"), []);
+    assert_eq!(found(&with_track("  - {id: pad, audio: [{sample: song}]}\n"), "track-empty"), []);
 }
 
 #[test]
@@ -157,12 +167,11 @@ fn a_sample_far_from_its_root() {
     assert_eq!(w[0].message, "piano.piano: 1 hit plays the sample as far as 36 semitones below its root, the first at beat 1; past two octaves a repitched sample sounds artificial");
     assert_eq!(w[0].paths, ["tracks.piano.instrument.sampler.pads.piano"]);
     assert_eq!(found(&sampler("C2"), "pad-far-from-root"), [], "two octaves is not past them");
-    // A pattern's pitched event, and the pad's own transpose.
-    let pattern = with_track("  - {id: hits, pads: {p: {sample: piano, transpose: 12}}, clips: [{pattern: high, at: 8}]}\n")
-        .replace("  fill:", "  high: {length_beats: 4, events: [{at: 2, pad: p, note: C6}]}\n  fill:");
-    let w = found(&pattern, "pad-far-from-root");
+    // A pitched note, and the pad's own transpose.
+    let high = with_track("  - {id: hits, type: midi, instrument: {sampler: {pads: {p: {sample: piano, transpose: 12}}, map: [{notes: [72, 96], pad: p, pitched: true}]}}, clips: [{id: high, at: 8, length_beats: 4, notes: [{pitch: C6, at: 2, duration: 1}]}]}\n");
+    let w = found(&high, "pad-far-from-root");
     assert_eq!(w.len(), 1, "{w:?}");
-    assert_eq!((w[0].paths.clone(), w[0].to_json()["at"].clone()), (vec!["tracks.hits.pads.p".to_string()], json!(10)));
+    assert_eq!((w[0].paths.clone(), w[0].to_json()["at"].clone()), (vec!["tracks.hits.instrument.sampler.pads.p".to_string()], json!(10)));
     assert!(w[0].message.contains("36 semitones above"), "{}", w[0].message);
 }
 

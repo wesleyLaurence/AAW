@@ -5,7 +5,7 @@
 //! Commands are JSON objects tagged by `op`, the form they take over the socket,
 //! in `batch` files and in the change log. Objects added by a command take their
 //! fields from the command's other keys, e.g.
-//! `{"op": "clip.add", "track": "drums", "pattern": "verse", "at": 8}`.
+//! `{"op": "clip.add", "track": "drums", "length_beats": 4, "at": 8}`.
 
 use crate::tree::{self, Item, Loc, Node, Step};
 use aaw_model::value::Value;
@@ -65,8 +65,8 @@ pub enum Command {
     /// rendered before its fader over the whole song to `frozen/TRACK.wav`
     /// at the song's rate, which plays in their place until
     /// `track.unfreeze`. While it is frozen, an edit of its clips, pads,
-    /// instrument, effects or their lanes, of the patterns its clips play
-    /// or the samples they name, or of the tempo, the rate or the
+    /// instrument, effects or their lanes, of the samples they name, or of
+    /// the tempo, the rate or the
     /// stretcher is refused; the fader, pan, mute, solo, sends and their
     /// lanes are live. A frozen track renders again from its content.
     #[serde(rename = "track.freeze")]
@@ -139,8 +139,6 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         at: Option<Json>,
     },
-    #[serde(rename = "clip.repeats")]
-    ClipRepeats { clip: String, repeats: Json },
     #[serde(rename = "clip.duplicate")]
     ClipDuplicate {
         clip: String,
@@ -171,8 +169,8 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         length: Option<Json>,
     },
-    /// Deactivates a clip, or activates it again: a pattern clip, a note
-    /// clip or an audio clip. A deactivated clip stays where it is and plays
+    /// Deactivates a clip, or activates it again: a note clip or an audio
+    /// clip. A deactivated clip stays where it is and plays
     /// nothing.
     #[serde(rename = "clip.active")]
     ClipActive { clip: String, active: bool },
@@ -189,17 +187,15 @@ pub enum Command {
     },
     /// Makes one clip of two or more clips of one track that plays what they
     /// played. Note clips become one note clip from the first's start to the
-    /// last's end, holding every note that played, loops unrolled; pattern
-    /// clips and audio clips join only where they meet and are one music: the
-    /// same pattern, or the same file played on from where the one before
-    /// leaves. The first clip is the one kept, with its ID and reference.
+    /// last's end, holding every note that played, loops unrolled; audio
+    /// clips join only where they meet and are one music: the same file
+    /// played on from where the one before leaves. The first clip is the one kept, with its ID and reference.
     #[serde(rename = "clip.join")]
     ClipJoin { clips: Vec<String> },
     /// Makes two clips of one at a beat inside it; they play as the one did.
     /// A note clip's note across the beat is held to it on the left and the
-    /// rest starts the right clip, which gets the next free ID; a pattern
-    /// clip is cut only between repeats; an audio clip as `audio.split`
-    /// splits it. A looped clip is cut only at a wrap.
+    /// rest starts the right clip, which gets the next free ID; an audio clip
+    /// as `audio.split` splits it. A looped clip is cut only at a wrap.
     #[serde(rename = "clip.split")]
     ClipSplit { clip: String, at: Json },
 
@@ -394,38 +390,6 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lead_ms: Option<f64>,
     },
-
-    // Patterns
-    #[serde(rename = "pattern.add")]
-    PatternAdd {
-        pattern: String,
-        #[serde(flatten)]
-        fields: Fields,
-    },
-    #[serde(rename = "pattern.steps")]
-    PatternSteps {
-        pattern: String,
-        pad: String,
-        /// Null, or left out, removes the row.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        row: Option<String>,
-    },
-    #[serde(rename = "pattern.duplicate")]
-    PatternDuplicate { pattern: String, to: String },
-    #[serde(rename = "event.add")]
-    EventAdd {
-        pattern: String,
-        #[serde(flatten)]
-        fields: Fields,
-    },
-    #[serde(rename = "event.set")]
-    EventSet {
-        event: String,
-        #[serde(flatten)]
-        fields: Fields,
-    },
-    #[serde(rename = "event.remove")]
-    EventRemove { event: String },
 
     // Pads
     #[serde(rename = "pad.add")]
@@ -1942,11 +1906,20 @@ impl<'a> Edit<'a> {
                 let mut f = Fields::new();
                 f.insert("id".into(), Json::String(id.clone()));
                 f.extend(fields.clone());
+                // A track is a MIDI track unless `type: audio` asks for an
+                // audio track, which the song writes with no type.
                 let node = match key {
-                    "tracks" if f.get("type").and_then(Json::as_str) == Some("midi") => {
-                        with_empty(&f, &["clips", "effects", "sends", "automation"], &[])?
-                    }
-                    "tracks" => with_empty(&f, &["clips", "audio", "effects", "sends", "automation"], &["pads"])?,
+                    "tracks" => match f.get("type").and_then(Json::as_str) {
+                        None | Some("midi") => {
+                            f.insert("type".into(), json!("midi"));
+                            with_empty(&f, &["clips", "effects", "sends", "automation"], &[])?
+                        }
+                        Some("audio") => {
+                            f.shift_remove("type");
+                            with_empty(&f, &["audio", "effects", "sends", "automation"], &[])?
+                        }
+                        Some(other) => return Err(format!("A track's type is midi or audio, not {other}")),
+                    },
                     _ => with_empty(&f, &["effects", "automation"], &[])?,
                 };
                 out.made.push(self.insert(&[], key, *index, node)?);
@@ -2116,9 +2089,7 @@ impl<'a> Edit<'a> {
                     let at = fields.get("at").map_or_else(|| "0".to_string(), short);
                     out.label = format!("Add note clip to {} at {at}", self.name(&loc));
                 } else {
-                    out.made.push(self.insert(&loc, "clips", None, map_node(fields)?)?);
-                    let pattern = fields.get("pattern").and_then(Json::as_str).unwrap_or("?");
-                    out.label = format!("Add clip of {pattern} to {}", self.name(&loc));
+                    return Err(format!("{track} is an audio track: a note clip goes on a MIDI track, and audio on this one with audio add"));
                 }
             }
             ClipMove { clip, track, at } => {
@@ -2129,12 +2100,8 @@ impl<'a> Edit<'a> {
                 }
                 if let Some(t) = track {
                     let dest = self.track(t)?;
-                    if self.is_midi(&dest) != self.is_midi(&owner) {
-                        return Err(if self.is_midi(&owner) {
-                            format!("A note clip moves only to a MIDI track, and {t} is not one")
-                        } else {
-                            format!("A pattern clip cannot move to MIDI track {t}")
-                        });
+                    if !self.is_midi(&dest) {
+                        return Err(format!("A note clip moves only to a MIDI track, and {t} is not one"));
                     }
                     if dest != owner {
                         let item = self.take(&owner, "clips", i)?;
@@ -2144,12 +2111,6 @@ impl<'a> Edit<'a> {
                     }
                 }
                 out.label = format!("Move clip {}", self.clip_name(&clip_loc));
-            }
-            ClipRepeats { clip, repeats } => {
-                let (owner, i) = self.member(clip, "clips", "a clip")?;
-                let loc = [owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat();
-                self.set_leaf(&loc, "repeats", json_value(repeats)?);
-                out.label = format!("Set repeats of clip {} to {}", self.clip_name(&loc), short(repeats));
             }
             ClipDuplicate { clip, track, at, id, times } => {
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
@@ -2348,7 +2309,7 @@ impl<'a> Edit<'a> {
                 }
                 let (owner, i) = self.member(clip, "clips", "a clip")?;
                 let loc = [owner.clone(), vec![Step::Key("clips".into()), Step::Index(i)]].concat();
-                let kind = if self.is_midi(&owner) { Kind::Note } else { Kind::Pattern };
+                let kind = Kind::Note;
                 let at = beat_at(at)?;
                 let node = self.node(&loc).clone();
                 let name = self.clip_name(&loc);
@@ -2388,13 +2349,9 @@ impl<'a> Edit<'a> {
                     return Err("The clips are on two tracks; clips joined are on one".into());
                 }
                 if found.iter().any(|(_, k, _)| *k != key) {
-                    return Err("Pattern clips and audio clips are not joined into one; join each kind by itself".into());
+                    return Err("Note clips and audio clips are not joined into one; join each kind by itself".into());
                 }
-                let kind = match key {
-                    "audio" => Kind::Audio,
-                    _ if self.is_midi(&owner) => Kind::Note,
-                    _ => Kind::Pattern,
-                };
+                let kind = if key == "audio" { Kind::Audio } else { Kind::Note };
                 let loc_of = |i: usize| [owner.clone(), vec![Step::Key(key.into()), Step::Index(i)]].concat();
                 // A deactivated clip and one that plays are not one music.
                 let active = |i: usize| !matches!(self.node(&loc_of(i)).get("active").map(Node::value), Some(Value::Bool(false)));
@@ -2794,6 +2751,9 @@ impl<'a> Edit<'a> {
             }
             AudioAdd { track, fields } => {
                 let loc = self.track(track)?;
+                if self.is_midi(&loc) {
+                    return Err(format!("{track} is a MIDI track; an audio clip goes on an audio track (daw track add SONG ID --type audio)"));
+                }
                 out.made.push(self.insert(&loc, "audio", None, map_node(fields)?)?);
                 let sample = fields.get("sample").and_then(Json::as_str).unwrap_or("?");
                 out.label = format!("Add audio clip of {sample} to {}", self.name(&loc));
@@ -2981,58 +2941,6 @@ impl<'a> Edit<'a> {
                     beat_text(&to),
                     self.name(&owner)
                 );
-            }
-            PatternAdd { pattern, fields } => {
-                let patterns = self.root.get_mut("patterns").and_then(Node::map_mut).expect("patterns");
-                if patterns.contains_key(pattern) {
-                    return Err(format!("Pattern {pattern} already exists"));
-                }
-                let node = with_empty(fields, &["events"], &["steps"])?;
-                self.root.get_mut("patterns").and_then(Node::map_mut).expect("patterns").insert(pattern.clone(), node);
-                out.label = format!("Add pattern {pattern}");
-            }
-            PatternSteps { pattern, pad, row } => {
-                let loc = self.at(&format!("patterns.{pattern}.steps"))?;
-                let steps = self.node_mut(&loc).map_mut().expect("steps");
-                match row {
-                    Some(r) => {
-                        steps.insert(pad.clone(), Node::Leaf(Value::str(r)));
-                        out.label = format!("Set {pattern} steps for {pad}");
-                    }
-                    None => {
-                        if steps.shift_remove(pad).is_none() {
-                            return Err(format!("Pattern {pattern} has no step row for {pad}"));
-                        }
-                        out.label = format!("Remove {pattern} steps for {pad}");
-                    }
-                }
-            }
-            PatternDuplicate { pattern, to } => {
-                let source = self.node(&self.at(&format!("patterns.{pattern}"))?).clone();
-                let patterns = self.root.get_mut("patterns").and_then(Node::map_mut).expect("patterns");
-                if patterns.contains_key(to) {
-                    return Err(format!("Pattern {to} already exists"));
-                }
-                // The copy's events are new objects with new handles.
-                patterns.insert(to.clone(), Node::new(&source.value()));
-                out.label = format!("Duplicate pattern {pattern} as {to}");
-            }
-            EventAdd { pattern, fields } => {
-                let loc = self.at(&format!("patterns.{pattern}"))?;
-                out.made.push(self.insert(&loc, "events", None, map_node(fields)?)?);
-                out.label = format!("Add event to {pattern}");
-            }
-            EventSet { event, fields } => {
-                let (owner, i) = self.member(event, "events", "a pattern event")?;
-                let loc = [owner, vec![Step::Key("events".into()), Step::Index(i)]].concat();
-                self.merge(&loc, fields)?;
-                out.label = format!("Change event of {}", self.event_name(&loc));
-            }
-            EventRemove { event } => {
-                let (owner, i) = self.member(event, "events", "a pattern event")?;
-                let loc = [owner, vec![Step::Key("events".into()), Step::Index(i)]].concat();
-                out.label = format!("Remove event of {}", self.event_name(&loc));
-                self.remove_at(&loc)?;
             }
             PadAdd { track, pad, fields } => {
                 let loc = self.pads(track)?;
@@ -3697,22 +3605,7 @@ impl<'a> Edit<'a> {
         self.node(loc).field("id").unwrap_or("?").to_string()
     }
 
-    /// An event described by its pattern, pad and beat, which a person can
-    /// find, for labels: `line: sub at 2`.
-    fn event_name(&self, loc: &[Step]) -> String {
-        let pattern = match loc {
-            [Step::Key(_), Step::Key(name), ..] => name.as_str(),
-            _ => "?",
-        };
-        let n = self.node(loc);
-        format!(
-            "{pattern}: {} at {}",
-            n.field("pad").unwrap_or("?"),
-            n.get("at").map_or_else(|| "?".into(), |a| short(&node_json(a)))
-        )
-    }
-
-    /// A clip described by its pattern and track, for labels.
+    /// The song's tempo.
     pub(crate) fn tempo(&self) -> f64 {
         number(self.root.get("session").and_then(|s| s.get("tempo"))).unwrap_or(144.0)
     }
@@ -3753,13 +3646,13 @@ impl<'a> Edit<'a> {
         self.set_leaf(entering, "fade_in_ms", Value::Float(into));
     }
 
-    /// A clip described by its pattern, or a note clip by its ID, and its
-    /// beat, for labels.
+    /// A note clip described by its ID, or an audio clip by its sample, and
+    /// its beat, for labels.
     fn clip_name(&self, loc: &[Step]) -> String {
         let n = self.node(loc);
         format!(
             "{} at {}",
-            n.field("pattern").or_else(|| n.field("id")).or_else(|| n.field("sample")).unwrap_or("?"),
+            n.field("id").or_else(|| n.field("sample")).unwrap_or("?"),
             n.get("at").map_or_else(|| "0".into(), |a| short(&node_json(a)))
         )
     }
@@ -3857,8 +3750,6 @@ impl<'a> Edit<'a> {
             return format!("{a} and {b} are not two halves of one loop that meet at a wrap; turn the loop off first (clip loop CLIP off)");
         }
         match kind {
-            Kind::Pattern if !same("pattern") => format!("{a} and {b} play different patterns, so one clip cannot play what they play"),
-            Kind::Pattern => format!("{a} and {b} are at different velocity scales, so one clip cannot play what they play"),
             Kind::Audio if !same("sample") => format!("{a} and {b} play different files, so one clip cannot play what they play"),
             Kind::Audio => {
                 let (l, r) = (Span::of(left, self.tempo()), Span::of(right, self.tempo()));
@@ -3890,20 +3781,9 @@ impl<'a> Edit<'a> {
         self.node(track).field("type") == Some("midi")
     }
 
-    /// How many beats a pattern or note clip lasts: a note clip's length, a
-    /// pattern clip's pattern by its repeats.
+    /// How many beats a note clip lasts.
     pub(crate) fn clip_span(&self, clip: &Node) -> Option<BigRational> {
-        if let Some(length) = exact(clip.get("length_beats")) {
-            return Some(length);
-        }
-        let pattern = clip.field("pattern")?;
-        let length = exact(self.root.get("patterns").and_then(|p| p.get(pattern)).and_then(|p| p.get("length_beats")))?;
-        let repeats = match clip.get("repeats") {
-            Some(Node::Leaf(Value::Int(n))) => BigRational::from_integer(n.clone()),
-            None => BigRational::from_integer(1.into()),
-            _ => return None,
-        };
-        Some(length * repeats)
+        exact(clip.get("length_beats"))
     }
 
     /// The first beat at or after `beat` where no clip of `track` starts:
@@ -3953,9 +3833,6 @@ impl<'a> Edit<'a> {
     /// The note clip a path names.
     fn note_clip(&self, path: &str) -> Result<Loc> {
         let (owner, i) = self.member(path, "clips", "a clip")?;
-        if !self.is_midi(&owner) {
-            return Err(format!("{path} is a pattern clip, not a note clip"));
-        }
         Ok([owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat())
     }
 
@@ -4047,21 +3924,27 @@ impl<'a> Edit<'a> {
 
     /// Where a track's pads are: its own, or its sampler's on a MIDI track,
     /// which is made if the track has no instrument.
+    /// A MIDI track's sampler's pads, a Drum Rack made when it has no
+    /// instrument. An audio track has none.
     fn pads(&mut self, track: &str) -> Result<Loc> {
-        let loc = self.track(track)?;
-        if self.is_midi(&loc) {
-            let sampler = self.sampler(&loc)?;
-            return Ok([sampler, vec![Step::Key("pads".into())]].concat());
-        }
-        Ok([loc, vec![Step::Key("pads".into())]].concat())
+        let loc = self.drum_track(track)?;
+        let sampler = self.sampler(&loc)?;
+        Ok([sampler, vec![Step::Key("pads".into())]].concat())
     }
 
     fn pad(&self, track: &str, pad: &str) -> Result<Loc> {
+        let loc = self.drum_track(track)?;
+        self.at(&format!("{}.instrument.sampler.pads.{pad}", self.text(&loc)))
+    }
+
+    /// A track that holds pads: a MIDI track. Pads on an audio track are
+    /// gone with patterns (D191).
+    fn drum_track(&self, track: &str) -> Result<Loc> {
         let loc = self.track(track)?;
-        if self.is_midi(&loc) {
-            return self.at(&format!("{}.instrument.sampler.pads.{pad}", self.text(&loc)));
+        if !self.is_midi(&loc) {
+            return Err(format!("{track} is an audio track; a pad belongs to a MIDI track's Drum Rack or Sampler (daw track add SONG ID makes a MIDI track)"));
         }
-        self.at(&format!("tracks.{track}.pads.{pad}"))
+        Ok(loc)
     }
 }
 

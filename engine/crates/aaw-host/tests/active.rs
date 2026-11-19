@@ -101,7 +101,7 @@ fn an_audio_clip_is_deactivated_by_its_path() {
     let song: Vec<[f32; 2]> = vec![[0.1; 2]; 48000];
     std::fs::write(dir.path().join("song.wav"), aaw_engine::wav::float_wav_bytes(&song, 48000)).unwrap();
     edit(&mut s, json!({"op": "set", "path": "samples.song", "value": {"path": "song.wav"}})).unwrap();
-    edit(&mut s, json!({"op": "track.add", "id": "song"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "song"})).unwrap();
     edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 4})).unwrap();
     let r = edit(&mut s, json!({"op": "clip.active", "clip": "tracks.song.audio.0", "active": false})).unwrap();
     assert!(r["label"].as_str().unwrap().starts_with("Deactivate clip "), "{r}");

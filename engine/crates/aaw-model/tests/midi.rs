@@ -141,23 +141,23 @@ tracks:
 #[test]
 fn the_sampler_plays_mapped_notes_and_releases_gated_pads_at_the_note_off() {
     let p = song(SAMPLED);
-    let rows: Vec<(i64, String, Option<String>, Option<i64>, i64)> = schedule(&p)
+    let rows: Vec<(i64, String, Option<i64>, Option<i64>, i64)> = schedule(&p)
         .into_iter()
-        .map(|t| (t.start, t.pad, t.event.note, t.cutoff, t.event.velocity))
+        .map(|t| (t.start, t.pad, t.note, t.cutoff, t.velocity))
         .collect();
     // A beat is 24000 frames at 120 BPM and 48 kHz; the clip starts on beat 4.
     let beat = 24000;
     assert_eq!(
         rows,
         [
-            (4 * beat, "piano".into(), Some("C4".into()), Some(5 * beat), 127),
-            (4 * beat, "piano".into(), Some("E4".into()), Some(5 * beat), 100),
+            (4 * beat, "piano".into(), Some(60), Some(5 * beat), 127),
+            (4 * beat, "piano".into(), Some(64), Some(5 * beat), 100),
             // An unpitched pad plays as it is, and a one-shot is not released.
             (5 * beat, "kick".into(), None, None, 100),
             // Note 90 is mapped to nothing; the note past the clip's end is cut
             // at it, and the one that starts at the end does not play, nor
             // the one before the clip's start that lasts into it.
-            (7 * beat, "piano".into(), Some("G4".into()), Some(8 * beat), 100),
+            (7 * beat, "piano".into(), Some(67), Some(8 * beat), 100),
         ]
     );
     let midi = p.tracks[0].midi.as_ref().unwrap();

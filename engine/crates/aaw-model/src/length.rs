@@ -69,11 +69,6 @@ pub fn content_end(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> B
         }
     };
     for t in &p.tracks {
-        for c in &t.clips {
-            if let Some(pattern) = p.patterns.get(&c.pattern) {
-                reach(c.at_exact() + pattern.length_exact() * BigRational::from_integer(c.repeats.into()));
-            }
-        }
         for c in &t.audio {
             let sound = c.sound_end(tempo, file_seconds(&c.sample)).and_then(BigRational::from_float);
             reach(sound.unwrap_or_else(|| c.at_exact()));

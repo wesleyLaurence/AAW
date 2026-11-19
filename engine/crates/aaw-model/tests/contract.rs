@@ -15,13 +15,10 @@ use std::collections::BTreeSet;
 const SONG: &str = r#"
 session: {}
 samples: {s: {path: s.wav}}
-patterns: {p: {length_beats: 4, events: [{at: 0, pad: a}]}}
 tracks:
   - id: t
     input: {}
     frozen: {path: frozen/t.wav}
-    pads: {a: {sample: s}}
-    clips: [{pattern: p}]
     audio: [{sample: s}]
     effects:
       - {type: filter, mode: lowpass, cutoff_hz: 1000}
@@ -391,7 +388,7 @@ fn a_part_of_a_topic_is_that_part_alone() {
     let filter = contract::describe_part("synth", "filter", true).unwrap().unwrap();
     assert_eq!(filter["schema"]["filter"], contract::model("SynthFilter"));
     let pads = contract::describe_part("sampler", "tracks", true).unwrap().unwrap();
-    assert_eq!(pads["schema"]["tracks[].pads.ID"], contract::model("Pad"));
+    assert_eq!(pads["schema"]["tracks[].instrument.sampler.pads.ID"], contract::model("Pad"));
     let wanted = contract::describe_part("synth", "wavetables", true).unwrap().unwrap();
     assert!(wanted["wavetables"].is_array());
     // An unknown part is refused with the nearest and the parts.
@@ -434,8 +431,7 @@ fn a_topic_lists_its_fields_a_line_each() {
     assert_eq!(fields["tracks[].effects"], "list of effect (daw describe effects), at most 32");
     let project = contract::describe("project").unwrap();
     assert_eq!(project["fields"]["session.sample_rate"], "44100|48000, default 48000");
-    assert_eq!(project["fields"]["tracks[].clips[].velocity_scale"], "number >0..2, default 1");
-    assert_eq!(project["fields"]["patterns.ID.events[].duration"], "beats or null, default null");
+    assert!(project["fields"].as_object().unwrap().keys().all(|k| !k.contains("pattern")), "{}", project["fields"]);
     assert_eq!(project["fields"]["tracks[]"], "MidiTrack (daw describe midi)");
     let effects = contract::describe("effects").unwrap();
     assert_eq!(effects["fields"]["eq.bands[].q"], "number 0.1..18, default 0.71");
@@ -449,7 +445,7 @@ fn a_topic_lists_its_fields_a_line_each() {
 #[test]
 fn an_unknown_field_is_answered_with_the_nearest() {
     let song = yaml_load::load(
-        "session: {}\npatterns: {}\ntracks:\n  - id: drums\n    pads: {}\n    clips: []\n    volume: -3\nmaster: {effects: [{type: limiter, ceiling: -1}]}\nbpm: 90\n",
+        "session: {}\ntracks:\n  - id: drums\n    volume: -3\nmaster: {effects: [{type: limiter, ceiling: -1}]}\nbpm: 90\n",
     )
     .unwrap();
     let error = Project::validate(&song).unwrap_err();

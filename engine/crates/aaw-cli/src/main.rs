@@ -62,7 +62,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
     (
         "Parts of the song",
         &[
-            "track", "group", "return", "clip", "audio", "note", "pattern", "pad", "midi", "instrument", "synth",
+            "track", "group", "return", "clip", "audio", "note", "pad", "midi", "instrument", "synth",
             "effect", "send", "lane", "section", "marker", "range",
         ],
     ),
@@ -364,7 +364,7 @@ enum Top {
     /// Move the playhead to a beat; while stopped, play starts there.
     Locate { project: Song, beat: String },
     /// The transport's loop: START LENGTH (beats), or `loop PROJECT off`. A
-    /// clip's own repeats are `daw clip loop`.
+    /// clip's own loop is `daw clip loop`.
     Loop {
         project: Song,
         start: String,
@@ -471,8 +471,6 @@ enum Top {
     #[command(subcommand)]
     Midi(MidiCmd),
     #[command(subcommand)]
-    Pattern(PatternCmd),
-    #[command(subcommand)]
     Pad(PadCmd),
     #[command(subcommand)]
     Effect(EffectCmd),
@@ -568,7 +566,8 @@ enum AudioDeviceCmd {
 /// Tracks.
 #[derive(Subcommand)]
 enum TrackCmd {
-    /// Add a track; --index places it, and --type midi makes a MIDI track.
+    /// Add a track: a MIDI track, or with --type audio an audio track;
+    /// --index places it.
     #[command(after_help = track_help())]
     Add {
         project: Song,
@@ -713,10 +712,8 @@ enum AudioCmd {
 /// or a note clip's ID, tracks.T.clips.ID.
 #[derive(Subcommand)]
 enum ClipCmd {
-    /// Add a clip. On a MIDI track, a note clip: --length-beats, and --at,
-    /// --id, --notes or --text if wanted. On a track of pads, as songs made
-    /// before note clips have, a pattern clip: `add SONG TRACK PATTERN`, then
-    /// --at, --repeats and --velocity-scale if wanted.
+    /// Add a note clip to a MIDI track: --length-beats, and --at, --id,
+    /// --notes or --text if wanted.
     #[command(after_help = clip_help())]
     Add {
         project: Song,
@@ -733,9 +730,6 @@ enum ClipCmd {
         #[arg(long)]
         at: Option<String>,
     },
-    /// Set how many times a pattern clip plays its pattern, one after
-    /// another: 1 to 10000.
-    Repeats { project: Song, clip: String, repeats: String },
     /// Copy a clip, by default right after the original, or after the copies
     /// already in a row there, so that duplicating again lays them in a row.
     /// --times N makes N copies one after another as one step. A note clip's
@@ -769,7 +763,7 @@ enum ClipCmd {
         #[arg(long)]
         length: Option<String>,
     },
-    /// Deactivate clips: pattern clips, note clips or audio clips
+    /// Deactivate clips: note clips or audio clips
     /// (tracks.T.audio.N). Each stays where it is and plays nothing, as 0
     /// does in the app and in Ableton; `clip activate` plays it again.
     /// Several clips are one step.
@@ -797,9 +791,9 @@ enum ClipCmd {
     /// Make one clip of two or more clips of one track that plays what they
     /// played. Note clips become one note clip from the first's start to the
     /// last's end, with every note that played and a loop laid out as notes;
-    /// pattern clips and audio clips (tracks.T.audio.N) join only where they
-    /// meet and are one music: the same pattern, or the same file played on
-    /// from where the one before leaves, as `audio split` left them. The
+    /// audio clips (tracks.T.audio.N) join only where they meet and are one
+    /// music: the same file played on from where the one before leaves, as
+    /// `audio split` left them. The
     /// first clip is kept, with its ID and reference.
     Join {
         project: Song,
@@ -807,10 +801,9 @@ enum ClipCmd {
         clips: Vec<String>,
     },
     /// Make two clips of one at a beat inside it, which play as the one did:
-    /// a note clip, a pattern clip or an audio clip (tracks.T.audio.N). A
-    /// note across the beat is held to it on the left and the rest starts the
-    /// right clip, which gets the next free ID; a pattern clip is cut only
-    /// between repeats, a looped clip only at a wrap.
+    /// a note clip or an audio clip (tracks.T.audio.N). A note across the
+    /// beat is held to it on the left and the rest starts the right clip,
+    /// which gets the next free ID; a looped clip is cut only at a wrap.
     Split {
         project: Song,
         clip: String,
@@ -1421,62 +1414,12 @@ enum MidiCmd {
     Export { project: Song, clip: String, file: PathBuf },
 }
 
-/// Patterns and their events: how songs made before note clips play drums.
-/// A new drum part is a note clip on a MIDI track (daw describe start).
-#[derive(Subcommand)]
-enum PatternCmd {
-    /// Add a pattern: --length-beats, and --grid and --swing if wanted; its
-    /// steps and events come after, with `pattern steps` and `pattern event add`.
-    #[command(after_help = fields_help("Pattern", &[]))]
-    Add {
-        project: Song,
-        pattern: String,
-        #[command(flatten)]
-        f: FieldArgs,
-    },
-    /// Set a pad's step row, e.g. "x... x... x... x...", or --clear it.
-    Steps {
-        project: Song,
-        pattern: String,
-        pad: String,
-        row: Option<String>,
-        #[arg(long)]
-        clear: bool,
-    },
-    /// Copy a pattern as TO, with its steps and events; the clips that play
-    /// it keep playing the original.
-    Duplicate { project: Song, pattern: String, to: String },
-    #[command(subcommand)]
-    Event(EventCmd),
-}
-
-/// Pattern events, addressed by reference.
-#[derive(Subcommand)]
-enum EventCmd {
-    /// Add an event: --at and --pad, optionally --note, --duration, --velocity, --transpose.
-    #[command(after_help = fields_help("Event", &[]))]
-    Add {
-        project: Song,
-        pattern: String,
-        #[command(flatten)]
-        f: FieldArgs,
-    },
-    /// Change an event's fields; a null value resets one.
-    #[command(after_help = fields_help("Event", &[]))]
-    Set {
-        project: Song,
-        event: String,
-        #[command(flatten)]
-        f: FieldArgs,
-    },
-    /// Remove an event from its pattern.
-    Remove { project: Song, event: String },
-}
-
-/// Pads.
+/// The pads of a MIDI track's Drum Rack or Sampler.
 #[derive(Subcommand)]
 enum PadCmd {
-    /// Add a pad: --sample, and any pad field.
+    /// Add a pad: --sample, and any pad field. On a MIDI track with no
+    /// instrument it makes a Drum Rack; `daw instrument map` gives the pad
+    /// its key.
     #[command(after_help = fields_help("Pad", &[]))]
     Add {
         project: Song,
@@ -1494,7 +1437,7 @@ enum PadCmd {
         #[command(flatten)]
         f: FieldArgs,
     },
-    /// Remove a pad from a track.
+    /// Remove a pad; the notes that played it are kept and play nothing.
     Remove { project: Song, track: String, pad: String },
 }
 
@@ -1663,7 +1606,7 @@ enum MarkerCmd {
 
 /// Ranges of beats across every track, or those named with --track: the
 /// clips, audio, automation and sections in them. A clip across an edge is
-/// cut there; a pattern clip only between repeats. Positions are beats.
+/// cut there; a looped clip only at a wrap. Positions are beats.
 #[derive(Subcommand)]
 enum RangeCmd {
     /// Put a copy of LENGTH beats from START at --to, over what is there;
@@ -1731,7 +1674,7 @@ fn fields_help(model: &str, skip: &[&str]) -> String {
 fn track_help() -> String {
     format!(
         "Fields:\n{}{}{}",
-        flag_line("type", "midi makes a MIDI track, which holds note clips and an instrument; without it, a track of pads and pattern clips, as songs made before note clips have"),
+        flag_line("type", "midi (the default), a track of note clips and an instrument, or audio, a track of audio clips that records from an input"),
         flag_line("index", "where among the tracks, 0 first; last unless given"),
         takes("Track", &["id"])
     )
@@ -1749,8 +1692,7 @@ fn group_help() -> String {
 
 fn clip_help() -> String {
     format!(
-        "Fields of a pattern clip:\n{}\nFields of a note clip, on a MIDI track:\n{}{}{}",
-        takes("Clip", &["pattern"]),
+        "Fields of a note clip, on a MIDI track:\n{}{}{}",
         takes("NoteClip", &[]),
         flag_line("text", "note text written from the clip's start, which is as long as the text in whole bars unless --length-beats says (daw describe midi.text)"),
         flag_line("grid", "a cell of --text in beats, 1/4 unless given")
@@ -2563,29 +2505,13 @@ fn run(cli: &Cli) -> Result<Json> {
             ),
         },
         Top::Clip(c) => match c {
-            ClipCmd::Add { project, track, f } => {
-                // A pattern, if one is given, comes before the fields.
-                let mut all = Fields::new();
-                let mut rest = FieldArgs { fields: f.fields.clone() };
-                if rest.fields.first().is_some_and(|a| !a.starts_with("--")) {
-                    all.insert("pattern".into(), json!(rest.fields.remove(0)));
-                }
-                all.extend(fields(&rest)?);
-                edit(project, C::ClipAdd { track: track.clone(), fields: all })
-            }
+            ClipCmd::Add { project, track, f } => edit(project, C::ClipAdd { track: track.clone(), fields: fields(f)? }),
             ClipCmd::Move { project, clip, track, at } => edit(
                 project,
                 C::ClipMove {
                     clip: clip.clone(),
                     track: track.clone(),
                     at: at.as_deref().map(parse_value),
-                },
-            ),
-            ClipCmd::Repeats { project, clip, repeats } => edit(
-                project,
-                C::ClipRepeats {
-                    clip: clip.clone(),
-                    repeats: parse_value(repeats),
                 },
             ),
             ClipCmd::Duplicate { project, clip, track, at, id, times } => edit(
@@ -3112,58 +3038,6 @@ fn run(cli: &Cli) -> Result<Json> {
                 ),
             },
         },
-        Top::Pattern(p) => match p {
-            PatternCmd::Add { project, pattern, f } => edit(
-                project,
-                C::PatternAdd {
-                    pattern: pattern.clone(),
-                    fields: fields(f)?,
-                },
-            ),
-            PatternCmd::Steps {
-                project,
-                pattern,
-                pad,
-                row,
-                clear,
-            } => {
-                if row.is_some() == *clear {
-                    return Err("Give a step row or --clear".into());
-                }
-                edit(
-                    project,
-                    C::PatternSteps {
-                        pattern: pattern.clone(),
-                        pad: pad.clone(),
-                        row: row.clone(),
-                    },
-                )
-            }
-            PatternCmd::Duplicate { project, pattern, to } => edit(
-                project,
-                C::PatternDuplicate {
-                    pattern: pattern.clone(),
-                    to: to.clone(),
-                },
-            ),
-            PatternCmd::Event(e) => match e {
-                EventCmd::Add { project, pattern, f } => edit(
-                    project,
-                    C::EventAdd {
-                        pattern: pattern.clone(),
-                        fields: fields(f)?,
-                    },
-                ),
-                EventCmd::Set { project, event, f } => edit(
-                    project,
-                    C::EventSet {
-                        event: event.clone(),
-                        fields: fields(f)?,
-                    },
-                ),
-                EventCmd::Remove { project, event } => edit(project, C::EventRemove { event: event.clone() }),
-            },
-        },
         Top::Pad(p) => match p {
             PadCmd::Add { project, track, pad, f } => edit(
                 project,
@@ -3529,7 +3403,6 @@ fn name(top: &Top) -> String {
         Top::Favorite(_) => group("favorite", ""),
         Top::Generate(_) => group("generate", ""),
         Top::Keys(_) => group("keys", ""),
-        Top::Pattern(_) => group("pattern", ""),
         Top::Pad(_) => group("pad", ""),
         Top::Effect(_) => group("effect", ""),
         Top::Send(_) => group("send", ""),

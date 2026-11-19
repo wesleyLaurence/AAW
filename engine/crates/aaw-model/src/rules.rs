@@ -3,7 +3,7 @@
 
 use crate::beat::{float_fraction, parse_fraction};
 use crate::pyfmt::{float_repr, format_g};
-use crate::schema::{Effect, Group, Lane, PadMode, Project, Return, Send, Track};
+use crate::schema::{Effect, Group, Lane, Project, Return, Send, Track};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use regex::Regex;
@@ -976,37 +976,9 @@ pub fn references(p: &Project) -> Result<(), String> {
         return Err("Section IDs must be unique".into());
     }
     for t in &p.tracks {
-        for pad in t.pads.values() {
-            if !p.samples.contains_key(&pad.sample) {
-                return Err(format!("{}: unknown sample {}", t.id, pad.sample));
-            }
-        }
         for clip in &t.audio {
             if !p.samples.contains_key(&clip.sample) {
                 return Err(format!("{}: unknown sample {}", t.id, clip.sample));
-            }
-        }
-        for clip in &t.clips {
-            let Some(pattern) = p.patterns.get(&clip.pattern) else {
-                return Err(format!("{}: unknown pattern {}", t.id, clip.pattern));
-            };
-            for e in pattern.expanded() {
-                let Some(pad) = t.pads.get(&e.pad) else {
-                    return Err(format!("{}: unknown pad {}", t.id, e.pad));
-                };
-                if e.note.as_deref().is_some_and(|n| !n.is_empty())
-                    && p.samples[&pad.sample]
-                        .root_note
-                        .as_deref()
-                        .is_none_or(str::is_empty)
-                {
-                    return Err(format!("{} needs root_note for pitched events", pad.sample));
-                }
-                if pad.mode == PadMode::Gate
-                    && e.duration_exact().is_none_or(|d| d <= BigRational::from_integer(0.into()))
-                {
-                    return Err(format!("{}.{}: gated events need positive duration", t.id, e.pad));
-                }
             }
         }
         if let Some(midi) = &t.midi {

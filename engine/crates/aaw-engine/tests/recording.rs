@@ -209,12 +209,11 @@ fn burst_song(dir: &Path, rate: u32) -> Arc<Program> {
 session: {{tempo: 120, sample_rate: {rate}, length_beats: 8, master_gain_db: 0}}
 samples:
   burst: {{path: burst.wav}}
-patterns:
-  one: {{length_beats: 4, events: [{{at: 2, pad: b}}]}}
 tracks:
 - id: hit
-  pads: {{b: {{sample: burst}}}}
-  clips: [{{pattern: one}}]
+  type: midi
+  instrument: {{sampler: {{drum_rack: true, pads: {{b: {{sample: burst}}}}, map: [{{notes: 36, pad: b}}]}}}}
+  clips: [{{id: one, length_beats: 4, notes: [{{pitch: 36, at: 2, duration: 1/4}}]}}]
 "#
     );
     let path = dir.join("song.yaml");

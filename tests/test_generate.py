@@ -506,7 +506,7 @@ def test_a_song_from_a_plan_is_imported_with_its_beat_map_and_cut_on_its_bars(tm
     # Listed with its title; a section cut on its bars plays at the song's tempo.
     listed = daw("generate", "list", song)["generated"][0]
     assert (listed["sample_id"], listed["kind"], listed["title"], listed["song_id"]) == ("dusty-soul-ballad", "music", "Dusty Soul Ballad", "song-xyz")
-    daw("track", "add", song, "chop")
+    daw("track", "add", song, "chop", "--type", "audio")
     chorus = made["sections"][2]
     daw("audio", "add", song, "chop", made["sample_id"], "--at", 0, "--source-start-seconds", chorus["bar_seconds"],
         "--source-end-seconds", bars[12], "--source-bpm", beat_map["tempo"]["bpm"], "--stretch", "preserve_pitch")

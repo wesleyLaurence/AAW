@@ -26,7 +26,7 @@ def song(tmp_path):
     code, asset = cli("samples", "--db", db, "import", tmp_path / "original.wav", "--project", path, "--id", "song")
     assert code == 0, asset
     assert cli("samples", "--db", db, "beats", path.parent / asset["path"])[0] == 0
-    daw("track", "add", path, "song")
+    daw("track", "add", path, "song", "--type", "audio")
     made = daw("audio", "add", path, "song", "song", "--at", 4, "--source-start-seconds", FIRST, "--lead-ms", 5, "--fade-in-ms", 2)
     assert made["path"] == "tracks.song.audio.0" and made["label"] == "Add audio clip of song to song"
     return path

@@ -333,14 +333,6 @@ public struct TimelineLayout: Equatable {
         return min(max(steps, least), most) * step
     }
 
-    /// The repeats that bring the end of a clip nearest `x`: at least one.
-    /// Past the song's end, the end moves to hold them.
-    public func repeats(atX x: CGFloat, clipAt at: Double, patternBeats: Double) -> Int {
-        guard patternBeats > 0 else { return 1 }
-        let wanted = ((beat(atX: x) - at) / patternBeats).rounded()
-        return Int(max(1, wanted))
-    }
-
     public mutating func clamp() {
         pixelsPerBeat = min(max(pixelsPerBeat, minPixelsPerBeat), Self.maxPixelsPerBeat)
         scroll.x = min(max(0, scroll.x), max(0, contentWidth - lanesWidth))

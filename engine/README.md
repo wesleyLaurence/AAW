@@ -14,7 +14,7 @@ reads songs through `aaw-py`.
 | `aaw-engine` | Song compilation, routing, latency alignment, mixing, the transport, offline and real-time drivers, input capture and taps for recording, waveform peaks |
 | `aaw-host` | The session host: commands, handles, undo, change log, saving, external edits, socket, recording; a project as a folder, made, moved and copied; the person's own devices, their manifests read, their code run and cached |
 | `aaw-cli` | The `daw` binary |
-| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, markers, devices, lanes, patterns, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
+| `aaw-ffi` | What the Mac app calls, through UniFFI: a hosted song's arrangement, markers, devices, lanes, waveforms, changes and transport, its project's Save As…, Untitled projects, and the sample library |
 | `aaw-py` | The model for Python, through PyO3: the `agent_daw.aaw_py` module, with the meter's loudness of saved audio |
 
 ## Build and test
@@ -67,16 +67,16 @@ instead. It implements:
 | `daw inspect`, `daw get PROJECT [PATH]`, `daw status`, `daw changes PROJECT --since REV` | Reading: summary, part of the song, host state, change log |
 | `daw map PROJECT [--per bar\|beat\|BARS] [--from BEAT] [--to BEAT] [--track T,...] [--lanes]` | The song as a grid of tracks by bars: a letter where a clip plays, the same letter for the same music, `#` where two clips of a track sound at once, `:` where a clip holds and nothing starts; the bars and sections above, a row a lane with `--lanes`, a legend of each letter and a line a track. `map` is the text as a list of lines and `clips` each letter's clips by reference. See [the arrangement map](../docs/features/arrangement-map.md) |
 | `daw set PROJECT PATH VALUE`, `daw toggle`, `daw remove` | Any value by path, e.g. `tracks.drums.gain_db -4.5` |
-| `daw track`, `return`, `clip`, `pattern`, `pattern event`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs. `daw effect move EFFECT INDEX --to OWNER` moves an effect into a rack of its row or out of one |
+| `daw track`, `return`, `clip`, `pad`, `effect`, `send`, `lane`, `lane point`, `section` | The command catalog of the rebuild plan; `--help` lists each group's verbs. `daw effect move EFFECT INDEX --to OWNER` moves an effect into a rack of its row or out of one |
 | `daw group add PROJECT ID [--tracks a,b] [--groups c,d] [--group P] [--gain-db G]`, `daw group remove\|rename\|move` | A group of tracks and groups, a bus between them and its own group or the master with effects, gain, pan, mute, solo and sends of its own: made of the tracks and groups named, whose tracks are moved together to where the first of them is; removed with what was in it going to its own group or the master; renamed with their `group` following. `daw set PROJECT tracks.T.group G` puts one track in, beside the others, and `daw remove tracks.T.group` takes it out; `daw set groups.G.group P` and `daw remove groups.G.group` do the same for a group, to any depth; `daw send set` takes a group as it takes a track. See [groups](../docs/features/groups.md) and [groups within groups](../docs/features/nested-groups.md) |
-| `daw range copy PROJECT START LENGTH --to AT [--insert] [--track T]…`, `daw range insert PROJECT AT LENGTH`, `daw range delete PROJECT START LENGTH`, `daw range clear PROJECT START LENGTH`, `daw section duplicate PROJECT SECTION [--to AT] [--id ID]`, `daw section move\|remove PROJECT SECTION … --with-content` | A range of beats across every track, or the tracks named: its pattern clips, note clips, audio clips, lanes and sections copied over what is at AT or into time opened for it, empty beats opened, beats removed with the gap closed and the clips that meet there made one again, or the range emptied; a clip across an edge is cut there, a pattern clip only between repeats; a section with what is under it duplicated after itself, moved over what is at AT, or deleted. One undo step each; the reply lists what was made, split, moved and removed. See [editing a range of bars](../docs/features/bar-ranges.md) and `daw describe edit` |
+| `daw range copy PROJECT START LENGTH --to AT [--insert] [--track T]…`, `daw range insert PROJECT AT LENGTH`, `daw range delete PROJECT START LENGTH`, `daw range clear PROJECT START LENGTH`, `daw section duplicate PROJECT SECTION [--to AT] [--id ID]`, `daw section move\|remove PROJECT SECTION … --with-content` | A range of beats across every track, or the tracks named: its note clips, audio clips, lanes and sections copied over what is at AT or into time opened for it, empty beats opened, beats removed with the gap closed and the clips that meet there made one again, or the range emptied; a clip across an edge is cut there, a looped clip only at a wrap; a section with what is under it duplicated after itself, moved over what is at AT, or deleted. One undo step each; the reply lists what was made, split, moved and removed. See [editing a range of bars](../docs/features/bar-ranges.md) and `daw describe edit` |
 | `daw marker list PROJECT`, `daw marker add PROJECT [AT] [--text TEXT] [--id ID]`, `daw marker move PROJECT MARKER AT`, `daw marker text PROJECT MARKER TEXT`, `daw marker remove PROJECT MARKER... \| --all` | Markers: the notes a person leaves at beats while listening, with M in the app. `list` reads them in time order, each with the bar it is in and the beat of that bar, the section over it, its text and the clips sounding there, a track each; `add` leaves one at AT, or without AT where a running host is playing; `move` and `text` change one and `remove` takes away those named or all. One undo step each. `daw map` has a row of them, and the range commands move them with their beats. See [listening markers](../docs/features/listening-markers.md) |
 | `daw effect add PROJECT tracks.T --type arpeggiator\|chord\|scale\|velocity [--FIELD VALUE...]`, `daw effect remove\|move\|bypass PROJECT tracks.T.midi_effects.REF`, `daw set PROJECT tracks.T.midi_effects.REF.FIELD VALUE` | MIDI effects: devices before a MIDI track's instrument that change the notes as they play, applied in the schedule so playback, a render and a freeze play what they make while the clips keep the notes as written; an arpeggiator on the song's grid, a chord of six shifts, a scale and a velocity. See [MIDI effects](../docs/features/midi-effects.md) and `daw describe midi` |
 | `daw track add PROJECT ID --type midi`, `daw clip add PROJECT TRACK --length-beats L`, `daw clip resize`, `daw clip trim --start\|--end`, `daw note add\|set\|move\|transpose\|quantize\|remove\|list`, `daw note on\|off PROJECT TRACK PITCH`, `daw instrument set\|remove\|map` | MIDI tracks: note clips that own their notes, the notes read with their names and song beats, and the instrument that plays them; a note held through the instrument now and let go, through a running host, recorded while the track is armed; `daw pad` edits a MIDI track's sampler. See `daw describe midi` |
 | `daw clip loop PROJECT CLIP BEATS\|off [--length BEATS]` | A note clip or an audio clip looped: its first so many beats play again and again until its end, which `clip resize` or `audio trim --end` sets, the last repetition cut off; `off` plays it once again. The schedule unrolls the loop, each audio repetition a copy with the clip's fades at the wrap; a looped clip is split only at a wrap. See [looping clips](../docs/features/looping-clips.md) |
-| `daw clip split PROJECT CLIP --at BEAT` | Two clips of one at a beat inside it that play as the one did, the later half new: a note clip with the note across the beat held to it on the left and the rest starting the right clip, which gets the next free ID; a pattern clip only between repeats; an audio clip as `audio split` splits it; a looped clip only at a wrap. ⌘E in the app does it to the selected clips at the start position |
-| `daw clip join PROJECT CLIP CLIP...` | One clip of two or more clips of one track that plays what they played, the first kept with its ID and reference: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a loop laid out as notes; pattern clips and audio clips (`tracks.T.audio.N`) only where they meet and are one music, the same pattern with the repeats summed, or the same file played on from where the one before leaves, as `audio split` left them; else refused with the reason |
-| `daw clip deactivate\|activate PROJECT CLIP...` | Clips deactivated, `active: false`, where they are and silent, or activated again: pattern clips, note clips and audio clips (`tracks.T.audio.N`), several as one step, as 0 in the app |
+| `daw clip split PROJECT CLIP --at BEAT` | Two clips of one at a beat inside it that play as the one did, the later half new: a note clip with the note across the beat held to it on the left and the rest starting the right clip, which gets the next free ID; an audio clip as `audio split` splits it; a looped clip only at a wrap. ⌘E in the app does it to the selected clips at the start position |
+| `daw clip join PROJECT CLIP CLIP...` | One clip of two or more clips of one track that plays what they played, the first kept with its ID and reference: note clips into one note clip from the first's start to the last's end, with every note that played where it played and a loop laid out as notes; audio clips (`tracks.T.audio.N`) only where they meet and are one music, the same file played on from where the one before leaves, as `audio split` left them; else refused with the reason |
+| `daw clip deactivate\|activate PROJECT CLIP...` | Clips deactivated, `active: false`, where they are and silent, or activated again: note clips and audio clips (`tracks.T.audio.N`), several as one step, as 0 in the app |
 | `daw synth add PROJECT TRACK [--patch NAME]`, `daw synth show PROJECT TRACK`, `daw synth set PROJECT TRACK PATH VALUE...`, `daw synth mod PROJECT TRACK SOURCE TARGET AMOUNT [--remove]`, `daw synth audition PROJECT TRACK [--notes C2,C3] [--velocity V] [--length-beats B] [--track-chain] [--output FILE] [--play]` | The Synth on a MIDI track: the plain saw or a patch attached, or a new MIDI track with it; the patch read; fields set by their paths in the patch as one undo step, a null removing a part, an oscillator's `unison`, `unison_detune_cents`, `unison_width_percent` and `table` among them; a matrix entry added, changed or removed; and notes rendered through the patch and its own effects to a WAV under `renders/auditions` with its peak, loudness and spectral centroid in the reply, and with `--play` also played now, one after another, through the running host (`note.preview`). The patch's effects are edited with `daw effect add\|remove\|move\|bypass` on `tracks.T.instrument.synth`. See `daw describe synth` |
 | `daw patch list [WORDS]`, `daw patch show NAME`, `daw patch save PROJECT TRACK NAME [--description TEXT] [--tags a,b] [--replace]`, `daw patch load PROJECT TRACK NAME` | Patches: a Synth's sound as a YAML file, the twelve factory patches built into `daw` and the saved ones in the workspace library, `~/Music/AAW/library/patches/` or `library/patches/` under `AAW_WORKSPACE`, each named by the slug of its name; a track's synth saved there, over a saved name only with `--replace`, naming the song's patch after it; and a patch, by name or as a `.yaml` path, put in place of a MIDI track's whole synth in one undo step, the notes staying. See `daw describe synth` |
 | `daw rack list [WORDS]`, `daw rack show NAME`, `daw rack save PROJECT OWNER NAME [--description TEXT] [--tags a,b] [--replace]`, `daw rack load PROJECT OWNER NAME [--index N] [--flat]`, `daw rack wrap PROJECT EFFECT... [--name N] [--id ID]`, `daw rack unwrap PROJECT RACK` | Effect racks: `rack` is an effect kind holding a chain of its own, run where it is, its effects addressed through it as `tracks.T.effects.RACK.effects.REF`, a chain owner for `effect add`, `rack load` and `rack save`; a saved rack is a chain as a YAML file in the workspace library, `~/Music/AAW/library/racks/` or `library/racks/` under `AAW_WORKSPACE`, each named by the slug of its name; a chain saved from `tracks.T`, `groups.G`, `returns.R`, `master`, `tracks.T.instrument.synth` or a rack of one, over a saved name only with `--replace`, the song unchanged and a rack in the chain laid out; and a saved rack, by name or as a `.yaml` path, added to a chain at `--index` or its end as one rack device named for it, or with `--flat` and into a rack or a patch laid in, an `id` the chain has numbered and a compressor's sidechain kept only where the song allows it, in one undo step; effects of one chain wrapped in a new rack and a rack laid out, the lanes on them following. `WORDS` match the name, a tag or an effect's kind. See [effect racks](../docs/features/effect-racks.md) and `daw describe effects` |
@@ -317,7 +317,7 @@ the caches made so far (`devices::Work`); a run that lands is compiled in
 and played, and `daw status` says what each device is doing under
 `custom_devices`. An effect's cache identity is the text of what feeds it
 (`custom::fed`: the song cut before the device, with only the channels
-`program::channels` compiles for its owner, the samples and patterns they
+`program::channels` compiles for its owner, the samples they
 play, and without the owner's fader, pan and sends or, for a stem, the
 master), which tracks and groups are muted or soloed, the size and time of
 the files it plays, the device's entry and lanes, the code of the devices
@@ -363,9 +363,9 @@ the song's rate, and sets `tracks[].frozen` to `{path}` as one edit, "Freeze
 TRACK"; the track then compiles as one voice of its file with no synth, no
 inserts and no lanes on them, its fader, pan, mute, solo and sends live. The
 session refuses an edit of what the file was rendered from while it is
-frozen, by comparing that content before and after every edit: the pads,
-clips, audio clips, instrument, note clips, effects and the lanes on them,
-the patterns the clips play and the samples they name, and, while any track
+frozen, by comparing that content before and after every edit: the audio
+clips, instrument, note clips, effects and the lanes on them and the samples
+they name, and, while any track
 is frozen, the tempo, the rate and the stretcher. `arm`, `note.preview` and
 `note.on` on a frozen track are refused in the same words. `track.unfreeze {track}`
 removes the field and leaves the file. `daw track freeze` and `daw track
@@ -419,13 +419,13 @@ unfreeze` are the terminal's way.
   the ops a batch takes, the edits, from `aaw_host::command::ops()`, the
   schema the enum derives; `Kind::of` names an op's kind, and a test holds it
   to `Command::kind`. `command::batch_commands` reads a batch file's list:
-  an op it does not take is refused with the nearest (`pattern.event.add`:
-  did you mean `event.add`?), a transport or reading op as not taken in a
+  an op it does not take is refused with the nearest (`clip.note.add`:
+  did you mean `note.add`?), a transport or reading op as not taken in a
   batch, and a key an op without fields does not have with the nearest key,
   where serde would have ignored it.
-- **A batch builds on itself.** A track, return or pattern a batch adds can be
-  added to by its later commands: a pad and a clip on a new track, steps and
-  events in a new pattern, notes in a new note clip. A note clip or a note is
+- **A batch builds on itself.** A track, return or clip a batch adds can be
+  added to by its later commands: a pad and a clip on a new track, notes in a
+  new note clip. A note clip or a note is
   given its ID when the command makes it (the next `clipN` in the song, the
   next `nN` in its clip), so a later command can name it; a command that makes
   several replies with each one's path.
@@ -434,7 +434,7 @@ unfreeze` are the terminal's way.
   renaming a group renames its tracks' `group`, and removing one frees them;
   inserting, moving or removing an effect rewrites or removes the lanes that
   address effects by index; a lane's last point takes the lane with it. Removing
-  something still referenced, such as a pad a pattern plays, is refused.
+  something still referenced, such as a pad a map entry names, is refused.
 - **Gestures.** A request may carry a `gesture` ID, as the app's drags do.
   Edits of one gesture and origin that land one after another are one undo
   step and one change-log entry, named for the whole move, and are saved once
@@ -518,11 +518,10 @@ the song after it, each revision's program once it is compiled, transport
 changes, warnings and the close, while `Clock` gives the playhead straight from
 the audio thread. The Mac app does this through `aaw-ffi`, whose `Song` turns
 each revision into the arrangement the app draws (`view.rs`), with every
-effect's fields as a control needs them, every lane's points and every
-pattern's steps and events, names the tracks, clips, returns and sections a
+effect's fields as a control needs them and every lane's points, names the tracks, clips, returns and sections a
 change touched, and turns the person's edits into commands (`edits.rs`),
 working out exact beats from the song for a clip moved by so many beats or
-copied after itself, and for an event moved by steps of its pattern's grid.
+copied after itself.
 A MIDI track is in the arrangement with its instrument's kind, its sampler's
 pads and map, and its note clips, each with its notes and their handles. The
 person's note edits work out exact beats from the piano roll's grid as typed,
@@ -543,7 +542,7 @@ plays, with the pad as a `SamplerView` and its level, pan, mute, solo, whether
 it sounds, choke group, mono, source tempo and stretch. Its edits attach an
 empty one, load a sample onto a key as a pad named after it, in place of the
 key's pad with that pad's settings, set any field of a pad, set its sample's
-root note, and take a pad off with its keys. A track's audio clips are in the arrangement beside its pattern clips, each to
+root note, and take a pad off with its keys. An audio track's audio clips are in the arrangement, each to
 where it leaves and with how long it sounds after that, and so are the files
 they play (`files.rs`): each file's length, and the beats of the map `daw
 samples beats` left beside it, when that map is of the sample the song lists.
@@ -621,8 +620,7 @@ through the device landing on its beat after a count-in.
 what each kind of change touches, the person's edits and their place in the
 shared history, markers left, dragged, reworded and removed, the fields a device panel is drawn from, edits of effects,
 equalizer bands, lanes and points, the transport shared with an agent, the
-waveforms that follow each kind of edit, patterns as the editor draws them,
-edits of steps, events, lengths and grids, a sample added as a pad or a track,
+waveforms that follow each kind of edit, a sample added as a pad or a track,
 and, where the checkout's Python is there, a search of a generated library and
 a copy from it.
 
@@ -636,13 +634,17 @@ SHAs carried over. It reads YAML with PyYAML's YAML 1.1 rules (`010` is 8, `1e5`
 is a string, `yes` is true, merge keys apply), applies pydantic's coercions, and
 writes with a port of PyYAML's emitter.
 
-`aaw_model::load` converts a song with tracks of pads or pattern clips once,
-as it reads it from its file, and writes it back with the file as it was
-kept as `song.before-drum-rack.yaml`; the host's `Session` does the same when
-it opens a song or loads an outside edit (`aaw_model::convert`, D190). Each
-such track becomes a MIDI track of the same ID with a Drum Rack and note
-clips that play the same hits. `aaw_model::parse` converts nothing, so the
-corpus below still reads documents as they are written.
+The song holds no patterns (D191). `aaw_model::load` converts a song made
+before note clips that still has patterns, tracks of pads or pattern clips
+once, as it reads it from its file, and writes it back with the file as it
+was kept as `song.before-drum-rack.yaml`; the host's `Session` does the same
+when it opens a song or loads an outside edit (`aaw_model::convert`, which
+reads them from the text with `aaw_model::legacy`, D190). Each such track
+becomes a MIDI track of the same ID with a Drum Rack and note clips that play
+the same hits; `tests/converted/` pins what the conversion writes for songs
+that were rendered both ways while patterns still played. `aaw_model::parse`
+converts nothing and refuses such a text with the reason, and an audio track
+written with `pads: {}`, as every one was before, is read without it.
 
 `daw model PATH...` prints each document's canonical YAML and fingerprints, or its
 validation errors as `{loc, type, msg}`, which are pydantic's. Before the Python

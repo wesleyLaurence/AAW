@@ -46,17 +46,15 @@ def song(directory, parts, **more):
         tracks.append(
             {
                 "id": name,
-                "pads": {"x": {"sample": name, "attack_ms": 0, "release_ms": 0}},
-                "clips": [{"pattern": "once"}],
+                "type": "midi",
+                "instrument": {"sampler": {"drum_rack": True, "pads": {"x": {"sample": name, "attack_ms": 0, "release_ms": 0}}, "map": [{"notes": 36, "pad": "x"}]}},
+                "clips": [{"id": f"{name}-once", "length_beats": beats, "notes": [{"pitch": 36, "at": 0, "duration": "1/4", "velocity": 127}]}],
                 **more.get("tracks", {}).get(name, {}),
             }
         )
     document = {
         "session": {"tempo": TEMPO, "length_beats": beats, "master_gain_db": 0, "end_fade_ms": 0},
         "samples": {name: {"path": f"{name}.wav"} for name in parts},
-        "patterns": {
-            "once": {"length_beats": beats, "events": [{"at": 0, "pad": "x", "velocity": 127}]}
-        },
         "tracks": tracks,
         **{k: v for k, v in more.items() if k != "tracks"},
     }

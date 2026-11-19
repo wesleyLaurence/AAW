@@ -209,7 +209,8 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     del manifest["engine"]
     manifest["python"] = "3.12.4"
     manifest["dependencies"] = {"numpy": "2.2.0", "scipy": "1.15.0", "soundfile": "0.13.0"}
-    dump = copy.deepcopy(p)
+    # Their full dump held the song's patterns, none in this song (D191).
+    dump = {**copy.deepcopy(p), "patterns": {}}
     forms = [copy.deepcopy(dump)]
     # A MIDI track has no pads, audio clips or input of its own.
     def pads(each):

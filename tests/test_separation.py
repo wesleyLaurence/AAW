@@ -90,7 +90,7 @@ def song(tmp_path, env):
     (folder / "samples").mkdir()
     mix(folder / "samples" / "mix.wav")
     daw("apply", path, write(tmp_path / "p.json", {"samples": {"mix": {"path": "samples/mix.wav"}}}), "--expect", daw("inspect", path)["project_sha256"])
-    daw("track", "add", path, "song")
+    daw("track", "add", path, "song", "--type", "audio")
     daw("audio", "add", path, "song", "mix", "--at", 4, "--fade-in-ms", 2, "--gain-db", -3)
     return path
 

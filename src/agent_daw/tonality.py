@@ -104,7 +104,7 @@ def of_song(path: Path) -> dict:
             continue
         pad_id, _, moved = hit.rpartition(" ")
         t = tracks[track]
-        pads = t.get("pads") or ((t.get("instrument") or {}).get("sampler") or {}).get("pads") or {}
+        pads = ((t.get("instrument") or {}).get("sampler") or {}).get("pads") or {}
         pad = pads.get(pad_id)
         if pad is None or pad["sample"] not in project["samples"]:
             continue

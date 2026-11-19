@@ -197,12 +197,18 @@ def test_a_sample_s_punch_is_its_hit_s_in_daw_listen(tmp_path):
     document = {
         "session": {"tempo": 120, "length_beats": 16, "master_gain_db": 0, "end_fade_ms": 0},
         "samples": {"kick": {"path": "kick.wav"}},
-        "patterns": {"bar": {"length_beats": 4, "events": [{"at": 0, "pad": "kick", "velocity": 127}]}},
         "tracks": [
             {
                 "id": "kick",
-                "pads": {"kick": {"sample": "kick", "attack_ms": 0, "release_ms": 0}},
-                "clips": [{"pattern": "bar", "repeats": 4}],
+                "type": "midi",
+                "instrument": {
+                    "sampler": {
+                        "drum_rack": True,
+                        "pads": {"kick": {"sample": "kick", "attack_ms": 0, "release_ms": 0}},
+                        "map": [{"notes": 36, "pad": "kick"}],
+                    }
+                },
+                "clips": [{"id": "bar", "length_beats": 16, "loop_beats": 4, "notes": [{"pitch": 36, "at": 0, "duration": "1/4", "velocity": 127}]}],
             }
         ],
     }

@@ -251,7 +251,7 @@ def test_a_clip_loops_its_first_beats_and_the_notes_past_the_loop_are_named(tmp_
 
     sf.write(path.parent / "loop.wav", tone(110.0, seconds=4.0), SR)
     daw("set", path, "samples.loop", json.dumps({"path": "loop.wav"}))
-    daw("track", "add", path, "drums")
+    daw("track", "add", path, "drums", "--type", "audio")
     daw("audio", "add", path, "drums", "loop", "--at", 0, "--source-end-seconds", 2)
     daw("clip", "loop", path, "tracks.drums.audio.0", 2, "--length", 7)
     found = regions(load(path), path.parent)["drums"]
@@ -276,7 +276,7 @@ def test_clips_are_deactivated_and_activated_by_the_cli_and_play_nothing_meanwhi
 
     sf.write(path.parent / "loop.wav", tone(110.0, seconds=1.0), SR)
     daw("set", path, "samples.loop", json.dumps({"path": "loop.wav"}))
-    daw("track", "add", path, "drums")
+    daw("track", "add", path, "drums", "--type", "audio")
     daw("audio", "add", path, "drums", "loop", "--at", 0)
     daw("clip", "activate", path, clip)
     both = daw("clip", "deactivate", path, clip, "tracks.drums.audio.0")
@@ -353,7 +353,7 @@ def test_midi_effects_change_the_notes_the_instrument_plays_and_keep_the_clips(t
     daw("init", song, "--tempo", 120)
     path = song / "song.yaml"
     daw("track", "add", path, "keys", "--type", "midi")
-    daw("track", "add", path, "drums")
+    daw("track", "add", path, "drums", "--type", "audio")
     (song / "samples").mkdir(exist_ok=True)
     sf.write(song / "samples" / "a3.wav", tone(220.0, seconds=0.05), SR)
     daw("set", path, "samples.a3", json.dumps({"path": "samples/a3.wav", "root_note": "A3"}))

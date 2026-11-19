@@ -2,14 +2,12 @@ import Foundation
 
 /// The grids an editor draws and snaps to, in beats as the song writes them
 /// and named as note values, a beat being a quarter note. One list for the
-/// timeline, the piano roll and the pattern's step, and the steps the Grid
-/// menu takes through it: finer, coarser and triplets. The list's bar is
-/// the song's, from its time signature: `bar` is a bar in beats.
+/// timeline and the piano roll, and the steps the Grid menu takes through
+/// it: finer, coarser and triplets. The list's bar is the song's, from its
+/// time signature: `bar` is a bar in beats.
 public enum Grid {
     /// From a bar of 4/4 to a sixty-fourth note, each triplet after its note.
     public static let values = ["4", "2", "4/3", "1", "2/3", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"]
-    /// The steps a pattern can have: a beat to a sixty-fourth note.
-    public static let patternValues = ["1", "1/2", "1/3", "1/4", "1/6", "1/8", "1/12", "1/16"]
 
     /// The values for a song whose bar is `bar` beats: that bar in place of
     /// the 4/4 bar, from the coarsest.

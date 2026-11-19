@@ -780,7 +780,7 @@ def place(project: dict, found: dict, ids: dict, record: dict, prefix: str) -> d
         source_track = tracks[at]
         base = {k: v for k, v in clip.items() if k != "sample"}
         group = source_track.get("group")
-        if len(source_track.get("audio") or []) == 1 and not source_track.get("clips") and not source_track.get("pads"):
+        if len(source_track.get("audio") or []) == 1:
             source_track["mute"] = True
             silenced = {"track": track_id, "mute": True}
         else:
@@ -806,7 +806,7 @@ def place(project: dict, found: dict, ids: dict, record: dict, prefix: str) -> d
         track_id = f"{prefix}-{part}"
         if track_id in taken:
             raise ValueError(f"A track, group or return named {track_id} is already in the song; pass --id with another prefix")
-        track = {"id": track_id, "pads": {}, "clips": [], "audio": [{**base, "sample": sample_id}]}
+        track = {"id": track_id, "audio": [{**base, "sample": sample_id}]}
         if group:
             track["group"] = group
         new.append(track)

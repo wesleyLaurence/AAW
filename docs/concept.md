@@ -396,8 +396,9 @@ address that stays valid as other edits land, and every error says how to fix it
   The first version stores numeric MIDI pitches alone; note names in the piano
   roll are derived, and explicit enharmonic spelling waits for evidence that
   it is needed (D61). A clip owns its notes; the sampler maps notes to pads,
-  which is what plays a drum part; and the pattern clips of songs made before
-  note clips become note clips when the person asks (D62).
+  which is what plays a drum part, a Drum Rack; and the patterns of songs made
+  before note clips became note clips on a Drum Rack, converted when such a
+  song is read, and the song holds no patterns (D190, D191).
 - **Sampler tracks and audio clips:** pads that play, hold and repitch samples,
   and parts of a file placed on beats with fades.
 - **Instruments:** a polyphonic synthesizer with text patches, in the shape of

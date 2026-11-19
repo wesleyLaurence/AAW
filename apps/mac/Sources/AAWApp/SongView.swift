@@ -2,8 +2,7 @@ import AAWCore
 import SwiftUI
 
 /// A song's window: the transport bar over the arrangement and the detail
-/// panel, which shows the devices of the selected row or the pattern of the
-/// selected clip, with the sample browser and the activity panel beside them.
+/// panel, which shows the devices of the selected row or the selected clip, with the sample browser and the activity panel beside them.
 struct SongView: View {
     let model: SongModel
 

@@ -131,7 +131,7 @@ fn an_import_goes_on_a_midi_track_it_is_given_and_on_no_other() {
     assert_eq!(r["path"], json!("tracks.keys.clips.clip2"));
     assert_eq!(get(&s, "tracks.keys.clips.clip2.at"), json!("16/3"));
     assert_eq!(get(&s, "tracks.keys.clips.clip2.notes"), json!([{"id": "n1", "pitch": 38, "at": 0.5, "duration": 1}]));
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     let err = edit(&mut s, json!({"op": "midi.import", "file": file, "track": "vox"})).unwrap_err();
     assert_eq!(err, "A MIDI file's notes go on a MIDI track, and vox is not one");
 }
@@ -153,7 +153,7 @@ fn only_a_note_clip_with_notes_that_play_is_exported() {
     let (dir, mut s) = open();
     phrase(&mut s);
     let file = path(dir.path(), "x.mid");
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     edit(&mut s, json!({"op": "audio.add", "track": "vox", "sample": "tone", "at": 0})).unwrap();
     assert_eq!(s.export_midi("tracks.vox.audio.0", &file).unwrap_err(), "tracks.vox.audio.0 is not a note clip");
     assert_eq!(s.export_midi("tracks.keys", &file).unwrap_err(), "tracks.keys is not a note clip");

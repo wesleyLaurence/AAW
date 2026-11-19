@@ -18,7 +18,7 @@ import soundfile as sf
 import yaml
 
 from agent_daw.model import frame, load, project_hash, save, schedule
-from helpers import cli
+from helpers import cli, drum_track
 from song_fixtures import make_song
 
 
@@ -69,7 +69,6 @@ def beat_json(x):
 def inspected(t, triggers):
     """What inspect says of a track of the song as `load` read it."""
     common = {
-        "events": sum(tr.track == t["id"] for tr in triggers),
         "gain_db": t["gain_db"],
         "mute": t["mute"],
         "solo": t["solo"],
@@ -91,11 +90,8 @@ def inspected(t, triggers):
             for n, c in in_order(t["clips"])
         ]
         kind = next(iter(instrument)) if instrument else None
-        return {"id": t["id"], "type": "midi", "instrument": kind, **common, "clips": clips}
-    clips = [
-        {"ref": f"tracks.{t['id']}.clips.{n}", "pattern": c["pattern"], "at": c["at"], "repeats": c["repeats"]}
-        for n, c in in_order(t["clips"])
-    ]
+        events = sum(tr.track == t["id"] for tr in triggers)
+        return {"id": t["id"], "type": "midi", "instrument": kind, "events": events, **common, "clips": clips}
     audio = [
         {
             "ref": f"tracks.{t['id']}.audio.{n}",
@@ -106,7 +102,7 @@ def inspected(t, triggers):
         }
         for n, c in in_order(t["audio"])
     ]
-    return {"id": t["id"], **common, "clips": clips, "audio": audio}
+    return {"id": t["id"], **common, "audio": audio}
 
 
 def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
@@ -127,7 +123,6 @@ def test_inspect_summarizes_the_song(rust_daw, tmp_path, registry):
             "session": session,
             "duration_seconds": frame(session["length_beats"], session["tempo"], session["sample_rate"]) / session["sample_rate"],
             "samples": len(song["samples"]),
-            "patterns": len(song["patterns"]),
             "tracks": [inspected(t, triggers) for t in song["tracks"]],
             "groups": [],
             "returns": [
@@ -377,8 +372,7 @@ def burst_song(directory, rate=48000):
     song = {
         "session": {"tempo": 120, "sample_rate": rate, "length_beats": 8},
         "samples": {"burst": {"path": "burst.wav"}},
-        "patterns": {"one": {"length_beats": 4, "events": [{"at": 2, "pad": "b"}]}},
-        "tracks": [{"id": "hit", "pads": {"b": {"sample": "burst"}}, "clips": [{"pattern": "one"}]}],
+        "tracks": [drum_track("hit", "b", "burst", 4, [2])],
     }
     path = directory / "song.yaml"
     path.write_text(yaml.safe_dump(song))
@@ -394,7 +388,11 @@ def test_a_track_records_the_songs_own_sound_as_its_stem(rust_daw, tmp_path, reg
     path = make_song(random.Random(41), tmp_path)
     song = yaml.safe_load(path.read_text())
     first = song["tracks"][0]["id"]
-    song["tracks"].append({"id": "bounce", "pads": {}, "input": {"track": first}})
+    # The first track is heard: it is not muted and nothing is soloed.
+    song["tracks"][0].pop("mute", None)
+    for track in song["tracks"]:
+        track.pop("solo", None)
+    song["tracks"].append({"id": "bounce", "input": {"track": first}})
     path.write_text(yaml.safe_dump(song))
     host = subprocess.Popen([str(rust_daw), "host", str(path), "--output", "BlackHole"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:
@@ -531,7 +529,7 @@ def test_a_take_through_the_loopback_lands_on_its_beat_after_a_count_in(rust_daw
         pytest.skip("no BlackHole device on this Mac")
     path = burst_song(tmp_path)
     song = yaml.safe_load(path.read_text())
-    song["tracks"].append({"id": "mic", "pads": {}, "input": {"device": "BlackHole", "channels": [1]}})
+    song["tracks"].append({"id": "mic", "input": {"device": "BlackHole", "channels": [1]}})
     path.write_text(yaml.safe_dump(song))
     host = subprocess.Popen([str(rust_daw), "host", str(path), "--output", "BlackHole"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     try:

@@ -117,7 +117,7 @@ fn audio_clips_join_back_into_what_a_split_divided() {
     let dir = s.path().parent().unwrap().to_path_buf();
     std::fs::write(dir.join("song.wav"), aaw_engine::wav::float_wav_bytes(&song, 48000)).unwrap();
     edit(&mut s, json!({"op": "set", "path": "samples.song", "value": {"path": "song.wav"}})).unwrap();
-    edit(&mut s, json!({"op": "track.add", "id": "song"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "song"})).unwrap();
     edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 4, "source_start_seconds": 1, "gain_db": -3, "fade_out_ms": 20})).unwrap();
     let whole = get(&s, "tracks.song.audio.0");
     let before = refs(&s, "tracks.song.audio");

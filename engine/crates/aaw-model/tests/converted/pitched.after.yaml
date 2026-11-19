@@ -1,0 +1,16 @@
+schema_version: 2
+session:
+  tempo: 120.0
+  length_beats: 8
+  end_fade_ms: 0.0
+samples:
+  tone:
+    path: tone.wav
+    root_note: A3
+tracks:
+- {id: lead, type: midi, instrument: {sampler: {drum_rack: true, pads: {g: {sample: tone, mode: gate, release_ms: 5.0},
+        s-1: {sample: tone, mode: gate, transpose: -4.0, release_ms: 5.0}, k: {sample: tone}}, map: [{notes: 0,
+          pad: g, pitched: true}, {notes: 1, pad: s-1, pitched: true}, {notes: 30, pad: g, pitched: true}, {notes: 36,
+          pad: k}, {notes: 127, pad: g, pitched: true}]}}, clips: [{id: line, length_beats: 8, loop_beats: 4, notes: [
+        {id: n1, pitch: 30, duration: 1}, {id: n2, pitch: 0, at: 1, duration: 1}, {id: n3, pitch: 1, at: 1, duration: 1},
+        {id: n4, pitch: 127, at: 2, duration: 1}, {id: n5, pitch: 36, at: 3, duration: 1/4}]}]}

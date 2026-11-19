@@ -1,0 +1,17 @@
+
+session: {tempo: 120, length_beats: 8, sample_rate: 48000, end_fade_ms: 0}
+samples:
+  tone: {path: tone.wav, root_note: A3}
+patterns:
+  line:
+    length_beats: 4
+    events:
+    - {at: 0, pad: g, note: F#1, duration: 1}
+    - {at: 1, pad: g, note: C-1, duration: 1}
+    - {at: 2, pad: g, note: G9, duration: 1}
+    - {at: 1, pad: s, note: C-1, duration: 1}
+    - {at: 3, pad: k}
+tracks:
+- id: lead
+  pads: {g: {sample: tone, mode: gate, release_ms: 5}, s: {sample: tone, mode: gate, release_ms: 5, transpose: -3}, k: {sample: tone}}
+  clips: [{pattern: line, repeats: 2}]

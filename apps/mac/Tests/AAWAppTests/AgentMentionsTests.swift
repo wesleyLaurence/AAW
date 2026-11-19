@@ -55,9 +55,9 @@ final class AgentMentionsTests: XCTestCase {
     func testTheGroupsAndTheFilter() {
         let candidates = [
             mention(.files, .document, "SONG.md", detail: "document in the project"),
-            mention(.tracks, .track, "drums", "tracks.drums", detail: "sample track, 2 clips"),
+            mention(.tracks, .track, "drums", "tracks.drums", detail: "audio track, 2 clips"),
             mention(.tracks, .bus, "verb", "returns.verb", detail: "return with reverb"),
-            mention(.clips, .clip, "hook.1", "@3", detail: "pattern clip of hook on drums at 1.1.1, 1 repeat"),
+            mention(.clips, .clip, "hook.1", "@3", detail: "note clip hook on drums at 1.1.1, 4 beats, 8 notes"),
             mention(.markers, .marker, "m1", "markers.m1", detail: "marker at 2.1.1: too busy"),
         ]
         let sections = AgentMentions.sections(candidates)
@@ -103,8 +103,8 @@ final class AgentMentionsTests: XCTestCase {
     }
 
     func testAMentionsLineAndItsReading() {
-        let track = mention(.tracks, .track, "drums", "tracks.drums", detail: "sample track, 2 clips").attachment
-        XCTAssertEqual(track.line, "- track: tracks.drums (sample track, 2 clips)")
+        let track = mention(.tracks, .track, "drums", "tracks.drums", detail: "audio track, 2 clips").attachment
+        XCTAssertEqual(track.line, "- track: tracks.drums (audio track, 2 clips)")
         let read = AgentAttachment(line: track.line)
         XCTAssertEqual(read?.kind, .track)
         XCTAssertEqual(read?.name, "drums", "read back as it was mentioned")
@@ -120,7 +120,6 @@ final class AgentMentionsTests: XCTestCase {
         XCTAssertEqual(reference?.reference, "Night Drive")
         // A clip read from the record is named by its detail, not `@12`.
         XCTAssertEqual(AgentAttachment(line: "- clip: @12 (note clip lead1 on keys at 2.1.1, 4 beats, 2 notes)")?.name, "lead1")
-        XCTAssertEqual(AgentAttachment(line: "- clip: @3 (pattern clip of hook on drums at 1.1.1, 1 repeat)")?.name, "hook")
         XCTAssertEqual(AgentAttachment(line: "- clip: @4 (audio clip of sample kick on bed at 1.1.1, 8 beats)")?.name, "kick")
         XCTAssertEqual(AgentAttachment(line: "- clip: @4 (on bed at 1.1.1)")?.name, "@4")
         XCTAssertNil(AgentAttachment.clipName(in: "note clip  on x"))

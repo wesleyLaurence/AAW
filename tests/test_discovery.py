@@ -11,7 +11,7 @@ import numpy as np
 import soundfile as sf
 
 from agent_daw.model import save
-from helpers import SR, cli, daw
+from helpers import SR, cli, daw, drum_track
 
 TOPICS = ["start", "recipes", "batch", "project", "sampler", "synth", "midi", "effects", "plugins", "automation", "edit", "check", "samples", "beats", "joins", "export", "listen", "reference", "separate", "generate"]
 
@@ -96,15 +96,16 @@ def test_a_part_of_a_topic_is_printed_alone():
     assert "TOPIC[.PART]" in run("describe", "--help").stdout
     # The sampler no longer repeats the project's semantics; it names them.
     sampler = daw("describe", "sampler")
-    assert "time" not in sampler["semantics"] and "project.steps" in sampler["semantics"]["project"]
+    assert "time" not in sampler["semantics"] and "project.gate" in sampler["semantics"]["project"]
 
 
 def test_describe_batch_lists_every_op_a_batch_takes(tmp_path):
     batch = daw("describe", "batch")
     ops = batch["ops"]
     assert ops["clip.move"] == {"command": "daw clip move", "keys": {"clip": "text, required", "track": "text", "at": "beats"}}
-    assert ops["event.add"]["command"] == "daw pattern event add" and ops["point.set"]["command"] == "daw lane point move"
-    assert "Clip (daw describe project) or NoteClip (daw describe midi)" in ops["clip.add"]["fields"]
+    assert ops["point.set"]["command"] == "daw lane point move"
+    assert not any(op.startswith(("pattern.", "event.")) for op in ops) and "clip.repeats" not in ops
+    assert "NoteClip (daw describe midi)" in ops["clip.add"]["fields"]
     assert "play" not in ops and "apply" not in ops and "undo" not in ops
     assert "schema" in daw("describe", "batch", "--schema")
     assert "daw describe batch" in run("batch", "--help").stdout
@@ -115,10 +116,10 @@ def test_describe_batch_lists_every_op_a_batch_takes(tmp_path):
     song = tmp_path / "song"
     run("init", song)
     file = tmp_path / "wrong.json"
-    file.write_text(json.dumps([{"op": "track.add", "id": "drums"}, {"op": "pattern.event.add", "pattern": "p"}]))
+    file.write_text(json.dumps([{"op": "track.add", "id": "drums"}, {"op": "clip.note.add", "clip": "c"}]))
     refused = run("batch", song, file)
     assert refused.returncode == 1
-    assert "command 1: `pattern.event.add` is not an op; did you mean `event.add`?" in json.loads(refused.stderr)["error"]
+    assert "command 1: `clip.note.add` is not an op; did you mean `note.add`?" in json.loads(refused.stderr)["error"]
     assert "drums" not in daw("get", song, "tracks")
 
 
@@ -157,7 +158,7 @@ def test_errors_say_what_to_do(tmp_path):
     assert "did you mean `tracks.drums.gain_db`?" in error("set", song, "tracks.drums.volume", -3)
     assert "did you mean `tracks.drums.gain_db`?" in error("set", song, "tracks.drums.gian_db", -3)
     nothing_near = error("set", song, "tracks.drums.zzz", 1)
-    assert "`tracks.drums.zzz` is not a field; tracks.drums has id, gain_db" in nothing_near
+    assert "`tracks.drums.zzz` is not a field; tracks.drums has id, type, gain_db" in nothing_near
     assert error("effect", "add", song, "master", "limiter").startswith("`limiter` is an effect type; use --type limiter")
     # A union's tag is not part of the path a command takes.
     tagged = error("effect", "add", song, "master", "--type", "limiter", "--ceiling", -1)
@@ -171,10 +172,9 @@ def test_a_clipped_render_names_the_loud_stems_and_the_fix(tmp_path):
     song = {
         "session": {"length_beats": 4, "master_gain_db": 12},
         "samples": {"tone": {"path": "tone.wav"}},
-        "patterns": {"p": {"length_beats": 4, "steps": {"t": "x..."}, "grid": 1}},
         "tracks": [
-            {"id": "loud", "pads": {"t": {"sample": "tone"}}, "clips": [{"pattern": "p"}]},
-            {"id": "quiet", "gain_db": -30, "pads": {"t": {"sample": "tone"}}, "clips": [{"pattern": "p"}]},
+            drum_track("loud", "t", "tone", 4, [0]),
+            drum_track("quiet", "t", "tone", 4, [0], gain_db=-30),
         ],
     }
     path = tmp_path / "song.yaml"
