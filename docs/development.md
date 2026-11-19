@@ -4,6 +4,23 @@ Read this when changing the software, tests, build, or repository documentation.
 For operating a song, use [music.md](music.md). Read the relevant backlog item
 and its feature file before building; keep one item to a branch and pull request.
 
+## Set up
+
+Install as [the README](../README.md#install) says, then add the test
+dependencies and run both suites:
+
+```sh
+uv sync --extra dev --locked
+uv run pytest -q && (cd engine && cargo test)
+```
+
+Dependencies are pinned in `engine/Cargo.lock` and `uv.lock`. If uv's Python is
+an Intel build on Apple silicon, add its Rust target first: `rustup target add
+x86_64-apple-darwin`. `daw` is one command: the Rust binary and `uv run daw`
+each pass the other the commands it does not own, and
+[engine/README.md](../engine/README.md) says which, and how `AAW_DAW` and
+`AAW_PYTHON` choose the binary and the Python.
+
 ## Find the implementation
 
 Read [architecture.md](architecture.md) when changing runtime behavior. It says
@@ -21,8 +38,7 @@ The runtime song model is Rust. Python reads songs through `agent_daw.aaw_py`.
 `uv run pytest -q` rebuilds the release `daw` and the package's Rust model.
 `uv run daw` itself uses the release binary as last built; after Rust changes,
 run `cargo build --release` in `engine/` before manual CLI checks if tests have
-not already rebuilt it. Initial dependencies and installation are in
-[README setup](../README.md#setup).
+not already rebuilt it.
 
 The Mac app builds with `./build.sh` in `apps/mac/`. Its README explains
 `--snapshot` for checking the window and `--measure` for timing its drawing.
@@ -44,6 +60,11 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
   needs a design: status proposed, then What, Why, Design, Done when and Open
   questions. When the feature is built, rewrite the file in the present tense as
   its reference, with the date it was implemented in the title.
+- The root `README.md` is for a person, a musician or a developer: what AAW is,
+  why it exists, what it does at a high level, its status, how to install it and
+  a first song. It holds no commands beyond install, no song format and no
+  feature reference; a feature changes it only when it changes what AAW does at
+  that level (D193).
 - `architecture.md`, `engine/README.md`, `apps/mac/README.md` and `daw describe` say
   what exists. Change them in the pull request that changes the code.
 - `decisions.md` is append-only. A choice gets a new numbered entry, and the entry
