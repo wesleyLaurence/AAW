@@ -4,8 +4,8 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// The detail panel, under the arrangement: the devices of the row last
-/// selected, or the clip last selected, which is a pattern clip's pattern, an
-/// audio clip's settings or a note clip's piano roll. A row's header shows the first and a clip the
+/// selected, or the clip last selected, which is an audio clip's settings or
+/// a note clip's piano roll. A row's header shows the first and a clip the
 /// second, and the two marks at the top left change between them.
 struct DetailView: View {
     let model: SongModel
@@ -18,7 +18,7 @@ struct DetailView: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 2) {
                     tab("Devices", .devices)
-                    tab(Self.clipTitle(model), .pattern)
+                    tab(Self.clipTitle(model), .clip)
                     Spacer(minLength: 0)
                 }
                 .padding(.horizontal, 10)
@@ -30,15 +30,13 @@ struct DetailView: View {
                     } else {
                         hint("Select a track, a return or the master to see its effects.")
                     }
-                case .pattern:
+                case .clip:
                     if let context = model.audioContext {
                         AudioClipHeader(model: model, context: context)
                     } else if let context = model.noteContext {
                         NoteClipHeader(model: model, context: context)
-                    } else if let context = model.patternContext {
-                        PatternHeader(model: model, context: context)
                     } else {
-                        hint("Select a clip to edit it. Double-click an empty part of a track to add a clip, or drop an audio file on it.")
+                        hint("Select a clip to edit it. Double-click an empty part of a MIDI track to add a note clip, or drop an audio file on a track.")
                     }
                 }
                 Spacer(minLength: 0)
@@ -48,16 +46,13 @@ struct DetailView: View {
             switch model.detail {
             case .devices:
                 if let chain = model.deviceChain { DeviceView(model: model, chain: chain) }
-            case .pattern:
+            case .clip:
                 if let context = model.audioContext {
                     AudioClipInfo(context: context, tempo: model.arrangement.tempo)
                 } else if let context = model.noteContext {
                     NotePane(model: model, context: context, color: model.color(of: context.track.key),
                              playing: model.transport.playing, selected: model.selectedNotes, grid: model.noteGrid,
                              unfolded: model.unfoldedDrums.contains(context.track.key))
-                } else if let context = model.patternContext {
-                    PatternPane(model: model, context: context, color: model.color(of: context.track.key),
-                                playing: model.transport.playing, selected: model.selectedEvents)
                 }
             }
             Spacer(minLength: 0)
@@ -70,7 +65,7 @@ struct DetailView: View {
     static func clipTitle(_ model: SongModel) -> String {
         if model.audioContext != nil { return "Audio Clip" }
         if model.noteContext != nil { return "Notes" }
-        return "Pattern"
+        return "Clip"
     }
 
     private func tab(_ title: String, _ detail: Detail) -> some View {
@@ -507,8 +502,8 @@ func readable(_ name: String) -> String {
     return words.prefix(1).uppercased() + words.dropFirst()
 }
 
-/// The row's name, the menu that adds an effect, Save Rack…, on a MIDI
-/// track with an instrument Save Instrument…, and a track's pads.
+/// The row's name, the menu that adds an effect, Save Rack…, and on a MIDI
+/// track with an instrument Save Instrument….
 private struct ChainHeader: View {
     let model: SongModel
     let chain: DeviceChain
@@ -603,24 +598,6 @@ private struct ChainHeader: View {
                 .controlSize(.small)
                 .disabled(track.instrument == nil)
                 .help("Save the instrument with this chain to the library as an instrument rack, to drop on a MIDI track in any song")
-            }
-            if !chain.pads.isEmpty, chain.track?.midi != true {
-                Divider()
-                Text("Pads").font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(chain.pads, id: \.name) { pad in
-                            HStack(spacing: 4) {
-                                Text(pad.name).font(.system(size: 10, weight: .medium))
-                                Text(pad.sample).font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
-                                Spacer(minLength: 0)
-                                if pad.gate {
-                                    Text("gate").font(.system(size: 9)).foregroundStyle(.tertiary)
-                                }
-                            }
-                        }
-                    }
-                }
             }
             Spacer(minLength: 0)
         }

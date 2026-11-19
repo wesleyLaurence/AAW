@@ -28,29 +28,45 @@ def song(tmp_path):
     data = {
         "session": {"tempo": 120, "length_beats": 4, "master_gain_db": -6},
         "samples": {"tone": {"path": "tone.wav", "root_note": "A3"}},
-        "patterns": {
-            "main": {
-                "length_beats": 4,
-                "events": [{"at": 0, "pad": "a", "note": "A3", "duration": 1}],
-            }
-        },
         "tracks": [
             {
                 "id": "bass",
-                "pads": {
-                    "a": {
-                        "sample": "tone",
-                        "mode": "gate",
-                        "release_ms": 10,
-                        "attack_ms": 1,
+                "type": "midi",
+                # One gated pad played at each note's pitch.
+                "instrument": {
+                    "sampler": {
+                        "drum_rack": True,
+                        "pads": {
+                            "a": {
+                                "sample": "tone",
+                                "mode": "gate",
+                                "release_ms": 10,
+                                "attack_ms": 1,
+                            }
+                        },
+                        "map": [{"notes": [0, 127], "pad": "a", "pitched": True}],
                     }
                 },
-                "clips": [{"pattern": "main"}],
+                "clips": [
+                    {
+                        "id": "main",
+                        "length_beats": 4,
+                        "notes": [{"pitch": "A3", "at": 0, "duration": 1}],
+                    }
+                ],
             }
         ],
     }
     save(data, tmp_path / "song.yaml")
     return tmp_path / "song.yaml", data
+
+
+def pads(d):
+    return d["tracks"][0]["instrument"]["sampler"]["pads"]
+
+
+def notes(d):
+    return d["tracks"][0]["clips"][0]["notes"]
 
 
 def test_exact_timing_no_drift():
@@ -66,11 +82,11 @@ def test_exact_timing_no_drift():
         lambda d: d["session"].update(tempo=0),
         lambda d: d["session"].update(tempo=float("nan")),
         lambda d: d["session"].update(effects=["compressor"]),
-        lambda d: d["tracks"][0]["pads"]["a"].update(sample="missing"),
-        lambda d: d["patterns"]["main"]["events"][0].update(at=-1),
-        lambda d: d["patterns"]["main"]["events"][0].update(duration=None),
-        lambda d: d["patterns"]["main"]["events"][0].update(note="H2"),
-        lambda d: d["patterns"]["main"].update(steps={"a": "x..."}),
+        lambda d: pads(d)["a"].update(sample="missing"),
+        lambda d: notes(d)[0].update(velocity=0),
+        lambda d: notes(d)[0].update(duration=None),
+        lambda d: notes(d)[0].update(pitch="H2"),
+        lambda d: d["tracks"][0]["instrument"]["sampler"]["map"][0].update(pad="missing"),
     ],
 )
 def test_validation(song, change):
@@ -82,7 +98,7 @@ def test_validation(song, change):
 
 def test_pitch_and_gate(song, tmp_path):
     path, d = song
-    d["patterns"]["main"]["events"][0]["note"] = "A4"
+    notes(d)[0]["pitch"] = "A4"
     save(d, path)
     render(path, tmp_path / "out")
     x = stem(tmp_path / "out", "bass")
@@ -96,13 +112,12 @@ def test_pitch_and_gate(song, tmp_path):
 
 def test_choke_and_swing(song):
     path, d = song
-    d["tracks"][0]["pads"]["a"].update(mode="one_shot", choke_group="hat")
-    d["patterns"]["main"] = {
-        "length_beats": 4,
-        "grid": "1/2",
-        "swing": 0.6,
-        "steps": {"a": "xx......"},
-    }
+    pads(d)["a"].update(mode="one_shot", choke_group="hat")
+    # Two eighths, the second swung 60% of the way through its pair.
+    d["tracks"][0]["clips"][0]["notes"] = [
+        {"pitch": "A3", "at": 0, "duration": "1/2"},
+        {"pitch": "A3", "at": "3/5", "duration": "1/2"},
+    ]
     tr = schedule(d)
     assert tr[1].start == 14400
     assert tr[0].cutoff == 14400
@@ -110,17 +125,18 @@ def test_choke_and_swing(song):
 
 def test_block_size_invariance_and_stems(song, tmp_path):
     path, d = song
-    d["patterns"]["main"]["events"] += [
-        {"at": "1/3", "pad": "a", "note": "C4", "duration": "1/3"},
-        {"at": "11/4", "pad": "a", "duration": "1/2"},
-    ]
+    notes(d).extend([
+        {"pitch": "C4", "at": "1/3", "duration": "1/3"},
+        {"pitch": "A3", "at": "11/4", "duration": "1/2"},
+    ])
     d["tracks"].append(
         {
             "id": "second",
+            "type": "midi",
             "gain_db": -10,
             "pan": 0.4,
-            "pads": d["tracks"][0]["pads"],
-            "clips": [{"pattern": "main"}],
+            "instrument": d["tracks"][0]["instrument"],
+            "clips": [{**d["tracks"][0]["clips"][0], "id": "again"}],
         }
     )
     save(d, path)
@@ -202,9 +218,8 @@ def test_project_hash_fingerprints_the_saved_form(song):
     # A field added later and left at its default is not saved, so it must not
     # change the fingerprint that renders and apply --expect rely on.
     path, _ = song
-    # Read once, the song is converted and saved as it now is, a MIDI track's
-    # song of version 2, which the fingerprint holds as a version 1 song's
-    # does not.
+    # A song of a MIDI track is saved as version 2, which the fingerprint holds
+    # as a version 1 song's does not.
     project = load(path)
     saved = yaml.safe_load(path.read_text())
     assert saved["schema_version"] == 2
@@ -214,22 +229,16 @@ def test_project_hash_fingerprints_the_saved_form(song):
 
 def projects_by_schema():
     """A project using every model of each schema that hashed the full dump, newest
-    first: automation, sends and returns, effects, and the first schema."""
-    pads = {"k": {"sample": "hit"}}
+    first: automation, sends and returns, effects, and the first schema.
+
+    They are the projects those engines fingerprinted without the patterns the
+    song no longer holds (D191), each audio track with the empty `pads` an engine
+    before then saved; engine/crates/aaw-model/tests/fingerprints.rs holds the
+    same four."""
     first = {
         "session": {"tempo": 120, "length_beats": 8},
         "samples": {"hit": {"path": "hit.wav", "root_note": "C3"}},
-        "patterns": {
-            "beat": {
-                "length_beats": 4,
-                "steps": {"k": "x..." * 4},
-                "events": [{"at": "1/3", "pad": "k"}],
-            }
-        },
-        "tracks": [
-            {"id": "kick", "pads": pads, "clips": [{"pattern": "beat"}]},
-            {"id": "bass", "pads": pads, "clips": [{"pattern": "beat", "at": 4}]},
-        ],
+        "tracks": [{"id": "kick", "pads": {}}, {"id": "bass", "pads": {}}],
         "sections": [{"id": "drop", "at": 4, "length_beats": 4}],
     }
     effects = copy.deepcopy(first)
@@ -264,21 +273,42 @@ def projects_by_schema():
     return [automation, sends, effects, first]
 
 
-# project_hash of each projects_by_schema() entry under the engine of its schema
-# (commits 5dd2e6c, 695ca77, 74c074a and f71aa1d).
-EARLIER_FINGERPRINTS = [
-    "c0c7d463215a7839767cef6302532441594a6f9432486e4061406bc51fbdc509",
-    "2079b7e7da4f90bbbfcd9b93414f91f2ede9df70a7bfec57401b4c8d32f06a30",
-    "0caffe96828674076f68c7060c86e5cc553cd6fab7d196c58bea5a6a7ae2b159",
-    "1b90bf9dcc3079a74cd794764f03445e7aa76eb30ea55b62cad15efa479a26dc",
+# Of each projects_by_schema() entry: the project_hash the engine of its schema
+# recorded (commits 5dd2e6c, 695ca77, 74c074a and f71aa1d), the one of the
+# saved form with `pads: {}` an engine wrote before patterns were removed, and
+# today's, as the build of D190 computed the first two.
+FINGERPRINTS = [
+    (
+        "262f56b4ce4972502b69cd40dcb20b6b0395ca0352e80316309d2f8ddbff21ef",
+        "ca7f2375ba36a4529bc1566c82291eccfc3d0a33492638c3bd50c59629cf0fca",
+        "7574a39e2d7f52a7cc042cbd81db56d6242caf49243b16b8a86f6458c1a29f08",
+    ),
+    (
+        "1b6e3be96763e67d8f101f5822ea94581059252607b3c1704075b4f9b4f049e5",
+        "542fd9416300d7a4dce0775889c0eec624657a7468c294a154e29f4c02d04d7e",
+        "b32ab59d1842421c4d00ef79bc8faf5261151f5a1f39812cc301a6348bf2f9a6",
+    ),
+    (
+        "004bf35773ebd9173e75c6592ceabebee458aee81f4a12e5b46b8d06ea34d63e",
+        "218c62932f364405a226610186a0fc2fecd18699060313f8d29c952a5f342f8b",
+        "31a0b8c61df4190fddb554323022bc89dec50c347374baa77266eb33de940ee2",
+    ),
+    (
+        "9b1c56b18358acefe858469f15d64cb6f629bf1b3742048c74068d7edcf6bea2",
+        "fb5103e1b08eb22f7bc1c0792020633a9b710ba53c7a8580428e571cb5df0707",
+        "333d6e1c1c520dc27301f2050f48030748a6a357455056c4eb7c2198802507bc",
+    ),
 ]
 
 
 def test_fingerprints_of_earlier_engines_still_verify():
     # The forms are rebuilt from today's full dump, so a field added to any model
     # breaks them here until the Rust model lists it among its legacy fields.
-    for data, sha in zip(projects_by_schema(), EARLIER_FINGERPRINTS, strict=True):
-        assert project_hash(data) != sha and hash_matches(data, sha)
+    for data, hashes in zip(projects_by_schema(), FINGERPRINTS, strict=True):
+        earlier, before, current = hashes
+        assert project_hash(data) == current
+        assert current not in (earlier, before)
+        assert hash_matches(data, earlier) and hash_matches(data, before)
 
 
 def test_region_is_full_render_slice(song, tmp_path):
@@ -302,9 +332,10 @@ def test_track_preview_and_missing_target(song, tmp_path):
     d["tracks"].append(
         {
             "id": "other",
+            "type": "midi",
             "gain_db": -10,
-            "pads": d["tracks"][0]["pads"],
-            "clips": [{"pattern": "main"}],
+            "instrument": d["tracks"][0]["instrument"],
+            "clips": [{**d["tracks"][0]["clips"][0], "id": "again"}],
         }
     )
     save(d, path)
@@ -321,9 +352,9 @@ def test_gate_release_is_a_continuous_ramp(song, tmp_path):
     path, d = song
     sf.write(path.parent / "tone.wav", np.full((1000, 2), 0.5), 48000, subtype="FLOAT")
     d["session"].update(master_gain_db=0, end_fade_ms=0)
-    d["tracks"][0]["pads"]["a"].update(attack_ms=0, release_ms=100 / 48)
-    d["patterns"]["main"]["events"] = [
-        {"at": 0, "pad": "a", "duration": "1/80", "velocity": 127}
+    pads(d)["a"].update(attack_ms=0, release_ms=100 / 48)
+    d["tracks"][0]["clips"][0]["notes"] = [
+        {"pitch": "A3", "at": 0, "duration": "1/80", "velocity": 127}
     ]
     save(d, path)
     render(path, tmp_path / "out", 227)
@@ -340,7 +371,7 @@ def test_resampling_44100_to_48000(song, tmp_path):
         44100,
         subtype="FLOAT",
     )
-    d["tracks"][0]["pads"]["a"]["mode"] = "one_shot"
+    pads(d)["a"]["mode"] = "one_shot"
     save(d, path)
     render(path, tmp_path / "out")
     audio = stem(tmp_path / "out", "bass")

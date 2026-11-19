@@ -1,7 +1,7 @@
 //! Event scheduling: every hit's start frame, from exact beats.
 
 use crate::midi_effects::Played;
-use crate::{frame, Beat, Event, Instrument, Midi, PadMode, Project, Sampler, Wave};
+use crate::{frame, Instrument, Midi, PadMode, Project, Sampler, Wave};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
@@ -90,15 +90,8 @@ pub fn sampler_hits(sampler: &Sampler, notes: &[NoteOn], track: usize, track_id:
             track,
             track_id: track_id.to_string(),
             pad: entry.pad.clone(),
-            event: Event {
-                at: Beat::Str(crate::fraction_str(&n.at)),
-                pad: entry.pad.clone(),
-                velocity: n.velocity,
-                note: entry.pitched.then(|| crate::rules::note_name(n.pitch).expect("a pitch is 0 to 127")),
-                duration: Some(Beat::Str(crate::fraction_str(&n.beats))),
-                transpose: 0.0,
-            },
-            velocity_scale: 1.0,
+            velocity: n.velocity,
+            note: entry.pitched.then_some(n.pitch),
             cutoff: (pad.mode == PadMode::Gate).then_some(n.end),
         });
     }
@@ -112,8 +105,10 @@ pub struct Trigger {
     pub track: usize,
     pub track_id: String,
     pub pad: String,
-    pub event: Event,
-    pub velocity_scale: f64,
+    pub velocity: i64,
+    /// The note a pitched map entry plays the pad at; None for a pad
+    /// played as it is.
+    pub note: Option<i64>,
     /// Where a gated or choked voice releases.
     pub cutoff: Option<i64>,
 }
@@ -121,38 +116,11 @@ pub struct Trigger {
 /// One track's triggers, sorted by (start, pad), with choke cutoffs applied.
 /// Choke groups are local to a track, so a track's hits depend on nothing else.
 pub fn track_triggers(p: &Project, ti: usize) -> Vec<Trigger> {
-    let rate = p.session.sample_rate;
-    let tempo = p.session.tempo;
     let t = &p.tracks[ti];
     let mut triggers = Vec::new();
     if let Some(midi) = &t.midi {
         if let Some(sampler) = midi.sampler() {
             triggers = sampler_hits(sampler, &track_notes(p, midi), ti, &t.id);
-        }
-    }
-    for c in t.clips.iter().filter(|c| c.active) {
-        let pattern = &p.patterns[&c.pattern];
-        let events = pattern.expanded();
-        let length = pattern.length_exact();
-        for r in 0..c.repeats {
-            let base = c.at_exact() + BigRational::from_integer(r.into()) * &length;
-            for e in &events {
-                let at = &base + e.at_exact();
-                let start = frame(&at, tempo, rate);
-                let cutoff = match (e.duration_exact(), t.pads[&e.pad].mode) {
-                    (Some(d), PadMode::Gate) => Some(frame(&(&at + d), tempo, rate)),
-                    _ => None,
-                };
-                triggers.push(Trigger {
-                    start,
-                    track: ti,
-                    track_id: t.id.clone(),
-                    pad: e.pad.clone(),
-                    event: e.clone(),
-                    velocity_scale: c.velocity_scale,
-                    cutoff,
-                });
-            }
         }
     }
     triggers.sort_by(|a, b| (a.start, &a.pad).cmp(&(b.start, &b.pad)));
@@ -193,8 +161,8 @@ pub struct Sounded {
     /// its oscillators, and a sample repitched to a note. None for a hit
     /// without a note, which plays its sample as it is.
     pub pitch: Option<f64>,
-    /// For a hit without a note, its pad and how far the pad's and the
-    /// event's transpose move it, in semitones; empty for a note.
+    /// For a hit without a note, its pad and how far the pad's transpose
+    /// moves it, in semitones; empty for a note.
     pub hit: String,
 }
 
@@ -234,24 +202,6 @@ pub fn sounded(p: &Project) -> Vec<Sounded> {
                 }
             }
         }
-        for c in t.clips.iter().filter(|c| c.active) {
-            let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
-            let (length, events) = (pattern.length_exact(), pattern.expanded());
-            for r in 0..c.repeats {
-                let base = c.at_exact() + BigRational::from_integer(r.into()) * &length;
-                for e in &events {
-                    let Some(pad) = t.pads.get(&e.pad) else { continue };
-                    let at = &base + e.at_exact();
-                    let until = &at + e.duration_exact().unwrap_or_else(|| BigRational::from_integer(0.into()));
-                    let moved = pad.transpose + e.transpose;
-                    let note = e.note.as_deref().filter(|n| !n.is_empty()).and_then(|n| crate::rules::midi(n).ok());
-                    match note {
-                        Some(note) => push(f(&at), f(&until), Some(note as f64 + moved), String::new()),
-                        None => push(f(&at), f(&until), None, format!("{} {}", e.pad, moved)),
-                    }
-                }
-            }
-        }
         out[from..].sort_by(|a, b| a.at.total_cmp(&b.at));
     }
     out
@@ -269,13 +219,8 @@ session: {tempo: 120, length_beats: 16, sample_rate: 48000}
 samples:
   kick: {path: kick.wav}
   bass: {path: bass.wav, root_note: C2}
-patterns:
-  beat: {length_beats: 4, events: [{at: 0, pad: kick}, {at: 2, pad: kick, transpose: -2}]}
-  line: {length_beats: 4, events: [{at: 1, pad: bass, note: E2, duration: 1}]}
 tracks:
-  - id: drums
-    pads: {kick: {sample: kick}, bass: {sample: bass, transpose: 12}}
-    clips: [{pattern: beat, at: 0, repeats: 2}, {pattern: line, at: 4}]
+  - id: loop
     audio: [{sample: kick, at: 8}]
   - id: lead
     type: midi
@@ -294,18 +239,8 @@ tracks:
         let of = |track: &str| -> Vec<(f64, f64, Option<f64>, String)> {
             sounded(&p).into_iter().filter(|s| s.track_id == track).map(|s| (s.at, s.until, s.pitch, s.hit)).collect()
         };
-        // A hit without a note is its pad and its transpose; a note is the
-        // pitch the sample is moved to. The audio clip is not listed.
-        assert_eq!(
-            of("drums"),
-            vec![
-                (0.0, 0.0, None, "kick 0".into()),
-                (2.0, 2.0, None, "kick -2".into()),
-                (4.0, 4.0, None, "kick 0".into()),
-                (5.0, 6.0, Some(52.0), String::new()),
-                (6.0, 6.0, None, "kick -2".into()),
-            ]
-        );
+        // An audio clip is not listed.
+        assert_eq!(of("loop"), vec![]);
         // A Synth's note at each oscillator but the noise; the last note is
         // cut at its clip's end.
         assert_eq!(

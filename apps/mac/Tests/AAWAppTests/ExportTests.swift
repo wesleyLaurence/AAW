@@ -193,8 +193,6 @@ final class ExportTests: XCTestCase {
         samples: {kick: {path: kick.wav}}
         tracks:
         - id: vox
-          pads: {}
-          clips: []
           audio:
           - {sample: kick, at: 8, source_start_seconds: 0.2, lead_ms: 70}
         - id: keys

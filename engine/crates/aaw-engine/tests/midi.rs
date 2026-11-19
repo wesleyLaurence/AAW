@@ -1,7 +1,5 @@
-//! Note clips through the engine, with generated audio: a phrase of chords,
-//! overlapping and repeated notes sounds as the same hits written as a
-//! pattern do, a gated note releases at its note-off or its clip's end, the
-//! level follows velocity, playback equals a render, and a note previewed
+//! Note clips through the engine, with generated audio: a gated note
+//! releases at its note-off or its clip's end, the level follows velocity, playback equals a render, and a note previewed
 //! through the sampler sounds as the same note in a clip does.
 
 mod common;
@@ -37,16 +35,6 @@ const NOTES: &str = r#"
     - {pitch: 43, at: 2, duration: 1.5}
     - {pitch: 30, at: 3, duration: 1/4, velocity: 30}"#;
 
-/// The same hits as a pattern's events, in the order the notes start.
-const EVENTS: &str = r#"
-    - {at: 0, pad: t, note: C3, duration: 1}
-    - {at: 0, pad: t, note: E3, duration: 1, velocity: 64}
-    - {at: 0, pad: t, note: G3, duration: 1}
-    - {at: 1/3, pad: t, note: C4, duration: 2/3}
-    - {at: 1/2, pad: t, note: C4, duration: 1}
-    - {at: 2, pad: t, note: G2, duration: 1.5}
-    - {at: 3, pad: d, duration: 1/4, velocity: 30}"#;
-
 fn write_audio(dir: &Path) {
     let tone: Vec<[f32; 2]> = (0..48000)
         .map(|i| {
@@ -78,17 +66,6 @@ fn render(p: &Arc<aaw_engine::program::Program>) -> Vec<Frame> {
         r.render(chunk, |_, _, _| {});
     }
     out
-}
-
-#[test]
-fn notes_sound_as_the_same_hits_written_as_a_pattern() {
-    let dir = tempfile::tempdir().unwrap();
-    write_audio(dir.path());
-    let notes = render(&compiled(dir.path(), &midi_song("")));
-    let pattern = format!("{HEAD}patterns:\n  p:\n    length_beats: 4\n    events:{EVENTS}\ntracks:\n- id: keys\n  pads: {PADS}\n  clips: [{{pattern: p, at: 1}}]\n");
-    let events = render(&compiled(dir.path(), &pattern));
-    assert!(notes.iter().any(|f| f[0].abs() > 0.1), "the phrase is silent");
-    assert_eq!(notes, events);
 }
 
 #[test]

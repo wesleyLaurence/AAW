@@ -111,13 +111,14 @@ impl Worker {
     /// of the song in `directory`, which gives each track its key.
     pub fn compiled(&self, revision: u64, program: &Program, doc: &Doc, files: &Files, directory: &Path) {
         let tree = doc.tree();
-        // A track of audio clips alone has nothing that draws its peaks.
+        // A MIDI track's voices draw its peaks; an audio track's clips draw
+        // their own.
         let keys: HashMap<&str, u64> = doc
             .project
             .tracks
             .iter()
             .zip(tree.get("tracks").map(Node::items).unwrap_or(&[]))
-            .filter(|(t, _)| !t.clips.is_empty() || t.audio.is_empty())
+            .filter(|(t, _)| t.midi.is_some())
             .map(|(t, item)| (t.id.as_str(), item.handle))
             .collect();
         let tracks = program

@@ -181,12 +181,18 @@ def stems(directory, parts, tracks=(), **more):
     document = {
         "session": {"tempo": 120, "length_beats": beats, "master_gain_db": -18, "end_fade_ms": 0},
         "samples": {name: {"path": f"{name}.wav"} for name in parts},
-        "patterns": {"once": {"length_beats": beats, "events": [{"at": 0, "pad": "x", "velocity": 127}]}},
         "tracks": list(tracks),
         **more,
     }
     save(validate(document), directory / "song.yaml")
     return Path(render(directory / "song.yaml")["directory"])
+
+
+def once(name, pads):
+    """A MIDI track whose Drum Rack plays its pad x once, at the start, as hard as it can."""
+    rack = {"sampler": {"drum_rack": True, "pads": pads, "map": [{"notes": 36, "pad": "x"}]}}
+    clip = {"id": f"{name}-once", "length_beats": BARS * 4, "notes": [{"pitch": 36, "at": 0, "duration": "1/4", "velocity": 127}]}
+    return {"id": name, "type": "midi", "instrument": rack, "clips": [clip]}
 
 
 def ring(rng, hz=None):
@@ -209,11 +215,11 @@ def test_what_the_song_says_decides_whether_a_peak_could_be_a_note(tmp_path):
         {"snare": ring(rng, 410), "plain": ring(rng)},
         tracks=[
             # One hit of one sample: nothing moves, so a ring could be the sound's own.
-            {"id": "snare", "pads": pad, "clips": [{"pattern": "once"}]},
+            once("snare", pad),
             # The same file as an audio clip: the song says nothing of what is in it.
-            {"id": "clip", "pads": {}, "audio": [{"sample": "snare", "at": 0}]},
-            {"id": "plain", "pads": {"x": {"sample": "plain"}}, "clips": [{"pattern": "once"}], "group": "kit"},
-            {"id": "sent", "pads": pad, "clips": [{"pattern": "once"}], "sends": [{"to": "room", "gain_db": 0}], "group": "kit"},
+            {"id": "clip", "audio": [{"sample": "snare", "at": 0}]},
+            once("plain", {"x": {"sample": "plain"}}) | {"group": "kit"},
+            once("sent", pad) | {"sends": [{"to": "room", "gain_db": 0}], "group": "kit"},
         ],
         groups=[{"id": "kit"}],
         returns=[{"id": "room", "effects": [{"type": "delay", "time_beats": "1/16", "feedback_percent": 0}]}],
@@ -244,12 +250,12 @@ def test_what_the_song_says_decides_whether_a_peak_could_be_a_note(tmp_path):
 
 
 def test_notes_that_move_explain_only_their_own_partials():
+    kit = {"sampler": {"drum_rack": True, "pads": {"kick": {"sample": "kick"}}, "map": [{"notes": 36, "pad": "kick"}]}}
     # Two bars of each of two notes, eight bars long, with nothing rendered.
     project = validate(
         {
             "session": {"tempo": 120, "length_beats": 32},
             "samples": {"kick": {"path": "kick.wav"}},
-            "patterns": {"beat": {"length_beats": 4, "events": [{"at": 0, "pad": "kick"}]}},
             "tracks": [
                 {
                     "id": "lead",
@@ -266,8 +272,13 @@ def test_notes_that_move_explain_only_their_own_partials():
                         }
                     ],
                 },
-                {"id": "drums", "pads": {"kick": {"sample": "kick"}}, "clips": [{"pattern": "beat", "repeats": 4}]},
-                {"id": "empty", "pads": {"kick": {"sample": "kick"}}},
+                {
+                    "id": "drums",
+                    "type": "midi",
+                    "instrument": kit,
+                    "clips": [{"id": "beat", "length_beats": 16, "loop_beats": 4, "notes": [{"pitch": 36, "at": 0, "duration": "1/4"}]}],
+                },
+                {"id": "empty", "type": "midi", "instrument": kit},
             ],
         }
     )

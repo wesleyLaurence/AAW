@@ -40,12 +40,11 @@ fn tone_song(dir: &Path, rate: u32) -> Arc<Program> {
 session: {{tempo: 120, sample_rate: {rate}, length_beats: 8, master_gain_db: 0}}
 samples:
   tone: {{path: tone.wav}}
-patterns:
-  hold: {{length_beats: 8, events: [{{at: 0, pad: t, duration: 8}}]}}
 tracks:
 - id: tone
-  pads: {{t: {{sample: tone, mode: gate, attack_ms: 1, release_ms: 20}}}}
-  clips: [{{pattern: hold}}]
+  type: midi
+  instrument: {{sampler: {{drum_rack: true, pads: {{t: {{sample: tone, mode: gate, attack_ms: 1, release_ms: 20}}}}, map: [{{notes: 36, pad: t}}]}}}}
+  clips: [{{id: hold, length_beats: 8, notes: [{{pitch: 36, duration: 8}}]}}]
 "#
     );
     let path = dir.join("song.yaml");

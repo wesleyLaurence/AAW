@@ -290,27 +290,12 @@ def musical_context(project, manifest, offset, count, sections):
                 for tr in triggers
                 if tr.track == track["id"] and start <= tr.start < end
             ]
-            placements = []
-            for clip in track["clips"]:
-                if "pattern" not in clip or not clip.get("active", True):
-                    continue
-                length = beat(project["patterns"][clip["pattern"]]["length_beats"])
-                for repeat in range(clip["repeats"]):
-                    at = beat(clip["at"]) + repeat * length
-                    if (
-                        frame(at, tempo, rate) < end
-                        and frame(at + length, tempo, rate) > start
-                    ):
-                        placements.append(clip["pattern"])
             regions.append(
                 {
                     "id": region["id"],
                     "trigger_count": len(hits),
                     "triggers_per_beat": len(hits)
                     / ((end - start) / rate * tempo / 60),
-                    "pattern_occurrences": {
-                        p: placements.count(p) for p in sorted(set(placements))
-                    },
                 }
             )
         result[track["id"]] = {
@@ -318,7 +303,7 @@ def musical_context(project, manifest, offset, count, sections):
             "regions": regions,
         }
     return {
-        "source": "saved project schedule; triggers are not detected audio onsets; pattern IDs do not establish musical similarity",
+        "source": "saved project schedule; triggers are not detected audio onsets",
         "tracks": result,
     }
 
@@ -821,12 +806,6 @@ def compare(before, after, images=True):
                                 - left["trigger_count"],
                                 "triggers_per_beat_delta": right["triggers_per_beat"]
                                 - left["triggers_per_beat"],
-                                "pattern_occurrences_before": left[
-                                    "pattern_occurrences"
-                                ],
-                                "pattern_occurrences_after": right[
-                                    "pattern_occurrences"
-                                ],
                             }
                         )
             report["musical_context_delta"][name] = changes

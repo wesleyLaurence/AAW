@@ -112,7 +112,7 @@ pub fn cut(p: &Project, owner: &str, index: usize) -> Result<Project, String> {
 
 /// What of the song the input of the device at `index` of `owner`'s chain
 /// is made from: `cut`, with only the channels its input is rendered from
-/// and the samples and patterns they play, and without what comes after
+/// and the samples they play, and without what comes after
 /// the owner's tap (its fader, pan and sends, and for a stem the master's
 /// gain, chain and end fade) or what is not heard (the title, the sections
 /// and the markers). Which tracks and groups are muted or soloed reaches
@@ -163,21 +163,17 @@ pub fn fed(p: &Project, owner: &str, index: usize) -> Result<Project, String> {
             }
         }
     }
-    // The samples and patterns the tracks kept play.
+    // The samples the tracks kept play.
     let mut samples: Vec<&str> = Vec::new();
-    let mut patterns: Vec<&str> = Vec::new();
     for t in &out.tracks {
         samples.extend(t.sound_pads().values().map(|pad| pad.sample.as_str()));
         samples.extend(t.audio.iter().map(|clip| clip.sample.as_str()));
         if let Some(synth) = t.midi.as_ref().and_then(|m| m.synth()) {
             samples.extend(synth.oscillators.values().filter_map(|o| o.sample_table()));
         }
-        patterns.extend(t.clips.iter().map(|c| c.pattern.as_str()));
     }
     let samples: Vec<String> = samples.into_iter().map(str::to_string).collect();
-    let patterns: Vec<String> = patterns.into_iter().map(str::to_string).collect();
     out.samples.retain(|id, _| samples.contains(id));
-    out.patterns.retain(|id, _| patterns.contains(id));
     Ok(out)
 }
 

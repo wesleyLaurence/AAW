@@ -56,7 +56,7 @@ fn with_audio(s: &mut Session) {
     let dir = s.path().parent().unwrap().to_path_buf();
     std::fs::write(dir.join("song.wav"), aaw_engine::wav::float_wav_bytes(&song, 48000)).unwrap();
     edit(s, json!({"op": "set", "path": "samples.song", "value": {"path": "song.wav"}})).unwrap();
-    edit(s, json!({"op": "track.add", "id": "song"})).unwrap();
+    edit(s, json!({"op": "track.add", "type": "audio", "id": "song"})).unwrap();
     edit(s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 4, "source_start_seconds": 1, "source_end_seconds": 9})).unwrap();
 }
 

@@ -664,7 +664,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             var report = times.report
             report["window"] = [size.width, size.height]
             report["tracks"] = a.tracks.count
-            report["clips"] = a.tracks.reduce(0) { $0 + $1.clips.count }
+            report["clips"] = a.tracks.reduce(0) { $0 + $1.noteClips.count + $1.audio.count }
             // How long waveforms trailed the song's opening and its last
             // change of audio.
             let round = { (x: Double) in (x * 10).rounded() / 10 }
@@ -888,7 +888,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             .separator(),
             item("Browser", #selector(SongWindowController.toggleBrowser(_:)), "b", [.command, .option]),
             item("Devices", #selector(SongWindowController.toggleDevices(_:)), "d", [.command, .option]),
-            item("Pattern", #selector(SongWindowController.togglePattern(_:)), "p", [.command, .option]),
+            // Named after the clip last selected, as its tab is.
+            item("Clip", #selector(SongWindowController.toggleClip(_:)), "p", [.command, .option]),
             item("Agent", #selector(SongWindowController.toggleAgent(_:)), "c", [.command, .option]),
             .separator(),
             item("Analyzer Window", #selector(SongWindowController.openAnalyzer(_:)), "l", [.command, .option]),
@@ -1212,7 +1213,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func toggleAgent(_ sender: Any?) { model.showsAgent.toggle() }
     @objc func toggleBrowser(_ sender: Any?) { model.showsBrowser.toggle() }
 
-    /// Shows the devices or the pattern in the detail panel, or hides the
+    /// Shows the devices or the clip in the detail panel, or hides the
     /// panel when it shows them already.
     private func toggle(_ detail: Detail) {
         if model.showsDetail, model.detail == detail {
@@ -1224,19 +1225,15 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     }
 
     @objc func toggleDevices(_ sender: Any?) { toggle(.devices) }
-    @objc func togglePattern(_ sender: Any?) { toggle(.pattern) }
+    @objc func toggleClip(_ sender: Any?) { toggle(.clip) }
     /// Opens the window of the selected analyzer, or of the first one on
     /// the row whose devices show.
     @objc func openAnalyzer(_ sender: Any?) { model.openShownAnalyzer() }
 
-    /// The editor a Grid menu command is for: the piano roll or the pattern
-    /// editor while it has the keys, else the timeline.
+    /// The editor a Grid menu command is for: the piano roll while it has
+    /// the keys, else the timeline.
     private var gridPlace: GridPlace {
-        switch window?.firstResponder {
-        case is NoteEditor: .notes
-        case is PatternEditor: .pattern
-        default: .timeline
-        }
+        window?.firstResponder is NoteEditor ? .notes : .timeline
     }
 
     @objc func gridFollowsZoom(_ sender: Any?) { model.timelineGrid = nil }
@@ -1257,26 +1254,19 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
     @objc func joinSelection(_ sender: Any?) { model.joinSelection() }
     @objc func toggleClipsActive(_ sender: Any?) { model.toggleClipsActive() }
     @objc func quantizeSelection(_ sender: Any?) { model.quantizeSelection() }
-    /// Delete, for what has the keys: in the pattern editor the selected
-    /// events and nothing else, so that it never takes the clip being edited.
+    /// Delete, for what has the keys: in the piano roll the selected notes
+    /// and nothing else, so that it never takes the clip being edited.
     @objc func deleteSelection(_ sender: Any?) {
-        if window?.firstResponder is PatternEditor, model.selectedEvents.isEmpty {
-            NSSound.beep()
-        } else if window?.firstResponder is NoteEditor, model.selectedNotes.isEmpty {
+        if window?.firstResponder is NoteEditor, model.selectedNotes.isEmpty {
             NSSound.beep()
         } else {
             model.deleteSelection()
         }
     }
-    /// Where Copy and Paste act: in the piano roll, notes, and in the pattern
-    /// editor, events, pasted where the clip or pattern was last clicked;
-    /// elsewhere, clips, pasted at the start position.
+    /// Where Copy and Paste act: in the piano roll, notes, pasted where the
+    /// clip was last clicked; elsewhere, clips, pasted at the start position.
     private var editPlace: EditPlace {
-        switch window?.firstResponder {
-        case is NoteEditor: .notes
-        case is PatternEditor: .events
-        default: .clips
-        }
+        window?.firstResponder is NoteEditor ? .notes : .clips
     }
 
     @objc func copy(_ sender: Any?) { model.copySelection(in: editPlace) }
@@ -1317,10 +1307,10 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             return !typing
         case #selector(toggleAgent(_:)): item.state = model.showsAgent ? .on : .off
         case #selector(toggleDevices(_:)): item.state = model.showsDetail && model.detail == .devices ? .on : .off
-        case #selector(togglePattern(_:)):
-            // The clip last selected: a pattern, or an audio clip.
+        case #selector(toggleClip(_:)):
+            // The clip last selected: notes, or an audio clip.
             item.title = DetailView.clipTitle(model)
-            item.state = model.showsDetail && model.detail == .pattern ? .on : .off
+            item.state = model.showsDetail && model.detail == .clip ? .on : .off
         case #selector(toggleBrowser(_:)): item.state = model.showsBrowser ? .on : .off
         case #selector(openAnalyzer(_:)): return model.shownAnalyzer != nil && !typing
         case #selector(gridFollowsZoom(_:)):
@@ -1365,7 +1355,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
             let activate = model.clipsActivation
             let many = model.selectedClips.count > 1
             item.title = "\(activate == true ? "Activate" : "Deactivate") \(many ? "Clips" : "Clip")"
-            // In the piano roll and the pattern editor the keys are theirs.
+            // In the piano roll the keys are its own.
             return activate != nil && editPlace == .clips && !typing
         case #selector(deleteSelection(_:)): return model.canDelete && !typing
         case #selector(renameSelection(_:)): return model.canRename && !typing

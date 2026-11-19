@@ -135,25 +135,26 @@ fn now() -> f64 {
     (t.as_secs_f64() * 1000.0).round() / 1000.0
 }
 
-fn parse(path: &Path, bytes: &[u8]) -> Result<Project> {
-    let text = std::str::from_utf8(bytes).map_err(|_| format!("{}: not UTF-8 text", path.display()))?;
-    aaw_model::parse(text).map_err(|e| e.to_string())
-}
-
 fn read_project(path: &Path) -> Result<(Project, Vec<u8>)> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    let project = parse(path, &bytes)?;
-    converted(path, project, bytes)
+    let (project, converted) = read(path, &bytes)?;
+    let bytes = if converted { write_back(path, &bytes, &project)? } else { bytes };
+    Ok((project, bytes))
 }
 
-/// A song as read, converted and written back once when it holds tracks
-/// of pads (`aaw_model::convert::upgrade`), with the bytes now in the file.
-fn converted(path: &Path, project: Project, bytes: Vec<u8>) -> Result<(Project, Vec<u8>)> {
-    let text = String::from_utf8_lossy(&bytes).into_owned();
-    match aaw_model::convert::upgrade(path, &text, project)? {
-        (project, Some(yaml)) => Ok((project, yaml.into_bytes())),
-        (project, None) => Ok((project, bytes)),
-    }
+/// A song's bytes read as the model reads them, converted in memory when
+/// they hold patterns or tracks of pads (`aaw_model::convert::read`); the
+/// flag says it was converted.
+fn read(path: &Path, bytes: &[u8]) -> Result<(Project, bool)> {
+    let text = std::str::from_utf8(bytes).map_err(|_| format!("{}: not UTF-8 text", path.display()))?;
+    aaw_model::convert::read(text).map_err(|e| e.to_string())
+}
+
+/// A converted song written over the file, with the bytes as they were
+/// kept beside it; the bytes now in the file.
+fn write_back(path: &Path, bytes: &[u8], project: &Project) -> Result<Vec<u8>> {
+    let text = String::from_utf8_lossy(bytes);
+    aaw_model::convert::write_back(path, &text, project).map(String::into_bytes)
 }
 
 impl Session {
@@ -598,22 +599,22 @@ impl Session {
         if bytes == self.disk_bytes {
             return None;
         }
-        let loaded = parse(&self.path, &bytes).and_then(|p| {
+        let loaded = read(&self.path, &bytes).and_then(|(p, converted)| {
             self.verify_changed(&p)?;
-            Ok(p)
+            Ok((p, converted))
         });
-        // An edit that brings tracks of pads is converted as a song opened
-        // with them is, and the file then holds the converted song.
+        // An edit that brings patterns or tracks of pads is converted as a
+        // song opened with them is, and the file then holds the converted
+        // song.
         let (loaded, bytes) = match loaded {
-            Ok(p) => match converted(&self.path, p, bytes.clone()) {
-                Ok((p, written)) => {
-                    if written != bytes {
-                        self.disk_stamp = Stamp::of(&self.path);
-                    }
+            Ok((p, true)) => match write_back(&self.path, &bytes, &p) {
+                Ok(written) => {
+                    self.disk_stamp = Stamp::of(&self.path);
                     (Ok(p), written)
                 }
                 Err(e) => (Err(e), bytes),
             },
+            Ok((p, false)) => (Ok(p), bytes),
             Err(e) => (Err(e), bytes),
         };
         self.disk_bytes = bytes;
@@ -795,27 +796,6 @@ impl Session {
             .iter()
             .enumerate()
             .map(|(ti, t)| {
-                let clips: Vec<Json> = in_order(&t.clips, |c| c.at_exact())
-                    .into_iter()
-                    .map(|(ci, c)| {
-                        let loc = [
-                            tree::Step::Key("tracks".into()),
-                            tree::Step::Index(ti),
-                            tree::Step::Key("clips".into()),
-                            tree::Step::Index(ci),
-                        ];
-                        let mut clip = json!({
-                            "ref": self.reference(&root, &loc),
-                            "pattern": c.pattern,
-                            "at": crate::command::node_json(&Node::Leaf(c.at.to_value())),
-                            "repeats": c.repeats,
-                        });
-                        if !c.active {
-                            clip["active"] = json!(false);
-                        }
-                        clip
-                    })
-                    .collect();
                 let audio: Vec<Json> = in_order(&t.audio, |c| c.at_exact())
                     .into_iter()
                     .map(|(ci, c)| {
@@ -878,7 +858,6 @@ impl Session {
                 }
                 json!({
                     "id": t.id,
-                    "events": triggers.iter().filter(|x| x.track_id == t.id).count(),
                     "gain_db": t.gain_db,
                     "mute": t.mute,
                     "solo": t.solo,
@@ -886,7 +865,6 @@ impl Session {
                     "sidechain": t.sidechains(),
                     "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                     "automation": params(&t.automation),
-                    "clips": clips,
                     "audio": audio,
                 })
             })
@@ -931,7 +909,6 @@ impl Session {
             "session": value_json(&p.session.dump(false)),
             "duration_seconds": frames as f64 / rate as f64,
             "samples": p.samples.len(),
-            "patterns": p.patterns.len(),
             "tracks": tracks,
             "groups": groups,
             "returns": returns,

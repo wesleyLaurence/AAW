@@ -21,7 +21,7 @@ use aaw_dsp::synth::{track_seed, Patch};
 use aaw_dsp::wavetable::Wavetable;
 use aaw_model::rules::{midi, target, Owner, TargetKind, MIDDLE_C};
 use aaw_model::schedule::{track_notes, track_triggers, NoteOn, Trigger};
-use aaw_model::{frame, AudioClip, Effect, Event, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
+use aaw_model::{frame, AudioClip, Effect, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 use std::hash::{Hash, Hasher};
@@ -162,7 +162,7 @@ pub struct SynthProgram {
 pub struct TrackProgram {
     pub id: String,
     /// Voices in trigger order, shared with every program compiled while the
-    /// track's clips, patterns and pads stay as they are. A track with a
+    /// track's clips and pads stay as they are. A track with a
     /// Synth has none; its notes are the synth's.
     pub voices: Arc<Vec<Voice>>,
     pub synth: Option<SynthProgram>,
@@ -576,7 +576,7 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
             continue;
         }
         for tr in track_triggers(p, ti) {
-            let Ok(job) = sampler.job(&t.sound_pads()[&tr.pad], &tr.event) else { break 'tracks };
+            let Ok(job) = sampler.job(&t.sound_pads()[&tr.pad], tr.note) else { break 'tracks };
             if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
                 jobs.push(job);
             }
@@ -674,17 +674,18 @@ impl<'a> Sampler<'a> {
         Ok((path, stamp, audio))
     }
 
-    /// What a pad's audio for an event is prepared from.
-    fn job(&mut self, pad: &Pad, event: &Event) -> Result<Job, String> {
+    /// What a pad's audio for a hit is prepared from: played at `note` when
+    /// a pitched map entry plays it.
+    fn job(&mut self, pad: &Pad, note: Option<i64>) -> Result<Job, String> {
         let asset = &self.project.samples[&pad.sample];
-        let mut semitones = pad.transpose + event.transpose;
-        if let Some(note) = &event.note {
+        let mut semitones = pad.transpose;
+        if let Some(note) = note {
             // Only a pitched map entry plays a sample with no root note.
             let root = match asset.root_note.as_deref().filter(|r| !r.is_empty()) {
                 Some(root) => midi(root)?,
                 None => MIDDLE_C,
             };
-            semitones += (midi(note)? - root) as f64;
+            semitones += (note - root) as f64;
         }
         let follow = (pad.source_bpm, pad.stretch);
         self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow, 0.0)
@@ -797,8 +798,8 @@ impl<'a> Sampler<'a> {
         })
     }
 
-    pub fn prepare(&mut self, pad: &Pad, event: &Event) -> Result<Arc<Prepared>, String> {
-        let job = self.job(pad, event)?;
+    pub fn prepare(&mut self, pad: &Pad, note: Option<i64>) -> Result<Arc<Prepared>, String> {
+        let job = self.job(pad, note)?;
         self.prepared_for(job)
     }
 
@@ -852,7 +853,7 @@ impl<'a> Sampler<'a> {
 
     /// `Sampler.voice`: the voice a trigger plays.
     pub fn voice(&mut self, pad: &Pad, tr: &Trigger) -> Result<Voice, String> {
-        let audio = self.prepare(pad, &tr.event)?;
+        let audio = self.prepare(pad, tr.note)?;
         let rate = self.project.session.sample_rate as f64;
         let attack = (pad.attack_ms * rate / 1000.0).round_ties_even() as usize;
         let release = (pad.release_ms * rate / 1000.0).round_ties_even() as usize;
@@ -862,7 +863,7 @@ impl<'a> Sampler<'a> {
             Some(g) => frames.min(g + release),
             None => frames,
         };
-        let velocity = (tr.event.velocity as f64 / 127.0 * tr.velocity_scale).min(1.0);
+        let velocity = (tr.velocity as f64 / 127.0).min(1.0);
         Ok(Voice {
             start: tr.start,
             pan: pan_gains(audio.channels, pad.pan),
@@ -906,9 +907,8 @@ impl<'a> Sampler<'a> {
     }
 }
 
-/// Everything a track's voices are made from, as text: its pads, clips and
-/// audio clips or its instrument and note clips, the patterns it plays, its
-/// samples and their files, the tempo, the rate and the stretcher. A Synth
+/// Everything a track's voices are made from, as text: its audio clips or
+/// its instrument and note clips, its samples and their files, the tempo, the rate and the stretcher. A Synth
 /// track's voices are none, whatever its patch.
 fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
     use std::fmt::Write;
@@ -925,9 +925,7 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
         return "device".to_string();
     }
     let mut key = format!(
-        "{:?}|{:?}|{:?}|{:?}|{}|{}|{:?}",
-        t.pads,
-        t.clips,
+        "{:?}|{:?}|{}|{}|{:?}",
         t.audio,
         t.midi,
         session.tempo.to_bits(),
@@ -935,13 +933,6 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
         session.stretcher
     );
     let mut seen: Vec<&str> = Vec::new();
-    for c in &t.clips {
-        if !seen.contains(&c.pattern.as_str()) {
-            seen.push(&c.pattern);
-            let _ = write!(key, "|{}={:?}", c.pattern, p.patterns.get(&c.pattern));
-        }
-    }
-    seen.clear();
     for sample in t.sound_pads().values().map(|pad| &pad.sample).chain(t.audio.iter().map(|clip| &clip.sample)) {
         if !seen.contains(&sample.as_str()) {
             seen.push(sample);

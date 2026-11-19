@@ -118,20 +118,30 @@ def test_an_edit_sped_up_keeps_its_joins(tmp_path):
         {
             "session": {"tempo": 120, "sample_rate": 44100, "length_beats": 48, "master_gain_db": -3},
             "samples": {"song": {"path": "song.wav"}},
-            "patterns": {
-                "edit": {
-                    "length_beats": 48,
-                    "events": [{"at": 4 - lead / beat, "pad": "first"}, {"at": 20 - lead / beat, "pad": "second"}],
-                }
-            },
             "tracks": [
                 {
                     "id": "song",
-                    "pads": {
-                        "first": {**follow, "start_seconds": first - lead, "end_seconds": first - lead + 16 * beat + 0.012, "attack_ms": 2, "release_ms": 12},
-                        "second": {**follow, "start_seconds": first - lead + 24 * beat, "attack_ms": 4, "release_ms": 20},
+                    "type": "midi",
+                    "instrument": {
+                        "sampler": {
+                            "drum_rack": True,
+                            "pads": {
+                                "first": {**follow, "start_seconds": first - lead, "end_seconds": first - lead + 16 * beat + 0.012, "attack_ms": 2, "release_ms": 12},
+                                "second": {**follow, "start_seconds": first - lead + 24 * beat, "attack_ms": 4, "release_ms": 20},
+                            },
+                            "map": [{"notes": 36, "pad": "first"}, {"notes": 37, "pad": "second"}],
+                        }
                     },
-                    "clips": [{"pattern": "edit"}],
+                    "clips": [
+                        {
+                            "id": "edit",
+                            "length_beats": 48,
+                            "notes": [
+                                {"pitch": 36, "at": 4 - lead / beat, "duration": "1/4"},
+                                {"pitch": 37, "at": 20 - lead / beat, "duration": "1/4"},
+                            ],
+                        }
+                    ],
                 }
             ],
         },
@@ -160,7 +170,7 @@ def test_an_audio_clip_s_transpose_repitches_shorter_or_keeps_its_length(tmp_pat
     folder = tmp_path / "song"
     song = tone_song(folder)
     project = load(song)
-    project["tracks"] = [{"id": "tone", "pads": {}}]
+    project["tracks"] = [{"id": "tone"}]
     save(project, song)
     daw("audio", "add", song, "tone", "tone", "--source-end-seconds", 2, "--fade-out-ms", 0, "--transpose", 12)
     report = render(song, tmp_path / "up")

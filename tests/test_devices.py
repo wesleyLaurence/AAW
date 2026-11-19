@@ -375,7 +375,7 @@ def test_a_midi_effect_is_made_added_by_slug_and_changes_the_notes_played(tmp_pa
     # a MIDI track's instrument.
     with pytest.raises(ValueError, match="pitch is one of same, octave_up, octave_down"):
         daw("set", project, "tracks.keys.midi_effects.0.fields.pitch", "fifth")
-    daw("track", "add", project, "bass")
+    daw("track", "add", project, "bass", "--type", "audio")
     with pytest.raises(ValueError, match="echoes is a MIDI effect: it goes on a MIDI track"):
         daw("effect", "add", project, "tracks.bass", "--type", "echoes")
     with pytest.raises(ValueError, match="echoes is a MIDI effect"):

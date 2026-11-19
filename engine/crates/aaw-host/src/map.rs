@@ -122,57 +122,6 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
         vec![Step::Key("tracks".into()), Step::Index(ti), Step::Key(kind.into()), Step::Index(i)]
     };
     let mut out = Vec::new();
-    for (i, c) in t.clips.iter().enumerate() {
-        let Some(pattern) = p.patterns.get(&c.pattern) else { continue };
-        let length = f(&pattern.length_exact());
-        let start = f(&c.at_exact());
-        let mut events: Vec<String> = pattern
-            .expanded()
-            .iter()
-            .map(|e| {
-                format!(
-                    "{}:{}:{}:{}:{}:{}",
-                    aaw_model::fraction_str(&e.at_exact()),
-                    e.pad,
-                    e.velocity,
-                    e.note.as_deref().unwrap_or(""),
-                    e.duration_exact().map(|d| aaw_model::fraction_str(&d)).unwrap_or_default(),
-                    e.transpose
-                )
-            })
-            .collect();
-        events.sort();
-        let hits = pattern.expanded();
-        let mut onsets = Vec::new();
-        let mut pitches = Vec::new();
-        for r in 0..c.repeats {
-            let base = start + r as f64 * length;
-            for e in &hits {
-                let at = base + f(&e.at_exact());
-                onsets.push(at);
-                if let Some(n) = e.note.as_deref().and_then(|n| aaw_model::rules::midi(n).ok()) {
-                    pitches.push((at, n));
-                }
-            }
-        }
-        out.push(Placed {
-            key: format!("pattern|{}|{}|{}", aaw_model::fraction_str(&pattern.length_exact()), c.velocity_scale, events.join(",")),
-            loc: at("clips", i),
-            start,
-            end: start + length * c.repeats as f64,
-            onsets,
-            pitches,
-            continuous: false,
-            repeats: c.repeats,
-            what: format!(
-                "pattern {}, {}, {}",
-                c.pattern,
-                beats_text(length),
-                plural(hits.len(), "hit", "hits")
-            ),
-            off: !c.active,
-        });
-    }
     for (i, c) in t.audio.iter().enumerate() {
         let start = f(&c.at_exact());
         let file = p
@@ -252,8 +201,8 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
                 })
                 .collect();
             // A clip that loops a whole number of times is its loop played
-            // so many times, the same music however many, as a pattern
-            // clip's repeats were; its length is then said by the bars.
+            // so many times, the same music however many; its length is
+            // then said by the bars.
             let whole = c.loop_exact().filter(|l| (&length / l).is_integer());
             let looped = c.loop_exact().map(|l| format!(", loops every {}", beats_text(f(&l)))).unwrap_or_default();
             let (key, long) = match &whole {
@@ -530,13 +479,12 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
                     Some(name) => format!("synth \"{name}\""),
                     None => "synth".into(),
                 },
-                // A Drum Rack by its pads, as a track of pads was.
+                // A Drum Rack by its pads.
                 Some(aaw_model::Instrument::Sampler(s)) if s.drum_rack => format!("drum rack {}", s.pads.keys().cloned().collect::<Vec<_>>().join(" ")),
                 Some(aaw_model::Instrument::Sampler(s)) => format!("sampler of {}", plural(s.pads.len(), "pad", "pads")),
                 Some(aaw_model::Instrument::Device(d)) => format!("plugin {}", d.name),
                 None => "no instrument".into(),
             },
-            None if !t.pads.is_empty() => format!("pads {}", t.pads.keys().cloned().collect::<Vec<_>>().join(" ")),
             None => "audio".into(),
         };
         // The MIDI effects the notes pass through before it, a plugin by

@@ -166,7 +166,7 @@ def test_a_clip_of_the_notes_goes_where_the_audio_clip_plays_them(made, tmp_path
     assert code == 0, imported
     placed = folder / imported["path"]
     hears(placed, [note(at(0), at(1), 42), note(at(4), at(5), 44)])
-    daw("track", "add", folder, "bass")
+    daw("track", "add", folder, "bass", "--type", "audio")
     daw("audio", "add", folder, "bass", "stem", "--at", 8)
     code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder, "--line")
     assert code == 0, out
@@ -311,7 +311,7 @@ def test_only_what_an_audio_clip_plays_is_written(made, tmp_path, model):
     shutil.copy(made, stem)
     code, imported = cli("samples", "import", stem, "--project", folder / "song.yaml", "--id", "stem")
     hears(folder / imported["path"], [note(at(k * 4), at(k * 4 + 2), 40 + k) for k in range(6)])
-    daw("track", "add", folder, "bass")
+    daw("track", "add", folder, "bass", "--type", "audio")
     # Bars 3 and 4 of the file, at beat 32.
     daw("audio", "add", folder, "bass", "stem", "--at", 32, "--source-start-seconds", at(8), "--source-end-seconds", at(16))
     code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder)
@@ -365,7 +365,7 @@ def test_a_pitch_moved_past_midi_is_left_out(made, tmp_path, model):
     shutil.copy(made, stem)
     code, imported = cli("samples", "import", stem, "--project", folder / "song.yaml", "--id", "stem")
     hears(folder / imported["path"], [note(at(0), at(1), 100), note(at(1), at(2), 40)])
-    daw("track", "add", folder, "bass")
+    daw("track", "add", folder, "bass", "--type", "audio")
     daw("audio", "add", folder, "bass", "stem", "--at", 0, "--transpose", 36, "--stretch", "preserve_pitch")
     code, out = cli("transcribe", "tracks.bass.audio.0", "--project", folder)
     assert code == 0, out

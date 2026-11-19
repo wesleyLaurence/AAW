@@ -27,7 +27,7 @@ const RECIPES: &[Recipe] = &[
             ("daw init song --tempo 96", "Makes song/song.yaml at 96 BPM in 4/4 (--time-signature 3/4 for a waltz), as long as what is put in it: the end follows the last clip, and song/song.aaw, the file that opens the project in the app. song is the PROJECT every other command takes. SONG.md beside it is for what the song is and where it is heading (daw describe project, notes)."),
             ("daw samples search kick", "Finds sounds in the sample library by name, here kicks; search for a snare and a hat too. A result's path is what import takes. An empty library is filled with daw samples folders add DIR. daw describe samples says how to choose between them by what they measure as."),
             ("daw samples import KICK_PATH --project song --id kick", "Copies the file into the project and names it kick in the song. Import the snare and the hat the same way, as snare and hat."),
-            ("daw track add song drums --type midi", "A MIDI track for the drums, all of them on one track: its notes play a Drum Rack, a sound a key."),
+            ("daw track add song drums", "A MIDI track for the drums, all of them on one track: its notes play a Drum Rack, a sound a key."),
             ("daw pad add song drums kick --sample kick", "A pad plays a sample; the first one gives the track its Drum Rack, which the app draws as a grid of pads. Add the snare and hat pads the same way; an open hat with --choke-group hats, given to the closed hat too, is cut off by it. daw describe sampler.drum_rack says what the Drum Rack is and daw describe sampler what a pad takes."),
             ("daw instrument map song drums C2 kick", "C2, note 36, plays the kick as it is. Map D2 (38) to snare and F#2 (42) to hat the same way: the General MIDI drum notes, which a MIDI file of the part keeps."),
             (
@@ -135,7 +135,7 @@ const RECIPES: &[Recipe] = &[
             ("daw set song session.tempo TEMPO", "A beat of the session is a beat of the song."),
             ("daw set song session.sample_rate RATE", "The song is not resampled, when RATE is 44100 or 48000."),
             ("daw set song session.master_gain_db 0", "The master at 0 dB, so the song plays at its own level; a new song's is -6."),
-            ("daw track add song tune", "A track for the song's audio."),
+            ("daw track add song tune --type audio", "An audio track for the song's audio."),
             ("daw audio add song tune tune --at 0 --source-start-seconds DOWNBEAT", "One clip of the whole song from its first downbeat at beat 0, so bar 1 of the edit is bar 1 of the song."),
             ("daw audio cut song tune --from 16 --to 32", "Bars 5 to 8 out: what follows moves 16 beats earlier and the join is crossfaded. Keep and cut whole bars, so the count carries across."),
             ("daw audio crossfade song tracks.tune.audio.1 --ms 12 --in-ms 4", "The join set by hand: 12 ms out under 4 ms in suits a cut before a hit; longer under a held sound."),

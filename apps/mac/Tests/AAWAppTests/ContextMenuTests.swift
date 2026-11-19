@@ -117,7 +117,7 @@ final class ContextMenuTests: XCTestCase {
         let several = ContextMenu.clip(editor: "Audio Clip", canSplit: true, canJoin: true)
         XCTAssertEqual(several.first { $0.action == .split }?.enabled, true)
         XCTAssertEqual(several.first { $0.action == .join }?.enabled, true)
-        XCTAssertEqual(ContextMenu.clip(editor: "Pattern", canSplit: false, canJoin: false).first?.title, "Edit Pattern")
+        XCTAssertEqual(ContextMenu.clip(editor: "Audio Clip", canSplit: false, canJoin: false).first?.title, "Edit Audio Clip")
         XCTAssertEqual(items.first { $0.action == .loop }?.key, "l")
         XCTAssertEqual(items.first { $0.action == .loop }?.command, false)
     }
@@ -127,7 +127,7 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(one.first { $0.action == .activate }?.title, "Deactivate Clip")
         XCTAssertEqual(one.first { $0.action == .activate }?.key, "0")
         XCTAssertEqual(one.first { $0.action == .activate }?.command, false)
-        let off = ContextMenu.clip(editor: "Pattern", canSplit: false, canJoin: true, activates: true, many: true)
+        let off = ContextMenu.clip(editor: "Audio Clip", canSplit: false, canJoin: true, activates: true, many: true)
         XCTAssertEqual(off.first { $0.action == .activate }?.title, "Activate Clips")
     }
 

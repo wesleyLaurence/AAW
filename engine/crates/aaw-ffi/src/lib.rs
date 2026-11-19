@@ -19,7 +19,7 @@ use aaw_host::session::{Change, Doc};
 use aaw_host::tree::{self, Step};
 use aaw_dsp::meter::{Meter, Ring};
 use aaw_dsp::spectrum::{Analyzer, Taps};
-pub use edits::{Edit, EventCopy, NoteCopy, PointPlace, Row, SynthFieldValue};
+pub use edits::{Edit, NoteCopy, PointPlace, Row, SynthFieldValue};
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

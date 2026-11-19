@@ -133,7 +133,7 @@ def _patches(rng, data):
         {"session": {"title": rng.choice(["patched é", "it's: here", None])}},
         {"sections": None},
         {"master": {"effects": [{"type": "limiter", "ceiling_db": -2}]}},
-        {"patterns": {name: {"swing": 0.6} for name in list(full["patterns"])[:1]}},
+        {"tracks": [{**full["tracks"][0], "solo": True}]},
         {"samples": {name: None for name in list(full["samples"])[:1]}},
         {"tracks": full["tracks"][:1]},
         {"tracks": [{**full["tracks"][0], "gain_db": -3, "effects": []}]},

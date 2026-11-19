@@ -71,7 +71,7 @@ final class TimelineLayoutTests: XCTestCase {
 
     func testTheResizeCursorShowsAtTheEdgesADragTrimsOrResizes() {
         let rect = CGRect(x: 300, y: 72, width: 100, height: 41)
-        // A note clip trims at either edge, a pattern clip resizes at its end.
+        // A note clip trims at either edge; an edge may be left out.
         XCTAssertEqual(TimelineLayout.edgeRects(of: rect, start: true, end: true),
                        [CGRect(x: 300, y: 72, width: 6, height: 41), CGRect(x: 394, y: 72, width: 6, height: 41)])
         XCTAssertEqual(TimelineLayout.edgeRects(of: rect, start: false, end: true), [CGRect(x: 394, y: 72, width: 6, height: 41)])

@@ -1119,7 +1119,6 @@ extension SongModel {
         var selected: [String] = []
         for clip in placedClips() where selectedClips.contains(clip.key) {
             let track = a.tracks.indices.contains(clip.track) ? a.tracks[clip.track].id : "?"
-            if let pattern = clip.clip { selected.append("clip of pattern \(pattern.pattern) on \(track) at \(bar(clip.at))") }
             if let audio = clip.audio { selected.append("audio clip \(audio.sample) on \(track) at \(bar(clip.at))") }
             if let notes = clip.notes { selected.append("note clip \(notes.id) on \(track) at \(bar(clip.at))") }
         }
@@ -1134,7 +1133,6 @@ extension SongModel {
             selected.append("marker \(m.id) at \(bar(m.at))\(m.text.isEmpty ? "" : " (\(m.text))")")
         }
         if !selectedNotes.isEmpty { selected.append("\(selectedNotes.count) note\(selectedNotes.count == 1 ? "" : "s") in the piano roll") }
-        if !selectedEvents.isEmpty { selected.append("\(selectedEvents.count) event\(selectedEvents.count == 1 ? "" : "s") in the pattern") }
         lines.append(selected.isEmpty ? "Nothing is selected." : "Selected: " + selected.joined(separator: "; ") + ".")
         let changes = activity.filter { $0.revision > revision && $0.origin != .agent }.reversed()
         if !changes.isEmpty {

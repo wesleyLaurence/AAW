@@ -3,7 +3,7 @@
 
 use crate::pyfmt::json_dumps;
 use crate::schema::Project;
-use crate::value::{py_eq, Dict, Value};
+use crate::value::{py_eq, Dict, Key, Value};
 use sha2::{Digest, Sha256};
 
 fn sha(v: &Value) -> String {
@@ -97,11 +97,38 @@ fn without(data: &Value, fields: &[Added]) -> Value {
     }
 }
 
-/// The fingerprint forms, newest first: the saved form, then the full dump with
-/// each schema's added fields removed in turn.
+/// The keys patterns' removal took out (D191), put back at what they held
+/// in every song that still validates: an audio track's `pads: {}`, which
+/// the saved form wrote too, and in the full dump its `clips: []` and the
+/// song's `patterns: {}`.
+fn with_removed(dump: &Value, full: bool) -> Value {
+    let mut out = dump.clone();
+    let Value::Dict(d) = &mut out else { return out };
+    if full {
+        d.insert(Key::str("patterns"), Value::Dict(Dict::new()));
+    }
+    if let Some(Value::List(tracks)) = d.get_mut(&Key::str("tracks")) {
+        for t in tracks {
+            let Value::Dict(t) = t else { continue };
+            if t.get(&Key::str("type")).is_some() {
+                continue;
+            }
+            t.insert(Key::str("pads"), Value::Dict(Dict::new()));
+            if full {
+                t.insert(Key::str("clips"), Value::List(Vec::new()));
+            }
+        }
+    }
+    out
+}
+
+/// The fingerprint forms, newest first: the saved form, the saved form as
+/// it was before patterns were removed, then the full dump as it was then
+/// with each schema's added fields removed in turn.
 pub fn fingerprints(project: &Project) -> Vec<String> {
-    let mut forms = vec![project_hash(project)];
-    let full = project.dump(false);
+    let saved = project.dump(true);
+    let mut forms = vec![sha(&saved), sha(&with_removed(&saved, false))];
+    let full = with_removed(&project.dump(false), true);
     let mut fields: Vec<Added> = Vec::new();
     forms.push(sha(&without(&full, &fields)));
     for added in legacy_fields() {

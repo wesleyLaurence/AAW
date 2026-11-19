@@ -1,0 +1,42 @@
+
+session: {tempo: 100, length_beats: 32, sample_rate: 48000, end_fade_ms: 0}
+samples:
+  hit: {path: hit.wav}
+  tone: {path: tone.wav, root_note: A3}
+patterns:
+  beat:
+    length_beats: 4
+    grid: 1/4
+    steps: {kick: x... .... x.5. ....,  hat: x9x9 x9x9 x9x9 x9x9, ohat: ..x. ..x. ..x. ..x.}
+    swing: 0.62
+    events:
+    - {at: 1, pad: kick, transpose: -2, velocity: 90}
+    - {at: 3, pad: kick, transpose: 0.5}
+    - {at: 2, pad: snare}
+    - {at: 1.5, pad: ohat, velocity: 120}
+    - {at: 1.5, pad: ohat, velocity: 30}
+  line:
+    length_beats: 2
+    events:
+    - {at: 0, pad: bass, note: C3, duration: 1}
+    - {at: 0.5, pad: bass, note: E3, duration: 1, transpose: 0.25}
+    - {at: 1.5, pad: bass, note: G2, duration: 1.5}
+    - {at: 1, pad: bass, velocity: 50, duration: 1/4}
+tracks:
+- id: drums
+  gain_db: -2
+  pads:
+    kick: {sample: hit, gain_db: -1}
+    snare: {sample: hit, transpose: 7, pan: 0.2}
+    hat: {sample: hit, transpose: 12, choke_group: hats, release_ms: 4}
+    ohat: {sample: hit, transpose: 10, choke_group: hats}
+    spare: {sample: tone}
+  clips:
+  - {pattern: beat, at: 0, repeats: 3, velocity_scale: 0.5}
+  - {pattern: beat, at: 12, active: false}
+  - {pattern: beat, at: 16, repeats: 2}
+  audio: [{sample: tone, at: 24}]
+  effects: [{type: eq, bands: [{shape: bell, freq_hz: 400, gain_db: -3}]}]
+- id: bass
+  pads: {bass: {sample: tone, mode: gate, release_ms: 20, transpose: -1}}
+  clips: [{pattern: line, at: 2, repeats: 5}, {pattern: line, at: 20}]

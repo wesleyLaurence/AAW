@@ -27,9 +27,7 @@ enum Event {
 /// It looks only at the keys, so it applies to any mapping with those keys.
 fn flow_mapping(keys: &[&str]) -> bool {
     let has = |k: &str| keys.contains(&k);
-    (has("pad") && has("at"))
-        || has("pattern")
-        || (has("id") && has("length_beats"))
+    (has("id") && has("length_beats"))
         || has("type")
         || has("shape")
         || (has("to") && keys.iter().all(|k| ["to", "gain_db", "pre_fader"].contains(k)))
@@ -846,12 +844,12 @@ mod tests {
     #[test]
     fn writes_block_and_flow_like_pyyaml() {
         let v = load(
-            "schema_version: 1\nsession: {tempo: 120.0}\ntracks:\n- id: a\n  pads: {}\n  clips:\n  - {pattern: p, at: '1/3'}\n",
+            "schema_version: 1\nsession: {tempo: 120.0}\ntracks:\n- id: a\n  audio: []\n  automation:\n  - param: gain_db\n    points:\n    - {at: '1/3', value: -3.0}\n",
         )
         .unwrap();
         assert_eq!(
             dump(&v),
-            "schema_version: 1\nsession:\n  tempo: 120.0\ntracks:\n- id: a\n  pads: {}\n  clips:\n  - {pattern: p, at: 1/3}\n"
+            "schema_version: 1\nsession:\n  tempo: 120.0\ntracks:\n- id: a\n  audio: []\n  automation:\n  - param: gain_db\n    points:\n    - {at: 1/3, value: -3.0}\n"
         );
     }
 

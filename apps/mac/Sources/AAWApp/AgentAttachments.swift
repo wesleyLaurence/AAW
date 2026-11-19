@@ -126,11 +126,11 @@ struct AgentAttachment: Equatable, Identifiable {
         }
     }
 
-    /// A clip's name from its line's detail, "note clip lead1 on…", "pattern
-    /// clip of hook on…" or "audio clip of sample kick on…", so that a row
-    /// read from the record shows the name rather than `@12`.
+    /// A clip's name from its line's detail, "note clip lead1 on…" or "audio
+    /// clip of sample kick on…", so that a row read from the record shows the
+    /// name rather than `@12`.
     static func clipName(in detail: String) -> String? {
-        for lead in ["note clip ", "pattern clip of ", "audio clip of sample "] where detail.hasPrefix(lead) {
+        for lead in ["note clip ", "audio clip of sample "] where detail.hasPrefix(lead) {
             let rest = detail.dropFirst(lead.count)
             let name = rest[..<(rest.range(of: " on ")?.lowerBound ?? rest.endIndex)]
             return name.isEmpty ? nil : String(name)
@@ -280,10 +280,6 @@ enum AgentAttachments {
     /// and for an audio clip its sample's name.
     static func make(clip: PlacedClip, track: TrackView?, bar: (Double) -> String) -> AgentAttachment {
         let on = track.map { $0.id } ?? "?"
-        if let pattern = clip.clip {
-            return AgentAttachment(kind: .clip, name: pattern.pattern, reference: pattern.reference,
-                                   detail: "pattern clip of \(pattern.pattern) on \(on) at \(bar(clip.at)), \(pattern.repeats) repeat\(pattern.repeats == 1 ? "" : "s")")
-        }
         if let audio = clip.audio {
             return AgentAttachment(kind: .clip, name: audio.sample, reference: audio.reference,
                                    detail: "audio clip of sample \(audio.sample) on \(on) at \(bar(clip.at)), \(Self.beats(audio.lengthBeats)) beats")

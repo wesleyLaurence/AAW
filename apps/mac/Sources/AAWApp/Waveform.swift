@@ -2,10 +2,10 @@ import AAWCore
 import CoreGraphics
 import Foundation
 
-/// What a track's clips play, or a sample file as it is, as the host worked
-/// it out: the least and greatest sample of each stretch of frames, at several
-/// resolutions. A pattern clip draws the part of its track's under its span,
-/// and an audio clip the part of its file's that it plays.
+/// What a MIDI track's voices play, or a sample file as it is, as the host
+/// worked it out: the least and greatest sample of each stretch of frames, at
+/// several resolutions. An audio clip draws the part of its file's that it
+/// plays.
 public final class Waveform {
     public struct Level {
         public var framesPerBucket: Double

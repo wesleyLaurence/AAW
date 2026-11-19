@@ -434,7 +434,7 @@ fn a_tail_rings_through_an_edit_a_locate_and_a_stop() {
     let mut cache = Cache::default();
     // Only the pulse sounds, for a beat from beat 6, into the reverb alone.
     let quiet = |p: &mut aaw_model::Project| {
-        p.tracks[0].clips.clear();
+        p.tracks[0].mute = true;
         p.tracks[0].mute = true;
         p.tracks[1].mute = false;
         p.tracks[1].sends.push(aaw_model::Send {

@@ -186,7 +186,7 @@ def chord_song(path=None, chords=(), bpm=100.0, beats_each=4, drums=True, swing=
     notes, for `beats_each` beats with its lowest note an octave down under it
     (or the note `bass` gives for every chord when it is a number), and with
     `drums` a kick and a snare on the beats and a hat on every `grid` beats,
-    the second of each pair late by `swing` as a pattern's swing is. Writes it
+    the second of each pair at `swing` of the way through the pair. Writes it
     to `path` if given and returns the samples."""
     RATE = 44100
     rng = np.random.default_rng(seed)

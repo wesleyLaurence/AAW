@@ -87,7 +87,6 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
     let mut song = Project {
         session: p.session.clone(),
         samples: p.samples.clone(),
-        patterns: Default::default(),
         tracks: vec![track],
         groups: Vec::new(),
         returns: Vec::new(),

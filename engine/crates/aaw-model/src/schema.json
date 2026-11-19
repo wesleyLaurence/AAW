@@ -159,54 +159,6 @@
       "title": "AudioClip",
       "type": "object"
     },
-    "Clip": {
-      "additionalProperties": false,
-      "properties": {
-        "pattern": {
-          "title": "Pattern",
-          "type": "string"
-        },
-        "at": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "default": 0,
-          "title": "At"
-        },
-        "repeats": {
-          "default": 1,
-          "maximum": 10000,
-          "minimum": 1,
-          "title": "Repeats",
-          "type": "integer"
-        },
-        "velocity_scale": {
-          "default": 1,
-          "exclusiveMinimum": 0,
-          "maximum": 2,
-          "title": "Velocity Scale",
-          "type": "number"
-        },
-        "active": {
-          "default": true,
-          "title": "Active",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "pattern"
-      ],
-      "title": "Clip",
-      "type": "object"
-    },
     "Compressor": {
       "additionalProperties": false,
       "properties": {
@@ -557,79 +509,6 @@
         "freq_hz"
       ],
       "title": "EqBand",
-      "type": "object"
-    },
-    "Event": {
-      "additionalProperties": false,
-      "properties": {
-        "at": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "title": "At"
-        },
-        "pad": {
-          "title": "Pad",
-          "type": "string"
-        },
-        "velocity": {
-          "default": 100,
-          "maximum": 127,
-          "minimum": 1,
-          "title": "Velocity",
-          "type": "integer"
-        },
-        "note": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Note"
-        },
-        "duration": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Duration"
-        },
-        "transpose": {
-          "default": 0,
-          "maximum": 36,
-          "minimum": -36,
-          "title": "Transpose",
-          "type": "number"
-        }
-      },
-      "required": [
-        "at",
-        "pad"
-      ],
-      "title": "Event",
       "type": "object"
     },
     "Filter": {
@@ -1916,66 +1795,6 @@
       "title": "Pad",
       "type": "object"
     },
-    "Pattern": {
-      "additionalProperties": false,
-      "properties": {
-        "length_beats": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "title": "Length Beats"
-        },
-        "grid": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "number"
-            },
-            {
-              "type": "string"
-            }
-          ],
-          "default": "1/4",
-          "title": "Grid"
-        },
-        "steps": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "title": "Steps",
-          "type": "object"
-        },
-        "events": {
-          "items": {
-            "$ref": "#/$defs/Event"
-          },
-          "title": "Events",
-          "type": "array"
-        },
-        "swing": {
-          "default": 0.5,
-          "maximum": 0.75,
-          "minimum": 0.5,
-          "title": "Swing",
-          "type": "number"
-        }
-      },
-      "required": [
-        "length_beats"
-      ],
-      "title": "Pattern",
-      "type": "object"
-    },
     "PluginInstrument": {
       "additionalProperties": false,
       "description": "An instrument of your own, by its slug: the notes go to its code, which makes the track's sound before its effects.",
@@ -2849,20 +2668,6 @@
           "description": "The track frozen to audio by daw track freeze: its instrument, effects and their lanes rendered to a file that plays in their place before the fader, until daw track unfreeze; null while it plays its own content. Frozen, its clips, devices and the tempo cannot change; the fader, pan, mute, solo and sends can.",
           "title": "Frozen"
         },
-        "pads": {
-          "additionalProperties": {
-            "$ref": "#/$defs/Pad"
-          },
-          "title": "Pads",
-          "type": "object"
-        },
-        "clips": {
-          "items": {
-            "$ref": "#/$defs/Clip"
-          },
-          "title": "Clips",
-          "type": "array"
-        },
         "audio": {
           "items": {
             "$ref": "#/$defs/AudioClip"
@@ -2958,8 +2763,7 @@
         }
       },
       "required": [
-        "id",
-        "pads"
+        "id"
       ],
       "title": "Track",
       "type": "object"
@@ -3799,13 +3603,6 @@
         "$ref": "#/$defs/Sample"
       },
       "title": "Samples",
-      "type": "object"
-    },
-    "patterns": {
-      "additionalProperties": {
-        "$ref": "#/$defs/Pattern"
-      },
-      "title": "Patterns",
       "type": "object"
     },
     "tracks": {

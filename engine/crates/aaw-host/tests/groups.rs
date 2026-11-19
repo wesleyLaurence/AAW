@@ -18,8 +18,8 @@ fn open() -> (tempfile::TempDir, Session) {
 #[test]
 fn a_group_is_made_of_tracks_moved_together() {
     let (_d, mut s) = open();
-    edit(&mut s, json!({"op": "track.add", "id": "keys"})).unwrap();
-    edit(&mut s, json!({"op": "track.add", "id": "pad"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "keys"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "pad"})).unwrap();
     // The drums and the pad are not next to each other; the group puts them
     // together where the first of them is, in their order.
     let r = edit(&mut s, json!({"op": "group.add", "id": "kit", "tracks": ["drums", "pad"], "gain_db": -3})).unwrap();
@@ -87,8 +87,8 @@ fn inspect_lists_the_groups_with_their_tracks() {
 #[test]
 fn a_group_of_groups_is_made_renamed_and_removed_down_the_tree() {
     let (_d, mut s) = open();
-    edit(&mut s, json!({"op": "track.add", "id": "keys"})).unwrap();
-    edit(&mut s, json!({"op": "track.add", "id": "pad"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "keys"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "pad"})).unwrap();
     edit(&mut s, json!({"op": "group.add", "id": "kit", "tracks": ["drums"]})).unwrap();
     edit(&mut s, json!({"op": "group.add", "id": "synths", "tracks": ["keys", "pad"]})).unwrap();
     // A group of the two groups: their tracks are moved together to where

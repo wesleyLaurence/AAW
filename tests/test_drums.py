@@ -230,7 +230,7 @@ def test_a_drum_track_where_an_audio_clip_plays_the_part(part, tmp_path):
     folder = tmp_path / "song"
     daw("init", folder, "--tempo", "120")
     cli("samples", "import", path, "--project", folder, "--id", "stem")
-    daw("track", "add", folder, "orig")
+    daw("track", "add", folder, "orig", "--type", "audio")
     daw("audio", "add", folder, "orig", "stem", "--at", "8")
     code, out = cli("transcribe", "tracks.orig.audio.0", *on(path), "--drums", "--project", folder / "song.yaml")
     assert code == 0, out
@@ -244,7 +244,7 @@ def test_onto_a_midi_track_of_the_song(part, tmp_path):
     folder = tmp_path / "song"
     daw("init", folder)
     daw("track", "add", folder, "kit", "--type", "midi")
-    daw("track", "add", folder, "vox")
+    daw("track", "add", folder, "vox", "--type", "audio")
     song = folder / "song.yaml"
     code, out = cli("transcribe", path, *on(path), "--drums", "--project", song, "--track", "kit")
     assert code == 0, out

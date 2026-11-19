@@ -78,10 +78,10 @@ enum AgentMentions {
     static func candidates(arrangement a: Arrangement, project: URL?, references: [String], bar: (Double) -> String) -> [AgentMention] {
         var found: [AgentMention] = []
         for track in a.tracks {
-            let clips = track.clips.count + track.audio.count + track.noteClips.count
+            let clips = track.audio.count + track.noteClips.count
             // A sampler drawn as a Drum Rack is named so, as the device view names it.
             let instrument = track.drumRack != nil ? " with a Drum Rack" : track.instrument.map { " with a \(readable($0))" }
-            var parts = [track.midi ? "MIDI track" + (track.plugin?.name.map { " with \($0)" } ?? instrument ?? " with no instrument") : "sample track"]
+            var parts = [track.midi ? "MIDI track" + (track.plugin?.name.map { " with \($0)" } ?? instrument ?? " with no instrument") : "audio track"]
             parts.append("\(clips) clip\(clips == 1 ? "" : "s")")
             if let group = track.group, let g = a.groups.first(where: { $0.key == group }) { parts.append("in group \(g.id)") }
             if track.mute { parts.append("muted") }
@@ -122,8 +122,8 @@ enum AgentMentions {
         return found
     }
 
-    /// The clips on the timeline, each named by its note clip's ID, its
-    /// pattern or its sample; where several share a name they are
+    /// The clips on the timeline, each named by its note clip's ID or its
+    /// sample; where several share a name they are
     /// `name.1`, `name.2`… in time order.
     static func clips(arrangement a: Arrangement, bar: (Double) -> String) -> [AgentMention] {
         struct Found {
@@ -135,10 +135,6 @@ enum AgentMentions {
         var all: [Found] = []
         for track in a.tracks {
             let on = track.id
-            for clip in track.clips {
-                all.append(Found(name: clip.pattern, reference: clip.reference, at: clip.at,
-                                 detail: "pattern clip of \(clip.pattern) on \(on) at \(bar(clip.at)), \(clip.repeats) repeat\(clip.repeats == 1 ? "" : "s")"))
-            }
             for clip in track.audio {
                 all.append(Found(name: clip.sample, reference: clip.reference, at: clip.at,
                                  detail: "audio clip of sample \(clip.sample) on \(on) at \(bar(clip.at)), \(beatsText(clip.lengthBeats)) beats"))

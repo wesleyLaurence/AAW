@@ -83,7 +83,7 @@ host from a native Mac app and sees the agent's changes as they happen. See
 
 **The Mac app** has an arrangement that shows each clip's waveform, a mixer,
 device panels, automation lanes for every row (A shows them all), a piano
-roll with a velocity lane, a pattern editor for songs made before note clips, a browser of favorites, samples,
+roll with a velocity lane, a Drum Rack, a browser of favorites, samples,
 instruments, effects, racks and plugins, a live analyzer, and File › Export
 Audio…. Each project's window has an agent panel: a conversation with your own
 Claude Code started in the project's folder, with your skills under `/`, the
@@ -297,7 +297,7 @@ the level policy it applied. See [docs/features/export.md](docs/features/export.
 Audition exports a short WAV for listening; it does not start playback automatically.
 
 Edits are commands: `set` for any value by path, and verbs for tracks, groups,
-returns, clips, audio clips, notes, instruments, the Synth, patterns, pads,
+returns, clips, audio clips, notes, instruments, the Synth, pads,
 effects, racks, sends, lanes, sections, markers and ranges of bars (`daw --help` lists them,
 and [engine/README.md](engine/README.md) describes them). Each validates the whole
 resulting song before it is written. While a host runs for the song, because it is
@@ -358,12 +358,13 @@ tracks:
 ```
 
 The song has no length to write: it ends at the bar after its last sound. The
-drums are a MIDI track whose Sampler plays a pad for each drum note, 36 the kick
+drums are a MIDI track whose Drum Rack plays a pad for each drum note, 36 the kick
 and 38 the snare as in General MIDI, and the clip's first bar loops to its 32
 beats. A note's `at` and `duration` are beats from the clip's start and its
 velocity is 1 to 127, 100 unless written. `daw note write` writes notes as text,
-a token a cell (`daw describe midi.text`). Songs made before note clips play
-drums from `patterns`, step rows on a grid, which keep working.
+a token a cell (`daw describe midi.text`). A song made before note clips that
+played drums from patterns is converted to a Drum Rack and note clips the first
+time it is read, and keeps a copy of itself as it was.
 
 Effects are listed under a track's or return's `effects` or under `master.effects`.
 Tracks reach shared reverb and delay through `sends` to `returns`. `automation`

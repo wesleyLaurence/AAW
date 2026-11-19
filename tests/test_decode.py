@@ -13,7 +13,7 @@ import soundfile as sf
 
 from agent_daw.library import DECODERS, decode
 from agent_daw.model import digest, load, save
-from helpers import cli, daw, render
+from helpers import cli, daw, drum_track, render
 
 RATE = 44100
 FRAMES = RATE * 2 + 137
@@ -103,8 +103,7 @@ def test_a_compressed_file_is_decoded_into_the_project(tmp_path, decoder, kind):
     assert sorted(p.name for p in copy.parent.iterdir()) == [copy.name]
     # The engine plays it.
     song = load(path)
-    song["patterns"] = {"once": {"length_beats": 4, "events": [{"at": 0, "pad": "x"}]}}
-    song["tracks"] = [{"id": "song", "pads": {"x": {"sample": "song"}}, "clips": [{"pattern": "once"}]}]
+    song["tracks"] = [drum_track("song", "x", "song", 4, [0])]
     # Written to the file, the song keeps its length: one bar, as its content is.
     song["session"]["length_beats"] = 4
     save(song, path)

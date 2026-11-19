@@ -73,10 +73,8 @@ samples:
   hit: {path: hit.wav}
 tracks:
 - id: drums
-  pads: {}
   audio: [{sample: hit, at: 0}, {sample: hit, at: 16}]
 - id: bass
-  pads: {}
   audio: [{sample: tone, at: 0}, {sample: tone, at: 16}]
   effects: [{type: compressor, threshold_db: -20, sidechain: drums}]
   sends: [{to: plate, gain_db: -12}]

@@ -29,7 +29,7 @@ const SYNONYMS: &[(&str, &str)] = &[
     ("name", "id"),
     ("bypassed", "bypass"),
     ("muted", "mute"),
-    ("loop", "repeats"),
+    ("loop", "loop_beats"),
 ];
 
 /// The hints for a refused song, one line for each key it has no field

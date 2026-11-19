@@ -10,48 +10,57 @@
 //! its own, so every hit sounds as it did.
 
 use crate::beat::Beat;
+use crate::legacy::{Clip, Drums, Event, Legacy, Pattern};
 use crate::rules::midi;
 use crate::schema::*;
+use crate::value::Value;
+use crate::ModelError;
 use indexmap::IndexMap;
 use num_rational::BigRational;
 use num_traits::{One, Zero};
 use std::collections::{HashMap, HashSet};
 
-/// Whether a song holds a track conversion changes: one with pads or
+/// Whether a song, as read from its text, holds anything conversion
+/// changes: a pattern, or a track that is not a MIDI track with pads or
 /// pattern clips.
-pub fn needed(p: &Project) -> bool {
-    p.tracks.iter().any(converts)
+pub fn needed(song: &Value) -> bool {
+    Legacy::found(song)
 }
 
-fn converts(t: &Track) -> bool {
-    t.midi.is_none() && (!t.pads.is_empty() || !t.clips.is_empty())
-}
-
-/// The song with its tracks of pads converted and its patterns gone, or
-/// None when it has no such track.
-pub fn converted(p: &Project) -> Result<Option<Project>, String> {
-    if !needed(p) {
-        return Ok(None);
+/// A song's text read as the model reads it: converted in memory when it
+/// holds patterns or a track of pads. The flag says it was converted.
+pub fn read(text: &str) -> Result<(Project, bool), ModelError> {
+    let value = crate::yaml_load::load(text).map_err(ModelError::Yaml)?;
+    if !needed(&value) {
+        return Ok((Project::validate(&value)?, false));
     }
+    let (rest, legacy) = Legacy::take(&value)?;
+    let project = Project::validate(&rest)?;
+    let converted = converted(&project, &legacy).map_err(ModelError::Convert)?;
+    Ok((converted, true))
+}
+
+/// The song with its tracks of pads converted, given what it held besides
+/// what the model reads.
+fn converted(p: &Project, legacy: &Legacy) -> Result<Project, String> {
     let mut clip_ids: HashSet<String> =
         p.tracks.iter().filter_map(|t| t.midi.as_ref()).flat_map(|m| m.clips.iter().map(|c| c.id.clone())).collect();
     let mut track_ids: HashSet<String> =
         p.tracks.iter().map(|t| t.id.clone()).chain(p.groups.iter().map(|g| g.id.clone())).chain(p.returns.iter().map(|r| r.id.clone())).collect();
     let mut out = p.clone();
     out.tracks = Vec::with_capacity(p.tracks.len());
-    for t in &p.tracks {
-        if !converts(t) {
+    for (i, t) in p.tracks.iter().enumerate() {
+        let Some(d) = legacy.tracks.get(&i) else {
             out.tracks.push(t.clone());
             continue;
-        }
-        let (drums, audio) = track(p, t, &mut clip_ids, &mut track_ids).map_err(|e| format!("{}: {e}", t.id))?;
+        };
+        let (drums, audio) = track(p, &legacy.patterns, t, d, &mut clip_ids, &mut track_ids).map_err(|e| format!("{}: {e}", t.id))?;
         out.tracks.push(drums);
         out.tracks.extend(audio);
     }
-    out.patterns.clear();
     // Validated again, so the notes get their IDs and every rule is checked
     // on what was made.
-    Project::validate(&out.dump(false)).map(Some).map_err(|e| format!("The converted song does not validate: {e}"))
+    Project::validate(&out.dump(false)).map_err(|e| format!("The converted song does not validate: {e}"))
 }
 
 /// What a hit plays: a pad as it is, moved by its event's transpose, or a
@@ -152,8 +161,8 @@ struct Rack {
 impl Rack {
     /// The pad named `pad` moved by `by` semitones, copied under a new name
     /// unless `by` is 0.
-    fn pad(&mut self, t: &Track, pad: &str, by: f64) -> Result<String, String> {
-        let base = &t.pads[pad];
+    fn pad(&mut self, d: &Drums, pad: &str, by: f64) -> Result<String, String> {
+        let base = d.pads.get(pad).ok_or_else(|| format!("unknown pad {pad}"))?;
         if by == 0.0 {
             if !self.pads.contains_key(pad) {
                 self.pads.insert(pad.to_string(), Pad { mute: false, solo: false, ..base.clone() });
@@ -167,7 +176,7 @@ impl Rack {
         if let Some(name) = self.copies.get(&(pad.to_string(), bits(by))) {
             return Ok(name.clone());
         }
-        let name = moved_name(pad, by, &self.pads, &t.pads);
+        let name = moved_name(pad, by, &self.pads, &d.pads);
         self.pads.insert(name.clone(), Pad { transpose, mute: false, solo: false, ..base.clone() });
         self.copies.insert((pad.to_string(), bits(by)), name.clone());
         Ok(name)
@@ -177,7 +186,7 @@ impl Rack {
 /// Puts each pitched pad's notes on keys: the whole span of its notes, or
 /// with `runs` each run of notes next to one another it plays.
 fn pitch_ranges(
-    t: &Track,
+    d: &Drums,
     pitched: &IndexMap<(String, u64), (f64, std::collections::BTreeSet<i64>)>,
     runs: bool,
     r: &mut Rack,
@@ -195,7 +204,7 @@ fn pitch_ranges(
                 }
             }
         }
-        let base = t.pads[pad].transpose;
+        let base = d.pads.get(pad).ok_or_else(|| format!("unknown pad {pad}"))?.transpose;
         for (low, high) in spans {
             let shift = (0..128i64)
                 .flat_map(|d| [d, -d])
@@ -204,7 +213,7 @@ fn pitch_ranges(
                     lo >= 0 && hi <= 127 && (lo..=hi).all(|n| free[n as usize]) && (-36.0..=36.0).contains(&(base + rest - *k as f64))
                 })
                 .ok_or_else(|| format!("no free keys for pad {pad}'s notes"))?;
-            let name = r.pad(t, pad, rest - shift as f64)?;
+            let name = r.pad(d, pad, rest - shift as f64)?;
             for n in low + shift..=high + shift {
                 free[n as usize] = false;
             }
@@ -217,12 +226,20 @@ fn pitch_ranges(
     Ok(())
 }
 
-fn rack(p: &Project, t: &Track) -> Result<Rack, String> {
+/// The pattern a clip plays.
+fn pattern<'a>(patterns: &'a IndexMap<String, Pattern>, c: &Clip) -> Result<&'a Pattern, String> {
+    patterns.get(&c.pattern).ok_or_else(|| format!("unknown pattern {}", c.pattern))
+}
+
+fn rack(patterns: &IndexMap<String, Pattern>, d: &Drums) -> Result<Rack, String> {
     // What each pad plays, in the order first played.
-    let mut hits: IndexMap<String, Vec<f64>> = t.pads.keys().map(|k| (k.clone(), Vec::new())).collect();
+    let mut hits: IndexMap<String, Vec<f64>> = d.pads.keys().map(|k| (k.clone(), Vec::new())).collect();
     let mut pitched: IndexMap<(String, u64), (f64, std::collections::BTreeSet<i64>)> = IndexMap::new();
-    for c in &t.clips {
-        for e in p.patterns[&c.pattern].expanded() {
+    for c in &d.clips {
+        for e in pattern(patterns, c)?.expanded() {
+            if !d.pads.contains_key(&e.pad) {
+                return Err(format!("pattern {} plays unknown pad {}", c.pattern, e.pad));
+            }
             match slot(&e)? {
                 Slot::Hit(by) => {
                     let list = hits.get_mut(&e.pad).ok_or_else(|| format!("unknown pad {}", e.pad))?;
@@ -251,7 +268,7 @@ fn rack(p: &Project, t: &Track) -> Result<Rack, String> {
     for runs in [false, true] {
         let mut r = Rack { pads: IndexMap::new(), map: Vec::new(), keys: HashMap::new(), shifts: HashMap::new(), copies: HashMap::new() };
         let mut free = [true; 128];
-        match pitch_ranges(t, &pitched, runs, &mut r, &mut free) {
+        match pitch_ranges(d, &pitched, runs, &mut r, &mut free) {
             Ok(()) if free.iter().filter(|f| **f).count() >= hit_keys => {
                 placed = Some((r, free));
                 break;
@@ -265,7 +282,7 @@ fn rack(p: &Project, t: &Track) -> Result<Rack, String> {
     // Then each hit: a pad as it is on its General MIDI key when that is
     // free, the rest on the lowest free key from C2 up, then below it.
     let place = |r: &mut Rack, free: &mut [bool; 128], pad: &str, by: f64, key: i64| -> Result<(), String> {
-        let name = r.pad(t, pad, by)?;
+        let name = r.pad(d, pad, by)?;
         free[key as usize] = false;
         r.map.push(NoteMap { low: key, high: key, range: false, pad: name, pitched: false });
         r.keys.insert((pad.to_string(), bits(by)), key);
@@ -343,8 +360,8 @@ fn start(p: &Project, written: &Beat, at: &BigRational, bases: &[BigRational]) -
 /// A note clip that plays a pattern clip's hits: looped over the pattern's
 /// length when it repeats, or written out when a gated hit lasts past the
 /// pattern's end, which a loop would cut.
-fn clip(p: &Project, t: &Track, c: &Clip, r: &Rack, id: String) -> Result<NoteClip, String> {
-    let pattern = &p.patterns[&c.pattern];
+fn clip(p: &Project, patterns: &IndexMap<String, Pattern>, d: &Drums, c: &Clip, r: &Rack, id: String) -> Result<NoteClip, String> {
+    let pattern = pattern(patterns, c)?;
     let length = pattern.length_exact();
     let grid = pattern.grid_exact();
     let repeats = BigRational::from_integer(c.repeats.into());
@@ -352,7 +369,7 @@ fn clip(p: &Project, t: &Track, c: &Clip, r: &Rack, id: String) -> Result<NoteCl
     let events = pattern.expanded();
     let mut one = Vec::new();
     for e in &events {
-        let gated = t.pads[&e.pad].mode == PadMode::Gate;
+        let gated = d.pads[&e.pad].mode == PadMode::Gate;
         // A gated hit's end is heard, so its start stays as it is.
         let written = if gated { e.at.clone() } else { start(p, &e.at, &e.at_exact(), &bases) };
         let at = exact(&written);
@@ -378,7 +395,7 @@ fn clip(p: &Project, t: &Track, c: &Clip, r: &Rack, id: String) -> Result<NoteCl
     // the rest are made shorter than it. A one-shot pad's length is not heard.
     for i in 0..one.len() {
         let (at, _, pitch, _, _, gated) = &one[i];
-        let choked = t.pads[&events[i].pad].choke_group.as_deref().is_some_and(|g| !g.is_empty());
+        let choked = d.pads[&events[i].pad].choke_group.as_deref().is_some_and(|g| !g.is_empty());
         let Some(last) = (i + 1..one.len()).rev().find(|j| &one[*j].0 == at && one[*j].2 == *pitch) else { continue };
         if !choked || *gated {
             continue;
@@ -418,17 +435,22 @@ fn clip(p: &Project, t: &Track, c: &Clip, r: &Rack, id: String) -> Result<NoteCl
 
 /// A track of pads as a MIDI track of the same name, and the audio track
 /// that keeps its audio clips and input when it has any.
-fn track(p: &Project, t: &Track, clip_ids: &mut HashSet<String>, track_ids: &mut HashSet<String>) -> Result<(Track, Option<Track>), String> {
-    let r = rack(p, t)?;
+fn track(
+    p: &Project,
+    patterns: &IndexMap<String, Pattern>,
+    t: &Track,
+    d: &Drums,
+    clip_ids: &mut HashSet<String>,
+    track_ids: &mut HashSet<String>,
+) -> Result<(Track, Option<Track>), String> {
+    let r = rack(patterns, d)?;
     let mut clips = Vec::new();
-    for c in &t.clips {
+    for c in &d.clips {
         let id = clip_id(&c.pattern, clip_ids);
-        clips.push(clip(p, t, c, &r, id)?);
+        clips.push(clip(p, patterns, d, c, &r, id)?);
     }
     let sampler = Sampler { pads: r.pads, map: r.map, drum_rack: true };
     let drums = Track {
-        pads: IndexMap::new(),
-        clips: Vec::new(),
         audio: Vec::new(),
         input: None,
         midi: Some(Midi {
@@ -455,7 +477,7 @@ fn track(p: &Project, t: &Track, clip_ids: &mut HashSet<String>, track_ids: &mut
     // A frozen track's file holds both, so the audio's own track is quiet
     // until the drums are unfrozen.
     let mute = t.mute || t.frozen.is_some();
-    let audio = Track { id, pads: IndexMap::new(), clips: Vec::new(), frozen: None, mute, ..t.clone() };
+    let audio = Track { id, frozen: None, mute, ..t.clone() };
     Ok((drums, Some(audio)))
 }
 
@@ -473,16 +495,26 @@ pub fn kept_path(song: &std::path::Path) -> std::path::PathBuf {
     path
 }
 
-/// A song read from `path` as `text`, converted and written back when it
-/// holds tracks of pads, with the text as it was kept beside it. Returns
-/// the song to use and, when it was converted, the text now in the file.
-pub fn upgrade(path: &std::path::Path, text: &str, project: Project) -> Result<(Project, Option<String>), String> {
-    let Some(converted) = converted(&project)? else {
-        return Ok((project, None));
-    };
+/// Writes a converted song over `path`, with `text`, the song as it was,
+/// kept beside it. Returns the text now in the file.
+pub fn write_back(path: &std::path::Path, text: &str, converted: &Project) -> Result<String, String> {
     let kept = kept_path(path);
     crate::atomic_write(&kept, text).map_err(|e| format!("{}: {e}", kept.display()))?;
-    let yaml = crate::to_yaml(&converted);
+    let yaml = crate::to_yaml(converted);
     crate::atomic_write(path, &yaml).map_err(|e| format!("{}: {e}", path.display()))?;
-    Ok((converted, Some(yaml)))
+    Ok(yaml)
+}
+
+/// A song read from `path` as `text`, converted and written back when it
+/// holds patterns or tracks of pads, with the text as it was kept beside
+/// it. Returns the song to use and, when it was converted, the text now in
+/// the file.
+pub fn upgrade(path: &std::path::Path, text: &str) -> Result<(Project, Option<String>), ModelError> {
+    match read(text)? {
+        (project, false) => Ok((project, None)),
+        (project, true) => {
+            let yaml = write_back(path, text, &project).map_err(ModelError::Convert)?;
+            Ok((project, Some(yaml)))
+        }
+    }
 }

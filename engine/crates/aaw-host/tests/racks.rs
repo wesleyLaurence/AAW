@@ -54,7 +54,7 @@ fn a_chain_is_saved_as_a_rack_and_added_to_a_chain_in_another_song() {
     let (_d1, mut s) = open();
     // A chain of three on the drums: a compressor keyed by a percussion
     // track, an EQ and a limiter.
-    edit(&mut s, json!({"op": "track.add", "id": "perc"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "perc"})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "tracks.drums", "type": "compressor", "id": "glue", "threshold_db": -18, "ratio": 4, "sidechain": "perc"})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "tracks.drums", "type": "eq", "bands": [{"shape": "highpass", "freq_hz": 40}]})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "tracks.drums", "type": "limiter", "id": "top", "ceiling_db": -0.5})).unwrap();
@@ -140,7 +140,7 @@ fn a_chain_is_saved_as_a_rack_and_added_to_a_chain_in_another_song() {
     // an owner without a chain, a rack that is not there, an index past the end.
     let e = edit(&mut s, json!({"op": "rack.save", "owner": "tracks.drums", "name": "***"})).unwrap_err();
     assert!(e.contains("letter or a digit"), "{e}");
-    edit(&mut s, json!({"op": "track.add", "id": "empty"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "empty"})).unwrap();
     let e = edit(&mut s, json!({"op": "rack.save", "owner": "tracks.empty", "name": "Nothing"})).unwrap_err();
     assert!(e.contains("no effects to save"), "{e}");
     let e = edit(&mut s, json!({"op": "rack.save", "owner": "samples.hit", "name": "Nothing"})).unwrap_err();
@@ -169,7 +169,7 @@ fn effect_json(s: &Session, path: &str) -> Json {
 #[test]
 fn a_saved_rack_loads_as_one_device_whose_effects_are_addressed_through_it() {
     let (_d, mut s) = open();
-    edit(&mut s, json!({"op": "track.add", "id": "perc"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "perc"})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "tracks.drums", "type": "compressor", "id": "glue", "threshold_db": -18, "sidechain": "perc"})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "tracks.drums", "type": "utility", "id": "top", "gain_db": -0.5})).unwrap();
     let name = format!("Test Device {}", std::process::id());
@@ -344,7 +344,7 @@ fn an_instrument_rack_carries_a_sampler_with_its_files_and_a_chain_into_another_
     let saved = aaw_host::instruments::find(&name).unwrap();
     assert_eq!((saved.kind(), saved.tags.as_slice()), ("sampler", &["keys".to_string()][..]));
     assert!(aaw_host::instruments::matches(&saved, "sampler reverb keys"));
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     let e = edit(&mut s, json!({"op": "instrument.rack.save", "track": "vox", "name": "X"})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     let e = edit(&mut s, json!({"op": "instrument.rack.save", "track": "keys", "name": name})).unwrap_err();
@@ -381,7 +381,7 @@ fn an_instrument_rack_carries_a_sampler_with_its_files_and_a_chain_into_another_
     assert_eq!(get(&third, "samples.tone.path"), json!("samples/tone.wav"));
     assert!(d3.path().join("samples/tone.wav").is_file());
     assert_eq!(get(&third, "tracks.lead.instrument.sampler.pads.t.sample"), json!("tone"));
-    edit(&mut third, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut third, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     let e = edit(&mut third, json!({"op": "instrument.rack.load", "track": "vox", "rack": name})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     let e = edit(&mut third, json!({"op": "instrument.rack.load", "track": "lead", "rack": "Nothing Here"})).unwrap_err();

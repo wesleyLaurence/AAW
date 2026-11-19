@@ -5,7 +5,7 @@ import pytest
 import soundfile as sf
 
 from agent_daw.model import load, save
-from helpers import cli, daw
+from helpers import cli, daw, drum_track
 
 
 def test_init_and_describe_through_either_entry_point(tmp_path):
@@ -55,8 +55,7 @@ def test_python_commands_run_from_the_rust_binary(tmp_path):
     song = {
         "session": {"length_beats": 4},
         "samples": {"hit": {"path": "hit.wav"}},
-        "patterns": {"p": {"length_beats": 4, "steps": {"h": "x..."}, "grid": 1}},
-        "tracks": [{"id": "drums", "pads": {"h": {"sample": "hit"}}, "clips": [{"pattern": "p"}]}],
+        "tracks": [drum_track("drums", "h", "hit", 4, [0])],
     }
     path = tmp_path / "song.yaml"
     save(song, path)

@@ -169,7 +169,7 @@ fn a_device_s_identity_is_what_feeds_it_and_no_more() {
     let (dir, mut s) = open();
     edit(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "tilt"})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "returns.plate", "type": "tilt"})).unwrap();
-    edit(&mut s, json!({"op": "track.add", "id": "pad"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "pad"})).unwrap();
     edit(&mut s, json!({"op": "audio.add", "track": "pad", "sample": "tone", "at": 0})).unwrap();
     edit(&mut s, json!({"op": "group.add", "id": "kit", "tracks": ["pad"]})).unwrap();
     edit(&mut s, json!({"op": "effect.add", "owner": "groups.kit", "type": "tilt"})).unwrap();
@@ -192,7 +192,7 @@ fn a_device_s_identity_is_what_feeds_it_and_no_more() {
         json!({"op": "effect.add", "owner": "master", "type": "limiter"}),
         json!({"op": "marker.add", "at": 4}),
         json!({"op": "section.add", "id": "verse", "at": 8, "length_beats": 8}),
-        json!({"op": "track.add", "id": "lead"}),
+        json!({"op": "track.add", "type": "audio", "id": "lead"}),
         json!({"op": "apply", "patch": {"samples": {"other": {"path": "hit.wav"}}}}),
         json!({"op": "audio.add", "track": "lead", "sample": "other", "at": 2}),
     ] {
@@ -512,7 +512,7 @@ fn a_midi_effect_is_added_by_slug_held_to_its_manifest_and_kept_in_its_place() {
     edit(&mut s, json!({"op": "set", "path": "tracks.keys.midi_effects.1.fields.pitch", "value": "octave_up"})).unwrap();
     // A MIDI effect goes before a MIDI track's instrument and nowhere else;
     // an effect or an instrument does not go there.
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     assert!(refused(&mut s, json!({"op": "effect.add", "owner": "tracks.vox", "type": "echo"})).contains("echo is a MIDI effect: it goes on a MIDI track"));
     assert!(refused(&mut s, json!({"op": "apply", "patch": {"master": {"effects": [{"type": "device", "name": "echo"}]}}})).contains("echo is a MIDI effect, which changes a MIDI track's notes"));
     assert!(refused(&mut s, json!({"op": "instrument.set", "track": "keys", "instrument": "echo"})).contains("echo is a MIDI effect"));

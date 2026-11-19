@@ -221,7 +221,7 @@ fn a_project_file_that_does_not_read_is_refused_and_several_are_told_apart() {
     assert_eq!(project::song_file(&folder).unwrap(), song);
     assert_eq!(project::project_file_in(&folder), None);
     let mut s = Session::open(&song, true).unwrap();
-    s.edit(&cmd(json!({"op": "track.add", "id": "drums"})), Origin::User, None, None).unwrap();
+    s.edit(&cmd(json!({"op": "track.add", "type": "audio", "id": "drums"})), Origin::User, None, None).unwrap();
     s.write().unwrap();
     assert_eq!(project::project_file_in(&folder), None);
     let written = project::ensure_project_file(&folder).unwrap();
@@ -257,7 +257,7 @@ fn untitled_projects_take_the_lowest_free_name_and_blank_ones_are_swept() {
     assert!(!blank(&noted));
     project::delete_untitled(&noted).unwrap();
     let mut s = Session::open(&second, false).unwrap();
-    s.edit(&cmd(json!({"op": "track.add", "id": "drums"})), Origin::User, None, None).unwrap();
+    s.edit(&cmd(json!({"op": "track.add", "type": "audio", "id": "drums"})), Origin::User, None, None).unwrap();
     s.write().unwrap();
     std::fs::write(third.parent().unwrap().join("notes.txt"), "x").unwrap();
     std::fs::write(first.parent().unwrap().join(".DS_Store"), "x").unwrap();

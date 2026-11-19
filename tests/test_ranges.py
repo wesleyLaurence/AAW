@@ -58,7 +58,7 @@ def test_ranges_edit_the_song_across_its_tracks(tmp_path):
 def test_describe_and_help_say_what_ranges_do():
     semantics = daw("describe", "edit")["semantics"]
     assert "daw range copy SONG START LENGTH --to AT" in semantics["ranges"]
-    assert "cut only between repeats" in semantics["edges"]
+    assert "A looped clip is cut only at a wrap" in semantics["edges"]
     assert "daw section duplicate" in semantics["sections"]
     help_text = run("range", "--help").stdout
     for verb in ["copy", "insert", "delete", "clear"]:

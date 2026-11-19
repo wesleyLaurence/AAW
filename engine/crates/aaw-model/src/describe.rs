@@ -631,9 +631,16 @@ mod tests {
         let song = dict(vec![
             ("session", dict(vec![])),
             ("samples", dict(vec![("s", dict(vec![("path", Value::str("s.wav"))]))])),
-            ("tracks", Value::List(vec![dict(vec![("id", Value::str("t")), ("pads", dict(vec![("p", dict(fields))]))])])),
+            (
+                "tracks",
+                Value::List(vec![dict(vec![
+                    ("id", Value::str("t")),
+                    ("type", Value::str("midi")),
+                    ("instrument", dict(vec![("sampler", dict(vec![("pads", dict(vec![("p", dict(fields))]))]))])),
+                ])]),
+            ),
         ]);
-        Project::validate(&song).map(|p| p.tracks[0].pads["p"].clone()).map_err(|e| e.to_string())
+        Project::validate(&song).map(|p| p.tracks[0].sound_pads()["p"].clone()).map_err(|e| e.to_string())
     }
 
     #[test]

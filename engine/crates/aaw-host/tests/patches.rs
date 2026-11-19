@@ -70,7 +70,7 @@ fn a_factory_patch_is_attached_to_a_new_track_or_loaded_into_one() {
     edit(&mut s, json!({"op": "track.add", "id": "empty", "type": "midi"})).unwrap();
     edit(&mut s, json!({"op": "patch.load", "track": "empty", "patch": "Hat"})).unwrap();
     assert_eq!(synth(&s, "empty")["patch"], json!("Hat"));
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     let e = edit(&mut s, json!({"op": "patch.load", "track": "vox", "patch": "Hat"})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     let e = edit(&mut s, json!({"op": "synth.add", "track": "x", "patch": "Nothing Here"})).unwrap_err();
@@ -142,7 +142,7 @@ fn a_synth_is_saved_as_a_patch_and_loaded_into_another_song_as_the_same_sound() 
     // What is refused: a name with nothing to make a file of, and a track without a synth.
     let e = edit(&mut s, json!({"op": "patch.save", "track": "lead", "name": "***"})).unwrap_err();
     assert!(e.contains("letter or a digit"), "{e}");
-    edit(&mut s, json!({"op": "track.add", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
     let e = edit(&mut s, json!({"op": "patch.save", "track": "vox", "name": "Bass"})).unwrap_err();
     assert!(e.contains("not a MIDI track"), "{e}");
     // A file in the library that is not a patch is named, not fatal.

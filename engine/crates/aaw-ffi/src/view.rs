@@ -8,8 +8,7 @@ use aaw_host::tree::{Item, Node};
 use aaw_model::describe::{self, Initial, Kind};
 use aaw_model::rules::{midi, synth_param, synth_params, target, Domain, Owner, TargetKind};
 use aaw_model::value::{py_eq, Value};
-use aaw_model::{step_cells, AudioClip, Curve, Effect, Lane, Project};
-use num_rational::BigRational;
+use aaw_model::{AudioClip, Curve, Effect, Lane, Project};
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -36,7 +35,6 @@ pub struct Arrangement {
     pub sections: Vec<SectionView>,
     /// The person's markers, in time order.
     pub markers: Vec<MarkerView>,
-    pub patterns: Vec<PatternView>,
     /// The files the tracks' audio clips play.
     pub files: Vec<FileView>,
     /// The song's samples by ID, placed or not, in the song's order.
@@ -216,64 +214,17 @@ pub struct LaneTarget {
     pub label: String,
 }
 
-/// A pad of a track's sampler.
+/// A pad of a MIDI track's sampler.
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct PadView {
     pub name: String,
     pub sample: String,
     pub gain_db: f64,
-    /// Whether events hold the sample for their duration.
+    /// Whether notes hold the sample for their duration.
     pub gate: bool,
-    /// The sample's root note as a MIDI number, for a pad that events can
+    /// The sample's root note as a MIDI number, for a pad that notes can
     /// play at other pitches.
     pub root: Option<i32>,
-}
-
-/// A row of a pattern's step grid: a pad's hits on the pattern's grid.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct StepRow {
-    pub pad: String,
-    /// Each step's level: 0 for none, 1 to 9 for the row's digits, softest
-    /// to hardest, and 10 for an `x`.
-    pub cells: Vec<u8>,
-}
-
-/// A hit a pattern places by itself, off the grid or with a pitch or a length.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct EventView {
-    pub key: u64,
-    /// Beats from the pattern's start, and as the song writes them, such as `4/3`.
-    pub at: f64,
-    pub at_text: String,
-    pub pad: String,
-    /// 1 to 127.
-    pub velocity: u32,
-    pub note: Option<String>,
-    /// The note as a MIDI number.
-    pub pitch: Option<i32>,
-    /// How long a gated pad is held, in beats.
-    pub duration: Option<f64>,
-    pub duration_text: Option<String>,
-    pub transpose: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct PatternView {
-    pub name: String,
-    /// The length in beats, and as the song writes it.
-    pub length_beats: f64,
-    pub length_text: String,
-    /// The length of a step, in beats, and as the song writes it, such as `1/4`.
-    pub grid: f64,
-    pub grid_text: String,
-    /// How far each second step is pushed late: 0.5 is straight.
-    pub swing: f64,
-    /// Whether the length is a whole number of steps, as step rows need.
-    pub steps: Option<u32>,
-    pub rows: Vec<StepRow>,
-    pub events: Vec<EventView>,
-    /// How many clips play the pattern.
-    pub clips: u32,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -290,11 +241,11 @@ pub struct TrackView {
     pub sends: Vec<SendView>,
     pub lanes: Vec<LaneView>,
     pub lane_targets: Vec<LaneTarget>,
+    /// A MIDI track's sampler's pads; an audio track has none.
     pub pads: Vec<PadView>,
-    pub clips: Vec<ClipView>,
     pub audio: Vec<AudioClipView>,
-    /// Whether it is a MIDI track, whose clips are `note_clips` and whose
-    /// `pads` are its sampler's.
+    /// Whether it is a MIDI track, whose clips are `note_clips`, or else an
+    /// audio track, whose clips are `audio`.
     pub midi: bool,
     /// A MIDI track's MIDI effects, before its instrument, in order; none
     /// of their fields takes a lane.
@@ -538,20 +489,6 @@ pub struct SendView {
     /// The return's ID.
     pub to: String,
     pub gain_db: f64,
-}
-
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
-pub struct ClipView {
-    pub key: u64,
-    /// How commands address the clip, such as `@12`.
-    pub reference: String,
-    pub pattern: String,
-    pub at: f64,
-    /// The length of one repeat.
-    pub pattern_beats: f64,
-    pub repeats: u32,
-    /// False when the clip is deactivated: it is drawn and plays nothing.
-    pub active: bool,
 }
 
 /// An audio clip: part of a sample file on a track's timeline.
@@ -1552,62 +1489,6 @@ fn pad_view(p: &Project, name: &str, pad: &aaw_model::Pad, file: Option<(u64, f6
     }
 }
 
-/// A step's level as a row writes it: `.`, a digit or `x`.
-pub fn step_level(c: char) -> u8 {
-    match c {
-        'x' => 10,
-        _ => c.to_digit(10).map_or(0, |d| d as u8),
-    }
-}
-
-fn patterns(p: &Project, tree: &Node) -> Vec<PatternView> {
-    let float = |x: &BigRational| x.to_f64().unwrap_or(0.0);
-    let nodes = tree.get("patterns");
-    p.patterns
-        .iter()
-        .map(|(name, pattern)| {
-            let event_items = nodes.and_then(|n| n.get(name)).map(|n| items(n, "events")).unwrap_or(&[]);
-            let (length, grid) = (pattern.length_exact(), pattern.grid_exact());
-            let steps = &length / &grid;
-            PatternView {
-                name: name.clone(),
-                length_beats: float(&length),
-                length_text: pattern.length_beats.text(),
-                grid: float(&grid),
-                grid_text: pattern.grid.text(),
-                swing: pattern.swing,
-                steps: steps.is_integer().then(|| steps.to_integer().to_u32()).flatten(),
-                rows: pattern
-                    .steps
-                    .iter()
-                    .map(|(pad, row)| StepRow {
-                        pad: pad.clone(),
-                        cells: step_cells(row).into_iter().map(step_level).collect(),
-                    })
-                    .collect(),
-                events: pattern
-                    .events
-                    .iter()
-                    .enumerate()
-                    .map(|(i, e)| EventView {
-                        key: handle(event_items, i),
-                        at: float(&e.at_exact()),
-                        at_text: e.at.text(),
-                        pad: e.pad.clone(),
-                        velocity: e.velocity.clamp(0, 127) as u32,
-                        note: e.note.clone().filter(|n| !n.is_empty()),
-                        pitch: e.note.as_deref().and_then(|n| midi(n).ok()).map(|n| n as i32),
-                        duration: e.duration_exact().map(|d| float(&d)),
-                        duration_text: e.duration.as_ref().map(|d| d.text()),
-                        transpose: e.transpose,
-                    })
-                    .collect(),
-                clips: p.tracks.iter().flat_map(|t| &t.clips).filter(|c| &c.pattern == name).count() as u32,
-            }
-        })
-        .collect()
-}
-
 /// Seconds of an audio clip's file that go by in a beat of the song. A clip
 /// with a tempo of its own follows the song's, so a beat of the song is a beat
 /// of its file.
@@ -1666,10 +1547,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 lanes,
                 lane_targets,
                 pads: t
-                    .midi
-                    .as_ref()
-                    .and_then(|m| m.sampler())
-                    .map_or(&t.pads, |s| &s.pads)
+                    .sound_pads()
                     .iter()
                     .map(|(name, pad)| PadView {
                         name: name.clone(),
@@ -1730,23 +1608,6 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                                     duration_text: n.duration.text(),
                                 })
                                 .collect(),
-                            active: c.active,
-                        }
-                    })
-                    .collect(),
-                clips: t
-                    .clips
-                    .iter()
-                    .enumerate()
-                    .map(|(j, c)| {
-                        let key = handle(clip_items, j);
-                        ClipView {
-                            key,
-                            reference: aaw_host::tree::handle_text(key),
-                            pattern: c.pattern.clone(),
-                            at: float(c.at_exact()),
-                            pattern_beats: p.patterns.get(&c.pattern).map_or(0.0, |x| float(x.length_exact())),
-                            repeats: c.repeats.max(0) as u32,
                             active: c.active,
                         }
                     })
@@ -1906,7 +1767,6 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         },
         sections,
         markers,
-        patterns: patterns(p, &tree),
         files: used,
         samples: p
             .samples
@@ -1958,7 +1818,7 @@ fn list_delta(part: Part, old: &[Item], new: &[Item], changed: impl Fn(&Item, &I
     }
 }
 
-/// Every clip by handle, pattern clips and audio clips alike, with the handle
+/// Every clip by handle, note clips and audio clips alike, with the handle
 /// of its track.
 fn clips(tree: &Node) -> Vec<(u64, &Item)> {
     items(tree, "tracks")
@@ -1968,8 +1828,7 @@ fn clips(tree: &Node) -> Vec<(u64, &Item)> {
 }
 
 /// The objects that differ between two revisions, for highlighting. A track's
-/// clips count separately from the track. A clip also counts as changed when
-/// its pattern changed, since it then plays something else.
+/// clips count separately from the track.
 pub fn touched(old: &Doc, new: &Doc) -> Vec<Touch> {
     let (a, b) = (old.tree(), new.tree());
     let mut out = Vec::new();
@@ -1998,7 +1857,6 @@ pub fn touched(old: &Doc, new: &Doc) -> Vec<Touch> {
         &mut out,
     );
 
-    let patterns = |t: &Node, name: &str| t.get("patterns").and_then(|p| p.get(name)).cloned();
     let (old_clips, new_clips) = (clips(&a), clips(&b));
     let before: HashMap<u64, (u64, &Item)> = old_clips.iter().map(|(track, c)| (c.handle, (*track, *c))).collect();
     let after: HashSet<u64> = new_clips.iter().map(|(_, c)| c.handle).collect();
@@ -2006,9 +1864,7 @@ pub fn touched(old: &Doc, new: &Doc) -> Vec<Touch> {
         let delta = match before.get(&clip.handle) {
             None => Delta::Added,
             Some((old_track, o)) => {
-                let pattern = clip.node.field("pattern").unwrap_or_default();
-                let replayed = !same(patterns(&a, pattern).as_ref(), patterns(&b, pattern).as_ref());
-                if old_track != track || differs(o, clip) || replayed {
+                if old_track != track || differs(o, clip) {
                     Delta::Changed
                 } else {
                     continue;

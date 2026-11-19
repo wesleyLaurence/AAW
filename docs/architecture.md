@@ -308,7 +308,7 @@ processing never allocates, so it runs in the audio callback. No second engine e
 
 ## Format
 
-Required top-level fields: `session`. Optional `samples`, `patterns`, `tracks`,
+Required top-level fields: `session`. Optional `samples`, `tracks`,
 `groups`, `returns`, `sections`, `markers` and `master`. `schema_version` is 2 in a song with a MIDI
 track and 1 in any other, which saves byte for byte as it did before MIDI
 tracks; either is read (D63). Unknown fields are rejected, and an edit that
@@ -351,7 +351,8 @@ library index includes compressed files using temporary decoding for metadata; `
 An import refuses a file the engine cannot play (unreadable, empty, or more than
 two channels), and `daw check` warns of a sample like that in a song.
 
-Track: unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`, named `pads`, `clips`,
+Track: an audio track, without `type`, or a MIDI track (below). An audio
+track has a unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`,
 `audio` (audio clips: parts of a sample file on the timeline, see
 [audio-clips.md](features/audio-clips.md); one with `loop_beats` and
 `length_beats` plays its first beats again at each wrap until its length, each
@@ -447,7 +448,8 @@ for the whole song and holds its first and last values outside its points. See
 MIDI track: `type: midi`, with `id`, `gain_db`, `pan`, `mute`, `solo`,
 `effects`, `sends` and `automation` as any track, an `instrument`, MIDI
 effects before it under `midi_effects`, and note clips under `clips`; no
-pads, pattern clips or audio clips. `midi_effects` list devices that change
+audio clips. `daw track add` and `track.add` make one unless `type: audio`
+asks for an audio track. `midi_effects` list devices that change
 the notes as they play, in order: an `arpeggiator` (rate on the song's grid,
 order, octaves, gate), a `chord` (six shifts), a `scale` (root, scale,
 transpose), a `velocity` (scale, offset, random by seed, min, max) and a
@@ -490,8 +492,7 @@ null, which plays nothing, `{sampler: {pads, map}}`, `{synth: {...}}` or
 entries `{notes, pad, pitched}` naming a note or an inclusive range, which may
 not overlap; a pitched entry repitches its pad from its sample's root note, or
 from middle C (C4, 60) when the sample has none, to the note. The schedule gives a MIDI track's notes to its instrument as pitch,
-velocity, start and note-off, and the sampler makes of them the hits a pattern
-event would make. The Synth plays them itself, every frame, from a patch of
+velocity, start and note-off, and the sampler makes of them its pads' hits. The Synth plays them itself, every frame, from a patch of
 oscillators with unison and wavetables, a filter a voice, envelopes, LFOs, a
 modulation matrix, macros and a chain of effects of its own, whose fields a
 track's lanes reach as `instrument.FIELD`; see
@@ -509,16 +510,18 @@ semitones, `start_seconds`, `end_seconds`, `attack_ms`, `release_ms`, optional
 `choke_group`, `reverse`, optional `source_bpm`, `stretch` (`repitch` or
 `preserve_pitch`), and `mono` for downmixing.
 
-Patterns and pattern clips are the format of songs made before note clips; a
-new drum part is a note clip on a MIDI track whose sampler maps the drum notes
-to pads, and nothing teaches patterns (D184). A song with a track of pads or
-pattern clips is converted the first time it is read from its file, by
-`aaw_model::load` (every command, the Python package and renders) and by the
-host's `Session` when it opens a song or loads an outside edit:
-`aaw_model::convert` makes each such track a MIDI track of the same ID whose
-Drum Rack holds its pads and each pattern clip a note clip of the same hits,
-writes the song as it was to `song.before-drum-rack.yaml` beside it and the
-converted song over it, and the patterns go (D190). A pad named as a General
+Patterns are gone (D191): a drum part is a note clip on a MIDI track whose
+Drum Rack, a sampler with `drum_rack: true`, maps the drum notes to pads. The
+model refuses `patterns`, pads on a track and pattern clips; an audio track
+written with `pads: {}`, as every one was until then, is read and written
+without it. A song made before note clips that still holds them is converted
+the first time it is read from its file, by `aaw_model::load` (every
+command, the Python package and renders) and by the host's `Session` when it
+opens a song or loads an outside edit: `aaw_model::convert` reads them from
+the song's text (`aaw_model::legacy`), makes each such track a MIDI track of
+the same ID whose Drum Rack holds its pads and each pattern clip a note clip
+of the same hits, writes the song as it was to `song.before-drum-rack.yaml`
+beside it and the converted song over it (D190). A pad named as a General
 MIDI drum takes that drum's key, the rest the lowest free keys from C2 up; a
 pad played with notes keeps a pitched range of them, and a hit its event
 transposes plays a copy of its pad moved as far (`kick-2`), so every hit
@@ -529,21 +532,13 @@ rounded into its notes' velocities, 0.05 dB at most. Audio clips and an input
 on such a track go to a track `ID-audio` after it with the same mixer, chain,
 sends and lanes, which sums as one track did through a chain that is linear
 (an equalizer, a filter, a delay, a reverb) and not exactly through a
-compressor, and a sidechain keyed by the track no longer hears them. Text
-parsed with `aaw_model::parse` is not converted, so the model's corpus reads
-what it is given, and an edit inside a running session that adds a pattern
-clip is not converted until the song is read again.
+compressor, and a sidechain keyed by the track no longer hears them. Such a
+song given as text, to `aaw_model::parse`, `daw model` or a patch, is
+refused with the reason, and so is a render's snapshot of one, which no
+longer verifies. The fingerprints keep the keys the removal took out, so a
+report written before it still verifies its song (`aaw_model::hash`).
 
-Pattern: positive `length_beats`, `grid` in beats per step, `steps` mapping pad IDs
-to strings, optional explicit `events`, `swing` (0.5…0.75). Step rows and explicit
-events are additive. Swing delays odd-numbered step cells only; explicit events
-retain their exact times. Explicit events: `at`, `pad`, `velocity` (1…127), optional
-`note`, `duration`, `transpose`. Gate mode requires a positive duration.
-
-Clip: `pattern`, `at`, positive integer `repeats`, `velocity_scale`. Repetitions
-use the pattern's declared length. A clip may lie anywhere from the song's start,
-and sample tails may cross pattern boundaries. Sections have unique `id`, `at`,
-`length_beats`.
+Sections have unique `id`, `at`, `length_beats`.
 
 Marker: `id` (unique among the markers; left out, the next free `mN`), `at` from
 0, and `text`, up to 200 characters. A marker is a note the
