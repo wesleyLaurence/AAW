@@ -43,6 +43,7 @@ Built:
 | [the form of a song](features/form.md) | `daw samples form`: which bars are the same music, sections labelled and named, the key changes, and checks of the meter and the bars, with a picture |
 | [words by bar](features/words.md) | `daw transcribe --words`: the words a voice sings by bar and beat, heard by Whisper, the doubtful stretches read again, the hook, and the chorus of the form named by its words |
 | [sound and effects from audio](features/sound.md) | `daw samples sound`: each part's tone as `eq` bands, width by section, pumping with the kick, a reverb's decay and a delay's repeats from its tails, and its dynamics, checked on renders with known settings |
+| [one analysis file](features/study.md) | `daw samples study`: every measure of a song and its parts in one `study.json` with each one's confidence, a table of the bars, the tuning, and a markdown summary |
 | [key, chords and swing](features/key-chords-swing.md) | a sample's and a song's key, chords by beat and swing; `daw key`, a song's key and the transpose that puts a loop in it |
 | [audio clips](features/audio-clips.md) | Parts of a file on a track, and the `daw audio` commands |
 | [audio clips in the app](features/audio-clips-in-app.md) | A file dropped on the timeline, a clip moved, trimmed, faded and split there, the song growing to hold it, and the beat map on its waveform |

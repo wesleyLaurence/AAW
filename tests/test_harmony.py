@@ -273,3 +273,32 @@ def test_drums_in_a_song_add_nothing_to_its_key(tmp_path):
     code, fitted = cli("key", song, "--sample", "loop", "--db", tmp_path / "db.sqlite")
     assert fitted["samples"][0]["why"].startswith("the sample has no key")
     assert "swing" in fitted["samples"][0]
+
+
+# --- tuning ------------------------------------------------------------------------
+
+
+def detuned(cents, seed=0):
+    """Two dozen notes of five harmonics, each `cents` off equal temperament on A 440."""
+    rate = 44100
+    g = np.random.default_rng(seed)
+    out = []
+    for _ in range(24):
+        hz = 440 * 2 ** ((int(g.integers(40, 76)) - 69 + cents / 100) / 12)
+        t = np.arange(int(0.5 * rate)) / rate
+        out.append(sum(0.5 / h * np.sin(2 * np.pi * hz * h * t) for h in range(1, 6)) * np.exp(-t * 2))
+    x = np.concatenate(out)
+    return x + 0.01 * g.standard_normal(len(x)), rate
+
+
+@pytest.mark.parametrize("cents", [0, 20, -35, 45])
+def test_the_tuning_is_read_in_cents_from_a440(cents):
+    found = harmony.tuning(*detuned(cents, seed=abs(cents)))
+    assert found["cents"] == pytest.approx(cents, abs=2)
+    assert found["a4_hz"] == pytest.approx(440 * 2 ** (cents / 1200), abs=0.6)
+    assert found["concentration"] > 0.9 and found["spread_cents"] < 8
+
+
+def test_noise_has_no_tuning():
+    x = np.random.default_rng(0).standard_normal(44100 * 4)
+    assert harmony.tuning(x, 44100)["concentration"] < 0.2
