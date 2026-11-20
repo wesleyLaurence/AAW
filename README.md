@@ -2,9 +2,11 @@
   <img src="apps/mac/AppIcon.png" width="128" alt="The AAW logo">
 </p>
 
-<h1 align="center">AAW: Agentic Audio Workspace</h1>
+<h1 align="center">AAW</h1>
 
-<p align="center"><strong>A music workstation you and an AI agent use together.</strong></p>
+<h3 align="center">Agentic Audio Workspace</h3>
+
+<p align="center"><em>The AI-Native DAW</em></p>
 
 AAW is a full DAW for the Mac, with tracks, clips, instruments, a mixer,
 effects and automation. An agent can operate it too. Make music in it yourself,
