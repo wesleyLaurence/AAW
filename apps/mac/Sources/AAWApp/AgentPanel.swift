@@ -19,12 +19,27 @@ final class AgentPanel {
         case tool(id: Int, use: String, name: String, summary: String, result: String?, failed: Bool)
         /// A request the person answers: allowed, refused, or still waiting.
         case approval(id: Int, request: String, summary: String, allowed: Bool?)
+        /// Questions the agent asks with choices, and where they stand.
+        /// `request` is empty for one read from a resumed thread's record.
+        case question(id: Int, request: String, questions: [AgentQuestion], outcome: AgentQuestion.Outcome)
+        /// A plan the agent proposes before it acts: approved, kept
+        /// planning, or still waiting.
+        case plan(id: Int, request: String, plan: String, approved: Bool?)
         /// A word from the panel: a resumed conversation, a stop, an error.
         case note(id: Int, text: String)
 
         var id: Int {
             switch self {
-            case .person(let id, _, _), .agent(let id, _), .tool(let id, _, _, _, _, _), .approval(let id, _, _, _), .note(let id, _): id
+            case .person(let id, _, _), .agent(let id, _), .tool(let id, _, _, _, _, _), .approval(let id, _, _, _),
+                 .question(let id, _, _, _), .plan(let id, _, _, _), .note(let id, _): id
+            }
+        }
+
+        /// The request the entry answers, for one that answers a request.
+        var request: String? {
+            switch self {
+            case .approval(_, let request, _, _), .question(_, let request, _, _), .plan(_, let request, _, _): request
+            default: nil
             }
         }
 
@@ -332,6 +347,10 @@ final class AgentPanel {
                     entries.append(.person(id: next(), text: text, attachments: stamped(attached)))
                 case .agent(let text): entries.append(.agent(id: next(), text: text))
                 case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: ClaudeTranscripts.shortened(summary, folder: folder), result: nil, failed: false))
+                case .question(let questions, let answers):
+                    entries.append(.question(id: next(), request: "", questions: questions, outcome: answers.map { .answered($0) } ?? .unanswered))
+                case .plan(let plan, let approved):
+                    entries.append(.plan(id: next(), request: "", plan: plan, approved: approved))
                 }
             }
         } else {
@@ -910,22 +929,55 @@ final class AgentPanel {
         process.send(["type": "control_request", "request_id": "stop-\(next())", "request": ["subtype": "interrupt"]])
     }
 
-    /// Answers a request the agent made.
+    /// The tools that ask the person something, drawn as their own cards
+    /// rather than as tools: questions with choices and a plan to approve.
+    static let asksThePerson: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
+
+    /// Answers a request the agent made: allows or refuses a tool, approves
+    /// a plan or keeps planning, or leaves questions unanswered.
     func answer(_ request: String, allow: Bool) {
         guard pending[request] != nil else { return }
         decided(request, allowed: allow)
     }
 
+    /// Answers the agent's questions with the person's choices, keyed by
+    /// each question's words, as the tool takes them in its input.
+    func answer(_ request: String, answers: [String: String]) {
+        guard var input = pending[request],
+              let i = entries.lastIndex(where: { $0.request == request }),
+              case .question(let id, _, let questions, .waiting) = entries[i] else { return }
+        input["answers"] = answers
+        respond(request, ["behavior": "allow", "updatedInput": input])
+        entries[i] = .question(id: id, request: request, questions: questions, outcome: .answered(answers))
+    }
+
+    /// What a refusal tells the agent, by what it refused.
+    static let refused = "The person refused this in the app's panel."
+    static let unanswered = "The person did not answer the question in the app's panel."
+    static let keepPlanning = "The person did not approve the plan in the app's panel and wants to keep planning; ask what to change."
+
     private func decided(_ request: String, allowed: Bool) {
-        let input = pending.removeValue(forKey: request) ?? [:]
-        let response: [String: Any] = allowed
-            ? ["behavior": "allow", "updatedInput": input]
-            : ["behavior": "deny", "message": "The person refused this in the app's panel."]
-        process?.send(["type": "control_response", "response": ["subtype": "success", "request_id": request, "response": response]])
-        if let i = entries.firstIndex(where: { if case .approval(_, request, _, _) = $0 { true } else { false } }),
-           case .approval(let id, _, let summary, _) = entries[i] {
-            entries[i] = .approval(id: id, request: request, summary: summary, allowed: allowed)
+        let input = pending[request] ?? [:]
+        let i = entries.lastIndex(where: { $0.request == request })
+        switch i.map({ entries[$0] }) {
+        case .question(let id, _, let questions, _)?:
+            // Questions are answered with `answer(_:answers:)`; this leaves them.
+            respond(request, ["behavior": "deny", "message": Self.unanswered])
+            entries[i!] = .question(id: id, request: request, questions: questions, outcome: .unanswered)
+        case .plan(let id, _, let plan, _)?:
+            respond(request, allowed ? ["behavior": "allow", "updatedInput": input] : ["behavior": "deny", "message": Self.keepPlanning])
+            entries[i!] = .plan(id: id, request: request, plan: plan, approved: allowed)
+        case .approval(let id, _, let summary, _)?:
+            respond(request, allowed ? ["behavior": "allow", "updatedInput": input] : ["behavior": "deny", "message": Self.refused])
+            entries[i!] = .approval(id: id, request: request, summary: summary, allowed: allowed)
+        default:
+            respond(request, allowed ? ["behavior": "allow", "updatedInput": input] : ["behavior": "deny", "message": Self.refused])
         }
+    }
+
+    private func respond(_ request: String, _ response: [String: Any]) {
+        pending.removeValue(forKey: request)
+        process?.send(["type": "control_response", "response": ["subtype": "success", "request_id": request, "response": response]])
     }
 
     // MARK: What the process says
@@ -965,7 +1017,8 @@ final class AgentPanel {
                     if let id, streamed.contains(id) { continue }
                     if let text = block["text"] as? String, !text.isEmpty { entries.append(.agent(id: next(), text: text)) }
                 case "tool_use":
-                    guard let name = block["name"] as? String else { continue }
+                    // Questions and plans are drawn from their request.
+                    guard let name = block["name"] as? String, !Self.asksThePerson.contains(name) else { continue }
                     let input = block["input"] as? [String: Any] ?? [:]
                     let use = block["id"] as? String ?? ""
                     entries.append(.tool(id: next(), use: use, name: name, summary: ClaudeTranscripts.shortened(ClaudeTranscripts.toolSummary(name: name, input: input), folder: folder), result: nil, failed: false))
@@ -1003,15 +1056,27 @@ final class AgentPanel {
             if request["subtype"] as? String == "can_use_tool", let tool = request["tool_name"] as? String, let folder {
                 let input = request["input"] as? [String: Any] ?? [:]
                 pending[id] = input
-                switch Approval.decide(tool: tool, input: input, project: folder, attached: attachedPaths) {
-                case .allow:
-                    decided(id, allowed: true)
-                case .ask(let summary):
-                    entries.append(.approval(id: next(), request: id, summary: summary, allowed: nil))
+                let questions = tool == "AskUserQuestion" ? AgentQuestion.list(from: input) : []
+                if !questions.isEmpty {
+                    entries.append(.question(id: next(), request: id, questions: questions, outcome: .waiting))
                     NSSound.beep()
+                } else if tool == "ExitPlanMode" {
+                    entries.append(.plan(id: next(), request: id, plan: input["plan"] as? String ?? "", approved: nil))
+                    NSSound.beep()
+                } else {
+                    switch Approval.decide(tool: tool, input: input, project: folder, attached: attachedPaths) {
+                    case .allow:
+                        decided(id, allowed: true)
+                    case .ask(let summary):
+                        entries.append(.approval(id: next(), request: id, summary: summary, allowed: nil))
+                        NSSound.beep()
+                    }
                 }
             } else {
+                // Said in the conversation, never dropped silently.
+                let what = (request["subtype"] as? String) ?? "something"
                 process?.send(["type": "control_response", "response": ["subtype": "error", "request_id": id, "error": "The AAW panel does not answer this request."]])
+                note("The agent asked the panel for \(what), which the panel does not answer; it was told so.")
             }
         case "result":
             working = false
