@@ -1,6 +1,6 @@
 # Folders as a tree in the browser — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 6. The person's note of November
+Status: proposed, not built. Backlog: Next 5. The person's note of November
 22, 2026 (D194): "in the sample viewer, it is not showing folders. For
 example i have a folder on the side samples/ and in it there is one folder
 bass/ but i just see all the audio files listed. Ideally I want to see each

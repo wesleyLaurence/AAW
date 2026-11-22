@@ -185,6 +185,25 @@ enum ClaudeTranscripts {
         case agent(String)
         /// A tool the agent used, with what it was given in a line.
         case tool(name: String, summary: String)
+        /// Questions the agent asked with choices, and the answers that
+        /// went back; nil when they were not answered.
+        case question([AgentQuestion], answers: [String: String]?)
+        /// A plan the agent proposed, and whether it was approved.
+        case plan(String, approved: Bool)
+    }
+
+    /// What came back for a tool: whether it failed, and the answers given
+    /// to questions.
+    private struct Outcome {
+        var failed: Bool
+        var answers: [String: String]?
+    }
+
+    /// A line of the file read: messages, a tool's ID beside a question or
+    /// a plan, or what came back for a tool.
+    private enum Piece {
+        case line(Line, use: String?)
+        case outcome(use: String, Outcome)
     }
 
     /// Claude Code's folder: `CLAUDE_CONFIG_DIR`, or `~/.claude`.
@@ -264,36 +283,73 @@ enum ClaudeTranscripts {
         return parse(data)
     }
 
+    /// The messages of a file's lines; a question has the answers that
+    /// came back for it, and a plan whether it was approved.
     static func parse(_ data: Data) -> [Line] {
-        data.split(separator: UInt8(ascii: "\n")).flatMap { parse(line: Data($0)) }
+        let all = data.split(separator: UInt8(ascii: "\n")).flatMap { pieces(of: Data($0)) }
+        var outcomes: [String: Outcome] = [:]
+        for case .outcome(let use, let outcome) in all { outcomes[use] = outcome }
+        return all.compactMap { piece in
+            guard case .line(let line, let use) = piece else { return nil }
+            let outcome = use.flatMap { outcomes[$0] }
+            switch line {
+            case .question(let questions, _):
+                return .question(questions, answers: outcome?.failed == false ? outcome?.answers : nil)
+            case .plan(let plan, _):
+                return .plan(plan, approved: outcome?.failed == false)
+            default:
+                return line
+            }
+        }
     }
 
     /// The messages in one line of the file: a person's message, an agent's
     /// text and the tools it used. Tool results, meta lines and the lines of
-    /// subagents are passed over.
+    /// subagents are passed over; a question here has no answers, and a
+    /// plan is not approved, which `parse(_:)` reads from a later line.
     static func parse(line: Data) -> [Line] {
+        pieces(of: line).compactMap { if case .line(let line, _) = $0 { line } else { nil } }
+    }
+
+    private static func pieces(of line: Data) -> [Piece] {
         guard let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
               let type = object["type"] as? String, type == "user" || type == "assistant",
               object["isMeta"] as? Bool != true, object["isSidechain"] as? Bool != true,
               let message = object["message"] as? [String: Any] else { return [] }
         if type == "user" {
-            if let text = message["content"] as? String { return personLine(text).map { [$0] } ?? [] }
+            if let text = message["content"] as? String { return personLine(text).map { [.line($0, use: nil)] } ?? [] }
             guard let blocks = message["content"] as? [[String: Any]] else { return [] }
             // A message of several blocks is the person's only when it has
             // text and no tool result.
-            if blocks.contains(where: { $0["type"] as? String == "tool_result" }) { return [] }
+            let results = blocks.filter { $0["type"] as? String == "tool_result" }
+            if !results.isEmpty {
+                // The answers are in the line's own record of the result.
+                let answers = results.count == 1 ? (object["toolUseResult"] as? [String: Any])?["answers"] as? [String: String] : nil
+                return results.compactMap { block in
+                    guard let use = block["tool_use_id"] as? String else { return nil }
+                    return .outcome(use: use, Outcome(failed: block["is_error"] as? Bool ?? false, answers: answers))
+                }
+            }
             let text = blocks.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined(separator: "\n")
-            return personLine(text).map { [$0] } ?? []
+            return personLine(text).map { [.line($0, use: nil)] } ?? []
         }
         guard let blocks = message["content"] as? [[String: Any]] else { return [] }
         return blocks.compactMap { block in
             switch block["type"] as? String {
             case "text":
                 guard let text = block["text"] as? String, !text.isEmpty else { return nil }
-                return .agent(text)
+                return .line(.agent(text), use: nil)
             case "tool_use":
                 guard let name = block["name"] as? String else { return nil }
-                return .tool(name: name, summary: toolSummary(name: name, input: block["input"] as? [String: Any] ?? [:]))
+                let input = block["input"] as? [String: Any] ?? [:]
+                let use = block["id"] as? String
+                if name == "AskUserQuestion", case let questions = AgentQuestion.list(from: input), !questions.isEmpty {
+                    return .line(.question(questions, answers: nil), use: use)
+                }
+                if name == "ExitPlanMode" {
+                    return .line(.plan(input["plan"] as? String ?? "", approved: false), use: use)
+                }
+                return .line(.tool(name: name, summary: toolSummary(name: name, input: input)), use: use)
             default:
                 return nil
             }

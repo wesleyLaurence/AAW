@@ -230,6 +230,35 @@ final class AgentThreadsTests: XCTestCase {
         ])
     }
 
+    /// Questions the agent asked are read with the answers recorded with
+    /// their result, a refused one as unanswered; a plan is approved when
+    /// its result did not fail. The answers are read from the result's own
+    /// record, not its words.
+    func testQuestionsAndPlansAreReadWithTheirOutcome() throws {
+        let record = """
+        {"type":"user","message":{"role":"user","content":"Make a beat"},"uuid":"1"}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"q1","name":"AskUserQuestion","input":{"questions":[{"question":"Which drums?","header":"Drums","options":[{"label":"808","description":"Low"},{"label":"Breaks","description":"Chopped"}],"multiSelect":false}]}}]},"uuid":"2"}
+        {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"Your questions have been answered: \\"Which drums?\\"=\\"Breaks\\".","tool_use_id":"q1"}]},"toolUseResult":{"questions":[],"answers":{"Which drums?":"Breaks"}},"uuid":"3"}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"q2","name":"AskUserQuestion","input":{"questions":[{"question":"Tempo?","header":"Tempo","options":[{"label":"140","description":""},{"label":"154","description":""}],"multiSelect":false}]}}]},"uuid":"4"}
+        {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"The person did not answer","is_error":true,"tool_use_id":"q2"}]},"toolUseResult":"Error: The person did not answer","uuid":"5"}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"p1","name":"ExitPlanMode","input":{"plan":"Add a kick","planFilePath":"/x/p.md"}}]},"uuid":"6"}
+        {"type":"user","message":{"role":"user","content":[{"type":"tool_result","content":"User has approved your plan.","tool_use_id":"p1"}]},"toolUseResult":{"plan":"Add a kick"},"uuid":"7"}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"p2","name":"ExitPlanMode","input":{"plan":"Add a snare"}}]},"uuid":"8"}
+        {"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"q3","name":"AskUserQuestion","input":{"questions":[{"question":"Unanswered?","header":"","options":[{"label":"Yes","description":""}]}]}}]},"uuid":"9"}
+
+        """
+        let drums = AgentQuestion(question: "Which drums?", header: "Drums", options: [.init(label: "808", description: "Low"), .init(label: "Breaks", description: "Chopped")])
+        let tempo = AgentQuestion(question: "Tempo?", header: "Tempo", options: [.init(label: "140", description: ""), .init(label: "154", description: "")])
+        XCTAssertEqual(ClaudeTranscripts.parse(Data(record.utf8)), [
+            .person("Make a beat", []),
+            .question([drums], answers: ["Which drums?": "Breaks"]),
+            .question([tempo], answers: nil),
+            .plan("Add a kick", approved: true),
+            .plan("Add a snare", approved: false),
+            .question([AgentQuestion(question: "Unanswered?", options: [.init(label: "Yes", description: "")])], answers: nil),
+        ])
+    }
+
     /// The sessions in a folder are listed newest first, titled by the first
     /// message; a file with no message of the person's is left out, and a
     /// folder that is not there lists none.

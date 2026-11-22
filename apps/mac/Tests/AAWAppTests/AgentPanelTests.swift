@@ -73,6 +73,26 @@ final class AgentPanelTests: XCTestCase {
             if text.endswith("signout"):
                 out({"type": "result", "subtype": "error", "is_error": True, "result": "Not logged in · Please run /login", "session_id": "s"})
                 continue
+            if text.endswith("question"):
+                ask = {"questions": [
+                    {"question": "Which drums?", "header": "Drums", "multiSelect": False, "options": [
+                        {"label": "808", "description": "Long and low"},
+                        {"label": "Breakbeat", "description": "Chopped", "preview": "x . x x | . x . x"}]},
+                    {"question": "Which parts?", "header": "Parts", "multiSelect": True, "options": [
+                        {"label": "Bass", "description": ""}, {"label": "Keys", "description": ""}, {"label": "Pads", "description": ""}]}]}
+                out({"type": "assistant", "message": {"id": "mq0", "role": "assistant", "content": [{"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": ask}]}})
+                out({"type": "control_request", "request_id": "q1", "request": {"subtype": "can_use_tool", "tool_name": "AskUserQuestion", "input": ask, "tool_use_id": "q1", "requires_user_interaction": True}})
+                continue
+            if text.endswith("plan"):
+                plan = {"plan": "## Plan\\n\\n- Add a kick\\n- Sidechain the bass", "planFilePath": "/x/plan.md"}
+                out({"type": "assistant", "message": {"id": "mp0", "role": "assistant", "content": [{"type": "tool_use", "id": "p1", "name": "ExitPlanMode", "input": plan}]}})
+                out({"type": "control_request", "request_id": "p1", "request": {"subtype": "can_use_tool", "tool_name": "ExitPlanMode", "input": plan, "tool_use_id": "p1", "requires_user_interaction": True}})
+                continue
+            if text.endswith("elicit"):
+                out({"type": "control_request", "request_id": "e1", "request": {"subtype": "elicitation", "message": "Pick"}})
+                out({"type": "assistant", "message": {"id": "me", "role": "assistant", "content": [{"type": "text", "text": "Went on"}]}})
+                out({"type": "result", "subtype": "success", "is_error": False, "result": "Went on", "session_id": "s"})
+                continue
             if text.endswith("blocks"):
                 ev({"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}})
                 for piece in BLOCKS.split(" "):
@@ -102,8 +122,24 @@ final class AgentPanelTests: XCTestCase {
             if stopped:
                 continue
             rid = m["response"]["request_id"]
-            allowed = m["response"]["response"].get("behavior") == "allow"
-            if rid in pending:
+            said = m["response"].get("response", {})
+            allowed = said.get("behavior") == "allow"
+            if rid == "q1":
+                if allowed:
+                    answers = said["updatedInput"]["answers"]
+                    out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "q1", "content": "answered"}]}})
+                    words = "You chose " + json.dumps(answers, sort_keys=True) + " with " + str(len(said["updatedInput"]["questions"])) + " questions"
+                else:
+                    out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "q1", "content": said["message"], "is_error": True}]}})
+                    words = "No answer: " + said["message"]
+                out({"type": "assistant", "message": {"id": "mq", "role": "assistant", "content": [{"type": "text", "text": words}]}})
+                out({"type": "result", "subtype": "success", "is_error": False, "result": words, "session_id": "s"})
+            elif rid == "p1":
+                words = "Carrying it out" if allowed else "Still planning: " + said["message"]
+                out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "p1", "content": words, "is_error": not allowed}]}})
+                out({"type": "assistant", "message": {"id": "mp", "role": "assistant", "content": [{"type": "text", "text": words}]}})
+                out({"type": "result", "subtype": "success", "is_error": False, "result": words, "session_id": "s"})
+            elif rid in pending:
                 pending.remove(rid)
                 out({"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": rid, "content": "ok " + rid, "is_error": False}]}})
                 if pending:
@@ -1016,6 +1052,75 @@ final class AgentPanelTests: XCTestCase {
         XCTAssertEqual(agent.threads.count, 2)
     }
 
+    /// The agent's questions are drawn with their options instead of a
+    /// tool to allow: answered, the answers go back in the tool's input
+    /// keyed by each question's words; skipped, the tool is refused with a
+    /// word saying so. A plan is approved or sent back the same way, and a
+    /// request the panel does not answer is said in the conversation.
+    func testQuestionsAndPlansAreAskedAndAnswered() throws {
+        let song = try workspaceAndProject()
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        let agent = model.agent
+
+        agent.send("question")
+        wait("the questions") { agent.entries.contains { if case .question(_, _, _, .waiting) = $0 { true } else { false } } }
+        XCTAssertEqual(agent.entries.map(\.description), ["you: question", "question Which drums? / Which parts?"],
+                       "the tool's own line is not drawn beside its card")
+        guard case .question(_, let request, let questions, _)? = agent.entries.last else { return XCTFail("no question") }
+        XCTAssertEqual(questions[0].options.map(\.label), ["808", "Breakbeat"])
+        XCTAssertEqual(questions[0].options[1].preview, "x . x x | . x . x")
+        XCTAssertTrue(questions[1].multiSelect)
+        XCTAssertTrue(agent.awaitingAnswer)
+        agent.answer(request, answers: ["Which drums?": "Breakbeat", "Which parts?": "Bass, Pads"])
+        wait("the turn's end") { !agent.working }
+        XCTAssertEqual(agent.entries.suffix(2).map(\.description), [
+            "question Which drums? / Which parts? → Breakbeat / Bass, Pads",
+            #"agent: You chose {"Which drums?": "Breakbeat", "Which parts?": "Bass, Pads"} with 2 questions"#,
+        ], "the input went back whole, with the answers")
+
+        // Skipped, the questions are left unanswered and the agent told so.
+        agent.send("question")
+        wait("the questions again") { agent.entries.contains { if case .question(_, _, _, .waiting) = $0 { true } else { false } } }
+        guard case .question(_, let again, _, _)? = agent.entries.last else { return XCTFail("no question") }
+        agent.answer(again, allow: false)
+        wait("the turn's end") { !agent.working }
+        XCTAssertEqual(agent.entries.suffix(2).map(\.description), [
+            "question Which drums? / Which parts? ✗", "agent: No answer: \(AgentPanel.unanswered)",
+        ])
+
+        // A stop leaves them unanswered too.
+        agent.send("question")
+        wait("the questions a third time") { agent.entries.contains { if case .question(_, _, _, .waiting) = $0 { true } else { false } } }
+        agent.stop()
+        wait("the stop") { !agent.working }
+        XCTAssertTrue(agent.entries.suffix(3).contains { $0.description == "question Which drums? / Which parts? ✗" })
+
+        // A plan: sent back, then approved.
+        agent.send("plan")
+        wait("the plan") { agent.entries.contains { if case .plan(_, _, _, nil) = $0 { true } else { false } } }
+        guard case .plan(_, let planRequest, let plan, _)? = agent.entries.last else { return XCTFail("no plan") }
+        XCTAssertEqual(plan, "## Plan\n\n- Add a kick\n- Sidechain the bass")
+        agent.answer(planRequest, allow: false)
+        wait("the turn's end") { !agent.working }
+        XCTAssertEqual(agent.entries.suffix(2).map(\.description), ["plan ## Plan ✗", "agent: Still planning: \(AgentPanel.keepPlanning)"])
+        agent.send("plan")
+        wait("the plan again") { agent.entries.contains { if case .plan(_, _, _, nil) = $0 { true } else { false } } }
+        guard case .plan(_, let second, _, _)? = agent.entries.last else { return XCTFail("no plan") }
+        agent.answer(second, allow: true)
+        wait("the turn's end") { !agent.working }
+        XCTAssertEqual(agent.entries.suffix(2).map(\.description), ["plan ## Plan ✓", "agent: Carrying it out"])
+
+        // A request the panel does not answer is said, and refused.
+        agent.send("elicit")
+        wait("the turn's end") { !agent.working && agent.entries.last?.description == "agent: Went on" }
+        XCTAssertTrue(agent.entries.contains { $0.description.hasPrefix("note: The agent asked the panel for elicitation") })
+        let refused = try logged().contains {
+            (($0["response"] as? [String: Any])?["request_id"] as? String) == "e1" && (($0["response"] as? [String: Any])?["subtype"] as? String) == "error"
+        }
+        XCTAssertTrue(refused)
+    }
+
     func testSignedOutIsSaid() throws {
         let song = try workspaceAndProject()
         let model = try SongModel(url: song)
@@ -1132,6 +1237,16 @@ extension AgentPanel.Entry {
             "tool \(name) \(summary)" + (result.map { failed ? " ✗ \($0)" : " → \($0)" } ?? "")
         case .approval(_, _, let summary, let allowed):
             "\(allowed == nil ? "ask" : allowed == true ? "allowed" : "refused") \(summary)"
+        case .question(_, _, let questions, let outcome):
+            "question " + questions.map(\.question).joined(separator: " / ") + {
+                switch outcome {
+                case .waiting: ""
+                case .unanswered: " ✗"
+                case .answered(let answers): " → " + questions.map { answers[$0.question] ?? "" }.joined(separator: " / ")
+                }
+            }()
+        case .plan(_, _, let plan, let approved):
+            "plan \(plan.split(separator: "\n").first ?? "")" + (approved == nil ? "" : approved == true ? " ✓" : " ✗")
         case .note(_, let text): "note: \(text)"
         }
     }

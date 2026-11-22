@@ -88,6 +88,8 @@ such as `head`, `grep` or `jq` its output goes through, is allowed at once.
 Anything else, a command with another program, a path outside the project,
 a home path, a redirection, a subshell, or any other tool, an edit of
 `SONG.md` included, is a card in the panel with Allow and Refuse, and a beep.
+The agent's questions with choices and a plan it proposes come the same
+way and are cards of their own ([the agent's questions](agent-questions.md)).
 A request still waiting when the conversation changes or the turn is stopped
 is refused. A file the person attached may be read without a card: by Read,
 by `daw`, or by a program that inspects a file; writing to it still asks.
@@ -157,8 +159,10 @@ shows (D133).
   thread's file is not in the project's own.
 - Delete takes a thread out of the project's list and keeps it out;
   Claude Code's own record of it stays where it was.
-- The approval request's shape was taken from Claude Code's SDK; no card from
-  a real session has been answered: see below.
+- The approval request's shape was taken from Claude Code's SDK and was
+  first seen from a real session on November 22, 2026, as a question
+  ([the agent's questions](agent-questions.md)); no Allow card from a real
+  session has been answered: see below.
 - **The engine is the developer's own.** The panel drives the Claude Code
   the person installed and signed in to, which a distributed app may not do:
   Anthropic allows no third-party app to use people's claude.ai login or
@@ -179,7 +183,7 @@ as the panel drives it:
 | `control_request` with subtype `initialize` first | Answered with Claude Code's commands and settings |
 | A message with `--permission-mode auto`, October 12, 2026 | `system` init with `permissionMode` `auto`, and the turn answered |
 | `ls`, `echo`, `sleep` with `--permission-prompt-tool stdio` | Each ran with no request, allowed by Claude Code's own rules |
-| A command that would need a request, from a script | Not tried: the request's fields (`can_use_tool`, `tool_name`, `input`) and the answer (`behavior` allow with `updatedInput`, or deny with a `message`) are as the Agent SDK documents them |
+| A command that would need a request, from a script | Not tried: the request's fields (`can_use_tool`, `tool_name`, `input`) and the answer (`behavior` allow with `updatedInput`, or deny with a `message`) are as the Agent SDK documents them; with Claude Code 2.1.330 on November 22, 2026, `AskUserQuestion` and `ExitPlanMode` came as such requests and were answered so ([the agent's questions](agent-questions.md)) |
 | The built app, `--ask` with a request to say which project it is in, what `SONG.md` says under Instructions and to run `daw status .`, on a scratch project outside the checkout | Answered from the folder and the file, ran the command and read `host: true` back, in a picture of the panel; the thread was kept in `.daw/threads.json`. Whether the app answered a request for the command or Claude Code's own rules allowed it is not in the record, so the first card from a real session is still for the person to see |
 | The built app, `--ask` with the stand-in program | A picture of the panel with the streamed greeting, the `daw` command ticked, and the card for `touch x` with Allow and Refuse |
 

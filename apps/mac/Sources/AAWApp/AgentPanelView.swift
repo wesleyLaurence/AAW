@@ -404,6 +404,10 @@ private struct RowView: View, Equatable {
                     .padding(.horizontal, 12)
             case .approval(_, let request, let summary, let allowed):
                 ApprovalCard(agent: agent, request: request, summary: summary, allowed: allowed)
+            case .question(_, let request, let questions, let outcome):
+                QuestionCard(agent: agent, request: request, questions: questions, outcome: outcome)
+            case .plan(_, let request, let plan, let approved):
+                PlanCard(agent: agent, request: request, plan: plan, approved: approved)
             case .note(_, let text):
                 Text(text)
                     .font(.system(size: AgentPanelView.smallSize))
@@ -861,6 +865,220 @@ private struct ApprovalCard: View {
         .padding(.horizontal, 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Approval")
+    }
+}
+
+/// The agent's questions, each with its header, its words and its options
+/// as rows to click, a circle for one choice and a box for several, then
+/// Other with a field for the person's own words; Submit sends the answers
+/// once each question has one, and Skip or Stop leaves them unanswered (D196).
+/// Answered, the card keeps the choices marked.
+private struct QuestionCard: View {
+    let agent: AgentPanel
+    let request: String
+    let questions: [AgentQuestion]
+    let outcome: AgentQuestion.Outcome
+    @State private var choices: [AgentQuestion.Choice] = []
+
+    private var waiting: Bool { outcome == .waiting }
+
+    var body: some View {
+        let accent = Color(nsColor: Theme.insertion)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(waiting ? (questions.count == 1 ? "The agent asks:" : "The agent asks \(questions.count) questions:")
+                 : outcome == .unanswered ? "Not answered:" : "Answered:")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(waiting ? accent : Color.secondary)
+            ForEach(Array(questions.enumerated()), id: \.offset) { i, question in
+                QuestionView(question: question, choice: choice(i), enabled: waiting) { choices = set(i, $0) }
+            }
+            if waiting {
+                let answers = AgentQuestion.answers(questions, questions.indices.map(choice))
+                HStack(spacing: 8) {
+                    Button("Submit") {
+                        if let answers { agent.answer(request, answers: answers) }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+                    .disabled(answers == nil)
+                    .help(answers == nil ? "Choose an answer for each question first" : "Send the answers to the agent")
+                    // No Escape: it clears the timeline's selection, and
+                    // would skip the questions while a card waits.
+                    Button("Skip") { agent.answer(request, allow: false) }
+                        .help("Leave the questions unanswered; the agent is told so and goes on")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(waiting ? 0.10 : 0.04), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Question")
+    }
+
+    /// The person's choice for a question while waiting; the answer that
+    /// went back once answered.
+    private func choice(_ i: Int) -> AgentQuestion.Choice {
+        if case .answered(let answers) = outcome {
+            return answers[questions[i].question].map { questions[i].chosen(by: $0) } ?? .init()
+        }
+        return i < choices.count ? choices[i] : .init()
+    }
+
+    private func set(_ i: Int, _ choice: AgentQuestion.Choice) -> [AgentQuestion.Choice] {
+        var all = questions.indices.map { $0 < choices.count ? choices[$0] : .init() }
+        all[i] = choice
+        return all
+    }
+}
+
+/// One question: its header as a small capsule, its words, its options and
+/// Other, and the chosen option's preview under them where it has one.
+private struct QuestionView: View {
+    let question: AgentQuestion
+    let choice: AgentQuestion.Choice
+    let enabled: Bool
+    let change: (AgentQuestion.Choice) -> Void
+    @State private var other = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if !question.header.isEmpty {
+                Text(question.header.uppercased())
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.white.opacity(0.08), in: Capsule())
+            }
+            Text(AgentPanelView.inline(question.question))
+                .font(.system(size: AgentPanelView.textSize, weight: .semibold))
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+            if question.multiSelect {
+                Text("Choose any").font(.system(size: AgentPanelView.smallSize)).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(question.options, id: \.label) { option in
+                    let on = choice.labels.contains(option.label)
+                    Button {
+                        change(question.choosing(option.label, in: choice))
+                    } label: {
+                        row(on: on) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(option.label)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(enabled || on ? Color.primary : Color.secondary)
+                                if !option.description.isEmpty {
+                                    Text(option.description)
+                                        .font(.system(size: AgentPanelView.smallSize))
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!enabled)
+                    .accessibilityLabel(option.label)
+                    .accessibilityAddTraits(on ? .isSelected : [])
+                }
+                otherRow
+            }
+            if let preview = question.options.first(where: { choice.labels.contains($0.label) && $0.preview != nil })?.preview {
+                Text(preview)
+                    .font(.system(size: AgentPanelView.smallSize, design: .monospaced))
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(AgentPanelView.codeFill, in: RoundedRectangle(cornerRadius: 6))
+            }
+        }
+    }
+
+    /// Other: a field for the person's own words, chosen by clicking its
+    /// mark or by typing. Answered, it shows the words that went back.
+    @ViewBuilder private var otherRow: some View {
+        let on = choice.other != nil
+        if enabled {
+            row(on: on) {
+                TextField("Other", text: $other)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .onChange(of: other) { _, text in
+                        change(question.choosingOther(text.isEmpty && !on ? nil : text, in: choice))
+                    }
+                    .onSubmit {}
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { change(question.choosingOther(on ? nil : other, in: choice)) }
+            .accessibilityLabel("Other")
+        } else if let words = choice.other {
+            row(on: true) {
+                Text(words).font(.system(size: 12, weight: .medium)).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// A row with its mark: a circle for one choice, a box for several,
+    /// filled when chosen.
+    private func row(on: Bool, @ViewBuilder content: () -> some View) -> some View {
+        let accent = Color(nsColor: Theme.insertion)
+        let mark = question.multiSelect ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle")
+        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: mark)
+                .font(.system(size: 12))
+                .foregroundStyle(on ? accent : Color.secondary)
+            content()
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(on ? accent.opacity(0.16) : Color.clear, in: RoundedRectangle(cornerRadius: 6))
+        .contentShape(Rectangle())
+    }
+}
+
+/// A plan the agent proposes before it acts, in blocks as its words are,
+/// with Approve, and Keep Planning to send it back (D196).
+private struct PlanCard: View {
+    let agent: AgentPanel
+    let request: String
+    let plan: String
+    let approved: Bool?
+
+    var body: some View {
+        let accent = Color(nsColor: Theme.insertion)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(approved == nil ? "The agent proposes this plan:" : approved == true ? "Plan approved:" : "Plan not approved:")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(approved == nil ? accent : Color.secondary)
+            AgentRow(text: plan, streaming: false)
+                .padding(.vertical, 8)
+                .background(AgentPanelView.codeFill, in: RoundedRectangle(cornerRadius: 6))
+            if approved == nil {
+                HStack(spacing: 8) {
+                    Button("Approve") { agent.answer(request, allow: true) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(accent)
+                        .help("Let the agent carry out the plan")
+                    Button("Keep Planning") { agent.answer(request, allow: false) }
+                        .help("Send the plan back; the agent asks what to change")
+                }
+                .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(accent.opacity(approved == nil ? 0.10 : 0.04), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 12)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Plan")
     }
 }
 
