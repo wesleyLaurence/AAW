@@ -260,9 +260,13 @@ private struct FadeDrag {
 private struct ReorderDrag {
     var row: RowID
     var startY: CGFloat
-    /// The row's place among its kind, and the gap it would move to.
+    /// A return's place among the returns, and the gap it would move to.
     var from: Int
     var slot: Int?
+    /// A track's or a group's: the rows as drawn when the drag began, and
+    /// where it would land, in or out of a group.
+    var rows: RowDrop?
+    var landing: RowDrop.Landing?
 }
 
 /// Automation points being dragged together, by the one grabbed.
@@ -1207,6 +1211,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     /// The rows of a row's kind in their order: the tracks, the groups or
     /// the returns.
+    /// The tracks and groups as drawn, for a header dragged among them.
+    private func rowDrop() -> RowDrop {
+        let a = model.arrangement
+        return RowDrop(tracks: a.tracks.map { ($0.key, $0.group) }, groups: a.groups.map { ($0.key, $0.group) },
+                       folded: foldedGroups)
+    }
+
     private func siblings(of row: RowID) -> [RowID] {
         switch row {
         case .track: model.arrangement.tracks.map { .track($0.key) }
@@ -1453,7 +1464,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 return
             }
             guard id != .master else { return }
-            if let from = siblings(of: id).firstIndex(of: id) {
+            if id.strip {
+                drag = .reorder(ReorderDrag(row: id, startY: p.y, from: 0, rows: rowDrop()))
+            } else if let from = siblings(of: id).firstIndex(of: id) {
                 drag = .reorder(ReorderDrag(row: id, startY: p.y, from: from))
             }
         }
@@ -1537,7 +1550,17 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             var frozen = false
             if case .track(let key) = id { frozen = model.arrangement.tracks.first { $0.key == key }?.frozen ?? false }
-            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.depth > 0, inputs: inputs, frozen: frozen)
+            // Move to Group: the groups it can go into, the one it is in checked.
+            var groups: [ContextMenu.Item<ContextMenu.RowAction>]?
+            if id.strip {
+                let current: UInt64? = switch id {
+                case .track(let key): model.arrangement.tracks.first { $0.key == key }?.group
+                case .group(let key): model.arrangement.groups.first { $0.key == key }?.group
+                default: nil
+                }
+                groups = ContextMenu.groups(model.groupChoices(for: id), current: current)
+            }
+            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.depth > 0, inputs: inputs, frozen: frozen, groups: groups)
             return menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
         }
         guard let hit = clip(at: p) else { return nil }
@@ -1566,6 +1589,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             entry.target = self
             entry.representedObject = choice(what)
             entry.state = item.checked ? .on : .off
+            entry.indentationLevel = item.indent
             if let children = item.children {
                 entry.action = nil
                 entry.submenu = self.menu(of: children, action, choice)
@@ -1596,6 +1620,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .solo:
             if id.strip { model.edit(.solo(row: id.row, on: !row.solo)) }
         case .group: model.groupSelection()
+        case .moveToGroup(let group): model.moveToGroup(id, group: group)
         case .ungroup: model.ungroupSelection()
         case .leaveGroup:
             switch id {
@@ -1941,10 +1966,18 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.select(clips: base.union(clipKeys(in: box)))
             }
         case .reorder(var r):
-            if r.slot == nil, abs(p.y - r.startY) < 4 { return }
-            // The gap the pointer is nearest: above the first row whose middle is below it.
-            let rows = siblings(of: r.row).compactMap { frame(of: $0) }
-            r.slot = rows.filter { $0.top + $0.height / 2 < p.y }.count
+            if r.slot == nil, r.landing == nil, abs(p.y - r.startY) < 4 { return }
+            if let rows = r.rows, let dragged = r.row.dropRow {
+                // The gap the pointer is nearest, and the group by how far in it is.
+                let middles = rows.entries.compactMap { frame(of: $0.row.id).map { $0.top + $0.height / 2 } }
+                let slot = RowDrop.slot(at: p.y, middles: middles)
+                r.landing = rows.landing(of: dragged, slot: slot, depth: RowDrop.depth(atX: p.x))
+                r.slot = r.landing?.slot
+            } else {
+                // The gap the pointer is nearest: above the first row whose middle is below it.
+                let rows = siblings(of: r.row).compactMap { frame(of: $0) }
+                r.slot = rows.filter { $0.top + $0.height / 2 < p.y }.count
+            }
             drag = .reorder(r)
         case nil:
             return
@@ -2016,8 +2049,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .marquee:
             break
         case .reorder(let r):
-            // Taking the row out moves the gaps below it up by one.
-            if let slot = r.slot {
+            if let rows = r.rows, let dragged = r.row.dropRow {
+                // Into a group, out of one, or to another place in its own.
+                if let landing = r.landing, !rows.isStill(dragged, landing) {
+                    model.edit(.place(row: r.row.row, index: UInt32(landing.index), group: landing.group))
+                }
+            } else if let slot = r.slot {
+                // Taking the row out moves the gaps below it up by one.
                 let index = slot > r.from ? slot - 1 : slot
                 if index != r.from { model.edit(.move(row: r.row.row, index: UInt32(index))) }
             }
@@ -2501,7 +2539,16 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
 
         // Where a dragged row would land.
-        if case .reorder(let r) = drag, let slot = r.slot {
+        if case .reorder(let r) = drag, let rows = r.rows, let landing = r.landing {
+            // Set in under the group it joins, at the group's depth.
+            let frames = rows.entries.compactMap { frame(of: $0.row.id) }
+            let slot = landing.slot
+            if let y = slot < frames.count ? frames[slot].top : frames.last.map({ $0.top + $0.height }), y >= ruler {
+                let x = 8 + CGFloat(landing.depth) * HeaderLayout.indent
+                fill(CGRect(x: x, y: y - 1.5, width: bounds.width - x, height: 2), Theme.insertion)
+                fill(CGRect(x: x, y: y - 4, width: 2, height: 8), Theme.insertion)
+            }
+        } else if case .reorder(let r) = drag, let slot = r.slot {
             let frames = siblings(of: r.row).compactMap { frame(of: $0) }
             if let y = slot < frames.count ? frames[slot].top : frames.last.map({ $0.top + $0.height }), y >= ruler {
                 fill(CGRect(x: 0, y: y - 1.5, width: bounds.width, height: 2), Theme.insertion)

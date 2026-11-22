@@ -1,6 +1,6 @@
 # The agent's questions in the panel — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 2. The person's note of November
+Status: proposed, not built. Backlog: Next 1. The person's note of November
 22, 2026 (D194): "whenever claude does this ask user question type of event
 I dont get to see or select any of the options." What is said here about the
 panel was read from the checkout on November 22, 2026.

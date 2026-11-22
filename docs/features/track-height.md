@@ -1,6 +1,6 @@
 # A track's height dragged — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 10. The person's note of November
+Status: proposed, not built. Backlog: Next 9. The person's note of November
 22, 2026 (D194): "to be able to adjust the size of a track ... when you go to
 the lower boundary it should show an icon that then allows you to click and
 drag down to make the track bigger or smaller in display, that would allow

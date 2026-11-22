@@ -95,9 +95,12 @@ pub enum Edit {
     /// Takes a group away, as ⇧⌘G does; its tracks and groups go to its own
     /// group, or to the master again.
     Ungroup { group: u64 },
-    /// Puts a track in a group, or with none takes it out of its group.
+    /// Puts a track in a group, after the group's last track, or with none
+    /// takes it out of its group into the group over that, or the master,
+    /// after the last track of the group it leaves.
     TrackGroup { track: u64, group: Option<u64> },
-    /// Puts a group in a group, or with none takes it out of its group.
+    /// Puts a group in a group, or with none takes it out of its group, as
+    /// `TrackGroup` does a track, with every track under it.
     GroupParent { group: u64, parent: Option<u64> },
     /// Where a track records from, or with none nothing: an audio track's
     /// `input`, set from the header's Input menu.
@@ -347,14 +350,20 @@ pub enum Edit {
     /// its file's own tempo.
     AudioSet { clip: u64, field: String, value: FieldValue },
     /// Adds an empty track at `index` among the tracks, under a free name: a
-    /// MIDI track of note clips with no instrument when `midi`.
-    TrackAdd { index: u32, midi: bool },
+    /// MIDI track of note clips with no instrument when `midi`, in `group`
+    /// when one is given.
+    TrackAdd { index: u32, midi: bool, group: Option<u64> },
     ReturnAdd { index: u32 },
     Rename { row: Row, to: String },
     Remove { row: Row },
-    /// Moves a track among the tracks, a group among the groups or a return
-    /// among the returns.
+    /// Moves a track among the tracks, a group with its tracks to `index`
+    /// among the tracks, or a return among the returns; each keeps its
+    /// group.
     Move { row: Row, index: u32 },
+    /// Puts a track, or a group with every track under it, at `index` among
+    /// the tracks, counting after they are taken out, and in `group`, or on
+    /// the master with none: where a header dragged is dropped.
+    Place { row: Row, index: u32, group: Option<u64> },
     /// Adds an effect of a type to a row's chain, at `index` or last, with
     /// its required fields at a place to start. The effect is what the edit
     /// makes.
@@ -1049,13 +1058,16 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             let tree = doc.tree();
             let name = |list: &str, key: u64| items(&tree, list).iter().find(|i| i.handle == key).and_then(|i| i.node.field("id").map(str::to_string));
             let track_name = name("tracks", *track).ok_or("The track is no longer in the song")?;
-            let path = format!("tracks.{}.group", handle_text(*track));
             match group {
                 Some(key) => {
                     let id = name("groups", *key).ok_or("The group is no longer in the song")?;
-                    Ok(batch(vec![json!({"op": "set", "path": path, "value": id})], format!("Put {track_name} in group {id}")))
+                    Ok(batch(vec![json!({"op": "track.move", "track": track_name, "group": id})], format!("Put {track_name} in group {id}")))
                 }
-                None => Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Take {track_name} out of its group"))),
+                None => {
+                    let was = project.tracks.iter().find(|t| t.id == track_name).and_then(|t| t.group.clone()).ok_or("The track is in no group")?;
+                    let over = project.groups.iter().find(|g| g.id == was).and_then(|g| g.group.clone());
+                    Ok(batch(vec![json!({"op": "track.move", "track": track_name, "group": over})], format!("Take {track_name} out of group {was}")))
+                }
             }
         }
         Edit::TrackInput { track, input } => {
@@ -1086,13 +1098,16 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             let tree = doc.tree();
             let name = |key: u64| items(&tree, "groups").iter().find(|i| i.handle == key).and_then(|i| i.node.field("id").map(str::to_string));
             let group_name = name(*group).ok_or("The group is no longer in the song")?;
-            let path = format!("groups.{}.group", handle_text(*group));
             match parent {
                 Some(key) => {
                     let id = name(*key).ok_or("The group is no longer in the song")?;
-                    Ok(batch(vec![json!({"op": "set", "path": path, "value": id})], format!("Put {group_name} in group {id}")))
+                    Ok(batch(vec![json!({"op": "group.move", "group": group_name, "parent": id})], format!("Put {group_name} in group {id}")))
                 }
-                None => Ok(batch(vec![json!({"op": "remove", "path": path})], format!("Take {group_name} out of its group"))),
+                None => {
+                    let of = |id: &str| project.groups.iter().find(|g| g.id == id).and_then(|g| g.group.clone());
+                    let was = of(&group_name).ok_or("The group is in no group")?;
+                    Ok(batch(vec![json!({"op": "group.move", "group": group_name, "parent": of(&was)})], format!("Take {group_name} out of group {was}")))
+                }
             }
         }
         Edit::ClipsMove { clips, by, rows } => {
@@ -1971,12 +1986,18 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             }
             Ok(vec![command])
         }
-        Edit::TrackAdd { index, midi } => {
-            Ok(vec![json!({
+        Edit::TrackAdd { index, midi, group } => {
+            let mut op = json!({
                 "op": "track.add", "id": free_name(project, if *midi { "midi" } else { "track" }),
                 "index": (*index as usize).min(project.tracks.len()),
                 "type": if *midi { "midi" } else { "audio" },
-            })])
+            });
+            if let Some(key) = group {
+                let tree = doc.tree();
+                let id = items(&tree, "groups").iter().find(|i| i.handle == *key).and_then(|i| i.node.field("id").map(str::to_string));
+                op["group"] = json!(id.ok_or("The group is no longer in the song")?);
+            }
+            Ok(vec![op])
         }
         Edit::ReturnAdd { index } => Ok(vec![json!({
             "op": "return.add", "id": free_name(project, "return"), "index": (*index as usize).min(project.returns.len()),
@@ -1999,6 +2020,21 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
             Row::Return { key } => Ok(vec![json!({"op": "return.move", "return": handle_text(*key), "index": index})]),
             Row::Master => Err("The master cannot be moved".into()),
         },
+        Edit::Place { row, index, group } => {
+            let tree = doc.tree();
+            let group = match group {
+                Some(key) => Some(
+                    items(&tree, "groups").iter().find(|i| i.handle == *key).and_then(|i| i.node.field("id").map(str::to_string))
+                        .ok_or("The group is no longer in the song")?,
+                ),
+                None => None,
+            };
+            match row {
+                Row::Track { key } => Ok(vec![json!({"op": "track.move", "track": handle_text(*key), "index": index, "group": group})]),
+                Row::Group { key } => Ok(vec![json!({"op": "group.move", "group": handle_text(*key), "index": index, "parent": group})]),
+                Row::Return { .. } | Row::Master => Err("Only a track or a group goes into a group".into()),
+            }
+        }
         Edit::EffectAdd { row, kind, index, rack } => {
             let mut command = json!({"op": "effect.add", "owner": chain_path(row, *rack), "type": kind});
             if let Some(i) = index {

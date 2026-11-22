@@ -148,3 +148,91 @@ fn a_group_of_groups_is_made_renamed_and_removed_down_the_tree() {
     s.undo(aaw_host::command::Origin::Agent, false).unwrap();
     assert_eq!(get(&s, "groups.synths.group"), json!("everything"));
 }
+
+fn order(s: &Session) -> Vec<String> {
+    get(s, "tracks").as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn a_track_moved_with_a_group_joins_it_where_it_lands() {
+    let (_d, mut s) = open();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "keys"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "pad"})).unwrap();
+    edit(&mut s, json!({"op": "group.add", "id": "kit", "tracks": ["drums", "bass"]})).unwrap();
+    assert_eq!(order(&s), ["drums", "bass", "keys", "pad"]);
+    // Dropped between the kit's tracks, and put in it in the same edit:
+    // the rule is checked once, after both.
+    let r = edit(&mut s, json!({"op": "track.move", "track": "pad", "index": 1, "group": "kit"})).unwrap();
+    assert_eq!(r["label"], json!("Move track pad into group kit"));
+    assert_eq!(order(&s), ["drums", "pad", "bass", "keys"]);
+    assert_eq!(get(&s, "tracks.pad.group"), json!("kit"));
+    // Out to the master below the group, with null.
+    let r = edit(&mut s, json!({"op": "track.move", "track": "drums", "index": 3, "group": null})).unwrap();
+    assert_eq!(r["label"], json!("Move track drums out of group kit"));
+    assert_eq!(order(&s), ["pad", "bass", "keys", "drums"]);
+    assert_eq!(get(&s, "tracks.drums.group"), json!(null));
+    // With a group and no index it goes after the group's last track.
+    edit(&mut s, json!({"op": "track.move", "track": "drums", "group": "kit"})).unwrap();
+    assert_eq!(order(&s), ["pad", "bass", "drums", "keys"]);
+    // Leaving with no index, it goes after the group it leaves.
+    edit(&mut s, json!({"op": "track.move", "track": "pad", "group": null})).unwrap();
+    assert_eq!(order(&s), ["bass", "drums", "pad", "keys"]);
+    assert_eq!(get(&s, "tracks.pad.group"), json!(null));
+    // Moved with no group, it keeps its own, and is still refused where it
+    // would split one.
+    let e = edit(&mut s, json!({"op": "track.move", "track": "keys", "index": 1})).unwrap_err();
+    assert!(e.contains("the tracks of group kit must be next to each other"), "{e}");
+    let e = edit(&mut s, json!({"op": "track.move", "track": "keys"})).unwrap_err();
+    assert!(e.contains("Give an index, a group, or both"), "{e}");
+    let e = edit(&mut s, json!({"op": "track.move", "track": "keys", "group": "nope"})).unwrap_err();
+    assert!(e.contains("nope"), "{e}");
+    // Undo puts it back in one step.
+    edit(&mut s, json!({"op": "track.move", "track": "keys", "index": 1, "group": "kit"})).unwrap();
+    s.undo(aaw_host::command::Origin::Agent, false).unwrap();
+    assert_eq!(order(&s), ["bass", "drums", "pad", "keys"]);
+    assert_eq!(get(&s, "tracks.keys.group"), json!(null));
+}
+
+#[test]
+fn a_group_moved_takes_its_tracks_and_nests_or_leaves() {
+    let (_d, mut s) = open();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "keys"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "pad"})).unwrap();
+    edit(&mut s, json!({"op": "track.add", "type": "audio", "id": "vox"})).unwrap();
+    edit(&mut s, json!({"op": "group.add", "id": "kit", "tracks": ["drums", "bass"]})).unwrap();
+    edit(&mut s, json!({"op": "group.add", "id": "synths", "tracks": ["keys", "pad"]})).unwrap();
+    assert_eq!(order(&s), ["drums", "bass", "keys", "pad", "vox"]);
+    // The synths go after the vocal, both tracks with them.
+    edit(&mut s, json!({"op": "group.move", "group": "synths", "index": 3})).unwrap();
+    assert_eq!(order(&s), ["drums", "bass", "vox", "keys", "pad"]);
+    // Into the kit, between its tracks: a group within a group by a drop.
+    let r = edit(&mut s, json!({"op": "group.move", "group": "synths", "index": 1, "parent": "kit"})).unwrap();
+    assert_eq!(r["label"], json!("Move group synths into group kit"));
+    assert_eq!(order(&s), ["drums", "keys", "pad", "bass", "vox"]);
+    assert_eq!(get(&s, "groups.synths.group"), json!("kit"));
+    // A group into itself or a group in it is refused.
+    let e = edit(&mut s, json!({"op": "group.move", "group": "kit", "parent": "synths"})).unwrap_err();
+    assert!(e.contains("kit: cannot be in group synths, which is in kit"), "{e}");
+    // Out with no index: after the kit, to the master.
+    let r = edit(&mut s, json!({"op": "group.move", "group": "synths", "parent": null})).unwrap();
+    assert_eq!(r["label"], json!("Move group synths out of group kit"));
+    assert_eq!(order(&s), ["drums", "bass", "keys", "pad", "vox"]);
+    assert_eq!(get(&s, "groups.synths.group"), json!(null));
+    // A track of a nested group taken one level out stays in the outer
+    // group, after the inner group's tracks.
+    edit(&mut s, json!({"op": "group.move", "group": "synths", "parent": "kit"})).unwrap();
+    assert_eq!(order(&s), ["drums", "bass", "keys", "pad", "vox"]);
+    edit(&mut s, json!({"op": "track.move", "track": "keys", "group": "kit"})).unwrap();
+    assert_eq!(order(&s), ["drums", "bass", "pad", "keys", "vox"]);
+    assert_eq!(get(&s, "tracks.keys.group"), json!("kit"));
+    // To the master from two groups down, after the outermost it leaves.
+    edit(&mut s, json!({"op": "track.move", "track": "pad", "group": null})).unwrap();
+    assert_eq!(order(&s), ["drums", "bass", "keys", "pad", "vox"]);
+    assert_eq!(get(&s, "tracks.pad.group"), json!(null));
+    // A group with no tracks takes its place in a group with none either.
+    edit(&mut s, json!({"op": "group.add", "id": "fx"})).unwrap();
+    edit(&mut s, json!({"op": "group.move", "group": "fx", "parent": "synths"})).unwrap();
+    assert_eq!(get(&s, "groups.fx.group"), json!("synths"));
+    let e = edit(&mut s, json!({"op": "group.move", "group": "kit", "index": 9})).unwrap_err();
+    assert!(e.contains("past the end"), "{e}");
+}

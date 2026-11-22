@@ -43,8 +43,9 @@ groups:
 of the tracks named, which are moved together to where the first of them is;
 `daw group remove|rename|move` do what the track verbs do, a removed group
 leaving its tracks on the master and a renamed one carrying their `group`
-along. `daw set SONG tracks.T.group G` puts one track in, `daw remove SONG
-tracks.T.group` takes it out, and `daw send set`, `daw effect add` and `daw
+along. `daw track move SONG T --group G` puts one track in, beside the
+group's tracks, and `--no-group` takes it out, as a drop of its header does
+in the app ([rows into groups](rows-into-groups.md), D195); and `daw send set`, `daw effect add` and `daw
 lane set` take `groups.G` as they take a track. `daw inspect` lists the groups
 with their tracks, and `daw describe project` and `daw describe effects` say
 what a group is.

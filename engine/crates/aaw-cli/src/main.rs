@@ -579,8 +579,21 @@ enum TrackCmd {
     Remove { project: Song, track: String },
     /// Rename a track and the sidechains that name it.
     Rename { project: Song, track: String, to: String },
-    /// Move a track to INDEX among the tracks, counting from 0.
-    Move { project: Song, track: String, index: usize },
+    /// Move a track to INDEX among the tracks, counting from 0 after it is
+    /// taken out; --group G puts it in G, --no-group takes it to the
+    /// master. With a group and no INDEX it goes after the group's last
+    /// track, or, leaving a group, after the group it leaves.
+    Move {
+        project: Song,
+        track: String,
+        index: Option<usize>,
+        /// The group it goes into.
+        #[arg(long, conflicts_with = "no_group")]
+        group: Option<String>,
+        /// Out of its groups, to the master.
+        #[arg(long)]
+        no_group: bool,
+    },
     /// Freeze a track: its instrument, effects and their lanes rendered before its fader to frozen/TRACK.wav, which plays in their place; its clips, devices and the tempo cannot change until it is unfrozen; its fader, pan, mute, solo and sends can. A frozen track is rendered again.
     Freeze { project: Song, track: String },
     /// Unfreeze a track: its instrument and effects play again. The file is left.
@@ -608,10 +621,9 @@ enum ReturnCmd {
 }
 
 /// Groups: tracks and groups summed through a chain, gain and pan of their
-/// own, as a drum bus. A track names its group with group; daw set
-/// tracks.T.group G moves one track, and daw remove tracks.T.group takes it
-/// out. A group names its own group the same way: daw set groups.G.group P
-/// puts a group in another, daw remove groups.G.group takes it out.
+/// own, as a drum bus. daw track move SONG T --group G puts a track in a
+/// group beside its tracks, --no-group takes it out; daw group move SONG G
+/// --group P puts a group in another, with its tracks.
 #[derive(Subcommand)]
 enum GroupCmd {
     /// Add a group; --tracks a,b and --groups c,d put those in it, moved together.
@@ -632,9 +644,21 @@ enum GroupCmd {
     Remove { project: Song, group: String },
     /// Rename a group and the tracks' and groups' group naming it.
     Rename { project: Song, group: String, to: String },
-    /// Move a group to INDEX among the groups, counting from 0; its tracks
-    /// stay where they are.
-    Move { project: Song, group: String, index: usize },
+    /// Move a group with every track under it to INDEX among the tracks,
+    /// counting from 0 after they are taken out; --group P puts it in P,
+    /// --no-group takes it to the master. With a group and no INDEX it goes
+    /// after P's last track, or, leaving a group, after the group it leaves.
+    Move {
+        project: Song,
+        group: String,
+        index: Option<usize>,
+        /// The group it goes into.
+        #[arg(long = "group", conflicts_with = "no_group")]
+        parent: Option<String>,
+        /// Out of its groups, to the master.
+        #[arg(long)]
+        no_group: bool,
+    },
 }
 
 /// Audio clips: parts of a sample file on a track, addressed by reference: @N
@@ -2390,11 +2414,12 @@ fn run(cli: &Cli) -> Result<Json> {
                     to: to.clone(),
                 },
             ),
-            TrackCmd::Move { project, track, index } => edit(
+            TrackCmd::Move { project, track, index, group, no_group } => edit(
                 project,
                 C::TrackMove {
                     track: track.clone(),
                     index: *index,
+                    group: if *no_group { Some(None) } else { group.clone().map(Some) },
                 },
             ),
             TrackCmd::Freeze { project, track } => edit(project, C::TrackFreeze { track: track.clone() }),
@@ -2445,11 +2470,12 @@ fn run(cli: &Cli) -> Result<Json> {
                     to: to.clone(),
                 },
             ),
-            GroupCmd::Move { project, group, index } => edit(
+            GroupCmd::Move { project, group, index, parent, no_group } => edit(
                 project,
                 C::GroupMove {
                     group: group.clone(),
                     index: *index,
+                    parent: if *no_group { Some(None) } else { parent.clone().map(Some) },
                 },
             ),
         },

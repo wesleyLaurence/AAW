@@ -1,6 +1,6 @@
 # Names with spaces — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 5. The person's note of November
+Status: proposed, not built. Backlog: Next 4. The person's note of November
 22, 2026 (D194): "it seems that I cant name a track something with a space
 in it? i had to use a - instad of a space to make it work. But I should be
 able to name a track with a space in it." It was a Later line, "names that

@@ -47,7 +47,8 @@ selected rows; ⌘G, or Group Tracks in a header's menu, groups the selected
 rows, tracks and groups, when they are all in the same group or all in none,
 and puts the new group there. Ungroup on a group leaves what was in it on the
 group's own group, or on the master. Remove from Group in a group's menu takes
-it out of its group. The group's lane draws the clips of every track under it.
+it one group out; a group's header dragged into or out of another group, or
+Move to Group ▸, moves it with its tracks ([rows into groups](rows-into-groups.md), D195). The group's lane draws the clips of every track under it.
 
 ## Why
 
@@ -101,8 +102,6 @@ the person knows has it.
 
 - `daw map` still draws the tracks without their groups.
 - A group does not send to a group, as D92 decided.
-- A group's row is not dragged into or out of another group: the menu's
-  Remove from Group and ⌘G move it.
 - Rows selected with Shift are read by Group Tracks alone: Delete, Mute and
   the rest act on the selected row.
 

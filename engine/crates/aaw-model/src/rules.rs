@@ -836,7 +836,7 @@ pub fn references(p: &Project) -> Result<(), String> {
             if !previous.contains(g) {
                 if seen.contains(g) {
                     return Err(format!(
-                        "{}: the tracks of group {g} must be next to each other; move it beside them with daw track move",
+                        "{}: the tracks of group {g} must be next to each other; move it beside them with daw track move, into a group with --group",
                         t.id
                     ));
                 }

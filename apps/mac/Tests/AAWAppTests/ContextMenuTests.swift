@@ -92,6 +92,26 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(nested.first { $0.action == .leaveGroup }?.title, "Remove from Group")
     }
 
+    func testMoveToGroupListsTheGroupsSetInWithNewGroup() {
+        let groups = ContextMenu.groups([(key: 7, name: "music", depth: 0), (key: 8, name: "synths", depth: 1)], current: 8)
+        XCTAssertEqual(actions(groups), [.moveToGroup(7), .moveToGroup(8), nil, .group])
+        XCTAssertEqual(titles(groups), ["music", "synths", "New Group"])
+        XCTAssertEqual(groups.map(\.indent), [0, 1, 0, 0])
+        // The group it is in is checked and not chosen again.
+        XCTAssertEqual(groups.map(\.checked), [false, true, false, false])
+        XCTAssertEqual(groups[1].enabled, false)
+        let track = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, grouped: true, groups: groups)
+        XCTAssertEqual(titles(track), [
+            "Rename", "Mute", "Solo", "Freeze Track", "Show Automation", "Add Track", "Add MIDI Track", "Move to Group",
+            "Remove from Group", "Delete",
+        ])
+        XCTAssertEqual(track.first { $0.title == "Move to Group" }?.children, groups)
+        let group = ContextMenu.row(kind: .group, muted: false, soloed: false, automationShown: false, groups: groups)
+        XCTAssertEqual(titles(group), [
+            "Rename", "Mute", "Solo", "Show Automation", "Add Track", "Add MIDI Track", "Move to Group", "Ungroup", "Delete",
+        ])
+    }
+
     func testAReturnHasNoSoloAndAddsAReturn() {
         let items = ContextMenu.row(kind: .bus, muted: false, soloed: false, automationShown: false)
         XCTAssertEqual(actions(items), [

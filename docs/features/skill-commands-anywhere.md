@@ -1,6 +1,6 @@
 # A skill named anywhere in a message — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 6. The person's note of November
+Status: proposed, not built. Backlog: Next 5. The person's note of November
 22, 2026 (D194): "whenever I use the chat and a slash command skill, it only
 works if the / is the first character if i try to use a slash command
 midway through a message it does not show any options or allow for it."

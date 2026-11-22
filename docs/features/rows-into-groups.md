@@ -1,73 +1,82 @@
-# A track or a group dragged into a group — proposed November 22, 2026
+# A track or a group dragged into a group — implemented November 22, 2026
 
-Status: proposed, not built. Backlog: Next 1. The person's note of November
-22, 2026 (D194), from using the app: "I created a group and now I'm trying to
-drag a new track into the group and getting this error: dub: the tracks of
-group group-1 must be next to each other; move it beside them with daw track
-move", and "I should be able to have groups within a group ... And each one
-of those could have its own processing chain on it." What is said here about
-the app was read from the checkout on November 22, 2026.
+Status: built (D195). The person's note of November 22, 2026 (D194), from
+using the app: "I created a group and now I'm trying to drag a new track
+into the group and getting this error: dub: the tracks of group group-1 must
+be next to each other; move it beside them with daw track move", and "I
+should be able to have groups within a group ... And each one of those could
+have its own processing chain on it."
 
 ## What
 
-A track's header dragged among a group's tracks, or onto the group's own
-header, joins that group and lands where it was dropped; dragged out of the
-group's tracks, above or below them, it leaves the group. A group's header
-dragged the same way moves the group with everything under it, into another
-group or out to the master, which is how a group within a group is made by
-hand. The line drawn while dragging says where it will land: set in under
-the group it joins, at the group's depth. Nothing a drag can make is refused.
+A track's header dragged among a group's rows, or right under the group's
+header, joins that group and lands where it was dropped; dragged above or
+below the group's rows, it leaves the group. A group's header dragged the
+same way moves the group with everything under it, into another group or
+out to the master: a group within a group made by hand. The line drawn
+while dragging is set in as the row will be, with a short upright mark at
+its start, so it says which group the row lands in. Nothing a drag offers
+is refused. A group is not dropped among its own rows.
 
-The same is in a header's menu for a person who does not drag: Move to Group
-▸ lists the song's groups and New Group, with Remove from Group as now.
+The same is in a header's menu: Move to Group ▸ lists the song's groups,
+set in as the arrangement draws them, the one the row is in checked, and
+New Group, which groups the row alone where it is, as ⌘G. Remove from Group
+takes a track or a group one group out, to the group over its own or the
+master, and puts it after the group it leaves. Add Track and Add MIDI Track
+with a grouped track selected make the new track after it in its group;
+with a group selected, after the group's last track, in it.
 
 ## Why
 
 Groups within groups, each with its own chain, fader, pan, mute, solo and
-sends, are built ([groups within groups](nested-groups.md), D129), but the
-only way to make one in the app is Shift-click on the rows and ⌘G, which
-makes a new group; there is no way to put a track or a group into a group
-that already exists. A drag of a header today is only a reorder
-(`ArrangementView`'s `.reorder` drag, ending in `Edit::Move`, the host's
-`track.move` or `group.move`): it never changes the row's `group`. Dropped
-among a group's tracks, the track splits the group's run of tracks, and the
-song's rule that a group's tracks are next to each other
-(`aaw-model/src/rules.rs`) refuses the edit with a message written for the
-agent, naming the track after the gap and telling a person to use `daw track
-move`. The same refusal is met by Add Track with a track of a group selected
-when it is not the group's last, since the new track goes after the
-selected one in no group, and by Remove from Group on a track in the middle
-of its group.
+sends, were built ([groups within groups](nested-groups.md), D129), but the
+only way to make one in the app was Shift-click on the rows and ⌘G, which
+makes a new group. A drag of a header was only a reorder (`Edit::Move`,
+`track.move`, `group.move` among `groups[]`, which left a group's tracks
+where they were): it never changed a row's `group`. A track dropped among a
+group's tracks split the group's run of tracks, and the song's rule that a
+group's tracks are next to each other refused the edit with a message
+written for the agent. Add Track with a grouped track selected and Remove
+from Group on a track in the middle of its group met the same refusal.
 
 ## Design
 
-- **One edit that moves and regroups.** The app sends the row's new index
-  and its new group as one edit: a host command, `track.place` (and
-  `group.place`), taking `index` and `group` and applied as one change so
-  the rule is checked once, after both. The CLI gets it as `daw track move
-  SONG ID --to INDEX [--group G | --no-group]`.
-- **What a drop means.** The slot between two rows decides the group: a slot
-  between two rows under the same group joins that group; a slot right under
-  a group's header joins it; a slot after a group's last row is ambiguous and
-  is decided by the pointer's x, set in for the group, at the left edge for
-  the group above it, as Ableton's and Logic's track lists do. A group
-  dropped into itself or a group under it is not offered.
-- **The other paths that split a group.** Add Track and Add MIDI Track with a
-  grouped track selected make the new track in that group. Remove from Group
-  on a track in the middle of its group moves it to just after the group's
-  last track. A refusal the app still meets is said in the person's words,
-  never with a `daw` command.
+- **One edit that moves and regroups.** `track.move` takes `index`
+  (optional now) and `group`: a group's ID puts the track in it, null takes
+  it to the master, absent keeps its group. `group.move` takes `index` among
+  the tracks, where the group's first track goes, and `parent`, the same
+  way; its tracks move together. The index counts after the moved tracks are
+  taken out. The song is checked once, after both, as for every command.
+  With a group and no index, a row goes after the last track under that
+  group, or under the nearest group over it with tracks; leaving for a
+  group it was in, or the master, it goes after the last track of the
+  outermost group it leaves. The CLI is `daw track move SONG T [INDEX]
+  [--group G | --no-group]` and `daw group move SONG G [INDEX] [--group P |
+  --no-group]`. `group.move` with an index among `groups[]`, its tracks
+  staying, is gone: a group's place is its tracks'.
+- **What a drop means** (`RowDrop`, in the app, pure and tested). The rows
+  are listed as the arrangement draws them; the pointer's height picks the
+  gap. The groups the row can be in run down the groups the row above is
+  in, or the group whose header it is, as far as the groups the row below
+  is in too; so a gap between two rows of a group, or right under a group's
+  header over its rows, is in that group, and the gap after a group's last
+  row could be in it or in any group over it. There the pointer's distance
+  from the left edge chooses, one group in for every 16 points, as Ableton's
+  and Logic's track lists do (the feature's open question, answered so). A
+  folded group's header is joined at its end, set in. A group with no
+  tracks, drawn under the tracks, is joined after the tracks of the nearest
+  group over it with tracks.
+- **The app's edits.** A drop sends `Edit::Place { row, index, group }`; a
+  drop that leaves the row where it was sends nothing. `Edit::TrackGroup`
+  and `Edit::GroupParent` send `track.move` and `group.move` with a group
+  and no index; with none they take the row one group out.
+  `Edit::TrackAdd` takes the new track's `group`. A refusal the app shows
+  loses a clause that names a `daw` command (`SongModel.forPerson`): the
+  host's words stay the agent's.
 
-## Done when
+## Limits
 
-- A track dragged into, within and out of a group lands there and plays
-  through that group's chain, with no error; the same for a group dragged
-  into another group and out of it.
-- Add Track with a grouped track selected, and Remove from Group on a middle
-  track, leave a song the host accepts.
-- Move to Group ▸ does what the drag does.
-
-## Open questions
-
-1. Whether the drop's group is decided by the pointer's x after a group's
-   last row, as proposed, or by a modifier key.
+- The order of groups with no tracks under them, drawn under the tracks, is
+  `groups[]`'s; a drag does not change it.
+- A track is not dropped onto a folded group's header to join it at its
+  start; it joins at the end, set in under the header.

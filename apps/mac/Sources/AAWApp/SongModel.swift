@@ -20,6 +20,15 @@ enum RowID: Hashable {
         }
     }
 
+    /// A track or a group as a header dragged among them names it.
+    var dropRow: RowDrop.Row? {
+        switch self {
+        case .track(let key): .track(key)
+        case .group(let key): .group(key)
+        case .bus, .master: nil
+        }
+    }
+
     /// Whether the row has a track's header: a volume bar, solo and sends.
     var strip: Bool {
         switch self {
@@ -1300,14 +1309,54 @@ public final class SongModel {
         edit(.clipsActive(clips: selectedClips.sorted(), active: active))
     }
 
-    /// Adds a track under the selected one, or else last, and asks for its
+    /// Adds a track under the selected one, in its group, or after the
+    /// tracks of the selected group, in it, or else last, and asks for its
     /// name: a MIDI track of note clips, with no instrument, when `midi`.
     public func addTrack(midi: Bool = false) {
         var index = arrangement.tracks.count
-        if case .track(let key) = selectedRow, let at = arrangement.tracks.firstIndex(where: { $0.key == key }) {
-            index = at + 1
+        var group: UInt64?
+        switch selectedRow {
+        case .track(let key):
+            if let at = arrangement.tracks.firstIndex(where: { $0.key == key }) {
+                index = at + 1
+                group = arrangement.tracks[at].group
+            }
+        case .group(let key):
+            group = key
+            // After the last track under it, or under the nearest group
+            // over it with tracks.
+            for g in groups(over: key) {
+                let keys = Set(tracks(under: g.key).map(\.key))
+                if let last = arrangement.tracks.lastIndex(where: { keys.contains($0.key) }) {
+                    index = last + 1
+                    break
+                }
+            }
+        default: break
         }
-        add(.trackAdd(index: UInt32(index), midi: midi)) { .track($0) }
+        add(.trackAdd(index: UInt32(index), midi: midi, group: group)) { .track($0) }
+    }
+
+    /// The groups a track or a group can be moved into from its menu, in
+    /// the order the arrangement shows them, each with how far in it sits:
+    /// every group but a group itself and the groups in it.
+    func groupChoices(for row: RowID) -> [(key: UInt64, name: String, depth: Int)] {
+        let drop = RowDrop(tracks: arrangement.tracks.map { ($0.key, $0.group) },
+                           groups: arrangement.groups.map { ($0.key, $0.group) }, folded: [])
+        return drop.entries.compactMap { entry in
+            guard case .group(let key) = entry.row, let g = arrangement.groups.first(where: { $0.key == key }) else { return nil }
+            if case .group(let moved) = row, key == moved || entry.path.contains(moved) { return nil }
+            return (key, g.id, entry.depth)
+        }
+    }
+
+    /// Moves a track or a group into a group, after its last track.
+    func moveToGroup(_ row: RowID, group: UInt64) {
+        switch row {
+        case .track(let key): edit(.trackGroup(track: key, group: group))
+        case .group(let key): edit(.groupParent(group: key, parent: group))
+        case .bus, .master: break
+        }
     }
 
     /// Whether a device from the browser can go on a row: an effect or a
@@ -2199,10 +2248,19 @@ public final class SongModel {
         }
     }
 
-    /// Why the host refused a command, in its words.
+    /// Why the host refused a command, in its words, less any advice
+    /// written for the agent: a clause that names a `daw` command.
     nonisolated static func reason(_ error: Error) -> String {
-        if case SongError.Failed(let message) = error { return message }
+        if case SongError.Failed(let message) = error { return forPerson(message) }
         return error.localizedDescription
+    }
+
+    /// A refusal without its clauses that tell the agent which `daw`
+    /// command to run, which a person in the app has no use for.
+    nonisolated static func forPerson(_ message: String) -> String {
+        let clauses = message.components(separatedBy: "; ")
+        let kept = clauses.filter { !$0.contains("daw ") }
+        return kept.isEmpty ? message : kept.joined(separator: "; ")
     }
 
     func refuse(_ message: String) {

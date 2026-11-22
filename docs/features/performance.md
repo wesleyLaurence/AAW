@@ -1,6 +1,6 @@
 # What makes the person wait — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 8. The person's note of November
+Status: proposed, not built. Backlog: Next 7. The person's note of November
 22, 2026 (D194): "a system wide scan for inefficiencies, anything that could
 be slowing down actions. I want to optimize performance to make sure this
 system can run as fast as possible and never see the spinning mac wheel when
