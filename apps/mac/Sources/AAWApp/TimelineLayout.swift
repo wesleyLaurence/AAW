@@ -200,11 +200,131 @@ public struct TimelineLayout: Equatable {
         return onBars ? step : zoomGrid
     }
 
-    /// Bars between bar numbers, so that the numbers do not crowd.
-    public var barLabelStep: Int {
-        var bars = 1
-        while CGFloat(Double(bars) * beatsPerBar) * pixelsPerBeat < 44 { bars *= 2 }
-        return bars
+    // MARK: Bars, beats and sixteenths in the ruler
+
+    /// The bar strip's steps, in beats.
+    public struct RulerSteps: Equatable {
+        /// Between the labels.
+        public var label: Double
+        /// Between the ticks, which divide the labels'.
+        public var tick: Double
+        /// What a label's third number counts: a sixteenth, or on a triplet
+        /// grid a third or a sixth of the meter's beat.
+        public var count: Double
+    }
+
+    /// The least distance between the bar strip's labels, and between its
+    /// ticks, in points. A label is also kept wider than its text.
+    public static let positionLabelSpacing: CGFloat = 36
+    public static let positionTickSpacing: CGFloat = 6
+    /// A digit or a point of a label's text, about, at the ruler's size.
+    public static let labelCharacterWidth: CGFloat = 6.2
+
+    /// Whether `b` divides `a` a whole number of times, within a hair.
+    static func divides(_ a: Double, _ b: Double) -> Bool {
+        guard b > 0 else { return false }
+        let q = a / b
+        return abs(q - q.rounded()) < 1e-6
+    }
+
+    /// Whether a grid in beats is a triplet one: a third of a power of two
+    /// of a beat, as 1/8T is a third of a beat and 1/4T two thirds.
+    public static func isTriplet(_ beats: Double) -> Bool {
+        func dyadic(_ v: Double) -> Bool {
+            var x = v
+            for _ in 0..<12 {
+                if abs(x - x.rounded()) < 1e-6 { return true }
+                x *= 2
+            }
+            return false
+        }
+        return beats > 0 && !dyadic(beats) && dyadic(beats * 3)
+    }
+
+    /// The steps the bar strip labels and ticks at this zoom: from bars,
+    /// 4, 2 and 1 of them and more zoomed out, down to the meter's beat, an
+    /// eighth and a sixteenth, or on a triplet grid down to thirds and sixths
+    /// of the beat. Labels take the finest whose labels are
+    /// `positionLabelSpacing` apart and wider than the text of the last bar's,
+    /// `lastBeat` being the last the ruler shows; ticks the finest that
+    /// divides it with ticks `positionTickSpacing` apart.
+    public static func rulerSteps(pixelsPerBeat: CGFloat, beatsPerBar: Double, beatUnit: Double,
+                                  grid: Double, lastBeat: Double) -> RulerSteps {
+        let bar = beatsPerBar > 0 ? beatsPerBar : 4
+        let unit = beatUnit > 0 ? beatUnit : 1
+        let triplet = isTriplet(grid)
+        let count = triplet ? (grid < unit / 3 - 1e-9 ? unit / 6 : unit / 3) : 0.25
+        var within: [Double] = []
+        if triplet {
+            within = [unit / 6, unit / 3].filter { $0 >= count - 1e-9 }
+        } else {
+            var step = 0.25
+            while step < unit - 1e-9 {
+                if divides(unit, step) { within.append(step) }
+                step *= 2
+            }
+        }
+        within.append(unit)
+        within = within.filter { $0 < bar - 1e-9 && divides(bar, $0) }
+        guard pixelsPerBeat > 0 else { return RulerSteps(label: bar, tick: bar, count: count) }
+
+        let digits = { (n: Int) in String(max(1, n)).count }
+        let bars = Int((max(lastBeat, bar) / bar).rounded(.up))
+        let beats = Int((bar / unit).rounded(.up))
+        let counts = Int((unit / count).rounded())
+        func wide(_ step: Double) -> CGFloat {
+            var characters = digits(bars)
+            if step < bar - 1e-9 { characters += 1 + digits(beats) }
+            if step < unit - 1e-9 { characters += 1 + digits(counts) }
+            return CGFloat(characters) * labelCharacterWidth + 8
+        }
+        func fits(_ step: Double) -> Bool {
+            CGFloat(step) * pixelsPerBeat >= max(positionLabelSpacing, wide(step))
+        }
+        var label = within.first(where: fits) ?? bar
+        if label >= bar { while !fits(label) { label *= 2 } }
+
+        var tick = label
+        var ladder = within
+        var step = bar
+        while step < label - 1e-9 { ladder.append(step); step *= 2 }
+        for rung in ladder where rung < label - 1e-9 && CGFloat(rung) * pixelsPerBeat >= positionTickSpacing && divides(label, rung) {
+            tick = rung
+            break
+        }
+        return RulerSteps(label: label, tick: tick, count: count)
+    }
+
+    /// The bar strip's steps at this zoom, for the song and the view past its end.
+    public var rulerSteps: RulerSteps {
+        Self.rulerSteps(pixelsPerBeat: pixelsPerBeat, beatsPerBar: beatsPerBar, beatUnit: beatUnit, grid: grid,
+                        lastBeat: max(lengthBeats, playedBeats, markersEnd) + tailBeats)
+    }
+
+    /// A place as the ruler labels it, each part counted from one: the bar
+    /// on a bar, `bar.beat` on a beat and `bar.beat.count` between, the beat
+    /// as the meter counts it and `count` beats each step of the third.
+    /// Before the song's start, as before a clip's, the bar is 0 and less.
+    public static func rulerLabel(_ beat: Double, beatsPerBar: Double, beatUnit: Double, count: Double) -> String {
+        let barIndex = (beat / beatsPerBar + 1e-6).rounded(.down)
+        let inBar = max(0, beat - barIndex * beatsPerBar)
+        let bar = Int(barIndex) + 1
+        if inBar < 1e-6 { return "\(bar)" }
+        let beatIndex = (inBar / beatUnit + 1e-6).rounded(.down)
+        let inBeat = max(0, inBar - beatIndex * beatUnit)
+        if inBeat < 1e-6 { return "\(bar).\(Int(beatIndex) + 1)" }
+        return "\(bar).\(Int(beatIndex) + 1).\(Int((inBeat / count).rounded()) + 1)"
+    }
+
+    /// The beat a click in the bar strip means: on the grid when it falls on
+    /// the labels, else on the ticks, so that a label can be clicked whatever
+    /// the grid; with `free` to a thousandth; not before the song.
+    public func rulerTarget(atX x: CGFloat, free: Bool) -> Double {
+        let raw = beat(atX: x)
+        if free { return max(0, (raw * 1000).rounded() / 1000) }
+        let steps = rulerSteps
+        let g = Self.divides(steps.label, grid) ? grid : steps.tick
+        return max(0, (raw / g).rounded() * g)
     }
 
     /// The beat a click at `x` means: on the grid unless `free`, and not
