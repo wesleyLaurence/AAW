@@ -12,6 +12,8 @@ public enum ContextMenu {
         /// Group Tracks on a track, Ungroup on a group, and Remove from Group
         /// on a track in one.
         case group, ungroup, leaveGroup
+        /// Move to Group ▸ a group of the song.
+        case moveToGroup(UInt64)
         /// Where a track records from, chosen in the Input submenu: a device
         /// and its channels, a track, a group, the mix, or nothing.
         case input(InputChoice?)
@@ -59,6 +61,8 @@ public enum ContextMenu {
         public var checked = false
         /// A submenu's items, on an item that opens one instead of acting.
         public var children: [Item<Action>]? = nil
+        /// How far in the title sits: a group in a group in Move to Group.
+        public var indent = 0
 
         public static var separator: Item { Item(title: "", action: nil) }
     }
@@ -98,14 +102,28 @@ public enum ContextMenu {
         return items
     }
 
+    /// The Move to Group submenu of a track or a group: the song's groups
+    /// it can go into, set in as they are in the arrangement, the one it
+    /// is in checked, then New Group, which groups it alone where it is.
+    public static func groups(_ choices: [(key: UInt64, name: String, depth: Int)], current: UInt64?) -> [Item<RowAction>] {
+        var items = choices.map {
+            Item<RowAction>(title: $0.name, action: .moveToGroup($0.key), enabled: $0.key != current, checked: $0.key == current, indent: $0.depth)
+        }
+        if !items.isEmpty { items.append(.separator) }
+        items.append(Item(title: "New Group", action: .group))
+        return items
+    }
+
     /// A header's menu: Rename, what a row is set to, a row added after it,
     /// and Delete. The master has no name of its own, no mute mark and cannot
     /// go; a return has no solo. A track offers Group Tracks, or Remove from
     /// Group when it is in one (`grouped`); a group offers Ungroup, and
-    /// Remove from Group when it is in a group. A track offers Freeze Track,
+    /// Remove from Group when it is in a group. Both offer Move to Group
+    /// with the `groups` submenu, when given. A track offers Freeze Track,
     /// or Unfreeze Track while it is frozen (`frozen`).
     public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false,
-                           inputs: [Item<RowAction>]? = nil, frozen: Bool = false) -> [Item<RowAction>] {
+                           inputs: [Item<RowAction>]? = nil, frozen: Bool = false,
+                           groups: [Item<RowAction>]? = nil) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
             items.append(Item(title: "Rename", action: .rename, key: "r"))
@@ -129,6 +147,9 @@ public enum ContextMenu {
             items.append(Item(title: "Add Track", action: .addTrack, key: "t"))
             items.append(Item(title: "Add MIDI Track", action: .addMIDITrack, key: "T"))
             items.append(.separator)
+            if let groups {
+                items.append(Item(title: "Move to Group", action: .moveToGroup(0), children: groups))
+            }
             if grouped {
                 items.append(Item(title: "Remove from Group", action: .leaveGroup))
             } else {
@@ -138,6 +159,9 @@ public enum ContextMenu {
             items.append(Item(title: "Add Track", action: .addTrack, key: "t"))
             items.append(Item(title: "Add MIDI Track", action: .addMIDITrack, key: "T"))
             items.append(.separator)
+            if let groups {
+                items.append(Item(title: "Move to Group", action: .moveToGroup(0), children: groups))
+            }
             if grouped {
                 items.append(Item(title: "Remove from Group", action: .leaveGroup))
             }

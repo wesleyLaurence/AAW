@@ -241,14 +241,14 @@ and register the one wanted with `lsregister -f PATH/AAW.app`.
 | Arrow keys | Move the selected clips a grid step, or to the next track |
 | ⌘D, Delete | Copies the selected clips to right after them; deletes them, or else the selected track, group or return; a deleted group leaves its tracks. In the piano roll, the selected notes |
 | ⌘C, ⌘X, ⌘V | Copies or cuts the selected clips, and pastes them at the start position, on the track whose lane was clicked last or else the tracks they came from; the start position moves to their end. In the piano roll, notes, pasted where the clip was last clicked in the clear, or else right after themselves. A copy is its own: changing it changes nothing else |
-| Click a header; drag it up or down | Selects the track, group or return; moves it among the others. A track in a group stays beside the others: the host refuses a move out of the run. Shift-click on a track's or a group's header adds it to the selected rows, for ⌘G |
+| Click a header; drag it up or down | Selects the track, group or return; moves it among the others. A track or a group dropped among a group's rows, or right under its header, goes into that group; dropped above or below them, it leaves it, a group with everything under it. After a group's last row the pointer's distance from the left edge chooses: set in, that group; at the edge, the group over it or the master. The line says where it lands, set in as its row will be. A group is not dropped among its own rows. Shift-click on a track's or a group's header adds it to the selected rows, for ⌘G |
 | Click the mark before a group's name | Folds everything under the group away under its row, tracks and groups, or shows them again; with Option, every group. The fold is the window's, not the song's |
 | ⌘G, ⇧⌘G | Groups the selected rows, tracks and groups, or the tracks of the selected clips, into a new group above them and asks for its name, when they are all in the same group or all in none, where the new group goes; takes the selected group, or the selected track's, away, leaving what was in it on the group's own group or the master |
 | ⇧⌘F, or Freeze Track in a header's menu | Freezes the selected track: what its instrument, effects and their lanes make is rendered to a file that plays in their place, the header reads "frozen" before its devices, its clips are drawn iced and the device panel says so; its fader, pan, mute, solo and sends still work, and the host refuses a change to its clips or devices with a banner until Unfreeze Track, the same item on a frozen track |
 | Double-click a header | Selects the row and shows its devices in the detail panel, shown if it was hidden |
-| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Input on an audio track, Freeze Track or Unfreeze Track on a track, Show Automation, Add Track, Add MIDI Track, Add Return, Group Tracks or Remove from Group on a track, Ungroup on a group and Remove from Group on a group in a group, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
+| Right-click or Control-click a header | Selects the row and offers Rename, Mute, Solo, Input on an audio track, Freeze Track or Unfreeze Track on a track, Show Automation, Add Track, Add MIDI Track, Add Return, Move to Group ▸ on a track or a group (the song's groups set in as drawn, the one it is in checked, and New Group), Group Tracks or Remove from Group on a track, Ungroup on a group and Remove from Group on a group in a group, which takes it one group out, after the group it leaves, and Delete, as the row allows: the master is not renamed, muted or deleted, and a return has no solo |
 | Rename in that menu, or ⌘R | Renames the track, group or return where its name is: Return keeps the name, Escape drops it. With a marker selected, ⌘R types what the marker says |
-| ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, a MIDI track with no instrument, or a return, and asks for its name |
+| ⌘T, ⇧⌘T, ⌥⌘T | Adds a track under the selected one, in its group, or after the tracks of the selected group, in it; a MIDI track with no instrument; or a return; and asks for its name |
 | ⌘Z, ⇧⌘Z | Undo and redo, whoever made the change. The Edit menu names the step and whose it is |
 | A, or View › Automation | Shows the automation lanes of every track, group, return and the master, with the strip that adds one, and hides them again, as Ableton's A; Show Automation in a header's menu does the same, and a lane added from a device's lane mark shows them. The lanes are the window's: a project opens with them hidden |
 | Double-click in a lane | Adds a point there, on the grid; with ⌘, off it |
@@ -602,8 +602,7 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
   several are not selected, moved or copied together. The marker strip is
   there whether or not the song has markers.
 - Save As… does not replace a folder that is already there.
-- Which groups are folded is kept by the window, not saved with the project,
-  and a group is not dragged into another: ⌘G and Remove from Group move it.
+- Which groups are folded is kept by the window, not saved with the project.
 - The analyzer's panes are arranged by hand each time rather than from a
   saved set; the agent cannot read its numbers.
 - The agent panel drives the person's own Claude Code, found through their

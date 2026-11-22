@@ -598,12 +598,12 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     };
 
     // A new track gets a free name, which the person then changes.
-    let made = song.edit(Edit::TrackAdd { index: 1, midi: false }, None).unwrap();
+    let made = song.edit(Edit::TrackAdd { index: 1, midi: false, group: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(ids(&u.arrangement).0, ["drums", "track-1", "perc"]);
     assert_eq!(made, [u.arrangement.tracks[1].key]);
     let track = Row::Track { key: made[0] };
-    assert_eq!(song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap().len(), 1);
+    assert_eq!(song.edit(Edit::TrackAdd { index: 99, midi: false, group: None }, None).unwrap().len(), 1);
     assert_eq!(ids(&update(&seen).arrangement).0, ["drums", "track-1", "perc", "track-2"]);
     song.edit(Edit::Rename { row: track.clone(), to: "keys".into() }, None).unwrap();
     assert_eq!(update(&seen).change.label, "Rename track track-1 to keys");
@@ -647,7 +647,7 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     song.select(Vec::new()).unwrap();
     assert_eq!(agent(&path, json!({"op": "status"}))["selection"], json!([]));
     song.close();
-    assert!(song.edit(Edit::TrackAdd { index: 0, midi: false }, None).is_err());
+    assert!(song.edit(Edit::TrackAdd { index: 0, midi: false, group: None }, None).is_err());
 }
 
 #[test]
@@ -1076,7 +1076,7 @@ fn waveforms_follow_the_audio_of_each_track() {
     assert!(undone.peaks[0].levels[0].data[..bucket(8.0)].iter().all(|x| *x == 0));
 
     // A new MIDI track has peaks of its own: silence, until it plays something.
-    let added = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    let added = song.edit(Edit::TrackAdd { index: 2, midi: true, group: None }, None).unwrap()[0];
     let grown = waveforms(&waves, 4, &mut have);
     assert_eq!(grown.tracks.iter().map(|t| t.track).collect::<Vec<_>>(), [drums, perc, added]);
     assert!(have[&identity(&grown, added)].levels[0].data.iter().all(|x| *x == 0));
@@ -1676,7 +1676,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
 
     // A track by hand and one from a terminal are in one history, and make
     // the project one that holds something.
-    song.edit(Edit::TrackAdd { index: 0, midi: false }, None).unwrap();
+    song.edit(Edit::TrackAdd { index: 0, midi: false, group: None }, None).unwrap();
     update(&seen);
     agent(Path::new(&first), json!({"op": "track.add", "type": "audio", "id": "bass"}));
     assert_eq!(update(&seen).change.origin, Who::Agent);
@@ -1734,7 +1734,7 @@ fn an_untitled_project_is_named_by_a_move_and_a_named_one_by_a_copy() {
     let kept = project_new_untitled().unwrap();
     let (song, seen) = open_at(&kept);
     transport(&seen);
-    song.edit(Edit::TrackAdd { index: 0, midi: false }, None).unwrap();
+    song.edit(Edit::TrackAdd { index: 0, midi: false, group: None }, None).unwrap();
     update(&seen);
     song.close();
     let blank = project_new_untitled().unwrap();
@@ -1829,7 +1829,7 @@ fn the_app_makes_a_midi_track_and_draws_and_edits_its_notes() {
     let (dir, path, song, seen) = open();
     transport(&seen);
     // A MIDI track with no instrument, and a clip of a bar on it.
-    let track = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    let track = song.edit(Edit::TrackAdd { index: 2, midi: true, group: None }, None).unwrap()[0];
     let u = update(&seen);
     let keys = &u.arrangement.tracks[2];
     assert!(keys.midi && keys.instrument.is_none() && keys.id == "midi-1");
@@ -2357,7 +2357,7 @@ fn a_drum_rack_takes_samples_on_its_keys_and_sets_each_pad() {
 fn a_midi_file_dropped_becomes_a_note_clip_and_a_clip_is_exported() {
     let (dir, _path, song, seen) = open();
     transport(&seen);
-    let track = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    let track = song.edit(Edit::TrackAdd { index: 2, midi: true, group: None }, None).unwrap()[0];
     update(&seen);
     let clip = song.edit(Edit::ClipNew { track, at: 0.0 }, None).unwrap()[0];
     update(&seen);
@@ -2715,7 +2715,7 @@ fn the_panel_adds_parts_and_entries_sets_several_fields_saves_a_patch_and_previe
     // song already named the patch, so nothing in it changed.
     assert_eq!(aaw_ffi::library::library_patches("panel".into())[0].description, "From the panel");
     // A note previewed on a track without an instrument is refused before anything opens.
-    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap()[0];
+    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false, group: None }, None).unwrap()[0];
     let e = song.preview_note(audio, 60, 100, 1.0, true).unwrap_err();
     assert!(e.to_string().contains("no instrument"), "{e}");
 }
@@ -2763,7 +2763,7 @@ fn the_browsers_synth_and_its_patches_are_dropped_on_tracks_and_under_them() {
     song.edit(Edit::SynthAdd { track: Some(sampler.key), patch: None }, None).unwrap();
     let u = update(&seen);
     assert_eq!(u.change.label, format!("Attach a Synth to {}", sampler.id));
-    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap()[0];
+    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false, group: None }, None).unwrap()[0];
     update(&seen);
     let e = song.edit(Edit::SynthAdd { track: Some(audio), patch: Some("Hat".into()) }, None).unwrap_err();
     assert!(e.to_string().contains("not a MIDI track"), "{e}");
@@ -2933,11 +2933,47 @@ fn groups_are_rows_over_their_tracks() {
     update(&seen);
     song.edit(Edit::TrackGroup { track: start.tracks[1].key, group: None }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.label, "Take perc out of its group");
+    assert_eq!(u.change.label, "Take perc out of group kit");
     assert_eq!(u.arrangement.tracks[1].group, None);
     assert_eq!(u.arrangement.groups[0].tracks, [start.tracks[0].key]);
     song.edit(Edit::TrackGroup { track: start.tracks[1].key, group: Some(group.key) }, None).unwrap();
     assert_eq!(update(&seen).arrangement.groups[0].tracks.len(), 2);
+    // A track added with a grouped track selected goes in its group, after it.
+    let added = song.edit(Edit::TrackAdd { index: 1, midi: false, group: Some(group.key) }, None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!(ids(&u.arrangement), ["drums", "track-1", "perc"]);
+    assert_eq!(u.arrangement.groups[0].tracks.len(), 3);
+    // Dropped below the group on the master, then back between its tracks:
+    // the row and its group change in one edit, with nothing refused.
+    song.edit(Edit::Place { row: Row::Track { key: added }, index: 2, group: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move track track-1 out of group kit");
+    assert_eq!(ids(&u.arrangement), ["drums", "perc", "track-1"]);
+    assert_eq!(u.arrangement.tracks[2].group, None);
+    song.edit(Edit::Place { row: Row::Track { key: added }, index: 1, group: Some(group.key) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move track track-1 into group kit");
+    assert_eq!(ids(&u.arrangement), ["drums", "track-1", "perc"]);
+    // A group dropped into another with its tracks, and taken out again one
+    // level, after the group it leaves.
+    let outer = song.edit(Edit::GroupAdd { tracks: vec![added], groups: vec![] }, None).unwrap()[0];
+    let u = update(&seen);
+    assert_eq!(ids(&u.arrangement), ["drums", "track-1", "perc"]);
+    let inner = u.arrangement.groups.iter().find(|g| g.key == outer).unwrap();
+    assert_eq!(inner.group, Some(group.key), "made in the group its track is in");
+    song.edit(Edit::GroupParent { group: outer, parent: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Take group-1 out of group kit");
+    assert_eq!(ids(&u.arrangement), ["drums", "perc", "track-1"]);
+    song.edit(Edit::Place { row: Row::Group { key: outer }, index: 0, group: Some(group.key) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move group group-1 into group kit");
+    assert_eq!(ids(&u.arrangement), ["track-1", "drums", "perc"]);
+    assert!(song.edit(Edit::Place { row: Row::Group { key: group.key }, index: 0, group: Some(outer) }, None).is_err());
+    song.edit(Edit::Remove { row: Row::Group { key: outer } }, None).unwrap();
+    update(&seen);
+    song.edit(Edit::Remove { row: Row::Track { key: added } }, None).unwrap();
+    update(&seen);
     // Ungrouped, the tracks stay and the group goes.
     song.edit(Edit::Ungroup { group: group.key }, None).unwrap();
     let u = update(&seen);
@@ -3111,7 +3147,7 @@ fn an_instrument_rack_is_listed_and_loaded_from_the_browser() {
     let u = update(&seen);
     let t = u.arrangement.tracks.iter().find(|t| t.key == sampler).unwrap();
     assert_eq!((t.instrument.as_deref(), t.effects[0].kind.as_str()), (Some("synth"), "rack"));
-    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false }, None).unwrap()[0];
+    let audio = song.edit(Edit::TrackAdd { index: 99, midi: false, group: None }, None).unwrap()[0];
     update(&seen);
     let e = song.edit(Edit::InstrumentRackAdd { track: Some(audio), rack: name }, None).unwrap_err().to_string();
     assert!(e.contains("MIDI"), "{e}");
@@ -3182,7 +3218,7 @@ fn a_group_of_groups_is_a_row_over_their_rows() {
     // Remove from Group on a group takes it to the master, and back.
     song.edit(Edit::GroupParent { group: perc, parent: None }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.label, "Take group-2 out of its group");
+    assert_eq!(u.change.label, "Take group-2 out of group group-3");
     assert_eq!(u.arrangement.groups.iter().find(|g| g.key == perc).unwrap().group, None);
     assert_eq!(u.arrangement.groups.iter().find(|g| g.key == made[0]).unwrap().groups, [drums]);
     song.edit(Edit::GroupParent { group: perc, parent: Some(made[0]) }, None).unwrap();
@@ -3326,7 +3362,7 @@ fn a_midi_effect_of_the_person_s_own_is_drawn_from_its_manifest() {
 fn the_app_quantizes_notes_onto_the_piano_rolls_grid() {
     let (_dir, _path, song, seen) = open();
     transport(&seen);
-    let track = song.edit(Edit::TrackAdd { index: 2, midi: true }, None).unwrap()[0];
+    let track = song.edit(Edit::TrackAdd { index: 2, midi: true, group: None }, None).unwrap()[0];
     update(&seen);
     let clip = song.edit(Edit::ClipNew { track, at: 8.0 }, None).unwrap()[0];
     update(&seen);

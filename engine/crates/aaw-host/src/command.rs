@@ -35,6 +35,12 @@ impl Origin {
     }
 }
 
+/// A field that may be given as null, which is not the same as left out:
+/// `Some(None)` for null, `None` for absent (with `#[serde(default)]`).
+fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> std::result::Result<Option<T>, D::Error> {
+    T::deserialize(d).map(Some)
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op")]
 pub enum Command {
@@ -59,8 +65,20 @@ pub enum Command {
     TrackRemove { track: String },
     #[serde(rename = "track.rename")]
     TrackRename { track: String, to: String },
+    /// Moves a track to `index` among the tracks, counting after it is
+    /// taken out, and with `group` puts it in that group, or with null
+    /// takes it to the master. With a group and no index it goes after the
+    /// group's last track, or, leaving groups for one it was in, after the
+    /// last track of the group it leaves; the song is checked once, after
+    /// both.
     #[serde(rename = "track.move")]
-    TrackMove { track: String, index: usize },
+    TrackMove {
+        track: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+        #[serde(default, deserialize_with = "given", skip_serializing_if = "Option::is_none")]
+        group: Option<Option<String>>,
+    },
     /// Freezes a track: what its instrument, inserts and their lanes make,
     /// rendered before its fader over the whole song to `frozen/TRACK.wav`
     /// at the song's rate, which plays in their place until
@@ -121,8 +139,18 @@ pub enum Command {
     /// Renames a group and the tracks' and groups' `group` naming it.
     #[serde(rename = "group.rename")]
     GroupRename { group: String, to: String },
+    /// Moves a group with every track under it to `index` among the tracks,
+    /// counting after they are taken out, and with `parent` puts it in that
+    /// group, or with null takes it to the master; without an index, as
+    /// `track.move` places a track.
     #[serde(rename = "group.move")]
-    GroupMove { group: String, index: usize },
+    GroupMove {
+        group: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        index: Option<usize>,
+        #[serde(default, deserialize_with = "given", skip_serializing_if = "Option::is_none")]
+        parent: Option<Option<String>>,
+    },
 
     // Clips
     #[serde(rename = "clip.add")]
@@ -1708,6 +1736,80 @@ impl<'a> Edit<'a> {
             .collect()
     }
 
+    /// A group's own group and the groups over that, the innermost first.
+    fn group_path(&self, group: &str) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut at = self.at(&format!("groups.{group}")).ok().and_then(|l| self.node(&l).field("group").map(str::to_string));
+        while let Some(g) = at {
+            if out.contains(&g) {
+                break;
+            }
+            at = self.at(&format!("groups.{g}")).ok().and_then(|l| self.node(&l).field("group").map(str::to_string));
+            out.push(g);
+        }
+        out
+    }
+
+    /// Sets or removes the `group` of the track or group at `loc`.
+    fn regroup(&mut self, loc: &[Step], group: Option<&str>) {
+        match group {
+            Some(g) => self.set_leaf(loc, "group", Value::str(g)),
+            None => {
+                if let Some(m) = self.node_mut(loc).map_mut() {
+                    m.shift_remove("group");
+                }
+            }
+        }
+    }
+
+    /// Where tracks at `rows` go when they leave group `was` for group
+    /// `to` and no index is given, counting after they are taken out:
+    /// leaving for a group over the one they were in, after the last track
+    /// of the outermost group they leave; else after the last track under
+    /// `to`, or under the nearest group over it with tracks; else where
+    /// they are (None).
+    fn landing(&self, rows: &[usize], was: Option<&str>, to: Option<&str>) -> Option<usize> {
+        if was == to {
+            return None;
+        }
+        let mut path: Vec<String> = was.map(|w| std::iter::once(w.to_string()).chain(self.group_path(w)).collect()).unwrap_or_default();
+        let after = |group: &str| -> Option<usize> {
+            let under: Vec<usize> = self.tracks_under(group).iter().map(|l| index_of(l)).filter(|i| !rows.contains(i)).collect();
+            under.last().map(|last| last + 1 - rows.iter().filter(|r| **r < *last).count())
+        };
+        match to {
+            // Outward: `to` is on the path above `was`, or the master.
+            _ if to.is_none_or(|t| path.iter().any(|g| g == t)) => {
+                if let Some(t) = to {
+                    let at = path.iter().position(|g| g == t).expect("on the path");
+                    path.truncate(at);
+                }
+                let outermost = path.last()?;
+                after(outermost).or(Some(rows[0]))
+            }
+            Some(t) => std::iter::once(t.to_string()).chain(self.group_path(t)).find_map(|g| after(&g)),
+            None => unreachable!(),
+        }
+    }
+
+    /// Takes the tracks at `rows` out and puts them back together, in
+    /// their order, at `at` among the tracks left.
+    fn place_tracks(&mut self, rows: &[usize], at: usize) -> Result<()> {
+        let list = self.list(&[], "tracks")?;
+        let left = list.len() - rows.len();
+        if at > left {
+            return Err(format!("tracks index {at} is past the end ({left} other tracks)"));
+        }
+        let mut sorted = rows.to_vec();
+        sorted.sort_unstable();
+        let mut taken: Vec<Item> = sorted.iter().rev().map(|&i| list.remove(i)).collect();
+        taken.reverse();
+        for (k, item) in taken.into_iter().enumerate() {
+            list.insert(at + k, item);
+        }
+        Ok(())
+    }
+
     /// A track or a group, by ID or handle: what a send belongs to.
     fn sender(&self, id: &str) -> Result<Loc> {
         self.track(id).or_else(|e| self.at(&format!("groups.{id}")).map_err(|_| e))
@@ -2006,12 +2108,31 @@ impl<'a> Edit<'a> {
                 }
                 out.label = format!("Rename group {old} to {to}");
             }
-            GroupMove { group, index } => {
+            GroupMove { group, index, parent } => {
                 let loc = self.at(&format!("groups.{group}"))?;
                 let name = self.name(&loc);
-                let Some(Step::Index(from)) = loc.last().cloned() else { unreachable!() };
-                self.move_item(&[], "groups", from, *index)?;
-                out.label = format!("Move group {name} to position {index}");
+                let was = self.node(&loc).field("group").map(str::to_string);
+                if let Some(Some(p)) = parent {
+                    let ploc = self.at(&format!("groups.{p}"))?;
+                    let p = self.name(&ploc);
+                    if p == name || self.group_path(&p).contains(&name) {
+                        return Err(format!("{name}: cannot be in group {p}, which is in {name}"));
+                    }
+                }
+                let to = match parent {
+                    Some(p) => p.as_ref().map(|p| self.name(&self.at(&format!("groups.{p}")).expect("found above"))),
+                    None => was.clone(),
+                };
+                let rows: Vec<usize> = self.tracks_under(&name).iter().map(|l| index_of(l)).collect();
+                let at = match index {
+                    Some(i) => Some(*i),
+                    None => self.landing(&rows, was.as_deref(), to.as_deref()),
+                };
+                self.regroup(&loc, to.as_deref());
+                if let Some(at) = at {
+                    self.place_tracks(&rows, at)?;
+                }
+                out.label = moved_label("group", &name, was.as_deref(), to.as_deref(), *index);
             }
             TrackRename { track, to } => {
                 let loc = self.track(track)?;
@@ -2046,16 +2167,35 @@ impl<'a> Edit<'a> {
                 }
                 out.label = format!("Rename return {id} to {to}");
             }
-            TrackMove { track: id, index } | ReturnMove { id, index } => {
-                let (key, what) = match cmd {
-                    TrackMove { .. } => ("tracks", "track"),
-                    _ => ("returns", "return"),
+            TrackMove { track, index, group } => {
+                let loc = self.track(track)?;
+                let name = self.name(&loc);
+                let was = self.node(&loc).field("group").map(str::to_string);
+                let to = match group {
+                    Some(Some(g)) => Some(self.name(&self.at(&format!("groups.{g}"))?)),
+                    Some(None) => None,
+                    None => was.clone(),
                 };
-                let loc = self.at(&format!("{key}.{id}"))?;
+                if index.is_none() && group.is_none() {
+                    return Err("Give an index, a group, or both".into());
+                }
+                let rows = vec![index_of(&loc)];
+                let at = match index {
+                    Some(i) => Some(*i),
+                    None => self.landing(&rows, was.as_deref(), to.as_deref()),
+                };
+                self.regroup(&loc, to.as_deref());
+                if let Some(at) = at {
+                    self.place_tracks(&rows, at)?;
+                }
+                out.label = moved_label("track", &name, was.as_deref(), to.as_deref(), *index);
+            }
+            ReturnMove { id, index } => {
+                let loc = self.at(&format!("returns.{id}"))?;
                 let name = self.name(&loc);
                 let Some(Step::Index(from)) = loc.last().cloned() else { unreachable!() };
-                self.move_item(&[], key, from, *index)?;
-                out.label = format!("Move {what} {name} to position {index}");
+                self.move_item(&[], "returns", from, *index)?;
+                out.label = format!("Move return {name} to position {index}");
             }
             ClipAdd { track, fields } => {
                 let loc = self.track(track)?;
@@ -4009,5 +4149,25 @@ fn signed(text: &str) -> String {
         text.to_string()
     } else {
         format!("+{text}")
+    }
+}
+
+/// A list item's place in its list.
+fn index_of(loc: &[Step]) -> usize {
+    let Some(Step::Index(i)) = loc.last() else { unreachable!("an item of a list") };
+    *i
+}
+
+/// What a move of a track or a group says it did: into a group, out of
+/// one, or to a place.
+fn moved_label(what: &str, name: &str, was: Option<&str>, to: Option<&str>, index: Option<usize>) -> String {
+    match (was, to) {
+        (a, b) if a == b => match index {
+            Some(i) => format!("Move {what} {name} to position {i}"),
+            None => format!("Move {what} {name}"),
+        },
+        (_, Some(g)) => format!("Move {what} {name} into group {g}"),
+        (Some(g), None) => format!("Move {what} {name} out of group {g}"),
+        (None, None) => unreachable!(),
     }
 }

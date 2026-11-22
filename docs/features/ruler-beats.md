@@ -1,6 +1,6 @@
 # Beats and sixteenths in the ruler — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 3. The person's note of November
+Status: proposed, not built. Backlog: Next 2. The person's note of November
 22, 2026 (D194): "on the top bar that shows the bar numbers i dont see any
 labels for the beats so if I zoom in and want to select the 3rd 16th note I
 don't see it. I see sub divisions of time but not on the actually bar/beat.
