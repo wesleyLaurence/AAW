@@ -31,7 +31,100 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.grid, 0.25)
         l.pixelsPerBeat = 2
         XCTAssertEqual(l.grid, 8, "two bars")
-        XCTAssertEqual(l.barLabelStep, 8, "a number every eight bars")
+        XCTAssertEqual(l.rulerSteps.label, 32, "a number every eight bars")
+        XCTAssertEqual(l.rulerSteps.tick, 4, "a tick every bar, 8 points apart")
+    }
+
+    /// Zoomed in, the bar strip labels beats, then eighths, then sixteenths,
+    /// and ticks between the labels down to a sixteenth (D197).
+    func testTheRulerRevealsBeatsAndSixteenthsAsTheViewZoomsIn() {
+        var l = layout()
+        XCTAssertEqual(l.rulerSteps, .init(label: 4, tick: 1, count: 0.25), "fitted: a number a bar, a tick a beat")
+        l.pixelsPerBeat = 40
+        XCTAssertEqual(l.rulerSteps, .init(label: 1, tick: 0.25, count: 0.25), "beats labelled, sixteenths ticked")
+        l.pixelsPerBeat = 150
+        XCTAssertEqual(l.rulerSteps.label, 0.5, "a sixteenth's label would be wider than 37.5 points")
+        l.pixelsPerBeat = 200
+        XCTAssertEqual(l.rulerSteps.label, 0.25)
+
+        let label = { (beat: Double) in TimelineLayout.rulerLabel(beat, beatsPerBar: 4, beatUnit: 1, count: 0.25) }
+        XCTAssertEqual(label(16), "5")
+        XCTAssertEqual(label(17), "5.2")
+        XCTAssertEqual(label(16.5), "5.1.3")
+        XCTAssertEqual(label(18.5), "5.3.3")
+        XCTAssertEqual(label(19.75), "5.4.4")
+        XCTAssertEqual(label(0), "1")
+        XCTAssertEqual(label(-0.5), "0.4.3", "before a clip's start, as the piano roll shows")
+    }
+
+    func testTheRulerCountsTheMetersOwnBeats() {
+        var l = layout()
+        l.beatsPerBar = 3
+        l.pixelsPerBeat = 40
+        XCTAssertEqual(l.rulerSteps.label, 1, "3/4")
+        XCTAssertEqual(TimelineLayout.rulerLabel(4, beatsPerBar: 3, beatUnit: 1, count: 0.25), "2.2")
+
+        l.beatUnit = 0.5
+        l.pixelsPerBeat = 100
+        XCTAssertEqual(l.rulerSteps, .init(label: 0.5, tick: 0.25, count: 0.25), "6/8: eighths labelled, sixteenths ticked")
+        l.pixelsPerBeat = 200
+        XCTAssertEqual(l.rulerSteps.label, 0.25)
+        XCTAssertEqual(TimelineLayout.rulerLabel(3.5, beatsPerBar: 3, beatUnit: 0.5, count: 0.25), "2.2")
+        XCTAssertEqual(TimelineLayout.rulerLabel(3.75, beatsPerBar: 3, beatUnit: 0.5, count: 0.25), "2.2.2")
+
+        l.beatsPerBar = 3.5
+        l.pixelsPerBeat = 100
+        XCTAssertEqual(l.rulerSteps.label, 0.5, "7/8")
+        XCTAssertEqual(TimelineLayout.rulerLabel(6.5, beatsPerBar: 3.5, beatUnit: 0.5, count: 0.25), "2.7")
+    }
+
+    func testATripletGridLabelsItsOwnDivisions() {
+        var l = layout()
+        l.fixedGrid = 1.0 / 3
+        l.pixelsPerBeat = 120
+        XCTAssertEqual(l.rulerSteps.label, 1)
+        XCTAssertEqual(l.rulerSteps.tick, 1.0 / 3, accuracy: 1e-12)
+        l.pixelsPerBeat = 240
+        XCTAssertEqual(l.rulerSteps.label, 1.0 / 3, accuracy: 1e-12)
+        XCTAssertEqual(TimelineLayout.rulerLabel(17 + 2.0 / 3, beatsPerBar: 4, beatUnit: 1, count: 1.0 / 3), "5.2.3")
+        l.fixedGrid = 1.0 / 6
+        XCTAssertEqual(l.rulerSteps.count, 1.0 / 6, accuracy: 1e-12, "a sixteenth-note triplet counts sixths")
+        XCTAssertEqual(TimelineLayout.rulerLabel(16 + 1.0 / 6, beatsPerBar: 4, beatUnit: 1, count: 1.0 / 6), "5.1.2")
+        XCTAssertTrue(TimelineLayout.isTriplet(2.0 / 3))
+        XCTAssertFalse(TimelineLayout.isTriplet(0.25))
+        XCTAssertFalse(TimelineLayout.isTriplet(4))
+    }
+
+    /// At every zoom and meter, labels are far enough apart for their text
+    /// and the ticks divide them.
+    func testTheRulersLabelsNeverCrowd() {
+        for (bar, unit, grid) in [(4.0, 1.0, nil), (3, 1, nil), (3, 0.5, nil), (3.5, 0.5, nil), (4, 1, 1.0 / 3), (4, 1, 4)] as [(Double, Double, Double?)] {
+            var l = layout()
+            l.beatsPerBar = bar
+            l.beatUnit = unit
+            l.fixedGrid = grid
+            var ppb = l.minPixelsPerBeat
+            while ppb <= TimelineLayout.maxPixelsPerBeat {
+                l.pixelsPerBeat = ppb
+                let steps = l.rulerSteps
+                XCTAssertGreaterThanOrEqual(CGFloat(steps.label) * ppb, TimelineLayout.positionLabelSpacing, "\(bar)/\(unit) at \(ppb)")
+                XCTAssertTrue(TimelineLayout.divides(steps.label, steps.tick))
+                XCTAssertTrue(steps.tick == steps.label || CGFloat(steps.tick) * ppb >= TimelineLayout.positionTickSpacing)
+                ppb *= 1.1
+            }
+        }
+    }
+
+    /// A click in the bar strip lands on what it shows, whatever the grid.
+    func testAClickInTheBarStripLandsOnItsLabelsAndTicks() {
+        var l = layout()
+        l.pixelsPerBeat = 40
+        XCTAssertEqual(l.grid, 0.5)
+        XCTAssertEqual(l.rulerTarget(atX: l.x(17.3), free: false), 17.5, accuracy: 1e-9, "the zoom's grid falls on the labels")
+        l.fixedGrid = 4
+        l.pixelsPerBeat = 200
+        XCTAssertEqual(l.rulerTarget(atX: l.x(18.55), free: false), 18.5, accuracy: 1e-9, "a bar's grid: on the sixteenths shown")
+        XCTAssertEqual(l.target(atX: l.x(18.55), free: false), 20, "the lanes keep the grid")
     }
 
     func testAChosenGridHoldsWhateverTheZoom() {

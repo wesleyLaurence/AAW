@@ -778,26 +778,33 @@ final class NoteEditor: NSView {
         }
     }
 
-    /// Beats from the clip's start, as bars and beats counted from one, the
-    /// beat as the time signature counts it.
+    /// Beats from the clip's start as the timeline's ruler labels them:
+    /// bars, beats and sixteenths as finely as the zoom leaves room for,
+    /// the beat as the time signature counts it.
     private func drawRuler() {
         let gutter = PianoRollLayout.gutter
         let ruler = PianoRollLayout.rulerHeight
         fill(CGRect(x: gutter, y: 0, width: bounds.width - gutter, height: ruler), Theme.ruler)
+        let bar = layout.beatsPerBar
         let unit = layout.beatUnit
-        let perBar = max(1, Int((layout.beatsPerBar / unit).rounded()))
-        var every = 1
-        while CGFloat(Double(every) * unit) * layout.pixelsPerBeat < 26 { every *= 2 }
-        let first = Int((max(layout.first, layout.beat(atX: gutter)) / unit).rounded(.down))
-        let last = Int((min(layout.last, layout.beat(atX: bounds.width)) / unit).rounded(.up))
+        let steps = TimelineLayout.rulerSteps(pixelsPerBeat: layout.pixelsPerBeat, beatsPerBar: bar, beatUnit: unit,
+                                              grid: layout.grid, lastBeat: layout.last)
+        let first = Int((max(layout.first, layout.beat(atX: gutter)) / steps.tick).rounded(.down))
+        let last = Int((min(layout.last, layout.beat(atX: bounds.width)) / steps.tick).rounded(.up))
         guard last >= first else { return }
-        for k in first...last where k % every == 0 {
-            let x = layout.x(Double(k) * unit).rounded()
-            let bar = Int((Double(k) / Double(perBar)).rounded(.down))
-            let onBar = k - bar * perBar == 0
-            fill(CGRect(x: x, y: onBar ? 2 : ruler - 5, width: 1, height: onBar ? ruler - 2 : 5), Theme.gray(1, onBar ? 0.3 : 0.16))
-            let label = onBar ? "\(bar + 1)" : "\(bar + 1).\(k - bar * perBar + 1)"
-            text(label, in: CGRect(x: x + 3, y: 2, width: 40, height: 12), font: Self.numberFont, color: onBar ? Theme.dimText : Theme.faintText)
+        for i in first...last {
+            let beat = Double(i) * steps.tick
+            let x = layout.x(beat).rounded()
+            let labeled = TimelineLayout.divides(beat, steps.label)
+            let level = TimelineLayout.divides(beat, bar) ? 0 : TimelineLayout.divides(beat, unit) ? 1 : 2
+            if labeled {
+                fill(CGRect(x: x, y: 2, width: 1, height: ruler - 2), Theme.gray(1, [0.3, 0.2, 0.14][level]))
+                text(TimelineLayout.rulerLabel(beat, beatsPerBar: bar, beatUnit: unit, count: steps.count),
+                     in: CGRect(x: x + 3, y: 2, width: CGFloat(steps.label) * layout.pixelsPerBeat - 5, height: 12),
+                     font: Self.numberFont, color: [Theme.dimText, Theme.faintText, Theme.gray(0.34)][level])
+            } else {
+                fill(CGRect(x: x, y: ruler - 5, width: 1, height: 5), Theme.gray(1, level == 2 ? 0.1 : 0.16))
+            }
         }
     }
 

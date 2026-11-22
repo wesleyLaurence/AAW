@@ -1262,7 +1262,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
                 return
             }
-            model.locate(layout.target(atX: p.x, free: free))
+            // In the bar strip, on whatever its labels and ticks mark.
+            let inBars = p.y >= TimelineLayout.barTop && p.y < TimelineLayout.timeTop
+            model.locate(inBars ? layout.rulerTarget(atX: p.x, free: free) : layout.target(atX: p.x, free: free))
             guard p.y >= TimelineLayout.rulerHeight else { return }
             // A press in the clear selects nothing, and a drag from it the
             // clips a rectangle touches; with Shift, as well as those selected.
@@ -3209,21 +3211,27 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         }
 
+        // Bars, beats and sixteenths, labelled as finely as the zoom leaves
+        // room for and ticked between down to the grid's: a bar's number
+        // brighter than a beat's, a beat's than a sixteenth's.
         let bar = layout.beatsPerBar
-        let step = layout.barLabelStep
-        let firstBar = max(0, Int((layout.beat(atX: header) / bar).rounded(.down)))
-        let lastBar = Int((layout.beat(atX: bounds.width) / bar).rounded(.up))
-        if lastBar >= firstBar {
-            for n in firstBar...lastBar {
-                let x = layout.x(Double(n) * bar).rounded()
-                let labeled = n % step == 0
-                if labeled || CGFloat(bar) * layout.pixelsPerBeat >= 6 {
-                    fill(CGRect(x: x, y: labeled ? barTop : timeTop - 5, width: 1, height: labeled ? timeTop - barTop : 5),
-                         Theme.gray(1, labeled ? 0.3 : 0.16))
-                }
+        let unit = layout.beatUnit
+        let steps = layout.rulerSteps
+        let firstBeatTick = max(0, Int((layout.beat(atX: header) / steps.tick).rounded(.down)))
+        let lastBeatTick = Int((layout.beat(atX: bounds.width) / steps.tick).rounded(.up))
+        if lastBeatTick >= firstBeatTick {
+            for i in firstBeatTick...lastBeatTick {
+                let beat = Double(i) * steps.tick
+                let x = layout.x(beat).rounded()
+                let labeled = TimelineLayout.divides(beat, steps.label)
+                let level = TimelineLayout.divides(beat, bar) ? 0 : TimelineLayout.divides(beat, unit) ? 1 : 2
                 if labeled {
-                    text("\(n + 1)", in: CGRect(x: x + 4, y: barTop + 2, width: 40, height: 13),
-                         font: Self.numberFont, color: Theme.dimText)
+                    fill(CGRect(x: x, y: barTop, width: 1, height: timeTop - barTop), Theme.gray(1, [0.3, 0.2, 0.14][level]))
+                    text(TimelineLayout.rulerLabel(beat, beatsPerBar: bar, beatUnit: unit, count: steps.count),
+                         in: CGRect(x: x + 4, y: barTop + 2, width: CGFloat(steps.label) * layout.pixelsPerBeat - 6, height: 13),
+                         font: Self.numberFont, color: [Theme.dimText, Theme.faintText, Theme.gray(0.34)][level])
+                } else {
+                    fill(CGRect(x: x, y: timeTop - 5, width: 1, height: 5), Theme.gray(1, level == 2 ? 0.1 : 0.16))
                 }
             }
         }

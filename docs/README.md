@@ -84,21 +84,21 @@ Built:
 | [time ruler](features/time-ruler.md) | The ruler's time strip under the bar numbers: the time from the song's start as a clock at the session tempo, its labels and ticks following the zoom, minutes zoomed out and tenths of a second zoomed in |
 | [a track or a group dragged into a group](features/rows-into-groups.md) | A header dropped among a group's rows joins it and outside them leaves it, a group moving with its tracks; Move to Group ▸; `daw track move` and `daw group move` with `--group` |
 | [the agent's questions in the panel](features/agent-questions.md) | The agent's questions with choices drawn in the conversation, one or several and Other, the answers sent back; a plan to approve or send back; a request the panel does not answer said in a line |
+| [beats and sixteenths in the ruler](features/ruler-beats.md) | The bar strip labels beats, eighths and sixteenths as the zoom leaves room, `5.2` and `5.2.3`, in the meter's own beats and a triplet grid's thirds, the piano roll's ruler alike; a click there lands on what is shown |
 | [finding one's way in the CLI](features/cli-navigation.md) | `daw --help` in sections, `daw describe batch`, `daw describe TOPIC.PART`, tested recipes, `daw audio-device` for the Mac's audio devices, and a line for every command, each held by a test |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [beats and sixteenths in the ruler](features/ruler-beats.md) | Next 1; proposed |
-| [names with spaces](features/display-names.md) | Next 3; proposed |
-| [a skill named anywhere in a message](features/skill-commands-anywhere.md) | Next 4; proposed |
-| [folders as a tree in the browser](features/browser-folders.md) | Next 5; proposed |
-| [what makes the person wait](features/performance.md) | Next 6; proposed |
-| [colors for tracks and clips](features/colors.md) | Next 7; proposed |
-| [a track's height dragged](features/track-height.md) | Next 8; proposed |
+| [names with spaces](features/display-names.md) | Next 2; proposed |
+| [a skill named anywhere in a message](features/skill-commands-anywhere.md) | Next 3; proposed |
+| [folders as a tree in the browser](features/browser-folders.md) | Next 4; proposed |
+| [what makes the person wait](features/performance.md) | Next 5; proposed |
+| [colors for tracks and clips](features/colors.md) | Next 6; proposed |
+| [a track's height dragged](features/track-height.md) | Next 7; proposed |
 | [the Drum Rack, and patterns gone](features/drum-rack.md) | Built |
-| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 9 |
+| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 8 |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
