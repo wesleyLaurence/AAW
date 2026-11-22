@@ -349,7 +349,10 @@ its reference, `tracks.T.instrument`.
 
 An audio clip's waveform is its file's, from where the clip starts in the file
 and at the clip's gain, so it is there while an edge is dragged outward. The
-host reads a file's peaks once. The clip is drawn from where its sound starts,
+host reads a file's peaks once. Its columns are a device pixel wide on the
+view's own pixels, whatever the clip's start, each of at least four buckets of
+the peaks and each bucket in one column, so it reads the same at every zoom
+(D198). The clip is drawn from where its sound starts,
 its lead before its beat, to where its sound ends, with its fades inside it,
 and the ticks at its foot are the beats `daw samples beats` measured, when its
 map is beside the file.

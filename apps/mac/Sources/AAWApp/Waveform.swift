@@ -44,19 +44,31 @@ public final class Waveform {
         })
     }
 
-    /// The coarsest level with a bucket for each column `frames` wide, or the
-    /// finest when columns are narrower than its buckets.
+    /// Buckets a column takes at the least, where a level is fine enough: a
+    /// column's least and greatest are then of its own frames give or take
+    /// half a bucket at each side, so the waveform is as heavy at every zoom.
+    static let bucketsPerColumn = 4.0
+
+    /// The coarsest level with `bucketsPerColumn` buckets in a column `frames`
+    /// wide, or the finest when columns are narrower than that.
     public func level(forColumn frames: Double) -> Level? {
-        levels.last { $0.framesPerBucket <= frames } ?? levels.first
+        levels.last { $0.framesPerBucket * Self.bucketsPerColumn <= frames } ?? levels.first
     }
 
     /// The least and greatest sample from one frame to another among a
     /// level's buckets, from -1 to 1: silence before the song, and after what
-    /// the peaks cover.
+    /// the peaks cover. A bucket counts for the range its middle falls in, so
+    /// columns side by side share none; a range narrower than a bucket takes
+    /// the bucket its own middle falls in.
     private static func range(_ samples: UnsafeBufferPointer<Int8>, framesPerBucket: Double, from: Double,
                               to: Double) -> (lo: Double, hi: Double) {
-        let first = max(0, Int((from / framesPerBucket).rounded(.down)))
-        let last = min(samples.count / 2, max(first + 1, Int((to / framesPerBucket).rounded(.up))))
+        var first = Int((from / framesPerBucket - 0.5).rounded(.up))
+        var last = Int((to / framesPerBucket - 0.5).rounded(.up))
+        if last <= first {
+            first = Int(((from + to) / 2 / framesPerBucket).rounded(.down))
+            last = first + 1
+        }
+        (first, last) = (max(0, first), min(samples.count / 2, last))
         guard first < last else { return (0, 0) }
         var lo = Int8.max
         var hi = Int8.min
@@ -71,10 +83,11 @@ public final class Waveform {
         level.data.withUnsafeBytes { range($0.bindMemory(to: Int8.self), framesPerBucket: level.framesPerBucket, from: from, to: to) }
     }
 
-    /// The waveform from `beat` on as columns `step` points wide filling
-    /// `rect` from its left edge: only the columns inside `clip`, each from
-    /// its least sample to its greatest and at least `step` tall, so that
-    /// silence is a line.
+    /// The waveform from `beat` on at `rect`'s left edge as columns `step`
+    /// points wide, on the view's own grid of steps so that each is one
+    /// device pixel when `step` is: only the columns inside `clip`, those at
+    /// `rect`'s edges cut there, each from its least sample to
+    /// its greatest and at least `step` tall, so that silence is a line.
     public func columns(in rect: CGRect, clippedTo clip: CGRect, fromBeat beat: Double, pixelsPerBeat: CGFloat,
                         step: CGFloat) -> [CGRect] {
         guard pixelsPerBeat > 0 else { return [] }
@@ -93,22 +106,26 @@ public final class Waveform {
         let left = max(rect.minX, clip.minX)
         let right = min(rect.maxX, clip.maxX)
         guard right > left else { return [] }
-        // Columns are counted from the clip's start, so they hold the same
-        // audio wherever the view cuts the clip.
-        let first = Int(((left - rect.minX) / step).rounded(.down))
-        let last = Int(((right - rect.minX) / step).rounded(.up))
+        // Columns stand on the view's grid, not at the clip's fractional
+        // start: a column that straddled two pixels would share each with
+        // its neighbor, the antialiased edges averaging their heights, and the
+        // waveform would fade or not as the zoom moved the clip's start.
+        let first = Int((left / step).rounded(.down))
+        let last = Int((right / step).rounded(.up))
         let half = rect.height / 2
+        let frame = { (x: CGFloat) in start + Double(x - rect.minX) * framesPerPoint }
         var columns: [CGRect] = []
         columns.reserveCapacity(last - first)
         level.data.withUnsafeBytes { bytes in
             let samples = bytes.bindMemory(to: Int8.self)
             for column in first..<last {
-                let from = start + Double(column) * framesPerColumn
-                var (lo, hi) = Self.range(samples, framesPerBucket: level.framesPerBucket, from: from, to: from + framesPerColumn)
+                let x0 = max(rect.minX, CGFloat(column) * step)
+                let x1 = min(rect.maxX, CGFloat(column + 1) * step)
+                guard x1 > x0 else { continue }
+                var (lo, hi) = Self.range(samples, framesPerBucket: level.framesPerBucket, from: frame(x0), to: frame(x1))
                 if gain != 1 { (lo, hi) = (max(-1, lo * gain), min(1, hi * gain)) }
                 let height = max(step, CGFloat(hi - lo) * half)
-                columns.append(CGRect(x: rect.minX + CGFloat(column) * step, y: rect.midY - CGFloat(hi) * half,
-                                      width: step, height: height))
+                columns.append(CGRect(x: x0, y: rect.midY - CGFloat(hi) * half, width: x1 - x0, height: height))
             }
         }
         return columns

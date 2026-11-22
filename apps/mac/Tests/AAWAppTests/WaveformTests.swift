@@ -17,11 +17,13 @@ final class WaveformTests: XCTestCase {
         return Waveform(identity: 7, framesPerBeat: 100, levels: [level(10, fine), level(40, coarse)])
     }
 
-    func testTheLevelDrawnHasABucketForEachColumn() {
+    func testTheLevelDrawnHasFourBucketsForEachColumn() {
         let w = waveform()
-        XCTAssertEqual(w.level(forColumn: 100)?.framesPerBucket, 40)
-        XCTAssertEqual(w.level(forColumn: 40)?.framesPerBucket, 40)
-        XCTAssertEqual(w.level(forColumn: 39)?.framesPerBucket, 10)
+        XCTAssertEqual(w.level(forColumn: 200)?.framesPerBucket, 40)
+        XCTAssertEqual(w.level(forColumn: 160)?.framesPerBucket, 40)
+        XCTAssertEqual(w.level(forColumn: 159)?.framesPerBucket, 10)
+        XCTAssertEqual(w.level(forColumn: 40)?.framesPerBucket, 10)
+        XCTAssertEqual(w.level(forColumn: 39)?.framesPerBucket, 10, "fewer than four of the finest")
         XCTAssertEqual(w.level(forColumn: 2)?.framesPerBucket, 10, "zoomed in past the finest, buckets repeat")
         XCTAssertNil(Waveform(identity: 0, framesPerBeat: 100, levels: []).level(forColumn: 10))
     }
@@ -32,6 +34,14 @@ final class WaveformTests: XCTestCase {
         XCTAssertEqual([r.lo, r.hi], [-32.0 / 127, 16.0 / 127])
         r = Waveform.range(fine, from: 25, to: 26)
         XCTAssertEqual([r.lo, r.hi], [-16.0 / 127, 8.0 / 127], "inside one bucket")
+        // A bucket counts where its middle falls: frames 24 to 46 hold the
+        // middles of buckets 2, 3 and 4, and to 44 those of 2 and 3.
+        r = Waveform.range(fine, from: 24, to: 46)
+        XCTAssertEqual([r.lo, r.hi], [-32.0 / 127, 16.0 / 127])
+        r = Waveform.range(fine, from: 24, to: 44)
+        XCTAssertEqual([r.lo, r.hi], [-24.0 / 127, 12.0 / 127])
+        r = Waveform.range(fine, from: 31, to: 34)
+        XCTAssertEqual([r.lo, r.hi], [-24.0 / 127, 12.0 / 127], "no middle inside: the bucket of its own middle")
         r = Waveform.range(fine, from: 100, to: 150)
         XCTAssertEqual([r.lo, r.hi], [0, 0])
         // Before the song and past what the peaks cover there is silence.
@@ -63,6 +73,42 @@ final class WaveformTests: XCTestCase {
         let far = w.columns(in: CGRect(x: 0, y: 0, width: 4, height: 254), clippedTo: .infinite, fromBeat: 0, pixelsPerBeat: 2.5, step: 1)
         XCTAssertEqual(far.count, 4)
         for (column, height) in zip(far, [36.0, 84, 1, 1]) { XCTAssertEqual(column.height, height, accuracy: 1e-9) }
+    }
+
+    func testColumnsStandOnTheViewsPixelsWhereverTheClipStarts() {
+        let w = waveform()
+        // A clip from a fractional point, drawn in device pixels of half a point.
+        let rect = CGRect(x: 100.3, y: 10, width: 2, height: 40)
+        let columns = w.columns(in: rect, clippedTo: rect, fromFrame: 0, framesPerPoint: 40, step: 0.5)
+        XCTAssertEqual(columns.count, 5)
+        // Cut at the clip's start and end, and on the pixels between.
+        for (column, edges) in zip(columns, [(100.3, 100.5), (100.5, 101), (101, 101.5), (101.5, 102), (102, 102.3)]) {
+            XCTAssertEqual(column.minX, edges.0, accuracy: 1e-9)
+            XCTAssertEqual(column.maxX, edges.1, accuracy: 1e-9)
+        }
+        // Each column is of the frames under it: the second, from 100.5, is
+        // frames 8 to 28, the middles of buckets 1 and 2, from -16 to 8.
+        XCTAssertEqual(columns[1].height, 24.0 / 127 * 20, accuracy: 1e-9)
+        // Cut by the view, the columns that show are the same ones.
+        let cut = w.columns(in: rect, clippedTo: CGRect(x: 100.7, y: 0, width: 1, height: 100), fromFrame: 0, framesPerPoint: 40, step: 0.5)
+        XCTAssertEqual(cut, Array(columns[1...3]))
+    }
+
+    func testAClickIsOneColumnAtEveryZoom() {
+        // One loud bucket of ten frames among silence, at both levels.
+        var fine = [(Int8, Int8)](repeating: (0, 0), count: 64)
+        fine[20] = (-100, 100)
+        var coarse = [(Int8, Int8)](repeating: (0, 0), count: 16)
+        coarse[5] = (-100, 100)
+        let w = Waveform(identity: 1, framesPerSecond: 100, levels: [level(10, fine), level(40, coarse)])
+        for framesPerColumn in [10.0, 13, 20, 39, 40, 41, 80, 120, 159, 160, 161, 240, 300] {
+            for origin in [0.0, 0.25, 0.3, 0.5, 0.71] {
+                let rect = CGRect(x: origin, y: 0, width: 640 / framesPerColumn * 0.5 + 1, height: 100)
+                let columns = w.columns(in: rect, clippedTo: rect, fromFrame: 0, framesPerPoint: framesPerColumn / 0.5, step: 0.5)
+                let loud = columns.filter { $0.height > 1 }
+                XCTAssertEqual(loud.count, 1, "\(framesPerColumn) frames a column from \(origin)")
+            }
+        }
     }
 
     func testTheStoreKeepsThePeaksOfTheLatestRevision() {
