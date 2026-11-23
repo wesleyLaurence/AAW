@@ -605,6 +605,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             row.name = name
             row.detail = detail
+            row.color = color
             row.mute = mute
             row.solo = solo
             row.armed = armed
@@ -685,7 +686,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 liveClips.insert(clip.key)
                 if var v = clips[clip.key], !v.removing {
                     v.title = clip.id
-                    v.color = color
+                    v.color = Theme.swatch(clip.shownColor)
                     v.muted = muted
                     v.frozen = frozen
                     v.active = clip.active
@@ -702,7 +703,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        title: clip.id, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
+                        title: clip.id, loop: clip.loopBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), alpha: alpha,
                         notes: clip, anchor: Animated(clip.at)
                     )
@@ -713,7 +714,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 let shape = audioLayout(clip, in: a)
                 if var v = clips[clip.key], !v.removing {
                     v.title = clip.sample
-                    v.color = color
+                    v.color = Theme.swatch(clip.shownColor)
                     v.muted = muted
                     v.frozen = frozen
                     v.active = clip.active
@@ -730,7 +731,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        title: clip.sample, loop: clip.loopBeats, color: color, muted: muted, frozen: frozen, active: clip.active,
+                        title: clip.sample, loop: clip.loopBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), alpha: alpha,
                         audio: clip, anchor: Animated(shape.fileStart)
                     )
@@ -744,7 +745,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         y += TimelineLayout.busGap
         for bus in a.returns {
             let height = TimelineLayout.busHeight + lanesHeight(.bus(bus.key), bus.lanes)
-            place(.bus(bus.key), name: bus.name, detail: Self.chain(bus.effects), color: nil,
+            place(.bus(bus.key), name: bus.name, detail: Self.chain(bus.effects), color: bus.color.map(Theme.swatch),
                   mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: height)
             y += height
         }
@@ -1543,7 +1544,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             case .lane, .laneRemove, .laneAdd: return nil
             default: break
             }
-            model.select(row: id)
+            // A row among several selected keeps them, for Color ▸ over all.
+            if !model.isSelected(row: id) || model.menuRows(id).count < 2 { model.select(row: id) }
             needsDisplay = true
             // An audio track's Input submenu; a MIDI track has none.
             var inputs: [ContextMenu.Item<ContextMenu.RowAction>]?
@@ -1562,7 +1564,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
                 groups = ContextMenu.groups(model.groupChoices(for: id), current: current)
             }
-            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.depth > 0, inputs: inputs, frozen: frozen, groups: groups)
+            // A return without a color has none; a track or a group takes one by its place.
+            var none = "Automatic"
+            if case .bus = id { none = "No Color" }
+            let colors = ContextMenu.colors(palette: Self.palette, chosen: model.menuRows(id).map(model.ownColor(of:)),
+                                            none: none) { ContextMenu.RowAction.color($0) }
+            let items = ContextMenu.row(kind: row.kind, muted: row.mute, soloed: row.solo, automationShown: model.showsAutomation, grouped: row.depth > 0, inputs: inputs, frozen: frozen, groups: groups, colors: colors)
             return menu(of: items, #selector(rowMenuAction(_:))) { RowChoice(row: id, action: $0) }
         }
         guard let hit = clip(at: p) else { return nil }
@@ -1573,15 +1580,39 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .audio: editor = "Audio Clip"
         case .notes: editor = "Notes"
         }
+        let colors = ContextMenu.colors(palette: Self.palette, chosen: model.selectedClipColors, none: "Track Color") {
+            ContextMenu.ClipAction.color($0)
+        }
         let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit, canJoin: model.canJoin,
-                                     activates: model.clipsActivation == true, many: model.selectedClips.count > 1)
+                                     activates: model.clipsActivation == true, many: model.selectedClips.count > 1, colors: colors)
         return menu(of: items, #selector(clipMenuAction(_:))) { ClipChoice(action: $0) }
     }
 
     private func menu<Action: Equatable>(of items: [ContextMenu.Item<Action>], _ action: Selector,
                               _ choice: (Action) -> NSObject) -> NSMenu {
         let menu = NSMenu()
+        var swatches: [(item: ContextMenu.Item<Action>, choice: NSObject)] = []
+        // The swatches beside each other are one grid, as in Ableton's.
+        func endSwatches() {
+            guard !swatches.isEmpty else { return }
+            let grid = SwatchGrid(swatches: swatches.map {
+                (name: $0.item.title, color: Theme.rgb($0.item.swatch ?? 0), checked: $0.item.checked, choice: $0.choice)
+            }) { [weak self] choice in
+                let chosen = NSMenuItem()
+                chosen.representedObject = choice
+                _ = self?.perform(action, with: chosen)
+            }
+            let entry = NSMenuItem()
+            entry.view = grid
+            menu.addItem(entry)
+            swatches = []
+        }
         for item in items {
+            if item.swatch != nil, let what = item.action {
+                swatches.append((item, choice(what)))
+                continue
+            }
+            endSwatches()
             guard let what = item.action else {
                 menu.addItem(.separator())
                 continue
@@ -1598,8 +1629,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
             menu.addItem(entry)
         }
+        endSwatches()
         return menu
     }
+
+    /// The colors the song's palette has, by name, in the grid's order.
+    private static let palette: [(name: String, rgb: UInt32)] = AAWCore.palette().map { ($0.name, $0.rgb) }
 
     @objc private func markerMenuAction(_ sender: NSMenuItem) {
         guard let choice = sender.representedObject as? MarkerChoice else { return }
@@ -1635,6 +1670,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             if case .track(let key) = id { model.setInput(track: key, choice) }
         case .freeze:
             if case .track(let key) = id { model.toggleFreeze(track: key) }
+        case .color(let color): model.setColor(rows: model.menuRows(id), clips: [], color)
         case .addTrack: model.addTrack()
         case .addMIDITrack: model.addTrack(midi: true)
         case .addReturn: model.addReturn()
@@ -1655,6 +1691,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .split: model.splitSelection()
         case .join: model.joinSelection()
         case .activate: model.toggleClipsActive()
+        case .color(let color): model.setColor(rows: [], clips: Array(model.selectedClips), color)
         case .loop: model.toggleLoop()
         case .delete: model.deleteSelection()
         }
@@ -2699,25 +2736,27 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// The clips of the tracks under a group drawn small in the group's
-    /// lane, in their tracks' colors, so that a folded group still shows
-    /// what it holds.
+    /// lane, in their colors, so that a folded group still shows what it
+    /// holds.
     private func drawOverview(of group: GroupView, in rect: CGRect, alpha: CGFloat) {
         let members = model.tracks(under: group.key)
         guard !members.isEmpty else { return }
         let strip = rect.height / CGFloat(members.count)
         for (index, track) in members.enumerated() {
             let muted = track.mute || model.groups(over: track.group).contains { $0.mute }
-            let color = (muted ? Theme.gray(0.45) : model.color(of: track.key)).withAlphaComponent(0.55 * alpha)
             let y = rect.minY + CGFloat(index) * strip
-            var spans: [(at: Double, length: Double, active: Bool)] = track.noteClips.map { ($0.at, $0.lengthBeats, $0.active) }
+            var spans: [(at: Double, length: Double, active: Bool, color: String)] = track.noteClips.map {
+                ($0.at, $0.lengthBeats, $0.active, $0.shownColor)
+            }
             spans += track.audio.map { clip in
                 let shape = audioLayout(clip)
-                return (shape.start, shape.length, clip.active)
+                return (shape.start, shape.length, clip.active, clip.shownColor)
             }
             for span in spans {
                 let x = layout.x(span.at)
                 let w = max(2, CGFloat(span.length) * layout.pixelsPerBeat - 1)
                 guard x + w >= rect.minX, x <= rect.maxX else { continue }
+                let color = (muted ? Theme.gray(0.45) : Theme.swatch(span.color)).withAlphaComponent(0.55 * alpha)
                 fill(CGRect(x: x, y: y + 1, width: w, height: max(1, strip - 2)),
                      span.active ? color : Theme.inactiveClip.withAlphaComponent(0.55 * alpha))
             }

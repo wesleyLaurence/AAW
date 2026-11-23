@@ -80,11 +80,15 @@ enum Theme {
         }
     }
 
-    /// Track colors, given out in order as tracks are first seen.
-    static let palette: [NSColor] = [
-        rgb(0xe8704f), rgb(0xe9b44c), rgb(0x8ecf5d), rgb(0x4fc9b0), rgb(0x54a8e8),
-        rgb(0x8d86f0), rgb(0xd67fd6), rgb(0xe86a8f), rgb(0xa9b86a), rgb(0x6fc1d9),
-    ]
+    /// The colors a track, a group, a return or a clip takes, by name, in
+    /// the order of the grid of swatches: the song's palette.
+    static let palette: [(name: String, color: NSColor)] = AAWCore.palette().map { ($0.name, rgb($0.rgb)) }
+    private static let swatches = Dictionary(palette.map { ($0.name, $0.color) }, uniquingKeysWith: { a, _ in a })
+
+    /// A color of the palette by its name; the first for a name it has not.
+    static func swatch(_ name: String) -> NSColor {
+        swatches[name] ?? palette[0].color
+    }
 }
 
 extension Who {

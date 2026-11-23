@@ -50,7 +50,7 @@ struct DetailView: View {
                 if let context = model.audioContext {
                     AudioClipInfo(context: context, tempo: model.arrangement.tempo)
                 } else if let context = model.noteContext {
-                    NotePane(model: model, context: context, color: model.color(of: context.track.key),
+                    NotePane(model: model, context: context, color: Theme.swatch(context.clip.shownColor),
                              playing: model.transport.playing, selected: model.selectedNotes, grid: model.noteGrid,
                              unfolded: model.unfoldedDrums.contains(context.track.key))
                 }

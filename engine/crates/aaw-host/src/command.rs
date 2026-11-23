@@ -202,6 +202,10 @@ pub enum Command {
     /// nothing.
     #[serde(rename = "clip.active")]
     ClipActive { clip: String, active: bool },
+    /// Colors a clip, a note clip or an audio clip, with one of the named
+    /// colors; none takes its own color away, and it takes its track's.
+    #[serde(rename = "clip.color")]
+    ClipColor { clip: String, color: Option<String> },
     /// Moves a note clip's start, its end or both to a song beat. Its notes
     /// stay where they are in the song: those the start passes are kept,
     /// before the clip, and do not play.
@@ -2432,6 +2436,32 @@ impl<'a> Edit<'a> {
                     self.set_leaf(&loc, "active", Value::Bool(false));
                 }
                 out.label = format!("{} clip {}", if *active { "Activate" } else { "Deactivate" }, self.clip_name(&loc));
+            }
+            ClipColor { clip, color } => {
+                let loc = match self.audio_clip(clip) {
+                    Some(loc) => loc,
+                    None => {
+                        let (owner, i) = self.member(clip, "clips", "a clip")?;
+                        [owner, vec![Step::Key("clips".into()), Step::Index(i)]].concat()
+                    }
+                };
+                match color {
+                    Some(name) => {
+                        if !aaw_model::COLORS.iter().any(|(n, _)| n == name) {
+                            let names: Vec<&str> = aaw_model::COLORS.iter().map(|(n, _)| *n).collect();
+                            return Err(format!("No color {name:?}; the colors are {}", names.join(", ")));
+                        }
+                        self.set_leaf(&loc, "color", Value::str(name));
+                        out.label = format!("Color clip {} {name}", self.clip_name(&loc));
+                    }
+                    // Without a color of its own the clip takes its track's.
+                    None => {
+                        if let Some(m) = self.node_mut(&loc).map_mut() {
+                            m.shift_remove("color");
+                        }
+                        out.label = format!("Clear the color of clip {}", self.clip_name(&loc));
+                    }
+                }
             }
             ClipTrim { clip, start, end } => {
                 let loc = self.note_clip(clip)?;

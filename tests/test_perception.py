@@ -191,7 +191,8 @@ def test_mix_and_snapshot_tamper_rejected(rendered):
 
 
 def test_reports_from_earlier_engines_still_verify(rendered):
-    # Earlier engines hashed the full dump before a row had a name, before a pad had its own mute
+    # Earlier engines hashed the full dump before a row or a clip had a color, before a row had a name,
+    # before a pad had its own mute
     # and solo and a sampler could be a Drum Rack, before a clip could be
     # deactivated, before a MIDI track had MIDI effects, before a track could be frozen,
     # before a track had an input,
@@ -212,6 +213,11 @@ def test_reports_from_earlier_engines_still_verify(rendered):
     # Their full dump held the song's patterns, none in this song (D191).
     dump = {**copy.deepcopy(p), "patterns": {}}
     forms = [copy.deepcopy(dump)]
+    for each in [*dump["tracks"], *dump["groups"], *dump["returns"]]:
+        each.pop("color", None)
+        for clip in [*each.get("clips", []), *each.get("audio", [])]:
+            clip.pop("color", None)
+    forms.append(copy.deepcopy(dump))
     for each in [*dump["tracks"], *dump["groups"], *dump["returns"]]:
         each.pop("name", None)
     forms.append(copy.deepcopy(dump))

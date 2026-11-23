@@ -395,8 +395,6 @@ public final class SongModel {
     /// How long the waveforms took, in milliseconds: after the song opened,
     /// and after the last change of some track's audio.
     @ObservationIgnored private(set) var waveformDelay: (open: Double?, change: Double?)
-    /// Track colors, given out in the order tracks are first seen.
-    @ObservationIgnored private var colors: [UInt64: Int] = [:]
     /// Samples are copied into the project off the main thread, and off the
     /// queue of commands: a copy takes a moment, and a fader must not wait.
     @ObservationIgnored private let imports = DispatchQueue(label: "aaw.imports")
@@ -587,12 +585,12 @@ public final class SongModel {
         identity == 0 ? nil : arrangement.files.first { $0.identity == identity }
     }
 
-    /// A track's color: the next of the palette for each track first seen.
-    /// The song format has no color.
-    func color(of track: UInt64) -> NSColor {
-        let index = colors[track] ?? colors.count
-        colors[track] = index
-        return Theme.palette[index % Theme.palette.count]
+    /// The color a track or a group is drawn in: its own, or the one the
+    /// song gives it by its place.
+    func color(of row: UInt64) -> NSColor {
+        if let track = arrangement.tracks.first(where: { $0.key == row }) { return Theme.swatch(track.shownColor) }
+        if let group = arrangement.groups.first(where: { $0.key == row }) { return Theme.swatch(group.shownColor) }
+        return Theme.palette[0].color
     }
 
     private func after(_ seconds: Double, _ body: @escaping @MainActor (SongModel) -> Void) -> Task<Void, Never> {
@@ -1331,6 +1329,35 @@ public final class SongModel {
         let clips = placedClips().filter { selectedClips.contains($0.key) }
         guard !clips.isEmpty else { return nil }
         return !clips.contains { $0.active }
+    }
+
+    /// The rows a header's menu acts on: the selected rows, when the one it
+    /// was opened on is among them, else that row alone.
+    func menuRows(_ row: RowID) -> [RowID] {
+        guard isSelected(row: row), !selectedRows.isEmpty else { return [row] }
+        return [selectedRow].compactMap { $0 } + Array(selectedRows)
+    }
+
+    /// A row's own color, by name: nil where it has none and takes the
+    /// song's by its place.
+    func ownColor(of row: RowID) -> String? {
+        switch row {
+        case .track(let key): arrangement.tracks.first { $0.key == key }?.color
+        case .group(let key): arrangement.groups.first { $0.key == key }?.color
+        case .bus(let key): arrangement.returns.first { $0.key == key }?.color
+        case .master: nil
+        }
+    }
+
+    /// The selected clips' own colors, nil for each without one.
+    var selectedClipColors: [String?] {
+        placedClips().filter { selectedClips.contains($0.key) }.map { $0.audio?.color ?? $0.notes?.color }
+    }
+
+    /// Colors rows and clips with a color of the palette by name, or takes
+    /// their own away with none, as one step.
+    func setColor(rows: [RowID], clips: [UInt64], _ color: String?) {
+        edit(.color(rows: rows.filter { $0 != .master }.map(\.row), clips: clips.sorted(), color: color))
     }
 
     /// Deactivates the selected clips, so they stay where they are and play
