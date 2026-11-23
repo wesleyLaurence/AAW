@@ -411,18 +411,45 @@ public final class SongModel {
 
     /// Opens the song and becomes its host. Throws when the song does not
     /// load or another host has it open.
-    public init(url: URL) throws {
-        let relay = Relay()
-        song = try Song.open(path: url.path, observer: relay, audio: AudioPreferences.shared.settings)
-        self.url = url
-        untitled = song.isUntitled()
-        projectID = projectId(song: url.path)
-        browser = Browser(library: libraryPath(song: url.path))
-        arrangement = song.arrangement()
+    public convenience init(url: URL) throws {
+        self.init(opened: try Self.open(url: url, audio: AudioPreferences.shared.settings))
+    }
+
+    /// Takes a song `open` opened.
+    init(opened: OpenedSong) {
+        song = opened.song
+        url = opened.url
+        untitled = opened.untitled
+        projectID = opened.projectID
+        browser = Browser(library: opened.library)
+        arrangement = opened.arrangement
         deviceRow = arrangement.tracks.first.map { .track($0.key) }
-        relay.model = self
+        opened.relay.attach(self)
         agent.song = self
         agent.start()
+    }
+
+    /// Opens the song off the main thread, as the app does, and gives what
+    /// `open(url:audio:)` gave on it.
+    static func open(url: URL, then: @escaping @MainActor (Result<OpenedSong, Error>) -> Void) {
+        let audio = AudioPreferences.shared.settings
+        DispatchQueue.global(qos: .userInitiated).async {
+            let result = Result { try open(url: url, audio: audio) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated { then(result) }
+            }
+        }
+    }
+
+    /// Opens the song as its host, and reads what the window first shows:
+    /// a while for a large song, which loads its samples, so the app calls
+    /// it off the main thread. Throws when the song does not load or another
+    /// host has it open.
+    nonisolated static func open(url: URL, audio: AudioSettings) throws -> OpenedSong {
+        let relay = Relay()
+        let song = try Song.open(path: url.path, observer: relay, audio: audio)
+        return OpenedSong(song: song, url: url, arrangement: song.arrangement(), untitled: song.isUntitled(),
+                          projectID: projectId(song: url.path), library: libraryPath(song: url.path), relay: relay)
     }
 
     // MARK: What the host reports
@@ -493,7 +520,11 @@ public final class SongModel {
     /// Reads the plugins installed for the project again, as the browser
     /// is shown; `daw plugin list` lists the same.
     func refreshPlugins() {
-        plugins = libraryDevices(project: url.path, query: "")
+        let project = url.path
+        imports.async { [weak self] in
+            let found = libraryDevices(project: project, query: "")
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.plugins = found } }
+        }
     }
 
     /// The line a device's panel says under its fields, from the host's
@@ -2490,15 +2521,46 @@ public final class SongModel {
     }
 }
 
+/// A song the host has opened off the main thread, for a model to take on it.
+struct OpenedSong: @unchecked Sendable {
+    let song: Song
+    let url: URL
+    let arrangement: Arrangement
+    let untitled: Bool
+    let projectID: String?
+    let library: String?
+    fileprivate let relay: Relay
+
+    /// Stops hosting a song no window took, as one whose opening was
+    /// cancelled.
+    func close() {
+        song.close()
+    }
+}
+
 /// Carries the host's reports from its thread to the model on the main thread,
-/// in the order they were made.
+/// in the order they were made. What the host reports before the model takes
+/// the song, such as its first waveforms, waits for it.
 private final class Relay: SongObserver, @unchecked Sendable {
-    @MainActor weak var model: SongModel?
+    @MainActor private weak var model: SongModel?
+    /// The reports waiting for the model; nil once it has them.
+    @MainActor private var waiting: [@MainActor (SongModel) -> Void]? = []
+
+    @MainActor func attach(_ model: SongModel) {
+        self.model = model
+        let waited = waiting ?? []
+        waiting = nil
+        for body in waited { body(model) }
+    }
 
     private func onMain(_ body: @escaping @MainActor (SongModel) -> Void) {
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                if let model = self.model { body(model) }
+                if let model = self.model {
+                    body(model)
+                } else if self.waiting != nil {
+                    self.waiting?.append(body)
+                }
             }
         }
     }

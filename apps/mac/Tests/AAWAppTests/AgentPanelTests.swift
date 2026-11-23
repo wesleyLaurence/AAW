@@ -310,6 +310,7 @@ final class AgentPanelTests: XCTestCase {
         // record, which the stand-in does not keep, and the process resumes it.
         agent.open(first)
         XCTAssertEqual(agent.currentID, first)
+        wait("the record looked for") { !agent.entries.isEmpty }
         XCTAssertEqual(agent.entries.count, 1)
         guard case .note? = agent.entries.first else { return XCTFail("no note") }
         agent.send("third short")
@@ -700,6 +701,7 @@ final class AgentPanelTests: XCTestCase {
         agent.newThread()
         XCTAssertEqual(agent.attachedPaths, [])
         agent.open(id)
+        wait("the record read") { !agent.entries.isEmpty }
         XCTAssertEqual(agent.entries.map(\.description), ["you: use these short + shot.png, kick.wav, two.mid, lead1"], "the clip's chip is named from the record's line")
         XCTAssertEqual(agent.attachedPaths, [files.png.path, files.wav.path, files.mid.path])
         try FileManager.default.removeItem(at: record.deletingLastPathComponent())
@@ -1088,6 +1090,7 @@ final class AgentPanelTests: XCTestCase {
         defer { again.close() }
         XCTAssertEqual(again.agent.threads.map(\.id), [first])
         XCTAssertEqual(again.agent.currentID, first)
+        wait("the record read") { !again.agent.entries.isEmpty }
         guard case .person(_, let text, _)? = again.agent.entries.first else { return XCTFail("not drawn: \(again.agent.entries)") }
         XCTAssertEqual(text, "first short")
     }

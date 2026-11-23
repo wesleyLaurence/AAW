@@ -221,6 +221,7 @@ final class ProjectsTests: XCTestCase {
         defer { model.close() }
         // The factory patches are listed, and a search narrows them by name and tag.
         model.browser.refreshPatches()
+        wait(for: "the patches read") { !model.browser.patches.isEmpty }
         let patches = model.browser.patches
         XCTAssertEqual(patches.prefix(3).map(\.name), ["Init", "Sub Bass", "Reese"])
         XCTAssertTrue(patches.allSatisfy(\.factory))
