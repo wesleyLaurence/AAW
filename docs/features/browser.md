@@ -55,7 +55,7 @@ or several directories. These are registered and recursively indexed in
 Existing project-local indexes remain usable with an explicit override; they are
 not migrated automatically. Their source folders can instead be added again.
 
-All folders are searched by default. Check one or several folder names to narrow
+The Folders section shows them as a tree, subfolders with arrows ([folders as a tree](browser-folders.md), November 22, 2026). All folders are searched by default. Check one or several folder names to narrow
 the results; All folders clears the scope. Samples and Folders show the same
 sample results and filters. Refresh rescans for new, changed and removed files.
 Unavailable folders remain registered, marked offline. Remove Folder in the

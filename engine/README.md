@@ -582,7 +582,7 @@ The browser's shared index is `library.sqlite` in `AAW_DATA_DIR` (otherwise
 `samples --db PATH`. `daw samples folders` lists registered directories;
 `folders add DIRECTORY` scans and registers one, `folders remove DIRECTORY`
 forgets it without touching source files, and `folders refresh` rescans.
-`samples scan DIRECTORY` also registers a source. `samples search QUERY
+`samples scan DIRECTORY` also registers a source. `samples tree [DIRECTORY ...]` lists each folder's subfolders, with how many samples are under each, and the samples directly in it, from the index alone, for the registered folders when none is named; the browser's Folders tree reads it a folder at a time. `samples search QUERY
 --folder DIRECTORY` scopes results, with `--folder` repeatable. A sample's
 measurements are kept in the index's `analysis` table as the report `daw
 samples analyze` prints, and a search reads the numbers of `sound` and

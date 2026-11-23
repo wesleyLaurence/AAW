@@ -125,6 +125,14 @@ def parser():
     folders = ss.add_parser("folders", help="List, add, refresh or remove shared sample folders")
     folders.add_argument("operation", choices=["list", "add", "remove", "refresh"], nargs="?", default="list")
     folders.add_argument("directory", type=Path, nargs="?")
+    tree = ss.add_parser(
+        "tree",
+        help="A folder's subfolders, each with how many samples are under it, and the samples directly in it, from the index",
+    )
+    tree.add_argument(
+        "directory", type=Path, nargs="*",
+        help="A registered folder or one inside it; repeat for several. None: every registered folder",
+    )
     search = ss.add_parser("search")
     search.add_argument("query", nargs="?", default="")
     search.add_argument("--folder", type=Path, action="append", help="Search within this folder; repeat for multiple sources")
@@ -764,6 +772,8 @@ def execute(a):
         if a.operation == "add":
             return library.scan(a.directory, a.db)
         return library.remove_folder(a.db, a.directory)
+    if a.action == "tree":
+        return library.tree(a.db, a.directory)
     if a.action == "scan":
         return library.scan(a.directory, a.db)
     if a.action == "search":

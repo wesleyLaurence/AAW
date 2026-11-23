@@ -91,7 +91,7 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [folders as a tree in the browser](features/browser-folders.md) | Next 1; proposed |
+| [folders as a tree in the browser](features/browser-folders.md) | Built |
 | [what makes the person wait](features/performance.md) | Next 2; proposed |
 | [colors for tracks and clips](features/colors.md) | Next 3; proposed |
 | [a track's height dragged](features/track-height.md) | Next 4; proposed |

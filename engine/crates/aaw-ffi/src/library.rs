@@ -118,6 +118,47 @@ pub fn library_folders(db: String, operation: String, path: Option<String>) -> R
     }).collect())
 }
 
+/// A folder inside a library folder, as the browser's tree lists it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct LibrarySubfolder {
+    pub name: String,
+    pub path: String,
+    /// How many samples are under it, at any depth.
+    pub count: u32,
+}
+
+/// A folder of the library as the index has it: its subfolders, by name as
+/// the Finder orders them, and the samples directly in it.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct LibraryTree {
+    pub path: String,
+    pub folders: Vec<LibrarySubfolder>,
+    pub samples: Vec<SampleInfo>,
+}
+
+/// Each folder's subfolders and the samples directly in it, from the index,
+/// reading no audio file: what `daw samples tree` lists. Each folder is a
+/// registered one or inside one. Blocks while Python runs, so call it off
+/// the main thread.
+#[uniffi::export]
+pub fn library_tree(db: String, folders: Vec<String>) -> Result<Vec<LibraryTree>, SongError> {
+    if folders.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec!["--db", db.as_str(), "tree"];
+    args.extend(folders.iter().map(String::as_str));
+    let found = python::run("samples", &args)?;
+    Ok(found.as_array().into_iter().flatten().map(|tree| LibraryTree {
+        path: text(tree, "path"),
+        folders: tree["folders"].as_array().into_iter().flatten().map(|f| LibrarySubfolder {
+            name: text(f, "name"),
+            path: text(f, "path"),
+            count: f["count"].as_u64().unwrap_or(0) as u32,
+        }).collect(),
+        samples: tree["samples"].as_array().into_iter().flatten().map(sample).collect(),
+    }).collect())
+}
+
 /// Device kinds supplied by the engine, used by the browser and Add Effect.
 #[uniffi::export]
 pub fn browser_effects() -> Vec<String> {
