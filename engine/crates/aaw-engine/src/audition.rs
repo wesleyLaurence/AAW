@@ -49,6 +49,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         at: Beat::int(0),
         length_beats: Beat::Str(aaw_model::fraction_str(&(&length * BigRational::from_integer(notes.len().into())))),
         loop_beats: None,
+        loop_offset_beats: None,
         notes: Vec::new(),
         active: true,
         color: None,

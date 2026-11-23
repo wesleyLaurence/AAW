@@ -24,7 +24,8 @@ pub struct NoteOn {
 /// to its end or its clip's, whichever is first; one that starts before its
 /// clip or at or after its end does not play. A looped clip's notes play in
 /// each repetition, cut at the loop's end, and in the last repetition only
-/// those that start before the clip ends.
+/// those that start before the clip ends; one that starts into its loop
+/// plays from there first.
 pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
     let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
     // The MIDI effects change the notes here, so every reader of the
@@ -58,15 +59,18 @@ fn written(midi: &Midi) -> Vec<Played> {
     let mut played = Vec::new();
     for clip in midi.clips.iter().filter(|c| c.active) {
         let start = clip.at_exact();
-        for (from, plays) in clip.repetitions() {
+        for (from, plays, into) in clip.repetitions() {
             let base = &start + &from;
+            let stop = &into + &plays;
             for n in clip.notes.iter().filter(|n| clip.plays(n)) {
-                let at = n.at_exact();
-                if at >= plays {
+                // A note sounding where a repetition starts into the loop
+                // plays from there, as a split's right half holds its rest.
+                let at = n.at_exact().max(into.clone());
+                let until = (n.at_exact() + n.duration_exact()).min(stop.clone());
+                if at >= stop || until <= at {
                     continue;
                 }
-                let until = (&at + n.duration_exact()).min(plays.clone());
-                played.push(Played { pitch: n.pitch, velocity: n.velocity, at: &base + &at, beats: &until - &at });
+                played.push(Played { pitch: n.pitch, velocity: n.velocity, at: &base + &at - &into, beats: &until - &at });
             }
         }
     }

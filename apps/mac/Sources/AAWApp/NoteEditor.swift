@@ -174,10 +174,14 @@ final class NoteEditor: NSView {
             if !model.transport.playing { link.isPaused = true }
             return
         }
-        let into = head.beat - context.clip.at
+        var into = head.beat - context.clip.at
         guard into >= 0, into < context.clip.lengthBeats else {
             playhead.isHidden = true
             return
+        }
+        // A looped clip's playhead goes round its loop, from as far into it as the clip starts.
+        if let every = context.clip.loopBeats, every > 0 {
+            into = (into + context.clip.loopOffsetBeats).truncatingRemainder(dividingBy: every)
         }
         let x = layout.x(into).rounded()
         playhead.isHidden = x < PianoRollLayout.gutter || x > bounds.width
@@ -655,7 +659,8 @@ final class NoteEditor: NSView {
     /// Before the clip's start and after its end, where notes are kept and
     /// do not play: shaded, with a line at each edge. A looped clip is shaded
     /// from its loop's end too, where its notes play again from the start,
-    /// with a line there.
+    /// with a line there; one that starts into its loop has a mark where it
+    /// starts, flagged the other way.
     private func drawOutside(_ clip: NoteClipView, top: CGFloat, bottom: CGFloat) {
         let height = bottom - top
         let start = layout.x(0)
@@ -667,6 +672,11 @@ final class NoteEditor: NSView {
             fill(CGRect(x: wrap, y: top, width: end - wrap, height: height), Theme.pastEnd.withAlphaComponent(0.5))
             fill(CGRect(x: wrap.rounded() - 1, y: top, width: 2, height: height), color.withAlphaComponent(0.7))
             fill(CGRect(x: wrap.rounded() - 1, y: top, width: 6, height: 2), color.withAlphaComponent(0.9))
+        }
+        if clip.loopBeats != nil, clip.loopOffsetBeats > 0 {
+            let x = layout.x(clip.loopOffsetBeats).rounded()
+            fill(CGRect(x: x - 1, y: top, width: 2, height: height), color.withAlphaComponent(0.7))
+            fill(CGRect(x: x - 1, y: bottom - 2, width: 6, height: 2), color.withAlphaComponent(0.9))
         }
         for x in [start, end] {
             fill(CGRect(x: x.rounded() - 1, y: top, width: 2, height: height), color.withAlphaComponent(0.7))

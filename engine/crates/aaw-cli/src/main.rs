@@ -841,7 +841,8 @@ enum ClipCmd {
     /// Make two clips of one at a beat inside it, which play as the one did:
     /// a note clip or an audio clip (tracks.T.audio.N). A note across the
     /// beat is held to it on the left and the rest starts the right clip,
-    /// which gets the next free ID; a looped clip is cut only at a wrap.
+    /// which gets the next free ID; a looped clip's right half starts as far
+    /// into its loop as the cut is (loop_offset_beats).
     Split {
         project: Song,
         clip: String,
@@ -1644,7 +1645,7 @@ enum MarkerCmd {
 
 /// Ranges of beats across every track, or those named with --track: the
 /// clips, audio, automation and sections in them. A clip across an edge is
-/// cut there; a looped clip only at a wrap. Positions are beats.
+/// cut there, a looped clip's right half starting into its loop. Positions are beats.
 #[derive(Subcommand)]
 enum RangeCmd {
     /// Put a copy of LENGTH beats from START at --to, over what is there;

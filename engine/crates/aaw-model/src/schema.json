@@ -128,6 +128,25 @@
           "description": "More than 0. With it, the first loop_beats of the clip play again and again from its start until length_beats, each repetition a copy of the clip with its lead and fades; the last is cut off where the clip ends. daw clip loop CLIP BEATS|off sets it.",
           "title": "Loop Beats"
         },
+        "loop_offset_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "At least 0 and less than loop_beats. How far into its loop the clip starts: it plays the file from there to the loop's end, without a lead, then the whole loop from each wrap. A looped clip cut inside a repetition, or trimmed at its start, starts into its loop; only with loop_beats.",
+          "title": "Loop Offset Beats"
+        },
         "length_beats": {
           "anyOf": [
             {
@@ -1545,6 +1564,25 @@
           "default": null,
           "description": "More than 0. With it, the notes of the clip's first loop_beats play again and again from its start until length_beats, the last repetition cut off there; a note held across the loop's end is cut there, and one that starts at or after it is kept and does not play. daw clip loop CLIP BEATS|off sets it.",
           "title": "Loop Beats"
+        },
+        "loop_offset_beats": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "At least 0 and less than loop_beats. How far into its loop the clip starts: the notes from there to the loop's end play first, one sounding there from the clip's start, then the whole loop from each wrap. A looped clip cut inside a repetition, or trimmed at its start, starts into its loop; only with loop_beats.",
+          "title": "Loop Offset Beats"
         },
         "notes": {
           "items": {

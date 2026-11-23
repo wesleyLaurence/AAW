@@ -227,7 +227,8 @@ pub enum Command {
     /// Makes two clips of one at a beat inside it; they play as the one did.
     /// A note clip's note across the beat is held to it on the left and the
     /// rest starts the right clip, which gets the next free ID; an audio clip
-    /// as `audio.split` splits it. A looped clip is cut only at a wrap.
+    /// as `audio.split` splits it. A looped clip's halves keep the loop, the right
+    /// starting as far into it as the cut is.
     #[serde(rename = "clip.split")]
     ClipSplit { clip: String, at: Json },
 
@@ -1183,6 +1184,8 @@ pub(crate) struct Span {
     /// A looped clip's loop and its length on the timeline.
     pub(crate) every: Option<BigRational>,
     pub(crate) length: Option<BigRational>,
+    /// How far into its loop a looped clip starts.
+    pub(crate) offset: BigRational,
 }
 
 impl Span {
@@ -1203,6 +1206,7 @@ impl Span {
             per_beat,
             every: exact(clip.get("loop_beats")),
             length: exact(clip.get("length_beats")),
+            offset: exact(clip.get("loop_offset_beats")).unwrap_or_default(),
         })
     }
 
@@ -1221,25 +1225,30 @@ impl Span {
         Some(&self.at + BigRational::from_float(beats)?)
     }
 
-    /// Beats from the clip's start to `at`, when `at` is at a wrap of a clip
-    /// that loops every `every` beats; else why a looped clip is not cut there.
-    pub(crate) fn wrap(&self, at: &BigRational, every: &BigRational, what: &str) -> Result<BigRational> {
-        wrap_of(&self.at, at, every, what)
+    /// How far into its loop the clip is at `at`, when it loops every `every`.
+    pub(crate) fn into_loop(&self, at: &BigRational, every: &BigRational) -> BigRational {
+        into_loop(&self.at, &self.offset, at, every)
     }
 }
 
-/// Beats from `start` to `at`, when `at` is a whole number of loops of
-/// `every` beats from it; else why a looped clip is not cut there.
-pub(crate) fn wrap_of(start: &BigRational, at: &BigRational, every: &BigRational, what: &str) -> Result<BigRational> {
-    let cut = at - start;
-    if !(&cut / every).is_integer() {
-        return Err(format!(
-            "Beat {} falls inside a repetition of {what}, which loops every {} beats; a looped clip is cut only at a wrap, or turn its loop off first",
-            beat_text(at),
-            aaw_model::fraction_str(every)
-        ));
+/// How far into its loop a clip at `start`, which starts `offset` into a
+/// loop of `every` beats, is at `at`: what a cut there starts the right half
+/// with, or a start trimmed to there.
+pub(crate) fn into_loop(start: &BigRational, offset: &BigRational, at: &BigRational, every: &BigRational) -> BigRational {
+    let x = at - start + offset;
+    let wraps = (&x / every).floor();
+    x - wraps * every
+}
+
+/// Sets a looped clip's `loop_offset_beats`, leaving none for 0, its default.
+pub(crate) fn set_offset(node: &mut Node, offset: &BigRational) {
+    if let Some(m) = node.map_mut() {
+        if offset.is_zero() {
+            m.shift_remove("loop_offset_beats");
+        } else {
+            m.insert("loop_offset_beats".into(), Node::Leaf(beat_value(offset)));
+        }
     }
-    Ok(cut)
 }
 
 fn map_node(fields: &Fields) -> Result<Node> {
@@ -2408,9 +2417,35 @@ impl<'a> Edit<'a> {
                             return Err(format!("Clip {name} is a note clip, whose length clip resize sets"));
                         }
                         self.set_leaf(&loc, "loop_beats", beat_value(&every));
+                        // A start into the loop stays where it is, while the loop holds it.
+                        let offset = exact(self.node(&loc).get("loop_offset_beats")).unwrap_or_default();
+                        if offset >= every {
+                            set_offset(self.node_mut(&loc), &BigRational::zero());
+                        }
                         out.label = format!("Loop clip {name} every {} beats", aaw_model::fraction_str(&every));
                     }
                     None => {
+                        // A clip that started into its loop plays from there once.
+                        let offset = exact(self.node(&loc).get("loop_offset_beats")).unwrap_or_default();
+                        if !offset.is_zero() {
+                            if audio.is_some() {
+                                let span = self.span(&loc)?;
+                                let from = span.source(&(&span.at + &offset));
+                                self.set_leaf(&loc, "source_start_seconds", Value::Float(from));
+                                // It starts inside its audio, which a lead would play before.
+                                if let Some(m) = self.node_mut(&loc).map_mut() {
+                                    m.shift_remove("lead_ms");
+                                }
+                            } else {
+                                let count = self.node(&loc).get("notes").map_or(0, |n| n.items().len());
+                                for i in 0..count {
+                                    let note = [loc.clone(), vec![Step::Key("notes".into()), Step::Index(i)]].concat();
+                                    let moved = exact(self.node(&note).get("at")).unwrap_or_default() - &offset;
+                                    self.set_leaf(&note, "at", beat_value(&moved));
+                                }
+                            }
+                            set_offset(self.node_mut(&loc), &BigRational::zero());
+                        }
                         self.set_leaf(&loc, "loop_beats", Value::None);
                         if audio.is_some() {
                             self.set_leaf(&loc, "length_beats", Value::None);
@@ -2475,7 +2510,15 @@ impl<'a> Edit<'a> {
                 if to <= from {
                     return Err(format!("Clip {} would end before it starts", self.clip_name(&loc)));
                 }
-                if from != at {
+                let every = exact(self.node(&loc).get("loop_beats")).filter(|e| e.is_positive());
+                if let (Some(every), true) = (&every, from != at) {
+                    // A looped clip's loop stays where it is in the song: it
+                    // starts as far into its loop as its start is moved.
+                    let offset = exact(self.node(&loc).get("loop_offset_beats")).unwrap_or_default();
+                    let into = into_loop(&at, &offset, &from, every);
+                    set_offset(self.node_mut(&loc), &into);
+                    self.set_leaf(&loc, "at", beat_value(&from));
+                } else if from != at {
                     // The notes stay where they are in the song.
                     let by = &from - &at;
                     let count = self.node(&loc).get("notes").map_or(0, |n| n.items().len());
@@ -2504,7 +2547,7 @@ impl<'a> Edit<'a> {
                 if at <= start || end.is_some_and(|end| at >= end) {
                     return Err(format!("Beat {} is not inside clip {name}", beat_text(&at)));
                 }
-                let (left, right) = self.split_node(kind, &node, &at, &name)?;
+                let (left, right) = self.split_node(kind, &node, &at)?;
                 *self.node_mut(&loc) = left;
                 out.made.push(self.insert(&owner, "clips", Some(i + 1), right)?);
                 out.label = format!("Split clip {name} at beat {}", beat_text(&at));
@@ -2978,12 +3021,14 @@ impl<'a> Edit<'a> {
                 let name = self.audio_name(&loc);
                 let mut right = self.node(&loc).clone();
                 if let Some(every) = &span.every {
-                    // A looped clip is cut at a wrap: each half keeps the loop.
-                    let cut = span.wrap(&at, every, &format!("audio clip {name}"))?;
+                    // Each half keeps the loop; the right starts as far into
+                    // it as the cut is.
+                    let cut = &at - &span.at;
                     self.set_leaf(&loc, "length_beats", beat_value(&cut));
                     let fields = right.map_mut().expect("an audio clip is an object");
                     fields.insert("at".into(), Node::Leaf(beat_value(&at)));
                     fields.insert("length_beats".into(), Node::Leaf(beat_value(&(span.length.clone().expect("a looped clip has a length") - &cut))));
+                    set_offset(&mut right, &span.into_loop(&at, every));
                 } else {
                     let cut = span.source(&at);
                     // The halves meet where the audio is continuous, so neither fades there.
@@ -3008,16 +3053,20 @@ impl<'a> Edit<'a> {
                 if start.is_none() && end.is_none() {
                     return Err("Trim needs a start or an end".into());
                 }
-                if span.every.is_some() {
-                    // A looped clip's end is how long it plays; its start is its loop's.
-                    if start.is_some() {
-                        return Err(format!("Audio clip {name} loops from its start, which cannot be trimmed; turn the loop off first (clip loop CLIP off)"));
-                    }
-                    let to = beat_at(end.as_ref().expect("an end"))?;
-                    if to <= span.at {
+                if let (Some(every), Some(length)) = (&span.every, &span.length) {
+                    // A looped clip's end is how long it plays; its start, how
+                    // far into its loop it starts, so the loop stays where it is.
+                    let from = start.as_ref().map(beat_at).transpose()?.unwrap_or_else(|| span.at.clone());
+                    let to = end.as_ref().map(beat_at).transpose()?.unwrap_or_else(|| &span.at + length);
+                    if to <= from {
                         return Err(format!("Audio clip {name} would end before it starts"));
                     }
-                    self.set_leaf(&loc, "length_beats", beat_value(&(&to - &span.at)));
+                    if from != span.at {
+                        self.set_leaf(&loc, "at", beat_value(&from));
+                        let offset = span.into_loop(&from, every);
+                        set_offset(self.node_mut(&loc), &offset);
+                    }
+                    self.set_leaf(&loc, "length_beats", beat_value(&(&to - &from)));
                     out.label = format!("Trim audio clip {name}");
                     return Ok(out);
                 }
@@ -3086,7 +3135,7 @@ impl<'a> Edit<'a> {
                         let name = item.node.field("sample").unwrap_or("?").to_string();
                         *self.list(&owner, "audio")? = kept;
                         return Err(format!(
-                            "Audio clip {name} at {} loops across the cut; daw range delete cuts a looped clip at a wrap, or turn its loop off first",
+                            "Audio clip {name} at {} loops across the cut; daw range delete cuts a looped clip, or turn its loop off first",
                             beat_text(&span.at)
                         ));
                     } else {
@@ -3879,23 +3928,31 @@ impl<'a> Edit<'a> {
             let offset = &starts[k] - &start;
             let length = lengths[k].clone();
             let every = exact(node.get("loop_beats")).filter(|e| e.is_positive()).unwrap_or_else(|| length.clone());
+            // Where the clip starts in its loop: a repetition plays from
+            // `into` in its notes, a note sounding there from its start.
+            let mut into = exact(node.get("loop_offset_beats")).filter(|_| node.get("loop_beats").is_some()).unwrap_or_default();
             let mut base = BigRational::zero();
+            let mut first = true;
             while base < length {
                 for n in node.get("notes").map_or(&[][..], Node::items) {
-                    let at = exact(n.node.get("at")).unwrap_or_default();
+                    let written = exact(n.node.get("at")).unwrap_or_default();
                     let duration = exact(n.node.get("duration")).unwrap_or_default();
-                    if at.is_negative() || at >= every || &base + &at >= length {
+                    if written.is_negative() || written >= every {
                         continue;
                     }
-                    let stop = [&at + &duration, every.clone(), &length - &base].into_iter().min().unwrap_or_default();
+                    let at = written.clone().max(into.clone());
+                    if &base + &at - &into >= length {
+                        continue;
+                    }
+                    let stop = [&written + &duration, every.clone(), &length - &base + &into].into_iter().min().unwrap_or_default();
                     if stop <= at {
                         continue;
                     }
                     let mut copy = n.node.clone();
-                    set(&mut copy, "at", beat_value(&(&offset + &base + &at)));
+                    set(&mut copy, "at", beat_value(&(&offset + &base + &at - &into)));
                     set(&mut copy, "duration", beat_value(&(&stop - &at)));
                     let id = n.node.field("id").map(str::to_string);
-                    let keeps = base.is_zero() && id.as_ref().is_some_and(|id| !ids.contains(id));
+                    let keeps = first && written == at && id.as_ref().is_some_and(|id| !ids.contains(id));
                     match (keeps, id) {
                         (true, Some(id)) => ids.push(id),
                         _ => {
@@ -3905,10 +3962,12 @@ impl<'a> Edit<'a> {
                         }
                     }
                     // A note of the first clip, played once, is the note it was.
-                    let handle = (k == 0 && base.is_zero()).then_some(n.handle);
+                    let handle = (k == 0 && first && written == at).then_some(n.handle);
                     notes.push((handle, copy));
                 }
-                base += &every;
+                base += &every - &into;
+                into = BigRational::zero();
+                first = false;
             }
         }
         let mut out = self.node(&locs[0]).clone();
@@ -3916,6 +3975,7 @@ impl<'a> Edit<'a> {
         set(&mut out, "length_beats", beat_value(&(&end - &start)));
         if let Some(m) = out.map_mut() {
             m.shift_remove("loop_beats");
+            m.shift_remove("loop_offset_beats");
         }
         let items: Vec<Item> = notes
             .into_iter()
@@ -3936,7 +3996,7 @@ impl<'a> Edit<'a> {
         use crate::range::Kind;
         let same = |key: &str| left.get(key).map(node_json) == right.get(key).map(node_json);
         if exact(left.get("loop_beats")).is_some() || exact(right.get("loop_beats")).is_some() {
-            return format!("{a} and {b} are not two halves of one loop that meet at a wrap; turn the loop off first (clip loop CLIP off)");
+            return format!("{a} and {b} are not two halves of one loop, the second going on from where the first leaves it; turn the loop off first (clip loop CLIP off)");
         }
         match kind {
             Kind::Audio if !same("sample") => format!("{a} and {b} play different files, so one clip cannot play what they play"),

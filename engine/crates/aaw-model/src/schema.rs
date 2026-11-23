@@ -541,6 +541,10 @@ pub struct AudioClip {
     /// the clip's start until `length_beats`, each repetition a copy of the
     /// clip with its own lead and fades, the last cut off where the clip ends.
     pub loop_beats: Option<Beat>,
+    /// How far into its loop the clip starts: it plays from there to the
+    /// loop's end, then the whole loop from each wrap. What a looped clip cut
+    /// inside a repetition starts with. Only with `loop_beats`, and shorter.
+    pub loop_offset_beats: Option<Beat>,
     /// How long a looped clip lasts on the timeline. Only with `loop_beats`.
     pub length_beats: Option<Beat>,
     /// False when the clip is deactivated: it stays where it is and plays
@@ -553,8 +557,8 @@ pub struct AudioClip {
 impl AudioClip {
     const FIELDS: &'static [&'static str] = &[
         "sample", "at", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms",
-        "fade_out_ms", "fade_curve", "source_bpm", "stretch", "transpose", "loop_beats", "length_beats",
-        "active", "color",
+        "fade_out_ms", "fade_curve", "source_bpm", "stretch", "transpose", "loop_beats", "loop_offset_beats",
+        "length_beats", "active", "color",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<AudioClip> {
@@ -591,6 +595,7 @@ impl AudioClip {
         });
         let transpose = f.opt(ctx, "transpose", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-48", "48")));
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
+        let loop_offset_beats = f.opt(ctx, "loop_offset_beats", None, |c, x| v::optional(c, x, beat_field));
         let length_beats = f.opt(ctx, "length_beats", None, |c, x| v::optional(c, x, beat_field));
         let active = f.opt(ctx, "active", true, v::boolean);
         let color = f.opt(ctx, "color", None, opt_color);
@@ -612,6 +617,7 @@ impl AudioClip {
             stretch: stretch?,
             transpose: transpose?,
             loop_beats: loop_beats?,
+            loop_offset_beats: loop_offset_beats?,
             length_beats: length_beats?,
             active: active?,
             color: color?,
@@ -637,6 +643,10 @@ impl AudioClip {
             }
             (None, None) => {}
         }
+        if let Some(why) = offset_error(clip.loop_exact(), clip.loop_offset_beats.as_ref()) {
+            ctx.value_error(why);
+            return None;
+        }
         Some(clip)
     }
 
@@ -647,6 +657,12 @@ impl AudioClip {
     /// The loop's length, when the clip loops.
     pub fn loop_exact(&self) -> Option<BigRational> {
         self.loop_beats.as_ref().map(exact)
+    }
+
+    /// How far into its loop the clip starts: 0 unless it was cut inside a
+    /// repetition.
+    pub fn offset_exact(&self) -> BigRational {
+        self.loop_offset_beats.as_ref().map(exact).unwrap_or_default()
     }
 
     /// How long a looped clip lasts on the timeline.
@@ -676,7 +692,9 @@ impl AudioClip {
     /// repetitions, each a copy from the clip's start to the loop's end that
     /// starts a loop later, the last cut off where the clip ends. Each copy
     /// keeps the clip's lead and fades, so a repetition leaves from where the
-    /// next starts, as two clips that meet do.
+    /// next starts, as two clips that meet do. A clip that starts into its
+    /// loop plays the rest of the loop first, from there in its file and
+    /// without a lead, since the cut was inside the audio.
     pub fn repetitions(&self, tempo: f64) -> Vec<AudioClip> {
         let (Some(every), Some(length)) = (self.loop_exact(), self.length_exact()) else {
             return vec![self.clone()];
@@ -684,18 +702,24 @@ impl AudioClip {
         let per_beat = self.seconds_per_beat(tempo);
         let start = self.at_exact();
         let mut out = Vec::new();
+        let mut into = self.offset_exact();
         let mut from = BigRational::zero();
         while from < length {
-            let beats = every.clone().min(&length - &from);
-            let end = self.source_start_seconds + beats.to_f64().unwrap_or(0.0) * per_beat;
+            let beats = (&every - &into).min(&length - &from);
+            let source_start = self.source_start_seconds + into.to_f64().unwrap_or(0.0) * per_beat;
+            let end = source_start + beats.to_f64().unwrap_or(0.0) * per_beat;
             out.push(AudioClip {
                 at: Beat::from_exact(&(&start + &from)),
+                source_start_seconds: source_start,
                 source_end_seconds: Some(self.source_end_seconds.map_or(end, |own| own.min(end))),
+                lead_ms: if into.is_zero() { self.lead_ms } else { 0.0 },
                 loop_beats: None,
+                loop_offset_beats: None,
                 length_beats: None,
                 ..self.clone()
             });
-            from += &every;
+            from += &every - &into;
+            into = BigRational::zero();
         }
         out
     }
@@ -715,6 +739,7 @@ impl AudioClip {
         o.str("stretch", self.stretch.as_str(), "repitch");
         o.float("transpose", self.transpose, 0.0);
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
+        o.opt("loop_offset_beats", self.loop_offset_beats.as_ref().map(Beat::to_value));
         o.opt("length_beats", self.length_beats.as_ref().map(Beat::to_value));
         o.bool("active", self.active, true);
         o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
@@ -819,6 +844,19 @@ impl Note {
     }
 }
 
+/// Why a clip's `loop_offset_beats` cannot be: it needs a loop, and is
+/// inside it.
+fn offset_error(every: Option<BigRational>, offset: Option<&Beat>) -> Option<String> {
+    let offset = exact(offset?);
+    match every {
+        None => Some("loop_offset_beats is how far into its loop a clip starts; it needs loop_beats".into()),
+        Some(every) if offset.is_negative() || offset >= every => {
+            Some("loop_offset_beats must be at least 0 and less than loop_beats".into())
+        }
+        _ => None,
+    }
+}
+
 /// A clip of a MIDI track: notes it owns, placed on the song's timeline.
 #[derive(Clone, Debug)]
 pub struct NoteClip {
@@ -831,6 +869,11 @@ pub struct NoteClip {
     /// again from the clip's start until its end, the last repetition cut off
     /// there; a note at or after the loop's end is kept and does not play.
     pub loop_beats: Option<Beat>,
+    /// How far into its loop the clip starts: the notes from there to the
+    /// loop's end play first, a note sounding there from the clip's start,
+    /// then the whole loop from each wrap. What a looped clip cut inside a
+    /// repetition starts with. Only with `loop_beats`, and shorter.
+    pub loop_offset_beats: Option<Beat>,
     /// In the order they were written. A note that starts before the clip or
     /// at or after its end, or its loop's, is kept and does not play.
     pub notes: Vec<Note>,
@@ -842,7 +885,7 @@ pub struct NoteClip {
 }
 
 impl NoteClip {
-    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "notes", "active", "color"];
+    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "loop_offset_beats", "notes", "active", "color"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<NoteClip> {
         let f = Fields::of(ctx, x, "NoteClip", Self::FIELDS)?;
@@ -851,6 +894,7 @@ impl NoteClip {
         let at = f.opt(ctx, "at", Beat::int(0), beat_field);
         let length_beats = f.req(ctx, "length_beats", beat_field);
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
+        let loop_offset_beats = f.opt(ctx, "loop_offset_beats", None, |c, x| v::optional(c, x, beat_field));
         let notes = f.opt(ctx, "notes", Vec::new(), |c, x| v::list(c, x, 0, None, Note::validate));
         let active = f.opt(ctx, "active", true, v::boolean);
         let color = f.opt(ctx, "color", None, opt_color);
@@ -863,6 +907,7 @@ impl NoteClip {
             at: at?,
             length_beats: length_beats?,
             loop_beats: loop_beats?,
+            loop_offset_beats: loop_offset_beats?,
             notes: notes?,
             active: active?,
             color: color?,
@@ -873,6 +918,10 @@ impl NoteClip {
         }
         if clip.loop_exact().is_some_and(|l| !l.is_positive()) {
             ctx.value_error("A clip's loop_beats must be positive");
+            return None;
+        }
+        if let Some(why) = offset_error(clip.loop_exact(), clip.loop_offset_beats.as_ref()) {
+            ctx.value_error(why);
             return None;
         }
         let mut seen = std::collections::HashSet::new();
@@ -897,6 +946,12 @@ impl NoteClip {
         self.loop_beats.as_ref().map(exact)
     }
 
+    /// How far into its loop the clip starts: 0 unless it was cut inside a
+    /// repetition.
+    pub fn offset_exact(&self) -> BigRational {
+        self.loop_offset_beats.as_ref().map(exact).unwrap_or_default()
+    }
+
     /// How many beats of the clip's notes play: its loop, or the whole clip.
     pub fn plays_until(&self) -> BigRational {
         self.loop_exact().unwrap_or_else(|| self.length_exact())
@@ -909,19 +964,23 @@ impl NoteClip {
         !at.is_negative() && at < self.plays_until()
     }
 
-    /// Where each repetition of the clip starts, from the clip's start, and
-    /// how much of it plays: one of the clip's length, or a loop each until
-    /// the end, the last cut off there.
-    pub fn repetitions(&self) -> Vec<(BigRational, BigRational)> {
+    /// Each repetition of the clip: where it starts, from the clip's start,
+    /// how much of it plays, and where in the notes it starts. One of the
+    /// clip's length from 0, or a loop each until the end, the last cut off
+    /// there; a clip that starts into its loop plays the rest of it first.
+    pub fn repetitions(&self) -> Vec<(BigRational, BigRational, BigRational)> {
         let length = self.length_exact();
         let Some(every) = self.loop_exact() else {
-            return vec![(BigRational::zero(), length)];
+            return vec![(BigRational::zero(), length, BigRational::zero())];
         };
         let mut out = Vec::new();
+        let mut into = self.offset_exact();
         let mut from = BigRational::zero();
         while from < length {
-            out.push((from.clone(), every.clone().min(&length - &from)));
-            from += &every;
+            let plays = (&every - &into).min(&length - &from);
+            out.push((from.clone(), plays.clone(), into.clone()));
+            from += plays;
+            into = BigRational::zero();
         }
         out
     }
@@ -932,6 +991,7 @@ impl NoteClip {
         o.beat("at", &self.at, &Beat::int(0));
         o.req("length_beats", self.length_beats.to_value());
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
+        o.opt("loop_offset_beats", self.loop_offset_beats.as_ref().map(Beat::to_value));
         o.coll("notes", list(&self.notes, saved, Note::dump));
         o.bool("active", self.active, true);
         o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
