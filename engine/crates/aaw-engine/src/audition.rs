@@ -15,6 +15,7 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub struct AuditionOptions {
     pub track: String,
     /// MIDI numbers, played one after another; middle C when empty.
@@ -32,7 +33,7 @@ pub struct AuditionOptions {
 /// master effects, one clip of the notes in a row, and the song as long as
 /// they last plus the release and a beat.
 fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
-    let t = p.track(&opts.track).ok_or_else(|| format!("Unknown track: {}", opts.track))?;
+    let t = p.find_track(&opts.track)?;
     let midi = t.midi.as_ref().ok_or_else(|| format!("{} is not a MIDI track", t.id))?;
     let synth = midi.synth().ok_or_else(|| format!("{} has no synth", t.id))?;
     if !(1..=127).contains(&opts.velocity) {
@@ -104,6 +105,8 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
 /// and what it measures.
 pub fn audition(path: &Path, opts: &AuditionOptions) -> Result<Value, String> {
     let p = aaw_model::load(path, true).map_err(|e| e.to_string())?;
+    // The track by its ID from here, though named by its name.
+    let opts = &AuditionOptions { track: p.find_track(&opts.track)?.id.clone(), ..opts.clone() };
     let directory = path.parent().unwrap_or(Path::new("."));
     let song = song(&p, opts)?;
     let rate = song.session.sample_rate;

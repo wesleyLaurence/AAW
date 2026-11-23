@@ -380,6 +380,13 @@ with its fader, pan, mute, solo and sends live and what the file was rendered
 from held until `track.unfreeze`; see [freezing.md](features/freezing.md). A
 send is `{to, gain_db, pre_fader}`, at most one per return.
 
+A track, a group and a return may have a `name` beside the `id`: any one line
+of text up to 64 characters, which the app shows in place of the ID. The ID
+stays what sends, groups, sidechains, inputs and lanes store; a path segment
+and a command that names a row take its exact name as well as its ID, an ID
+first, and a name two rows share is refused there. See
+[display-names.md](features/display-names.md).
+
 Group: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
 `solo`, `effects`, `sends` and `automation`, as a track has them, and an optional
 `group`, the group this group is summed into. A group sums the tracks and groups

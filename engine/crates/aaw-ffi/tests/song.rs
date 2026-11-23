@@ -605,15 +605,33 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     let track = Row::Track { key: made[0] };
     assert_eq!(song.edit(Edit::TrackAdd { index: 99, midi: false, group: None }, None).unwrap().len(), 1);
     assert_eq!(ids(&update(&seen).arrangement).0, ["drums", "track-1", "perc", "track-2"]);
+    // Named by the person, a track takes any text and keeps its ID, so
+    // what refers to it does not move; `daw` finds it by the name.
+    song.edit(Edit::Rename { row: track.clone(), to: "  Lead Vox, 2.0 ".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Rename to Lead Vox, 2.0");
+    assert_eq!((u.arrangement.tracks[1].id.as_str(), u.arrangement.tracks[1].name.as_str()), ("track-1", "Lead Vox, 2.0"));
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.Lead Vox, 2.0.id"})), json!("track-1"));
+    assert_eq!(u.arrangement.tracks[0].name, "drums");
+    let e = song.edit(Edit::Rename { row: track.clone(), to: "x".repeat(65) }, None).unwrap_err().to_string();
+    assert_eq!(e, "tracks.1.name: A name is at most 64 characters");
+    // The same name twice is allowed; the ID tells them apart.
+    song.edit(Edit::Rename { row: track.clone(), to: "drums".into() }, None).unwrap();
+    assert_eq!(update(&seen).arrangement.tracks[1].name, "drums");
+    // Cleared, or given its ID, the name goes and the ID shows again.
+    song.edit(Edit::Rename { row: track.clone(), to: " ".into() }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Clear the name");
+    assert_eq!(u.arrangement.tracks[1].name, "track-1");
+    assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.track-1"}))["name"], Json::Null);
+    assert!(song.edit(Edit::Rename { row: track.clone(), to: "track-1".into() }, None).unwrap().is_empty());
     song.edit(Edit::Rename { row: track.clone(), to: "keys".into() }, None).unwrap();
-    assert_eq!(update(&seen).change.label, "Rename track track-1 to keys");
-    let e = song.edit(Edit::Rename { row: track.clone(), to: "two words".into() }, None).unwrap_err().to_string();
-    assert_eq!(e, "tracks.1.id: String should match pattern '^[a-zA-Z][a-zA-Z0-9_-]*$'");
-    assert!(song.edit(Edit::Rename { row: track.clone(), to: "drums".into() }, None).is_err());
+    update(&seen);
     song.edit(Edit::Move { row: track.clone(), index: 0 }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.change.label, "Move track keys to position 0");
-    assert_eq!(ids(&u.arrangement).0, ["keys", "drums", "perc", "track-2"]);
+    assert_eq!(u.change.label, "Move track track-1 to position 0");
+    assert_eq!(ids(&u.arrangement).0, ["track-1", "drums", "perc", "track-2"]);
+    assert_eq!(u.arrangement.tracks[0].name, "keys");
     song.edit(Edit::Remove { row: track }, None).unwrap();
     assert_eq!(ids(&update(&seen).arrangement).0, ["drums", "perc", "track-2"]);
 
@@ -624,11 +642,16 @@ fn tracks_and_returns_are_added_named_moved_and_removed() {
     let room = Row::Return { key: made[0] };
     song.edit(Edit::Move { row: room.clone(), index: 1 }, None).unwrap();
     assert_eq!(ids(&update(&seen).arrangement).1, ["plate", "return-1"]);
-    song.edit(Edit::Rename { row: Row::Return { key: start.returns[0].key }, to: "hall".into() }, None).unwrap();
+    // A return named keeps its ID, and its sends with it; the lanes of
+    // the sends to it are labelled by the name.
+    song.edit(Edit::Rename { row: Row::Return { key: start.returns[0].key }, to: "Big Hall".into() }, None).unwrap();
     let u = update(&seen);
-    assert_eq!(u.arrangement.tracks[0].sends, [SendView { to: "hall".into(), gain_db: -12.0 }]);
+    assert_eq!(u.arrangement.tracks[0].sends, [SendView { to: "plate".into(), gain_db: -12.0 }]);
+    assert_eq!(u.arrangement.returns[0].name, "Big Hall");
+    let sends: Vec<&str> = u.arrangement.tracks.iter().flat_map(|t| t.lanes.iter().map(|l| (l.param.as_str(), l.label.as_str())).chain(t.lane_targets.iter().map(|l| (l.param.as_str(), l.label.as_str())))).filter(|(p, _)| p.starts_with("sends.plate")).map(|(_, l)| l).collect();
+    assert!(!sends.is_empty() && sends.iter().all(|l| *l == "Send Big Hall"), "{sends:?}");
     song.edit(Edit::Remove { row: room }, None).unwrap();
-    assert_eq!(ids(&update(&seen).arrangement).1, ["hall"]);
+    assert_eq!(ids(&update(&seen).arrangement).1, ["plate"]);
     for edit in [Edit::Rename { row: Row::Master, to: "x".into() }, Edit::Remove { row: Row::Master }, Edit::Move { row: Row::Master, index: 0 }] {
         assert!(song.edit(edit, None).is_err());
     }
@@ -2928,7 +2951,7 @@ fn groups_are_rows_over_their_tracks() {
     assert_eq!(update(&seen).arrangement.groups[0].effects[0].kind, "compressor");
     assert!(song.edit(Edit::Solo { row: Row::Return { key: start.returns[0].key }, on: true }, None).is_err());
     // Renamed, its tracks follow; a track taken out goes to the master.
-    song.edit(Edit::Rename { row: row.clone(), to: "kit".into() }, None).unwrap();
+    agent(&path, json!({"op": "group.rename", "group": "group-1", "to": "kit"}));
     assert_eq!(agent(&path, json!({"op": "get", "path": "tracks.drums.group"})), json!("kit"));
     update(&seen);
     song.edit(Edit::TrackGroup { track: start.tracks[1].key, group: None }, None).unwrap();

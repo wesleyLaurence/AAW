@@ -2002,12 +2002,31 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         Edit::ReturnAdd { index } => Ok(vec![json!({
             "op": "return.add", "id": free_name(project, "return"), "index": (*index as usize).min(project.returns.len()),
         })]),
-        Edit::Rename { row, to } => match row {
-            Row::Track { key } => Ok(vec![json!({"op": "track.rename", "track": handle_text(*key), "to": to})]),
-            Row::Group { key } => Ok(vec![json!({"op": "group.rename", "group": handle_text(*key), "to": to})]),
-            Row::Return { key } => Ok(vec![json!({"op": "return.rename", "return": handle_text(*key), "to": to})]),
-            Row::Master => Err("The master cannot be renamed".into()),
-        },
+        // The app names a row: its name is set and its ID stays, so what
+        // refers to it does not move. A name cleared, or the ID typed, takes
+        // the name away, and the ID shows again.
+        Edit::Rename { row, to } => {
+            let (list, key) = match row {
+                Row::Track { key } => ("tracks", *key),
+                Row::Group { key } => ("groups", *key),
+                Row::Return { key } => ("returns", *key),
+                Row::Master => return Err("The master cannot be renamed".into()),
+            };
+            let tree = doc.tree();
+            let node = &items(&tree, list).iter().find(|i| i.handle == key).ok_or("The row is no longer in the song")?.node;
+            let (id, name) = (node.field("id").unwrap_or_default(), node.field("name"));
+            let to = to.trim();
+            if to.is_empty() || to == id {
+                return Ok(match name {
+                    Some(_) => vec![json!({"op": "remove", "path": path(row, "name")?})],
+                    None => Vec::new(),
+                });
+            }
+            if name == Some(to) {
+                return Ok(Vec::new());
+            }
+            Ok(vec![json!({"op": "set", "path": path(row, "name")?, "value": to})])
+        }
         Edit::Remove { row } => match row {
             Row::Track { key } => Ok(vec![json!({"op": "track.remove", "track": handle_text(*key)})]),
             Row::Group { key } => Ok(vec![json!({"op": "group.remove", "group": handle_text(*key)})]),
@@ -2494,6 +2513,8 @@ pub fn label(edit: &Edit, count: usize) -> Option<String> {
         Edit::BandAdd { .. } => return Some("Add a band to an equalizer".into()),
         Edit::BandRemove { band, .. } => return Some(format!("Remove band {} of an equalizer", band + 1)),
         Edit::BandSet { band, .. } => return Some(format!("Move band {} of an equalizer", band + 1)),
+        Edit::Rename { to, .. } if to.trim().is_empty() => return Some("Clear the name".into()),
+        Edit::Rename { to, .. } => return Some(format!("Rename to {}", to.trim())),
         _ if count < 2 => return None,
         Edit::ClipsActive { active, .. } => return Some(format!("{} {count} clips", if *active { "Activate" } else { "Deactivate" })),
         Edit::ClipsMove { .. } => "Move",

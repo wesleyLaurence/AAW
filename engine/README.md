@@ -429,6 +429,12 @@ unfreeze` are the terminal's way.
   given its ID when the command makes it (the next `clipN` in the song, the
   next `nN` in its clip), so a later command can name it; a command that makes
   several replies with each one's path.
+- **Rows by name.** A track's, a group's or a return's `name` finds it
+  wherever its ID does: in a path (`tracks.Lead Vox.gain_db`, a name with a
+  dot in it too), as a command's `track`, `group`, `return` or send `to`, and
+  as a `group` among `track.add`'s and `group.add`'s fields, which store the
+  ID. An ID comes first; a name two rows share is refused, naming their IDs.
+  `daw map`, `daw render --track` and `daw audition` find the row the same way.
 - **References stay valid.** Renaming a track renames the sidechains naming it;
   renaming or removing a return updates or removes its sends and their lanes;
   renaming a group renames its tracks' `group`, and removing one frees them;

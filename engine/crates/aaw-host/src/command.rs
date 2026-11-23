@@ -1811,6 +1811,23 @@ impl<'a> Edit<'a> {
     }
 
     /// A track or a group, by ID or handle: what a send belongs to.
+    /// The ID of the row of `list` (tracks, groups or returns) that `r`
+    /// names by its ID, handle or name; `r` itself where none answers, for
+    /// the song's check to refuse.
+    pub(crate) fn row_id(&self, list: &str, r: &str) -> String {
+        self.at(&format!("{list}.{r}")).map_or_else(|_| r.to_string(), |l| self.name(&l))
+    }
+
+    /// A command's fields with a `group` that names a group by its name or
+    /// handle given as the group's ID, as the song stores it.
+    fn group_by_id(&self, fields: &Fields) -> Fields {
+        let mut f = fields.clone();
+        if let Some(g) = f.get("group").and_then(Json::as_str).map(str::to_string) {
+            f.insert("group".into(), Json::String(self.row_id("groups", &g)));
+        }
+        f
+    }
+
     fn sender(&self, id: &str) -> Result<Loc> {
         self.track(id).or_else(|e| self.at(&format!("groups.{id}")).map_err(|_| e))
     }
@@ -2007,7 +2024,7 @@ impl<'a> Edit<'a> {
                 };
                 let mut f = Fields::new();
                 f.insert("id".into(), Json::String(id.clone()));
-                f.extend(fields.clone());
+                f.extend(self.group_by_id(fields));
                 // A track is a MIDI track unless `type: audio` asks for an
                 // audio track, which the song writes with no type.
                 let node = match key {
@@ -2038,7 +2055,7 @@ impl<'a> Edit<'a> {
             GroupAdd { id, index, tracks: members, groups: inner, fields } => {
                 let mut f = Fields::new();
                 f.insert("id".into(), Json::String(id.clone()));
-                f.extend(fields.clone());
+                f.extend(self.group_by_id(fields));
                 let node = with_empty(&f, &["effects", "sends", "automation"], &[])?;
                 out.made.push(self.insert(&[], "groups", *index, node)?);
                 // The groups named join it.
@@ -3491,6 +3508,7 @@ impl<'a> Edit<'a> {
             }
             SendSet { track, to, fields } => {
                 let loc = self.sender(track)?;
+                let to = &self.row_id("returns", to);
                 let existing = self.list(&loc, "sends")?.iter().position(|s| s.node.field("to") == Some(to.as_str()));
                 match existing {
                     Some(i) => {
@@ -3508,6 +3526,7 @@ impl<'a> Edit<'a> {
             }
             SendRemove { track, to } => {
                 let sender = self.sender(track)?;
+                let to = &self.row_id("returns", to);
                 let name = self.name(&sender);
                 let loc = [sender.clone(), vec![Step::Key("sends".into())]].concat();
                 let loc = self.at(&format!("{}.{to}", self.text(&loc)))?;

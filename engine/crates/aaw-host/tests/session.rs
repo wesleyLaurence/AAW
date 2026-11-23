@@ -121,6 +121,57 @@ fn tracks_add_move_rename_and_remove() {
 }
 
 #[test]
+fn rows_are_found_by_their_names() {
+    let (_d, mut s) = open(true);
+    // A name is any line of text; the ID stays what the song refers by.
+    edit(&mut s, json!({"op": "set", "path": "tracks.drums.name", "value": "Drums 1.5 (room)"})).unwrap();
+    edit(&mut s, json!({"op": "set", "path": "returns.plate.name", "value": "Big Plate"})).unwrap();
+    assert_eq!(get(&s, "tracks.Drums 1.5 (room).id"), json!("drums"));
+    let r = edit(&mut s, json!({"op": "set", "path": "tracks.Drums 1.5 (room).gain_db", "value": -2})).unwrap();
+    assert_eq!(r["label"], json!("Set tracks.drums.gain_db: 0.0 → -2"));
+    // Commands that name a row take its name, and store its ID.
+    edit(&mut s, json!({"op": "send.set", "track": "Drums 1.5 (room)", "to": "Big Plate", "gain_db": -9})).unwrap();
+    assert_eq!(get(&s, "tracks.drums.sends.0.to"), json!("plate"));
+    edit(&mut s, json!({"op": "group.add", "id": "kit", "name": "Drum Bus", "tracks": ["Drums 1.5 (room)"]})).unwrap();
+    assert_eq!(get(&s, "tracks.drums.group"), json!("kit"));
+    edit(&mut s, json!({"op": "track.add", "id": "hats", "name": "Hats", "group": "Drum Bus", "index": 1})).unwrap();
+    assert_eq!(get(&s, "tracks.hats.group"), json!("kit"));
+    edit(&mut s, json!({"op": "track.move", "track": "bass", "group": "Drum Bus"})).unwrap();
+    assert_eq!(get(&s, "tracks.bass.group"), json!("kit"));
+    // An ID comes before a name; a name two rows share is refused.
+    edit(&mut s, json!({"op": "set", "path": "tracks.hats.name", "value": "bass"})).unwrap();
+    assert_eq!(get(&s, "tracks.bass.id"), json!("bass"));
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.name", "value": "Hats"})).unwrap();
+    edit(&mut s, json!({"op": "set", "path": "tracks.hats.name", "value": "Hats"})).unwrap();
+    let e = edit(&mut s, json!({"op": "set", "path": "tracks.Hats.mute", "value": true})).unwrap_err();
+    assert!(e.contains("2 tracks are named \"Hats\": hats, bass; name one by its ID"), "{e}");
+    // What a name may be.
+    for (value, problem) in [
+        (json!(" Hats"), "A name does not start or end with a space"),
+        (json!("   "), "A name needs a character besides spaces"),
+        (json!("a\tb"), "A name is one line"),
+        (json!("x".repeat(65)), "A name is at most 64 characters"),
+        (json!(true), "Input should be a valid string"),
+    ] {
+        let e = edit(&mut s, json!({"op": "set", "path": "tracks.hats.name", "value": value})).unwrap_err();
+        assert!(e.contains(problem), "{e}");
+    }
+    // Digits alone, as daw set hands them over, are a name too.
+    edit(&mut s, json!({"op": "set", "path": "tracks.hats.name", "value": 808})).unwrap();
+    assert_eq!(get(&s, "tracks.808.id"), json!("hats"));
+    assert_eq!(get(&s, "tracks.hats.name"), json!("808"));
+    // The summary gives both.
+    let summary = s.inspect();
+    assert_eq!(summary["tracks"][0]["id"], json!("drums"));
+    assert_eq!(summary["tracks"][0]["name"], json!("Drums 1.5 (room)"));
+    assert_eq!(summary["groups"][0]["name"], json!("Drum Bus"));
+    assert_eq!(summary["returns"][0]["name"], json!("Big Plate"));
+    // Taken away, the ID is the name again.
+    edit(&mut s, json!({"op": "remove", "path": "tracks.drums.name"})).unwrap();
+    assert!(get(&s, "tracks.drums").get("name").is_none());
+}
+
+#[test]
 fn returns_carry_their_sends_and_lanes() {
     let (_d, mut s) = open(true);
     edit(&mut s, json!({"op": "return.rename", "return": "plate", "to": "hall"})).unwrap();

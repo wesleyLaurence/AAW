@@ -639,7 +639,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let sends = unfolded.contains(group.key) ? a.returns.count : 0
             let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
                 + lanesHeight(.group(group.key), group.lanes)
-            place(.group(group.key), name: group.id, detail: Self.chain(group.effects), color: model.color(of: group.key),
+            place(.group(group.key), name: group.name, detail: Self.chain(group.effects), color: model.color(of: group.key),
                   mute: group.mute, solo: group.solo, gain: group.gainDb, pan: group.pan,
                   kind: .group, height: height, sends: group.sends, depth: depth,
                   collapsed: foldedGroups.contains(group.key))
@@ -677,7 +677,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 : Self.chain(track.effects)
             // A frozen track says so before its devices, which its file plays for.
             let detail = frozen ? (["frozen"] + [chain]).filter { !$0.isEmpty }.joined(separator: " · ") : chain
-            place(.track(track.key), name: track.id, detail: detail, color: color,
+            place(.track(track.key), name: track.name, detail: detail, color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
                   kind: .track, height: height, sends: track.sends, depth: path.count,
                   armed: model.isArmed(track: track.key), hasInput: track.input != nil || (track.midi && (track.instrument != nil || track.plugin != nil)))
@@ -744,7 +744,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         y += TimelineLayout.busGap
         for bus in a.returns {
             let height = TimelineLayout.busHeight + lanesHeight(.bus(bus.key), bus.lanes)
-            place(.bus(bus.key), name: bus.id, detail: Self.chain(bus.effects), color: nil,
+            place(.bus(bus.key), name: bus.name, detail: Self.chain(bus.effects), color: nil,
                   mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: height)
             y += height
         }
@@ -3120,7 +3120,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             // A level for each return; one the track does not send to is off.
             for (index, bus) in model.arrangement.returns.enumerated() where index < header.sends {
                 let level = row.sends[bus.id]?.value(at: now)
-                text(bus.id, in: header.sendName(index), font: Self.smallFont, color: level == nil ? Theme.faintText.withAlphaComponent(alpha) : dim)
+                text(bus.name, in: header.sendName(index), font: Self.smallFont, color: level == nil ? Theme.faintText.withAlphaComponent(alpha) : dim)
                 bar(header.sendBar(index), filled: level.map { Fader.fraction($0, in: Fader.send) } ?? 0, dim: row.mute, alpha: alpha)
                 text(level.map(Fader.text(db:)) ?? "off", in: header.sendText(index), font: Self.numberFont,
                      color: level == nil ? Theme.faintText.withAlphaComponent(alpha) : dim)

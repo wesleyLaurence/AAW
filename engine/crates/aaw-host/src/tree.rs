@@ -4,6 +4,7 @@
 //!
 //! Paths are dot-separated. A list segment is an index, the item's `id` (sends:
 //! its `to`), or a handle such as `@12`; a path may also start with a handle.
+//! A track, a group or a return may also be named by its `name`.
 
 use aaw_model::value::{Key, Value};
 use indexmap::IndexMap;
@@ -364,9 +365,14 @@ pub fn resolve(root: &Node, path: &str, handles: bool) -> Result<Loc, String> {
         segments.next();
     }
     let mut node = get(root, &loc);
+    let segments: Vec<&str> = segments.collect();
     let mut done: Vec<&str> = Vec::new();
-    for seg in segments {
+    let mut at = 0;
+    while at < segments.len() {
+        let seg = segments[at];
+        let mut taken = 1;
         let here = if done.is_empty() { "the song".to_string() } else { done.join(".") };
+        let rows = matches!(loc.as_slice(), [Step::Key(k)] if ROWS.contains(&k.as_str()));
         let step = match node {
             Node::Map(m) => {
                 if !m.contains_key(seg) {
@@ -374,14 +380,46 @@ pub fn resolve(root: &Node, path: &str, handles: bool) -> Result<Loc, String> {
                 }
                 Step::Key(seg.to_string())
             }
-            Node::List(items) => Step::Index(item(items, seg, handles).ok_or_else(|| format!("{here} has no {seg}"))??),
+            Node::List(items) => match item(items, seg, handles) {
+                Some(found) => Step::Index(found?),
+                None if rows => {
+                    let (i, n) = named(items, &here, &segments[at..])?.ok_or_else(|| format!("{here} has no {seg}"))?;
+                    taken = n;
+                    Step::Index(i)
+                }
+                None => return Err(format!("{here} has no {seg}")),
+            },
             Node::Leaf(_) => return Err(format!("{here} is a value, not an object")),
         };
         node = get(node, std::slice::from_ref(&step));
         loc.push(step);
-        done.push(seg);
+        done.extend(&segments[at..at + taken]);
+        at += taken;
     }
     Ok(loc)
+}
+
+/// The lists of the song's rows, whose items a path may also name by their
+/// `name`, the text the person calls them.
+const ROWS: &[&str] = &["tracks", "groups", "returns"];
+
+/// The row whose `name` is the longest run of the path's segments from the
+/// first, since a name may hold a dot: its index and how many segments the
+/// name took. A name two rows share is refused, to be told apart by ID.
+fn named(items: &[Item], here: &str, segments: &[&str]) -> Result<Option<(usize, usize)>, String> {
+    for n in (1..=segments.len()).rev() {
+        let name = segments[..n].join(".");
+        let found: Vec<usize> = (0..items.len()).filter(|i| items[*i].node.field("name") == Some(name.as_str())).collect();
+        match found.as_slice() {
+            [] => continue,
+            [i] => return Ok(Some((*i, n))),
+            many => {
+                let ids: Vec<&str> = many.iter().filter_map(|i| items[*i].node.field("id")).collect();
+                return Err(format!("{} {here} are named {name:?}: {}; name one by its ID", many.len(), ids.join(", ")));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn no_handles() -> String {

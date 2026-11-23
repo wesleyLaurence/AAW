@@ -596,6 +596,21 @@
           "title": "Id",
           "type": "string"
         },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the person calls the group, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the group's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
+          "title": "Name"
+        },
         "gain_db": {
           "default": 0,
           "maximum": 24,
@@ -1116,6 +1131,21 @@
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "title": "Id",
           "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the person calls the track, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the track's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
+          "title": "Name"
         },
         "type": {
           "const": "midi",
@@ -1901,6 +1931,21 @@
           "title": "Id",
           "type": "string"
         },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the person calls the return, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the return's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
+          "title": "Name"
+        },
         "gain_db": {
           "default": 0,
           "maximum": 24,
@@ -2603,6 +2648,21 @@
           "pattern": "^[a-zA-Z][a-zA-Z0-9_-]*$",
           "title": "Id",
           "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the person calls the track, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the track's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
+          "title": "Name"
         },
         "gain_db": {
           "default": 0,

@@ -301,9 +301,7 @@ impl Session {
     /// `set` of its field. The track's content stays as it is.
     fn freeze(&self, track: &str) -> Result<Command> {
         let p = &self.doc.project;
-        if p.track(track).is_none() {
-            return Err(format!("No track {track}; daw inspect lists them"));
-        }
+        let track = p.find_track(track)?.id.as_str();
         // The devices of the person's own play from their caches in the
         // freeze as in the song: made here where they are not yet.
         let settled = crate::devices::settle(p, &self.dir, true)?;
@@ -323,11 +321,11 @@ impl Session {
 
     /// The `remove` of a frozen track's field; the file is left where it is.
     fn unfreeze(&self, track: &str) -> Result<Command> {
-        match self.doc.project.track(track) {
-            None => Err(format!("No track {track}; daw inspect lists them")),
-            Some(t) if t.frozen.is_none() => Err(format!("{track} is not frozen")),
+        let t = self.doc.project.find_track(track)?;
+        match t.frozen {
+            None => Err(format!("{} is not frozen", t.id)),
             Some(_) => Ok(Command::Remove {
-                path: format!("tracks.{track}.frozen"),
+                path: format!("tracks.{}.frozen", t.id),
             }),
         }
     }
@@ -841,7 +839,7 @@ impl Session {
                             clip
                         })
                         .collect();
-                    return json!({
+                    return with_name(json!({
                         "id": t.id,
                         "type": "midi",
                         "instrument": midi.instrument.as_ref().map(|i| i.kind()),
@@ -854,9 +852,9 @@ impl Session {
                         "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                         "automation": params(&t.automation),
                         "clips": clips,
-                    });
+                    }), &t.name);
                 }
-                json!({
+                with_name(json!({
                     "id": t.id,
                     "gain_db": t.gain_db,
                     "mute": t.mute,
@@ -866,14 +864,14 @@ impl Session {
                     "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                     "automation": params(&t.automation),
                     "audio": audio,
-                })
+                }), &t.name)
             })
             .collect();
         let groups: Vec<Json> = p
             .groups
             .iter()
             .map(|g| {
-                json!({
+                with_name(json!({
                     "id": g.id,
                     "tracks": p.members(&g.id).iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
                     "groups": p.child_groups(&g.id).iter().map(|c| c.id.as_str()).collect::<Vec<_>>(),
@@ -885,14 +883,14 @@ impl Session {
                     "sidechain": g.sidechains(),
                     "sends": g.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                     "automation": params(&g.automation),
-                })
+                }), &g.name)
             })
             .collect();
         let returns: Vec<Json> = p
             .returns
             .iter()
             .map(|r| {
-                json!({
+                with_name(json!({
                     "id": r.id,
                     "gain_db": r.gain_db,
                     "mute": r.mute,
@@ -900,7 +898,7 @@ impl Session {
                     "sidechain": r.sidechains(),
                     "senders": p.senders(&r.id),
                     "automation": params(&r.automation),
-                })
+                }), &r.name)
             })
             .collect();
         let mut out = json!({
@@ -1219,4 +1217,19 @@ fn beat_json(x: &num_rational::BigRational) -> Json {
 /// A model value as JSON.
 pub fn value_json(v: &aaw_model::value::Value) -> Json {
     node_json(&Node::Leaf(v.clone()))
+}
+
+/// A row's summary with its name after its ID, where it has one.
+fn with_name(row: Json, name: &Option<String>) -> Json {
+    let (Json::Object(map), Some(name)) = (&row, name) else {
+        return row;
+    };
+    let mut out = serde_json::Map::new();
+    for (k, v) in map {
+        out.insert(k.clone(), v.clone());
+        if k == "id" {
+            out.insert("name".into(), json!(name));
+        }
+    }
+    Json::Object(out)
 }

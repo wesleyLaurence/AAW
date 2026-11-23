@@ -37,6 +37,10 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // A track's, a group's and a return's name; a note, a rack and a
+        // device have the key too, so only a row's, beside its lanes, is
+        // dropped.
+        vec![Added { key: "name", default: Value::None, beside: Some("automation"), unless: None }],
         // A pad's own mute and solo, and a sampler drawn as a Drum Rack.
         vec![
             Added { key: "mute", default: Value::Bool(false), beside: Some("sample"), unless: None },

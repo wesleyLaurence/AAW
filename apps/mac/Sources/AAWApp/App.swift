@@ -1144,7 +1144,7 @@ final class SongWindowController: NSWindowController, NSWindowDelegate, NSMenuIt
         panel.nameFieldLabel = "Name:"
         panel.allowedContentTypes = [.midi]
         panel.canCreateDirectories = true
-        panel.nameFieldStringValue = "\(track.id) \(clip.id).mid"
+        panel.nameFieldStringValue = "\(track.name) \(clip.id).mid"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try model.exportMIDI(clip: clip.key, to: url)

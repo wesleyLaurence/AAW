@@ -934,13 +934,13 @@ public final class SongModel {
         switch deviceRow {
         case .track(let key):
             return arrangement.tracks.first { $0.key == key }
-                .map { DeviceChain(row: .track(key), name: $0.id, effects: $0.effects, track: $0) }
+                .map { DeviceChain(row: .track(key), name: $0.name, effects: $0.effects, track: $0) }
         case .group(let key):
             return arrangement.groups.first { $0.key == key }
-                .map { DeviceChain(row: .group(key), name: $0.id, effects: $0.effects) }
+                .map { DeviceChain(row: .group(key), name: $0.name, effects: $0.effects) }
         case .bus(let key):
             return arrangement.returns.first { $0.key == key }
-                .map { DeviceChain(row: .bus(key), name: $0.id, effects: $0.effects) }
+                .map { DeviceChain(row: .bus(key), name: $0.name, effects: $0.effects) }
         case .master:
             return DeviceChain(row: .master, name: "Master", effects: arrangement.master.effects)
         case nil:
@@ -1346,7 +1346,7 @@ public final class SongModel {
         return drop.entries.compactMap { entry in
             guard case .group(let key) = entry.row, let g = arrangement.groups.first(where: { $0.key == key }) else { return nil }
             if case .group(let moved) = row, key == moved || entry.path.contains(moved) { return nil }
-            return (key, g.id, entry.depth)
+            return (key, g.name, entry.depth)
         }
     }
 
@@ -1566,10 +1566,10 @@ public final class SongModel {
         guard case .track(let key) = selectedRow, let track = arrangement.tracks.first(where: { $0.key == key }) else {
             return "+ adds a new MIDI track with a Sampler of the sample."
         }
-        if track.drumRack != nil { return "+ puts the sample on a free pad of the Drum Rack on \(track.id)." }
+        if track.drumRack != nil { return "+ puts the sample on a free pad of the Drum Rack on \(track.name)." }
         return track.midi
-            ? "+ loads the sample into a Sampler on \(track.id)."
-            : "+ adds the sample to \(track.id) as an audio clip at the start position."
+            ? "+ loads the sample into a Sampler on \(track.name)."
+            : "+ adds the sample to \(track.name) as an audio clip at the start position."
     }
 
     /// Loads a sample file into the Sampler on a MIDI track, or gives a
@@ -1585,7 +1585,7 @@ public final class SongModel {
             if case .key(let note)? = drumSelection[track], !taken.contains(note) { free = note }
             let bank = drumBank(t)
             free = free ?? (bank..<128).first { !taken.contains($0) } ?? (0..<bank).reversed().first { !taken.contains($0) }
-            guard let note = free else { return refuse("Every key of the Drum Rack on \(t.id) plays a pad") }
+            guard let note = free else { return refuse("Every key of the Drum Rack on \(t.name) plays a pad") }
             loadDrumPad(path: path, name: name, into: track, note: note)
             select(row: .track(track))
             detail = .devices
@@ -2412,6 +2412,21 @@ public final class SongModel {
         song.resetAnalysis(effect: effect)
     }
 
+    /// What the window calls the track, group or return an ID names: its
+    /// name, or the ID where it has none or nothing has the ID.
+    func rowName(_ id: String) -> String {
+        arrangement.tracks.first { $0.id == id }?.name
+            ?? arrangement.groups.first { $0.id == id }?.name
+            ?? arrangement.returns.first { $0.id == id }?.name
+            ?? id
+    }
+
+    /// A row for the agent: its ID, which `daw` takes, and its name after
+    /// it where the person gave one.
+    nonisolated static func called(_ id: String, _ name: String) -> String {
+        name == id ? id : "\(id) (\"\(name)\")"
+    }
+
     /// The analyzer's name for its window's title: the row it is on and
     /// its id, `Analyzer · master` or `Analyzer · drums · kit`; nil when the
     /// song no longer has it.
@@ -2419,9 +2434,9 @@ public final class SongModel {
         func name(_ row: String, _ effects: [EffectView]) -> String? {
             effects.first { $0.key == effect }.map { e in "Analyzer · \(row)" + (e.id.map { " · \($0)" } ?? "") }
         }
-        for t in arrangement.tracks { if let n = name(t.id, t.effects) { return n } }
-        for g in arrangement.groups { if let n = name(g.id, g.effects) { return n } }
-        for r in arrangement.returns { if let n = name(r.id, r.effects) { return n } }
+        for t in arrangement.tracks { if let n = name(t.name, t.effects) { return n } }
+        for g in arrangement.groups { if let n = name(g.name, g.effects) { return n } }
+        for r in arrangement.returns { if let n = name(r.name, r.effects) { return n } }
         return name("master", arrangement.master.effects)
     }
 
