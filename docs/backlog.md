@@ -4,8 +4,7 @@ Everything between [concept.md](concept.md) and what exists, as one list. An ite
 is a line: what it is, and a link to its file in [features/](features/) once it
 has a design. When an item is finished its line moves to
 [completed.md](completed.md). [development.md](development.md) says how these files are
-kept. What is merged and not yet heard or tried by hand is in
-[verify.md](verify.md), which is the person's and not read by an agent.
+kept.
 
 - **Next** is in the order to build: by how much each item helps the person
   and the agent make good music with the tool (D75), with what lets the agent

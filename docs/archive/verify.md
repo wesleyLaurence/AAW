@@ -1,5 +1,8 @@
 # Verify
 
+Retired on November 23, 2026 (D202): the person finds what does not work by
+using the app, and it becomes a backlog item. Kept for history; nothing is added.
+
 Work that is merged and that nobody has heard or tried by hand. Each line wants
 a short session at the Mac, and what is found becomes a fix or a line in
 [completed.md](completed.md).

@@ -70,15 +70,13 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
 - `decisions.md` is append-only. A choice gets a new numbered entry, and the entry
   it replaces gets "Revised by Dn".
 - `completed.md` is what was built, newest first.
-- `verify.md` is what is merged and nobody has heard or tried by hand. It is
-  the person's and long: do not read it. Add a line at the top of its list
-  without reading the rest, and change other lines only when the person asks.
 - `archive/` holds superseded documents. Do not update them or build from them.
 - Before building, read the backlog item and its feature file. One item to a
   branch and a pull request.
 - The pull request that finishes an item also moves its line from `backlog.md` to
-  `completed.md` with the date, the pull request and what a person tried; adds a
-  line at the top of `verify.md` for anything nobody heard or tried by hand; and renumbers Next.
+  `completed.md` with the date, the pull request and what a person tried, and renumbers Next.
+  There is no list of things to try by hand (D202): the person finds what does
+  not work by using the app, and it comes back as a backlog item.
 - A limit that should be lifted gets a backlog line. A limit that is simply true
   stays in the feature's file.
 
