@@ -1,9 +1,8 @@
 # Completed
 
 What was built, newest first. A line comes here from [backlog.md](backlog.md)
-when its work is merged, with the date, the pull request, and what was and was
-not tried by a person. Anything not tried also gets a line in
-[verify.md](verify.md).
+when its work is merged: the date, what in a sentence, the pull request, and
+whether a person tried it. Lines before November 23, 2026 are longer (D203).
 
 | Date | What | PR | Tried by a person |
 |---|---|---|---|

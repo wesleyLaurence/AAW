@@ -59,7 +59,9 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
 - `features/NAME.md` is one feature. Write it when a backlog item is picked up and
   needs a design: status proposed, then What, Why, Design, Done when and Open
   questions. When the feature is built, rewrite the file in the present tense as
-  its reference, with the date it was implemented in the title.
+  its reference, with the date it was implemented in the title. The choices made
+  in building it, with what was rejected and why, go under its Decisions heading,
+  not in `decisions.md` (D203).
 - The root `README.md` is for a person, a musician or a developer: what AAW is,
   why it exists, what it does at a high level, its status, how to install it and
   a first song. It holds no commands beyond install, no song format and no
@@ -67,18 +69,23 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
   that level (D193).
 - `architecture.md`, `engine/README.md`, `apps/mac/README.md` and `daw describe` say
   what exists. Change them in the pull request that changes the code.
-- `decisions.md` is append-only. A choice gets a new numbered entry, and the entry
-  it replaces gets "Revised by Dn".
-- `completed.md` is what was built, newest first.
-- `verify.md` is what is merged and nobody has heard or tried by hand. It is
-  the person's and long: do not read it. Add a line at the top of its list
-  without reading the rest, and change other lines only when the person asks.
+- `decisions.md` is append-only and holds only choices for the whole project:
+  direction, priorities, process, and rules that cut across features (D203). An
+  entry is a few sentences: what was chosen, what was rejected, why. A choice
+  within one feature goes in that feature's file. A choice that replaces an
+  entry gets a new numbered entry, and the old one gets "Revised by Dn". It is
+  long: never read it whole. Find an entry by its number (`grep -n '^\*\*D59\.'`)
+  or a word, and the last number with `tail`.
+- `completed.md` is what was built, newest first, one short line a pull request:
+  the date, what in a sentence, the pull request, and whether a person tried it
+  or only tests and scripted runs did.
 - `archive/` holds superseded documents. Do not update them or build from them.
 - Before building, read the backlog item and its feature file. One item to a
   branch and a pull request.
 - The pull request that finishes an item also moves its line from `backlog.md` to
-  `completed.md` with the date, the pull request and what a person tried; adds a
-  line at the top of `verify.md` for anything nobody heard or tried by hand; and renumbers Next.
+  `completed.md` with the date, the pull request and what a person tried, and renumbers Next.
+  There is no list of things to try by hand (D202): the person finds what does
+  not work by using the app, and it comes back as a backlog item.
 - A limit that should be lifted gets a backlog line. A limit that is simply true
   stays in the feature's file.
 
@@ -107,5 +114,7 @@ Each kind of statement has one home in `docs/`; [README.md](README.md) is the in
 - Generic examples and test fixtures must be independent of personal songs and private
   libraries; prefer generated test audio.
 - Review staged changes before committing for creative content and local source paths.
+- A commit message is a short subject and, if needed, a few lines of body. The
+  detail goes in the pull request and the feature's file, not the commit (D203).
 - Keep local project files intact when changing tracking. Song history, if wanted,
   belongs in separate private versioning, not the tooling repository.
