@@ -117,6 +117,22 @@ final class AgentComposerTests: XCTestCase {
         XCTAssertNil(text.chipRange)
         text.set("/roar-edit\nmore")
         XCTAssertEqual(text.chipRange, NSRange(location: 0, length: 10))
+
+        // In the middle of the words, the chip is where it stands, with no hint.
+        text.set("take it and /roar-edit it")
+        XCTAssertEqual(text.chipRange, NSRange(location: 12, length: 10))
+        XCTAssertEqual(text.color(at: 12), ComposerTextView.chipText)
+        XCTAssertEqual(text.color(at: 2), text.textColor)
+        XCTAssertFalse(text.showsHint)
+        text.set("take it and /roar-edit")
+        XCTAssertEqual(text.chipRange, NSRange(location: 12, length: 10))
+        XCTAssertFalse(text.showsHint, "the hint only after a chip that is all there is")
+        text.setSelectedRange(NSRange(location: 15, length: 0))
+        XCTAssertEqual(text.selectedRange(), NSRange(location: 22, length: 0), "a caret put inside lands after it")
+        text.deleteBackward(nil)
+        XCTAssertEqual(text.string, "take it and ", "Backspace at its end takes it whole")
+        text.set("take it and/roar-edit it")
+        XCTAssertNil(text.chipRange, "after a letter it is text")
     }
 
     /// A thing of the song named with `@` is a chip wherever it stands:

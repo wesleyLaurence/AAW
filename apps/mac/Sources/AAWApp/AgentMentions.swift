@@ -242,14 +242,16 @@ enum AgentMentions {
     /// it: the `@` at the text's start or after a space, with no space
     /// between it and the caret. Nil when the caret is in no mention. The
     /// range is in UTF-16 units, as the text view counts.
-    static func query(in text: String, caret: Int) -> NSRange? {
+    /// `trigger` is the character that opens the list, `@` here and `/`
+    /// for the skills.
+    static func query(in text: String, caret: Int, trigger: unichar = 0x40) -> NSRange? {
         let ns = text as NSString
         guard caret >= 0, caret <= ns.length else { return nil }
         var i = caret
         while i > 0 {
             let c = ns.character(at: i - 1)
             if let scalar = Unicode.Scalar(c), Character(scalar).isWhitespace { return nil }
-            if c == 0x40 { // @
+            if c == trigger {
                 guard i == 1 || Unicode.Scalar(ns.character(at: i - 2)).map({ Character($0).isWhitespace }) == true else { return nil }
                 return NSRange(location: i - 1, length: caret - (i - 1))
             }

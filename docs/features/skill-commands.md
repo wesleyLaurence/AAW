@@ -23,6 +23,12 @@ does a resumed conversation. The person asked: "when a user types / the
 different skills they have pop up and you can select from them and then
 when you select one it shows as a blue highlighted slash command."
 
+Since November 22, 2026 the `/` opens the list after any space too, the
+chip stands where it was typed and the message is sent with the skill
+first: [a skill named anywhere in a message](skill-commands-anywhere.md)
+(D200). What follows is the list and the chip as first built, at the
+field's start.
+
 ## How it works
 
 **The list comes from the handshake.** The `initialize` request the panel
@@ -63,7 +69,8 @@ on a fill. Typing filters within each group: a name that starts with the
 text first, then a name that has it, then a description that has it, in
 any case. ↑ and ↓ move and wrap, Return and Tab choose, a click chooses,
 Escape closes the list and leaves the `/` typed, and the next key opens it
-again. A `/` anywhere else in the text is a slash. The list is a view in
+again. A `/` after a letter or a digit is a slash; after a space it lists
+the skills too (D200). The list is a view in
 the window, not a popover, so a scripted picture shows it.
 
 **The chip.** `ComposerTextView` in `AgentComposer.swift` draws it: while
@@ -74,7 +81,8 @@ temporary attribute the storage does not keep. Backspace at the chip's end
 takes the whole chip; a caret put inside it lands after it. Editing the
 text so that it no longer starts with the name drops the chip and, with
 `/` still first and no space yet, shows the list again. One chip a
-message, at the start, as Claude Code dispatches one command a prompt.
+message, as Claude Code dispatches one command a prompt; since D200 it
+may stand anywhere.
 
 **What is sent** is the field's text as it reads, `/name` and the words
 after it. The app's context block, which goes ahead of every other
@@ -172,7 +180,7 @@ AAW in front the whole time; nothing by hand:
 - Claude Code's own commands that stay, `compact` among them, run as the
   engine runs them; the panel shows what comes back and nothing else of
   them.
-- One chip a message, at the start.
+- One chip a message (anywhere in it since D200).
 
 ## Open questions
 

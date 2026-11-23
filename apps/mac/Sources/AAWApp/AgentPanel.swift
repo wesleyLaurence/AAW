@@ -120,12 +120,14 @@ final class AgentPanel {
     private(set) var sections: [AgentCommands.Section] = []
     /// Whether the running process has answered the handshake.
     private(set) var handshook = false
-    /// The skill chosen from the list, a chip at the field's start while
-    /// the draft still begins with its name.
+    /// The skill chosen from the list, or typed out whole, a chip wherever
+    /// its `/name` stands in the draft, while it does.
     private(set) var chip: AgentCommand?
     /// What the person typed after `/`, while the list shows; nil when it
     /// does not.
     private(set) var commandQuery: String?
+    /// The characters of `/` and the query in the draft, while the list shows.
+    @ObservationIgnored private var commandRange: NSRange?
     /// The row the keys are on, over the sections' commands in order.
     private(set) var commandSelection = 0
     /// Escape closed the list for this draft; the next keystroke opens it.
@@ -147,6 +149,7 @@ final class AgentPanel {
     var caret = 0 {
         didSet {
             guard caret != oldValue else { return }
+            commandChanged()
             mentionChanged()
         }
     }
@@ -418,6 +421,10 @@ final class AgentPanel {
             stamped.id = next()
             attached.append(stamped)
         }
+        // A skill chosen in the middle goes first, as Claude Code reads it.
+        if let chip, AgentCommands.range(of: chip.name, in: text) != nil {
+            text = AgentCommands.message(text, skill: chip.name)
+        }
         draft = ""
         chip = nil
         attachments = []
@@ -450,7 +457,7 @@ final class AgentPanel {
                 return
             }
             if isNew {
-                saveThreads { $0.note(id, title: ThreadList.title(from: text)) }
+                saveThreads { $0.note(id, title: ThreadList.title(from: AgentCommands.typed(text))) }
             }
             if process == nil || processThread != id || processFolder != folder {
                 endProcess()
@@ -505,10 +512,14 @@ final class AgentPanel {
 
     // MARK: The skills under `/`
 
-    /// The list's rows in order: the filtered sections' commands.
+    /// The list's rows in order: the filtered sections' commands; none
+    /// while a skill is already chosen, since a message runs one.
     var listed: [AgentCommands.Section] {
-        AgentCommands.filter(sections, query: commandQuery ?? "")
+        oneSkillTaken ? [] : AgentCommands.filter(sections, query: commandQuery ?? "")
     }
+
+    /// Whether the list shows for a second `/` while a skill is chosen.
+    var oneSkillTaken: Bool { commandQuery != nil && chip != nil }
 
     private var listedCommands: [AgentCommand] { listed.flatMap(\.commands) }
 
@@ -522,8 +533,9 @@ final class AgentPanel {
         sections = AgentCommands.grouped(commands, project: AgentCommands.skillNames(in: folder), workspace: workspace)
     }
 
-    /// The draft changed: a chip whose name the draft no longer starts
-    /// with goes, and `/` with a name typed so far shows the list.
+    /// The draft changed: a chip whose `/name` the draft no longer has
+    /// goes, a skill typed out whole becomes the chip, and the lists
+    /// follow.
     private func draftChanged() {
         // Typing while listening stops it, keeping what was typed; what
         // the recognizer still says is dropped.
@@ -531,23 +543,38 @@ final class AgentPanel {
             cancelled = true
             transcriber.stop()
         }
-        if let chip, AgentCommands.split(draft)?.name != chip.name { self.chip = nil }
-        var query: String?
-        if chip == nil, draft.hasPrefix("/"), !draft.contains(where: \.isWhitespace), !listClosed {
-            query = String(draft.dropFirst())
+        if let chip, AgentCommands.range(of: chip.name, in: draft) == nil { self.chip = nil }
+        if chip == nil, let name = AgentCommands.named(in: draft, among: Set(sections.flatMap { $0.commands.map(\.name) })) {
+            chip = sections.lazy.flatMap(\.commands).first { $0.name == name }
         }
+        commandChanged()
+        mentionChanged()
+    }
+
+    /// The draft or the caret changed: a `/` the caret is in, at the start
+    /// or after a space, with the name typed so far, shows the list; the
+    /// chip's own `/name` does not.
+    private func commandChanged() {
+        var query: String?
+        var range: NSRange?
+        let ns = draft as NSString
+        if !listClosed, let found = AgentCommands.query(in: draft, caret: min(caret, ns.length)),
+           found.location != chip.flatMap({ AgentCommands.range(of: $0.name, in: draft) })?.location {
+            range = found
+            query = ns.substring(with: NSRange(location: found.location + 1, length: found.length - 1))
+        }
+        commandRange = range
         if query != commandQuery {
             commandQuery = query
             commandSelection = 0
         }
-        mentionChanged()
     }
 
     /// Moves the list's selection; false when no list shows.
     func moveSelection(by step: Int) -> Bool {
         if commandQuery != nil {
             let count = listedCommands.count
-            guard count > 0 else { return true }
+            guard count > 0 else { return keepsKeys }
             commandSelection = (commandSelection + step + count) % count
             return true
         }
@@ -562,6 +589,7 @@ final class AgentPanel {
     func chooseSelected() -> Bool {
         if commandQuery != nil {
             let commands = listedCommands
+            guard !commands.isEmpty else { return keepsKeys }
             if commands.indices.contains(commandSelection) { choose(commands[commandSelection]) }
             return true
         }
@@ -571,17 +599,36 @@ final class AgentPanel {
         return true
     }
 
-    /// Puts the command in the field as a chip, with the caret after it.
+    /// Whether an empty list of skills keeps the keys: only while it
+    /// waits for the handshake. Once nothing matches, or a skill is
+    /// already chosen, Return sends and the arrows move the caret.
+    private var keepsKeys: Bool { chip == nil && sections.isEmpty }
+
+    /// Puts the command in the field as a chip in place of `/` and what
+    /// was typed after it, a space after it, and asks the field to put the
+    /// caret there.
     func choose(_ command: AgentCommand) {
+        let range = commandRange ?? AgentCommands.query(in: draft, caret: min(caret, (draft as NSString).length))
+            ?? NSRange(location: 0, length: 0)
+        let ns = draft as NSString
+        // A space already after the place serves as the chip's.
+        let spaced = range.upperBound < ns.length && Unicode.Scalar(ns.character(at: range.upperBound)).map { Character($0).isWhitespace } == true
+        let insert = "/\(command.name)" + (spaced ? "" : " ")
+        let text = ns.replacingCharacters(in: range, with: insert)
+        let after = range.location + (insert as NSString).length + (spaced ? 1 : 0)
         chip = command
-        draft = "/\(command.name) "
         commandQuery = nil
+        commandRange = nil
+        caretRequest = CaretRequest(id: (caretRequest?.id ?? 0) + 1, caret: after)
+        caret = after
+        draft = text
     }
 
     /// Closes the list and leaves what was typed; false when no list shows.
     func closeList() -> Bool {
         if commandQuery != nil {
             commandQuery = nil
+            commandRange = nil
             listClosed = true
             return true
         }

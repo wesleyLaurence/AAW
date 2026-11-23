@@ -113,11 +113,90 @@ enum AgentCommands {
     static func split(_ text: String) -> (name: String, rest: String)? {
         guard text.hasPrefix("/") else { return nil }
         let body = text.dropFirst()
-        let name = body.prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ":" }
+        let name = body.prefix(while: isNameCharacter)
         guard !name.isEmpty else { return nil }
         let after = body[name.endIndex...]
         guard after.isEmpty || after.first!.isWhitespace else { return nil }
         return (String(name), String(after))
+    }
+
+    // MARK: `/` anywhere in a message
+
+    /// Whether a character can be part of a command's name.
+    private static func isNameCharacter(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "-" || c == "_" || c == ":"
+    }
+
+    /// The `/` the caret is in, as the range of `/` and what was typed
+    /// after it: the `/` at the text's start or after a space, with no
+    /// space between it and the caret, so that "1/4" and "and/or" are
+    /// text. Nil when the caret is in none. In UTF-16 units.
+    static func query(in text: String, caret: Int) -> NSRange? {
+        AgentMentions.query(in: text, caret: caret, trigger: 0x2F)
+    }
+
+    /// Where `/name` stands in a text as a skill: the first at the start
+    /// or after a space, followed by a space, a line or the end. In UTF-16
+    /// units.
+    static func range(of name: String, in text: String) -> NSRange? {
+        let token = "/" + name
+        var from = text.startIndex
+        while let found = text.range(of: token, range: from..<text.endIndex) {
+            let before = found.lowerBound == text.startIndex || text[text.index(before: found.lowerBound)].isWhitespace
+            let after = found.upperBound == text.endIndex || text[found.upperBound].isWhitespace
+            if before && after { return NSRange(found, in: text) }
+            from = text.index(after: found.lowerBound)
+        }
+        return nil
+    }
+
+    /// The first `/name` in a text, at the start or after a space and
+    /// with a space or a line after it, whose name is among `names`: a
+    /// skill typed out whole rather than chosen.
+    static func named(in text: String, among names: Set<String>) -> String? {
+        guard !names.isEmpty else { return nil }
+        var index = text.startIndex
+        var previous: Character?
+        while index < text.endIndex {
+            let character = text[index]
+            index = text.index(after: index)
+            guard character == "/", previous?.isWhitespace ?? true else {
+                previous = character
+                continue
+            }
+            let end = text[index...].firstIndex { !isNameCharacter($0) } ?? text.endIndex
+            if end < text.endIndex, text[end].isWhitespace, names.contains(String(text[index..<end])) {
+                return String(text[index..<end])
+            }
+            previous = character
+        }
+        return nil
+    }
+
+    /// The message as it is sent for a skill: as typed when it starts with
+    /// `/name`; otherwise `/name` first and then the words as typed, the
+    /// chip's `/name` kept in its place, since Claude Code runs a skill
+    /// only from a message's start and gives it the rest as its words.
+    static func message(_ text: String, skill: String) -> String {
+        if range(of: skill, in: text)?.location == 0 { return text }
+        return "/\(skill) \(text)"
+    }
+
+    /// A message that runs a skill as the person's row draws it: the
+    /// skill, the words after `/name`, and where in them the person put
+    /// the chip, when it was in the middle; nil for a message that runs
+    /// none.
+    static func shown(_ text: String) -> (name: String, words: String, chip: NSRange?)? {
+        guard let (name, rest) = split(text) else { return nil }
+        let words = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (name, words, range(of: name, in: words))
+    }
+
+    /// What the person typed, for a thread's title: the words with the
+    /// chip in its place, or the message as it is.
+    static func typed(_ text: String) -> String {
+        guard let shown = shown(text), shown.chip != nil else { return text }
+        return shown.words
     }
 
     /// A command's record in Claude Code's transcript, as the person's

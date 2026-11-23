@@ -91,17 +91,17 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [names with spaces](features/display-names.md) | Next 2; proposed |
-| [a skill named anywhere in a message](features/skill-commands-anywhere.md) | Next 3; proposed |
-| [folders as a tree in the browser](features/browser-folders.md) | Next 4; proposed |
-| [what makes the person wait](features/performance.md) | Next 5; proposed |
-| [colors for tracks and clips](features/colors.md) | Next 6; proposed |
-| [a track's height dragged](features/track-height.md) | Next 7; proposed |
+| [folders as a tree in the browser](features/browser-folders.md) | Next 1; proposed |
+| [what makes the person wait](features/performance.md) | Next 2; proposed |
+| [colors for tracks and clips](features/colors.md) | Next 3; proposed |
+| [a track's height dragged](features/track-height.md) | Next 4; proposed |
+| [names with spaces](features/display-names.md) | Built |
 | [the Drum Rack, and patterns gone](features/drum-rack.md) | Built |
-| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 8 |
+| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 5 |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
+| [a skill named anywhere in a message](features/skill-commands-anywhere.md) | Built |
 | [files and clips in the conversation](features/agent-attachments.md) | Built |
 | [`@` mentions](features/agent-mentions.md) | Built |
 | [speaking to the agent](features/voice-input.md) | Built |

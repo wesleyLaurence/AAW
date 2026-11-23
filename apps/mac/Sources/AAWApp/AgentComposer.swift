@@ -5,11 +5,10 @@ import SwiftUI
 /// Shift-Return starts a new line and Escape gives the keys back; it grows
 /// with its text to `mostLines` and scrolls past that. An AppKit view so
 /// that a chip and a picture can be put in it. A skill chosen under `/` is
-/// a chip: its `/name` at the start drawn on a rounded fill in the person's
-/// color, taken whole by Backspace, the caret kept after it, and the
-/// skill's argument hint after it until the person types. A thing of the
-/// song named under `@` is a chip the same way, `@drums`, wherever it
-/// stands in the text.
+/// a chip: its `/name` wherever it stands drawn on a rounded fill in the
+/// person's color, taken whole by Backspace, the caret kept after it, and
+/// the skill's argument hint after it while it is all there is. A thing of
+/// the song named under `@` is a chip the same way, `@drums`.
 final class ComposerTextView: NSTextView {
     var onSend: (() -> Void)?
     var onEscape: (() -> Void)?
@@ -31,7 +30,7 @@ final class ComposerTextView: NSTextView {
         }
     }
     var placeholder = "Create or edit this session"
-    /// The chosen skill's name, drawn as a chip while the text starts with
+    /// The chosen skill's name, drawn as a chip where the text has
     /// `/name`, and what its words are, drawn after the chip until typed.
     var chip: String? {
         didSet {
@@ -181,11 +180,10 @@ final class ComposerTextView: NSTextView {
 
     // MARK: The chips
 
-    /// The characters of the skill's chip: `/name` at the start, while the
-    /// text goes on with a space, a line or nothing.
+    /// The characters of the skill's chip: the first `/name` at the start
+    /// or after a space, with a space, a line or nothing after it.
     var chipRange: NSRange? {
-        guard let chip, AgentCommands.split(string)?.name == chip else { return nil }
-        return NSRange(location: 0, length: ("/" + chip as NSString).length)
+        chip.flatMap { AgentCommands.range(of: $0, in: string) }
     }
 
     /// The characters of every `@name` chip.
@@ -261,9 +259,10 @@ final class ComposerTextView: NSTextView {
         return rect.insetBy(dx: -3, dy: 0.5)
     }
 
-    /// Whether the hint still shows: nothing typed after the chip.
+    /// Whether the hint still shows: the chip at the start and nothing
+    /// typed after it.
     var showsHint: Bool {
-        guard chip != nil, !hint.isEmpty, let split = AgentCommands.split(string) else { return false }
+        guard !hint.isEmpty, chipRange?.location == 0, let split = AgentCommands.split(string) else { return false }
         return split.rest.trimmingCharacters(in: .whitespaces).isEmpty
     }
 

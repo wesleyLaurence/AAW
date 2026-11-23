@@ -423,9 +423,10 @@ private struct RowView: View, Equatable {
 }
 
 /// The person's words on a rounded fill in their color, set in from the
-/// left; a skill they ran is its chip, then the words after it; a thing of
-/// the song they named with `@` is on the color within the words; what went
-/// with the message is a row of chips under the words.
+/// left; a skill they ran is its chip, then the words after it, or the chip
+/// within the words where they put it there; a thing of the song they
+/// named with `@` is on the color within the words; what went with the
+/// message is a row of chips under the words.
 private struct PersonRow: View {
     let text: String
     var attachments: [AgentAttachment] = []
@@ -434,11 +435,13 @@ private struct PersonRow: View {
         HStack(spacing: 0) {
             Spacer(minLength: 36)
             VStack(alignment: .leading, spacing: 6) {
-                if let (name, rest) = AgentCommands.split(text) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        CommandChip(name: name)
-                        if !rest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            words(rest.trimmingCharacters(in: .whitespacesAndNewlines))
+                if let shown = AgentCommands.shown(text) {
+                    if let chip = shown.chip {
+                        words(shown.words, skill: chip)
+                    } else {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            CommandChip(name: shown.name)
+                            if !shown.words.isEmpty { words(shown.words) }
                         }
                     }
                 } else {
@@ -456,17 +459,23 @@ private struct PersonRow: View {
         .accessibilityLabel("You")
     }
 
-    private func words(_ text: String) -> some View {
-        Text(Self.styled(text, mentions: attachments.map(\.name)))
+    private func words(_ text: String, skill: NSRange? = nil) -> some View {
+        Text(Self.styled(text, mentions: attachments.map(\.name), skill: skill))
             .font(.system(size: AgentPanelView.textSize))
             .textSelection(.enabled)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     /// The words with each `@name` of something attached in white on the
-    /// person's color, as the field drew it.
-    static func styled(_ text: String, mentions names: [String]) -> AttributedString {
+    /// person's color, as the field drew it, and the skill's `/name` where
+    /// it stands as its chip, in monospace.
+    static func styled(_ text: String, mentions names: [String], skill: NSRange? = nil) -> AttributedString {
         var out = AttributedString(text)
+        if let skill, let r = Range(skill, in: out) {
+            out[r].font = .system(size: 12, design: .monospaced)
+            out[r].foregroundColor = .white
+            out[r].backgroundColor = Who.user.color
+        }
         for (range, _) in AgentMentions.found(in: text, among: Set(names)) {
             guard let r = Range(range, in: out) else { continue }
             out[r].foregroundColor = .white
@@ -1281,7 +1290,12 @@ private struct CommandList: View {
         switch agent.status {
         case .missing: "Claude Code was not found, so no skills are listed."
         case .signedOut: "Claude Code is signed out, so no skills are listed."
-        default: agent.commands.isEmpty && !agent.handshook ? "Loading skills…" : "No skill matches."
+        default:
+            if let chip = agent.chip, agent.oneSkillTaken {
+                "One skill a message: /\(chip.name) is chosen."
+            } else {
+                agent.commands.isEmpty && !agent.handshook ? "Loading skills…" : "No skill matches."
+            }
         }
     }
 }

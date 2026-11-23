@@ -382,12 +382,12 @@ final class AgentPanelTests: XCTestCase {
 
         // `/` lists all; typing filters by the name, then the description.
         XCTAssertNil(agent.commandQuery)
-        agent.draft = "/"
+        type(agent, "/")
         XCTAssertEqual(agent.commandQuery, "")
         XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["song-skill", "for-all", "roar", "compact"])
-        agent.draft = "/co"
+        type(agent, "/co")
         XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["compact"])
-        agent.draft = "/song"
+        type(agent, "/song")
         XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["song-skill", "for-all"])
         XCTAssertTrue(agent.moveSelection(by: 1))
         XCTAssertEqual(agent.commandSelection, 1)
@@ -396,10 +396,11 @@ final class AgentPanelTests: XCTestCase {
         XCTAssertTrue(agent.chooseSelected())
         XCTAssertEqual(agent.chip?.name, "song-skill")
         XCTAssertEqual(agent.draft, "/song-skill ")
+        XCTAssertEqual(agent.caretRequest?.caret, 12)
         XCTAssertNil(agent.commandQuery)
-        agent.draft = "/song-skill 8 bars"
-        XCTAssertEqual(agent.chip?.name, "song-skill", "the chip stays while the draft starts with its name")
-        agent.draft = "/song-skil"
+        type(agent, "/song-skill 8 bars")
+        XCTAssertEqual(agent.chip?.name, "song-skill", "the chip stays while the draft has its name")
+        type(agent, "/song-skil")
         XCTAssertNil(agent.chip, "and goes once it does not")
         XCTAssertEqual(agent.commandQuery, "song-skil")
 
@@ -409,14 +410,26 @@ final class AgentPanelTests: XCTestCase {
         XCTAssertFalse(agent.closeList())
         XCTAssertFalse(agent.moveSelection(by: 1))
         XCTAssertFalse(agent.chooseSelected())
-        agent.draft = "/song-skill"
+        type(agent, "/song-skill")
         XCTAssertEqual(agent.commandQuery, "song-skill")
-        agent.draft = "a /b"
-        XCTAssertNil(agent.commandQuery, "a slash elsewhere is a slash")
+        XCTAssertNil(agent.chip, "a name typed out is no chip until a space follows")
+        type(agent, "a/b")
+        XCTAssertNil(agent.commandQuery, "a slash after a letter is a slash")
+        type(agent, "1/4 notes")
+        XCTAssertNil(agent.commandQuery)
+        type(agent, "and/or")
+        XCTAssertNil(agent.commandQuery)
 
-        agent.draft = "/ro"
+        // Nothing matching leaves Return and the arrows to the field.
+        type(agent, "see /zz")
+        XCTAssertEqual(agent.commandQuery, "zz")
+        XCTAssertEqual(agent.listed.count, 0)
+        XCTAssertFalse(agent.chooseSelected())
+        XCTAssertFalse(agent.moveSelection(by: 1))
+
+        type(agent, "/ro")
         XCTAssertTrue(agent.chooseSelected())
-        agent.draft = "/roar 8 bars short"
+        type(agent, "/roar 8 bars short")
         agent.send()
         XCTAssertEqual(agent.draft, "")
         XCTAssertNil(agent.chip)
@@ -434,6 +447,73 @@ final class AgentPanelTests: XCTestCase {
         XCTAssertEqual(agent.sections.count, 3)
         wait("the second process") { (try? self.starts().count) == 2 }
         wait("its handshake") { agent.handshook }
+    }
+
+    /// A `/` after a space in the middle of the words lists the skills;
+    /// the one chosen is a chip there, a second `/` lists none, and the
+    /// message is sent with `/name` first and the words as typed, the row
+    /// and the thread's title as typed. A skill typed out whole is a chip
+    /// too.
+    func testASkillChosenInTheMiddleRunsTheMessage() throws {
+        let song = try workspaceAndProject()
+        let dir = song.deletingLastPathComponent().appendingPathComponent(".claude/skills/song-skill")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "---\nname: song-skill\n---\n".write(to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        let model = try SongModel(url: song)
+        defer { model.close() }
+        model.showsAgent = true
+        let agent = model.agent
+        wait("the handshake") { agent.handshook }
+
+        type(agent, "take the second chorus and /song-")
+        XCTAssertEqual(agent.commandQuery, "song-")
+        XCTAssertEqual(agent.listed.flatMap(\.commands).map(\.name), ["song-skill"])
+        XCTAssertNil(agent.mentionQuery)
+        XCTAssertTrue(agent.chooseSelected())
+        XCTAssertEqual(agent.draft, "take the second chorus and /song-skill ")
+        XCTAssertEqual(agent.chip?.name, "song-skill")
+        XCTAssertEqual(agent.caretRequest?.caret, 39)
+        XCTAssertNil(agent.commandQuery)
+
+        // Chosen in place of a `/` with words already after it, the space
+        // after it serves.
+        type(agent, "take /so it")
+        agent.caret = 8
+        XCTAssertEqual(agent.commandQuery, "so")
+        XCTAssertTrue(agent.chooseSelected())
+        XCTAssertEqual(agent.draft, "take /song-skill it")
+        XCTAssertEqual(agent.caretRequest?.caret, 17)
+
+        // One skill a message: a second `/` lists none and keeps no key.
+        type(agent, "take /song-skill it and /ro")
+        XCTAssertEqual(agent.commandQuery, "ro")
+        XCTAssertTrue(agent.oneSkillTaken)
+        XCTAssertEqual(agent.listed.count, 0)
+        XCTAssertFalse(agent.chooseSelected())
+        // The caret on the chip's own name opens nothing.
+        type(agent, "take /song-skill")
+        XCTAssertNil(agent.commandQuery)
+        XCTAssertEqual(agent.chip?.name, "song-skill")
+
+        // A skill typed out whole is the chip once a space follows.
+        type(agent, "")
+        XCTAssertNil(agent.chip)
+        type(agent, "take the second chorus and /song-skill it, keep it short")
+        XCTAssertEqual(agent.chip?.name, "song-skill")
+        agent.send()
+        XCTAssertNil(agent.chip)
+        wait("the turn") { !agent.working }
+        let message = try XCTUnwrap(try messages().first)
+        XCTAssertTrue(message.hasPrefix("/song-skill take the second chorus and /song-skill it, keep it short\n\n\(AppContext.open)\n"), message)
+        XCTAssertEqual(agent.entries.first?.description, "you: /song-skill take the second chorus and /song-skill it, keep it short")
+        XCTAssertEqual(agent.threads.map(\.title), ["take the second chorus and /song-skill it, keep it short"])
+        XCTAssertEqual(AgentCommands.shown(AppContext.strip(message))?.chip, NSRange(location: 27, length: 11), "the row draws the chip where it was typed")
+    }
+
+    /// The draft typed with the caret at its end, as the field tells both.
+    private func type(_ agent: AgentPanel, _ text: String) {
+        agent.draft = text
+        agent.caret = (text as NSString).length
     }
 
     /// Record Audio: refused with the input's name when the device is not
