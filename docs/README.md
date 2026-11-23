@@ -12,7 +12,7 @@ development separately. The [project introduction](../README.md) covers setup.
 | [backlog.md](backlog.md) | What is not built yet, in order, with an inbox for ideas | Next |
 | [features/](features/) | One file per feature: its design before it is built, its reference after | Will, then is |
 | [architecture.md](architecture.md) | How it is built: the parts, the song format, the semantics | Is |
-| [decisions.md](decisions.md) | Why each choice was made, numbered and never rewritten | Because |
+| [decisions.md](decisions.md) | Why each choice for the whole project was made, numbered and never rewritten | Because |
 | [completed.md](completed.md) | What was built, when, and what a person tried | Was |
 | [images/](images/) | Pictures the README and docs show | — |
 | [archive/](archive/) | Superseded documents, kept for history | — |
