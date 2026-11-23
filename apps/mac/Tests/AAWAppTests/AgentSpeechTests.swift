@@ -108,10 +108,19 @@ final class AgentSpeechTests: XCTestCase {
     /// What cannot listen says why.
     func testTheReasons() {
         XCTAssertEqual(SpeechTranscriber.reason(.ready), "")
-        XCTAssertEqual(SpeechTranscriber.reason(.noOnDeviceRecognition(locale: "fr_FR")),
-                       "This Mac cannot yet recognize fr_FR speech on the device, and nothing is sent off it: turn on Dictation in System Settings › Keyboard, which downloads the language")
+        XCTAssertEqual(SpeechTranscriber.reason(.unreachable(locale: "fr_FR")),
+                       "This Mac cannot recognize fr_FR speech on the device, and Apple's speech recognition cannot be reached: connect to the internet")
         XCTAssertEqual(SpeechTranscriber.reason(.refused("off")), "off")
         XCTAssertEqual(SpeechTranscriber.reason(.unsupported), "This Mac has no speech recognizer")
+    }
+
+    /// Stopping and hearing nothing end without trouble; a failure does not.
+    func testQuietErrors() {
+        XCTAssertTrue(SpeechTranscriber.isQuiet(NSError(domain: "kLSRErrorDomain", code: 301)))
+        XCTAssertTrue(SpeechTranscriber.isQuiet(NSError(domain: "kAFAssistantErrorDomain", code: 216)))
+        XCTAssertTrue(SpeechTranscriber.isQuiet(NSError(domain: "kAFAssistantErrorDomain", code: 1110)))
+        XCTAssertFalse(SpeechTranscriber.isQuiet(NSError(domain: "kAFAssistantErrorDomain", code: 1700)))
+        XCTAssertFalse(SpeechTranscriber.isQuiet(NSError(domain: NSURLErrorDomain, code: -1009)))
     }
 
     /// The uncertain tail is drawn in the faint color and the rest in the

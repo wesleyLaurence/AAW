@@ -29,7 +29,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>AAW listens while you speak to the agent and puts your words in the field for you to read and send.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>AAW turns what you say to the agent into text, recognized on this Mac; nothing you say leaves it.</string>
+	<string>AAW turns what you say to the agent into text: on this Mac where it has your language, otherwise through Apple's speech recognition, as Dictation does.</string>
 	<key>UTExportedTypeDeclarations</key>
 	<array>
 		<dict>
