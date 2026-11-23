@@ -160,7 +160,7 @@ describe all of this; in short:
 | Launch | Opens a blank project called Untitled, 120 BPM and eight bars long until something is put in it, kept in `Untitled/` of the app's data folder until it has a name, with a `SONG.md` for what the song is for and an `AGENTS.md` that hands it to an agent ([what every session is given](../../docs/features/agent-context.md)); the app shows neither. There is no welcome window, and closing the last window quits |
 | File › New (⌘N) | Another Untitled project, in a window of its own |
 | A `.aaw` double-clicked in the Finder, or `open NAME.aaw` | Opens the project, launching the app on it with no Untitled project shown on the way, or brings its window forward. A `.aaw` that does not read says why and names the song file to open instead |
-| File › Open… (⌘O), Open Recent | A project's `.aaw` or its folder. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again by its bookmark, or by its ID when it is opened at a path the index does not know, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there. A folder duplicated in the Finder is given an ID of its own when opened |
+| File › Open… (⌘O), Open Recent | A project's `.aaw` or its folder, opened while the app goes on answering: its window comes when the host has the song, and a panel with Cancel says so when that takes over half a second. Open Recent is the app's own index of the projects it knows: a project whose folder was moved is found again by its bookmark, or by its ID when it is opened at a path the index does not know, one that is gone is listed and cannot be chosen, and an Untitled project a crash left is there. A folder duplicated in the Finder is given an ID of its own when opened |
 | File › Export Audio… (⇧⌘R) | Opens a sheet over the window with the name, Start and End as bar, beat and sixteenth, a decimal sixteenth between them (what the selected clips sound over when clips are selected, an audio clip's lead included, else the whole song, with Whole Song to put it back), the format (WAV, AIFF, FLAC, AAC, MP3), the sample rate, the bit depth (16, 24, 32-bit float) or for AAC and MP3 the bitrate, the level (as rendered, a true peak, a loudness or a gain) and the ceiling; Export writes what is heard over the range with the bundle's `daw export` into the project's `exports` folder, asking before replacing a file there, or where a save panel says for an Untitled project, rendering first when the song has changed. A problem with the range or the name is said beside the buttons and keeps Export gray. The options, not the name or range, are offered next time. The transport bar says "Exporting NAME…" while it runs and the window stays usable; a banner then shows the range, length, loudness, true peak, gain and warnings with Show in Finder, or the command's reason when nothing was written. The song does not change ([export in the app](../../docs/features/export-in-app.md)) |
 | File › Export MIDI Clip… (⇧⌘E) | With one note clip selected, asks for a name and a place and writes the notes that play as a MIDI file, as `daw midi export` does |
 | File › Save As… (⇧⌘S) | Asks for a name and a place. An Untitled project moves there. A project that has a name is copied, and the window carries on in the copy. Undo, the selection and what is playing carry on, and `daw` commands sent to the old path still land in the window |
@@ -450,8 +450,15 @@ none is, such as the same virtual device.
 
 `--measure JSON [--frames N]` in place of the picture, or before it, scrolls and
 zooms the arrangement through the song for N frames (240 unless given) and
-writes how long each took to draw, the time between frames, and how long the
-waveforms trailed the song's opening and its last change.
+writes how long each took to draw, the time between frames, how long the
+waveforms trailed the song's opening and its last change, and under `stalls`
+every time from launch the main thread was held past a tenth of a second, with
+its stacks, the app's own frames named by `atos`; `AAW_STALL_MS` lowers that to
+look into shorter work. The app logs each stall in any run, under
+`local.aaw.mac`, category `stall`. `./measure.sh OUT.json` runs one session on a
+generated song of 30 tracks, a library of 50,000 samples and a long
+conversation, the same steps before and after a change
+([performance](../../docs/features/performance.md)).
 
 These run in the order given, half a second apart; `--after` is the time
 between the last of them and the picture:
@@ -564,7 +571,9 @@ dragging it. A `--drag` from a point sets its band, as a person's drag does.
 | `Sources/AAWApp/AgentThreads.swift` | `.daw/threads.json`, the context wrapped ahead of a message, and Claude Code's own record of sessions read for a folder's list and a resumed thread's earlier messages, tested in `Tests` |
 | `Sources/AAWApp/ExportSheet.swift` | The Export Audio sheet: the name, the range's bar, beat and sixteenth fields with what they say, a place off the grid as the nearest sixteenth and milliseconds, the format, rate, depth or bitrate, level and ceiling |
 | `Sources/AAWApp/Projects.swift` | The index of the projects the app knows, and what closing a project does, tested in `Tests` |
-| `Sources/AAWApp/App.swift` | The app delegate, menus, windows, launch, Save As…, closing and the command line |
+| `Sources/AAWApp/App.swift` | The app delegate, menus, windows, launch, opening a project off the main thread, Save As…, closing and the command line |
+| `Sources/AAWApp/OpeningPanel.swift` | The panel that says a project is opening, with Cancel, when its host takes over half a second |
+| `Sources/AAWApp/Stalls.swift` | The watch on the main thread: each piece of work over a tenth of a second, with its stacks, logged and reported by `--measure`, tested in `Tests` |
 | `Sources/AAW` | The executable's entry point |
 
 ## Limits

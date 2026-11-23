@@ -1,6 +1,6 @@
 # Colors for tracks and clips — proposed November 22, 2026
 
-Status: proposed, not built. Backlog: Next 4. The person's note of November
+Status: proposed, not built. Backlog: Next 1. The person's note of November
 22, 2026 (D194): "you should be able to change the color of any track or
 clip in order to match it with others for example making the drum clips
 white etc." It takes in the Later line "a track's color saved in the song".

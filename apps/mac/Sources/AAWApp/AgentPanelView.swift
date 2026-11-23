@@ -321,7 +321,9 @@ private struct Conversation: View {
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                VStack(alignment: .leading, spacing: 12) {
+                // Lazy: a long conversation's rows are laid out as they
+                // scroll into view, not all of them on every change.
+                LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(AgentPanel.fold(agent.entries)) { row in
                         RowView(agent: agent, row: row, streaming: agent.streamingID).equatable()
                     }

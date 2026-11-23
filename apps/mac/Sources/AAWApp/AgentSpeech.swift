@@ -8,8 +8,11 @@ import Speech
 @MainActor
 protocol Transcriber: AnyObject {
     /// Whether it can listen, and if not, why, in a line for the button's
-    /// help and the refusal.
+    /// help and the refusal. Asked as listening starts.
     var availability: Transcriber.Availability { get }
+    /// Finds out whether it can listen without holding the main thread,
+    /// and gives the answer on it: for the button, which is drawn often.
+    func check(_ done: @escaping @MainActor (Transcriber.Availability) -> Void)
     /// Starts listening. `heard` is given the whole text so far each time
     /// it changes, and whether that is the last word; `level` the input's
     /// level from 0 to 1 as it goes; `ended` once, with what went wrong or
@@ -23,6 +26,10 @@ protocol Transcriber: AnyObject {
 }
 
 extension Transcriber {
+    func check(_ done: @escaping @MainActor (Transcriber.Availability) -> Void) {
+        done(availability)
+    }
+
     /// Whether it can listen now.
     var available: Bool {
         if case .ready = availability { return true }
@@ -98,6 +105,20 @@ final class SpeechTranscriber: Transcriber {
     }
 
     var availability: Availability {
+        Self.availability(of: recognizer)
+    }
+
+    /// Each question here is a call to a system service, 50 ms or more the
+    /// first time: asked off the main thread, of a recognizer of its own.
+    func check(_ done: @escaping @MainActor (Availability) -> Void) {
+        let locale = recognizer?.locale
+        DispatchQueue.global(qos: .utility).async {
+            let found = Self.availability(of: locale.flatMap { SFSpeechRecognizer(locale: $0) } ?? SFSpeechRecognizer())
+            DispatchQueue.main.async { MainActor.assumeIsolated { done(found) } }
+        }
+    }
+
+    nonisolated private static func availability(of recognizer: SFSpeechRecognizer?) -> Availability {
         guard let recognizer else { return .unsupported }
         if !recognizer.supportsOnDeviceRecognition {
             return .noOnDeviceRecognition(locale: recognizer.locale.identifier)

@@ -72,7 +72,23 @@ final class Browser {
     private(set) var instrumentRacks: [InstrumentRackInfo] = []
 
     func refreshInstrumentRacks() {
-        instrumentRacks = libraryInstrumentRacks(query: "")
+        read({ libraryInstrumentRacks(query: "") }) { $0.instrumentRacks = $1 }
+    }
+
+    /// The person's patches, racks, instrument racks and favorites are
+    /// files, read off the main thread as the browser shows, so that a large
+    /// library never holds the window; a list shows what it had meanwhile.
+    @ObservationIgnored private let files = DispatchQueue(label: "aaw.library.files")
+
+    private func read<T: Sendable>(_ body: @escaping @Sendable () -> T, then apply: @escaping @MainActor (Browser, T) -> Void) {
+        files.async { [weak self] in
+            let value = body()
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    if let self { apply(self, value) }
+                }
+            }
+        }
     }
 
     /// Whether every word of `query` is in the instrument rack's name, a
@@ -100,13 +116,16 @@ final class Browser {
     var favoriteError: String?
 
     func refreshFavorites() {
-        do {
-            favorites = try libraryFavorites()
-            favoriteError = nil
-        } catch {
-            favoriteError = SongModel.reason(error)
+        read({ Result { try libraryFavorites() } }) { browser, read in
+            switch read {
+            case .success(let favorites):
+                browser.favorites = favorites
+                browser.favoriteError = nil
+            case .failure(let error):
+                browser.favoriteError = SongModel.reason(error)
+            }
+            browser.resolveFavoriteSamples()
         }
-        resolveFavoriteSamples()
     }
 
     /// Asks the index for the favorite samples' rows, off the main thread.
@@ -184,7 +203,7 @@ final class Browser {
     private(set) var patches: [PatchInfo] = []
 
     func refreshPatches() {
-        patches = libraryPatches(query: "")
+        read({ libraryPatches(query: "") }) { $0.patches = $1 }
     }
 
     /// The person's effect racks, as `daw rack list` lists them; read again
@@ -192,7 +211,7 @@ final class Browser {
     private(set) var racks: [RackInfo] = []
 
     func refreshRacks() {
-        racks = libraryRacks(query: "")
+        read({ libraryRacks(query: "") }) { $0.racks = $1 }
     }
 
     /// Whether every word of `query` is in the patch's name or a tag.

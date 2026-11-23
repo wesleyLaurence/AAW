@@ -251,6 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        Stalls.shared.start()
         NSApp.mainMenu = mainMenu()
     }
 
@@ -260,12 +261,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         AudioPreferences.shared.onChange = { [weak self] settings in
             self?.songs.forEach { $0.model.applyAudio(settings) }
         }
-        for url in launch.songs { openSong(url) }
-        if songs.isEmpty { launched = newProject() }
-        if launch.settings { later(0.3) { $0.openSettings($0.launch.settingsPane) } }
         if !scripted || !launch.actions.isEmpty {
             NSApp.activate(ignoringOtherApps: true)
         }
+        // The songs open off the main thread; what is scripted starts once
+        // they are open.
+        openAll(launch.songs) { [self] in
+            // A song the Finder asked for is still opening: no Untitled.
+            guard songs.isEmpty, opening.isEmpty else { return runScript() }
+            newProject { [self] made in
+                launched = made
+                runScript()
+            }
+        }
+    }
+
+    /// Opens each song, then calls `then` once all of them have opened or
+    /// failed.
+    private func openAll(_ urls: [URL], then: @escaping @MainActor () -> Void) {
+        final class Left { var count: Int; init(_ count: Int) { self.count = count } }
+        let left = Left(urls.count)
+        guard left.count > 0 else { return then() }
+        for url in urls {
+            openSong(url) { _ in
+                left.count -= 1
+                if left.count == 0 { then() }
+            }
+        }
+    }
+
+    /// The scripted settings, input and picture of the launch's arguments.
+    private func runScript() {
+        if launch.settings { later(0.3) { $0.openSettings($0.launch.settingsPane) } }
         // Scripted input, half a second apart, then the picture. Typed
         // characters follow one another closely.
         var delay = 0.5
@@ -290,6 +317,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } else if let snapshot = launch.snapshot {
             later(end) { $0.snapshot(to: snapshot) }
         }
+    }
+
+    /// A permission the person changed in System Settings shows in the
+    /// microphone's button as the app comes back.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        songs.forEach { $0.model.agent.checkSpeech() }
     }
 
     /// Writes the first song's mix where `--export` said, prints what the
@@ -386,7 +419,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let folder = song.deletingLastPathComponent()
         guard !untitled, !FileManager.default.fileExists(atPath: folder.appendingPathComponent("Icon\r").path),
               let icon = NSApp.applicationIconImage else { return }
-        NSWorkspace.shared.setIcon(icon, forFile: folder.path, options: [])
+        // Writing the icon's pictures into the folder takes a fifth of a
+        // second: off the main thread, which NSWorkspace allows.
+        nonisolated(unsafe) let image = icon
+        DispatchQueue.global(qos: .utility).async {
+            NSWorkspace.shared.setIcon(image, forFile: folder.path, options: [])
+        }
     }
 
     private func failed(_ what: String, _ error: Error) {
@@ -427,34 +465,89 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         newProject()
     }
 
-    @discardableResult
-    private func newProject() -> SongWindowController? {
+    private func newProject(then: (@MainActor (SongWindowController?) -> Void)? = nil) {
         do {
-            return openSong(URL(fileURLWithPath: try projectNewUntitled()))
+            openSong(URL(fileURLWithPath: try projectNewUntitled()), then: then)
         } catch {
             failed("A new project could not be made", error)
-            return nil
+            then?(nil)
         }
     }
 
-    @discardableResult
-    func openSong(_ url: URL) -> SongWindowController? {
+    /// A song being opened off the main thread.
+    private final class Opening {
+        var cancelled = false
+        /// Shown when the opening takes a while, with Cancel.
+        var panel: OpeningPanel?
+        /// Each is called with the window, or nil when the song did not open.
+        var done: [@MainActor (SongWindowController?) -> Void] = []
+    }
+
+    /// The songs being opened, by their song file.
+    private var opening: [URL: Opening] = [:]
+
+    /// How long an opening goes before its panel shows.
+    static let openingPanelDelay = 0.5
+
+    /// Opens a project in a window of its own, or brings its window forward.
+    /// The host loads the song off the main thread, which for a large song
+    /// takes a while, so the app goes on answering meanwhile; a panel with
+    /// Cancel shows when it takes more than half a second. `then` is called
+    /// with the window, or nil when the song did not open.
+    func openSong(_ url: URL, then: (@MainActor (SongWindowController?) -> Void)? = nil) {
         let file: URL
         do {
             file = try Self.songFile(url)
         } catch {
             failed("“\(url.lastPathComponent)” could not be opened", error)
-            return nil
+            then?(nil)
+            return
         }
         if let shown = songs.first(where: { $0.model.url == file }) {
             shown.showWindow(nil)
-            return shown
+            then?(shown)
+            return
+        }
+        if let pending = opening[file] {
+            if let then { pending.done.append(then) }
+            return
         }
         // A project saved from this one answers `daw` commands for its path
         // until the project itself is opened.
         for other in songs where other.model.formerURLs.contains(file) { other.model.release(file) }
+        let pending = Opening()
+        if let then { pending.done.append(then) }
+        opening[file] = pending
+        later(Self.openingPanelDelay) { app in
+            guard app.opening[file] === pending, !pending.cancelled else { return }
+            pending.panel = OpeningPanel(name: ProjectIndex.name(of: file)) { [weak pending] in
+                pending?.cancelled = true
+                pending?.panel?.close()
+            }
+            pending.panel?.show()
+        }
+        SongModel.open(url: file) { [self] result in opened(file, result, pending) }
+    }
+
+    /// The host has the song, or could not open it: its window, unless the
+    /// person cancelled meanwhile, whose song is closed again.
+    private func opened(_ file: URL, _ result: Result<OpenedSong, Error>, _ pending: Opening) {
+        opening[file] = nil
+        pending.panel?.close()
+        var controller: SongWindowController?
+        if pending.cancelled {
+            if case .success(let song) = result {
+                DispatchQueue.global(qos: .utility).async { song.close() }
+            }
+        } else {
+            controller = show(file, result)
+        }
+        for done in pending.done { done(controller) }
+    }
+
+    private func show(_ file: URL, _ result: Result<OpenedSong, Error>) -> SongWindowController? {
         do {
-            let controller = SongWindowController(model: try SongModel(url: file), size: launch.size, asks: !scripted)
+            let controller = SongWindowController(model: SongModel(opened: try result.get()), size: launch.size, asks: !scripted)
             // A folder duplicated in the Finder shares its ID with the
             // project it was copied from: the copy gets one of its own.
             if let id = controller.model.projectID, index.taken(id, byAnotherThan: file) {
@@ -672,6 +765,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let open = controller.model.waveformDelay.open { waveforms["after_open"] = round(open) }
             if let change = controller.model.waveformDelay.change { waveforms["after_change"] = round(change) }
             report["waveform_ms"] = waveforms
+            // Every time the main thread was held past a tenth of a second,
+            // from launch: the opening, the actions and the frames.
+            report["stalls"] = Stalls.shared.report
             // An analyzer window open through the run: how its drawing kept up.
             if let analyzer = controller.model.openAnalyzerWindows.first {
                 var times = analyzer.view.drawTimes.report

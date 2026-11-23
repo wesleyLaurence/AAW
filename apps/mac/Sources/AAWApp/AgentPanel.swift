@@ -199,8 +199,22 @@ final class AgentPanel {
     /// still says is dropped.
     @ObservationIgnored private var cancelled = false
     /// What turns speech into text: the Mac's recognizer, or the stand-in
-    /// `AAW_SPEECH` names.
-    @ObservationIgnored lazy var transcriber: any Transcriber = Transcribers.make(environment: environment)
+    /// `AAW_SPEECH` names; made when first asked for, and checked again
+    /// when another takes its place.
+    var transcriber: any Transcriber {
+        get {
+            if let made = madeTranscriber { return made }
+            let made = Transcribers.make(environment: environment)
+            madeTranscriber = made
+            return made
+        }
+        set {
+            madeTranscriber = newValue
+            checkSpeech()
+        }
+    }
+
+    @ObservationIgnored private var madeTranscriber: (any Transcriber)?
 
     // Recording a sound.
 
@@ -269,6 +283,7 @@ final class AgentPanel {
         refreshThreads()
         if let first = threads.first { open(first.id) }
         if let last = Self.lastCommands[folder.path] { setCommands(last) }
+        checkSpeech()
         locating = Task.detached { [environment] in ClaudeCode.locate(environment: environment) }
         Task { [weak self] in
             guard let self, let task = locating else { return }
@@ -343,23 +358,45 @@ final class AgentPanel {
         currentID = id
         entries = []
         attachedPaths = []
-        if let file = ClaudeTranscripts.file(of: id, near: folders) {
-            for line in ClaudeTranscripts.read(file) {
-                switch line {
-                case .person(let text, let attached):
-                    entries.append(.person(id: next(), text: text, attachments: stamped(attached)))
-                case .agent(let text): entries.append(.agent(id: next(), text: text))
-                case .tool(let name, let summary): entries.append(.tool(id: next(), use: "", name: name, summary: ClaudeTranscripts.shortened(summary, folder: folder), result: nil, failed: false))
-                case .question(let questions, let answers):
-                    entries.append(.question(id: next(), request: "", questions: questions, outcome: answers.map { .answered($0) } ?? .unanswered))
-                case .plan(let plan, let approved):
-                    entries.append(.plan(id: next(), request: "", plan: plan, approved: approved))
-                }
-            }
-        } else {
-            note("Earlier messages are in Claude Code's own record, which was not found here; the conversation goes on from where it stopped.")
+        // A long conversation's record is megabytes of JSON: read off the
+        // main thread, and put before whatever the panel shows by then.
+        histories += 1
+        let (asked, folders) = (histories, folders)
+        let read = Task.detached { () -> [ClaudeTranscripts.Line]? in
+            ClaudeTranscripts.file(of: id, near: folders).map(ClaudeTranscripts.read)
+        }
+        Task { [weak self] in
+            let lines = await read.value
+            guard let self, histories == asked, currentID == id else { return }
+            showHistory(lines)
         }
         warm()
+    }
+
+    /// Counts the histories asked for, so that only the last one asked is shown.
+    @ObservationIgnored private var histories = 0
+
+    /// A thread's earlier messages, from Claude Code's record of it, before
+    /// what the panel already shows; nil when the record was not found.
+    private func showHistory(_ lines: [ClaudeTranscripts.Line]?) {
+        guard let lines else {
+            note("Earlier messages are in Claude Code's own record, which was not found here; the conversation goes on from where it stopped.")
+            return
+        }
+        var earlier: [Entry] = []
+        for line in lines {
+            switch line {
+            case .person(let text, let attached):
+                earlier.append(.person(id: next(), text: text, attachments: stamped(attached)))
+            case .agent(let text): earlier.append(.agent(id: next(), text: text))
+            case .tool(let name, let summary): earlier.append(.tool(id: next(), use: "", name: name, summary: ClaudeTranscripts.shortened(summary, folder: folder), result: nil, failed: false))
+            case .question(let questions, let answers):
+                earlier.append(.question(id: next(), request: "", questions: questions, outcome: answers.map { .answered($0) } ?? .unanswered))
+            case .plan(let plan, let approved):
+                earlier.append(.plan(id: next(), request: "", plan: plan, approved: approved))
+            }
+        }
+        entries.insert(contentsOf: earlier, at: 0)
     }
 
     func rename(_ id: String, _ title: String) {
@@ -703,9 +740,17 @@ final class AgentPanel {
 
     // MARK: Speaking
 
-    /// Why the microphone cannot listen now, in a line; nil when it can.
-    var speechTrouble: String? {
-        transcriber.available ? nil : SpeechTranscriber.reason(transcriber.availability)
+    /// Why the microphone cannot listen, in a line, as last found; nil
+    /// when it can, or until the first check answers.
+    private(set) var speechTrouble: String?
+
+    /// Finds out again whether the microphone can listen, off the main
+    /// thread: as the panel starts, and as the app comes to the front,
+    /// after the person may have changed a permission in System Settings.
+    func checkSpeech() {
+        transcriber.check { [weak self] availability in
+            self?.speechTrouble = availability == .ready ? nil : SpeechTranscriber.reason(availability)
+        }
     }
 
     /// The microphone's button: starts listening, or stops it, keeping
@@ -718,6 +763,9 @@ final class AgentPanel {
     /// shows them as they come, the uncertain tail in the faint color.
     func startListening() {
         guard !listening else { return }
+        // Asked again now: the person may have just allowed it.
+        let availability = transcriber.availability
+        speechTrouble = availability == .ready ? nil : SpeechTranscriber.reason(availability)
         if let trouble = speechTrouble {
             song?.refuse(trouble)
             return
