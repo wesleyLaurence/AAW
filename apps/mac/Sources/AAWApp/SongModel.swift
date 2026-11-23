@@ -212,6 +212,9 @@ public final class SongModel {
     /// The tracks whose Drum Rack's clips the piano roll shows unfolded,
     /// every key, rather than only the pads' keys.
     var unfoldedDrums: Set<UInt64> = []
+    /// The height of each row the person dragged, kept with the project
+    /// outside the song.
+    @ObservationIgnored private(set) var rowHeights: RowHeights
     /// The Drum Rack pad last clicked, while nothing else has been selected
     /// since: what Delete takes off.
     private(set) var drumPadInHand: (track: UInt64, pad: String)?
@@ -421,6 +424,8 @@ public final class SongModel {
         projectID = opened.projectID
         browser = Browser(library: opened.library)
         arrangement = opened.arrangement
+        rowHeights = RowHeights(project: opened.url.deletingLastPathComponent())
+        rowHeights.follow(Self.rowPaths(of: opened.arrangement))
         deviceRow = arrangement.tracks.first.map { .track($0.key) }
         opened.relay.attach(self)
         agent.song = self
@@ -455,6 +460,7 @@ public final class SongModel {
     fileprivate func apply(_ update: Update) {
         let was = arrangement
         arrangement = update.arrangement
+        if rowHeights.follow(Self.rowPaths(of: arrangement)) { saveRowHeights() }
         revisionShown = CACurrentMediaTime()
         undoStep = update.undo
         redoStep = update.redo
@@ -551,6 +557,8 @@ public final class SongModel {
         url = new
         untitled = song.isUntitled()
         projectID = projectId(song: new.path)
+        rowHeights.move(to: new.deletingLastPathComponent())
+        if !rowHeights.heights.isEmpty { saveRowHeights() }
         agent.projectMoved(from: old.deletingLastPathComponent())
         onMoved?(old)
     }
@@ -2410,6 +2418,41 @@ public final class SongModel {
         let path = try commands.sync { try song.saveAs(folder: folder.path) }
         // Known here at once; the host's own report of it follows.
         moved(to: path)
+    }
+
+    // MARK: Row heights
+
+    /// Each track's, group's and return's path in the song, by its key: what
+    /// a row's height is kept by.
+    static func rowPaths(of a: Arrangement) -> [UInt64: String] {
+        var paths: [UInt64: String] = [:]
+        for track in a.tracks { paths[track.key] = "tracks." + track.id }
+        for group in a.groups { paths[group.key] = "groups." + group.id }
+        for bus in a.returns { paths[bus.key] = "returns." + bus.id }
+        return paths
+    }
+
+    /// A row's path in the song; the master has none, and no height of its own.
+    func rowPath(of row: RowID) -> String? {
+        row.key.flatMap { Self.rowPaths(of: arrangement)[$0] }
+    }
+
+    /// The height the person gave a row's own line, or nil for its default.
+    func rowHeight(of row: RowID) -> CGFloat? {
+        rowPath(of: row).flatMap { rowHeights[$0] }
+    }
+
+    /// Gives rows a height, or their default with nil; kept with the project
+    /// when `keep`, as a drag is when it ends.
+    func setRowHeight(_ height: CGFloat?, of rows: [RowID], keep: Bool) {
+        let paths = Self.rowPaths(of: arrangement)
+        let changed = rowHeights.set(height, for: rows.compactMap { $0.key.flatMap { paths[$0] } })
+        if keep, changed || height == nil { saveRowHeights() }
+    }
+
+    /// Writes the heights to the project's `.daw/rows.json`.
+    func saveRowHeights() {
+        do { try rowHeights.save() } catch { warn("Row heights were not kept: \(error.localizedDescription)") }
     }
 
     /// Gives the project a new ID in its `.aaw`: for a folder duplicated in

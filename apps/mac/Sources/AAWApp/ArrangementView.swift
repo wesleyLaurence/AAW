@@ -99,6 +99,8 @@ private struct RowVisual {
     var depth = 0
     /// A group whose tracks and groups are folded away.
     var collapsed = false
+    /// The height of the row's own line, without its sends and lanes.
+    var line = TimelineLayout.trackHeight
 }
 
 private struct ClipVisual {
@@ -117,6 +119,8 @@ private struct ClipVisual {
     var at: Animated
     var length: Animated
     var y: Animated
+    /// The height of its track's line, which it fills.
+    var line = TimelineLayout.trackHeight
     var alpha: Animated
     var removing = false
     /// An audio clip as it is shown: the host's, or the person's while they
@@ -350,9 +354,23 @@ private enum Drag {
     case points(PointsDrag)
     case bend(BendDrag)
     case marker(MarkerDrag)
+    /// A row's lower edge, dragged to make it taller or shorter.
+    case height(HeightDrag)
     /// A rectangle that selects what it touches: clips, or the points of
     /// the lanes shown; with those selected before it when Shift was held.
     case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>, points: Bool)
+}
+
+/// A row's lower edge being dragged: the rows it sets, every row's with
+/// Option, from the height of the row pressed.
+private struct HeightDrag {
+    var rows: [RowID]
+    var startY: CGFloat
+    var from: CGFloat
+    /// The heights the rows had, which Escape puts back.
+    var before: [(row: RowID, height: CGFloat?)]
+    /// The height last given, once the drag has moved.
+    var shown: CGFloat?
 }
 
 /// An item chosen from a header's context menu, with the row it was on.
@@ -581,13 +599,19 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             }
         }
 
+        /// The height of a row's own line: the person's, or its kind's.
+        let paths = SongModel.rowPaths(of: a)
+        func line(_ key: UInt64, _ kind: HeaderLayout.Kind) -> CGFloat {
+            paths[key].flatMap { model.rowHeights[$0] } ?? HeaderLayout.defaultLine(kind)
+        }
+
         /// How much taller a row is for its lanes, while they are shown.
         func lanesHeight(_ id: RowID, _ lanes: [LaneView]) -> CGFloat {
             HeaderLayout.extraHeight(lanes: model.showsAutomation ? lanes.count : nil)
         }
 
         func place(_ id: RowID, name: String, detail: String, color: NSColor?, mute: Bool, solo: Bool,
-                   gain: Double, pan: Double, kind: HeaderLayout.Kind, height: CGFloat, sends: [SendView] = [],
+                   gain: Double, pan: Double, kind: HeaderLayout.Kind, line: CGFloat, height: CGFloat, sends: [SendView] = [],
                    depth: Int = 0, collapsed: Bool = false, armed: Bool = false, hasInput: Bool = false) {
             liveRows.insert(id)
             var row: RowVisual
@@ -612,6 +636,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             row.hasInput = hasInput
             row.depth = depth
             row.collapsed = collapsed
+            row.line = line
             row.gain = level(.gain(id), from: row.gain, to: gain)
             row.pan = level(.pan(id), from: row.pan, to: pan)
             if id.strip {
@@ -638,11 +663,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         func placeGroup(_ group: GroupView, depth: Int) {
             placedGroups.insert(group.key)
             let sends = unfolded.contains(group.key) ? a.returns.count : 0
-            let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
+            let own = line(group.key, .group)
+            let height = own + HeaderLayout.extraHeight(sends: sends)
                 + lanesHeight(.group(group.key), group.lanes)
             place(.group(group.key), name: group.name, detail: Self.chain(group.effects), color: model.color(of: group.key),
                   mute: group.mute, solo: group.solo, gain: group.gainDb, pan: group.pan,
-                  kind: .group, height: height, sends: group.sends, depth: depth,
+                  kind: .group, line: own, height: height, sends: group.sends, depth: depth,
                   collapsed: foldedGroups.contains(group.key))
             y += height
         }
@@ -670,7 +696,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let muted = track.mute || path.contains { $0.mute }
             let frozen = track.frozen
             let sends = unfolded.contains(track.key) ? a.returns.count : 0
-            let height = TimelineLayout.trackHeight + HeaderLayout.extraHeight(sends: sends)
+            let own = line(track.key, .track)
+            let height = own + HeaderLayout.extraHeight(sends: sends)
                 + lanesHeight(.track(track.key), track.lanes)
             // A MIDI track's chain starts with its instrument, one of the
             // person's own by the name its manifest gives it.
@@ -680,7 +707,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             let detail = frozen ? (["frozen"] + [chain]).filter { !$0.isEmpty }.joined(separator: " · ") : chain
             place(.track(track.key), name: track.name, detail: detail, color: color,
                   mute: track.mute, solo: track.solo, gain: track.gainDb, pan: track.pan,
-                  kind: .track, height: height, sends: track.sends, depth: path.count,
+                  kind: .track, line: own, height: height, sends: track.sends, depth: path.count,
                   armed: model.isArmed(track: track.key), hasInput: track.input != nil || (track.midi && (track.instrument != nil || track.plugin != nil)))
             for clip in track.noteClips {
                 liveClips.insert(clip.key)
@@ -692,6 +719,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.active = clip.active
                     v.notes = clip
                     v.loop = clip.loopBeats
+                    v.line = own
                     if !dragged.contains(clip.key) {
                         v.at.move(to: clip.at, at: now, over: time)
                         v.length.move(to: clip.lengthBeats, at: now, over: time)
@@ -704,7 +732,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
                         title: clip.id, loop: clip.loopBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
-                        at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), alpha: alpha,
+                        at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), line: own, alpha: alpha,
                         notes: clip, anchor: Animated(clip.at)
                     )
                 }
@@ -719,6 +747,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.frozen = frozen
                     v.active = clip.active
                     v.loop = clip.loopBeats
+                    v.line = own
                     if !dragged.contains(clip.key) {
                         v.audio = clip
                         v.at.move(to: shape.start, at: now, over: time)
@@ -732,7 +761,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
                         title: clip.sample, loop: clip.loopBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
-                        at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), alpha: alpha,
+                        at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), line: own, alpha: alpha,
                         audio: clip, anchor: Animated(shape.fileStart)
                     )
                 }
@@ -744,14 +773,16 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         y += TimelineLayout.busGap
         for bus in a.returns {
-            let height = TimelineLayout.busHeight + lanesHeight(.bus(bus.key), bus.lanes)
+            let own = line(bus.key, .bus)
+            let height = own + lanesHeight(.bus(bus.key), bus.lanes)
             place(.bus(bus.key), name: bus.name, detail: Self.chain(bus.effects), color: bus.color.map(Theme.swatch),
-                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, height: height)
+                  mute: bus.mute, solo: false, gain: bus.gainDb, pan: bus.pan, kind: .bus, line: own, height: height)
             y += height
         }
         let masterHeight = TimelineLayout.busHeight + lanesHeight(.master, a.master.lanes)
         place(.master, name: "Master", detail: Self.chain(a.master.effects), color: nil,
-              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, height: masterHeight)
+              mute: false, solo: false, gain: a.master.gainDb, pan: 0, kind: .master, line: TimelineLayout.busHeight,
+              height: masterHeight)
         y += masterHeight
 
         // What is gone fades out, then is dropped.
@@ -1005,7 +1036,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let returns = model.arrangement.returns.count
         var sends = 0
         if id.strip, let key = id.key, unfolded.contains(key) { sends = returns }
-        return HeaderLayout(kind: row.kind, top: top, sends: sends, folds: id.strip && returns > 0,
+        return HeaderLayout(kind: row.kind, top: top, line: row.line, sends: sends, folds: id.strip && returns > 0,
                             lanes: model.showsAutomation ? model.lanes(of: id).count : nil,
                             collapsed: row.collapsed, depth: row.depth)
     }
@@ -1087,9 +1118,16 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return max(0, tracks.count - 1)
     }
 
-    private func clipRect(at: Double, length: Double, top: CGFloat) -> CGRect {
+    /// A clip drawn in its track's line, whose top is at `top` and whose
+    /// height is `line`.
+    private func clipRect(at: Double, length: Double, top: CGFloat, line: CGFloat) -> CGRect {
         CGRect(x: layout.x(at), y: top + 2, width: max(2, CGFloat(length) * layout.pixelsPerBeat - 1),
-               height: TimelineLayout.trackHeight - 5)
+               height: line - 5)
+    }
+
+    /// The height of a row's own line, as it is drawn.
+    private func line(of id: RowID) -> CGFloat {
+        rows[id]?.line ?? TimelineLayout.trackHeight
     }
 
     /// The height of a clip's title strip.
@@ -1097,7 +1135,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     /// What a clip shows under its title: its notes or its file's waveform.
     private func body(of rect: CGRect) -> CGRect {
-        CGRect(x: rect.minX, y: rect.minY + Self.titleHeight + 1, width: rect.width, height: rect.height - Self.titleHeight - 2)
+        CGRect(x: rect.minX, y: rect.minY + Self.titleHeight + 1, width: rect.width, height: max(0, rect.height - Self.titleHeight - 2))
     }
 
     /// An audio clip as it is drawn and dragged, in the arrangement shown or
@@ -1123,12 +1161,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
+            let line = line(of: .track(track.key))
             for clip in track.audio {
                 let shape = audioLayout(clip)
-                take(.audio(clip), clipRect(at: shape.start, length: shape.length, top: frame.top))
+                take(.audio(clip), clipRect(at: shape.start, length: shape.length, top: frame.top, line: line))
             }
             for clip in track.noteClips {
-                take(.notes(clip), clipRect(at: clip.at, length: clip.lengthBeats, top: frame.top))
+                take(.notes(clip), clipRect(at: clip.at, length: clip.lengthBeats, top: frame.top, line: line))
             }
         }
         return found
@@ -1139,11 +1178,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         var keys: [UInt64] = []
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
+            let line = line(of: .track(track.key))
             let rects = track.audio.map { clip in
                     let shape = audioLayout(clip)
-                    return (clip.key, clipRect(at: shape.start, length: shape.length, top: frame.top))
+                    return (clip.key, clipRect(at: shape.start, length: shape.length, top: frame.top, line: line))
                 }
-                + track.noteClips.map { ($0.key, clipRect(at: $0.at, length: $0.lengthBeats, top: frame.top)) }
+                + track.noteClips.map { ($0.key, clipRect(at: $0.at, length: $0.lengthBeats, top: frame.top, line: line)) }
             keys += rects.filter { $0.1.intersects(box) }.map(\.0)
         }
         return keys
@@ -1188,13 +1228,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         var rects: [CGRect] = []
         for track in model.arrangement.tracks {
             guard let frame = frame(of: .track(track.key)) else { continue }
+            let line = line(of: .track(track.key))
             for clip in track.audio {
                 let shape = audioLayout(clip)
-                let rect = clipRect(at: shape.start, length: shape.length, top: frame.top)
+                let rect = clipRect(at: shape.start, length: shape.length, top: frame.top, line: line)
                 rects += shape.grabRects(in: body(of: rect), clip: rect)
             }
             for clip in track.noteClips {
-                rects += TimelineLayout.edgeRects(of: clipRect(at: clip.at, length: clip.lengthBeats, top: frame.top), start: true, end: true)
+                rects += TimelineLayout.edgeRects(of: clipRect(at: clip.at, length: clip.lengthBeats, top: frame.top, line: line), start: true, end: true)
             }
         }
         return rects.map { $0.intersection(lanes) }.filter { !$0.isEmpty }
@@ -1202,6 +1243,45 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     override func resetCursorRects() {
         for rect in cursorRects() { addCursorRect(rect, cursor: .resizeLeftRight) }
+        let headers = CGRect(x: 0, y: TimelineLayout.rulerHeight, width: HeaderLayout.width, height: layout.lanesHeight)
+        for (_, header) in edges() {
+            let rect = header.edge.intersection(headers)
+            if !rect.isEmpty { addCursorRect(rect, cursor: .resizeUpDown) }
+        }
+    }
+
+    /// The headers of the rows whose lower edge a drag resizes, as they
+    /// settle: every row's but the master's.
+    private func edges() -> [(id: RowID, header: HeaderLayout)] {
+        rows.compactMap { id, row in
+            guard let frame = frame(of: id) else { return nil }
+            let header = header(id, row, top: frame.top)
+            return header.resizable ? (id, header) : nil
+        }
+    }
+
+    /// The row whose lower edge is at a point of the headers.
+    private func edge(at p: CGPoint) -> (id: RowID, header: HeaderLayout)? {
+        edges().first { $0.header.edge.contains(p) }
+    }
+
+    /// Every row a height can be given: the tracks, the groups and the returns.
+    private var resizableRows: [RowID] {
+        let a = model.arrangement
+        return a.tracks.map { .track($0.key) } + a.groups.map { .group($0.key) } + a.returns.map { .bus($0.key) }
+    }
+
+    /// A press on a row's lower edge: a drag from it sets the row's height,
+    /// every row's with Option, and twice puts it back to its default.
+    private func heightDown(_ id: RowID, _ header: HeaderLayout, at p: CGPoint, _ event: NSEvent) {
+        let rows = event.modifierFlags.contains(.option) ? resizableRows : [id]
+        if event.clickCount == 2 {
+            model.setRowHeight(nil, of: rows, keep: true)
+            show(model.arrangement, animated: true)
+            return
+        }
+        drag = .height(HeightDrag(rows: rows, startY: p.y, from: header.line,
+                                  before: rows.map { ($0, model.rowHeight(of: $0)) }))
     }
 
     /// The clips' edges moved under the pointer: the window asks for the
@@ -1241,7 +1321,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         let p = convert(event.locationInWindow, from: nil)
         if p.x < TimelineLayout.headerWidth {
-            if p.y >= TimelineLayout.rulerHeight { headerDown(at: p, event) }
+            if p.y >= TimelineLayout.rulerHeight, let (id, header) = edge(at: p) {
+                heightDown(id, header, at: p, event)
+            } else if p.y >= TimelineLayout.rulerHeight {
+                headerDown(at: p, event)
+            }
         } else if p.y < TimelineLayout.loopStrip {
             drag = .loop(anchor: p.x, region: nil)
         } else if inMarkerStrip(p), markerDown(at: p, event) {
@@ -1381,7 +1465,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// The track whose strip of clips is at a point of the timeline.
     private func track(atLane p: CGPoint) -> UInt64? {
         guard p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .track(let key) = id,
-              let frame = frame(of: id), p.y < frame.top + TimelineLayout.trackHeight else { return nil }
+              let frame = frame(of: id), p.y < frame.top + line(of: id) else { return nil }
         return key
     }
 
@@ -1857,6 +1941,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     override func mouseDragged(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
         switch drag {
+        case .height(var d):
+            let height = RowHeights.clamped(d.from + p.y - d.startY)
+            guard height != d.shown else { return }
+            d.shown = height
+            drag = .height(d)
+            model.setRowHeight(height, of: d.rows, keep: false)
+            show(model.arrangement, animated: false)
         case .loop(let anchor, let region):
             let x = max(p.x, TimelineLayout.headerWidth)
             if abs(x - anchor) >= 3 || region != nil {
@@ -2028,6 +2119,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let ended = drag
         drag = nil
         switch ended {
+        case .height(let d):
+            if d.shown != nil { model.saveRowHeights() }
         case .loop(let anchor, let region):
             if let region {
                 model.setLoop(start: region.start, length: region.length)
@@ -2140,6 +2233,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .clips, .trim, .noteTrim, .fade, .reorder, .loop, .marquee:
             drag = nil
             show(model.arrangement, animated: true)
+            return true
+        case .height(let d):
+            drag = nil
+            for (row, height) in d.before { model.setRowHeight(height, of: [row], keep: false) }
+            show(model.arrangement, animated: false)
             return true
         case .slider, .points, .bend, .marker, nil:
             return false
@@ -2570,10 +2668,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 text("Sampler", in: CGRect(x: 12, y: under + 26, width: header - 24, height: 14), font: Self.smallFont, color: Theme.faintText)
             }
         case .clip(let key, let at):
-            if let frame = frame(of: .track(key)) { drawDropped(at: at, top: frame.top) }
+            if let frame = frame(of: .track(key)) { drawDropped(at: at, top: frame.top, line: line(of: .track(key))) }
         case .newClip(let at):
             fill(CGRect(x: 0, y: under - 1.5, width: bounds.width, height: 2), Theme.insertion)
-            drawDropped(at: at, top: under)
+            drawDropped(at: at, top: under, line: TimelineLayout.trackHeight)
         case nil: break
         }
 
@@ -2604,7 +2702,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                   let frame = frame(of: .track(tracks[origin.track + d.rows].key)) else { continue }
             // An audio clip's block starts its lead before its beat.
             let lead = clip.audio.map { max(0, $0.leadBeats) } ?? 0
-            let rect = clipRect(at: origin.at + d.by - lead, length: clip.length.to, top: frame.top)
+            let rect = clipRect(at: origin.at + d.by - lead, length: clip.length.to, top: frame.top,
+                                line: line(of: .track(tracks[origin.track + d.rows].key)))
             let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
             clip.color.withAlphaComponent(0.3).setFill()
             shape.fill()
@@ -2624,9 +2723,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     /// The outline of the clip a dragged file would make: from its beat for
     /// its length, or for a bar when its length is not known.
-    private func drawDropped(at beat: Double, top: CGFloat) {
+    private func drawDropped(at beat: Double, top: CGFloat, line: CGFloat) {
         let beats = dropLength ?? layout.beatsPerBar
-        let rect = clipRect(at: beat, length: beats, top: top)
+        let rect = clipRect(at: beat, length: beats, top: top, line: line)
         clipped(to: CGRect(x: TimelineLayout.headerWidth, y: TimelineLayout.rulerHeight,
                            width: bounds.width - TimelineLayout.headerWidth, height: bounds.height - TimelineLayout.rulerHeight)) {
             let shape = NSBezierPath(roundedRect: rect.insetBy(dx: 0.75, dy: 0.75), xRadius: 3, yRadius: 3)
@@ -2704,7 +2803,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         for (id, row) in order {
             guard case .group(let key) = id, let group = model.arrangement.groups.first(where: { $0.key == key }) else { continue }
             let top = layout.y(CGFloat(row.y.value(at: now)))
-            drawOverview(of: group, in: CGRect(x: header, y: top + 2, width: width, height: TimelineLayout.trackHeight - 5),
+            drawOverview(of: group, in: CGRect(x: header, y: top + 2, width: width, height: row.line - 5),
                          alpha: CGFloat(row.alpha.value(at: now)))
         }
 
@@ -2766,7 +2865,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     private func drawClip(_ key: UInt64, _ clip: ClipVisual, selected: Bool, at now: CFTimeInterval) {
         let alpha = CGFloat(clip.alpha.value(at: now))
         let rect = clipRect(at: clip.at.value(at: now), length: clip.length.value(at: now),
-                            top: layout.y(CGFloat(clip.y.value(at: now))))
+                            top: layout.y(CGFloat(clip.y.value(at: now))), line: clip.line)
         guard rect.maxX >= TimelineLayout.headerWidth, rect.minX <= bounds.width,
               rect.maxY >= TimelineLayout.rulerHeight, rect.minY <= bounds.height else { return }
         // A deactivated clip is gray and darker than a muted track's, as in
@@ -3149,12 +3248,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 mark.fill()
             }
 
-            // Volume as a bar from −60 to +6 dB, with the value and the pan.
-            bar(header.volumeBar, filled: Fader.fraction(gain, in: Fader.gain), dim: row.mute, alpha: alpha)
-            text(Fader.text(db: gain), in: header.volumeText, font: Self.numberFont, color: dim)
-            fill(rounded: header.pan, Theme.control.withAlphaComponent(0.28 * alpha))
-            text(Fader.text(pan: row.pan.value(at: now)), in: header.pan.insetBy(dx: 2, dy: 1),
-                 font: Self.numberFont, color: dim, align: .center)
+            // Volume as a bar from −60 to +6 dB, with the value and the pan,
+            // on the second line, which a row collapsed to one has not.
+            if header.showsLevels {
+                bar(header.volumeBar, filled: Fader.fraction(gain, in: Fader.gain), dim: row.mute, alpha: alpha)
+                text(Fader.text(db: gain), in: header.volumeText, font: Self.numberFont, color: dim)
+                fill(rounded: header.pan, Theme.control.withAlphaComponent(0.28 * alpha))
+                text(Fader.text(pan: row.pan.value(at: now)), in: header.pan.insetBy(dx: 2, dy: 1),
+                     font: Self.numberFont, color: dim, align: .center)
+            }
 
             // A level for each return; one the track does not send to is off.
             for (index, bus) in model.arrangement.returns.enumerated() where index < header.sends {
