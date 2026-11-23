@@ -40,9 +40,8 @@ extension Transcriber {
 enum TranscriberAvailability: Equatable {
     case ready
     /// The Mac cannot recognize the system's locale on the device, and
-    /// nothing is sent off it. The language comes down with Dictation in
-    /// System Settings › Keyboard; with Dictation off, no locale has it.
-    case noOnDeviceRecognition(locale: String)
+    /// Apple's server, which recognizes it otherwise, cannot be reached.
+    case unreachable(locale: String)
     /// The person refused the microphone or speech recognition in System
     /// Settings › Privacy.
     case refused(String)
@@ -89,8 +88,9 @@ enum Transcribers {
 
 // MARK: The Mac's recognizer
 
-/// `SFSpeechRecognizer` over the input node of an `AVAudioEngine`, on the
-/// device only, for the system's locale. The app's own engine plays the
+/// `SFSpeechRecognizer` over the input node of an `AVAudioEngine`, for the
+/// system's locale: on the device where the Mac has the language, and
+/// through Apple's server where it does not, as Dictation does. The app's own engine plays the
 /// song through Core Audio apart from this one, so the song keeps playing.
 @MainActor
 final class SpeechTranscriber: Transcriber {
@@ -120,8 +120,8 @@ final class SpeechTranscriber: Transcriber {
 
     nonisolated private static func availability(of recognizer: SFSpeechRecognizer?) -> Availability {
         guard let recognizer else { return .unsupported }
-        if !recognizer.supportsOnDeviceRecognition {
-            return .noOnDeviceRecognition(locale: recognizer.locale.identifier)
+        if !recognizer.supportsOnDeviceRecognition, !recognizer.isAvailable {
+            return .unreachable(locale: recognizer.locale.identifier)
         }
         if SFSpeechRecognizer.authorizationStatus() == .denied || SFSpeechRecognizer.authorizationStatus() == .restricted {
             return .refused("Speech recognition is off for AAW in System Settings › Privacy & Security › Speech Recognition")
@@ -171,7 +171,9 @@ final class SpeechTranscriber: Transcriber {
         let engine = AVAudioEngine()
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        request.requiresOnDeviceRecognition = true
+        // On the device where it can be; else the server, which ends a
+        // request after about a minute with its final result.
+        request.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         request.addsPunctuation = true
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
@@ -203,11 +205,7 @@ final class SpeechTranscriber: Transcriber {
                         if result.isFinal { self.finish(nil) }
                     }
                     if let error {
-                        // Stopping ends the task with a cancellation, which is no error.
-                        let code = (error as NSError).code
-                        let cancelled = (error as NSError).domain == "kLSRErrorDomain" && code == 301
-                            || (error as NSError).domain == "kAFAssistantErrorDomain" && (code == 216 || code == 1101)
-                        self.finish(cancelled ? nil : error.localizedDescription)
+                        self.finish(Self.isQuiet(error) ? nil : error.localizedDescription)
                     }
                 }
             }
@@ -236,11 +234,23 @@ final class SpeechTranscriber: Transcriber {
         ended(reason)
     }
 
+    /// Errors that are no trouble: stopping ends the task with a
+    /// cancellation, and the server answers a request that heard nothing
+    /// with "no speech detected".
+    nonisolated static func isQuiet(_ error: Error) -> Bool {
+        let error = error as NSError
+        switch error.domain {
+        case "kLSRErrorDomain": return error.code == 301
+        case "kAFAssistantErrorDomain": return [216, 1101, 1110].contains(error.code)
+        default: return false
+        }
+    }
+
     static func reason(_ availability: Availability) -> String {
         switch availability {
         case .ready: ""
-        case .noOnDeviceRecognition(let locale):
-            "This Mac cannot yet recognize \(locale) speech on the device, and nothing is sent off it: turn on Dictation in System Settings › Keyboard, which downloads the language"
+        case .unreachable(let locale):
+            "This Mac cannot recognize \(locale) speech on the device, and Apple's speech recognition cannot be reached: connect to the internet"
         case .refused(let why): why
         case .unsupported: "This Mac has no speech recognizer"
         }

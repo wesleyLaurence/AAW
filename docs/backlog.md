@@ -380,9 +380,8 @@ October 19, 2026 (D123). Items 8–17 are the order as it stood.
   list hides shown, if wanted
   ([skill commands](features/skill-commands.md)); a video's sound or a
   frame read for the agent; a
-  dropped sound imported at once rather than when it is placed; Apple's
-  server recognition where the Mac cannot recognize the locale on the
-  device, the song ducked while the person speaks, hold to talk,
+  dropped sound imported at once rather than when it is placed; the song
+  ducked while the person speaks, hold to talk,
   `SpeechTranscriber` on macOS 26 and spoken words sent as the person
   stops speaking ([attachments](features/agent-attachments.md),
   [speaking](features/voice-input.md)).

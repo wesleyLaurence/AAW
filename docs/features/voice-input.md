@@ -1,13 +1,13 @@
 # Speaking to the agent — implemented October 13, 2026
 
 A microphone in the field of [the agent panel](agent-panel.md): a click
-listens, the words appear in the field as they are recognized on the Mac,
+listens, the words appear in the field as they are recognized,
 and the person reads, fixes and sends them as any message. Asked for by
 the person (D113); the choices made in building it are D118. Nothing here
 touches the agent's engine: the words are text in the field, whichever
-engine the panel runs (D114, [the agent's engine](agent-engine.md)). What
-the real recognizer did on this Mac is under What was tried: it refused,
-since the Mac had no language for on-device recognition.
+engine the panel runs (D114, [the agent's engine](agent-engine.md)). Where
+the Mac has no language for on-device recognition, it recognizes through
+Apple's server, as Dictation does (November 23, 2026; see Decisions).
 
 ## What
 
@@ -31,14 +31,17 @@ the last word, the level, and the end, and `stop`. Two implement it.
 
 | Transcriber | Chosen when | Does |
 |---|---|---|
-| `SpeechTranscriber` | Always, in the app | `SFSpeechRecognizer` for the system's locale over a tap on the input node of an `AVAudioEngine` of its own, so the song keeps playing through the app's engine; `requiresOnDeviceRecognition` set, partial results, punctuation added by the recognizer; the two permissions asked at the first click and kept by the system |
+| `SpeechTranscriber` | Always, in the app | `SFSpeechRecognizer` for the system's locale over a tap on the input node of an `AVAudioEngine` of its own, so the song keeps playing through the app's engine; `requiresOnDeviceRecognition` set where the Mac has the language and Apple's server otherwise, partial results, punctuation added by the recognizer; the two permissions asked at the first click and kept by the system |
 | `FileTranscriber` | `AAW_SPEECH=FILE` names a file | Yields the file's words one at a time, a tenth of a second apart, each with the whole so far, then the whole as final, the level alternating; for scripted runs and tests, as `AAW_AGENT` names a program |
 
-**What the Mac must have.** The recognizer refuses to listen rather than
-send audio off the Mac: when `supportsOnDeviceRecognition` is false for
-the system's locale, the button's help and a click's refusal say so, and
-that Dictation in System Settings › Keyboard downloads the language. With
-Dictation off, no locale has it (What was tried). When the person has
+**What the Mac must have.** Where `supportsOnDeviceRecognition` is true
+for the system's locale, nothing leaves the Mac. Where it is false, the
+request goes to Apple's server, which ends it after about a minute with its
+final result, the words kept. Only where the Mac has no language and the
+recognizer is not available, the server out of reach, does the button
+refuse: its help and a click's refusal say so and ask for the internet.
+The server's "no speech detected", for a request that heard nothing, is
+no trouble, as a cancellation is not. When the person has
 refused the microphone or speech recognition in System Settings › Privacy,
 the refusal says which. Two usage descriptions are in `Info.plist`, and
 `AAW.entitlements`, passed to `codesign` for the app by `build.sh`, carries
@@ -101,16 +104,20 @@ words and one of sixty-six; nothing by hand and nothing spoken:
   en_US speech on the device. A check with the Speech framework found
   `supportsOnDeviceRecognition` false for every English locale and
   `Dictation Enabled` off in the Mac's settings, which is where the
-  language comes down from; so the refusal names Dictation. No permission
+  language comes down from; so the refusal named Dictation. No permission
   was asked, since the recognizer refuses before asking, and nobody turned
   Dictation on or spoke.
+- November 23, 2026: the person clicked the microphone with Dictation on
+  and got the same refusal. The Speech framework still said no for
+  `en_US`, logging that its assets are not available, and the Mac's
+  settings had `Dictation Enabled` on with the en-US offline model not
+  installed; turning Dictation off and on fetched nothing. The Mac's own
+  Dictation was working through Apple's server, so the app does the same.
 
 ## Limits
 
-- The recognizer is on the device only; where the Mac has no language for
-  it, the button refuses rather than offering Apple's server (open
-  question 1 of the design, answered as proposed; the server stays in
-  Later).
+- Through Apple's server a request ends after about a minute; the words
+  so far stay in the field, and a click listens again.
 - The song is not lowered while the person speaks (open question 2).
 - A click toggles; there is no hold to talk (open question 3).
 - Punctuation is the recognizer's, `addsPunctuation`, where its model adds
@@ -119,6 +126,16 @@ words and one of sixty-six; nothing by hand and nothing spoken:
 - `SpeechTranscriber` of macOS 26 is not used; the app runs on macOS 14.
 - The real recognizer cannot be driven by a script: the permission
   questions wait for a person.
+
+## Decisions
+
+- **Apple's server where the Mac has no language** (November 23, 2026).
+  The first build refused rather than send audio off the Mac (open
+  question 1 of the design). On the person's Mac the on-device model never
+  came down, with Dictation on and toggled, while Dictation worked through
+  the server; the person chose the server as the fallback. Rejected:
+  pointing at Dictation again, which did not fetch the language, and
+  asking each time, a question with one answer.
 
 ## Open questions
 
