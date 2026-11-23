@@ -707,7 +707,7 @@ struct BrowserView: View {
             .buttonStyle(.borderless)
             .font(.system(size: 10))
             .disabled(!model.canAddBrowserDevice(Browser.instrumentRackKind, to: model.selectedRow))
-            .help(target.map { "Load \(rack.name) onto \($0.id)" } ?? "Add a new MIDI track playing \(rack.name)")
+            .help(target.map { "Load \(rack.name) onto \($0.name)" } ?? "Add a new MIDI track playing \(rack.name)")
         }
         .padding(.leading, 18)
         .padding(.trailing, 6)
@@ -794,7 +794,7 @@ struct BrowserView: View {
             .font(.system(size: 10))
             .disabled(!model.canAddBrowserDevice(plugin.slug, to: model.selectedRow))
             .help(plugin.kind == "instrument"
-                ? (target.map { "Play \(plugin.name) on \($0.id), as daw instrument set does" } ?? "Add a new MIDI track playing \(plugin.name)")
+                ? (target.map { "Play \(plugin.name) on \($0.name), as daw instrument set does" } ?? "Add a new MIDI track playing \(plugin.name)")
                 : plugin.kind == "midi"
                 ? "Add \(plugin.name) before the selected MIDI track's instrument, as daw effect add --type \(plugin.slug) does"
                 : "Add \(plugin.name) to the selected row's chain, as daw effect add --type \(plugin.slug) does")
@@ -986,7 +986,7 @@ struct BrowserView: View {
             }
             .buttonStyle(.borderless)
             .font(.system(size: 10))
-            .help(target.map { $0.midi ? "Load into a Sampler on \($0.id)" : "Add to \($0.id) as an audio clip at the start position" }
+            .help(target.map { $0.midi ? "Load into a Sampler on \($0.name)" : "Add to \($0.name) as an audio clip at the start position" }
                 ?? "Add as a new MIDI track with a Sampler")
         }
         .padding(.leading, 10)

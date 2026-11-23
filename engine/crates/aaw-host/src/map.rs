@@ -398,14 +398,12 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
     }
     let meter = p.session.meter();
     let bar = meter.bar_f64();
-    for id in &options.tracks {
-        if p.track(id).is_none() {
-            let ids: Vec<&str> = p.tracks.iter().map(|t| t.id.as_str()).collect();
-            return Err(format!("No track {id}; the tracks are {}", ids.join(", ")));
-        }
+    let mut wanted: Vec<&str> = Vec::new();
+    for r in &options.tracks {
+        wanted.push(p.find_track(r)?.id.as_str());
     }
     let shown: Vec<usize> = (0..p.tracks.len())
-        .filter(|&i| options.tracks.is_empty() || options.tracks.contains(&p.tracks[i].id))
+        .filter(|&i| wanted.is_empty() || wanted.contains(&p.tracks[i].id.as_str()))
         .collect();
     let clips: Vec<Vec<Placed>> = shown.iter().map(|&ti| placed(p, dir, ti)).collect();
     let song_end = f(&p.session.length_exact());
@@ -512,7 +510,8 @@ pub fn map(p: &Project, dir: &Path, options: &Options, refer: &dyn Fn(&[Step]) -
                 format!("no {word} here")
             });
         }
-        details.push(format!("{}: {}", t.id, parts.join("; ")));
+        let called = t.name.as_ref().map_or_else(|| t.id.clone(), |n| format!("{} {n:?}", t.id));
+        details.push(format!("{called}: {}", parts.join("; ")));
     }
     if options.lanes && options.tracks.is_empty() {
         for r in &p.returns {

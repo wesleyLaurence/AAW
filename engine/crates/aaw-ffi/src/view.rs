@@ -233,6 +233,8 @@ pub struct TrackView {
     /// renames and moves.
     pub key: u64,
     pub id: String,
+    /// What the header shows: the track's name, or its ID without one.
+    pub name: String,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -285,6 +287,8 @@ pub struct TrackView {
 pub struct GroupView {
     pub key: u64,
     pub id: String,
+    /// What the header shows: the group's name, or its ID without one.
+    pub name: String,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -541,6 +545,8 @@ pub struct AudioClipView {
 pub struct ReturnView {
     pub key: u64,
     pub id: String,
+    /// What the header shows: the return's name, or its ID without one.
+    pub name: String,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -1160,13 +1166,18 @@ fn channel(owner: Owner, node: Option<&Node>, tracks: &[String], sends: &[String
         Owner::Track(t) => t.midi.as_ref().and_then(|m| m.device()).map(|d| plugin_view(d, &driven, &devices)),
         _ => None,
     };
-    (
-        effects(owner.effects(), effect_items, tracks, &driven, false, &devices),
-        lanes(owner, owner.automation(), lane_items, &devices),
-        lane_targets(owner, sends, &driven, &devices),
-        synth,
-        plugin,
-    )
+    // A send's lane by the return's name, where it has one.
+    let send_label = |param: &str, label: &mut String| {
+        let to = param.strip_prefix("sends.").and_then(|r| r.strip_suffix(".gain_db"));
+        if let Some(name) = to.and_then(|to| samples.returns.iter().find(|r| r.id == to)).and_then(|r| r.name.as_deref()) {
+            *label = format!("Send {name}");
+        }
+    };
+    let mut lanes = lanes(owner, owner.automation(), lane_items, &devices);
+    lanes.iter_mut().for_each(|l| send_label(&l.param, &mut l.label));
+    let mut targets = lane_targets(owner, sends, &driven, &devices);
+    targets.iter_mut().for_each(|t| send_label(&t.param, &mut t.label));
+    (effects(owner.effects(), effect_items, tracks, &driven, false, &devices), lanes, targets, synth, plugin)
 }
 
 /// A track's instrument of the person's own as its panel draws it, as a
@@ -1318,6 +1329,15 @@ fn synth_view(synth: &aaw_model::Synth, driven: &Driven, effect_items: &[Item], 
                 field: mod_field(&m.target),
             })
             .collect(),
+    }
+}
+
+/// An input in a few words, a track or a group by what the app calls it.
+fn input_label(p: &Project, input: &aaw_model::Input) -> String {
+    match input {
+        aaw_model::Input::Track(id) => format!("track {}", p.track(id).and_then(|t| t.name.as_deref()).unwrap_or(id)),
+        aaw_model::Input::Group(id) => format!("group {}", p.group(id).and_then(|g| g.name.as_deref()).unwrap_or(id)),
+        other => other.label(),
     }
 }
 
@@ -1531,6 +1551,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             TrackView {
                 key: handle(track_items, i),
                 id: t.id.clone(),
+                name: t.name.clone().unwrap_or_else(|| t.id.clone()),
                 gain_db: t.gain_db,
                 pan: t.pan,
                 mute: t.mute,
@@ -1660,7 +1681,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     },
                     aaw_model::Input::Master => crate::edits::InputChoice::Master,
                 }),
-                input_label: t.input.as_ref().map(aaw_model::Input::label),
+                input_label: t.input.as_ref().map(|i| input_label(p, i)),
                 frozen: t.frozen.is_some(),
             }
         })
@@ -1677,6 +1698,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             GroupView {
                 key: handle(group_items, i),
                 id: g.id.clone(),
+                name: g.name.clone().unwrap_or_else(|| g.id.clone()),
                 gain_db: g.gain_db,
                 pan: g.pan,
                 mute: g.mute,
@@ -1709,6 +1731,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
             ReturnView {
                 key: handle(return_items, i),
                 id: r.id.clone(),
+                name: r.name.clone().unwrap_or_else(|| r.id.clone()),
                 gain_db: r.gain_db,
                 pan: r.pan,
                 mute: r.mute,

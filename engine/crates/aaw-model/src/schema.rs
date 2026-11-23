@@ -179,6 +179,40 @@ fn opt_id(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
     v::optional(ctx, x, id_field)
 }
 
+/// The longest name a track, a group or a return takes.
+pub const MAX_NAME: usize = 64;
+
+/// A track's, a group's or a return's name: any one line of text up to
+/// MAX_NAME characters, with something besides spaces and none at its ends.
+fn opt_name(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
+    v::optional(ctx, x, |c, x| {
+        // A name of digits alone, as "808", reaches the song as a number
+        // from `daw set` and from YAML written by hand.
+        let s = match x {
+            Value::Int(n) => n.to_string(),
+            _ => v::string(c, x)?,
+        };
+        let problem = if s.trim().is_empty() {
+            Some("A name needs a character besides spaces".to_string())
+        } else if s.chars().count() > MAX_NAME {
+            Some(format!("A name is at most {MAX_NAME} characters"))
+        } else if s.chars().any(char::is_control) {
+            Some("A name is one line, without tabs or control characters".to_string())
+        } else if s.trim() != s {
+            Some("A name does not start or end with a space".to_string())
+        } else {
+            None
+        };
+        match problem {
+            Some(p) => {
+                c.value_error(p);
+                None
+            }
+            None => Some(s),
+        }
+    })
+}
+
 fn opt_string(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
     v::optional(ctx, x, v::string)
 }
@@ -3580,6 +3614,9 @@ impl Frozen {
 #[derive(Clone, Debug)]
 pub struct Track {
     pub id: String,
+    /// What the person calls the track, any text the app shows in place of
+    /// the ID; None where the ID is its name. `daw` finds the track by it.
+    pub name: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -3626,10 +3663,10 @@ fn gone(ctx: &mut Ctx, x: &Value, what: &str) -> Option<()> {
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
-        "id", "gain_db", "pan", "mute", "solo", "group", "input", "frozen", "pads", "clips", "audio", "effects", "sends", "automation",
+        "id", "name", "gain_db", "pan", "mute", "solo", "group", "input", "frozen", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
     const MIDI_FIELDS: &'static [&'static str] = &[
-        "id", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "midi_effects", "clips", "effects", "sends", "automation",
+        "id", "name", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "midi_effects", "clips", "effects", "sends", "automation",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
@@ -3647,6 +3684,7 @@ impl Track {
         let f = Fields::of(ctx, x, "Track", known)?;
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
+        let name = f.opt(ctx, "name", None, opt_name);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
@@ -3686,6 +3724,7 @@ impl Track {
         }
         Some(Track {
             id: id?,
+            name: name?,
             gain_db: gain_db?,
             pan: pan?,
             mute: mute?,
@@ -3713,6 +3752,7 @@ impl Track {
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
+        o.opt("name", self.name.as_ref().map(|n| Value::str(n)));
         if self.midi.is_some() {
             o.req("type", Value::str("midi"));
         }
@@ -3746,6 +3786,8 @@ impl Track {
 #[derive(Clone, Debug)]
 pub struct Group {
     pub id: String,
+    /// What the person calls the group, shown in place of the ID.
+    pub name: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -3759,12 +3801,13 @@ pub struct Group {
 }
 
 impl Group {
-    const FIELDS: &'static [&'static str] = &["id", "gain_db", "pan", "mute", "solo", "group", "effects", "sends", "automation"];
+    const FIELDS: &'static [&'static str] = &["id", "name", "gain_db", "pan", "mute", "solo", "group", "effects", "sends", "automation"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Group> {
         let f = Fields::of(ctx, x, "Group", Self::FIELDS)?;
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
+        let name = f.opt(ctx, "name", None, opt_name);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
@@ -3779,6 +3822,7 @@ impl Group {
         }
         Some(Group {
             id: id?,
+            name: name?,
             gain_db: gain_db?,
             pan: pan?,
             mute: mute?,
@@ -3797,6 +3841,7 @@ impl Group {
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
+        o.opt("name", self.name.as_ref().map(|n| Value::str(n)));
         o.float("gain_db", self.gain_db, 0.0);
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
@@ -3812,6 +3857,8 @@ impl Group {
 #[derive(Clone, Debug)]
 pub struct Return {
     pub id: String,
+    /// What the person calls the return, shown in place of the ID.
+    pub name: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -3820,12 +3867,13 @@ pub struct Return {
 }
 
 impl Return {
-    const FIELDS: &'static [&'static str] = &["id", "gain_db", "pan", "mute", "effects", "automation"];
+    const FIELDS: &'static [&'static str] = &["id", "name", "gain_db", "pan", "mute", "effects", "automation"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Return> {
         let f = Fields::of(ctx, x, "Return", Self::FIELDS)?;
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
+        let name = f.opt(ctx, "name", None, opt_name);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
@@ -3837,6 +3885,7 @@ impl Return {
         }
         Some(Return {
             id: id?,
+            name: name?,
             gain_db: gain_db?,
             pan: pan?,
             mute: mute?,
@@ -3852,6 +3901,7 @@ impl Return {
     pub fn dump(&self, saved: bool) -> Value {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
+        o.opt("name", self.name.as_ref().map(|n| Value::str(n)));
         o.float("gain_db", self.gain_db, 0.0);
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
@@ -4218,6 +4268,30 @@ impl Project {
         self.tracks.iter().find(|t| t.id == id)
     }
 
+    /// The track that `r` names, by its ID or by its exact name.
+    pub fn find_track(&self, r: &str) -> Result<&Track, String> {
+        let rows: Vec<(&str, Option<&str>)> = self.tracks.iter().map(|t| (t.id.as_str(), t.name.as_deref())).collect();
+        let id = by_name("tracks", &rows, r)?.ok_or_else(|| {
+            let ids: Vec<&str> = rows.iter().map(|(id, _)| *id).collect();
+            if ids.is_empty() {
+                format!("No track {r}; the song has no tracks")
+            } else {
+                format!("No track {r}; the tracks are {}", ids.join(", "))
+            }
+        })?;
+        Ok(self.track(id).expect("found"))
+    }
+
+    /// The ID of the track, group or return that `r` names, by its ID or
+    /// by its exact name; None where nothing does.
+    pub fn find_row(&self, r: &str) -> Result<Option<&str>, String> {
+        let rows: Vec<(&str, Option<&str>)> = (self.tracks.iter().map(|t| (t.id.as_str(), t.name.as_deref())))
+            .chain(self.groups.iter().map(|g| (g.id.as_str(), g.name.as_deref())))
+            .chain(self.returns.iter().map(|x| (x.id.as_str(), x.name.as_deref())))
+            .collect();
+        by_name("rows", &rows, r)
+    }
+
     /// What a track's frozen file was rendered from, as a value: its audio
     /// clips or its instrument and note clips, its effects, the lanes on
     /// them and the samples they name. The fader, pan, mute, solo, sends and their lanes are not in
@@ -4431,5 +4505,19 @@ impl Default for Project {
             markers: Vec::new(),
             master: Master::default(),
         }
+    }
+}
+
+/// Of rows as (ID, name), the ID of the one `r` names: by its ID first,
+/// then by a name one row alone has. Two with that name are refused.
+fn by_name<'a>(what: &str, rows: &[(&'a str, Option<&'a str>)], r: &str) -> Result<Option<&'a str>, String> {
+    if let Some((id, _)) = rows.iter().find(|(id, _)| *id == r) {
+        return Ok(Some(id));
+    }
+    let named: Vec<&str> = rows.iter().filter(|(_, n)| *n == Some(r)).map(|(id, _)| *id).collect();
+    match named.as_slice() {
+        [] => Ok(None),
+        [id] => Ok(Some(id)),
+        many => Err(format!("{} {what} are named {r:?}: {}; name one by its ID", many.len(), many.join(", "))),
     }
 }

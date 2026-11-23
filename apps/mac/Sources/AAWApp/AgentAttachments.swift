@@ -279,7 +279,7 @@ enum AgentAttachments {
     /// A clip on the timeline: its reference, its kind, its track and bar,
     /// and for an audio clip its sample's name.
     static func make(clip: PlacedClip, track: TrackView?, bar: (Double) -> String) -> AgentAttachment {
-        let on = track.map { $0.id } ?? "?"
+        let on = track.map { SongModel.called($0.id, $0.name) } ?? "?"
         if let audio = clip.audio {
             return AgentAttachment(kind: .clip, name: audio.sample, reference: audio.reference,
                                    detail: "audio clip of sample \(audio.sample) on \(on) at \(bar(clip.at)), \(Self.beats(audio.lengthBeats)) beats")

@@ -1183,14 +1183,14 @@ extension SongModel {
         lines.append(transport)
         var selected: [String] = []
         for clip in placedClips() where selectedClips.contains(clip.key) {
-            let track = a.tracks.indices.contains(clip.track) ? a.tracks[clip.track].id : "?"
+            let track = a.tracks.indices.contains(clip.track) ? SongModel.called(a.tracks[clip.track].id, a.tracks[clip.track].name) : "?"
             if let audio = clip.audio { selected.append("audio clip \(audio.sample) on \(track) at \(bar(clip.at))") }
             if let notes = clip.notes { selected.append("note clip \(notes.id) on \(track) at \(bar(clip.at))") }
         }
         switch selectedRow {
-        case .track(let key): if let t = a.tracks.first(where: { $0.key == key }) { selected.append("track \(t.id)") }
-        case .group(let key): if let g = a.groups.first(where: { $0.key == key }) { selected.append("group \(g.id)") }
-        case .bus(let key): if let r = a.returns.first(where: { $0.key == key }) { selected.append("return \(r.id)") }
+        case .track(let key): if let t = a.tracks.first(where: { $0.key == key }) { selected.append("track \(SongModel.called(t.id, t.name))") }
+        case .group(let key): if let g = a.groups.first(where: { $0.key == key }) { selected.append("group \(SongModel.called(g.id, g.name))") }
+        case .bus(let key): if let r = a.returns.first(where: { $0.key == key }) { selected.append("return \(SongModel.called(r.id, r.name))") }
         case .master: selected.append("the master")
         case nil: break
         }

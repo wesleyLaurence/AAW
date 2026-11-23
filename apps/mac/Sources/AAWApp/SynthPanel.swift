@@ -714,7 +714,7 @@ private struct PatchSaveSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Save the Synth on \(track.id) as a patch").font(.headline)
+            Text("Save the Synth on \(track.name) as a patch").font(.headline)
             Text("A patch is a file in the library, ~/Music/AAW/library/patches, that any song loads; the song's sound is then named after it.")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)

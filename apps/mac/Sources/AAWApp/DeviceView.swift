@@ -133,7 +133,7 @@ private struct AudioClipHeader: View {
         VStack(alignment: .leading, spacing: 3) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(clip.sample).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                Text("Audio clip on \(context.track.id)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                Text("Audio clip on \(context.track.name)").font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
             }
             row("Gain") {
                 KnobBar(model: model, spec: BarSpec(value: clip.gainDb, min: -36, max: 24, unit: "dB", initial: 0, live: false)) { [key = clip.key] value in
@@ -281,7 +281,7 @@ struct DeviceView: View {
                 if let track = chain.track, track.frozen {
                     // The devices are rendered to the track's file; the host
                     // refuses a change to them until the track is unfrozen.
-                    Text("\(track.id) is frozen: its devices are rendered to a file that plays in their place. Unfreeze the track to change them.")
+                    Text("\(track.name) is frozen: its devices are rendered to a file that plays in their place. Unfreeze the track to change them.")
                         .font(.system(size: 12))
                         .foregroundStyle(.secondary)
                         .frame(width: 220, alignment: .leading)
@@ -887,7 +887,7 @@ private struct InstrumentPanel: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
                         if track.instrument == nil {
-                            Text("The notes play nothing. Drop a sample here or on \(track.id)'s header, or add one with + in the samples, and a Sampler plays it on every note. Ask the agent for a drum kit.")
+                            Text("The notes play nothing. Drop a sample here or on \(track.name)'s header, or add one with + in the samples, and a Sampler plays it on every note. Ask the agent for a drum kit.")
                                 .font(.system(size: 10))
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1702,7 +1702,7 @@ struct FieldControl: View {
                 set: { set($0.isEmpty ? .absent : .text(value: $0)) }
             )) {
                 Text("None").tag("")
-                ForEach(field.choices, id: \.self) { Text($0).tag($0) }
+                ForEach(field.choices, id: \.self) { Text(model.rowName($0)).tag($0) }
             }
             .labelsHidden()
             .controlSize(.mini)

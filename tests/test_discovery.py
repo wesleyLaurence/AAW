@@ -158,7 +158,7 @@ def test_errors_say_what_to_do(tmp_path):
     assert "did you mean `tracks.drums.gain_db`?" in error("set", song, "tracks.drums.volume", -3)
     assert "did you mean `tracks.drums.gain_db`?" in error("set", song, "tracks.drums.gian_db", -3)
     nothing_near = error("set", song, "tracks.drums.zzz", 1)
-    assert "`tracks.drums.zzz` is not a field; tracks.drums has id, type, gain_db" in nothing_near
+    assert "`tracks.drums.zzz` is not a field; tracks.drums has id, name, type, gain_db" in nothing_near
     assert error("effect", "add", song, "master", "limiter").startswith("`limiter` is an effect type; use --type limiter")
     # A union's tag is not part of the path a command takes.
     tagged = error("effect", "add", song, "master", "--type", "limiter", "--ceiling", -1)

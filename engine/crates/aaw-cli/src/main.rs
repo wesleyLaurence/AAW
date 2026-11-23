@@ -577,7 +577,8 @@ enum TrackCmd {
     },
     /// Remove a track with its clips, effects, sends and lanes.
     Remove { project: Song, track: String },
-    /// Rename a track and the sidechains that name it.
+    /// Change a track's ID and the sidechains that name it. Its name, the
+    /// text the app shows, is set with daw set PROJECT tracks.ID.name TEXT.
     Rename { project: Song, track: String, to: String },
     /// Move a track to INDEX among the tracks, counting from 0 after it is
     /// taken out; --group G puts it in G, --no-group takes it to the
@@ -614,7 +615,8 @@ enum ReturnCmd {
     },
     /// Remove a return with the sends to it and their lanes.
     Remove { project: Song, id: String },
-    /// Rename a return, its sends and their lanes.
+    /// Change a return's ID, its sends and their lanes. Its name, the text
+    /// the app shows, is set with daw set PROJECT returns.ID.name TEXT.
     Rename { project: Song, id: String, to: String },
     /// Move a return to INDEX among the returns, counting from 0.
     Move { project: Song, id: String, index: usize },
@@ -642,7 +644,8 @@ enum GroupCmd {
     },
     /// Remove a group; its tracks and groups go to its own group, or the master.
     Remove { project: Song, group: String },
-    /// Rename a group and the tracks' and groups' group naming it.
+    /// Change a group's ID and the tracks' and groups' group naming it. Its
+    /// name, the text the app shows, is set with daw set PROJECT groups.ID.name TEXT.
     Rename { project: Song, group: String, to: String },
     /// Move a group with every track under it to INDEX among the tracks,
     /// counting from 0 after they are taken out; --group P puts it in P,

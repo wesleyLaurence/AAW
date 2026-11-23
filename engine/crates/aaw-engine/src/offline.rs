@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[derive(Clone)]
 pub struct RenderOptions {
     pub output: Option<PathBuf>,
     pub track: Option<String>,
@@ -248,11 +249,16 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     let p: Project = aaw_model::load(path, true).map_err(|e| e.to_string())?;
     let rate = p.session.sample_rate;
     let tempo = p.session.tempo;
-    if let Some(t) = &opts.track {
-        if p.track(t).is_none() && p.group(t).is_none() && !p.returns.iter().any(|r| &r.id == t) {
-            return Err(format!("Unknown track, group or return: {t}"));
+    // A stem's track, group or return by its ID, or by its name.
+    let named;
+    let opts = match &opts.track {
+        Some(t) => {
+            let id = p.find_row(t)?.ok_or_else(|| format!("Unknown track, group or return: {t}"))?.to_string();
+            named = RenderOptions { track: Some(id), ..opts.clone() };
+            &named
         }
-    }
+        None => opts,
+    };
     let region = match &opts.section {
         None => None,
         Some(name) => {

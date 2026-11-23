@@ -83,15 +83,15 @@ enum AgentMentions {
             let instrument = track.drumRack != nil ? " with a Drum Rack" : track.instrument.map { " with a \(readable($0))" }
             var parts = [track.midi ? "MIDI track" + (track.plugin?.name.map { " with \($0)" } ?? instrument ?? " with no instrument") : "audio track"]
             parts.append("\(clips) clip\(clips == 1 ? "" : "s")")
-            if let group = track.group, let g = a.groups.first(where: { $0.key == group }) { parts.append("in group \(g.id)") }
+            if let group = track.group, let g = a.groups.first(where: { $0.key == group }) { parts.append("in group \(g.name)") }
             if track.mute { parts.append("muted") }
             if track.solo { parts.append("soloed") }
-            found.append(AgentMention(group: .tracks, kind: .track, name: track.id, reference: "tracks.\(track.id)", detail: parts.joined(separator: ", ")))
+            found.append(AgentMention(group: .tracks, kind: .track, name: track.name, reference: "tracks.\(track.id)", detail: parts.joined(separator: ", ")))
         }
         for group in a.groups {
-            let members = a.tracks.filter { $0.group == group.key }.map(\.id) + a.groups.filter { $0.group == group.key }.map(\.id)
+            let members = a.tracks.filter { $0.group == group.key }.map(\.name) + a.groups.filter { $0.group == group.key }.map(\.name)
             let detail = members.isEmpty ? "group with nothing in it" : "group of \(members.joined(separator: ", "))"
-            found.append(AgentMention(group: .tracks, kind: .group, name: group.id, reference: "groups.\(group.id)", detail: detail))
+            found.append(AgentMention(group: .tracks, kind: .group, name: group.name, reference: "groups.\(group.id)", detail: detail))
         }
         for bus in a.returns {
             let effects = bus.effects.map { readable($0.kind) }
@@ -134,7 +134,7 @@ enum AgentMentions {
         }
         var all: [Found] = []
         for track in a.tracks {
-            let on = track.id
+            let on = track.name
             for clip in track.audio {
                 all.append(Found(name: clip.sample, reference: clip.reference, at: clip.at,
                                  detail: "audio clip of sample \(clip.sample) on \(on) at \(bar(clip.at)), \(beatsText(clip.lengthBeats)) beats"))
