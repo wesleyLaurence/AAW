@@ -231,14 +231,11 @@ fn clear_removes_the_range_and_moves_nothing_and_tracks_limit_a_range() {
 }
 
 #[test]
-fn a_looped_clip_cut_inside_a_repetition_is_refused_and_ranges_are_checked() {
+fn a_looped_clip_cut_inside_a_repetition_starts_into_its_loop_and_ranges_are_checked() {
     let (_d, mut s) = open();
-    let e = edit(&mut s, json!({"op": "range.insert", "at": 6, "length": 4})).unwrap_err();
-    assert_eq!(
-        e,
-        "Beat 6 falls inside a repetition of clip tracks.drums.clips.beat, which loops every 4 beats; a looped clip is cut only at a wrap, or turn its loop off first"
-    );
-    // Nothing of a refused command lands.
+    edit(&mut s, json!({"op": "range.insert", "at": 6, "length": 4})).unwrap();
+    assert_eq!(get(&s, "tracks.drums.clips.1.loop_offset_beats"), json!(2));
+    edit(&mut s, json!({"op": "range.delete", "start": 6, "length": 4})).unwrap();
     assert_eq!(get(&s, "session.length_beats"), json!(32));
     // A range past the end holds nothing, and is not refused (D130).
     assert_eq!(edit(&mut s, json!({"op": "range.clear", "start": 32, "length": 4})).unwrap()["changed"], json!(false));

@@ -336,7 +336,8 @@ class Played:
         repitched = clip.get("stretch", "repitch") == "repitch"
         transpose = float(clip.get("transpose", 0) or 0)
         source_bpm = float(clip.get("source_bpm") or 0)
-        self.at = float(clip["at"])
+        # A clip that starts into its loop plays its file from there.
+        self.at = float(clip["at"]) - float(clip.get("loop_offset_beats") or 0)
         self.start = float(clip.get("source_start_seconds", 0) or 0)
         self.per_beat = 60 / (source_bpm or tempo) * (2 ** (transpose / 12) if repitched else 1.0)
         # What it is heard moved by: its transpose, and a repitched tempo of its own

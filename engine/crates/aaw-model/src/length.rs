@@ -16,6 +16,10 @@ impl AudioClip {
         let at = self.at_exact().to_f64().unwrap_or(0.0) * 60.0 / tempo;
         let speed = self.seconds_per_beat(tempo) * tempo / 60.0;
         let in_file = if speed > 0.0 { self.source_start_seconds / speed } else { 0.0 };
+        // A clip that starts into its loop starts inside its audio, with no lead.
+        if !self.offset_exact().is_zero() {
+            return 0.0;
+        }
         (self.lead_ms / 1000.0).min(in_file).min(at).max(0.0) * tempo / 60.0
     }
 

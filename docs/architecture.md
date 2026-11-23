@@ -366,7 +366,8 @@ track has a unique `id`, `gain_db`, `pan` (-1…1), `mute`, `solo`,
 `audio` (audio clips: parts of a sample file on the timeline, see
 [audio-clips.md](features/audio-clips.md); one with `loop_beats` and
 `length_beats` plays its first beats again at each wrap until its length, each
-repetition a copy with the clip's fades, see
+repetition a copy with the clip's fades, the first from `loop_offset_beats`
+into the loop when it has one, see
 [looping-clips.md](features/looping-clips.md); one with `transpose` moves its
 pitch, shorter by repitching or at its length by the stretcher, see
 [clip-pitch.md](features/clip-pitch.md)), `effects`, `sends`, `automation`, an optional `group`, the
@@ -487,7 +488,7 @@ note played now and the audition are the notes as written, and no field of
 theirs takes a lane. `daw effect add|remove|move|bypass` reach them by the
 kind and as `tracks.T.midi_effects.REF`; see
 [midi-effects.md](features/midi-effects.md). A note clip is
-`{id, at, length_beats, loop_beats, notes}` and owns its notes, each `{id, pitch, at,
+`{id, at, length_beats, loop_beats, loop_offset_beats, notes}` and owns its notes, each `{id, pitch, at,
 duration, velocity}` with `pitch` a MIDI number (a name such as `C4` is taken
 and stored as 60) and `at` from the clip's start. A clip's ID is unique in the
 song and a note's in its clip; one that arrives without an ID is given the
@@ -504,8 +505,11 @@ by `aaw-model`'s `note_text` (see [note-text.md](features/note-text.md)). With
 `loop_beats`, the notes of the clip's first so many beats play again and again
 from its start until its end, the last repetition cut off there, a note held
 across the loop's end cut there and one at or after it kept and not played;
-the schedule unrolls the loop, so the engine plays what copies would play. An
-audio clip loops by the same field, with `length_beats` for how long; see
+the schedule unrolls the loop, so the engine plays what copies would play.
+`loop_offset_beats` is how far into its loop a clip starts, what a looped clip
+split inside a repetition or trimmed at its start keeps, a note sounding there
+playing from the clip's start. An audio clip loops by the same fields, with
+`length_beats` for how long; see
 [looping-clips.md](features/looping-clips.md). A clip of any kind with
 `active: false` is deactivated: it keeps its place and the song's length,
 the schedule and the audio voices skip it, and `clip.active` sets it, as 0

@@ -505,6 +505,9 @@ pub struct NoteClipView {
     /// The loop's length when the clip loops: its first so many beats play
     /// again at each wrap until its end.
     pub loop_beats: Option<f64>,
+    /// How far into its loop a looped clip starts: it plays from there to the
+    /// loop's end, then the whole loop from each wrap. 0 for most clips.
+    pub loop_offset_beats: f64,
     pub notes: Vec<NoteView>,
     /// False when the clip is deactivated: it is drawn and plays nothing.
     pub active: bool,
@@ -541,6 +544,9 @@ pub struct AudioClipView {
     /// The loop's length when the clip loops: its first so many beats of the
     /// file play again at each wrap until its end.
     pub loop_beats: Option<f64>,
+    /// How far into its loop a looped clip starts, in beats: it plays the file
+    /// from there to the loop's end, then the whole loop from each wrap.
+    pub loop_offset_beats: f64,
     /// How long it sounds after that while it fades out, in beats: its fade
     /// out, as far as its file goes. A clip is drawn to where its sound ends.
     pub tail_beats: f64,
@@ -1649,6 +1655,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             at: float(c.at_exact()),
                             length_beats: float(c.length_exact()),
                             loop_beats: c.loop_exact().map(&float),
+                            loop_offset_beats: float(c.offset_exact()),
                             notes: c
                                 .notes
                                 .iter()
@@ -1688,6 +1695,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             lead_beats: c.lead_beats(p.session.tempo),
                             length_beats: c.length_exact().map_or_else(|| ((end - c.source_start_seconds) / per_beat).max(0.0), &float),
                             loop_beats: c.loop_exact().map(&float),
+                            loop_offset_beats: float(c.offset_exact()),
                             tail_beats: tail_beats(c, p.session.tempo, (identity != 0).then_some(seconds)),
                             source_start_seconds: c.source_start_seconds,
                             source_end_seconds: end,

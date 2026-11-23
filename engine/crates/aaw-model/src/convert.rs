@@ -430,7 +430,7 @@ fn clip(p: &Project, patterns: &IndexMap<String, Pattern>, d: &Drums, c: &Clip, 
     for (i, n) in notes.iter_mut().enumerate() {
         n.id = format!("n{}", i + 1);
     }
-    Ok(NoteClip { id, at: c.at.clone(), length_beats, loop_beats, notes, active: c.active, color: None })
+    Ok(NoteClip { id, at: c.at.clone(), length_beats, loop_beats, loop_offset_beats: None, notes, active: c.active, color: None })
 }
 
 /// A track of pads as a MIDI track of the same name, and the audio track

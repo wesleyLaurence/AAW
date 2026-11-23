@@ -6,7 +6,7 @@
 
 use crate::tree::Step;
 use aaw_model::{Curve, Lane, Meter, Project};
-use num_traits::ToPrimitive;
+use num_traits::{ToPrimitive, Zero};
 use serde_json::{json, Value as Json};
 use std::collections::HashMap;
 use std::fmt::Write;
@@ -95,6 +95,16 @@ fn f(x: &num_rational::BigRational) -> f64 {
     x.to_f64().unwrap_or(f64::NAN)
 }
 
+/// How far into its loop a looped clip starts, when it does not start at
+/// the loop's start.
+fn into_text(offset: &num_rational::BigRational) -> String {
+    if offset.is_zero() {
+        String::new()
+    } else {
+        format!(" from {} in", beats_text(f(offset)))
+    }
+}
+
 fn beats_text(beats: f64) -> String {
     let n = number(beats);
     if n == "1" {
@@ -144,19 +154,20 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
             until = until.min(c.source_start_seconds + every * per_beat);
             beats = length;
             onsets = c.repetitions(p.session.tempo).iter().map(|r| f(&r.at_exact())).collect();
-            looped = format!(", loops every {}", beats_text(every));
+            looped = format!(", loops every {}{}", beats_text(every), into_text(&c.offset_exact()));
         }
         let repeats = onsets.len() as i64;
         out.push(Placed {
             key: format!(
-                "audio|{}|{:.3}|{:.3}|{:?}|{}|{}|{:?}",
+                "audio|{}|{:.3}|{:.3}|{:?}|{}|{}|{:?}|{}",
                 c.sample,
                 c.source_start_seconds,
                 until,
                 c.source_bpm,
                 c.stretch.as_str(),
                 c.transpose,
-                c.loop_exact().map(|l| aaw_model::fraction_str(&l))
+                c.loop_exact().map(|l| aaw_model::fraction_str(&l)),
+                aaw_model::fraction_str(&c.offset_exact())
             ),
             loc: at("audio", i),
             start,
@@ -196,19 +207,28 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
             let repetitions = c.repetitions();
             let placed: Vec<(f64, i64)> = repetitions
                 .iter()
-                .flat_map(|(from, plays)| {
-                    playing.iter().filter(move |n| n.at_exact() < *plays).map(move |n| (start + f(from) + f(&n.at_exact()), n.pitch))
+                .flat_map(|(from, plays, into)| {
+                    // A note sounding where a repetition starts into the loop plays from there.
+                    playing
+                        .iter()
+                        .filter(move |n| n.at_exact() < into + plays && n.at_exact() + n.duration_exact() > *into)
+                        .map(move |n| (start + f(from) + f(&n.at_exact().max(into.clone())) - f(into), n.pitch))
                 })
                 .collect();
             // A clip that loops a whole number of times is its loop played
             // so many times, the same music however many; its length is
             // then said by the bars.
-            let whole = c.loop_exact().filter(|l| (&length / l).is_integer());
-            let looped = c.loop_exact().map(|l| format!(", loops every {}", beats_text(f(&l)))).unwrap_or_default();
+            let whole = c.loop_exact().filter(|l| (&length / l).is_integer() && c.offset_exact().is_zero());
+            let looped = c.loop_exact().map(|l| format!(", loops every {}{}", beats_text(f(&l)), into_text(&c.offset_exact()))).unwrap_or_default();
             let (key, long) = match &whole {
                 Some(l) => (format!("loop|{}|{key}", aaw_model::fraction_str(l)), String::new()),
                 None => (
-                    format!("notes|{}|{:?}|{key}", aaw_model::fraction_str(&length), c.loop_exact().map(|l| aaw_model::fraction_str(&l))),
+                    format!(
+                        "notes|{}|{:?}|{}|{key}",
+                        aaw_model::fraction_str(&length),
+                        c.loop_exact().map(|l| aaw_model::fraction_str(&l)),
+                        aaw_model::fraction_str(&c.offset_exact())
+                    ),
                     format!(", {}", beats_text(f(&length))),
                 ),
             };

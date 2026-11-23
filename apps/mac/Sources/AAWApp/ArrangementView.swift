@@ -110,6 +110,8 @@ private struct ClipVisual {
     /// A note clip's or an audio clip's loop, when it has one: its first so
     /// many beats play again at each wrap until its end, where a mark is drawn.
     var loop: Double? = nil
+    /// How far into its loop a looped clip starts.
+    var loopOffset: Double = 0
     var color: NSColor
     var muted: Bool
     /// On a frozen track, whose file plays in the clips' place.
@@ -719,6 +721,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.active = clip.active
                     v.notes = clip
                     v.loop = clip.loopBeats
+                    v.loopOffset = clip.loopOffsetBeats
                     v.line = own
                     if !dragged.contains(clip.key) {
                         v.at.move(to: clip.at, at: now, over: time)
@@ -731,7 +734,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        title: clip.id, loop: clip.loopBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
+                        title: clip.id, loop: clip.loopBeats, loopOffset: clip.loopOffsetBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(clip.at), length: Animated(clip.lengthBeats), y: Animated(y), line: own, alpha: alpha,
                         notes: clip, anchor: Animated(clip.at)
                     )
@@ -747,6 +750,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     v.frozen = frozen
                     v.active = clip.active
                     v.loop = clip.loopBeats
+                    v.loopOffset = clip.loopOffsetBeats
                     v.line = own
                     if !dragged.contains(clip.key) {
                         v.audio = clip
@@ -760,7 +764,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                     var alpha = Animated(animated ? 0 : 1)
                     alpha.move(to: 1, at: now, over: time)
                     clips[clip.key] = ClipVisual(
-                        title: clip.sample, loop: clip.loopBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
+                        title: clip.sample, loop: clip.loopBeats, loopOffset: clip.loopOffsetBeats, color: Theme.swatch(clip.shownColor), muted: muted, frozen: frozen, active: clip.active,
                         at: Animated(shape.start), length: Animated(shape.length), y: Animated(y), line: own, alpha: alpha,
                         audio: clip, anchor: Animated(shape.fileStart)
                     )
@@ -2917,44 +2921,58 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     }
 
     /// The beats inside a looped clip where its loop wraps, from its start:
-    /// each a loop later, as far as the clip goes.
+    /// the first where the loop it starts into ends, each a loop later, as
+    /// far as the clip goes.
     private static func wraps(of clip: ClipVisual, at now: CFTimeInterval) -> [Double] {
         guard let every = clip.loop, every > 0 else { return [] }
-        // An audio clip's loop wraps from its beat, which its lead is drawn before.
+        // An audio clip's loop wraps from its beat, which its lead is drawn
+        // before; a note clip's stays where it is in the song while its
+        // start is dragged, as a trim of a looped clip's start leaves it.
         let start = clip.at.value(at: now) + (clip.audio.map { max(0, $0.leadBeats) } ?? 0)
+        let origin = (clip.notes != nil ? clip.anchor.value(at: now) : start) - clip.loopOffset
         let end = clip.at.value(at: now) + clip.length.value(at: now)
         guard (end - start) / every <= 512 else { return [] }
-        return stride(from: start + every, to: end - 1e-9, by: every).map { $0 }
+        let first = origin + ((start - origin) / every + 1e-9).rounded(.down) * every + every
+        return stride(from: first, to: end - 1e-9, by: every).map { $0 }
     }
 
     /// What a note clip shows under its title: its notes, each a bar from its
     /// start to its end or the clip's, from the lowest pitch at the bottom to
     /// the highest at the top, an octave at least. Notes outside the clip do
     /// not play and are not drawn; a looped clip's notes are drawn again at
-    /// each wrap, cut at the loop's end. While an edge is dragged the notes
-    /// stay where they are, and the clip shows more or fewer of them.
+    /// each wrap, cut at the loop's end, from as far into its loop as it
+    /// starts, a note sounding there from the clip's start. While an edge is
+    /// dragged the notes stay where they are, and the clip shows more or
+    /// fewer of them.
     private func drawNotes(_ clip: NoteClipView, of visual: ClipVisual, in body: CGRect, alpha: CGFloat,
                            at now: CFTimeInterval) {
         let origin = visual.anchor.value(at: now)
         let start = visual.at.value(at: now) - origin
         let end = start + visual.length.value(at: now)
-        let every = visual.loop.map { min($0, end - start) }
-        let playing = clip.notes.filter { $0.at >= start - 1e-9 && $0.at < start + (every ?? end - start) }
+        let every = visual.loop.flatMap { $0 > 0 ? $0 : nil }
+        let playing = every.map { every in clip.notes.filter { $0.at >= 0 && $0.at < every } }
+            ?? clip.notes.filter { $0.at >= start - 1e-9 && $0.at < end }
         guard body.height >= 6, let low = playing.map(\.pitch).min(), let high = playing.map(\.pitch).max() else { return }
         let span = max(high - low + 1, 12)
         let bottom = Int32(Double(low + high) / 2 - Double(span) / 2 + 0.5)
         let row = (body.height - 4) / CGFloat(span)
         let ink = Theme.gray(0.08, 0.8 * alpha)
-        // Each repetition: the clip once, or a loop at each wrap, the last cut off.
-        var repetitions: [(Double, Double)] = [(start, end)]
-        if let every, every > 0 {
-            repetitions = stride(from: start, to: end - 1e-9, by: every).map { ($0, min($0 + every, end)) }
+        // Each repetition: the clip once, or a loop at each wrap, from where
+        // the loop it starts into began, the first and last cut off at the
+        // clip's edges. Beats are from the clip's beat as it was.
+        var repetitions: [(Double, Double)] = [(0, .infinity)]
+        if let every {
+            guard (end - start) / every <= 512 else { return }
+            let first = -visual.loopOffset + ((start + visual.loopOffset) / every + 1e-9).rounded(.down) * every
+            repetitions = stride(from: first, to: end - 1e-9, by: every).map { ($0, $0 + every) }
         }
         for (from, to) in repetitions {
-            let offset = from - start
-            for note in playing where note.at + offset < to {
-                let x = layout.x(origin + note.at + offset)
-                let right = layout.x(origin + min(note.at + note.duration + offset, to))
+            for note in playing {
+                let a = max(from + note.at, start)
+                let b = min(from + note.at + note.duration, to, end)
+                guard b > a else { continue }
+                let x = layout.x(origin + a)
+                let right = layout.x(origin + b)
                 let y = body.maxY - 2 - CGFloat(note.pitch - bottom + 1) * row
                 fill(CGRect(x: x, y: y, width: max(right - x - 1, 1), height: max(row - 1, 1)), ink)
             }
@@ -2983,8 +3001,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             for (from, to) in zip(edges, edges.dropFirst()) {
                 let part = CGRect(x: layout.x(from), y: body.minY, width: layout.x(to) - layout.x(from), height: body.height)
                 guard part.width > 0 else { continue }
+                // The first repetition plays the file from as far into the loop as the clip starts.
+                let into = from == start ? clip.loopOffset : 0
                 let columns = wave.columns(
-                    in: part, clippedTo: visible, fromFrame: (start - anchor) * framesPerBeat,
+                    in: part, clippedTo: visible, fromFrame: (start - anchor + into) * framesPerBeat,
                     framesPerPoint: framesPerBeat / Double(layout.pixelsPerBeat), step: 1 / (window?.backingScaleFactor ?? 2),
                     gain: pow(10, audio.gainDb / 20)
                 )
@@ -2998,8 +3018,10 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         // the waveform, taller on a downbeat, once they are a few points apart.
         // A looped clip's are drawn across its first repetition.
         if let file = model.file(audio.file), file.beats.count > 1, perBeat > 0 {
-            let seconds = { (x: CGFloat) in (self.layout.beat(atX: x) - anchor) * perBeat }
-            let last = clip.loop.map { layout.x(start + min($0, length)) } ?? body.maxX
+            // The first repetition's, which plays the file from as far into the loop as the clip starts.
+            let fileAnchor = anchor - clip.loopOffset
+            let seconds = { (x: CGFloat) in (self.layout.beat(atX: x) - fileAnchor) * perBeat }
+            let last = clip.loop.map { layout.x(start + min($0 - clip.loopOffset, length)) } ?? body.maxX
             let (from, to) = (seconds(max(body.minX, visible.minX)), seconds(min(last, visible.maxX)))
             let apart = CGFloat((file.beats[1].seconds - file.beats[0].seconds) / perBeat) * layout.pixelsPerBeat
             let every = apart >= 5
@@ -3014,7 +3036,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
                 for beat in file.beats[low...] {
                     guard beat.seconds <= to else { break }
-                    let x = layout.x(anchor + beat.seconds / perBeat).rounded()
+                    let x = layout.x(fileAnchor + beat.seconds / perBeat).rounded()
                     if beat.downbeat {
                         bars.append(CGRect(x: x, y: body.maxY - 9, width: 1, height: 9))
                     } else if every {

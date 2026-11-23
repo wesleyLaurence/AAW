@@ -1803,6 +1803,13 @@ fn note_clips_split_at_the_start_position_as_audio_clips_do() {
     assert_eq!(u.arrangement.tracks[2].note_clips.len(), 1);
     assert_eq!(u.arrangement.tracks[2].note_clips[0].notes.len(), 3);
     assert_eq!(u.arrangement.tracks[0].note_clips[0].length_beats, 16.0);
+    // Inside a repetition of the drums' loop of 4 beats: the right half
+    // starts 2 beats into its loop.
+    let made = song.edit(Edit::ClipsSplit { clips: vec![beat], at: 6.0 }, None).unwrap();
+    let u = update(&seen);
+    let drums: Vec<_> = u.arrangement.tracks[0].note_clips.iter().map(|c| (c.at, c.length_beats, c.loop_beats, c.loop_offset_beats)).collect();
+    assert_eq!(drums[..2], [(0.0, 6.0, Some(4.0), 0.0), (6.0, 10.0, Some(4.0), 2.0)]);
+    assert_eq!(u.arrangement.tracks[0].note_clips[1].key, made[0]);
     song.close();
 }
 

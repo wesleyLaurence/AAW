@@ -97,19 +97,27 @@ def clip_region(track, index, clips, project, root: Path):
 def repetitions(clip, tempo) -> list[dict]:
     """An audio clip as the engine plays it: itself, or a looped clip as its
     repetitions, each a copy from the clip's start to the loop's end a loop
-    later, the last cut off where the clip ends."""
+    later, the last cut off where the clip ends. A clip that starts into its
+    loop plays the rest of it first, from there in its file, without a lead."""
     if clip.get("loop_beats") is None:
         return [clip]
     every, length = Fraction(str(clip["loop_beats"])), Fraction(str(clip["length_beats"]))
+    into = Fraction(str(clip.get("loop_offset_beats") or 0))
     per_beat = 60 / (clip["source_bpm"] or tempo) * repitch(clip)
     start, out, at = Fraction(str(clip["at"])), [], Fraction(0)
     while at < length:
-        beats = min(every, length - at)
-        end = clip["source_start_seconds"] + float(beats) * per_beat
+        beats = min(every - into, length - at)
+        source_start = clip["source_start_seconds"] + float(into) * per_beat
+        end = source_start + float(beats) * per_beat
         if clip["source_end_seconds"] is not None:
             end = min(end, clip["source_end_seconds"])
-        out.append({**clip, "at": str(start + at), "source_end_seconds": end, "loop_beats": None, "length_beats": None})
-        at += every
+        out.append({
+            **clip, "at": str(start + at), "source_start_seconds": source_start, "source_end_seconds": end,
+            "lead_ms": clip["lead_ms"] if into == 0 else 0.0,
+            "loop_beats": None, "loop_offset_beats": None, "length_beats": None,
+        })
+        at += every - into
+        into = Fraction(0)
     return out
 
 
