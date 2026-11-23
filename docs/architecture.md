@@ -57,7 +57,9 @@ path, a selected clip by its reference, a sound recorded in the panel
 through the host's input goes under `.daw/attachments/` with the song's
 tempo and the beat it began at, the person's words spoken into the field
 are recognized on the Mac and sent as text, and the project's conversations
-are kept in `.daw/threads.json` beside the song. A
+are kept in `.daw/threads.json` beside the song. The height the person
+drags each row to is the app's, kept in `.daw/rows.json` by the row's path,
+not in the song. A
 terminal started in the project's folder has the same by location. See
 [agent-panel.md](features/agent-panel.md).
 

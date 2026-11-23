@@ -104,6 +104,91 @@ final class EditingTests: XCTestCase {
         }
     }
 
+    /// A row's own line takes the height the person drags it to: its sends
+    /// and lanes follow under it, and shorter than two lines a track's
+    /// header is one, without its volume and pan.
+    func testARowsHeightMovesWhatIsUnderItAndCollapsesToOneLine() {
+        let tall = HeaderLayout(kind: .track, top: 100, line: 120, sends: 2, folds: true, lanes: 1)
+        XCTAssertEqual(tall.baseHeight, 120 + 2 * HeaderLayout.sendHeight + HeaderLayout.sendPadding)
+        XCTAssertEqual(tall.send(0).minY, 100 + 120 - 2)
+        XCTAssertEqual(tall.lane(0).minY, 100 + tall.baseHeight)
+        XCTAssertTrue(tall.showsLevels)
+        XCTAssertEqual(tall.part(at: CGPoint(x: tall.pan.midX, y: tall.pan.midY)), .pan)
+        // The edge a drag resizes is the header's lower edge, above the lanes.
+        XCTAssertEqual(tall.edge.midY, 100 + tall.baseHeight - 0.5)
+        XCTAssertTrue(tall.resizable)
+
+        let one = HeaderLayout(kind: .track, top: 100, line: RowHeights.least, folds: true)
+        XCTAssertEqual(one.height, RowHeights.least)
+        XCTAssertFalse(one.showsLevels)
+        func part(_ rect: CGRect) -> HeaderLayout.Part { one.part(at: CGPoint(x: rect.midX, y: rect.midY)) }
+        XCTAssertEqual(part(one.name), .name)
+        XCTAssertEqual(part(one.mute), .mute)
+        XCTAssertEqual(part(one.solo), .solo)
+        XCTAssertEqual(part(one.arm), .arm)
+        for rect in [one.name, one.mute, one.solo, one.arm, one.fold] {
+            XCTAssertLessThanOrEqual(rect.maxY, 100 + one.height, "the one line is in the row")
+        }
+        XCTAssertEqual(HeaderLayout(kind: .group, top: 0, line: HeaderLayout.twoLines).showsLevels, true)
+        XCTAssertEqual(HeaderLayout(kind: .group, top: 0, line: HeaderLayout.twoLines - 1).showsLevels, false)
+
+        // A return keeps its line inside a row shorter than its default; the
+        // master's height is its own.
+        let bus = HeaderLayout(kind: .bus, top: 300, line: RowHeights.least)
+        for rect in [bus.name, bus.mute, bus.volume] {
+            XCTAssertGreaterThanOrEqual(rect.minY, 300)
+            XCTAssertLessThanOrEqual(rect.maxY, 300 + RowHeights.least)
+        }
+        XCTAssertEqual(bus.part(at: CGPoint(x: bus.mute.midX, y: bus.mute.midY)), .mute)
+        XCTAssertEqual(HeaderLayout(kind: .bus, top: 300, line: 90).mute, HeaderLayout(kind: .bus, top: 300).mute)
+        XCTAssertFalse(HeaderLayout(kind: .master, top: 300).resizable)
+        XCTAssertEqual(HeaderLayout(kind: .master, top: 300).line, TimelineLayout.busHeight)
+    }
+
+    /// Heights are kept in the project's `.daw/rows.json` by the row's path,
+    /// in whole points from a collapsed line to the most, and a row
+    /// renamed keeps its own.
+    func testRowHeightsAreKeptWithTheProjectByPath() throws {
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("aaw rows \(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scratch) }
+        var heights = RowHeights(project: scratch)
+        XCTAssertEqual(heights.heights, [:])
+        heights.follow([1: "tracks.drums", 2: "tracks.bass", 3: "returns.verb"])
+        XCTAssertTrue(heights.set(120.4, for: ["tracks.drums"]))
+        XCTAssertFalse(heights.set(120, for: ["tracks.drums"]), "the same height is no change")
+        heights.set(5, for: ["tracks.bass"])
+        heights.set(4000, for: ["returns.verb"])
+        XCTAssertEqual(heights["tracks.drums"], 120)
+        XCTAssertEqual(heights["tracks.bass"], RowHeights.least)
+        XCTAssertEqual(heights["returns.verb"], RowHeights.most)
+        try heights.save()
+        XCTAssertEqual(RowHeights.file(project: scratch).path, scratch.appendingPathComponent(".daw/rows.json").path)
+        var read = RowHeights(project: scratch)
+        XCTAssertEqual(read.heights, heights.heights)
+
+        // The drums renamed keep their height; nil puts a row back to its default.
+        read.follow([1: "tracks.drums", 2: "tracks.bass", 3: "returns.verb"])
+        XCTAssertTrue(read.follow([1: "tracks.kit", 2: "tracks.bass", 3: "returns.verb"]))
+        XCTAssertEqual(read["tracks.kit"], 120)
+        XCTAssertNil(read["tracks.drums"])
+        XCTAssertFalse(read.follow([1: "tracks.kit", 2: "tracks.bass", 3: "returns.verb"]))
+        read.set(nil, for: ["tracks.bass", "returns.verb"])
+        XCTAssertEqual(read.heights, ["tracks.kit": 120])
+
+        // Two rows that swap names swap heights.
+        var swapped = RowHeights(file: scratch.appendingPathComponent("none.json"))
+        swapped.follow([1: "tracks.a", 2: "tracks.b"])
+        swapped.set(100, for: ["tracks.a"])
+        swapped.set(30, for: ["tracks.b"])
+        swapped.follow([1: "tracks.b", 2: "tracks.a"])
+        XCTAssertEqual(swapped.heights, ["tracks.a": 30, "tracks.b": 100])
+
+        // A file that does not read has no heights.
+        try Data("not json".utf8).write(to: RowHeights.file(project: scratch))
+        XCTAssertEqual(RowHeights(project: scratch).heights, [:])
+    }
+
     func testLanesFoldOutUnderARowWithTheirMarks() {
         // Two sends, then three lanes and the strip that adds one.
         let track = HeaderLayout(kind: .track, top: 100, sends: 2, folds: true, lanes: 3)

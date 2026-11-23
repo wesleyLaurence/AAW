@@ -56,11 +56,15 @@ public struct HeaderLayout: Equatable {
     public var depth: Int
     /// Whether the row is in a group.
     public var grouped: Bool { depth > 0 }
+    /// The height of the row's own line, where its controls and its clips
+    /// are, without its sends and lanes: the person's, or the kind's default.
+    public var line: CGFloat
 
-    public init(kind: Kind, top: CGFloat, sends: Int = 0, folds: Bool = false, lanes: Int? = nil,
+    public init(kind: Kind, top: CGFloat, line: CGFloat? = nil, sends: Int = 0, folds: Bool = false, lanes: Int? = nil,
                 collapsed: Bool = false, depth: Int = 0) {
         self.kind = kind
         self.top = top
+        self.line = line ?? Self.defaultLine(kind)
         self.sends = sends
         self.folds = folds
         self.lanes = lanes
@@ -71,6 +75,33 @@ public struct HeaderLayout: Equatable {
     /// Whether the header is a track's or a group's: two lines, with a
     /// volume bar, solo and sends.
     public var strip: Bool { kind == .track || kind == .group }
+
+    /// A row's own height before the person drags it: a track's or a
+    /// group's two lines, or a return's and the master's one.
+    public static func defaultLine(_ kind: Kind) -> CGFloat {
+        kind == .track || kind == .group ? TimelineLayout.trackHeight : TimelineLayout.busHeight
+    }
+
+    /// The least height a track's or a group's second line, with its volume
+    /// bar and pan, has room in. Shorter, the row is one line: its name, arm,
+    /// mute and solo.
+    public static let twoLines: CGFloat = 42
+
+    /// Whether a track's or a group's volume bar and pan are shown.
+    public var showsLevels: Bool { strip && line >= Self.twoLines }
+
+    /// Whether the person can drag the row's height: every row's but the master's.
+    public var resizable: Bool { kind != .master }
+
+    /// Where a press drags the row's height: a strip across its lower edge,
+    /// under its sends and above its lanes, reaching into the row under it.
+    public var edge: CGRect {
+        CGRect(x: 0, y: top + baseHeight - 3, width: Self.width, height: 5)
+    }
+
+    /// How far a return's or the master's one line moves up in a row
+    /// shorter than its default, so that it stays in the row.
+    private var busShift: CGFloat { min(0, (line - TimelineLayout.busHeight) / 2) }
 
     /// How far in a grouped row's marks and name sit, for each group it is in.
     public static let indent: CGFloat = 12
@@ -91,7 +122,7 @@ public struct HeaderLayout: Equatable {
 
     /// The row's height without its lanes.
     public var baseHeight: CGFloat {
-        strip ? TimelineLayout.trackHeight + Self.extraHeight(sends: sends) : TimelineLayout.busHeight
+        strip ? line + Self.extraHeight(sends: sends) : line
     }
 
     public var height: CGFloat {
@@ -124,14 +155,14 @@ public struct HeaderLayout: Equatable {
             let right = kind == .track ? arm.minX : mute.minX
             return CGRect(x: left, y: top + 5, width: right - 6 - left, height: 16)
         case .bus, .master:
-            return CGRect(x: 14, y: top + 7, width: volume.minX - 6 - 14, height: 16)
+            return CGRect(x: 14, y: top + 7 + busShift, width: volume.minX - 6 - 14, height: 16)
         }
     }
 
     public var mute: CGRect {
         switch kind {
         case .track, .group: CGRect(x: Self.width - 46, y: top + 6, width: 16, height: 14)
-        case .bus, .master: CGRect(x: Self.width - 24, y: top + 9, width: 16, height: 14)
+        case .bus, .master: CGRect(x: Self.width - 24, y: top + 9 + busShift, width: 16, height: 14)
         }
     }
 
@@ -149,8 +180,8 @@ public struct HeaderLayout: Equatable {
     public var volume: CGRect {
         switch kind {
         case .track, .group: CGRect(x: 12, y: top + 22, width: 150, height: 18)
-        case .bus: CGRect(x: Self.width - 28 - 58, y: top + 8, width: 58, height: 16)
-        case .master: CGRect(x: Self.width - 8 - 58, y: top + 8, width: 58, height: 16)
+        case .bus: CGRect(x: Self.width - 28 - 58, y: top + 8 + busShift, width: 58, height: 16)
+        case .master: CGRect(x: Self.width - 8 - 58, y: top + 8 + busShift, width: 58, height: 16)
         }
     }
 
@@ -172,7 +203,7 @@ public struct HeaderLayout: Equatable {
 
     /// The row of the send at `index`.
     public func send(_ index: Int) -> CGRect {
-        CGRect(x: 0, y: top + TimelineLayout.trackHeight + CGFloat(index) * Self.sendHeight - 2,
+        CGRect(x: 0, y: top + line + CGFloat(index) * Self.sendHeight - 2,
                width: Self.width, height: Self.sendHeight)
     }
 
@@ -226,8 +257,8 @@ public struct HeaderLayout: Equatable {
             if kind == .track, arm.contains(p) { return .arm }
             if mute.contains(p) { return .mute }
             if solo.contains(p) { return .solo }
-            if pan.contains(p) { return .pan }
-            if volume.contains(p) { return .volume }
+            if showsLevels, pan.contains(p) { return .pan }
+            if showsLevels, volume.contains(p) { return .volume }
             for index in 0..<sends where send(index).contains(p) { return .send(index) }
             return name.contains(p) ? .name : .body
         case .bus, .master:
