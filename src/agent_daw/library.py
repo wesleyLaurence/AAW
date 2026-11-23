@@ -409,6 +409,62 @@ def search(
     return rows[:limit]
 
 
+def natural(name: str):
+    """A name's sort key as the Finder orders names: case aside, and the
+    numbers in it by their value, so `kick 2` comes before `kick 10`."""
+    return [(0, int(t), "") if t.isdigit() else (1, 0, t.casefold()) for t in re.split(r"(\d+)", name) if t]
+
+
+def tree(db: Path, directories=None):
+    """Each directory's subfolders and the samples directly in it, as the
+    index has them: no file is read. A subfolder is listed with how many
+    samples are under it, at any depth, and one with none is not listed.
+    With no directories, the registered folders. A directory must be a
+    registered folder or inside one."""
+    with closing(connect(db)) as con:
+        registered = [r[0] for r in con.execute("SELECT path FROM folders ORDER BY path")]
+        if not directories:
+            wanted = registered
+        else:
+            wanted = []
+            for directory in directories:
+                given = os.path.normpath(Path(directory).expanduser().absolute())
+                # The index keeps paths as found under the resolved folder.
+                for path in (given, str(Path(given).resolve())):
+                    if any(path == r or Path(path).is_relative_to(r) for r in registered):
+                        wanted.append(path)
+                        break
+                else:
+                    raise ValueError(
+                        f"Not in a registered sample folder: {directory}; "
+                        "daw samples folders lists them and folders add DIR adds one"
+                    )
+        found = []
+        for directory in wanted:
+            prefix = directory.rstrip(os.sep) + os.sep
+            counts = {}
+            for (path,) in con.execute(
+                "SELECT path FROM samples WHERE substr(path, 1, ?) = ?", (len(prefix), prefix)
+            ):
+                rest = path[len(prefix):]
+                if os.sep in rest:
+                    name = rest.split(os.sep, 1)[0]
+                    counts[name] = counts.get(name, 0) + 1
+            rows = con.execute(
+                ROWS + " WHERE substr(s.path, 1, ?) = ? AND instr(substr(s.path, ?), ?) = 0",
+                [analysis.ANALYZER, len(prefix), prefix, len(prefix) + 1, os.sep],
+            )
+            found.append({
+                "path": directory,
+                "folders": [
+                    {"name": name, "path": prefix + name, "count": counts[name]}
+                    for name in sorted(counts, key=natural)
+                ],
+                "samples": sorted((listed(r) for r in rows), key=lambda r: natural(r["name"])),
+            })
+        return found
+
+
 def like(db: Path, path: Path, limit=10, category=None, roots=None, measure=0):
     """The measured samples nearest a chosen one in sound, nearest first.
 

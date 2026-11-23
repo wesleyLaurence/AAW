@@ -19,10 +19,18 @@ final class Browser {
     let library: String?
     let categories: [String]
     var section = UserDefaults.standard.string(forKey: "browser.section") ?? "Samples" {
-        didSet { UserDefaults.standard.set(section, forKey: "browser.section") }
+        didSet {
+            UserDefaults.standard.set(section, forKey: "browser.section")
+            readTree()
+        }
     }
     var folders: [LibraryFolder] = []
-    var selectedFolders: Set<String> = [] { didSet { search() } }
+    var selectedFolders: Set<String> = [] {
+        didSet {
+            search()
+            readTree()
+        }
+    }
     var scanning = false
     var folderError: String?
     @ObservationIgnored private var folderOperations = 0
@@ -228,6 +236,7 @@ final class Browser {
                     self.folders = folders
                     self.selectedFolders.formIntersection(Set(folders.map(\.path)))
                     self.search()
+                    self.rereadTree()
                 case .failure(let error): self.folderError = SongModel.reason(error)
                 }
                 if operation != "list" {
@@ -361,6 +370,188 @@ final class Browser {
         audition(sample)
     }
 
+    // MARK: Folders as a tree
+
+    /// The folders open in the Folders tree, by path, kept across launches.
+    var openFolders = Set(UserDefaults.standard.stringArray(forKey: "browser.openFolders") ?? []) {
+        didSet {
+            UserDefaults.standard.set(openFolders.sorted(), forKey: "browser.openFolders")
+            readTree()
+        }
+    }
+    /// The folders read from the index, by path: their subfolders and the
+    /// samples directly in them. Only folders shown open are read; the
+    /// tests set it in place of the index.
+    var trees: [String: LibraryTree] = [:]
+    /// Why a folder could not be read, shown under it.
+    private(set) var treeError: String?
+    /// The row of the tree last clicked or reached with the keys, by its
+    /// `FolderRow.key`.
+    private(set) var treeSelected: String?
+    @ObservationIgnored private var treeReads = 0
+    @ObservationIgnored private var reading: Set<String> = []
+
+    /// Whether the Folders section shows its folders as a tree: until a
+    /// search, a category or a kind asks for matches, which are listed flat.
+    var showsTree: Bool {
+        section == "Folders" && query.trimmingCharacters(in: .whitespaces).isEmpty && category == nil && kind == nil
+    }
+
+    /// The folders the tree starts from: those checked, else all of them.
+    var treeRoots: [String] {
+        let all = folders.map(\.path)
+        return selectedFolders.isEmpty ? all : all.filter(selectedFolders.contains)
+    }
+
+    /// The rows of the tree as they are drawn now.
+    var folderRows: [FolderRow] {
+        Self.folderRows(roots: treeRoots, open: openFolders, trees: trees)
+    }
+
+    /// Opens a folder that is closed and closes one that is open.
+    func toggle(_ path: String) {
+        if openFolders.contains(path) { openFolders.remove(path) } else { openFolders.insert(path) }
+    }
+
+    /// Forgets what was read, as after a folder is added, refreshed or
+    /// removed, and reads what is open again.
+    func rereadTree() {
+        treeReads += 1
+        reading = []
+        trees = [:]
+        readTree()
+    }
+
+    /// Reads the open folders the tree shows and has not read yet, in one
+    /// run of the index, off the main thread; a folder opened inside one
+    /// just read is read next.
+    func readTree() {
+        guard let library, section == "Folders" else { return }
+        let wanted = Self.unread(roots: treeRoots, open: openFolders, trees: trees).filter { !reading.contains($0) }
+        guard !wanted.isEmpty else { return }
+        reading.formUnion(wanted)
+        let mine = treeReads
+        queue.async { [weak self] in
+            let found = Result { try libraryTree(db: library, folders: wanted) }
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, self.treeReads == mine else { return }
+                    self.reading.subtract(wanted)
+                    switch found {
+                    case .success(let read):
+                        for tree in read { self.trees[tree.path] = tree }
+                        // A folder the index no longer has reads as empty, not forever.
+                        for path in wanted where self.trees[path] == nil {
+                            self.trees[path] = LibraryTree(path: path, folders: [], samples: [])
+                        }
+                        self.treeError = nil
+                        self.readTree()
+                    case .failure(let error):
+                        self.treeError = SongModel.reason(error)
+                        for path in wanted { self.trees[path] = LibraryTree(path: path, folders: [], samples: []) }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Selects a row of the tree, and plays it when it is a sample.
+    func selectRow(_ row: FolderRow) {
+        treeSelected = row.key
+        switch row.kind {
+        case .sample(let sample): audition(sample)
+        default: sound?.stop()
+        }
+    }
+
+    /// Up (-1) and Down (1) in the tree: the row before or after the
+    /// selected one, played when it is a sample, as the Finder walks a list.
+    func stepTree(_ delta: Int) {
+        guard let row = Self.neighborRow(of: treeSelected, in: folderRows, by: delta) else { return }
+        selectRow(row)
+    }
+
+    /// Right opens the selected folder, or goes into it when it is open;
+    /// Left closes it, or goes to the folder a row is in: an outline's keys.
+    func stepTree(into: Bool) {
+        let rows = folderRows
+        guard let index = rows.firstIndex(where: { $0.key == treeSelected }) else {
+            if let first = rows.first(where: { $0.selectable }) { selectRow(first) }
+            return
+        }
+        let row = rows[index]
+        if case .folder(let path, _, _, let open) = row.kind {
+            if into && !open { openFolders.insert(path); return }
+            if !into && open { openFolders.remove(path); return }
+            if into {
+                if index + 1 < rows.count, rows[index + 1].depth > row.depth, rows[index + 1].selectable { selectRow(rows[index + 1]) }
+                return
+            }
+        }
+        guard !into, let parent = rows[..<index].last(where: { $0.depth < row.depth && $0.selectable }) else { return }
+        selectRow(parent)
+    }
+
+    /// The rows of a tree of `roots`: one folder's contents at the top when
+    /// it is the only root, else each root as a folder; under a folder that
+    /// is open its subfolders and then its samples, a row reading it while
+    /// it is not read yet.
+    nonisolated static func folderRows(roots: [String], open: Set<String>, trees: [String: LibraryTree]) -> [FolderRow] {
+        var rows: [FolderRow] = []
+        func contents(_ path: String, _ depth: Int, _ root: Int) {
+            guard let tree = trees[path] else {
+                rows.append(FolderRow(root: root, depth: depth, kind: .reading(path)))
+                return
+            }
+            for folder in tree.folders {
+                let isOpen = open.contains(folder.path)
+                rows.append(FolderRow(root: root, depth: depth, kind: .folder(path: folder.path, name: folder.name, count: Int(folder.count), open: isOpen)))
+                if isOpen { contents(folder.path, depth + 1, root) }
+            }
+            for sample in tree.samples { rows.append(FolderRow(root: root, depth: depth, kind: .sample(sample))) }
+        }
+        if roots.count == 1 {
+            contents(roots[0], 0, 0)
+        } else {
+            for (index, root) in roots.enumerated() {
+                let isOpen = open.contains(root)
+                rows.append(FolderRow(root: index, depth: 0, kind: .folder(path: root, name: URL(fileURLWithPath: root).lastPathComponent, count: nil, open: isOpen)))
+                if isOpen { contents(root, 1, index) }
+            }
+        }
+        return rows
+    }
+
+    /// The folders the tree shows the contents of that are not read yet.
+    nonisolated static func unread(roots: [String], open: Set<String>, trees: [String: LibraryTree]) -> [String] {
+        folderRows(roots: roots, open: open, trees: trees).compactMap { row in
+            if case .reading(let path) = row.kind { return path }
+            return nil
+        }
+    }
+
+    /// The row `delta` places from the selected one, skipping rows still
+    /// being read: the first when none is selected, nil past either end.
+    nonisolated static func neighborRow(of selected: String?, in rows: [FolderRow], by delta: Int) -> FolderRow? {
+        let rows = rows.filter(\.selectable)
+        guard let selected, let index = rows.firstIndex(where: { $0.key == selected }) else { return rows.first }
+        let to = index + delta
+        return rows.indices.contains(to) ? rows[to] : nil
+    }
+
+    /// The folder a sample is in, from the registered folder it is under:
+    /// `samples/bass` for a file in `bass` of the folder `samples`. The
+    /// longest folder that holds it names it.
+    nonisolated static func folder(of path: String, in roots: [String]) -> String {
+        let directory = (path as NSString).deletingLastPathComponent
+        guard let root = roots.filter({ directory == $0 || directory.hasPrefix($0.hasSuffix("/") ? $0 : $0 + "/") }).max(by: { $0.count < $1.count }) else {
+            return (directory as NSString).lastPathComponent
+        }
+        let name = (root as NSString).lastPathComponent
+        let rest = String(directory.dropFirst(root.count)).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        return rest.isEmpty ? name : name + "/" + rest
+    }
+
     /// What a pad or a track for a sample is named after: its category where
     /// the file's name gave one, else the name.
     nonisolated static func padName(of sample: SampleInfo) -> String {
@@ -376,6 +567,38 @@ final class Browser {
         if let key = sample.key { parts.append(key) }
         if let note = sample.note { parts.append("♪ \(note)") }
         return parts.joined(separator: " · ")
+    }
+}
+
+/// A row of the Folders tree: a folder with its arrow, a sample, or a
+/// folder's contents while the index is being read for them.
+struct FolderRow: Equatable {
+    enum Kind: Equatable {
+        /// `count` is how many samples are under the folder; nil for a
+        /// registered folder listed as a root.
+        case folder(path: String, name: String, count: Int?, open: Bool)
+        case sample(SampleInfo)
+        case reading(String)
+    }
+
+    /// Which of the roots it is under, so a folder registered inside
+    /// another and listed twice keeps its rows apart.
+    let root: Int
+    let depth: Int
+    let kind: Kind
+
+    /// What the list knows it by and the selection names.
+    var key: String {
+        switch kind {
+        case .folder(let path, _, _, _): return "\(root):folder:\(path)"
+        case .sample(let sample): return "\(root):sample:\(sample.path)"
+        case .reading(let path): return "\(root):reading:\(path)"
+        }
+    }
+
+    var selectable: Bool {
+        if case .reading = kind { return false }
+        return true
     }
 }
 
@@ -473,7 +696,7 @@ struct BrowserView: View {
                     } else {
                         filters
                         Divider()
-                        results
+                        if browser.showsTree { folderTree } else { results }
                     }
                 }.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
@@ -964,8 +1187,116 @@ struct BrowserView: View {
         }
     }
 
-    private func row(_ sample: SampleInfo) -> some View {
-        let emphasized = browser.selected == sample.id && browser.hasKeys
+    /// How far a row of the tree is set in for its depth, and the width of
+    /// a folder's arrow.
+    static func indent(_ depth: Int) -> CGFloat { 8 + CGFloat(depth) * 14 }
+    static let arrowWidth: CGFloat = 14
+
+    /// The Folders section as a tree, as the Finder's list view shows one:
+    /// each folder with an arrow that opens and closes it, its subfolders
+    /// and then its samples under it. A click selects a row and plays a
+    /// sample; Up and Down walk the rows, Right opens a folder and Left
+    /// closes it or goes to the folder a row is in.
+    @ViewBuilder private var folderTree: some View {
+        let rows = browser.folderRows
+        if browser.folders.isEmpty {
+            note("Add a folder to find samples across your projects.")
+        } else if rows.isEmpty {
+            note("No samples in this folder.")
+        } else {
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows, id: \.key) { row in
+                            switch row.kind {
+                            case .folder(let path, let name, let count, let open):
+                                folderRow(row, path: path, name: name, count: count, open: open).id(row.key)
+                            case .sample(let sample):
+                                self.row(sample, in: row).id(row.key)
+                                Divider().opacity(0.35)
+                            case .reading:
+                                Text("Reading…")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, Self.indent(row.depth) + Self.arrowWidth + 4)
+                                    .frame(height: 22)
+                            }
+                        }
+                    }
+                }
+                .focusable()
+                .focusEffectDisabled()
+                .focused($samplesHaveKeys)
+                .onKeyPress(.upArrow) { browser.stepTree(-1); return .handled }
+                .onKeyPress(.downArrow) { browser.stepTree(1); return .handled }
+                .onKeyPress(.rightArrow) { browser.stepTree(into: true); return .handled }
+                .onKeyPress(.leftArrow) { browser.stepTree(into: false); return .handled }
+                .onChange(of: samplesHaveKeys) { _, has in browser.hasKeys = has }
+                .onChange(of: browser.treeSelected) { _, selected in
+                    if let selected, browser.hasKeys { proxy.scrollTo(selected) }
+                }
+            }
+            if let error = browser.treeError { note(error) }
+            Divider()
+            Text("\(model.sampleLanding) Drag onto the timeline for an audio clip, or onto a MIDI track's name for a Sampler.")
+                .font(.system(size: 10))
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+        }
+    }
+
+    /// A folder of the tree: its arrow, which opens and closes it, its
+    /// name, and how many samples are under it.
+    private func folderRow(_ row: FolderRow, path: String, name: String, count: Int?, open: Bool) -> some View {
+        let isSelected = browser.treeSelected == row.key
+        let emphasized = isSelected && browser.hasKeys
+        return HStack(spacing: 4) {
+            Button { browser.toggle(path) } label: {
+                Image(systemName: open ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .frame(width: Self.arrowWidth, height: 18)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(emphasized ? Color.white : Color.secondary)
+            .help(open ? "Close \(name)" : "Open \(name)")
+            Image(systemName: "folder.fill")
+                .font(.system(size: 10))
+                .foregroundStyle(emphasized ? Color.white : Color.accentColor.opacity(0.8))
+            Text(name)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(emphasized ? Color.white : Color.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 0)
+            if let count {
+                Text("\(count)")
+                    .font(.system(size: 10).monospacedDigit())
+                    .foregroundStyle(emphasized ? Color.white.opacity(0.8) : Color.secondary)
+            }
+        }
+        .padding(.leading, Self.indent(row.depth))
+        .padding(.trailing, 8)
+        .frame(height: 24)
+        .background(isSelected
+            ? Color(nsColor: browser.hasKeys ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor)
+            : Color.clear)
+        .contentShape(Rectangle())
+        .help(path)
+        .onTapGesture(count: 2) { browser.toggle(path) }
+        .onTapGesture {
+            samplesHaveKeys = true
+            browser.selectRow(row)
+        }
+    }
+
+    /// A sample's row; in the tree, `row` is its place there, which the
+    /// selection names, and the row is set in by its depth.
+    private func row(_ sample: SampleInfo, in row: FolderRow? = nil) -> some View {
+        let isSelected = row.map { browser.treeSelected == $0.key } ?? (browser.selected == sample.id)
+        let emphasized = isSelected && browser.hasKeys
         return HStack(spacing: 6) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(sample.name)
@@ -973,7 +1304,10 @@ struct BrowserView: View {
                     .foregroundStyle(emphasized ? Color.white : Color.primary)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text("\(Browser.detail(of: sample)) · \(sample.pack)")
+                // In the tree the folder is where the row is; a search in
+                // Folders names it, and Samples the pack.
+                Text(row != nil ? Browser.detail(of: sample)
+                    : "\(Browser.detail(of: sample)) · \(browser.section == "Folders" ? Browser.folder(of: sample.path, in: browser.folders.map(\.path)) : sample.pack)")
                     .font(.system(size: 10))
                     .foregroundStyle(emphasized ? Color.white.opacity(0.8) : Color.secondary)
                     .lineLimit(1)
@@ -989,12 +1323,12 @@ struct BrowserView: View {
             .help(target.map { $0.midi ? "Load into a Sampler on \($0.name)" : "Add to \($0.name) as an audio clip at the start position" }
                 ?? "Add as a new MIDI track with a Sampler")
         }
-        .padding(.leading, 10)
+        .padding(.leading, row.map { Self.indent($0.depth) + Self.arrowWidth + 4 } ?? 10)
         .padding(.trailing, 6)
         .frame(height: 34)
         // Selected as a Mac list shows it: in the accent color while the list
         // has the keys, gray once something else does.
-        .background(browser.selected == sample.id
+        .background(isSelected
             ? Color(nsColor: browser.hasKeys ? .selectedContentBackgroundColor : .unemphasizedSelectedContentBackgroundColor)
             : Color.clear)
         .contentShape(Rectangle())
@@ -1004,7 +1338,7 @@ struct BrowserView: View {
         }
         .onTapGesture {
             samplesHaveKeys = true
-            browser.audition(sample)
+            if let row { browser.selectRow(row) } else { browser.audition(sample) }
         }
         .onDrag {
             browser.dragged = sample

@@ -102,3 +102,48 @@ def test_search_by_path_keeps_only_those_files(tmp_path):
     assert len(library.search(db, "kick", paths=[root / "snare.wav"])) == 0
     args = parser().parse_args(["samples", "search", "--path", "a.wav", "--path", "b.wav"])
     assert [str(p) for p in args.path] == ["a.wav", "b.wav"]
+
+
+def test_tree_lists_subfolders_and_the_samples_directly_in_a_folder(tmp_path):
+    db = tmp_path / "index.sqlite"
+    root = tmp_path / "samples"
+    for rel in ["top 10.wav", "top 2.wav", "bass/sub.wav", "drums/kicks/k1.wav",
+                "drums/kicks/k2.wav", "drums/snare.wav", "Drums Old/hat.wav"]:
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        sf.write(root / rel, np.zeros(100), 44100)
+    (root / "empty").mkdir()
+    (root / "bass" / "notes.txt").write_text("not audio")
+    library.scan(root, db)
+    (whole,) = library.tree(db)
+    assert whole["path"] == str(root.resolve())
+    # By name as the Finder orders them, case aside; an empty folder is left out.
+    assert [(f["name"], f["count"]) for f in whole["folders"]] == [("bass", 1), ("drums", 3), ("Drums Old", 1)]
+    assert whole["folders"][1]["path"] == str(root.resolve() / "drums")
+    assert [s["name"] for s in whole["samples"]] == ["top 2.wav", "top 10.wav"]
+    assert "measured" in whole["samples"][0]
+    drums, kicks = library.tree(db, [root / "drums", root / "drums" / "kicks"])
+    assert [(f["name"], f["count"]) for f in drums["folders"]] == [("kicks", 2)]
+    assert [s["name"] for s in drums["samples"]] == ["snare.wav"]
+    assert kicks["folders"] == [] and [s["name"] for s in kicks["samples"]] == ["k1.wav", "k2.wav"]
+    # "drums" never takes in "Drums Old" or a folder whose name starts the same.
+    assert library.tree(db, [root / "Drums Old"])[0]["samples"][0]["name"] == "hat.wav"
+    try:
+        library.tree(db, [tmp_path])
+        raise AssertionError("a folder outside the registered ones")
+    except ValueError as e:
+        assert "Not in a registered sample folder" in str(e)
+
+
+def test_tree_command(tmp_path, monkeypatch):
+    from helpers import cli
+    monkeypatch.setenv("AAW_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("AAW_LIBRARY", raising=False)
+    root = tmp_path / "library"
+    (root / "bass").mkdir(parents=True)
+    sf.write(root / "bass" / "sub.wav", np.zeros(100), 44100)
+    cli("samples", "folders", "add", root)
+    code, found = cli("samples", "tree", root, root / "bass")
+    assert code == 0 and [f["name"] for f in found[0]["folders"]] == ["bass"]
+    assert [s["name"] for s in found[1]["samples"]] == ["sub.wav"]
+    code, found = cli("samples", "tree")
+    assert code == 0 and found[0]["folders"][0]["count"] == 1

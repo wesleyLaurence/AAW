@@ -391,6 +391,14 @@ Search and indexing run through Python off the UI thread. WAV, AIFF, FLAC, MP3
 and M4A are searchable. The agent's `daw samples folders` and repeatable
 `daw samples search --folder DIRECTORY` use the same sources.
 
+Folders lists the checked folders, or all of them, as a tree: subfolders with
+an arrow and a count, then the samples directly in each, read from the index
+by `daw samples tree` only for the folders open, which are kept in the
+`browser.openFolders` default. Up and Down walk it, Right opens a folder or
+goes in, Left closes it or goes to its parent. A search, a category or a kind
+lists the matches flat with the folder each is in ([browser
+folders](../../docs/features/browser-folders.md)).
+
 Drag an effect onto a track, return or master header to append it, or onto an
 insertion strip between device panels to place it there. Instruments lists
 Sampler and Synth, and under Synth its patches, Factory and Mine, which the
