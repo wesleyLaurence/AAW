@@ -291,6 +291,22 @@ def test_clips_are_deactivated_and_activated_by_the_cli_and_play_nothing_meanwhi
         daw("clip", "deactivate", path, "tracks.keys")
 
 
+def test_rows_and_clips_are_colored_by_the_cli_and_kept_in_the_song(tmp_path):
+    path = phrase(tmp_path)
+    clip = "tracks.keys.clips.clip1"
+    daw("set", path, "tracks.keys.color", "white")
+    out = daw("clip", "color", path, clip, "red")
+    assert out["label"] == "Color clip clip1 at 4 red"
+    song = load(path)
+    assert (song["tracks"][0]["color"], song["tracks"][0]["clips"][0]["color"]) == ("white", "red")
+    assert "white" in daw("describe", "project")["semantics"]["colors"]
+    with pytest.raises(ValueError):
+        daw("clip", "color", path, clip, "beige")
+    # none takes the clip's own away, and it takes its track's.
+    daw("clip", "color", path, clip, "none")
+    assert "color" not in load(path)["tracks"][0]["clips"][0] or load(path)["tracks"][0]["clips"][0]["color"] is None
+
+
 def test_racks_are_saved_from_a_chain_listed_and_added_to_a_chain_in_another_song(tmp_path, monkeypatch):
     monkeypatch.setenv("AAW_WORKSPACE", str(tmp_path / "ws"))
     listed = daw("rack", "list")

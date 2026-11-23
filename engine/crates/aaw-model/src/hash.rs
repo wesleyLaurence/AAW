@@ -37,6 +37,8 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // A track's, a group's, a return's and a clip's color.
+        vec![added("color", Value::None)],
         // A track's, a group's and a return's name; a note, a rack and a
         // device have the key too, so only a row's, beside its lanes, is
         // dropped.

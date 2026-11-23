@@ -51,6 +51,7 @@ fn song(p: &Project, opts: &AuditionOptions) -> Result<Project, String> {
         loop_beats: None,
         notes: Vec::new(),
         active: true,
+        color: None,
     };
     for (i, pitch) in notes.iter().enumerate() {
         if !(0..=127).contains(pitch) {

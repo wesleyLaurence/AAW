@@ -2061,6 +2061,37 @@ fn a_note_clip_copied_in_the_app_is_its_own() {
     assert_eq!(u.change.label, "Activate clip clip3 at 16");
     assert!(u.arrangement.tracks[3].note_clips[0].active);
 
+    // Colored: a track takes one by its place until it has its own, and a
+    // clip takes its track's until it has its own; two clips and a track
+    // in one step, undone in one; then taken away.
+    let palette = aaw_ffi::view::palette();
+    assert_eq!((palette.len(), palette.last().unwrap().name.as_str()), (24, "white"));
+    let t = &u.arrangement.tracks;
+    assert_eq!((t[0].color.as_deref(), t[0].shown_color.as_str(), t[1].shown_color.as_str()), (None, "coral", "amber"));
+    assert_eq!(t[3].note_clips[0].shown_color, t[3].shown_color);
+    let track = Row::Track { key: t[3].key };
+    song.edit(Edit::Color { rows: vec![track.clone()], clips: vec![beat, pasted[0]], color: Some("white".into()) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Color 1 row and 2 clips white");
+    let t = &u.arrangement.tracks;
+    assert_eq!((t[3].color.as_deref(), t[3].shown_color.as_str()), (Some("white"), "white"));
+    assert_eq!((t[0].note_clips[0].color.as_deref(), t[0].note_clips[0].shown_color.as_str()), (Some("white"), "white"));
+    assert_eq!((t[0].note_clips[1].color.as_deref(), t[0].note_clips[1].shown_color.as_str()), (None, "coral"));
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.tracks[3].color.is_none() && u.arrangement.tracks[0].note_clips[0].color.is_none());
+    song.edit(Edit::Color { rows: vec![track.clone()], clips: vec![], color: Some("red".into()) }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Color a track red");
+    song.edit(Edit::Color { rows: vec![], clips: vec![pasted[0]], color: Some("sky".into()) }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Color clip clip3 at 16 sky");
+    assert_eq!(u.arrangement.tracks[3].note_clips[0].shown_color, "sky");
+    assert!(song.edit(Edit::Color { rows: vec![], clips: vec![pasted[0]], color: Some("beige".into()) }, None).is_err());
+    song.edit(Edit::Color { rows: vec![track], clips: vec![pasted[0]], color: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Clear the color of 1 row and 1 clip");
+    assert_eq!((u.arrangement.tracks[3].color.as_deref(), u.arrangement.tracks[3].note_clips[0].color.as_deref()), (None, None));
+
     // Moved and removed as any clip.
     song.edit(Edit::ClipsMove { clips: vec![pasted[0]], by: -4.0, rows: -1 }, None).unwrap();
     let u = update(&seen);

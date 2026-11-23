@@ -150,6 +150,10 @@ pub enum Edit {
     /// activates them again: pattern clips, note clips and audio clips, as 0
     /// does.
     ClipsActive { clips: Vec<u64>, active: bool },
+    /// Colors tracks, groups, returns and clips with one of `palette()` by
+    /// name, as one step; none takes their own color away, so a clip takes
+    /// its track's and a track one by its place.
+    Color { rows: Vec<Row>, clips: Vec<u64>, color: Option<String> },
     /// Adds a note to a note clip at a beat of the clip, one step of `grid`
     /// long: on the step under the beat, exactly, unless `free`. The note is
     /// what the edit makes.
@@ -1244,6 +1248,26 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
         }
         Edit::ClipsActive { clips, active } => {
             Ok(clips.iter().map(|key| json!({"op": "clip.active", "clip": clip(key), "active": active})).collect())
+        }
+        Edit::Color { rows, clips, color } => {
+            let tree = doc.tree();
+            let mut out = Vec::new();
+            for row in rows {
+                let (list, key) = match row {
+                    Row::Track { key } => ("tracks", *key),
+                    Row::Group { key } => ("groups", *key),
+                    Row::Return { key } => ("returns", *key),
+                    Row::Master => return Err("The master has no color".into()),
+                };
+                let node = &items(&tree, list).iter().find(|i| i.handle == key).ok_or("The row is no longer in the song")?.node;
+                match (color, node.field("color")) {
+                    (Some(c), own) if own != Some(c.as_str()) => out.push(json!({"op": "set", "path": path(row, "color")?, "value": c})),
+                    (None, Some(_)) => out.push(json!({"op": "remove", "path": path(row, "color")?})),
+                    _ => {}
+                }
+            }
+            out.extend(clips.iter().map(|key| json!({"op": "clip.color", "clip": clip(key), "color": color})));
+            Ok(out)
         }
         Edit::NoteAdd { clip: key, at, free, grid, pitch } => {
             let tree = doc.tree();
@@ -2515,6 +2539,27 @@ pub fn label(edit: &Edit, count: usize) -> Option<String> {
         Edit::BandSet { band, .. } => return Some(format!("Move band {} of an equalizer", band + 1)),
         Edit::Rename { to, .. } if to.trim().is_empty() => return Some("Clear the name".into()),
         Edit::Rename { to, .. } => return Some(format!("Rename to {}", to.trim())),
+        Edit::Color { rows, clips, color } => {
+            // "Color 3 clips white", "Color drums and 2 clips red".
+            let what = match (rows.len(), clips.len()) {
+                // One clip's is the host's, which names it.
+                (0, 1) => return None,
+                (0, n) => format!("{n} clips"),
+                (1, 0) => match rows[0] {
+                    Row::Track { .. } => "a track",
+                    Row::Group { .. } => "a group",
+                    Row::Return { .. } => "a return",
+                    Row::Master => "the master",
+                }
+                .to_string(),
+                (n, 0) => format!("{n} rows"),
+                (r, c) => format!("{r} {} and {c} {}", if r == 1 { "row" } else { "rows" }, if c == 1 { "clip" } else { "clips" }),
+            };
+            return Some(match color {
+                Some(c) => format!("Color {what} {c}"),
+                None => format!("Clear the color of {what}"),
+            });
+        }
         _ if count < 2 => return None,
         Edit::ClipsActive { active, .. } => return Some(format!("{} {count} clips", if *active { "Activate" } else { "Deactivate" })),
         Edit::ClipsMove { .. } => "Move",

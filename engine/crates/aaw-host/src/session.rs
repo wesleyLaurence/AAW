@@ -813,6 +813,9 @@ impl Session {
                         if !c.active {
                             clip["active"] = json!(false);
                         }
+                        if let Some(color) = &c.color {
+                            clip["color"] = json!(color);
+                        }
                         clip
                     })
                     .collect();
@@ -836,6 +839,9 @@ impl Session {
                             if !c.active {
                                 clip["active"] = json!(false);
                             }
+                            if let Some(color) = &c.color {
+                                clip["color"] = json!(color);
+                            }
                             clip
                         })
                         .collect();
@@ -852,7 +858,7 @@ impl Session {
                         "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                         "automation": params(&t.automation),
                         "clips": clips,
-                    }), &t.name);
+                    }), &t.name, &t.color);
                 }
                 with_name(json!({
                     "id": t.id,
@@ -864,7 +870,7 @@ impl Session {
                     "sends": t.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                     "automation": params(&t.automation),
                     "audio": audio,
-                }), &t.name)
+                }), &t.name, &t.color)
             })
             .collect();
         let groups: Vec<Json> = p
@@ -883,7 +889,7 @@ impl Session {
                     "sidechain": g.sidechains(),
                     "sends": g.sends.iter().map(|s| value_json(&s.dump(false))).collect::<Vec<_>>(),
                     "automation": params(&g.automation),
-                }), &g.name)
+                }), &g.name, &g.color)
             })
             .collect();
         let returns: Vec<Json> = p
@@ -898,7 +904,7 @@ impl Session {
                     "sidechain": r.sidechains(),
                     "senders": p.senders(&r.id),
                     "automation": params(&r.automation),
-                }), &r.name)
+                }), &r.name, &r.color)
             })
             .collect();
         let mut out = json!({
@@ -1219,16 +1225,22 @@ pub fn value_json(v: &aaw_model::value::Value) -> Json {
     node_json(&Node::Leaf(v.clone()))
 }
 
-/// A row's summary with its name after its ID, where it has one.
-fn with_name(row: Json, name: &Option<String>) -> Json {
-    let (Json::Object(map), Some(name)) = (&row, name) else {
+/// A row's summary with its name and its color after its ID, where it has
+/// them.
+fn with_name(row: Json, name: &Option<String>, color: &Option<String>) -> Json {
+    let Json::Object(map) = &row else {
         return row;
     };
     let mut out = serde_json::Map::new();
     for (k, v) in map {
         out.insert(k.clone(), v.clone());
         if k == "id" {
-            out.insert("name".into(), json!(name));
+            if let Some(name) = name {
+                out.insert("name".into(), json!(name));
+            }
+            if let Some(color) = color {
+                out.insert("color".into(), json!(color));
+            }
         }
     }
     Json::Object(out)

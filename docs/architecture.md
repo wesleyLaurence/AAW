@@ -387,6 +387,14 @@ and a command that names a row take its exact name as well as its ID, an ID
 first, and a name two rows share is refused there. See
 [display-names.md](features/display-names.md).
 
+A track, a group, a return and a note or an audio clip may have a `color`,
+one of the 24 names of `COLORS` in `aaw-model`'s schema, which the app reads
+through the FFI's `palette()`. Without one, a clip takes its track's, a track
+or a group one of `DEFAULT_COLORS` by its place among the tracks or the
+groups (`Project::track_color`, `group_color`), and a return has none; the
+views give both the own color and the one drawn. `clip.color` sets a clip's,
+and a row's is set by path. See [colors.md](features/colors.md).
+
 Group: `id` (unique across tracks, groups and returns), `gain_db`, `pan`, `mute`,
 `solo`, `effects`, `sends` and `automation`, as a track has them, and an optional
 `group`, the group this group is summed into. A group sums the tracks and groups

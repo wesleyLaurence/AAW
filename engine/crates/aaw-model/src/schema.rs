@@ -213,6 +213,36 @@ fn opt_name(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
     })
 }
 
+/// The colors a track, a group, a return or a clip takes, by name, with
+/// each one's RGB: in the order the app's grid of swatches shows them, two
+/// rows of twelve, strong hues first and soft ones and neutrals after.
+pub const COLORS: &[(&str, u32)] = &[
+    ("red", 0xe5534b), ("coral", 0xe8704f), ("orange", 0xf0923a), ("amber", 0xe9b44c),
+    ("yellow", 0xe3d35b), ("lime", 0x8ecf5d), ("green", 0x4fb86a), ("teal", 0x4fc9b0),
+    ("cyan", 0x6fc1d9), ("blue", 0x54a8e8), ("violet", 0x8d86f0), ("orchid", 0xd67fd6),
+    ("rose", 0xe86a8f), ("pink", 0xf2a5c0), ("peach", 0xf2b38f), ("sand", 0xd9c39a),
+    ("olive", 0xa9b86a), ("mint", 0xa8e0b8), ("sky", 0xa6d4f2), ("lavender", 0xc3b8f2),
+    ("brown", 0xa87a5a), ("slate", 0x7d8ca3), ("silver", 0xb8b8b8), ("white", 0xf2f2f2),
+];
+
+/// The colors a track or a group without one of its own takes, by its place
+/// in the song: the first track the first, and on round.
+pub const DEFAULT_COLORS: &[&str] = &["coral", "amber", "lime", "teal", "blue", "violet", "orchid", "rose", "olive", "cyan"];
+
+/// The color of a track, a group, a return or a clip: one of COLORS by name.
+fn opt_color(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
+    v::optional(ctx, x, |c, x| {
+        let s = v::string(c, x)?;
+        if COLORS.iter().any(|(name, _)| *name == s) {
+            Some(s)
+        } else {
+            let names: Vec<&str> = COLORS.iter().map(|(name, _)| *name).collect();
+            c.value_error(format!("No color {s:?}; the colors are {}", names.join(", ")));
+            None
+        }
+    })
+}
+
 fn opt_string(ctx: &mut Ctx, x: &Value) -> Option<Option<String>> {
     v::optional(ctx, x, v::string)
 }
@@ -516,13 +546,15 @@ pub struct AudioClip {
     /// False when the clip is deactivated: it stays where it is and plays
     /// nothing, as a deactivated clip in Ableton.
     pub active: bool,
+    /// The clip's own color, one of COLORS; None takes its track's.
+    pub color: Option<String>,
 }
 
 impl AudioClip {
     const FIELDS: &'static [&'static str] = &[
         "sample", "at", "source_start_seconds", "source_end_seconds", "lead_ms", "gain_db", "fade_in_ms",
         "fade_out_ms", "fade_curve", "source_bpm", "stretch", "transpose", "loop_beats", "length_beats",
-        "active",
+        "active", "color",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<AudioClip> {
@@ -561,6 +593,7 @@ impl AudioClip {
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
         let length_beats = f.opt(ctx, "length_beats", None, |c, x| v::optional(c, x, beat_field));
         let active = f.opt(ctx, "active", true, v::boolean);
+        let color = f.opt(ctx, "color", None, opt_color);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -581,6 +614,7 @@ impl AudioClip {
             loop_beats: loop_beats?,
             length_beats: length_beats?,
             active: active?,
+            color: color?,
         };
         if clip.source_end_seconds.is_some_and(|end| end <= clip.source_start_seconds) {
             ctx.value_error("source_end_seconds must exceed source_start_seconds");
@@ -683,6 +717,7 @@ impl AudioClip {
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
         o.opt("length_beats", self.length_beats.as_ref().map(Beat::to_value));
         o.bool("active", self.active, true);
+        o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
         o.done()
     }
 }
@@ -802,10 +837,12 @@ pub struct NoteClip {
     /// False when the clip is deactivated: it stays where it is and plays
     /// nothing, as a deactivated clip in Ableton.
     pub active: bool,
+    /// The clip's own color, one of COLORS; None takes its track's.
+    pub color: Option<String>,
 }
 
 impl NoteClip {
-    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "notes", "active"];
+    const FIELDS: &'static [&'static str] = &["id", "at", "length_beats", "loop_beats", "notes", "active", "color"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<NoteClip> {
         let f = Fields::of(ctx, x, "NoteClip", Self::FIELDS)?;
@@ -816,6 +853,7 @@ impl NoteClip {
         let loop_beats = f.opt(ctx, "loop_beats", None, |c, x| v::optional(c, x, beat_field));
         let notes = f.opt(ctx, "notes", Vec::new(), |c, x| v::list(c, x, 0, None, Note::validate));
         let active = f.opt(ctx, "active", true, v::boolean);
+        let color = f.opt(ctx, "color", None, opt_color);
         f.finish(ctx);
         if ctx.count() > before {
             return None;
@@ -827,6 +865,7 @@ impl NoteClip {
             loop_beats: loop_beats?,
             notes: notes?,
             active: active?,
+            color: color?,
         };
         if !clip.length_exact().is_positive() {
             ctx.value_error("A clip's length must be positive");
@@ -895,6 +934,7 @@ impl NoteClip {
         o.opt("loop_beats", self.loop_beats.as_ref().map(Beat::to_value));
         o.coll("notes", list(&self.notes, saved, Note::dump));
         o.bool("active", self.active, true);
+        o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
         o.done()
     }
 }
@@ -3617,6 +3657,9 @@ pub struct Track {
     /// What the person calls the track, any text the app shows in place of
     /// the ID; None where the ID is its name. `daw` finds the track by it.
     pub name: Option<String>,
+    /// The track's color, one of COLORS; None takes one of DEFAULT_COLORS
+    /// by its place among the tracks.
+    pub color: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -3663,10 +3706,10 @@ fn gone(ctx: &mut Ctx, x: &Value, what: &str) -> Option<()> {
 
 impl Track {
     const FIELDS: &'static [&'static str] = &[
-        "id", "name", "gain_db", "pan", "mute", "solo", "group", "input", "frozen", "pads", "clips", "audio", "effects", "sends", "automation",
+        "id", "name", "color", "gain_db", "pan", "mute", "solo", "group", "input", "frozen", "pads", "clips", "audio", "effects", "sends", "automation",
     ];
     const MIDI_FIELDS: &'static [&'static str] = &[
-        "id", "name", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "midi_effects", "clips", "effects", "sends", "automation",
+        "id", "name", "color", "type", "gain_db", "pan", "mute", "solo", "group", "frozen", "instrument", "midi_effects", "clips", "effects", "sends", "automation",
     ];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Track> {
@@ -3685,6 +3728,7 @@ impl Track {
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
         let name = f.opt(ctx, "name", None, opt_name);
+        let color = f.opt(ctx, "color", None, opt_color);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
@@ -3725,6 +3769,7 @@ impl Track {
         Some(Track {
             id: id?,
             name: name?,
+            color: color?,
             gain_db: gain_db?,
             pan: pan?,
             mute: mute?,
@@ -3753,6 +3798,7 @@ impl Track {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
         o.opt("name", self.name.as_ref().map(|n| Value::str(n)));
+        o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
         if self.midi.is_some() {
             o.req("type", Value::str("midi"));
         }
@@ -3788,6 +3834,8 @@ pub struct Group {
     pub id: String,
     /// What the person calls the group, shown in place of the ID.
     pub name: Option<String>,
+    /// The group's color, one of COLORS; None takes one of DEFAULT_COLORS.
+    pub color: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -3801,13 +3849,14 @@ pub struct Group {
 }
 
 impl Group {
-    const FIELDS: &'static [&'static str] = &["id", "name", "gain_db", "pan", "mute", "solo", "group", "effects", "sends", "automation"];
+    const FIELDS: &'static [&'static str] = &["id", "name", "color", "gain_db", "pan", "mute", "solo", "group", "effects", "sends", "automation"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Group> {
         let f = Fields::of(ctx, x, "Group", Self::FIELDS)?;
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
         let name = f.opt(ctx, "name", None, opt_name);
+        let color = f.opt(ctx, "color", None, opt_color);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
@@ -3823,6 +3872,7 @@ impl Group {
         Some(Group {
             id: id?,
             name: name?,
+            color: color?,
             gain_db: gain_db?,
             pan: pan?,
             mute: mute?,
@@ -3842,6 +3892,7 @@ impl Group {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
         o.opt("name", self.name.as_ref().map(|n| Value::str(n)));
+        o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
         o.float("gain_db", self.gain_db, 0.0);
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
@@ -3859,6 +3910,8 @@ pub struct Return {
     pub id: String,
     /// What the person calls the return, shown in place of the ID.
     pub name: Option<String>,
+    /// The return's color, one of COLORS; None has none.
+    pub color: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -3867,13 +3920,14 @@ pub struct Return {
 }
 
 impl Return {
-    const FIELDS: &'static [&'static str] = &["id", "name", "gain_db", "pan", "mute", "effects", "automation"];
+    const FIELDS: &'static [&'static str] = &["id", "name", "color", "gain_db", "pan", "mute", "effects", "automation"];
 
     fn validate(ctx: &mut Ctx, x: &Value) -> Option<Return> {
         let f = Fields::of(ctx, x, "Return", Self::FIELDS)?;
         let before = ctx.count();
         let id = f.req(ctx, "id", id_field);
         let name = f.opt(ctx, "name", None, opt_name);
+        let color = f.opt(ctx, "color", None, opt_color);
         let gain_db = f.opt(ctx, "gain_db", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-96", "24")));
         let pan = f.opt(ctx, "pan", 0.0, |c, x| v::float(c, x, Bounds::ge_le("-1", "1")));
         let mute = f.opt(ctx, "mute", false, v::boolean);
@@ -3886,6 +3940,7 @@ impl Return {
         Some(Return {
             id: id?,
             name: name?,
+            color: color?,
             gain_db: gain_db?,
             pan: pan?,
             mute: mute?,
@@ -3902,6 +3957,7 @@ impl Return {
         let mut o = Out::new(saved);
         o.req("id", Value::str(&self.id));
         o.opt("name", self.name.as_ref().map(|n| Value::str(n)));
+        o.opt("color", self.color.as_ref().map(|c| Value::str(c)));
         o.float("gain_db", self.gain_db, 0.0);
         o.float("pan", self.pan, 0.0);
         o.bool("mute", self.mute, false);
@@ -4266,6 +4322,20 @@ impl Project {
 
     pub fn track(&self, id: &str) -> Option<&Track> {
         self.tracks.iter().find(|t| t.id == id)
+    }
+
+    /// The color the track at `i` is drawn in: its own, or one of
+    /// DEFAULT_COLORS by its place among the tracks, the first the first.
+    pub fn track_color(&self, i: usize) -> &str {
+        self.tracks.get(i).and_then(|t| t.color.as_deref()).unwrap_or(DEFAULT_COLORS[i % DEFAULT_COLORS.len()])
+    }
+
+    /// The color the group at `i` is drawn in: its own, or one of
+    /// DEFAULT_COLORS by its place among the groups, counted from the last,
+    /// so that the first group and the first track differ.
+    pub fn group_color(&self, i: usize) -> &str {
+        let n = DEFAULT_COLORS.len();
+        self.groups.get(i).and_then(|g| g.color.as_deref()).unwrap_or(DEFAULT_COLORS[n - 1 - i % n])
     }
 
     /// The track that `r` names, by its ID or by its exact name.

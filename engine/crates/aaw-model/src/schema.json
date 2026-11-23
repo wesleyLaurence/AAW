@@ -151,6 +151,19 @@
           "default": true,
           "title": "Active",
           "type": "boolean"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The clip's own color in the app, one of the named colors daw describe project lists; left out, it takes its track's.",
+          "title": "Color"
         }
       },
       "required": [
@@ -610,6 +623,19 @@
           "default": null,
           "description": "What the person calls the group, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the group's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
           "title": "Name"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The group's color in the app, one of the named colors daw describe project lists. Left out, it takes one by its place among the groups.",
+          "title": "Color"
         },
         "gain_db": {
           "default": 0,
@@ -1147,6 +1173,19 @@
           "description": "What the person calls the track, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the track's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
           "title": "Name"
         },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The track's color in the app, one of the named colors daw describe project lists. Left out, it takes one by its place among the tracks.",
+          "title": "Color"
+        },
         "type": {
           "const": "midi",
           "title": "Type",
@@ -1518,6 +1557,19 @@
           "default": true,
           "title": "Active",
           "type": "boolean"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The clip's own color in the app, one of the named colors daw describe project lists; left out, it takes its track's.",
+          "title": "Color"
         }
       },
       "required": [
@@ -1945,6 +1997,19 @@
           "default": null,
           "description": "What the person calls the return, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the return's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
           "title": "Name"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The return's color in the app, one of the named colors daw describe project lists. Left out, it has none.",
+          "title": "Color"
         },
         "gain_db": {
           "default": 0,
@@ -2663,6 +2728,19 @@
           "default": null,
           "description": "What the person calls the track, any one line of text up to 64 characters, such as \"Lead Vox\"; the app shows it in place of the ID, and every command that takes the track's ID takes its exact name too. Left out, the ID is its name. The ID stays what sends, groups, sidechains, inputs and lanes name.",
           "title": "Name"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The track's color in the app, one of the named colors daw describe project lists. Left out, it takes one by its place among the tracks.",
+          "title": "Color"
         },
         "gain_db": {
           "default": 0,

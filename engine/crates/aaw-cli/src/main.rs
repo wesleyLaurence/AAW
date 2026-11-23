@@ -805,6 +805,17 @@ enum ClipCmd {
         #[arg(required = true, num_args = 1..)]
         clips: Vec<String>,
     },
+    /// Color clips, note clips or audio clips (tracks.T.audio.N), as the
+    /// app draws them: COLOR is a named color (`daw describe project`
+    /// lists them), or none to take each clip's own away so it takes its
+    /// track's. Several clips are one step.
+    Color {
+        project: Song,
+        #[arg(required = true, num_args = 1..)]
+        clips: Vec<String>,
+        /// The color, after the clips: red, white, blue ... or none.
+        color: String,
+    },
     /// Move a note clip's start or end to a song beat. Its notes stay where
     /// they are in the song; those the start passes are kept and do not play.
     Trim {
@@ -2585,6 +2596,20 @@ fn run(cli: &Cli) -> Result<Json> {
                     edit(project, commands.remove(0))
                 } else {
                     let label = format!("{} {} clips", if active { "Activate" } else { "Deactivate" }, commands.len());
+                    edit(project, C::Batch { commands, label: Some(label) })
+                }
+            }
+            ClipCmd::Color { project, clips, color } => {
+                // Several clips colored are one step.
+                let color = (color != "none").then(|| color.clone());
+                let mut commands: Vec<C> = clips.iter().map(|clip| C::ClipColor { clip: clip.clone(), color: color.clone() }).collect();
+                if commands.len() == 1 {
+                    edit(project, commands.remove(0))
+                } else {
+                    let label = match &color {
+                        Some(c) => format!("Color {} clips {c}", commands.len()),
+                        None => format!("Clear the color of {} clips", commands.len()),
+                    };
                     edit(project, C::Batch { commands, label: Some(label) })
                 }
             }

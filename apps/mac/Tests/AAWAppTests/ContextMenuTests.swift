@@ -151,6 +151,31 @@ final class ContextMenuTests: XCTestCase {
         XCTAssertEqual(off.first { $0.action == .activate }?.title, "Activate Clips")
     }
 
+    /// Color ▸ on a header and on a clip: the item that takes the own color
+    /// away, then a swatch of each color of the palette in its order, the
+    /// one everything colored has checked, none checked for a mix; the
+    /// master has none.
+    func testColorOffersTheNoneItemAndASwatchOfEachColor() {
+        let palette: [(name: String, rgb: UInt32)] = [("red", 0xe5534b), ("white", 0xf2f2f2)]
+        let colors = ContextMenu.colors(palette: palette, chosen: ["white", "white"], none: "Automatic") { ContextMenu.RowAction.color($0) }
+        XCTAssertEqual(actions(colors), [.color(nil), .color("red"), .color("white")])
+        XCTAssertEqual(colors.map(\.title), ["Automatic", "red", "white"])
+        XCTAssertEqual(colors.map(\.swatch), [nil, 0xe5534b, 0xf2f2f2])
+        XCTAssertEqual(colors.map(\.checked), [false, false, true])
+        let mixed = ContextMenu.colors(palette: palette, chosen: ["white", nil], none: "Automatic") { ContextMenu.RowAction.color($0) }
+        XCTAssertFalse(mixed.contains(where: \.checked))
+        let none = ContextMenu.colors(palette: palette, chosen: [nil], none: "Track Color") { ContextMenu.ClipAction.color($0) }
+        XCTAssertEqual(none.map(\.checked), [true, false, false])
+
+        let row = ContextMenu.row(kind: .track, muted: false, soloed: false, automationShown: false, colors: colors)
+        XCTAssertEqual(Array(actions(row).suffix(3)), [nil, .color(nil), .delete])
+        XCTAssertEqual(row.first { $0.title == "Color" }?.children, colors)
+        let master = ContextMenu.row(kind: .master, muted: false, soloed: false, automationShown: false, colors: colors)
+        XCTAssertFalse(master.contains { $0.title == "Color" })
+        let clip = ContextMenu.clip(editor: "Notes", canSplit: false, canJoin: false, colors: none)
+        XCTAssertEqual(Array(actions(clip).suffix(2)), [.color(nil), .delete])
+    }
+
     func testAnEffectsMenuPastesOnlyWhatWasCopiedAndNamesItsBypass() {
         let items = ContextMenu.effect(bypassed: false, copied: nil)
         XCTAssertEqual(actions(items), [.cut, .copy, .paste, .duplicate, nil, .bypass, .makeRack, nil, .delete])

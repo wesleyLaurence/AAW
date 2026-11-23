@@ -235,6 +235,10 @@ pub struct TrackView {
     pub id: String,
     /// What the header shows: the track's name, or its ID without one.
     pub name: String,
+    /// Its own color, one of `palette()` by name, if it has one.
+    pub color: Option<String>,
+    /// The color it is drawn in: its own, or one by its place in the song.
+    pub shown_color: String,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -289,6 +293,10 @@ pub struct GroupView {
     pub id: String,
     /// What the header shows: the group's name, or its ID without one.
     pub name: String,
+    /// Its own color, one of `palette()` by name, if it has one.
+    pub color: Option<String>,
+    /// The color it is drawn in: its own, or one by its place in the song.
+    pub shown_color: String,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -365,6 +373,21 @@ pub fn mod_field(target: &str) -> Option<String> {
         ["envelopes", _, "attack_ms" | "decay_ms" | "sustain_percent" | "release_ms"] => Some(target.to_string()),
         _ => None,
     }
+}
+
+/// One of the named colors a track, a group, a return or a clip takes, with
+/// its RGB as 0xRRGGBB.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct Swatch {
+    pub name: String,
+    pub rgb: u32,
+}
+
+/// The named colors, in the order the grid of swatches shows them: two rows
+/// of twelve.
+#[uniffi::export]
+pub fn palette() -> Vec<Swatch> {
+    aaw_model::COLORS.iter().map(|(name, rgb)| Swatch { name: name.to_string(), rgb: *rgb }).collect()
 }
 
 /// The matrix target a field of the panel stands for, by the field's path,
@@ -485,6 +508,10 @@ pub struct NoteClipView {
     pub notes: Vec<NoteView>,
     /// False when the clip is deactivated: it is drawn and plays nothing.
     pub active: bool,
+    /// Its own color, one of `palette()` by name, if it has one.
+    pub color: Option<String>,
+    /// The color it is drawn in: its own, or its track's.
+    pub shown_color: String,
 }
 
 /// A send from a track to a return.
@@ -539,6 +566,10 @@ pub struct AudioClipView {
     pub file: u64,
     /// False when the clip is deactivated: it is drawn and plays nothing.
     pub active: bool,
+    /// Its own color, one of `palette()` by name, if it has one.
+    pub color: Option<String>,
+    /// The color it is drawn in: its own, or its track's.
+    pub shown_color: String,
 }
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -547,6 +578,8 @@ pub struct ReturnView {
     pub id: String,
     /// What the header shows: the return's name, or its ID without one.
     pub name: String,
+    /// Its color, one of `palette()` by name; a return without one has none.
+    pub color: Option<String>,
     pub gain_db: f64,
     pub pan: f64,
     pub mute: bool,
@@ -1552,6 +1585,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 key: handle(track_items, i),
                 id: t.id.clone(),
                 name: t.name.clone().unwrap_or_else(|| t.id.clone()),
+                color: t.color.clone(),
+                shown_color: p.track_color(i).to_string(),
                 gain_db: t.gain_db,
                 pan: t.pan,
                 mute: t.mute,
@@ -1630,6 +1665,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                                 })
                                 .collect(),
                             active: c.active,
+                            color: c.color.clone(),
+                            shown_color: c.color.clone().unwrap_or_else(|| p.track_color(i).to_string()),
                         }
                     })
                     .collect(),
@@ -1664,6 +1701,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             transpose: c.transpose,
                             file: identity,
                             active: c.active,
+                            color: c.color.clone(),
+                            shown_color: c.color.clone().unwrap_or_else(|| p.track_color(i).to_string()),
                         }
                     })
                     .collect(),
@@ -1699,6 +1738,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 key: handle(group_items, i),
                 id: g.id.clone(),
                 name: g.name.clone().unwrap_or_else(|| g.id.clone()),
+                color: g.color.clone(),
+                shown_color: p.group_color(i).to_string(),
                 gain_db: g.gain_db,
                 pan: g.pan,
                 mute: g.mute,
@@ -1732,6 +1773,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                 key: handle(return_items, i),
                 id: r.id.clone(),
                 name: r.name.clone().unwrap_or_else(|| r.id.clone()),
+                color: r.color.clone(),
                 gain_db: r.gain_db,
                 pan: r.pan,
                 mute: r.mute,

@@ -19,6 +19,8 @@ public enum ContextMenu {
         case input(InputChoice?)
         /// Freeze Track on a track, Unfreeze Track on a frozen one.
         case freeze
+        /// A color of Color ▸, by name, or none for the row's own taken away.
+        case color(String?)
     }
 
     /// One choice of an audio track's Input submenu.
@@ -35,6 +37,8 @@ public enum ContextMenu {
     /// What an item of a clip's menu does, to the selected clips.
     public enum ClipAction: Equatable {
         case edit, cut, copy, duplicate, split, join, activate, loop, delete
+        /// A color of Color ▸, by name, or none for the clips' own taken away.
+        case color(String?)
     }
 
     /// What an item of an effect's menu does, to the effect that was clicked
@@ -63,6 +67,9 @@ public enum ContextMenu {
         public var children: [Item<Action>]? = nil
         /// How far in the title sits: a group in a group in Move to Group.
         public var indent = 0
+        /// A swatch of Color ▸, as 0xRRGGBB: drawn with the swatches beside
+        /// it as one grid, its title the color's name.
+        public var swatch: UInt32? = nil
 
         public static var separator: Item { Item(title: "", action: nil) }
     }
@@ -114,16 +121,31 @@ public enum ContextMenu {
         return items
     }
 
+    /// The Color submenu: `none` first, the item that takes the own color
+    /// away, then a swatch for each color of the song's palette, in its
+    /// order. What is colored has the colors `chosen`, nil for one without
+    /// its own: the color they all have is checked.
+    public static func colors<Action: Equatable>(palette: [(name: String, rgb: UInt32)], chosen: [String?], none: String,
+                                                 _ action: (String?) -> Action) -> [Item<Action>] {
+        // The one color they all have, nil among them for none of their own.
+        let same = Set(chosen.map { $0 ?? "" })
+        let all = same.count == 1 ? same.first : nil
+        var items = [Item<Action>(title: none, action: action(nil), checked: all == "")]
+        items += palette.map { Item(title: $0.name, action: action($0.name), checked: all == $0.name, swatch: $0.rgb) }
+        return items
+    }
+
     /// A header's menu: Rename, what a row is set to, a row added after it,
     /// and Delete. The master has no name of its own, no mute mark and cannot
     /// go; a return has no solo. A track offers Group Tracks, or Remove from
     /// Group when it is in one (`grouped`); a group offers Ungroup, and
     /// Remove from Group when it is in a group. Both offer Move to Group
     /// with the `groups` submenu, when given. A track offers Freeze Track,
-    /// or Unfreeze Track while it is frozen (`frozen`).
+    /// or Unfreeze Track while it is frozen (`frozen`). Every row but the
+    /// master offers Color with the `colors` submenu, when given.
     public static func row(kind: HeaderLayout.Kind, muted: Bool, soloed: Bool, automationShown: Bool, grouped: Bool = false,
                            inputs: [Item<RowAction>]? = nil, frozen: Bool = false,
-                           groups: [Item<RowAction>]? = nil) -> [Item<RowAction>] {
+                           groups: [Item<RowAction>]? = nil, colors: [Item<RowAction>]? = nil) -> [Item<RowAction>] {
         var items: [Item<RowAction>] = []
         if kind != .master {
             items.append(Item(title: "Rename", action: .rename, key: "r"))
@@ -173,6 +195,9 @@ public enum ContextMenu {
         }
         if kind != .master {
             items.append(.separator)
+            if let colors {
+                items.append(Item(title: "Color", action: .color(nil), children: colors))
+            }
             items.append(Item(title: "Delete", action: .delete, key: "\u{8}", command: false))
         }
         return items
@@ -184,10 +209,11 @@ public enum ContextMenu {
     /// `canJoin` whether two or more clips of one track and kind are
     /// selected, `activates` whether 0 would activate the selection, every
     /// clip of it being deactivated, rather than deactivate it, and `many`
-    /// whether more than one clip is selected.
+    /// whether more than one clip is selected. Color is the `colors`
+    /// submenu, when given.
     public static func clip(editor: String, canSplit: Bool, canJoin: Bool, activates: Bool = false,
-                            many: Bool = false) -> [Item<ClipAction>] {
-        [
+                            many: Bool = false, colors: [Item<ClipAction>]? = nil) -> [Item<ClipAction>] {
+        var items: [Item<ClipAction>] = [
             Item(title: "Edit \(editor)", action: .edit),
             .separator,
             Item(title: "Cut", action: .cut, key: "x"),
@@ -200,8 +226,12 @@ public enum ContextMenu {
             .separator,
             Item(title: "Loop Selection", action: .loop, key: "l", command: false),
             .separator,
-            Item(title: "Delete", action: .delete, key: "\u{8}", command: false),
         ]
+        if let colors {
+            items.append(Item(title: "Color", action: .color(nil), children: colors))
+        }
+        items.append(Item(title: "Delete", action: .delete, key: "\u{8}", command: false))
+        return items
     }
 
     /// The marker strip's menu. On a marker: Rename, which lets the person

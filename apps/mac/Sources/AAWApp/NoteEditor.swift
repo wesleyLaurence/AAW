@@ -39,7 +39,7 @@ final class NoteEditor: NSView {
     private let model: SongModel
     private var context: NoteContext?
     private var layout = PianoRollLayout()
-    private var color = Theme.palette[0]
+    private var color = Theme.palette[0].color
     /// The clip the view was last fitted to, and whether it was folded.
     private var fitted: UInt64?
     private var fittedFolded = false
