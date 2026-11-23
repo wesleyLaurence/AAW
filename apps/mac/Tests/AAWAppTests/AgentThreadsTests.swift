@@ -135,6 +135,53 @@ final class AgentThreadsTests: XCTestCase {
         XCTAssertNil(AgentCommands.split(""))
     }
 
+    /// A skill anywhere in a message: the `/` the caret is in, after a
+    /// space only; where a chip's `/name` stands; a name typed out whole;
+    /// the message sent with it first; and the row drawn back from it.
+    func testASkillAnywhereInAMessage() {
+        XCTAssertEqual(AgentCommands.query(in: "/", caret: 1), NSRange(location: 0, length: 1))
+        XCTAssertEqual(AgentCommands.query(in: "take it and /cl", caret: 15), NSRange(location: 12, length: 3))
+        XCTAssertEqual(AgentCommands.query(in: "take it and /cl more", caret: 15), NSRange(location: 12, length: 3), "the caret says which")
+        XCTAssertNil(AgentCommands.query(in: "take it and /cl more", caret: 20))
+        XCTAssertNil(AgentCommands.query(in: "1/4 notes", caret: 3), "a slash after a digit is text")
+        XCTAssertNil(AgentCommands.query(in: "and/or", caret: 6), "a slash after a letter is text")
+        XCTAssertNil(AgentCommands.query(in: "see /Users/wes", caret: 14), "a path past its first part is text")
+
+        XCTAssertEqual(AgentCommands.range(of: "roar", in: "/roar"), NSRange(location: 0, length: 5))
+        XCTAssertEqual(AgentCommands.range(of: "roar", in: "do it /roar now"), NSRange(location: 6, length: 5))
+        XCTAssertEqual(AgentCommands.range(of: "roar", in: "a/roar b /roar\nc"), NSRange(location: 9, length: 5), "the first at a word's start")
+        XCTAssertNil(AgentCommands.range(of: "roar", in: "do it /roar-edit"))
+        XCTAssertNil(AgentCommands.range(of: "roar", in: "do it /roar,"))
+
+        let names: Set<String> = ["roar", "clean-edit"]
+        XCTAssertEqual(AgentCommands.named(in: "take it and /clean-edit it", among: names), "clean-edit")
+        XCTAssertEqual(AgentCommands.named(in: "/roar 8 bars", among: names), "roar")
+        XCTAssertNil(AgentCommands.named(in: "take it and /clean-edit", among: names), "not until a space follows")
+        XCTAssertNil(AgentCommands.named(in: "take it and/clean-edit it", among: names))
+        XCTAssertNil(AgentCommands.named(in: "take /other it", among: names))
+        XCTAssertNil(AgentCommands.named(in: "take /roar it", among: []))
+
+        let typed = "take the second chorus and /clean-edit it, keep the ad-libs"
+        let sent = AgentCommands.message(typed, skill: "clean-edit")
+        XCTAssertEqual(sent, "/clean-edit take the second chorus and /clean-edit it, keep the ad-libs")
+        XCTAssertEqual(AgentCommands.message("/roar 8 bars", skill: "roar"), "/roar 8 bars", "a skill already first is as typed")
+        XCTAssertEqual(AgentCommands.split(sent)?.name, "clean-edit", "Claude Code reads the skill from the start")
+
+        let shown = AgentCommands.shown(sent)
+        XCTAssertEqual(shown?.name, "clean-edit")
+        XCTAssertEqual(shown?.words, typed)
+        XCTAssertEqual(shown?.chip, NSRange(location: 27, length: 11))
+        XCTAssertEqual(AgentCommands.typed(sent), typed)
+        XCTAssertNil(AgentCommands.shown("/roar 8 bars")?.chip, "a chip at the start is drawn first")
+        XCTAssertEqual(AgentCommands.shown("/roar 8 bars")?.words, "8 bars")
+        XCTAssertEqual(AgentCommands.typed("/roar 8 bars"), "/roar 8 bars")
+        XCTAssertNil(AgentCommands.shown("plain words"))
+
+        // The record's line reads back the same.
+        let record = "<command-message>clean-edit</command-message>\n<command-name>/clean-edit</command-name>\n<command-args>take the second chorus and /clean-edit it, keep the ad-libs\n\n<app-context>\nplaying\n</app-context></command-args>"
+        XCTAssertEqual(AgentCommands.recorded(record), sent)
+    }
+
     /// The handshake's commands grouped by the skill folders, with the
     /// engine's own hidden, and filtered by a query.
     func testCommandsAreGroupedAndFiltered() throws {
