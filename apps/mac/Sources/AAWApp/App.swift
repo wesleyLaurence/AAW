@@ -213,12 +213,22 @@ public enum AAWMain {
     private static var delegate: AppDelegate?
 
     public static func run() {
+        withoutAutoFill()
         let app = NSApplication.shared
         let delegate = AppDelegate(launch: Launch(arguments: Array(CommandLine.arguments.dropFirst())))
         Self.delegate = delegate
         app.delegate = delegate
         app.setActivationPolicy(.regular)
         app.run()
+    }
+
+    /// Turns off macOS's password AutoFill, which the app has no use for.
+    /// As any field takes the keys, AutoFill looks for the fields before and
+    /// after it, and with none set walks every view in the window to find
+    /// them: half a second of the main thread as a track's name field opened
+    /// in a large song, and longer the more the window shows.
+    static func withoutAutoFill() {
+        UserDefaults.standard.register(defaults: ["NSAutoFillHeuristicControllerEnabled": false])
     }
 }
 

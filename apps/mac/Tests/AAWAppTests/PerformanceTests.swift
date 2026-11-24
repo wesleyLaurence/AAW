@@ -1,5 +1,6 @@
 import AAWCore
 import AVFoundation
+import SwiftUI
 import XCTest
 @testable import AAWApp
 
@@ -64,6 +65,45 @@ final class PerformanceTests: XCTestCase {
         model.refreshPlugins()
         wait("the patches") { !model.browser.patches.isEmpty }
         spin(0.3)
+
+        let over = Stalls.shared.found(after: mark).filter { $0.ms > Self.budget }
+        XCTAssertEqual(over.map(\.ms), [], over.map { stall in
+            "\(stall.ms) ms: " + (stall.stacks.first ?? []).prefix(16).joined(separator: " < ")
+        }.joined(separator: "\n"))
+    }
+
+    /// A field takes the keys in a window that shows a great deal, as a new
+    /// track's name does: macOS's password AutoFill, unless the app turns it
+    /// off, looks for the fields beside it through every view in the window,
+    /// almost four seconds in this one.
+    func testAFieldTakesTheKeysWithoutWalkingTheWindow() throws {
+        AAWMain.withoutAutoFill()
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 1440, height: 900),
+                              styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+        let rows = NSHostingView(rootView: ScrollView {
+            VStack(alignment: .leading) {
+                ForEach(0..<300, id: \.self) { n in
+                    HStack {
+                        Text("Row \(n)")
+                        Button("Play") {}
+                        Toggle("On", isOn: .constant(n % 2 == 0))
+                    }
+                }
+            }
+        })
+        rows.frame = CGRect(x: 0, y: 0, width: 1440, height: 870)
+        let field = NSTextField(string: "Name")
+        field.frame = CGRect(x: 20, y: 874, width: 200, height: 20)
+        window.contentView?.addSubview(rows)
+        window.contentView?.addSubview(field)
+        window.makeKeyAndOrderFront(nil)
+        defer { window.orderOut(nil) }
+        Stalls.shared.start()
+        spin(0.5)
+        let mark = Stalls.shared.elapsed
+
+        window.makeFirstResponder(field)
+        spin(0.5)
 
         let over = Stalls.shared.found(after: mark).filter { $0.ms > Self.budget }
         XCTAssertEqual(over.map(\.ms), [], over.map { stall in

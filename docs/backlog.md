@@ -335,6 +335,9 @@ October 19, 2026 (D123). Items 8–17 are the order as it stood.
   100–155 ms, SwiftUI building and laying out their views once a launch,
   the last stalls over 100 ms the [performance](features/performance.md)
   session finds.
+- An edit answered sooner by the host: off the main thread, but a new track
+  or a marker shows, and its name field opens, 80–95 ms after the key on a
+  37-track song and 240–270 ms on the performance session's song.
 - Audio clips: a crossfade made by dragging one clip over another, where today
   both play; an edge that snaps to the beats of the file's beat map; a clip's
   lead shown and dragged; several clips trimmed at once.
