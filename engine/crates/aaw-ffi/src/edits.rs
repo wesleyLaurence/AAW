@@ -127,6 +127,17 @@ pub enum Edit {
     /// `track` or else on the track it was copied from, and the others as far
     /// after it and below it as they were. The copies are what the edit makes.
     ClipsPaste { copied: String, at: f64, track: Option<u64> },
+    /// Empties the beats from `start` for `length` on `rows`, its tracks
+    /// and groups, or on every track with none: clips across an edge are
+    /// cut there, and nothing moves.
+    RangeClear { start: f64, length: f64, rows: Vec<Row> },
+    /// Copies the beats from `start` for `length` on `rows`, or every track
+    /// with none, to `to`, over what is there, as ⌘D does to a time
+    /// selection. The copies are what the edit makes.
+    RangeCopy { start: f64, length: f64, to: f64, rows: Vec<Row> },
+    /// Puts a range Copy took over the beats from `at`, on the tracks it
+    /// came from or from `track` down. The copies are what the edit makes.
+    RangePaste { copied: String, at: f64, track: Option<u64> },
     /// Moves a note clip's start, its end or both to a beat. Its notes stay
     /// where they are in the song: those the start passes are kept, before
     /// the clip, and do not play.
@@ -723,6 +734,24 @@ fn beat_at(x: f64) -> Result<Json> {
     Ok(beat(&aaw_model::beat(&Beat::Float(x.max(0.0)))?))
 }
 
+/// The tracks and groups of a range by handle; returns and the master
+/// have no clips, and a range over every track names none.
+pub fn range_rows(rows: &[Row]) -> Vec<String> {
+    rows.iter()
+        .filter_map(|row| match row {
+            Row::Track { key } | Row::Group { key } => Some(handle_text(*key)),
+            Row::Return { .. } | Row::Master => None,
+        })
+        .collect()
+}
+
+/// What Copy takes of a range, for `Edit::RangePaste`.
+pub fn copied_range(doc: &Doc, start: f64, length: f64, rows: &[Row]) -> Result<String> {
+    let start = aaw_model::beat(&Beat::Float(start.max(0.0)))?;
+    let length = aaw_model::beat(&Beat::Float(length.max(0.0)))?;
+    Ok(aaw_host::range::take(&doc.tree(), &start, &length, &range_rows(rows))?.to_string())
+}
+
 /// What a marker says, as typed: on one line, without the space around
 /// it, and no longer than a marker holds.
 fn marker_text(text: &str) -> String {
@@ -1171,6 +1200,20 @@ pub fn commands(doc: &Doc, edit: &Edit, files: &Files, directory: &Path) -> Resu
                 return Err("A copy cannot start before the song".into());
             }
             song.copies(&tree, clips, &spans, &by, (*rows).into(), "Copy")
+        }
+        Edit::RangeClear { start, length, rows } => {
+            Ok(vec![json!({"op": "range.clear", "start": beat_at(*start)?, "length": beat_at(*length)?, "tracks": range_rows(rows)})])
+        }
+        Edit::RangeCopy { start, length, to, rows } => {
+            Ok(vec![json!({"op": "range.copy", "start": beat_at(*start)?, "length": beat_at(*length)?, "to": beat_at(*to)?, "tracks": range_rows(rows)})])
+        }
+        Edit::RangePaste { copied, at, track } => {
+            let copied: Json = serde_json::from_str(copied).map_err(|e| e.to_string())?;
+            let mut command = json!({"op": "range.paste", "copied": copied, "at": beat_at(*at)?});
+            if let Some(key) = track {
+                command["track"] = json!(handle_text(*key));
+            }
+            Ok(vec![command])
         }
         Edit::ClipsPaste { copied, at, track } => {
             let tree = doc.tree();

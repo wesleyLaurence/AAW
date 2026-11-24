@@ -61,13 +61,14 @@ Built:
 | [learning the CLI quickly](features/cli-discovery.md) | Short `daw describe` topics, `daw describe start`, `--help` with fields, and errors that say what to do |
 | [the arrangement map](features/arrangement-map.md) | `daw map`: the song as a grid of tracks by bars, the same music under the same letter |
 | [musical checks](features/musical-checks.md) | `daw check`'s warnings as objects with codes, the checks of the music, and `clip duplicate` laying copies in a row |
-| [selecting several things](features/selection.md) | Clips by a rectangle and copied by Option-drag, several pattern events and automation points selected, moved, copied and removed together |
+| [selecting several things](features/selection.md) | Clips copied by Option-drag, several pattern events and automation points selected, moved, copied and removed together |
 | [the piano roll](features/piano-roll.md) | Writing notes by hand: previews through either instrument, the velocity lane, zoom up and down, a note's start, Option-drag copies, ⌘ off the grid and grids as note values |
 | [the grid](features/grid.md) | The timeline's grid named in the transport bar and chosen in a Grid menu with ⌘1 to ⌘4, acting on the editor that has the keys; triplets, and Snap to Grid off |
 | [watchable steps](features/watchable-steps.md) | The agent making the song a part at a time with a host running, each command as it is decided, and a hint in the next edit's reply after five minutes of silence |
 | [time signature](features/time-signature.md) | One time signature for the song, `3/4` or `6/8`, typed in the transport bar or set with `daw`; positions stay quarter-note beats while the bars, grid, rulers, position, metronome, map, MIDI files and beat map count the meter |
 | [the Synth](features/synth.md) | A polyphonic synthesizer as a MIDI track's instrument, its sound a patch in the song: the engine, `daw synth`, patches as files and factory patches, the panel, unison, wavetables and the patch's effects |
 | [editing a range of bars](features/bar-ranges.md) | `daw range copy\|insert\|delete\|clear` across the tracks with the clips, audio, lanes and sections in a range, and a section duplicated, moved or removed with its content |
+| [a time selection in the app](features/time-selection.md) | Beats dragged across tracks and groups, or along the ruler, and copied, cut, pasted over their whole length, duplicated and emptied with the keys |
 | [export in the app](features/export-in-app.md) | File › Export Audio… (⇧⌘R): a sheet with the range as bars and beats from the selected clips, the format, rate, depth and level, writing into `exports/` through the bundle's `daw export`, with its measurements in a banner |
 | [clips that loop](features/looping-clips.md) | A note clip or an audio clip whose content repeats until the clip ends, and `daw clip loop` |
 | [the live analyzer](features/analyzer.md) | An effect that changes nothing and shows the sound passing through it: a strip in the device panel and a window with levels, loudness, spectrum, stereo field, spectrogram and waveform |

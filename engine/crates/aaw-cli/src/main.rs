@@ -1643,8 +1643,9 @@ enum MarkerCmd {
     },
 }
 
-/// Ranges of beats across every track, or those named with --track: the
-/// clips, audio, automation and sections in them. A clip across an edge is
+/// Ranges of beats across every track, or those named with --track, a
+/// track or a group, which stands for every track under it and its own
+/// lanes: the clips, audio, automation and sections in them. A clip across an edge is
 /// cut there, a looped clip's right half starting into its loop. Positions are beats.
 #[derive(Subcommand)]
 enum RangeCmd {

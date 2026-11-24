@@ -8,10 +8,12 @@ automation lanes work the same way, as the piano roll does.
 
 ## What
 
-- **Clips by a rectangle.** A drag that starts in the clear of the timeline
-  draws a rectangle and selects every clip it touches, across tracks. With
-  Shift, they are added to the clips already selected. The press sets the
-  start position, as a click there always has.
+- **Clips by a time selection.** A drag that starts in the clear of the
+  timeline selects the beats it crosses on the rows it crosses, and with
+  them the clips wholly inside, which then move together when one of them
+  is dragged. It drew a rectangle that selected the clips it touched until
+  November 24, 2026 ([time selection](time-selection.md), D204). The press
+  sets the start position, as a click there always has.
 - **Clips copied by a drag with Option.** A clip dragged with Option is
   copied where it is let go, with every selected clip, and the clips stay.
   The copies are outlined on the way and are the selection after. Option is
@@ -64,9 +66,6 @@ automation lanes work the same way, as the piano roll does.
 
 ## Limits
 
-- The rectangle on the timeline selects clips and not a time range: the
-  time selection across tracks of [editing a range of bars](bar-ranges.md)
-  needs a gesture of its own.
 - An event's end is dragged for that event alone, which the press selects.
 - Steps are not selected, copied or pasted; an event is.
 - Points are copied by neither Option nor Copy.

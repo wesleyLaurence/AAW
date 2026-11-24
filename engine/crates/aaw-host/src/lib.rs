@@ -20,7 +20,7 @@ pub mod project;
 pub mod python;
 pub mod racks;
 pub mod record;
-mod range;
+pub mod range;
 pub mod registry;
 pub mod session;
 pub mod tree;
