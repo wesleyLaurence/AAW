@@ -49,7 +49,9 @@ a test fails when opening a large song holds the main thread again.
 - **The test.** `PerformanceTests` opens a generated 30-track song as the app
   does, with an 8 MB conversation, waits for its waveforms and history and
   reads the browser's lists, all under the watch, and fails on any piece of
-  main-thread work over 100 ms, naming its stack.
+  main-thread work over 100 ms, naming its stack. It also gives a field the
+  keys in a window of 300 SwiftUI rows, which held the main thread 3.9 s
+  while password AutoFill was on, and fails the same way.
 
 ## What was measured and changed
 
@@ -67,6 +69,7 @@ repeated runs.
 | First click after opening, with that conversation | 796 ms | 155 ms | The conversation's rows are a lazy stack, laid out as they scroll into view, not all of them on every change of the window |
 | The browser's lists of patches, racks, instrument racks, favorites and plugins, as it shows | 50 ms | 0 | Read off the main thread |
 | Naming a stall's frames | 33 ms | 0 | The watch's own cost, moved off the main thread |
+| A field taking the keys: a new MIDI track's name (⌘⇧T), a new group's (⌘G), a marker's (⇧M), the tempo, the browser's search; a copy of a person's 37-track song in a window of 1440 by 900 | 78–493 ms; 3.9 s in a window of 300 SwiftUI rows of a button and a toggle | 0 | macOS's password AutoFill is off (`NSAutoFillHeuristicControllerEnabled`, registered as the app launches). As a field took the keys it looked for the fields before and after it, and with none set it walked every view in the window to find them, so it grew with what the window shows: half as long with the conversation panel empty. The generated session's song never showed it |
 | Drag a clip and undo; play; save; search 50,000 samples; open Folders; 16 edits from `daw`; scroll and zoom 240 frames | no stall | no stall | A frame draws in 1.9 ms on average and 7 ms at most |
 
 Two stalls came once each and not in six later runs: 435 ms for the first
@@ -99,6 +102,11 @@ first click in a field. Both are the system's first use and outside the app.
   Mac app does: the window comes when the project is ready, and a long open
   says so with a way out. A panel for every open would flash on a small
   song.
+- **Password AutoFill off for the whole app, not a field at a time.** A
+  name field of its own with no neighbours (`nextValidKeyView` nil) took the
+  walk out of the arrangement's fields, but SwiftUI's fields, the tempo and
+  the browser's search, walked the window too. The app has no login to fill;
+  its one secure field is an API key, pasted.
 - **The lists read again as the browser shows, not cached.** The
   person's patches and racks change from a terminal; the browser reads them
   again as it shows, now off the main thread, and shows what it had
