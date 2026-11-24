@@ -36,10 +36,13 @@ pub(crate) enum Kind {
     Audio,
 }
 
-/// The tracks a range covers. When it covers every track, the returns' and
-/// master's lanes, the sections and the song's length go with it.
+/// The tracks a range covers, and the groups whose lanes it covers: a group
+/// named stands for itself, the groups in it and every track under it. When
+/// it covers every track, the groups', returns' and master's lanes, the
+/// sections and the song's length go with it.
 pub(crate) struct Scope {
     tracks: Vec<Loc>,
+    groups: Vec<Loc>,
     names: Vec<String>,
     all: bool,
 }
@@ -386,28 +389,88 @@ fn check_range(start: &BigRational, length: &BigRational) -> Result<BigRational>
     Ok(start + length)
 }
 
+/// A track's place in the song's tracks.
+fn index_of(track: &[Step]) -> usize {
+    match track.last() {
+        Some(Step::Index(i)) => *i,
+        _ => 0,
+    }
+}
+
+/// What Copy takes of the beats from `start` for `length` on `tracks`
+/// (tracks or groups by ID or `@N`, or every track with none), for
+/// `range.paste`; the song is not touched.
+pub fn take(root: &Node, start: &BigRational, length: &BigRational, tracks: &[String]) -> Result<serde_json::Value> {
+    let mut root = root.clone();
+    let mut next = 0;
+    let edit = Edit { root: &mut root, handles: true, next: &mut next, origin: crate::command::Origin::User, dir: None, also: Vec::new() };
+    edit.taken(start, length, tracks)
+}
+
 fn beats(s: &BigRational, e: &BigRational) -> String {
     format!("beats {}–{}", beat_text(s), beat_text(e))
 }
 
 impl<'a> Edit<'a> {
-    /// The tracks a range covers: those named, or every track.
+    /// The tracks a range covers: those named and those under the groups
+    /// named, or every track.
     fn scope(&self, tracks: &[String]) -> Result<Scope> {
         let count = self.root.get("tracks").map_or(0, |t| t.items().len());
         let mut locs: Vec<Loc> = Vec::new();
+        let mut groups: Vec<Loc> = Vec::new();
         let mut names = Vec::new();
         for id in tracks {
-            let loc = self.track(id)?;
+            let loc = match self.track(id) {
+                Ok(loc) => loc,
+                Err(not_track) => {
+                    let Ok(group) = self.at(&format!("groups.{id}")) else {
+                        return Err(not_track);
+                    };
+                    let gid = self.name(&group);
+                    if !groups.contains(&group) {
+                        names.push(gid.clone());
+                    }
+                    for (i, g) in self.root.get("groups").map_or(&[][..], Node::items).iter().enumerate() {
+                        let loc = vec![Step::Key("groups".into()), Step::Index(i)];
+                        if self.chain(g.node.field("id")).contains(&gid) && !groups.contains(&loc) {
+                            groups.push(loc);
+                        }
+                    }
+                    for (i, t) in self.root.get("tracks").map_or(&[][..], Node::items).iter().enumerate() {
+                        let loc = vec![Step::Key("tracks".into()), Step::Index(i)];
+                        if self.chain(t.node.field("group")).contains(&gid) && !locs.contains(&loc) {
+                            locs.push(loc);
+                        }
+                    }
+                    continue;
+                }
+            };
             if !locs.contains(&loc) {
                 names.push(self.name(&loc));
                 locs.push(loc);
             }
         }
-        let all = locs.is_empty() || locs.len() == count;
-        if locs.is_empty() {
+        let all = tracks.is_empty() || locs.len() == count;
+        if tracks.is_empty() {
             locs = (0..count).map(|i| vec![Step::Key("tracks".into()), Step::Index(i)]).collect();
         }
-        Ok(Scope { tracks: locs, names, all })
+        Ok(Scope { tracks: locs, groups, names, all })
+    }
+
+    /// The groups above a track or a group, from the one it is in out: the
+    /// chain from `group`.
+    fn chain(&self, group: Option<&str>) -> Vec<String> {
+        let groups = self.root.get("groups").map_or(&[][..], Node::items);
+        let mut out: Vec<String> = Vec::new();
+        let mut next = group.map(str::to_string);
+        while let Some(g) = next {
+            if out.contains(&g) {
+                break;
+            }
+            next = groups.iter().find(|x| x.node.field("id") == Some(g.as_str())).and_then(|x| x.node.field("group")).map(str::to_string);
+            out.push(g);
+        }
+        out
     }
 
     /// The song's length as the tree holds it before the host settles it
@@ -804,11 +867,13 @@ impl<'a> Edit<'a> {
         Ok(())
     }
 
-    /// The owners whose lanes a range covers: its tracks, and the returns and
-    /// the master when it covers every track.
+    /// The owners whose lanes a range covers: its tracks and its groups, and
+    /// every group, the returns and the master when it covers every track.
     fn lane_owners(&self, scope: &Scope) -> Vec<Loc> {
         let mut out = scope.tracks.clone();
-        if scope.all {
+        if !scope.all {
+            out.extend(scope.groups.iter().cloned());
+        } else {
             for key in ["groups", "returns"] {
                 for i in 0..self.root.get(key).map_or(0, |n| n.items().len()) {
                     out.push(vec![Step::Key(key.into()), Step::Index(i)]);
@@ -819,14 +884,17 @@ impl<'a> Edit<'a> {
         out
     }
 
-    fn lane_domain(project: &Project, owner: &[Step], param: &str) -> Domain {
-        let owner = match owner {
+    fn owner_of<'p>(project: &'p Project, owner: &[Step]) -> Owner<'p> {
+        match owner {
             [Step::Key(k), Step::Index(i)] if k == "tracks" => Owner::Track(&project.tracks[*i]),
             [Step::Key(k), Step::Index(i)] if k == "groups" => Owner::Group(&project.groups[*i]),
             [Step::Key(k), Step::Index(i)] if k == "returns" => Owner::Return(&project.returns[*i]),
             _ => Owner::Master(&project.master),
-        };
-        rules::target(owner, param).map_or(Domain::Linear, |t| t.domain)
+        }
+    }
+
+    fn lane_domain(project: &Project, owner: &[Step], param: &str) -> Domain {
+        rules::target(Self::owner_of(project, owner), param).map_or(Domain::Linear, |t| t.domain)
     }
 
     /// Rewrites the points of every lane of the scope.
@@ -1121,6 +1189,188 @@ impl<'a> Edit<'a> {
         self.edit_lanes(&scope, &project, |items, domain, next| lane_clear(items, start, &end, domain, next))?;
         out.label = format!("Clear {}{}", beats(start, &end), scope.suffix());
         self.finish(out, report)
+    }
+
+    /// What Copy takes of a range, for `range.paste`: each track's pieces
+    /// cut to the range, its place in the song and its lanes over the range,
+    /// and the lanes of the groups in it, with every position from the
+    /// range's start. A track with nothing in the range is taken too, so a
+    /// paste empties its beats where it lands.
+    fn taken(&self, start: &BigRational, length: &BigRational, tracks: &[String]) -> Result<serde_json::Value> {
+        let scope = self.scope(tracks)?;
+        let end = check_range(start, length)?;
+        let project = self.validated()?;
+        let pieces = self.extract_scope(&scope, start, &end)?;
+        let mut rows = Vec::new();
+        for track in &scope.tracks {
+            let items: Vec<serde_json::Value> = pieces
+                .iter()
+                .filter(|p| p.track == *track)
+                .map(|p| {
+                    let mut node = p.node.clone();
+                    let at = exact(node.get("at")).unwrap_or_default() - start;
+                    set(&mut node, "at", beat_value(&at));
+                    json!({"list": p.key, "node": crate::command::node_json(&node)})
+                })
+                .collect();
+            rows.push(json!({"index": index_of(track), "items": items, "lanes": self.lanes_taken(track, &project, start, &end)}));
+        }
+        let groups: Vec<Loc> = if scope.all {
+            (0..self.root.get("groups").map_or(0, |n| n.items().len())).map(|i| vec![Step::Key("groups".into()), Step::Index(i)]).collect()
+        } else {
+            scope.groups.clone()
+        };
+        let mut taken_groups = Vec::new();
+        for group in &groups {
+            let lanes = self.lanes_taken(group, &project, start, &end);
+            if lanes.is_empty() {
+                continue;
+            }
+            // The group is found again from the first of its tracks taken,
+            // so many groups up from it.
+            let id = self.name(group);
+            let place = scope.tracks.iter().enumerate().find_map(|(row, t)| {
+                let up = self.chain(self.node(t).field("group")).iter().position(|g| *g == id)?;
+                Some((row, up + 1))
+            });
+            if let Some((row, up)) = place {
+                taken_groups.push(json!({"track": row, "up": up, "lanes": lanes}));
+            }
+        }
+        Ok(json!({"length": crate::command::to_json(&beat_value(length)), "tracks": rows, "groups": taken_groups}))
+    }
+
+    /// An owner's lanes over `[s, e)`, from `s`: the points in the range,
+    /// with the value at `s` where no point is there and the value the lane
+    /// reaches at `e`, as the lane plays them.
+    fn lanes_taken(&self, owner: &[Step], project: &Project, s: &BigRational, e: &BigRational) -> Vec<serde_json::Value> {
+        let mut out = Vec::new();
+        for lane in self.node(owner).get("automation").map_or(&[][..], Node::items) {
+            let param = lane.node.field("param").unwrap_or_default().to_string();
+            let src = pts(lane.node.get("points").map_or(&[][..], Node::items));
+            if src.is_empty() {
+                continue;
+            }
+            let domain = Self::lane_domain(project, owner, &param);
+            let at = |x: &BigRational| crate::command::to_json(&beat_value(x));
+            let mut points = Vec::new();
+            if !src.iter().any(|x| x.at == *s) {
+                points.push(json!({"at": at(&BigRational::zero()), "value": right_of(&src, domain, s)}));
+            }
+            for x in src.iter().filter(|x| x.at >= *s && x.at < *e) {
+                let mut p = json!({"at": at(&(&x.at - s)), "value": x.value});
+                if x.hold {
+                    p["curve"] = json!("hold");
+                }
+                if x.shape != 0.0 {
+                    p["shape"] = json!(x.shape);
+                }
+                points.push(p);
+            }
+            points.push(json!({"at": at(&(e - s)), "value": left_of(&src, domain, e)}));
+            out.push(json!({"param": param, "points": points}));
+        }
+        out
+    }
+
+    /// `range.paste`: what `range.take` took, over what is at `at`, on the
+    /// tracks it came from or as many tracks down as `track` is from the
+    /// first of them. The whole length is replaced, beats that held nothing
+    /// too. A lane goes where its parameter is: to a lane of the same
+    /// parameter, made if the track has none and could have it.
+    pub(crate) fn range_paste(&mut self, out: &mut Outcome, copied: &serde_json::Value, at: &BigRational, track: Option<&str>) -> Result<()> {
+        let length = crate::command::beat_at(&copied["length"])?;
+        let end = check_range(at, &length)?;
+        let rows = copied["tracks"].as_array().filter(|r| !r.is_empty()).ok_or("Nothing was copied")?;
+        let indices = rows.iter().map(|r| r["index"].as_i64().ok_or_else(|| "A copied track has no place".to_string())).collect::<Result<Vec<_>>>()?;
+        let top = indices.iter().copied().min().unwrap_or(0);
+        let shift = match track {
+            Some(id) => index_of(&self.track(id)?) as i64 - top,
+            None => 0,
+        };
+        let count = self.root.get("tracks").map_or(0, |t| t.items().len()) as i64;
+        let mut targets: Vec<Loc> = Vec::new();
+        for i in &indices {
+            let to = i + shift;
+            if to < 0 || to >= count {
+                return Err(format!("The copy covers {} tracks, and the song has no track {} below the first", rows.len(), to - shift - top));
+            }
+            targets.push(vec![Step::Key("tracks".into()), Step::Index(to as usize)]);
+        }
+        let names = targets.iter().map(|t| self.name(t)).collect();
+        let scope = Scope { tracks: targets.clone(), groups: Vec::new(), names, all: false };
+        let project = self.validated()?;
+        let mut report = Report::default();
+        let mut pieces = Vec::new();
+        for (row, target) in rows.iter().zip(&targets) {
+            for item in row["items"].as_array().map_or(&[][..], Vec::as_slice) {
+                let (key, kind, what) = match item["list"].as_str() {
+                    Some("clips") => ("clips", Kind::Note, "note clips"),
+                    Some("audio") => ("audio", Kind::Audio, "audio clips"),
+                    _ => return Err("A copied item is a note clip or an audio clip".into()),
+                };
+                if self.node(target).get(key).is_none() {
+                    return Err(format!("{} takes no {what}: paste on tracks like the ones copied", self.name(target)));
+                }
+                let node = Node::new(&crate::command::json_value(&item["node"])?);
+                pieces.push(Piece { track: target.clone(), key, kind, node });
+            }
+        }
+        self.split_scope(&scope, at, &mut report)?;
+        self.split_scope(&scope, &end, &mut report)?;
+        self.remove_scope(&scope, at, &end, &mut report)?;
+        self.place(pieces, at, &mut report)?;
+        for (row, target) in rows.iter().zip(&targets) {
+            self.paste_lanes(target, &row["lanes"], at, &length, &project)?;
+        }
+        for group in copied["groups"].as_array().map_or(&[][..], Vec::as_slice) {
+            let (Some(row), Some(up)) = (group["track"].as_u64(), group["up"].as_u64()) else { continue };
+            let Some(target) = targets.get(row as usize) else { continue };
+            let chain = self.chain(self.node(target).field("group"));
+            let Some(id) = (up as usize).checked_sub(1).and_then(|i| chain.get(i)) else { continue };
+            let owner = self.at(&format!("groups.{id}"))?;
+            self.paste_lanes(&owner, &group["lanes"], at, &length, &project)?;
+        }
+        out.label = format!("Paste {} beats at {}{}", beat_text(&length), beat_text(at), scope.suffix());
+        self.finish(out, report)
+    }
+
+    /// Puts lanes `range.take` took on `owner` at `at`, over what is there.
+    fn paste_lanes(&mut self, owner: &[Step], lanes: &serde_json::Value, at: &BigRational, length: &BigRational, project: &Project) -> Result<()> {
+        for lane in lanes.as_array().map_or(&[][..], Vec::as_slice) {
+            let Some(param) = lane["param"].as_str() else { continue };
+            let src = Node::new(&crate::command::json_value(&lane["points"])?);
+            let src = pts(src.items());
+            if src.is_empty() {
+                continue;
+            }
+            let i = match self.lane(owner, param) {
+                Some(i) => i,
+                None => {
+                    if rules::target(Self::owner_of(project, owner), param).is_err() {
+                        continue;
+                    }
+                    let mut map = indexmap::IndexMap::new();
+                    map.insert("param".to_string(), Node::Leaf(Value::str(param)));
+                    map.insert("points".to_string(), Node::List(Vec::new()));
+                    if self.node(owner).get("automation").is_none() {
+                        if let Some(m) = self.node_mut(owner).map_mut() {
+                            m.insert("automation".into(), Node::List(Vec::new()));
+                        }
+                    }
+                    self.insert(owner, "automation", None, Node::Map(map))?;
+                    self.lane(owner, param).ok_or("The lane was not made")?
+                }
+            };
+            let domain = Self::lane_domain(project, owner, param);
+            let loc = [owner.to_vec(), vec![Step::Key("automation".into()), Step::Index(i)]].concat();
+            let points = std::mem::take(self.list(&loc, "points")?);
+            let mut next = *self.next;
+            let points = lane_copy(&src, &BigRational::zero(), length, points, at, false, domain, &mut next);
+            *self.next = next;
+            *self.list(&loc, "points")? = points;
+        }
+        Ok(())
     }
 
     /// A section's index, start and length.

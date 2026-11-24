@@ -555,7 +555,7 @@ can still be moved. The grid and the pattern's step are named as note values
 (1/16, 1/8T, 1 Bar) and still written in beats in the song, so no song changes;
 the piano roll's grid gained 1 Bar and 1/2.
 
-**D80. A rectangle in the clear selects, Option-drag copies everywhere a thing is dragged, and several events and points are selected as notes are.**
+**D80. A rectangle in the clear selects, Option-drag copies everywhere a thing is dragged, and several events and points are selected as notes are.** Revised by D204.
 
 Made while building [selecting several things in the app](features/selection.md)
 on October 6, 2026, without the person, settling what the backlog item left
@@ -1084,3 +1084,6 @@ Decided on November 23, 2026, by the person. `verify.md` had a line added by nea
 
 **D203. Each fact is written once; `decisions.md` holds only choices for the whole project.**
 Decided on November 23, 2026, by the person. A finished feature was described in its backlog line, its feature file, an entry here, a paragraph in `completed.md`, the pull request and a long commit message; this file reached 350 KB and was never read whole. From now on a choice within one feature goes under its file's Decisions heading, and this file takes only direction, priorities, process and rules across features, in a few sentences each. `completed.md` gets one short line a pull request and commit messages stay short. Rejected: moving the backlog to Jira or GitHub Issues, since the agent reads the repository directly and a pull request moves its own line. Earlier entries stay as written, since their numbers are cited throughout the docs.
+
+**D204. A drag in the clear of the timeline selects time, as Ableton's does.**
+Decided on November 24, 2026, by the person, who asked to select a group's or a track's bars with the rests in them and copy, paste and duplicate them, and chose this of the two gestures offered. It revises D80's rectangle in the track lanes: a drag in the clear selects the beats it crosses on the rows it crosses, a group standing for every track under it, and the clips wholly inside are selected with them, so moving several clips together still works; a drag along the ruler selects the beats on every track. The other choice, keeping the rectangle and selecting time only from the ruler or with a modifier, was rejected as less direct than what every arrangement in Ableton does. The automation lanes keep their rectangle for points. The rest is in [time selection](features/time-selection.md).

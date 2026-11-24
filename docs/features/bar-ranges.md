@@ -1,7 +1,9 @@
 # Editing a range of bars — implemented October 6, 2026
 
-Status: implemented through `daw` (D82). A time selection across the tracks in
-the app is a line of its own in [the backlog](../backlog.md).
+Status: implemented through `daw` (D82). The person selects a range in the
+app by a drag in the clear of the timeline or along the ruler, and copies,
+cuts, pastes, duplicates and clears it with the keys
+([time selection](time-selection.md), 2026-11-24).
 
 ## What
 
@@ -44,7 +46,8 @@ LENGTH, or AT. A bar is four beats. A range is `[START, START + LENGTH)`.
 **What a range holds.** Pattern clips, note clips and audio clips that start
 in it; automation points in it, on tracks, returns and the master; and
 sections that lie inside it. `--track T`, repeatable, limits a command to some
-tracks; their lanes go with them. The sections, the returns' and master's
+tracks; their lanes go with them. T may name a group, which stands for every
+track under it, in the groups in it too, and for its own lanes and theirs. The sections, the returns' and master's
 lanes and the song's length change only when every track is in the range.
 
 **The edges.** A clip that crosses an edge is cut there, so that the range
@@ -65,11 +68,11 @@ holds exactly what plays in it:
   beat is 4 beats long; a pattern clip is cut only between repeats`. Move the
   range to a repeat's edge, or split the pattern.
 - A looped note clip or audio clip ([looping-clips.md](looping-clips.md)) is
-  split only at a wrap, each half keeping the loop and, for a note clip, every
-  note. An edge inside a repetition refuses the command the same way, naming
-  the clip; move the range to a wrap or turn the loop off. After a delete, two
-  halves of one loop that meet again are one clip when the left is a whole
-  number of loops long.
+  split at any beat, each half keeping the loop and, for a note clip, every
+  note, the right half starting as far into its loop as the cut is
+  (`loop_offset_beats`). After a delete, two halves of one loop that meet
+  again are one clip when the right goes on in the loop from where the left
+  leaves it.
 
 A copy reads the range without touching the source: the clips it is cut from
 stay whole, so a note held across the range's edge is not retriggered in the
@@ -147,9 +150,6 @@ map and checks show the result.
 
 ## Open questions
 
-- Which gesture makes the time selection in the app: a drag in the clear of
-  the timeline selects clips by a rectangle (D80), so perhaps a drag in the
-  ruler under the loop strip. The app's part is a line in the backlog.
 - Whether a note crossing an edge should instead stay whole in the left clip,
   with nothing new on the right. That is simpler, and changes what the range
   plays.

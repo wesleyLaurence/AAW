@@ -717,6 +717,14 @@ impl Song {
         Ok(edits::copied(doc.as_ref().ok_or_else(closed)?, &clips, &self.files, &directory)?)
     }
 
+    /// What Copy takes of a range of beats on rows, or on every track with
+    /// none, for `Edit::RangePaste`: the clips cut to it, the empty beats
+    /// and the lanes, as they are now.
+    pub fn copy_range(&self, start: f64, length: f64, rows: Vec<Row>) -> Result<String, SongError> {
+        let doc = locked(&self.doc);
+        Ok(edits::copied_range(doc.as_ref().ok_or_else(closed)?, start, length, &rows)?)
+    }
+
     /// What Copy takes of an effect, for `Edit::EffectPaste`.
     pub fn copy_effect(&self, effect: u64) -> Result<String, SongError> {
         let doc = locked(&self.doc);

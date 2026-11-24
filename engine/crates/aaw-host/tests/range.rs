@@ -339,6 +339,86 @@ fn a_copied_range_renders_as_the_clips_it_stands_for() {
     assert!(by_range == by_hand, "the renders differ");
 }
 
+/// What Copy takes of beats `start` for `length` on `tracks`, as the app takes it.
+fn take(s: &Session, start: i64, length: i64, tracks: &[&str]) -> Json {
+    let tracks: Vec<String> = tracks.iter().map(|t| t.to_string()).collect();
+    aaw_host::range::take(&s.doc().tree(), &num_rational::BigRational::from_integer(start.into()), &num_rational::BigRational::from_integer(length.into()), &tracks).unwrap()
+}
+
+#[test]
+fn a_taken_range_pasted_is_the_copy_the_range_verb_makes() {
+    // Taken and pasted at 16 is what `range copy --to 16` makes, byte for
+    // byte: the bass's clips cut to the range and its lane's ramp.
+    let (_d, mut a) = open();
+    let (_e, mut b) = open();
+    edit(&mut a, json!({"op": "range.copy", "start": 4, "length": 8, "to": 20, "tracks": ["bass"]})).unwrap();
+    let copied = take(&b, 4, 8, &["bass"]);
+    let r = edit(&mut b, json!({"op": "range.paste", "copied": copied, "at": 20})).unwrap();
+    assert_eq!(r["label"], json!("Paste 8 beats at 20 on bass"));
+    assert_eq!(file(&a), file(&b));
+    // Taking reads the song and changes nothing.
+    let before = file(&b);
+    take(&b, 0, 32, &[]);
+    assert_eq!(file(&b), before);
+}
+
+#[test]
+fn a_paste_replaces_its_whole_length_and_lands_on_the_tracks_given() {
+    let (_d, mut s) = open();
+    with_keys(&mut s);
+    // Beats 0 to 4 of the keys hold nothing; pasted at 4 they empty the
+    // first bar of the phrase, which is cut at 8.
+    let rest = take(&s, 0, 4, &["keys"]);
+    assert_eq!(rest["tracks"][0]["items"], json!([]));
+    edit(&mut s, json!({"op": "range.paste", "copied": rest, "at": 4})).unwrap();
+    let keys = get(&s, "tracks.keys.clips");
+    assert_eq!(keys.as_array().unwrap().len(), 1);
+    assert_eq!(keys[0]["at"], json!(8));
+    assert_eq!(keys[0]["length_beats"], json!(4));
+    // The drums and the bass taken, pasted a track down: the drums' beats
+    // land on the bass and the bass's on the keys.
+    let two = take(&s, 8, 4, &["drums", "bass"]);
+    edit(&mut s, json!({"op": "range.paste", "copied": two, "at": 24, "track": "bass"})).unwrap();
+    assert_eq!(shape(&s, "bass").iter().filter(|c| c.contains(" 24 4 ")).count(), 1);
+    assert!(shape(&s, "keys").iter().any(|c| c.contains(" 24 4 ")));
+    // Past the last track, or audio onto a MIDI track, is refused.
+    let two = take(&s, 8, 4, &["drums", "bass"]);
+    assert!(edit(&mut s, json!({"op": "range.paste", "copied": two, "at": 24, "track": "keys"})).unwrap_err().contains("covers 2 tracks"));
+    with_audio(&mut s);
+    let audio = take(&s, 4, 4, &["song"]);
+    assert!(edit(&mut s, json!({"op": "range.paste", "copied": audio, "at": 4, "track": "keys"})).unwrap_err().contains("takes no audio clips"));
+}
+
+#[test]
+fn a_group_in_a_range_is_its_tracks_and_its_own_lanes() {
+    let (_d, mut s) = open();
+    with_keys(&mut s);
+    edit(&mut s, json!({"op": "group.add", "id": "rhythm", "tracks": ["drums", "bass"]})).unwrap();
+    edit(&mut s, json!({"op": "lane.set", "owner": "groups.rhythm", "param": "gain_db", "points": [{"at": 0, "value": -12}, {"at": 4, "value": 0}, {"at": 8, "value": -12}]})).unwrap();
+    // Cleared by the group's name: both its tracks and its lane, not the keys.
+    let r = edit(&mut s, json!({"op": "range.clear", "start": 2, "length": 4, "tracks": ["rhythm"]})).unwrap();
+    assert_eq!(r["label"], json!("Clear beats 2–6 on rhythm"));
+    assert_eq!(shape(&s, "drums")[0], "beat 0 2 4");
+    assert_eq!(shape(&s, "bass")[0], "bass 0 2 4");
+    assert_eq!(get(&s, "groups.rhythm.automation.0.points"), json!([{"at": 0, "value": -12.0}, {"at": 2, "value": -6.0}, {"at": 6, "value": -6.0}, {"at": 8, "value": -12.0}]));
+    assert_eq!(shape(&s, "keys"), ["phrase 4 8 -"]);
+    // Taken and pasted, the group's lane comes with it, and jumps back to
+    // where it was at the copy's end.
+    let copied = take(&s, 0, 4, &["rhythm"]);
+    assert_eq!(copied["tracks"].as_array().unwrap().len(), 2);
+    assert_eq!(copied["groups"][0]["up"], json!(1));
+    edit(&mut s, json!({"op": "range.paste", "copied": copied, "at": 24})).unwrap();
+    assert_eq!(
+        get(&s, "groups.rhythm.automation.0.points"),
+        json!([
+            {"at": 0, "value": -12.0}, {"at": 2, "value": -6.0}, {"at": 6, "value": -6.0}, {"at": 8, "value": -12.0},
+            {"at": 24, "value": -12.0}, {"at": 26, "value": -6.0}, {"at": 28, "value": -6.0}, {"at": 28, "value": -12.0}
+        ])
+    );
+    // Only the drums' first two beats came: the rest of the four is empty.
+    assert!(shape(&s, "drums").iter().any(|c| c.ends_with(" 24 2 4")));
+}
+
 #[test]
 fn range_commands_round_trip_as_json() {
     let commands = [
@@ -347,6 +427,7 @@ fn range_commands_round_trip_as_json() {
         json!({"op": "range.insert", "at": 64, "length": 16}),
         json!({"op": "range.delete", "start": 64, "length": "16/3", "tracks": ["drums", "bass"]}),
         json!({"op": "range.clear", "start": 64, "length": 16}),
+        json!({"op": "range.paste", "copied": {"length": 4, "tracks": []}, "at": 8, "track": "bass"}),
         json!({"op": "section.duplicate", "section": "verse", "to": 96, "id": "verse2"}),
         json!({"op": "section.duplicate", "section": "verse"}),
         json!({"op": "section.move", "section": "verse", "at": 96, "with_content": true}),

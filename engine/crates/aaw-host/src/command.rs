@@ -608,6 +608,16 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         tracks: Vec<String>,
     },
+    /// Puts a range the app's Copy took over the beats at `at`, on the
+    /// tracks it came from or from `track` down: the whole length is
+    /// replaced, beats that held nothing too.
+    #[serde(rename = "range.paste")]
+    RangePaste {
+        copied: Json,
+        at: Json,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track: Option<String>,
+    },
 
     // Sections
     #[serde(rename = "section.add")]
@@ -964,9 +974,10 @@ pub fn ops() -> Vec<(String, Json)> {
 }
 
 /// Whether a batch takes the op: the edits, apply aside, which replaces
-/// the whole song.
+/// the whole song, and range.paste, whose copy only the app's Copy writes:
+/// an agent copies a range with range.copy.
 pub fn batchable(op: &str) -> bool {
-    Kind::of(op) == Kind::Edit && op != "apply"
+    Kind::of(op) == Kind::Edit && op != "apply" && op != "range.paste"
 }
 
 /// The commands of a batch file's list. Each is checked before it is read:
@@ -1148,7 +1159,7 @@ fn note_fields(n: &aaw_model::note_text::Written) -> Fields {
 }
 
 /// A beat given to a command, exactly.
-fn beat_at(j: &Json) -> Result<BigRational> {
+pub(crate) fn beat_at(j: &Json) -> Result<BigRational> {
     let value = json_value(j)?;
     beat_of(&value)
         .and_then(|b| aaw_model::beat(&b).ok())
@@ -1964,7 +1975,7 @@ impl<'a> Edit<'a> {
         }
     }
 
-    fn lane(&self, owner: &[Step], param: &str) -> Option<usize> {
+    pub(crate) fn lane(&self, owner: &[Step], param: &str) -> Option<usize> {
         self.node(owner)
             .get("automation")?
             .items()
@@ -3776,6 +3787,9 @@ impl<'a> Edit<'a> {
             }
             RangeClear { start, length, tracks } => {
                 self.range_clear(&mut out, &beat_at(start)?, &beat_at(length)?, tracks)?;
+            }
+            RangePaste { copied, at, track } => {
+                self.range_paste(&mut out, copied, &beat_at(at)?, track.as_deref())?;
             }
             Batch { commands, label } => {
                 let mut labels = Vec::new();

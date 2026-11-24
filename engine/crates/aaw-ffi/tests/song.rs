@@ -549,6 +549,52 @@ fn clips_dragged_with_option_are_copied_as_far_as_a_move_goes() {
 }
 
 #[test]
+fn a_time_selection_is_copied_pasted_duplicated_and_cleared_on_its_rows() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let (drums, perc) = (start.tracks[0].key, start.tracks[1].key);
+    let group = song.edit(Edit::GroupAdd { tracks: vec![drums, perc], groups: vec![] }, None).unwrap()[0];
+    update(&seen);
+    let clips = |a: &aaw_ffi::Arrangement, track: usize| -> Vec<(f64, f64)> {
+        let mut c: Vec<(f64, f64)> = a.tracks[track].note_clips.iter().map(|c| (c.at, c.length_beats)).collect();
+        c.sort_by(|a, b| a.0.total_cmp(&b.0));
+        c
+    };
+
+    // Beats 4 to 12 of the group, its two tracks, taken as they are now and
+    // pasted at 12 after the song changed: the drums' beat goes over the
+    // fill, and the perc's empty first beats empty its beats from 12.
+    let taken = song.copy_range(4.0, 8.0, vec![Row::Group { key: group }]).unwrap();
+    song.edit(Edit::RangeClear { start: 0.0, length: 16.0, rows: vec![Row::Track { key: perc }] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Clear beats 0–16 on perc");
+    assert_eq!(clips(&u.arrangement, 1), []);
+    song.edit(Edit::RangePaste { copied: taken, at: 12.0, track: None }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Paste 8 beats at 12 on drums, perc");
+    assert_eq!(clips(&u.arrangement, 0), [(0.0, 12.0), (12.0, 8.0)]);
+    assert_eq!(clips(&u.arrangement, 1), [(16.0, 4.0)]);
+    song.undo().unwrap();
+    update(&seen);
+    song.undo().unwrap();
+    update(&seen);
+
+    // ⌘D on the perc: its beats 8 to 10 again right after themselves, over
+    // what is there, and the drums untouched.
+    let made = song.edit(Edit::RangeCopy { start: 8.0, length: 2.0, to: 10.0, rows: vec![Row::Track { key: perc }] }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(made.len(), 2);
+    assert_eq!(u.change.label, "Copy beats 8–10 to 10 on perc");
+    assert_eq!(clips(&u.arrangement, 1), [(8.0, 2.0), (10.0, 2.0), (12.0, 4.0)]);
+    assert_eq!(clips(&u.arrangement, 0), clips(&start, 0));
+    // A group that holds every track is the whole song, as every track named is.
+    song.edit(Edit::RangeClear { start: 0.0, length: 2.0, rows: vec![Row::Group { key: group }] }, None).unwrap();
+    assert_eq!(update(&seen).change.label, "Clear beats 0–2");
+    song.close();
+}
+
+#[test]
 fn several_automation_points_move_and_go_together() {
     let (_dir, _path, song, seen) = open();
     transport(&seen);

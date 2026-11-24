@@ -358,13 +358,29 @@ private enum Drag {
     case marker(MarkerDrag)
     /// A row's lower edge, dragged to make it taller or shorter.
     case height(HeightDrag)
-    /// A rectangle that selects what it touches: clips, or the points of
-    /// the lanes shown; with those selected before it when Shift was held.
-    case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>, points: Bool)
+    /// A span of beats across rows, which selects them.
+    case time(TimeDrag)
+    /// A rectangle that selects the points of the lanes shown it holds;
+    /// with those selected before it when Shift was held.
+    case marquee(origin: CGPoint, now: CGPoint, base: Set<UInt64>)
 }
 
 /// A row's lower edge being dragged: the rows it sets, every row's with
 /// Option, from the height of the row pressed.
+/// A span of beats dragged out in the clear of the timeline, over the rows
+/// it crosses, or in the ruler, over every track.
+private struct TimeDrag {
+    /// The beat the drag holds still: where it was pressed, on the grid.
+    var anchor: Double
+    var startX: CGFloat
+    var startY: CGFloat
+    /// The rows it keeps: none for every track, from the ruler, or a
+    /// selection's own while Shift extends it. Nil takes them from the rows
+    /// the drag crosses.
+    var rows: [RowID]?
+    var moved: Bool
+}
+
 private struct HeightDrag {
     var rows: [RowID]
     var startY: CGFloat
@@ -1177,22 +1193,6 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return found
     }
 
-    /// The clips a rectangle of the timeline touches.
-    private func clipKeys(in box: CGRect) -> [UInt64] {
-        var keys: [UInt64] = []
-        for track in model.arrangement.tracks {
-            guard let frame = frame(of: .track(track.key)) else { continue }
-            let line = line(of: .track(track.key))
-            let rects = track.audio.map { clip in
-                    let shape = audioLayout(clip)
-                    return (clip.key, clipRect(at: shape.start, length: shape.length, top: frame.top, line: line))
-                }
-                + track.noteClips.map { ($0.key, clipRect(at: $0.at, length: $0.lengthBeats, top: frame.top, line: line)) }
-            keys += rects.filter { $0.1.intersects(box) }.map(\.0)
-        }
-        return keys
-    }
-
     /// The points of the lanes shown that a rectangle of the timeline holds.
     private func pointKeys(in box: CGRect) -> [UInt64] {
         let grown = box.insetBy(dx: -3, dy: -3)
@@ -1340,8 +1340,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             clipDown(hit.hit, rect: hit.rect, at: p, event)
         } else {
             let free = model.free(event.modifierFlags)
-            // Clips are pasted on the track whose lane was clicked last.
-            if let track = track(atLane: p) { model.cueTrack = track }
+            // Clips are pasted on the track whose lane was clicked last, or
+            // on a group's first track.
+            if let track = track(atLane: p) {
+                model.cueTrack = track
+            } else if p.y >= TimelineLayout.rulerHeight, let (id, _) = row(atY: p.y), case .group(let key) = id {
+                if let first = model.tracks(under: key).first { model.cueTrack = first.key }
+            }
             if event.clickCount == 2, let track = track(atLane: p) {
                 // Twice on an empty part of a MIDI track: an empty note clip
                 // in the grid step under the pointer. An audio track takes
@@ -1351,19 +1356,70 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
                 return
             }
+            let beat = layout.target(atX: p.x, free: free)
+            if event.modifierFlags.contains(.shift), let time = model.timeSelection {
+                // With Shift, the selected beats reach to the pointer from
+                // their far edge, on their own rows.
+                let anchor = abs(beat - time.start) < abs(beat - time.end) ? time.end : time.start
+                let d = TimeDrag(anchor: anchor, startX: p.x, startY: p.y, rows: time.rows, moved: true)
+                drag = .time(d)
+                selectTime(d, to: beat)
+                return
+            }
             // In the bar strip, on whatever its labels and ticks mark.
             let inBars = p.y >= TimelineLayout.barTop && p.y < TimelineLayout.timeTop
-            model.locate(inBars ? layout.rulerTarget(atX: p.x, free: free) : layout.target(atX: p.x, free: free))
-            guard p.y >= TimelineLayout.rulerHeight else { return }
-            // A press in the clear selects nothing, and a drag from it the
-            // clips a rectangle touches; with Shift, as well as those selected.
-            let shift = event.modifierFlags.contains(.shift)
-            if !shift {
-                model.select(clips: [])
-                model.select(marker: nil)
+            model.locate(inBars ? layout.rulerTarget(atX: p.x, free: free) : beat)
+            guard p.y >= TimelineLayout.rulerHeight else {
+                // A drag along the ruler selects its beats on every track.
+                drag = .time(TimeDrag(anchor: inBars ? layout.rulerTarget(atX: p.x, free: free) : beat, startX: p.x, startY: p.y, rows: [], moved: false))
+                return
             }
-            drag = .marquee(origin: p, now: p, base: shift ? model.selectedClips : [], points: false)
+            // A press in the clear selects nothing, and a drag from it the
+            // beats it crosses on the rows it crosses, with the clips wholly
+            // inside them.
+            model.select(clips: [])
+            model.select(marker: nil)
+            drag = .time(TimeDrag(anchor: beat, startX: p.x, startY: p.y, rows: nil, moved: false))
         }
+    }
+
+    /// Selects the beats from a time drag's anchor to `beat`, on its rows or
+    /// the rows from where it started to the pointer's height.
+    private func selectTime(_ d: TimeDrag, to beat: Double, y: CGFloat? = nil) {
+        let rows = d.rows ?? timeRows(from: d.startY, to: y ?? d.startY)
+        let start = min(d.anchor, beat)
+        let end = max(d.anchor, beat)
+        guard end > start, d.rows != nil || !rows.isEmpty else {
+            model.select(time: nil)
+            return
+        }
+        model.select(time: TimeSelection(start: start, length: end - start, rows: rows))
+    }
+
+    /// The tracks and groups between two heights of the timeline, top to bottom.
+    private func timeRows(from a: CGFloat, to b: CGFloat) -> [RowID] {
+        let top = min(a, b)
+        let bottom = max(a, b)
+        return rows.sorted { $0.value.y.to < $1.value.y.to }.map(\.key).filter { id in
+            switch id {
+            case .track, .group: break
+            case .bus, .master: return false
+            }
+            guard let frame = frame(of: id) else { return false }
+            return frame.top <= bottom && frame.top + frame.height > top
+        }
+    }
+
+    /// The rows a time selection is drawn on: its own, and the tracks and
+    /// groups under its groups; nil for every track and group.
+    private func timeRowsShown(_ time: TimeSelection) -> Set<RowID>? {
+        guard !time.rows.isEmpty else { return nil }
+        var shown = Set(time.rows)
+        for case .group(let key) in time.rows {
+            shown.formUnion(model.tracks(under: key).map { RowID.track($0.key) })
+            shown.formUnion(model.groups(under: key).map { RowID.group($0) })
+        }
+        return shown
     }
 
     // MARK: Markers
@@ -1810,7 +1866,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                                       shape: heldShapes[segment.point.key]?.shape ?? segment.point.shape))
             } else {
                 if !shift { model.select(points: []) }
-                drag = .marquee(origin: p, now: p, base: shift ? model.selectedPoints : [], points: true)
+                drag = .marquee(origin: p, now: p, base: shift ? model.selectedPoints : [])
             }
             return
         }
@@ -2091,14 +2147,15 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 model.drag(.markerMove(marker: d.key, at: at), gesture: d.gesture)
             }
             drag = .marker(d)
-        case .marquee(let origin, _, let base, let points):
-            drag = .marquee(origin: origin, now: p, base: base, points: points)
+        case .time(var d):
+            if !d.moved, abs(p.x - d.startX) < 3, abs(p.y - d.startY) < 3 { return }
+            d.moved = true
+            drag = .time(d)
+            selectTime(d, to: layout.target(atX: p.x, free: model.free(event.modifierFlags)), y: p.y)
+        case .marquee(let origin, _, let base):
+            drag = .marquee(origin: origin, now: p, base: base)
             let box = CGRect(x: min(origin.x, p.x), y: min(origin.y, p.y), width: abs(p.x - origin.x), height: abs(p.y - origin.y))
-            if points {
-                model.select(points: base.union(pointKeys(in: box)))
-            } else {
-                model.select(clips: base.union(clipKeys(in: box)))
-            }
+            model.select(points: base.union(pointKeys(in: box)))
         case .reorder(var r):
             if r.slot == nil, r.landing == nil, abs(p.y - r.startY) < 4 { return }
             if let rows = r.rows, let dragged = r.row.dropRow {
@@ -2182,6 +2239,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 // A click on a marker: play starts from it.
                 model.locate(min(d.origin, max(0, layout.lengthBeats - 0.001)))
             }
+        case .time(let d):
+            // Play and Paste start where the selection does, and Paste of
+            // beats from other tracks lands from its first track down.
+            if d.moved, let time = model.timeSelection {
+                model.locate(time.start)
+                if !time.rows.isEmpty, let first = model.tracks(of: time).first { model.cueTrack = first }
+            }
         case .marquee:
             break
         case .reorder(let r):
@@ -2234,7 +2298,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// Drops a drag that has sent nothing yet. True if there was one.
     private func cancelDrag() -> Bool {
         switch drag {
-        case .clips, .trim, .noteTrim, .fade, .reorder, .loop, .marquee:
+        case .clips, .trim, .noteTrim, .fade, .reorder, .loop, .marquee, .time:
             drag = nil
             show(model.arrangement, animated: true)
             return true
@@ -2495,6 +2559,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// stay after the song's start and on its tracks. A clip may pass the
     /// song's end, which moves to hold it.
     private func nudge(by: Double, rows: Int) {
+        // The clips move; the beats selected around them stay behind.
+        model.dropTimeSelection()
         let placed = model.placedClips().filter { model.selectedClips.contains($0.key) }
         let tracks = placed.map(\.track)
         guard let first = placed.map(\.at).min(), let top = tracks.min(), let bottom = tracks.max() else { return }
@@ -2637,6 +2703,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
         clipped(to: CGRect(x: header, y: ruler, width: bounds.width - header, height: bounds.height - ruler)) {
             drawLanes(order, at: now)
+            drawTimeSelection(order)
             drawCopies()
             drawMarquee()
         }
@@ -2645,6 +2712,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         clipped(to: CGRect(x: header, y: 0, width: bounds.width - header, height: ruler)) {
             drawRuler(at: now)
+            if let time = model.timeSelection {
+                let x = layout.x(time.start)
+                fill(CGRect(x: x, y: TimelineLayout.barTop, width: max(1, layout.x(time.end) - x),
+                            height: TimelineLayout.rulerHeight - TimelineLayout.barTop), Theme.gray(1, 0.16))
+            }
         }
         fill(CGRect(x: 0, y: 0, width: header, height: ruler), Theme.ruler)
         text("\(model.arrangement.tracks.count) tracks",
@@ -2717,8 +2789,27 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
     }
 
+    /// The selected beats, lit on the rows they cover, with their edges.
+    private func drawTimeSelection(_ order: [(key: RowID, value: RowVisual)]) {
+        guard let time = model.timeSelection else { return }
+        let shown = timeRowsShown(time)
+        let x0 = layout.x(time.start)
+        let width = max(1, layout.x(time.end) - x0)
+        for (id, _) in order {
+            switch id {
+            case .track, .group: break
+            case .bus, .master: continue
+            }
+            guard shown?.contains(id) ?? true, let frame = frame(of: id) else { continue }
+            let rect = CGRect(x: x0, y: frame.top, width: width, height: frame.height)
+            fill(rect, Theme.gray(1, 0.12))
+            fill(CGRect(x: rect.minX, y: rect.minY, width: 1, height: rect.height), Theme.gray(1, 0.55))
+            fill(CGRect(x: rect.maxX - 1, y: rect.minY, width: 1, height: rect.height), Theme.gray(1, 0.55))
+        }
+    }
+
     private func drawMarquee() {
-        guard case .marquee(let origin, let now, _, _) = drag, origin != now else { return }
+        guard case .marquee(let origin, let now, _) = drag, origin != now else { return }
         let box = CGRect(x: min(origin.x, now.x), y: min(origin.y, now.y), width: abs(now.x - origin.x), height: abs(now.y - origin.y))
         fill(box, Theme.gray(1, 0.08))
         Theme.gray(1, 0.6).setStroke()

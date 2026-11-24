@@ -81,10 +81,12 @@ October 19, 2026 (D123). Items 8–17 are the order as it stood.
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-9. **A time selection in the app.** A range of beats dragged across the
-    tracks and copied, inserted, deleted or cleared as `daw range` does it,
-    and a section dragged with its content; which gesture makes it is the
-    open question in [features/bar-ranges.md](features/bar-ranges.md).
+9. **Time inserted and deleted in the app, and sections dragged.** The
+    selected beats ([time selection](features/time-selection.md)) inserted
+    again after themselves on every track (Ableton's Duplicate Time) and
+    deleted with the gap closed, as `daw range copy --insert` and `range
+    delete` do; a section dragged in the ruler with what is under it; the
+    time selection sent to the host for `daw status`.
 10. **A MIDI keyboard plugged in.** The typing keyboard plays and records
     notes ([typing keyboard](features/typing-keyboard.md)) and ⌘U or `daw
     note quantize` snaps what was played ([quantize](features/quantize.md));

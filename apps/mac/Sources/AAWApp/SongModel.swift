@@ -136,10 +136,26 @@ struct NoteContext: Equatable {
     var track: TrackView
 }
 
+/// A span of beats selected across rows: dragged in the clear of the
+/// timeline over tracks and groups, or in the ruler over every track. A
+/// group stands for itself and every track under it.
+struct TimeSelection: Equatable {
+    var start: Double
+    var length: Double
+    /// The tracks and groups it covers, top to bottom; none for every track.
+    var rows: [RowID]
+
+    var end: Double { start + length }
+}
+
 /// What Copy took, for Paste: clips, as the host wrote them down, and the
 /// beats they covered; or notes, with the clip they came from.
 enum Clipboard {
     case clips(copied: String, span: Double)
+    /// A time selection as the host wrote it down: its clips cut to it, its
+    /// empty beats and its lanes; the tracks it covered in their order, or
+    /// none for every track.
+    case range(copied: String, length: Double, tracks: [UInt64])
     case notes([NoteCopy], from: UInt64)
     /// An effect, as the host wrote it down, with its kind for the menus.
     case effect(copied: String, kind: String)
@@ -195,6 +211,9 @@ public final class SongModel {
     /// Group Tracks over several rows. Cleared with the next selection.
     private(set) var selectedRows: Set<RowID> = []
     private(set) var selectedPoints: Set<UInt64> = []
+    /// A span of beats across rows, with the clips wholly inside it
+    /// selected as well: what Delete, Copy, Cut and Duplicate act on.
+    private(set) var timeSelection: TimeSelection?
     /// The selected marker, clicked in the ruler, in place of the clips,
     /// rows and points: what Delete and Rename act on.
     private(set) var selectedMarker: UInt64?
@@ -729,8 +748,9 @@ public final class SongModel {
         }
     }
 
-    /// The beats the selected clips cover together.
+    /// The beats the selected clips cover together, or the selected beats.
     var selectedSpan: (start: Double, end: Double)? {
+        if let time = timeSelection { return (time.start, time.end) }
         let clips = placedClips().filter { selectedClips.contains($0.key) }
         guard let start = clips.map(\.at).min() else { return nil }
         return (start, clips.map(\.end).max() ?? start)
@@ -1005,12 +1025,67 @@ public final class SongModel {
         }
     }
 
+    /// Selects a span of beats across rows, and the clips wholly inside it
+    /// on the tracks it covers; nil selects nothing.
+    func select(time: TimeSelection?) {
+        guard time != timeSelection || time == nil else { return }
+        let clips = time.map(clipsInside) ?? []
+        setSelection(clips: clips, row: nil)
+        timeSelection = time
+        onSelection?()
+    }
+
+    /// Forgets the span of beats and keeps the clips selected, as the arrow
+    /// keys moving the clips do.
+    func dropTimeSelection() {
+        guard timeSelection != nil else { return }
+        timeSelection = nil
+        onSelection?()
+    }
+
+    /// The tracks a time selection covers, in their order: those of its
+    /// rows and those under its groups, or every track.
+    func tracks(of time: TimeSelection) -> [UInt64] {
+        guard !time.rows.isEmpty else { return arrangement.tracks.map(\.key) }
+        var keys: Set<UInt64> = []
+        for row in time.rows {
+            switch row {
+            case .track(let key): keys.insert(key)
+            case .group(let key): keys.formUnion(tracks(under: key).map(\.key))
+            case .bus, .master: break
+            }
+        }
+        return arrangement.tracks.map(\.key).filter { keys.contains($0) }
+    }
+
+    /// The groups under a group, and the group itself.
+    func groups(under group: UInt64) -> Set<UInt64> {
+        var keys: Set<UInt64> = []
+        var pending = [group]
+        while let next = pending.popLast() {
+            guard keys.insert(next).inserted, let view = arrangement.groups.first(where: { $0.key == next }) else { continue }
+            pending += view.groups
+        }
+        return keys
+    }
+
+    /// The clips that lie wholly inside a time selection, on its tracks.
+    private func clipsInside(_ time: TimeSelection) -> Set<UInt64> {
+        let tracks = Set(tracks(of: time))
+        let keys = arrangement.tracks.map(\.key)
+        let epsilon = 1e-6
+        return Set(placedClips().filter { clip in
+            tracks.contains(keys[clip.track]) && clip.at >= time.start - epsilon && clip.end <= time.end + epsilon
+        }.map(\.key))
+    }
+
     public func selectAllClips() {
         select(clips: Set(placedClips().map(\.key)))
     }
 
     private func setSelection(clips: Set<UInt64>, row: RowID?) {
-        guard clips != selectedClips || row != selectedRow || !selectedRows.isEmpty else { return }
+        guard clips != selectedClips || row != selectedRow || !selectedRows.isEmpty || timeSelection != nil else { return }
+        timeSelection = nil
         selectedClips = clips
         selectedRow = row
         selectedRows = []
@@ -1066,6 +1141,21 @@ public final class SongModel {
             case .bus, .master: false
             }
         }
+        var time = timeSelection
+        if let t = time, !t.rows.isEmpty {
+            let kept = t.rows.filter { row in
+                switch row {
+                case .track(let key): arrangement.tracks.contains { $0.key == key }
+                case .group(let key): arrangement.groups.contains { $0.key == key }
+                case .bus, .master: false
+                }
+            }
+            time = kept.isEmpty ? nil : TimeSelection(start: t.start, length: t.length, rows: kept)
+        }
+        if time != timeSelection {
+            timeSelection = time
+            onSelection?()
+        }
         if clips != selectedClips || row != selectedRow || points != selectedPoints || rows != selectedRows {
             selectedClips = clips
             selectedRow = row
@@ -1093,7 +1183,7 @@ public final class SongModel {
     }
 
     public var canDelete: Bool {
-        selectedMarker != nil || effectInHand || !selectedNotes.isEmpty || !selectedClips.isEmpty || !selectedPoints.isEmpty
+        selectedMarker != nil || effectInHand || !selectedNotes.isEmpty || !selectedClips.isEmpty || !selectedPoints.isEmpty || timeSelection != nil
             || (selectedRow != nil && selectedRow != .master)
     }
 
@@ -1116,6 +1206,9 @@ public final class SongModel {
             edit(.effectRemove(effect: effect))
         } else if notesInHand {
             edit(.notesRemove(notes: selectedNotes.sorted()))
+        } else if let time = timeSelection {
+            // The beats emptied on its rows; nothing moves.
+            edit(.rangeClear(start: time.start, length: time.length, rows: time.rows.map(\.row)))
         } else if !selectedClips.isEmpty {
             edit(.clipsRemove(clips: selectedClips.sorted()))
         } else if !selectedPoints.isEmpty {
@@ -1126,7 +1219,7 @@ public final class SongModel {
     }
 
     public var canDuplicate: Bool {
-        effectInHand || notesInHand || !selectedClips.isEmpty
+        effectInHand || notesInHand || !selectedClips.isEmpty || timeSelection != nil
     }
 
     /// The notes Quantize acts on: the selected notes of the clip the piano
@@ -1165,6 +1258,16 @@ public final class SongModel {
             }
             return
         }
+        if let time = timeSelection {
+            // The beats again right after themselves, over what is there, on
+            // its rows, and the selection on the copy, so that ⌘D again
+            // goes on.
+            edit(.rangeCopy(start: time.start, length: time.length, to: time.end, rows: time.rows.map(\.row))) { [weak self] _ in
+                self?.select(time: TimeSelection(start: time.end, length: time.length, rows: time.rows))
+            }
+            locate(time.end)
+            return
+        }
         guard !selectedClips.isEmpty else { return }
         edit(.clipsDuplicate(clips: selectedClips.sorted())) { [weak self] made in
             self?.select(clips: Set(made))
@@ -1189,6 +1292,15 @@ public final class SongModel {
             guard let from = noteContext?.clip.key, !chosen.isEmpty else { return }
             clipboard = .notes(chosen.map { NoteCopy(pitch: $0.pitch, at: $0.atText, duration: $0.durationText, velocity: $0.velocity) }, from: from)
         case .clips:
+            if let time = timeSelection {
+                do {
+                    let copied = try song.copyRange(start: time.start, length: time.length, rows: time.rows.map(\.row))
+                    clipboard = .range(copied: copied, length: time.length, tracks: time.rows.isEmpty ? [] : tracks(of: time))
+                } catch {
+                    refuse(Self.reason(error))
+                }
+                return
+            }
             guard let span = selectedSpan else { return }
             do {
                 clipboard = .clips(copied: try song.copyClips(clips: selectedClips.sorted()), span: span.end - span.start)
@@ -1202,7 +1314,7 @@ public final class SongModel {
     func canCopy(in place: EditPlace) -> Bool {
         if effectInHand { return true }
         return switch place {
-        case .clips: !selectedClips.isEmpty
+        case .clips: !selectedClips.isEmpty || timeSelection != nil
         case .notes: !selectedNotes.isEmpty
         }
     }
@@ -1212,7 +1324,7 @@ public final class SongModel {
         copySelection(in: place)
         let held = switch place {
         case _ where effectInHand: true
-        case .clips: !selectedClips.isEmpty
+        case .clips: !selectedClips.isEmpty || timeSelection != nil
         case .notes: notesInHand
         }
         if held { deleteSelection() }
@@ -1256,6 +1368,31 @@ public final class SongModel {
                 self?.select(notes: Set(made))
             }
             if let at { noteInsert = at + end - first }
+        case .range(let copied, let length, let tracks) where place == .clips:
+            // At the start position, over the whole length: on the tracks
+            // it came from, or from the selected track or the one whose lane
+            // was clicked last down. A copy of every track goes back on them.
+            let at = transport.cue
+            var target: UInt64?
+            if !tracks.isEmpty {
+                target = cueTrack
+                if case .track(let key) = selectedRow { target = key }
+            }
+            let keys = arrangement.tracks.map(\.key)
+            let rows: [RowID]? = {
+                if tracks.isEmpty { return [] }
+                let places = tracks.compactMap { keys.firstIndex(of: $0) }
+                guard places.count == tracks.count, let top = places.min() else { return nil }
+                let shift = (target.flatMap { keys.firstIndex(of: $0) } ?? top) - top
+                let moved = places.map { $0 + shift }
+                guard moved.allSatisfy(keys.indices.contains) else { return nil }
+                return moved.map { .track(keys[$0]) }
+            }()
+            edit(.rangePaste(copied: copied, at: at, track: target)) { [weak self] _ in
+                // The pasted beats are the selection, and the next paste follows them.
+                self?.select(time: rows.map { TimeSelection(start: at, length: length, rows: $0) })
+                self?.locate(at + length)
+            }
         case .clips(let copied, let span) where place == .clips:
             var track = cueTrack
             if case .track(let key) = selectedRow { track = key }
@@ -1273,7 +1410,7 @@ public final class SongModel {
     func canPaste(in place: EditPlace) -> Bool {
         switch clipboard {
         case .notes?: place == .notes && noteContext != nil
-        case .clips?: place == .clips
+        case .clips?, .range?: place == .clips
         case .effect?: pastesEffect(in: place)
         case nil: false
         }
@@ -1835,13 +1972,14 @@ public final class SongModel {
     /// sound starts, an audio clip's lead before its beat included, to where
     /// the last one's ends, its fade's tail included.
     var selectedSound: (start: Double, end: Double)? {
+        if let time = timeSelection { return (time.start, time.end) }
         let clips = placedClips().filter { selectedClips.contains($0.key) }
         guard let start = clips.map({ $0.at - ($0.audio?.leadBeats ?? 0) }).min() else { return nil }
         return (start, clips.map(\.end).max() ?? start)
     }
 
-    /// The range an export starts with: what the selected clips sound over,
-    /// else the whole song.
+    /// The range an export starts with: the selected beats, or what the
+    /// selected clips sound over, else the whole song.
     var exportRange: ExportRange {
         ExportRange.initial(selection: selectedSound, length: arrangement.lengthBeats)
     }
@@ -2185,7 +2323,7 @@ public final class SongModel {
         toggleAutomation()
     }
 
-    /// Loops the selected clips. With none selected, turns the loop off, or
+    /// Loops the selected beats or clips. With none selected, turns the loop off, or
     /// back on over its last region; with no earlier loop, it covers the
     /// section at the start position, else that bar, or the song's last bar
     /// while the start position is past the end.
