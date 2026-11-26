@@ -332,6 +332,21 @@ final class TimelineLayoutTests: XCTestCase {
         XCTAssertEqual(l.x(seconds: 2), l.x(3))
     }
 
+    /// A song at 120 that steps to 150 at bar 17: bars keep their width, and
+    /// the time under them follows each step.
+    func testTimeFollowsEachStepOfTheTempo() {
+        var l = layout()
+        l.tempoMap = TempoMap([.init(beat: 0, seconds: 0, bpm: 120), .init(beat: 64, seconds: 32, bpm: 150)])
+        XCTAssertEqual(l.x(seconds: 2), l.x(4))
+        XCTAssertEqual(l.x(seconds: 32), l.x(64))
+        XCTAssertEqual(l.x(seconds: 32.4), l.x(65), accuracy: 1e-9)
+        XCTAssertEqual(l.seconds(atX: l.x(66)), 32.8, accuracy: 1e-9)
+        XCTAssertEqual(l.pixelsPerSecond, 20, "labels are spaced at the slowest tempo, where seconds are narrowest")
+        XCTAssertEqual(l.tempoMap.tempo(atBeat: 63.9), 120)
+        XCTAssertEqual(l.tempoMap.tempo(atBeat: 64), 150)
+        XCTAssertNil(l.tempoMap.constantTempo)
+    }
+
     func testTheTimeLabelsCoarsenAsTheViewZoomsOutLikeTheBarNumbers() {
         var l = layout()
         XCTAssertEqual(l.timeLabelStep, 5, "at 20 points a second, two seconds are too close: fives")

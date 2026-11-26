@@ -18,7 +18,7 @@ from scipy.ndimage import median_filter
 from scipy.signal import find_peaks, get_window
 
 from .analysis import hz_to_midi, note_name
-from .model import meter, sounded
+from .model import TempoMap, meter, sounded
 
 # Third octaves at the standard centers, 20 Hz to 20 kHz. The top one ends at
 # 20 kHz, where the seven bands do.
@@ -142,17 +142,26 @@ class Resonances:
     def __init__(self, frames, rate, project, manifest, offset, sections):
         session = project["session"]
         self.rate, self.project, self.manifest = rate, project, manifest
-        per_beat = 60 / float(session["tempo"]) * rate
+        # Through a song's tempo steps each span is its bars, as long as they
+        # last there, at least SPAN_SECONDS at its fastest tempo.
+        tm = TempoMap.of(project)
+        per_beat = 60 / max(bpm for _, bpm, _ in tm.steps) * rate
         self.span_beats = float(meter(session)[0])
         while self.span_beats * per_beat < SPAN_SECONDS * rate:
             self.span_beats *= 2
         size = self.span_beats * per_beat
-        first = int(np.floor(offset / size + 1e-9))
-        last = max(first + 1, int(np.ceil((offset + frames) / size - 1e-9)))
+        if tm.tempo is not None:
+            first = int(np.floor(offset / size + 1e-9))
+            last = max(first + 1, int(np.ceil((offset + frames) / size - 1e-9)))
+            edge = lambda i: round(i * size)  # noqa: E731
+        else:
+            first = int(np.floor(tm.beat(offset / rate) / self.span_beats + 1e-9))
+            last = max(first + 1, int(np.ceil(tm.beat((offset + frames) / rate) / self.span_beats - 1e-9)))
+            edge = lambda i: round(tm.seconds(i * self.span_beats) * rate)  # noqa: E731
         # Each span on the song's own bars, as (first frame, last, first beat).
         self.spans = []
         for i in range(first, last):
-            a, b = max(0, round(i * size) - offset), min(frames, round((i + 1) * size) - offset)
+            a, b = max(0, edge(i) - offset), min(frames, edge(i + 1) - offset)
             # A part of a bar at a preview's edge is read when windows fit inside it.
             if b - a >= 2 * SPAN_WINDOW:
                 self.spans.append((a, b, i * self.span_beats))

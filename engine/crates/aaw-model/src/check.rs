@@ -42,7 +42,8 @@ pub const CODES: &[(&str, &str)] = &[
     ("voices-exceeded", "More notes sound at once than the Synth has voices, so the oldest are cut off."),
     ("release-cut", "The last note's release runs past the song's end, and the end fade cuts it."),
     ("stretch-without-tempo", "A pad or audio clip is to be stretched with preserve_pitch (or an audio clip with preserve_formants) but has no source_bpm and no transpose, so nothing is stretched."),
-    ("stretch-audible", "A pad or audio clip is stretched more than about 8% from its source_bpm, which can be heard."),
+    ("stretch-audible", "A pad or audio clip is stretched more than about 8% from its source_bpm, which can be heard: at the song's tempo, or with a tempo lane at a tempo it plays in."),
+    ("tempo-step-off-bar", "A step of the master's tempo lane is not on a bar line, where a step is counted; daw tempo set places one on a bar."),
     ("lane-on-bypassed-effect", "An automation lane moves a field of a bypassed effect."),
     ("sample-unreadable", "A sample's file is not audio the engine reads, so a render fails."),
     ("root-note-mismatch", "A sample's root_note disagrees with the pitch measured from its audio."),
@@ -158,7 +159,8 @@ fn bar_runs(bars: &BTreeSet<i64>) -> String {
 /// length of each sample's file, by sample ID; an audio clip without an end
 /// whose file is not in it is left out of the checks of where clips sound.
 pub fn check(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
-    let mut out = stretch(p);
+    let mut out = stretch(p, seconds);
+    out.extend(tempo_steps(p));
     out.extend(bypassed_lanes(p));
     out.extend(notes_outside(p));
     out.extend(synths(p));
@@ -177,20 +179,53 @@ pub fn check(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
     out
 }
 
+/// Steps of the tempo lane that are not on a bar line.
+fn tempo_steps(p: &Project) -> Vec<Warning> {
+    let Some(lane) = p.tempo_lane() else { return Vec::new() };
+    let bar = p.session.meter().bar();
+    let mut out = Vec::new();
+    for (i, point) in lane.points.iter().enumerate() {
+        let at = point.at_exact();
+        if !(&at / &bar).is_integer() {
+            out.push(
+                Warning::new(
+                    "tempo-step-off-bar",
+                    format!("master: the tempo step to {} at beat {} is not on a bar line", float_repr(point.value), beat_text(&at)),
+                    vec![format!("master.automation.{}.points.{i}", lane_index(p))],
+                )
+                .at(at),
+            );
+        }
+    }
+    out
+}
+
+fn lane_index(p: &Project) -> usize {
+    p.master.automation.iter().position(|l| l.param == crate::TEMPO_PARAM).unwrap_or(0)
+}
+
 fn pad_path(t: &Track, name: &str) -> String {
     format!("tracks.{}.instrument.sampler.pads.{name}", t.id)
 }
 
 /// Pads and audio clips stretched far enough to hear, or with nothing to
 /// stretch to.
-fn stretch(p: &Project) -> Vec<Warning> {
+fn stretch(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
     let mut out = Vec::new();
+    let map = p.tempo_map();
+    let every: Vec<f64> = map.steps().iter().map(|s| s.bpm).collect();
     for t in &p.tracks {
-        let pads = t.sound_pads().iter().map(|(name, pad)| (name.clone(), pad_path(t, name), pad.stretch, pad.source_bpm, 0.0));
+        // A pad plays wherever a note does: at every tempo of the song. A
+        // clip plays at the tempos of the steps it sounds in.
+        let pads = t.sound_pads().iter().map(|(name, pad)| (name.clone(), pad_path(t, name), pad.stretch, pad.source_bpm, 0.0, every.clone()));
         let clips = t.audio.iter().enumerate().map(|(i, clip)| {
-            (format!("audio.{i}"), format!("tracks.{}.audio.{i}", t.id), clip.stretch, clip.source_bpm, clip.transpose)
+            let at = clip.at_exact().to_f64().unwrap_or(0.0);
+            let end = clip.sound_end(&map, seconds.get(&clip.sample).copied()).unwrap_or(at);
+            let mut tempos = vec![map.tempo_at(at)];
+            tempos.extend(map.changes_between(at, end).map(|s| s.bpm));
+            (format!("audio.{i}"), format!("tracks.{}.audio.{i}", t.id), clip.stretch, clip.source_bpm, clip.transpose, tempos)
         });
-        for (name, path, stretch, source_bpm, transpose) in pads.chain(clips) {
+        for (name, path, stretch, source_bpm, transpose, tempos) in pads.chain(clips) {
             if !stretch.keeps_pitch() {
                 continue;
             }
@@ -208,11 +243,14 @@ fn stretch(p: &Project) -> Vec<Warning> {
                     vec![path],
                 )),
                 Some(bpm) => {
-                    let percent = (p.session.tempo / bpm - 1.0) * 100.0;
+                    let percent = |tempo: f64| (tempo / bpm - 1.0) * 100.0;
+                    let worst = tempos.iter().copied().fold(tempos[0], |w, x| if percent(x).abs() > percent(w).abs() { x } else { w });
+                    let percent = percent(worst);
+                    let at = if map.constant_tempo().is_some() { String::new() } else { format!(" where the song is at {}", float_repr(worst)) };
                     if percent.abs() > 8.0 {
                         out.push(Warning::new(
                             "stretch-audible",
-                            format!("{}.{name}: stretched {percent:+.1}% from {bpm} BPM; more than about 8% can be heard", t.id),
+                            format!("{}.{name}: stretched {percent:+.1}% from {bpm} BPM{at}; more than about 8% can be heard", t.id),
                             vec![path],
                         ));
                     }
@@ -341,8 +379,10 @@ fn synths(p: &Project) -> Vec<Warning> {
             out.push(w);
         }
         let release = synth.envelopes.get("amp").map_or(0.0, |e| e.release_ms);
-        let tail = release / 1000.0 * p.session.tempo / 60.0;
-        if let Some(last) = notes.iter().map(|n| &n.at + &n.beats).max() {
+        let last_note = notes.iter().map(|n| &n.at + &n.beats).max();
+        let tempo = last_note.as_ref().map_or(p.session.tempo, |b| p.tempo_map().tempo_at_exact(b));
+        let tail = release / 1000.0 * tempo / 60.0;
+        if let Some(last) = last_note {
             let ends = last + BigRational::from_float(tail).unwrap_or_default();
             if ends > length {
                 out.push(
@@ -381,14 +421,14 @@ struct Span {
 /// deactivated.
 fn spans(p: &Project, ti: usize, seconds: &HashMap<String, f64>) -> Vec<Span> {
     let t = &p.tracks[ti];
+    let map = p.tempo_map();
     let mut out = Vec::new();
     for (i, c) in t.audio.iter().enumerate().filter(|(_, c)| c.active) {
         let start = c.at_exact();
         let until = c.source_end_seconds.or_else(|| seconds.get(&c.sample).copied());
-        let per_beat = c.seconds_per_beat(p.session.tempo);
         let end = match c.length_exact() {
             Some(length) => Some(f(&(&start + length))),
-            None => until.map(|u| f(&start) + (u - c.source_start_seconds).max(0.0) / per_beat),
+            None => until.map(|u| f(&start) + c.beats_for_file(&map, (u - c.source_start_seconds).max(0.0))),
         };
         let looped = c.loop_exact().map(|l| format!(" every {}", fraction_str(&l))).unwrap_or_default();
         out.push(Span {

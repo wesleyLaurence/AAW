@@ -30,6 +30,76 @@ def frame(value: Beat | Fraction, tempo: float, rate: int) -> int:
     return aaw_py.frame(x.numerator, x.denominator, tempo, rate)
 
 
+class TempoMap:
+    """The song's tempo through time, as the engine has it: `session.tempo`,
+    or the steps of the master's tempo lane. Each step holds from its beat
+    to the next; everything placed in beats stays on its beat. With one
+    tempo, seconds are `beats * 60 / tempo` and beats `seconds * tempo / 60`,
+    as they always were."""
+
+    def __init__(self, steps):
+        # (beat, bpm, seconds) a step, the first at beat 0.
+        self.steps = [(Fraction(b), float(bpm), float(s)) for b, bpm, s in steps]
+        self._beats = [float(b) for b, _, _ in self.steps]
+        self._seconds = [s for _, _, s in self.steps]
+
+    @classmethod
+    def of(cls, project) -> "TempoMap":
+        return cls((Fraction(n, d), bpm, s) for n, d, bpm, s in aaw_py.tempo_map(project))
+
+    @classmethod
+    def constant(cls, bpm: float) -> "TempoMap":
+        return cls([(Fraction(0), bpm, 0.0)])
+
+    @property
+    def tempo(self) -> float | None:
+        """The one tempo of a song that keeps one; None where it changes."""
+        return self.steps[0][1] if len(self.steps) == 1 else None
+
+    @property
+    def opening(self) -> float:
+        return self.steps[0][1]
+
+    def _at_beat(self, beat: float) -> int:
+        i = 0
+        while i + 1 < len(self._beats) and self._beats[i + 1] <= beat:
+            i += 1
+        return i
+
+    def _at_seconds(self, seconds: float) -> int:
+        i = 0
+        while i + 1 < len(self._seconds) and self._seconds[i + 1] <= seconds:
+            i += 1
+        return i
+
+    def tempo_at(self, beat: float) -> float:
+        return self.steps[self._at_beat(beat)][1]
+
+    def tempo_at_seconds(self, seconds: float) -> float:
+        return self.steps[self._at_seconds(seconds)][1]
+
+    def seconds(self, beat: float) -> float:
+        """The second a beat falls on."""
+        i = self._at_beat(beat)
+        return self._seconds[i] + (beat - self._beats[i]) * 60 / self.steps[i][1]
+
+    def beat(self, seconds: float) -> float:
+        """The beat a second of the song falls on."""
+        i = self._at_seconds(seconds)
+        return self._beats[i] + (seconds - self._seconds[i]) * self.steps[i][1] / 60
+
+    def frame(self, value: "Beat | Fraction", rate: int) -> int:
+        """The audio frame of a beat, rounded half up from absolute time."""
+        x = value if isinstance(value, Fraction) else beat(value)
+        steps = [(b.numerator, b.denominator, bpm) for b, bpm, _ in self.steps]
+        return aaw_py.map_frame(steps, x.numerator, x.denominator, rate)
+
+
+def tempo_map(project) -> TempoMap:
+    """The song's tempo map."""
+    return TempoMap.of(project)
+
+
 def meter(session: dict) -> tuple[Fraction, Fraction]:
     """A session's bar and the note it counts, both in quarter-note beats: (3, 1)
     in 3/4, (3, 1/2) in 6/8, (7/2, 1/2) in 7/8. 4/4 when the field is absent."""

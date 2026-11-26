@@ -72,6 +72,22 @@ impl Meter {
         (bar as i64 + 1, (rest / self.beat_f64() * 100.0).round() / 100.0 + 1.0)
     }
 
+    /// The song beat of a place written as a bar, `17`, or a bar and the
+    /// beat of it as the meter counts it, `17:3`, each from 1.
+    pub fn beat_of_place(&self, text: &str) -> Result<BigRational, String> {
+        let wrong = || format!("{text} is not a place: give a bar such as 17, or BAR:BEAT such as 17:3, each from 1");
+        let (bar, beat) = match text.trim().split_once(':') {
+            Some((bar, beat)) => (bar, Some(beat)),
+            None => (text.trim(), None),
+        };
+        let bar: i64 = bar.trim().parse().ok().filter(|b| *b >= 1).ok_or_else(wrong)?;
+        let beat = match beat {
+            Some(b) => crate::beat::parse_fraction(b.trim()).ok().filter(|b| *b >= BigRational::from_integer(1.into())).ok_or_else(wrong)?,
+            None => BigRational::from_integer(1.into()),
+        };
+        Ok(self.bar() * BigRational::from_integer((bar - 1).into()) + (beat - BigRational::from_integer(1.into())) * self.beat())
+    }
+
     /// A song beat as a DAW counts it: the bar, then the beat of the bar and
     /// the sixteenth of the beat when it is not on the bar, each from 1; a
     /// beat off the sixteenths is written as the beat commands take it.

@@ -207,6 +207,31 @@ fn frame(numerator: BigInt, denominator: BigInt, tempo: f64, rate: i64) -> PyRes
     Ok(aaw_model::frame(&position, tempo, rate))
 }
 
+/// The song's tempo map: each step as (beat numerator, beat denominator,
+/// bpm, seconds), the first at beat 0; one for a song that keeps one tempo.
+#[pyfunction]
+fn tempo_map(data: &Bound<'_, PyAny>) -> PyResult<Vec<(BigInt, BigInt, f64, f64)>> {
+    let map = project(data)?.tempo_map();
+    Ok(map.steps().iter().map(|s| (s.beat.numer().clone(), s.beat.denom().clone(), s.bpm, s.seconds_f64())).collect())
+}
+
+/// The audio frame of an exact beat through tempo steps given as (beat
+/// numerator, beat denominator, bpm), as `tempo_map` gives them: rounded
+/// half up from absolute time.
+#[pyfunction]
+fn map_frame(steps: Vec<(BigInt, BigInt, f64)>, numerator: BigInt, denominator: BigInt, rate: i64) -> PyResult<i64> {
+    if denominator == BigInt::ZERO || steps.iter().any(|(_, d, bpm)| *d == BigInt::ZERO || !(bpm.is_finite() && *bpm > 0.0)) {
+        return Err(PyValueError::new_err("A frame needs nonzero denominators and positive tempos"));
+    }
+    let map = aaw_model::TempoMap::from_steps(steps.into_iter().map(|(n, d, bpm)| (BigRational::new(n, d), bpm)).collect());
+    let position = BigRational::new(numerator, denominator);
+    let estimate = map.seconds(position.to_f64().unwrap_or(f64::INFINITY)).abs() * rate as f64;
+    if !(estimate < 4e18) {
+        return Err(PyValueError::new_err("The position is beyond any timeline"));
+    }
+    Ok(map.frame(&position, rate))
+}
+
 /// The MIDI number of a note with its octave, such as C2 or F#1.
 #[pyfunction]
 fn midi(note: &str) -> PyResult<i64> {
@@ -259,5 +284,5 @@ fn loudness<'py>(
 #[pymodule]
 mod aaw_py {
     #[pymodule_export]
-    use super::{beat, fingerprints, frame, load, loudness, midi, parse, save, schedule, sounded, to_yaml, validate, warnings};
+    use super::{beat, fingerprints, frame, load, loudness, map_frame, midi, parse, save, schedule, sounded, tempo_map, to_yaml, validate, warnings};
 }

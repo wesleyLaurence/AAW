@@ -822,6 +822,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         layout.beatsPerBar = a.barBeats
         layout.beatUnit = a.beatUnit
         layout.tempo = a.tempo
+        layout.tempoMap = a.tempoMap
         layout.lengthBeats = a.lengthBeats
         layout.markersEnd = a.markers.map(\.at).max() ?? 0
         layout.clamp()

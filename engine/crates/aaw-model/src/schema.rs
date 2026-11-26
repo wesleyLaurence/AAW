@@ -695,19 +695,27 @@ impl AudioClip {
     /// next starts, as two clips that meet do. A clip that starts into its
     /// loop plays the rest of the loop first, from there in its file and
     /// without a lead, since the cut was inside the audio.
-    pub fn repetitions(&self, tempo: f64) -> Vec<AudioClip> {
+    ///
+    /// A clip without a tempo of its own plays its file at its own speed, so
+    /// with a tempo that changes, each repetition plays as much of its file
+    /// as its beats last where it plays.
+    pub fn repetitions(&self, map: &crate::TempoMap) -> Vec<AudioClip> {
         let (Some(every), Some(length)) = (self.loop_exact(), self.length_exact()) else {
             return vec![self.clone()];
         };
-        let per_beat = self.seconds_per_beat(tempo);
         let start = self.at_exact();
         let mut out = Vec::new();
         let mut into = self.offset_exact();
         let mut from = BigRational::zero();
         while from < length {
             let beats = (&every - &into).min(&length - &from);
+            let here = (&start + &from).to_f64().unwrap_or(0.0);
+            let per_beat = self.seconds_per_beat(map.tempo_at(here));
             let source_start = self.source_start_seconds + into.to_f64().unwrap_or(0.0) * per_beat;
-            let end = source_start + beats.to_f64().unwrap_or(0.0) * per_beat;
+            let end = match (map.constant_tempo(), self.source_bpm) {
+                (None, None) => source_start + map.seconds_between(here, here + beats.to_f64().unwrap_or(0.0)) * self.repitch(),
+                _ => source_start + beats.to_f64().unwrap_or(0.0) * per_beat,
+            };
             out.push(AudioClip {
                 at: Beat::from_exact(&(&start + &from)),
                 source_start_seconds: source_start,
@@ -4308,7 +4316,7 @@ impl Project {
         let f = Fields::of(ctx, x, "Project", Self::FIELDS)?;
         let before = ctx.count();
         // The version a song is written with follows from what it holds.
-        let schema = f.opt(ctx, "schema_version", 1, |c, x| v::literal_int(c, x, &[1, 2]));
+        let schema = f.opt(ctx, "schema_version", 1, |c, x| v::literal_int(c, x, &[1, 2, 3]));
         let session = f.req(ctx, "session", Session::validate);
         let samples = f.opt(ctx, "samples", IndexMap::new(), |c, x| v::str_dict(c, x, Sample::validate));
         f.opt(ctx, "patterns", (), |c, x| gone(c, x, "Patterns"));
@@ -4350,10 +4358,15 @@ impl Project {
         })
     }
 
-    /// 2 for a song with a MIDI track, which an engine that knows only
-    /// version 1 refuses; otherwise 1, so that such a song saves as it did.
+    /// 3 for a song whose tempo changes, which an engine that knows only
+    /// versions 1 and 2 refuses rather than playing everything after the
+    /// first change at the wrong time; 2 for a song with a MIDI track, which
+    /// an engine that knows only version 1 refuses; otherwise 1, so that such
+    /// a song saves as it did.
     pub fn schema_version(&self) -> i64 {
-        if self.tracks.iter().any(|t| t.midi.is_some()) {
+        if self.tempo_lane().is_some() {
+            3
+        } else if self.tracks.iter().any(|t| t.midi.is_some()) {
             2
         } else {
             1

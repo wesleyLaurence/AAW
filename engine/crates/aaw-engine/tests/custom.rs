@@ -153,3 +153,31 @@ fn a_device_on_the_master_or_a_group_is_given_what_reaches_it() {
     let bass: Vec<[f32; 2]> = frames(&dir.path().join("plain/stems/bass.wav")).iter().map(|f| [f[0] / master, f[1] / master]).collect();
     close(&input[..half], &bass[..half], 1e-5, "the group's input is its track's stem");
 }
+
+#[test]
+fn a_device_in_a_song_whose_tempo_steps_is_given_its_input_through_the_steps() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_song(dir.path());
+    let p = with(&aaw_model::load(&path, false).unwrap(), |d| {
+        push(track(d, "bass"), "effects", yaml("{type: device, name: half}"));
+        d.insert(
+            Key::str("master"),
+            yaml("{automation: [{param: tempo, points: [{at: 0, value: 120.0, curve: hold}, {at: 4, value: 90.0, curve: hold}]}]}"),
+        );
+    });
+    for (owner, index) in [("tracks.bass", 0), ("master", 0)] {
+        let p = if owner == "master" {
+            with(&p, |d| {
+                let Some(Value::Dict(master)) = d.get_mut(&Key::str("master")) else { panic!() };
+                push(master, "effects", yaml("{type: device, name: mute}"));
+            })
+        } else {
+            p.clone()
+        };
+        let cut = custom::cut(&p, owner, index).unwrap();
+        assert!(cut.tempo_lane().is_some(), "{owner}: the cut keeps the tempo");
+        let input = custom::input(&p, dir.path(), owner, index, 4096, &Caches::new()).unwrap();
+        let total = p.tempo_map().frame(&p.session.length_exact(), p.session.sample_rate) as usize;
+        assert_eq!(input.len(), total, "{owner}: the input lasts the song through its steps");
+    }
+}

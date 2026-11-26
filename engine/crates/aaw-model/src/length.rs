@@ -5,15 +5,45 @@
 
 use crate::rules::owners;
 use crate::schema::{AudioClip, Project};
+use crate::tempo::TempoMap;
 use num_rational::BigRational;
 use num_traits::{ToPrimitive, Zero};
 
 impl AudioClip {
+    /// The tempo the clip's file follows at a beat: its own `source_bpm`'s
+    /// beat is a beat of the song wherever it plays, and a clip without one
+    /// plays its file at its own speed through the song's tempo there.
+    fn local_seconds_per_beat(&self, map: &TempoMap, beat: f64) -> f64 {
+        self.seconds_per_beat(map.tempo_at(beat))
+    }
+
+    /// Beats the clip takes from its start to play `seconds` of its file.
+    pub fn beats_for_file(&self, map: &TempoMap, seconds: f64) -> f64 {
+        let at = self.at_exact().to_f64().unwrap_or(0.0);
+        match (map.constant_tempo(), self.source_bpm) {
+            (Some(t), _) => seconds / self.seconds_per_beat(t),
+            (None, Some(_)) => seconds / self.seconds_per_beat(0.0),
+            (None, None) => map.beat_after(at, seconds / self.repitch()) - at,
+        }
+    }
+
+    /// Seconds of its file the clip plays in its first `beats`.
+    pub fn file_for_beats(&self, map: &TempoMap, beats: f64) -> f64 {
+        let at = self.at_exact().to_f64().unwrap_or(0.0);
+        match (map.constant_tempo(), self.source_bpm) {
+            (Some(t), _) => beats * self.seconds_per_beat(t),
+            (None, Some(_)) => beats * self.seconds_per_beat(0.0),
+            (None, None) => map.seconds_between(at, at + beats) * self.repitch(),
+        }
+    }
+
     /// Beats before its beat the clip's sound starts: its lead, as the engine
     /// plays it, no earlier than its file's start or the song's.
-    pub fn lead_beats(&self, tempo: f64) -> f64 {
+    pub fn lead_beats(&self, map: &TempoMap) -> f64 {
+        let beat = self.at_exact().to_f64().unwrap_or(0.0);
+        let tempo = map.tempo_at(beat);
         // All in seconds of the song, as the engine counts it.
-        let at = self.at_exact().to_f64().unwrap_or(0.0) * 60.0 / tempo;
+        let at = map.seconds(beat);
         let speed = self.seconds_per_beat(tempo) * tempo / 60.0;
         let in_file = if speed > 0.0 { self.source_start_seconds / speed } else { 0.0 };
         // A clip that starts into its loop starts inside its audio, with no lead.
@@ -27,7 +57,15 @@ impl AudioClip {
     /// more than the file holds past the end, and none for a clip that plays
     /// to its file's end and fades over the last of it. `file` is the file's
     /// length in seconds when known.
-    pub fn tail_beats(&self, tempo: f64, file: Option<f64>) -> f64 {
+    pub fn tail_beats(&self, map: &TempoMap, file: Option<f64>) -> f64 {
+        let tempo = match (map.constant_tempo(), self.source_end_seconds) {
+            (Some(t), _) => t,
+            (None, Some(end)) => {
+                let at = self.at_exact().to_f64().unwrap_or(0.0);
+                map.tempo_at(at + self.beats_for_file(map, end - self.source_start_seconds))
+            }
+            (None, None) => map.opening(),
+        };
         let fade = self.fade_out_ms / 1000.0 * tempo / 60.0;
         match (self.source_end_seconds, file) {
             (Some(end), Some(file)) => fade.min(((file - end) / self.seconds_per_beat(tempo)).max(0.0)),
@@ -39,7 +77,7 @@ impl AudioClip {
     /// The beat the clip's sound ends on, its tail included: a looped clip's
     /// own length, else to its end in the file or the file's end. None when
     /// the clip plays to the end of a file whose length is not known.
-    pub fn sound_end(&self, tempo: f64, file: Option<f64>) -> Option<f64> {
+    pub fn sound_end(&self, map: &TempoMap, file: Option<f64>) -> Option<f64> {
         let at = self.at_exact().to_f64().unwrap_or(0.0);
         let played = match self.length_exact() {
             Some(length) => length.to_f64().unwrap_or(0.0),
@@ -50,10 +88,16 @@ impl AudioClip {
                     (None, Some(file)) => file,
                     (None, None) => return None,
                 };
-                ((until - self.source_start_seconds) / self.seconds_per_beat(tempo)).max(0.0)
+                self.beats_for_file(map, until - self.source_start_seconds).max(0.0)
             }
         };
-        Some(at + played + self.tail_beats(tempo, file))
+        Some(at + played + self.tail_beats(map, file))
+    }
+
+    /// Seconds of the file a beat of the clip plays where it starts, for
+    /// a reader that wants one figure.
+    pub fn seconds_per_beat_at_start(&self, map: &TempoMap) -> f64 {
+        self.local_seconds_per_beat(map, self.at_exact().to_f64().unwrap_or(0.0))
     }
 }
 
@@ -65,7 +109,7 @@ impl AudioClip {
 /// length of a sample's file, which an audio clip that plays to its file's
 /// end needs; such a clip whose file cannot be read counts from its start.
 pub fn content_end(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> BigRational {
-    let tempo = p.session.tempo;
+    let map = p.tempo_map();
     let mut end = BigRational::zero();
     let mut reach = |beat: BigRational| {
         if beat > end {
@@ -74,7 +118,7 @@ pub fn content_end(p: &Project, file_seconds: &dyn Fn(&str) -> Option<f64>) -> B
     };
     for t in &p.tracks {
         for c in &t.audio {
-            let sound = c.sound_end(tempo, file_seconds(&c.sample)).and_then(BigRational::from_float);
+            let sound = c.sound_end(&map, file_seconds(&c.sample)).and_then(BigRational::from_float);
             reach(sound.unwrap_or_else(|| c.at_exact()));
         }
         if let Some(midi) = &t.midi {

@@ -465,10 +465,14 @@ pub struct Renderer {
 
 /// A frame of one program at the same beat in another.
 pub fn carry(frame: usize, from: &Program, to: &Program) -> usize {
-    if from.tempo == to.tempo && from.rate == to.rate {
+    if from.map == to.map && from.rate == to.rate {
         return frame;
     }
-    (frame as f64 * (to.rate as f64 / from.rate as f64) * (from.tempo / to.tempo)).round() as usize
+    if let (Some(a), Some(b)) = (from.map.constant_tempo(), to.map.constant_tempo()) {
+        return (frame as f64 * (to.rate as f64 / from.rate as f64) * (a / b)).round() as usize;
+    }
+    let beat = from.map.beat_of_frame(frame as f64, from.rate as f64);
+    (to.map.seconds(beat) * to.rate as f64).round().max(0.0) as usize
 }
 
 /// Silences the frames of a chain's output at or past the session end: the

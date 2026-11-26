@@ -183,7 +183,7 @@ impl Captured {
 
     /// The sound as the reply reports it; `dir` is the project's folder,
     /// which a file under it is given relative to.
-    pub fn report(&self, dir: &Path, tempo: f64) -> Json {
+    pub fn report(&self, dir: &Path, map: &aaw_model::TempoMap) -> Json {
         let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
         let file = self.file.strip_prefix(dir).unwrap_or(&self.file);
         json!({
@@ -195,9 +195,9 @@ impl Captured {
             "seconds": round3(self.seconds()),
             "peak_dbfs": self.peak_dbfs.map(|p| (p * 100.0).round() / 100.0),
             "lost_frames": self.lost,
-            "at_beat": self.at_frame.map(|f| round3(f * tempo / 60.0 / self.sample_rate as f64)),
+            "at_beat": self.at_frame.map(|f| round3(map.beat_of_frame(f, self.sample_rate as f64))),
             "pulled_ms": (self.pulled_ms * 100.0).round() / 100.0,
-            "tempo": tempo,
+            "tempo": self.at_frame.map_or(map.opening(), |f| map.tempo_at_seconds(f / self.sample_rate as f64)),
         })
     }
 }

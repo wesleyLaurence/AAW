@@ -90,7 +90,7 @@ render artifacts did not change
 
 Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
 
-- `aaw-model`: the strict schema (version 1, and 2 with MIDI tracks), exact musical time, stable YAML, validation,
+- `aaw-model`: the strict schema (version 1, 2 with MIDI tracks, and 3 with a tempo lane), exact musical time and the song's tempo map (`tempo.rs`: steps of the master's tempo lane, or one tempo, turning beats into frames and seconds for every reader; see [tempo-changes.md](features/tempo-changes.md)), stable YAML, validation,
   hashes, the event schedule, the schema `daw describe` prints, and the
   warnings `daw check` gives of a valid song, each with a code (`check`); see
   [musical-checks.md](features/musical-checks.md).
@@ -323,7 +323,7 @@ processing never allocates, so it runs in the audio callback. No second engine e
 ## Format
 
 Required top-level fields: `session`. Optional `samples`, `tracks`,
-`groups`, `returns`, `sections`, `markers` and `master`. `schema_version` is 2 in a song with a MIDI
+`groups`, `returns`, `sections`, `markers` and `master`. `schema_version` is 3 in a song with a tempo lane on the master, and otherwise 2 in a song with a MIDI
 track and 1 in any other, which saves byte for byte as it did before MIDI
 tracks; either is read (D63). Unknown fields are rejected, and an edit that
 names one is told the nearest field. Run `daw describe TOPIC` for each field's
@@ -470,7 +470,7 @@ and change; see [favorites.md](features/favorites.md).
 
 Automation: `tracks[].automation`, `groups[].automation`, `returns[].automation` and `master.automation`
 list lanes `{param, points}`. `param` is `gain_db`, `pan`, `sends.RETURN.gain_db` (tracks and groups),
-`effects.REF.FIELD`, `effects.RACK.effects.REF.FIELD` for an effect inside a rack, or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD`, or with an instrument of the person's own `instrument.fields.F` (master: `gain_db` and effects). Points `{at, value, curve, shape}`
+`effects.REF.FIELD`, `effects.RACK.effects.REF.FIELD` for an effect inside a rack, or, on a MIDI track with a synth, `instrument.FIELD`, the patch's effects included as `instrument.effects.REF.FIELD`, or with an instrument of the person's own `instrument.fields.F` (master: `gain_db`, effects and `tempo`, the song's tempo as steps, each `curve: hold`, which everything placed in beats follows; `session.tempo` is then its tempo at beat 0; see [tempo-changes.md](features/tempo-changes.md)). Points `{at, value, curve, shape}`
 are in time order; `curve` is `linear` or `hold`, and `shape` bends a linear segment. A lane overrides the static value
 for the whole song and holds its first and last values outside its points. See
 [automation.md](features/automation.md).

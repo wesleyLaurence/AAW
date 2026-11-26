@@ -66,7 +66,7 @@ beats play again at each wrap until its end.
 
 **A MIDI track** has an instrument, note clips, effects, sends and automation,
 and no pads, pattern clips or audio clips. A song with a MIDI track is saved as
-`schema_version: 2`, which an engine from before MIDI tracks refuses; a song
+`schema_version: 2` (3 with a tempo lane, [tempo changes](tempo-changes.md)), which an engine from before MIDI tracks refuses; a song
 without one is saved as version 1, byte for byte as before.
 
 **The instrument** is null, which plays nothing, or a sampler of pads and a map

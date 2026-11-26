@@ -286,7 +286,7 @@ impl Session {
             }
         }
         let (a, b) = (&old.session, &new.session);
-        if a.tempo != b.tempo || a.sample_rate != b.sample_rate || a.stretcher != b.stretcher {
+        if a.tempo != b.tempo || old.tempo_map() != new.tempo_map() || a.sample_rate != b.sample_rate || a.stretcher != b.stretcher {
             let names: Vec<&str> = frozen.iter().map(|t| t.id.as_str()).collect();
             return Err(format!(
                 "{} {} frozen: unfreeze before changing the tempo, the sample rate or the stretcher",
@@ -428,7 +428,7 @@ impl Session {
             Command::Apply { patch, label } => {
                 let merged = aaw_model::merge(&self.doc.project.dump(false), &json_value(patch)?);
                 let mut project = Project::validate(&merged).map_err(|e| aaw_model::hint::explain(&merged, &e))?;
-                self.settle(&mut project);
+                self.settle(&mut project)?;
                 let node = tree::matched(&project.dump(false), Some(&self.doc.tree()), &mut self.next);
                 let outcome = Outcome {
                     label: label.clone().unwrap_or_else(|| "Apply a merge patch".into()),
@@ -455,7 +455,7 @@ impl Session {
                 }
                 let value = root.value();
                 let mut project = Project::validate(&value).map_err(|e| aaw_model::hint::explain(&value, &e))?;
-                self.settle(&mut project);
+                self.settle(&mut project)?;
                 let node = tree::carry(&project.dump(false), Some(&root), &mut next);
                 self.next = next;
                 (project, node, outcome)
@@ -507,14 +507,29 @@ impl Session {
 
     /// Sets the song's length to its content: the next whole bar after the
     /// last sound, so that nothing lies past the end (D130). An audio clip
-    /// that plays to its file's end needs the file's length.
-    fn settle(&self, project: &mut Project) {
+    /// that plays to its file's end needs the file's length. With a tempo
+    /// lane, `session.tempo` is the lane's tempo at beat 0, and an edit of
+    /// the field alone is refused: the lane is the song's tempo.
+    fn settle(&self, project: &mut Project) -> Result<()> {
+        if project.tempo_lane().is_some() {
+            let opening = project.tempo_map().opening();
+            let set = project.session.tempo != self.doc.project.session.tempo;
+            if set && project.session.tempo != opening {
+                return Err(format!(
+                    "The song's tempo changes along its tempo lane (master.automation.{}): daw tempo set PROJECT --at BAR --bpm {} sets the step at a bar, and daw tempo clear goes back to one tempo",
+                    project.master.automation.iter().position(|l| l.param == aaw_model::TEMPO_PARAM).unwrap_or(0),
+                    aaw_model::pyfmt::float_repr(project.session.tempo)
+                ));
+            }
+            project.session.tempo = opening;
+        }
         let seconds = |sample: &str| -> Option<f64> {
             let asset = project.samples.get(sample)?;
             aaw_engine::sndfile::info(&self.dir.join(&asset.path)).ok().map(|info| info.seconds())
         };
         let length = aaw_model::fitted_length(project, &seconds);
         project.session.length_beats = aaw_model::Beat::from_exact(&length);
+        Ok(())
     }
 
     fn stamp_reply(&self, changed: bool) -> Map<String, Json> {
@@ -775,7 +790,7 @@ impl Session {
         let root = self.doc.tree();
         let triggers = aaw_model::schedule::schedule(p);
         let rate = p.session.sample_rate;
-        let frames = aaw_model::frame(&p.session.length_exact(), p.session.tempo, rate);
+        let frames = p.tempo_map().frame(&p.session.length_exact(), rate);
         fn types(effects: &[aaw_model::Effect]) -> Vec<&str> {
             effects.iter().map(|e| e.kind()).collect()
         }
@@ -930,6 +945,36 @@ impl Session {
     /// `daw marker list`: the person's markers in time order, each with the
     /// bar it is in and the beat of that bar, the section over it, and the
     /// clips sounding there, a track each.
+    /// `daw tempo list`: the song's tempo, a step from each beat on, with
+    /// its bar and beat in the bar, the second it starts on and its tempo.
+    pub fn tempo_list(&self) -> Json {
+        let p = &self.doc.project;
+        let meter = p.session.meter();
+        let map = p.tempo_map();
+        let round = |x: f64| (x * 1e6).round() / 1e6;
+        let steps: Vec<Json> = map
+            .steps()
+            .iter()
+            .map(|s| {
+                let (bar, beat) = meter.bar_beat(s.beat_f64());
+                json!({
+                    "at": value_json(&aaw_model::Beat::from_exact(&s.beat).to_value()),
+                    "bar": bar,
+                    "beat": beat,
+                    "seconds": round(s.seconds_f64()),
+                    "bpm": s.bpm,
+                })
+            })
+            .collect();
+        let length = p.session.length_exact();
+        json!({
+            "tempo": map.opening(),
+            "changes": map.constant_tempo().is_none(),
+            "steps": steps,
+            "length_seconds": round(map.seconds(num_traits::ToPrimitive::to_f64(&length).unwrap_or(0.0))),
+        })
+    }
+
     pub fn markers(&self) -> Json {
         let p = &self.doc.project;
         let root = self.doc.tree();
@@ -1051,7 +1096,12 @@ impl Session {
         }
         notes.sort_by(|(_, a), (_, b)| a.at.cmp(&b.at).then(a.pitch.cmp(&b.pitch)));
         let file_notes: Vec<_> = notes.iter().map(|(_, n)| n.clone()).collect();
-        let written = crate::midi_file::write(&file_notes, &track.id, p.session.tempo, p.session.meter());
+        // The song's tempo where the clip plays, from the clip's start.
+        let map = p.tempo_map();
+        let start = c.at_exact();
+        let mut tempo = vec![(num_rational::BigRational::from_integer(0.into()), map.tempo_at_exact(&start))];
+        tempo.extend(map.steps().iter().filter(|s| s.beat > start && s.beat < &start + &length).map(|s| (&s.beat - &start, s.bpm)));
+        let written = crate::midi_file::write(&file_notes, &track.id, &tempo, p.session.meter());
         std::fs::write(file, &written.bytes).map_err(|e| format!("{file}: {e}"))?;
         let mut left_out = Map::new();
         if outside > 0 {

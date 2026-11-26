@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 
 from . import aaw_py
-from .model import sounded
+from .model import TempoMap, sounded
 
 # A hit's punch is the peak of its first ATTACK_MS against the RMS of the
 # BODY_MS that follow, or of what there is before the next hit. Hits that
@@ -76,10 +76,10 @@ class Punch:
     def __init__(self, x, rate, project, manifest, offset, sections):
         self.x, self.sections = x, sections
         attack, body, apart = (round(ms * rate / 1000) for ms in (ATTACK_MS, BODY_MS, APART_MS))
-        tempo = project["session"]["tempo"]
+        tm = TempoMap.of(project)
         starts: dict[str, list] = {}
         for track, at, _, _, hit in sounded(project):
-            frame = round(at * 60 / tempo * rate) - offset
+            frame = round(tm.seconds(at) * rate) - offset
             if track in manifest["tracks"] and 0 <= frame < len(x):
                 # A hit without a note is written as its pad and its transpose.
                 starts.setdefault(track, []).append((frame, hit.rsplit(" ", 1)[0] if hit else None))

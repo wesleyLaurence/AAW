@@ -17,7 +17,7 @@ import soundfile as sf
 from scipy.signal import resample_poly, spectrogram, welch
 
 from . import dynamics, overlap, spectrum, translation
-from .model import atomic_text, beat, digest, frame, hash_matches, load_snapshot, schedule
+from .model import TempoMap, atomic_text, beat, digest, hash_matches, load_snapshot, schedule
 
 VERSION = 1
 BANDS = {
@@ -193,19 +193,20 @@ def context(folder, x, rate):
     # the timeline check below confirms.
     region = manifest.get("target", {}).get("source_frames")
     offset = region[0] if region else 0
+    tm = TempoMap.of(project)
     expected_end = (
         region[1]
         if region
-        else frame(session["length_beats"], session["tempo"], rate)
+        else tm.frame(session["length_beats"], rate)
     )
     if offset < 0 or expected_end - offset != len(x):
         raise ValueError("Render timeline does not match its manifest")
     sections = []
     for sec in project["sections"]:
-        start = max(offset, frame(sec["at"], session["tempo"], rate))
+        start = max(offset, tm.frame(sec["at"], rate))
         end = min(
             offset + len(x),
-            frame(beat(sec["at"]) + beat(sec["length_beats"]), session["tempo"], rate),
+            tm.frame(beat(sec["at"]) + beat(sec["length_beats"]), rate),
         )
         if end > start:
             sections.append(
@@ -218,18 +219,45 @@ def context(folder, x, rate):
     return project, manifest, offset, sections
 
 
+def steps_of(project) -> dict:
+    """A song's tempo steps for a report's source, when its tempo changes:
+    each step's beat, seconds and bpm. Nothing for a song of one tempo, whose
+    report is as it was."""
+    if not project:
+        return {}
+    tm = TempoMap.of(project)
+    if tm.tempo is not None:
+        return {}
+    return {"tempo_steps": [{"beat": float(b), "seconds": s, "bpm": bpm} for b, bpm, s in tm.steps]}
+
+
+def to_beats(source):
+    """Seconds of a report's song to its beats, for a plot's axis: through
+    its tempo steps, at its one tempo, or seconds as they are without one.
+    Takes arrays as numbers."""
+    steps = source.get("tempo_steps")
+    if steps:
+        far = 1e7
+        xs = [-far] + [s["seconds"] for s in steps] + [steps[-1]["seconds"] + far]
+        ys = [-far * steps[0]["bpm"] / 60] + [s["beat"] for s in steps] + [steps[-1]["beat"] + far * steps[-1]["bpm"] / 60]
+        return lambda t: np.interp(t, xs, ys)
+    tempo = source.get("tempo")
+    scale = tempo / 60 if tempo else 1
+    return lambda t: t * scale
+
+
 def timeline(x, rate, project, offset):
     # One beat per energy bin, or one second when musical timing is unknown.
     if project:
-        tempo = project["session"]["tempo"]
-        first = int(np.floor(offset / rate * tempo / 60))
-        last = int(np.ceil((offset + len(x)) / rate * tempo / 60))
+        tm = TempoMap.of(project)
+        first = int(np.floor(tm.beat(offset / rate)))
+        last = int(np.ceil(tm.beat((offset + len(x)) / rate)))
         boundaries = (
             [0]
             + [
-                frame(i, tempo, rate) - offset
+                tm.frame(i, rate) - offset
                 for i in range(first + 1, last)
-                if 0 < frame(i, tempo, rate) - offset < len(x)
+                if 0 < tm.frame(i, rate) - offset < len(x)
             ]
             + [len(x)]
         )
@@ -241,9 +269,7 @@ def timeline(x, rate, project, offset):
             {
                 "start_seconds": (offset + start) / rate,
                 "end_seconds": (offset + end) / rate,
-                "at_beat": (offset + start) / rate * project["session"]["tempo"] / 60
-                if project
-                else None,
+                "at_beat": tm.beat((offset + start) / rate) if project else None,
                 "rms_dbfs": db(float(np.mean(x[start:end] ** 2))),
             }
         )
@@ -274,7 +300,7 @@ def timeline(x, rate, project, offset):
 def musical_context(project, manifest, offset, count, sections):
     if project is None:
         return None
-    rate, tempo = project["session"]["sample_rate"], project["session"]["tempo"]
+    rate, tm = project["session"]["sample_rate"], TempoMap.of(project)
     triggers = schedule(project)
     any_solo = any(t["solo"] for t in project["tracks"])
     result = {}
@@ -295,7 +321,11 @@ def musical_context(project, manifest, offset, count, sections):
                     "id": region["id"],
                     "trigger_count": len(hits),
                     "triggers_per_beat": len(hits)
-                    / ((end - start) / rate * tempo / 60),
+                    / (
+                        (end - start) / rate * tm.tempo / 60
+                        if tm.tempo is not None
+                        else tm.beat(end / rate) - tm.beat(start / rate)
+                    ),
                 }
             )
         result[track["id"]] = {
@@ -373,6 +403,7 @@ def measured(source):
             "channels": x.shape[1],
             "start_seconds": offset / rate,
             "tempo": project["session"]["tempo"] if project else None,
+            **steps_of(project),
         },
         "methods": {
             "loudness": "pyloudnorm BS.1770-4 K-weighting, 400 ms absolute/relative gating; null below gate or under 400 ms",
@@ -444,13 +475,13 @@ def plot_listen(report, x, output):
     rate = report["source"]["sample_rate"]
     offset = report["source"]["start_seconds"]
     tempo = report["source"]["tempo"]
-    scale = tempo / 60 if tempo else 1
+    scale = to_beats(report["source"])
     fig = Figure(figsize=(12, 7), layout="constrained")
     FigureCanvasAgg(fig)
     top, bottom = fig.subplots(2, 1, sharex=True)
     bins = report["timeline"]["energy"]
     top.step(
-        [b["start_seconds"] * scale for b in bins] + [bins[-1]["end_seconds"] * scale],
+        [float(scale(b["start_seconds"])) for b in bins] + [float(scale(bins[-1]["end_seconds"]))],
         [b["rms_dbfs"] if b["rms_dbfs"] is not None else -120 for b in bins]
         + [bins[-1]["rms_dbfs"] if bins[-1]["rms_dbfs"] is not None else -120],
         where="post",
@@ -471,7 +502,7 @@ def plot_listen(report, x, output):
         db_power = np.repeat(db_power, 2, axis=1)
     if np.count_nonzero(keep) >= 2:
         mesh = bottom.pcolormesh(
-            (t + offset) * scale,
+            scale(t + offset),
             f[keep],
             db_power,
             shading="nearest",
@@ -495,17 +526,17 @@ def plot_listen(report, x, output):
         xlabel="Quarter-note beat (zero-based)" if tempo else "Seconds",
     )
     for sec_id, sec in report["sections"].items():
-        pos = sec["start_seconds"] * scale
+        pos = float(scale(sec["start_seconds"]))
         top.axvline(pos, color="gray", alpha=0.5)
         top.text(
             pos, 0.98, sec_id, transform=top.get_xaxis_transform(), va="top", fontsize=8
         )
     for ax in (top, bottom):
-        ax.set_xlim(offset * scale, (offset + len(x) / rate) * scale)
+        ax.set_xlim(float(scale(offset)), float(scale(offset + len(x) / rate)))
         ax.grid(alpha=0.15)
         if tempo:
-            start = int(np.ceil(offset * scale))
-            stop = int(np.ceil((offset + len(x) / rate) * scale))
+            start = int(np.ceil(scale(offset)))
+            stop = int(np.ceil(scale(offset + len(x) / rate)))
             # Beat grid on short views; bar grid on long views, bounded for full songs.
             step = (
                 1
@@ -629,6 +660,7 @@ def overlap_of(source, a, b, images=True):
             "render_id": manifest.get("render_id"),
             "start_seconds": offset / rate,
             "tempo": project["session"]["tempo"],
+            **steps_of(project),
         },
         "method": overlap.METHOD,
         **grid.detail(a, b),
@@ -846,7 +878,7 @@ def plot_compare(a, b, gain, output):
     FigureCanvasAgg(fig)
     axes = fig.subplots(2, 1, sharex=True)
     tempo = a["source"]["tempo"]
-    scale = tempo / 60 if tempo else 1
+    scale = to_beats(a["source"])
     for ax, matched in zip(axes, (False, True)):
         for report, label, adjustment in (
             (a, "Before", 0),
@@ -855,8 +887,8 @@ def plot_compare(a, b, gain, output):
             if adjustment is None:
                 continue
             bins = report["timeline"]["energy"]
-            times = [v["start_seconds"] * scale for v in bins] + [
-                bins[-1]["end_seconds"] * scale
+            times = [float(scale(v["start_seconds"])) for v in bins] + [
+                float(scale(bins[-1]["end_seconds"]))
             ]
             values = [
                 v["rms_dbfs"] + adjustment if v["rms_dbfs"] is not None else np.nan
@@ -869,7 +901,7 @@ def plot_compare(a, b, gain, output):
         if matched and gain is None:
             ax.set_title("Loudness matching unavailable: undefined integrated loudness")
         for name, sec in a["sections"].items():
-            pos = sec["start_seconds"] * scale
+            pos = float(scale(sec["start_seconds"]))
             ax.axvline(pos, color="gray", alpha=0.3)
             ax.text(
                 pos,
@@ -881,8 +913,8 @@ def plot_compare(a, b, gain, output):
             )
         ax.grid(alpha=0.2)
         ax.set_xlim(
-            a["source"]["start_seconds"] * scale,
-            (a["source"]["start_seconds"] + a["mix"]["duration_seconds"]) * scale,
+            float(scale(a["source"]["start_seconds"])),
+            float(scale(a["source"]["start_seconds"] + a["mix"]["duration_seconds"])),
         )
         ax.legend(loc="lower right")
     axes[-1].set_xlabel("Quarter-note beat (zero-based)" if tempo else "Seconds")

@@ -691,7 +691,10 @@ impl Player {
                         at += ((-at + bar - 1) / bar) * bar;
                     }
                     if self.roll_on || at < p.total.max(bar as usize) as i64 {
-                        let click = metronome_sample(at as usize, p.rate, p.tempo, p.click_beats, p.beats_per_bar) * self.click_gain;
+                        let click = match p.map.constant_tempo() {
+                            Some(tempo) => metronome_sample(at as usize, p.rate, tempo, p.click_beats, p.beats_per_bar),
+                            None => stepped_metronome_sample(at as usize, p.rate, &p.map, p.click_beats, p.beats_per_bar),
+                        } * self.click_gain;
                         frame[0] += click;
                         frame[1] += click;
                     }
@@ -721,9 +724,66 @@ fn metronome_sample(frame: usize, rate: u32, tempo: f64, click_beats: f64, beats
     let period = rate as f64 * 60.0 / tempo * click_beats;
     let beat = ((frame as f64 + 0.5) / period).floor();
     let onset = (beat * period).round() as usize;
+    click(frame, onset, beat as u64, rate, beats_per_bar)
+}
+
+/// The metronome in a song whose tempo steps: each click on its beat
+/// through the map, at the tempo where it falls.
+fn stepped_metronome_sample(frame: usize, rate: u32, map: &aaw_model::TempoMap, click_beats: f64, beats_per_bar: u32) -> f64 {
+    let at = map.beat_of_frame(frame as f64 + 0.5, rate as f64);
+    let mut beat = (at / click_beats).floor();
+    let mut onset = (map.seconds(beat * click_beats) * rate as f64).round();
+    // Rounding can put a click's onset after the frame that asked for it.
+    if onset > frame as f64 && beat > 0.0 {
+        beat -= 1.0;
+        onset = (map.seconds(beat * click_beats) * rate as f64).round();
+    }
+    click(frame, onset.max(0.0) as usize, beat.max(0.0) as u64, rate, beats_per_bar)
+}
+
+/// The click's sound `frame - onset` frames after it starts: a short attack
+/// and decay, higher on the bar's first beat.
+fn click(frame: usize, onset: usize, beat: u64, rate: u32, beats_per_bar: u32) -> f64 {
     let t = frame.saturating_sub(onset) as f64 / rate as f64;
     if t >= 0.025 { return 0.0; }
-    let hz = if beat as u64 % beats_per_bar.max(1) as u64 == 0 { 1760.0 } else { 1320.0 };
+    let hz = if beat % beats_per_bar.max(1) as u64 == 0 { 1760.0 } else { 1320.0 };
     let envelope = (t / 0.001).min(1.0) * (1.0 - t / 0.025).powi(3);
     0.16 * envelope * (std::f64::consts::TAU * hz * t).sin()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use num_rational::BigRational;
+
+    /// The frames a click starts on: a sample after silence.
+    fn onsets(f: impl Fn(usize) -> f64, frames: usize) -> Vec<usize> {
+        let mut out = Vec::new();
+        let mut quiet = usize::MAX;
+        for i in 0..frames {
+            if f(i).abs() > 1e-9 {
+                if quiet > 2000 {
+                    // The click's first frame is silent: it starts at 0.
+                    out.push(i - 1);
+                }
+                quiet = 0;
+            } else {
+                quiet = quiet.saturating_add(1);
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_metronome_clicks_on_each_beat_through_a_tempo_step() {
+        let map = aaw_model::TempoMap::from_steps(vec![(BigRational::from_integer(0.into()), 120.0), (BigRational::from_integer(8.into()), 150.0)]);
+        let found = onsets(|i| stepped_metronome_sample(i, 48000, &map, 1.0, 4), 48000 * 7);
+        let want: Vec<usize> = (0..16).map(|b| map.frame(&BigRational::from_integer(b.into()), 48000) as usize).collect();
+        assert_eq!(found, want);
+        // With one tempo it clicks where it always did.
+        let one = aaw_model::TempoMap::constant(120.0);
+        let a = onsets(|i| stepped_metronome_sample(i, 48000, &one, 1.0, 4), 48000 * 4);
+        let b = onsets(|i| metronome_sample(i, 48000, 120.0, 1.0, 4), 48000 * 4);
+        assert_eq!(a, b);
+    }
 }

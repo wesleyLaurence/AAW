@@ -338,7 +338,10 @@ remove SLUG` moves one to the Trash.
     beats from the song's start (float64), `pitch` and `velocity`, a row a
     note in the order they start, as the clips play them through the MIDI
     effects before it (`schedule::midi_effect_input`); `fields` each name
-    to a float, a bool or a string; `tempo` in beats a minute. It returns
+    to a float, a bool or a string; `tempo` in beats a minute, the
+    tempo at beat 0. Any entry, `transform`, `play` or `process`, that
+    takes a `tempo_map` keyword is given the song's steps, each `{beat,
+    seconds, bpm}` ([tempo changes](tempo-changes.md)). It returns
     the notes to play in any order, a structured array of those fields or
     rows of four numbers. The runner and the host hold every note to a
     start at 0 or after, an end after it, a whole pitch 0 to 127 and a

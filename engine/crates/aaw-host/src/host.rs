@@ -215,8 +215,8 @@ enum Recordable {
 /// The playhead, readable from any thread without waiting for the host.
 #[derive(Default)]
 pub struct Clock {
-    /// What the audio thread publishes, and beats per frame of its program.
-    source: Mutex<Option<(Arc<Shared>, f64)>>,
+    /// What the audio thread publishes, and its program's tempo map and rate.
+    source: Mutex<Option<(Arc<Shared>, Arc<aaw_model::TempoMap>, f64)>>,
 }
 
 impl Clock {
@@ -225,14 +225,14 @@ impl Clock {
     /// the output has been opened by a first play.
     pub fn now(&self) -> Option<(bool, f64)> {
         let source = self.source.lock().unwrap_or_else(|e| e.into_inner());
-        source.as_ref().map(|(shared, beats_per_frame)| {
+        source.as_ref().map(|(shared, map, rate)| {
             let playing = shared.playing.load(Relaxed);
             let ahead = if playing { shared.output_latency.load(Relaxed) } else { 0 };
-            (playing, shared.position.load(Relaxed).saturating_sub(ahead) as f64 * beats_per_frame)
+            (playing, map.beat_of_frame(shared.position.load(Relaxed).saturating_sub(ahead) as f64, *rate))
         })
     }
 
-    fn set(&self, source: Option<(Arc<Shared>, f64)>) {
+    fn set(&self, source: Option<(Arc<Shared>, Arc<aaw_model::TempoMap>, f64)>) {
         *self.source.lock().unwrap_or_else(|e| e.into_inner()) = source;
     }
 }
@@ -364,8 +364,8 @@ impl Host {
     }
 
     fn frame(&self, beats: &BigRational) -> usize {
-        let s = &self.session.project().session;
-        aaw_model::frame(beats, s.tempo, s.sample_rate).max(0) as usize
+        let p = self.session.project();
+        p.tempo_map().frame(beats, p.session.sample_rate).max(0) as usize
     }
 
     /// With `exit_on_stop`, refuses a start position at or past the song's
@@ -506,7 +506,7 @@ impl Host {
         let playing = old.control.playing() || unheard.is_some();
         let (frame, old_program) = (unheard.unwrap_or(old.control.position()), old.control.program().clone());
         drop(old);
-        let beats = BigRational::from_float(frame as f64 * old_program.tempo / 60.0 / old_program.rate as f64).unwrap_or_default();
+        let beats = BigRational::from_float(old_program.map.beat_of_frame(frame as f64, old_program.rate as f64)).unwrap_or_default();
         self.open_transport(program)?;
         if playing {
             let f = self.frame(&beats);
@@ -561,11 +561,11 @@ impl Host {
         }
     }
 
-    /// Points the clock at the open output and its program's tempo.
+    /// Points the clock at the open output and its program's tempo map.
     fn publish_clock(&self) {
         self.clock.set(self.transport.as_ref().map(|t| {
             let p = t.control.program();
-            (t.control.shared().clone(), p.tempo / 60.0 / p.rate as f64)
+            (t.control.shared().clone(), p.map.clone(), p.rate as f64)
         }));
     }
 
@@ -821,7 +821,17 @@ impl Host {
         }
         let rate = program.rate;
         let bar = (rate as f64 * 60.0 / program.tempo * program.click_beats * program.beats_per_bar.max(1) as f64).round().max(1.0) as usize;
-        let preroll = count_in.unwrap_or(1) as usize * bar;
+        let bars = count_in.unwrap_or(1) as usize;
+        // In a song whose tempo steps, the count-in is the bars before the
+        // start as the song plays them.
+        let preroll = match program.map.constant_tempo() {
+            Some(_) => bars * bar,
+            None => {
+                let back = BigRational::from_float(program.click_beats * program.beats_per_bar.max(1) as f64 * bars as f64).unwrap_or_default();
+                let cue = program.map.frame(&self.cue, rate as i64);
+                (cue - program.map.frame(&(&self.cue - back), rate as i64)).max(1) as usize
+            }
+        };
         // The output's hardware latency, in the song's frames: what the
         // person heard the song late by. The driver's own lead is already in
         // the anchor, which is where each block plays.
@@ -899,7 +909,7 @@ impl Host {
         }
         let project = self.session.project().clone();
         let rate = project.session.sample_rate as u32;
-        let tempo = project.session.tempo;
+        let map = project.tempo_map();
         let dir = self.session.dir().to_path_buf();
         let mut commands = Vec::new();
         let mut reports = Vec::new();
@@ -911,7 +921,7 @@ impl Host {
                     if take.lost > 0 {
                         self.warn(format!("{}: {} frames were lost on the way to the take", take.track, take.lost));
                     }
-                    let beat = BigRational::from_float(take.at as f64 * tempo / 60.0 / rate as f64).unwrap_or_default();
+                    let beat = BigRational::from_float(map.beat_of_frame(take.at as f64, rate as f64)).unwrap_or_default();
                     commands.push(Command::Set {
                         path: format!("samples.{}", take.id),
                         value: take.sample(),
@@ -924,7 +934,7 @@ impl Host {
                         fields,
                     });
                     labels.push(format!("{} on {}", take.id, take.track));
-                    reports.push(take.report(rate, tempo));
+                    reports.push(take.report(rate, &map));
                 }
                 Err(e) => self.warn(format!("the take was not kept: {e}")),
             }
@@ -935,7 +945,7 @@ impl Host {
                 fields: take.clip(),
             });
             labels.push(format!("notes on {}", take.track));
-            reports.push(take.report(tempo));
+            reports.push(take.report(&map));
         }
         if commands.is_empty() {
             return Some(json!([]));
@@ -1177,7 +1187,7 @@ impl Host {
         if captured.lost > 0 {
             self.warn(format!("{} frames were lost on the way to the sound", captured.lost));
         }
-        let report = captured.report(self.session.dir(), s.tempo);
+        let report = captured.report(self.session.dir(), &self.session.project().tempo_map());
         let mut status = self.status();
         if let Json::Object(m) = &mut status {
             m.insert("captured".into(), report);
@@ -1303,12 +1313,12 @@ impl Host {
         let mut m: Map<String, Json> = self.session.status();
         m.insert("pid".into(), json!(std::process::id()));
         let s = self.session.project().session.clone();
-        let (playing, frame, tempo, rate) = match &self.transport {
+        let (playing, frame, map, rate) = match &self.transport {
             Some(t) => {
                 let p = t.control.program();
-                (t.control.playing(), t.control.position(), p.tempo, p.rate as f64)
+                (t.control.playing(), t.control.position(), p.map.clone(), p.rate as f64)
             }
-            None => (false, self.frame(&self.cue), s.tempo, s.sample_rate as f64),
+            None => (false, self.frame(&self.cue), Arc::new(self.session.project().tempo_map()), s.sample_rate as f64),
         };
         m.insert("playing".into(), json!(playing));
         m.insert("sample_rate".into(), json!(s.sample_rate));
@@ -1316,7 +1326,7 @@ impl Host {
         m.insert("custom_devices".into(), self.devices.status_json());
         m.insert(
             "position".into(),
-            json!({"frame": frame, "beat": round3(frame as f64 * tempo / 60.0 / rate), "seconds": round3(frame as f64 / rate)}),
+            json!({"frame": frame, "beat": round3(map.beat_of_frame(frame as f64, rate)), "seconds": round3(frame as f64 / rate), "tempo": map.tempo_at_seconds(frame as f64 / rate)}),
         );
         m.insert("cue".into(), crate::session::value_json(&beat_value(&self.cue)));
         m.insert("armed".into(), json!(self.armed));
@@ -1343,7 +1353,7 @@ impl Host {
                     "level": (c.level as f64 * 1000.0).round() / 1000.0,
                     "lost_frames": c.lost(),
                     "device_stopped": c.dead(),
-                    "at_beat": c.first_frame().map(|f| round3(f * tempo / 60.0 / rate)),
+                    "at_beat": c.first_frame().map(|f| round3(map.beat_of_frame(f, rate))),
                 }),
                 None => Json::Null,
             },
@@ -1490,6 +1500,7 @@ impl Host {
                         Ok(self.session.markers())
                     }
                     Command::MidiExport { clip, file } => self.session.export_midi(&clip, &file),
+                    Command::TempoList => Ok(self.session.tempo_list()),
                     _ => unreachable!("not a read"),
                 }
             }

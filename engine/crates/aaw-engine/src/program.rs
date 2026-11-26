@@ -21,7 +21,7 @@ use aaw_dsp::synth::{track_seed, Patch};
 use aaw_dsp::wavetable::Wavetable;
 use aaw_model::rules::{midi, target, Owner, TargetKind, MIDDLE_C};
 use aaw_model::schedule::{track_notes, track_triggers, NoteOn, Trigger};
-use aaw_model::{frame, AudioClip, Effect, FadeCurve, Lane, Pad, Project, Stretch, Stretcher};
+use aaw_model::{AudioClip, Beat, Effect, FadeCurve, Lane, Pad, Project, Stretch, Stretcher, TempoMap};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::PI;
 use std::hash::{Hash, Hasher};
@@ -283,8 +283,11 @@ pub struct MasterProgram {
 #[derive(Debug)]
 pub struct Program {
     pub rate: u32,
-    /// Beats per minute, to carry a playhead across a tempo change.
+    /// Beats per minute at beat 0.
     pub tempo: f64,
+    /// The song's tempo through time, to place the metronome's clicks and
+    /// to carry a playhead across a change of tempo.
+    pub map: Arc<TempoMap>,
     /// The note the time signature counts, in quarter-note beats: what the
     /// metronome clicks on, 1/2 in 6/8.
     pub click_beats: f64,
@@ -484,7 +487,7 @@ impl Cache {
     /// A Synth track's notes, from the cache when its clips, the tempo and
     /// the rate are as they were.
     fn synth_notes(&mut self, p: &Project, t: &aaw_model::Track, midi: &aaw_model::Midi) -> Arc<Vec<NoteOn>> {
-        let key = format!("{:?}|{:?}|{}|{}", midi.clips, midi.midi_effects, p.session.tempo.to_bits(), p.session.sample_rate);
+        let key = format!("{:?}|{:?}|{}|{}", midi.clips, midi.midi_effects, p.tempo_map().key(), p.session.sample_rate);
         let g = self.generation;
         if let Some(entry) = self.notes.get_mut(&t.id) {
             if entry.1 == key {
@@ -576,12 +579,13 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
             continue;
         }
         for tr in track_triggers(p, ti) {
-            let Ok(job) = sampler.job(&t.sound_pads()[&tr.pad], tr.note) else { break 'tracks };
+            let tempo = sampler.tempo_of_frame(tr.start);
+            let Ok(job) = sampler.job(&t.sound_pads()[&tr.pad], tr.note, tempo) else { break 'tracks };
             if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
                 jobs.push(job);
             }
         }
-        let audio = played_audio(p, t);
+        let Ok(audio) = sampler.played(t) else { break 'tracks };
         for clip in &audio {
             let leaves = sampler.clip_leaves(&audio, clip);
             let Ok(job) = sampler.clip_job(clip, leaves) else { break 'tracks };
@@ -619,16 +623,14 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
     }
 }
 
-/// A track's audio clips as they play: each looped clip as its repetitions,
-/// so the engine plays what it would play from copies, and none deactivated,
-/// so a clip before one leaves as if nothing followed it.
-fn played_audio(p: &Project, t: &aaw_model::Track) -> Vec<AudioClip> {
-    t.audio.iter().filter(|c| c.active).flat_map(|c| c.repetitions(p.session.tempo)).collect()
-}
+/// How long the parts of a stretched clip that crosses a tempo step take to
+/// cross over, before the step's beat.
+const STEP_JOIN_MS: f64 = 5.0;
 
 /// Loads and prepares pad audio through a cache.
 pub struct Sampler<'a> {
     project: &'a Project,
+    map: TempoMap,
     directory: PathBuf,
     cache: &'a mut Cache,
     /// What the voices made so far were prepared from.
@@ -639,6 +641,7 @@ pub struct Sampler<'a> {
 impl<'a> Sampler<'a> {
     pub fn new(project: &'a Project, directory: &Path, cache: &'a mut Cache) -> Self {
         Sampler {
+            map: project.tempo_map(),
             project,
             directory: directory.to_path_buf(),
             cache,
@@ -674,9 +677,67 @@ impl<'a> Sampler<'a> {
         Ok((path, stamp, audio))
     }
 
+    /// The tempo playing at a frame of the song.
+    fn tempo_of_frame(&self, frame: i64) -> f64 {
+        match self.map.constant_tempo() {
+            Some(t) => t,
+            None => self.map.tempo_at_seconds(frame as f64 / self.project.session.sample_rate as f64),
+        }
+    }
+
+    /// A track's audio clips as they play: each looped clip as its
+    /// repetitions, so the engine plays what it would play from copies, and
+    /// none deactivated, so a clip before one leaves as if nothing followed
+    /// it. A clip with a tempo of its own that crosses a step of the song's
+    /// tempo plays as a part a step, each stretched to its step's tempo.
+    fn played(&mut self, t: &aaw_model::Track) -> Result<Vec<AudioClip>, String> {
+        let repeated: Vec<AudioClip> = t.audio.iter().filter(|c| c.active).flat_map(|c| c.repetitions(&self.map)).collect();
+        if self.map.constant_tempo().is_some() {
+            return Ok(repeated);
+        }
+        let mut out = Vec::with_capacity(repeated.len());
+        for clip in repeated {
+            let Some(bpm) = clip.source_bpm else {
+                out.push(clip);
+                continue;
+            };
+            let (_, _, audio) = self.original(&clip.sample)?;
+            let length = audio.frames() as f64 / audio.rate as f64;
+            let end = clip.source_end_seconds.unwrap_or(length).min(length);
+            let at = clip.at_exact();
+            let per_beat = 60.0 / bpm * clip.repitch();
+            let last = num_traits::ToPrimitive::to_f64(&at).unwrap_or(0.0) + (end - clip.source_start_seconds) / per_beat;
+            let cuts: Vec<num_rational::BigRational> =
+                self.map.changes_between(num_traits::ToPrimitive::to_f64(&at).unwrap_or(0.0), last).map(|s| s.beat.clone()).collect();
+            if cuts.is_empty() {
+                out.push(clip);
+                continue;
+            }
+            let file_at = |b: &num_rational::BigRational| clip.source_start_seconds + num_traits::ToPrimitive::to_f64(&(b - &at)).unwrap_or(0.0) * per_beat;
+            let mut from = at.clone();
+            for (k, cut) in cuts.iter().chain(std::iter::once(&at)).enumerate() {
+                let first = k == 0;
+                let tail = k == cuts.len();
+                out.push(AudioClip {
+                    at: if first { clip.at.clone() } else { Beat::from_exact(&from) },
+                    source_start_seconds: if first { clip.source_start_seconds } else { file_at(&from) },
+                    source_end_seconds: if tail { clip.source_end_seconds } else { Some(file_at(cut)) },
+                    lead_ms: if first { clip.lead_ms } else { STEP_JOIN_MS },
+                    fade_in_ms: if first { clip.fade_in_ms } else { STEP_JOIN_MS },
+                    fade_out_ms: if tail { clip.fade_out_ms } else { STEP_JOIN_MS },
+                    ..clip.clone()
+                });
+                if !tail {
+                    from = cut.clone();
+                }
+            }
+        }
+        Ok(out)
+    }
+
     /// What a pad's audio for a hit is prepared from: played at `note` when
-    /// a pitched map entry plays it.
-    fn job(&mut self, pad: &Pad, note: Option<i64>) -> Result<Job, String> {
+    /// a pitched map entry plays it, at `tempo`, the song's where it plays.
+    fn job(&mut self, pad: &Pad, note: Option<i64>, tempo: f64) -> Result<Job, String> {
         let asset = &self.project.samples[&pad.sample];
         let mut semitones = pad.transpose;
         if let Some(note) = note {
@@ -688,20 +749,30 @@ impl<'a> Sampler<'a> {
             semitones += (note - root) as f64;
         }
         let follow = (pad.source_bpm, pad.stretch);
-        self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow, 0.0)
+        self.part(&pad.sample, pad.start_seconds, pad.end_seconds, pad.reverse, pad.mono, semitones, follow, 0.0, tempo)
     }
 
     /// Seconds of an audio clip's file to a second of the timeline.
+    /// The tempo is the song's where the clip starts: a clip with a tempo of
+    /// its own plays as a part a step, each in one tempo.
     fn clip_speed(&self, clip: &AudioClip) -> f64 {
-        let tempo = self.project.session.tempo;
+        let tempo = self.clip_tempo(clip);
         clip.seconds_per_beat(tempo) * tempo / 60.0
+    }
+
+    /// The song's tempo where an audio clip starts.
+    fn clip_tempo(&self, clip: &AudioClip) -> f64 {
+        match self.map.constant_tempo() {
+            Some(t) => t,
+            None => self.map.tempo_at_exact(&clip.at_exact()),
+        }
     }
 
     /// The second of the timeline an audio clip's beat is on, before any
     /// rounding to frames.
     fn clip_beat(&self, clip: &AudioClip) -> f64 {
         let beats = num_traits::ToPrimitive::to_f64(&clip.at_exact()).unwrap_or(0.0);
-        beats * 60.0 / self.project.session.tempo
+        self.map.seconds(beats)
     }
 
     /// How many seconds before its beat an audio clip starts: its lead, and no
@@ -742,7 +813,8 @@ impl<'a> Sampler<'a> {
         // A transpose repitches as a pad's does, or is the stretcher's to
         // make at the clip's length.
         let (repitch, shift) = if clip.stretch.keeps_pitch() { (0.0, clip.transpose) } else { (clip.transpose, 0.0) };
-        self.part(&clip.sample, start, Some(end), false, false, repitch, follow, shift)
+        let tempo = self.clip_tempo(clip);
+        self.part(&clip.sample, start, Some(end), false, false, repitch, follow, shift, tempo)
     }
 
     /// The job for part of a sample: from `start` to `end` seconds of its
@@ -759,6 +831,7 @@ impl<'a> Sampler<'a> {
         semitones: f64,
         follow: (Option<f64>, Stretch),
         shift: f64,
+        tempo: f64,
     ) -> Result<Job, String> {
         let (path, stamp, audio) = self.original(sample)?;
         if !self.originals.contains(&path) {
@@ -767,7 +840,7 @@ impl<'a> Sampler<'a> {
         let mut speed = 2f64.powf(semitones / 12.0);
         let mut stretch = 1.0;
         if let Some(bpm) = follow.0 {
-            let ratio = self.project.session.tempo / bpm;
+            let ratio = tempo / bpm;
             match follow.1 {
                 Stretch::Repitch => speed *= ratio,
                 Stretch::PreservePitch | Stretch::PreserveFormants => stretch = ratio,
@@ -798,8 +871,8 @@ impl<'a> Sampler<'a> {
         })
     }
 
-    pub fn prepare(&mut self, pad: &Pad, note: Option<i64>) -> Result<Arc<Prepared>, String> {
-        let job = self.job(pad, note)?;
+    pub fn prepare(&mut self, pad: &Pad, note: Option<i64>, tempo: f64) -> Result<Arc<Prepared>, String> {
+        let job = self.job(pad, note, tempo)?;
         self.prepared_for(job)
     }
 
@@ -853,7 +926,8 @@ impl<'a> Sampler<'a> {
 
     /// `Sampler.voice`: the voice a trigger plays.
     pub fn voice(&mut self, pad: &Pad, tr: &Trigger) -> Result<Voice, String> {
-        let audio = self.prepare(pad, tr.note)?;
+        let tempo = self.tempo_of_frame(tr.start);
+        let audio = self.prepare(pad, tr.note, tempo)?;
         let rate = self.project.session.sample_rate as f64;
         let attack = (pad.attack_ms * rate / 1000.0).round_ties_even() as usize;
         let release = (pad.release_ms * rate / 1000.0).round_ties_even() as usize;
@@ -928,7 +1002,7 @@ fn voices_key(p: &Project, ti: usize, directory: &Path) -> String {
         "{:?}|{:?}|{}|{}|{:?}",
         t.audio,
         t.midi,
-        session.tempo.to_bits(),
+        p.tempo_map().key(),
         session.sample_rate,
         session.stretcher
     );
@@ -977,7 +1051,7 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
         }
     }
     if !t.audio.is_empty() && t.frozen.is_none() {
-        let audio = played_audio(p, t);
+        let audio = sampler.played(t).map_err(|e| format!("{}: {e}", t.id))?;
         for clip in &audio {
             voices.push(sampler.clip_voice(&audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
         }
@@ -1019,7 +1093,7 @@ pub fn preview_voice(
         pitch,
         velocity,
         start: 0,
-        end: frame(&beats, p.session.tempo, p.session.sample_rate),
+        end: p.tempo_map().frame(&beats, p.session.sample_rate),
         at: num_rational::BigRational::from_integer(0.into()),
         beats,
     };
@@ -1043,11 +1117,14 @@ struct Lanes {
 impl Lanes {
     fn new(owner: Owner, lanes: &[Lane], p: &Project) -> Lanes {
         let mut out = Lanes::default();
+        let map = p.tempo_map();
         for lane in lanes {
             out.params.push(lane.param.clone());
             let Ok(t) = target(owner, &lane.param) else { continue };
-            let env = Arc::new(Envelope::new(lane, t.domain, p.session.tempo, p.session.sample_rate));
+            let env = Arc::new(Envelope::new(lane, t.domain, &map, p.session.sample_rate));
             match &t.kind {
+                // The tempo moves no parameter: the map places everything.
+                TargetKind::Tempo => {}
                 TargetKind::Channel => {
                     out.channel.insert(t.field.clone(), env);
                 }
@@ -1108,7 +1185,7 @@ fn chain(
                 patch_effect_lanes(&outer.as_ref().expect("the rack's lanes").1, j)
             }
         };
-        let mut plan = Plan::new(effect, own, p.session.sample_rate, p.session.tempo, &mut cache.kernels);
+        let mut plan = Plan::new(effect, own, p.session.sample_rate, &p.tempo_map(), &mut cache.kernels);
         if let (Some(owner), Effect::Device(_)) = (owner, effect) {
             plan.with_made(cache.devices.get(&(owner.to_string(), place.index)).cloned());
         }
@@ -1241,7 +1318,8 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     let attached = crate::custom::attach(p, &cache.devices);
     let p = attached.as_ref().unwrap_or(p);
     let rate = p.session.sample_rate;
-    let total = frame(&p.session.length_exact(), p.session.tempo, rate).max(0) as usize;
+    let map = Arc::new(p.tempo_map());
+    let total = map.frame(&p.session.length_exact(), rate).max(0) as usize;
     let (needed, heard, groups, returns) = channels(p, scope)?;
     cache.begin();
     let any_solo = p.tracks.iter().any(|t| t.solo) || p.groups.iter().any(|g| g.solo);
@@ -1301,7 +1379,7 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
             }
             synth = Some(SynthProgram {
                 notes: cache.synth_notes(p, t, midi),
-                patch: Arc::new(Patch::new(spec, &lanes.instrument, rate as f64, p.session.tempo, track_seed(&t.id), &tables)),
+                patch: Arc::new(Patch::new(spec, &lanes.instrument, rate as f64, &map, track_seed(&t.id), &tables)),
                 chain: chain(&spec.effects, |i| patch_effect_lanes(&lanes.instrument, i), p, cache, None, None, 0),
             });
         }
@@ -1496,7 +1574,8 @@ pub fn compile_scoped(p: &Project, directory: &Path, cache: &mut Cache, scope: S
     devices(&master.chain, &mut h);
     Ok(Program {
         rate: rate as u32,
-        tempo: p.session.tempo,
+        tempo: map.opening(),
+        map,
         click_beats: p.session.meter().beat_f64(),
         beats_per_bar: p.session.meter().beats,
         total,

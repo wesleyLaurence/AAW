@@ -24,5 +24,7 @@ refused, and the app builds and shows the control on a scratch project.
 
 ## Open questions
 
-None. Tempo maps remain backlog work; the time signature has a field of its own
-beside this one ([time signature](time-signature.md)).
+None. In a song whose tempo steps the field shows the tempo at the playhead
+([tempo changes](tempo-changes.md)); setting a step from it is backlog work. The
+time signature has a field of its own beside this one ([time
+signature](time-signature.md)).

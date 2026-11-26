@@ -1,9 +1,10 @@
 # Tempo changes and warp markers — proposed November 26, 2026
 
 Status: item 1, a beat map through tempo changes, built November 26, 2026
-([beat map](beat-map.md#tempo-segments) is its reference); items 2–6 proposed,
-now Next items 1–5 of the backlog, built in order, each its own branch and pull
-request (D205).
+([beat map](beat-map.md#tempo-segments) is its reference); item 2, tempo
+changes in the song, built November 26, 2026 ([tempo changes](tempo-changes.md)
+is its reference, with its decisions); items 3–6 proposed, now Next items 1–4
+of the backlog, built in order, each its own branch and pull request (D205).
 
 ## What
 
@@ -120,6 +121,10 @@ every beat within 5 ms of where it was made; and the person's song that
 switches from 140 to 170 reports its two segments with the switch on bar 69.
 
 ### 2. Tempo changes in the song
+
+Built November 26, 2026; [tempo changes](tempo-changes.md) is its reference,
+and its choices are under its Decisions. What follows is the design as
+proposed.
 
 **In the song.** A lane on the master, `param: tempo`, as a master `gain_db`
 lane is today, values within `session.tempo`'s bounds, 20 to 400 BPM:
@@ -397,14 +402,14 @@ Item 1, November 26, 2026:
 
 ## Open questions
 
-1. **A step off a bar line.** The design places steps on bar lines and warns of
-   one off them; a song that changes tempo on beat 3 of a bar would need one.
-   Allow it, warn of it, or refuse it?
+1. **A step off a bar line.** Allowed and warned of, as built in item 2:
+   `daw tempo set --at 19:3` places one.
 2. **`daw timeline --tempo-for`**, the tempo at which a song lasts so many
    seconds: with a lane, scale every step by one factor, as "make it 2% faster"
    is said?
-3. **The tempo field typed into with a lane:** set the step the playhead is in
-   (the design), or scale the whole lane, or ask?
+3. **The tempo field typed into with a lane:** it shows the tempo at the
+   playhead (item 2); set the step the playhead is in (the design), or scale
+   the whole lane, or ask?
 4. **A MIDI file read in** keeps not taking its tempo (D65); with a lane, should
    `--tempo` take the file's tempo map as the song's?
 5. **A take recorded into a song with a lane** is placed by the map; is the

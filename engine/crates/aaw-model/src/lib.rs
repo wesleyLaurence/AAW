@@ -23,6 +23,7 @@ pub mod recipes;
 pub mod rules;
 pub mod schedule;
 pub mod schema;
+pub mod tempo;
 pub mod validate;
 pub mod value;
 pub mod yaml_emit;
@@ -33,6 +34,7 @@ pub use hash::{fingerprints, hash_matches, project_hash};
 pub use length::{content_end, empty_length, fitted_length, EMPTY_BARS};
 pub use meter::Meter;
 pub use schema::*;
+pub use tempo::{TempoMap, TempoStep, TEMPO_PARAM};
 pub use validate::ValidationError;
 
 use crate::value::{Dict, Key, Value};

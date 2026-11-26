@@ -3763,10 +3763,11 @@
   "additionalProperties": false,
   "properties": {
     "schema_version": {
-      "description": "Written by the tool: 2 for a song with a MIDI track, which an engine that knows only 1 refuses, otherwise 1. Either is read.",
+      "description": "Written by the tool: 3 for a song with a tempo lane on the master, which an engine that knows only 1 and 2 refuses; 2 for a song with a MIDI track, which an engine that knows only 1 refuses; otherwise 1. Each is read.",
       "enum": [
         1,
-        2
+        2,
+        3
       ],
       "title": "Schema Version",
       "type": "integer"

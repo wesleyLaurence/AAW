@@ -254,7 +254,7 @@ mod tests {
                 })
                 .collect(),
         };
-        Param::new(0.0, Some(&Arc::new(Envelope::new(&lane, domain, 120.0, 48000))))
+        Param::new(0.0, Some(&Arc::new(Envelope::new(&lane, domain, &aaw_model::TempoMap::constant(120.0), 48000))))
     }
 
     fn worst(a: &[Frame], b: &[Frame]) -> f64 {

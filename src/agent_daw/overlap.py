@@ -16,7 +16,7 @@ from numpy.lib.stride_tricks import sliding_window_view
 from scipy import fft
 
 from . import spectrum
-from .model import meter
+from .model import TempoMap, meter
 
 # Two stems contest a cell when the weaker is within CLOSE_DB of the stronger
 # and within HEARD_DB of the stems' sum there, in a cell of the sum that counts:
@@ -98,19 +98,32 @@ class Grid:
             for name, entry in entries.items()
             if entry.get("kind", "track") == "return" or not entry.get("group")
         } or set(entries)
+        # A song whose tempo steps has cells of a beat's share each, each as
+        # long as its beats are where it is; the window fits the shortest.
+        tm = TempoMap.of(project)
+        fastest = max(bpm for _, bpm, _ in tm.steps)
         self.cell_beats = 0.25
-        while self.cell_beats * 60 / self.tempo < MIN_CELL_SECONDS:
+        while self.cell_beats * 60 / fastest < MIN_CELL_SECONDS:
             self.cell_beats *= 2
-        per_beat = 60 / self.tempo * rate
+        per_beat = 60 / fastest * rate
         self.cell_frames = self.cell_beats * per_beat
-        first = int(np.floor(offset / self.cell_frames + 1e-9))
-        last = max(first + 1, int(np.ceil((offset + frames) / self.cell_frames - 1e-9)))
+        if tm.tempo is not None:
+            first = int(np.floor(offset / self.cell_frames + 1e-9))
+            last = max(first + 1, int(np.ceil((offset + frames) / self.cell_frames - 1e-9)))
+        else:
+            first = int(np.floor(tm.beat(offset / rate) / self.cell_beats + 1e-9))
+            last = max(first + 1, int(np.ceil(tm.beat((offset + frames) / rate) / self.cell_beats - 1e-9)))
         index = np.arange(first, last)
         self.at = index * self.cell_beats  # each cell's start, in the song's beats
-        starts = index * self.cell_frames - offset
+        if tm.tempo is not None:
+            starts = index * self.cell_frames - offset
+            lengths = self.cell_frames
+        else:
+            edges = np.array([tm.seconds(float(i) * self.cell_beats) * rate for i in range(first, last + 1)]) - offset
+            starts, lengths = edges[:-1], np.diff(edges)
         self.bar_beats = float(meter(session)[0])
         self.bars = np.floor(self.at / self.bar_beats + 1e-9).astype(int)
-        middle = starts + self.cell_frames / 2
+        middle = starts + lengths / 2
         self.sections = [
             (s["id"], (middle >= s["start_frame"]) & (middle < s["end_frame"]))
             for s in sections
@@ -121,7 +134,7 @@ class Grid:
         # stops on the grid 10 dB down in the one after.
         self.window = 2 * int(np.ceil(self.cell_frames / 2))
         self.size = fft.next_fast_len(self.window, real=True)
-        centers = np.concatenate([starts + self.cell_frames / 8, starts + 5 * self.cell_frames / 8])
+        centers = np.concatenate([starts + lengths / 8, starts + 5 * lengths / 8])
         self.first_frames = np.round(centers).astype(int) + self.window // 2
         freq = fft.rfftfreq(self.size, 1 / rate)
         self.bins = np.searchsorted(freq, EDGES)

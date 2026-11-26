@@ -8,17 +8,30 @@ use aaw_host::tree::{Item, Node};
 use aaw_model::describe::{self, Initial, Kind};
 use aaw_model::rules::{midi, synth_param, synth_params, target, Domain, Owner, TargetKind};
 use aaw_model::value::{py_eq, Value};
-use aaw_model::{AudioClip, Curve, Effect, Lane, Project};
+use aaw_model::{AudioClip, Curve, Effect, Lane, Project, TempoMap};
 use num_traits::ToPrimitive;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+/// A step of the song's tempo: from `beat` on, `bpm` quarter notes a
+/// minute, the step starting `seconds` into the song.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct TempoStepView {
+    pub beat: f64,
+    pub seconds: f64,
+    pub bpm: f64,
+}
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
 pub struct Arrangement {
     pub revision: u64,
     pub project_sha256: String,
     pub title: String,
+    /// The tempo at beat 0.
     pub tempo: f64,
+    /// The song's tempo through time, a step from each beat on, the first at
+    /// beat 0: one step for a song that keeps one tempo.
+    pub tempo_steps: Vec<TempoStepView>,
     /// The time signature as written, `4/4`.
     pub time_signature: String,
     /// A bar in beats as the song writes them: 3 in 3/4 and 6/8, 3.5 in 7/8.
@@ -965,6 +978,7 @@ pub fn synth_label(synth: &aaw_model::Synth, path: &str) -> (String, String) {
 /// A lane parameter as a person reads it, with its unit.
 fn lane_label(owner: Owner, kind: &TargetKind, field: &str, devices: &Devices) -> (String, String) {
     match kind {
+        TargetKind::Tempo => ("Tempo".into(), "BPM".into()),
         TargetKind::Channel if field == "pan" => ("Pan".into(), String::new()),
         TargetKind::Channel => ("Volume".into(), "dB".into()),
         TargetKind::Send(to) => (format!("Send {to}"), "dB".into()),
@@ -1043,6 +1057,12 @@ fn lanes(owner: Owner, lanes: &[Lane], handles: &[Item], devices: &Devices) -> V
             // range its manifest gives it.
             let (min, max) = match &t.kind {
                 TargetKind::Channel if t.field == "gain_db" => (-60.0, 6.0),
+                // The tempo's own span, in tens, with room above and below.
+                TargetKind::Tempo => {
+                    let values = lane.points.iter().map(|p| p.value);
+                    let (lo, hi) = (values.clone().fold(f64::INFINITY, f64::min), values.fold(f64::NEG_INFINITY, f64::max));
+                    (((lo - 10.0) / 10.0).floor().max(2.0) * 10.0, ((hi + 10.0) / 10.0).ceil().min(40.0) * 10.0)
+                }
                 TargetKind::Send(_) => (-60.0, 0.0),
                 TargetKind::Instrument if t.field.starts_with("fields.") => match owner {
                     Owner::Track(x) => x
@@ -1551,19 +1571,20 @@ fn pad_view(p: &Project, name: &str, pad: &aaw_model::Pad, file: Option<(u64, f6
 /// Seconds of an audio clip's file that go by in a beat of the song. A clip
 /// with a tempo of its own follows the song's, so a beat of the song is a beat
 /// of its file.
-pub fn seconds_per_beat(clip: &AudioClip, tempo: f64) -> f64 {
-    clip.seconds_per_beat(tempo)
+pub fn seconds_per_beat(clip: &AudioClip, map: &TempoMap) -> f64 {
+    clip.seconds_per_beat_at_start(map)
 }
 
 /// How long an audio clip sounds after it leaves, in beats: its fade out, as
 /// far as its file goes. `file` is the file's length in seconds, when known.
-pub fn tail_beats(clip: &AudioClip, tempo: f64, file: Option<f64>) -> f64 {
-    clip.tail_beats(tempo, file)
+pub fn tail_beats(clip: &AudioClip, map: &TempoMap, file: Option<f64>) -> f64 {
+    clip.tail_beats(map, file)
 }
 
 /// The arrangement of a revision of the song in `directory`.
 pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) -> Arrangement {
     let p = &doc.project;
+    let tempo_map = p.tempo_map();
     let tree = doc.tree();
     let float = |x: num_rational::BigRational| x.to_f64().unwrap_or(0.0);
     let track_items = items(&tree, "tracks");
@@ -1683,7 +1704,7 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                     .enumerate()
                     .map(|(j, c)| {
                         let key = handle(audio_items, j);
-                        let per_beat = seconds_per_beat(c, p.session.tempo);
+                        let per_beat = seconds_per_beat(c, &tempo_map);
                         let (identity, seconds) = file(&c.sample).unwrap_or((0, 0.0));
                         // A file that cannot be read has no length to end on.
                         let end = c.source_end_seconds.map_or(seconds, |end| if identity == 0 { end } else { end.min(seconds) });
@@ -1692,11 +1713,11 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
                             reference: aaw_host::tree::handle_text(key),
                             sample: c.sample.clone(),
                             at: float(c.at_exact()),
-                            lead_beats: c.lead_beats(p.session.tempo),
-                            length_beats: c.length_exact().map_or_else(|| ((end - c.source_start_seconds) / per_beat).max(0.0), &float),
+                            lead_beats: c.lead_beats(&tempo_map),
+                            length_beats: c.length_exact().map_or_else(|| c.beats_for_file(&tempo_map, end - c.source_start_seconds).max(0.0), &float),
                             loop_beats: c.loop_exact().map(&float),
                             loop_offset_beats: float(c.offset_exact()),
-                            tail_beats: tail_beats(c, p.session.tempo, (identity != 0).then_some(seconds)),
+                            tail_beats: tail_beats(c, &tempo_map, (identity != 0).then_some(seconds)),
                             source_start_seconds: c.source_start_seconds,
                             source_end_seconds: end,
                             seconds_per_beat: per_beat,
@@ -1823,7 +1844,8 @@ pub fn arrangement(doc: &Doc, revision: u64, files: &Files, directory: &Path) ->
         revision,
         project_sha256: doc.sha.clone(),
         title: p.session.title.clone(),
-        tempo: p.session.tempo,
+        tempo: tempo_map.opening(),
+        tempo_steps: tempo_map.steps().iter().map(|s| TempoStepView { beat: s.beat_f64(), seconds: s.seconds_f64(), bpm: s.bpm }).collect(),
         time_signature: p.session.meter().text(),
         bar_beats: p.session.meter().bar_f64(),
         beat_unit: p.session.meter().beat_f64(),

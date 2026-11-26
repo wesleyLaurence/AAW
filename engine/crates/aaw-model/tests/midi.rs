@@ -69,7 +69,7 @@ fn a_song_without_a_midi_track_stays_version_1() {
     // A song with one written as version 1 is read, and saved as 2.
     let midi = song(&format!("schema_version: 1\n{KEYS}"));
     assert_eq!(midi.schema_version(), 2);
-    assert!(refused("schema_version: 3\nsession: {}\n").contains("Input should be 1 or 2"));
+    assert!(refused("schema_version: 4\nsession: {}\n").contains("Input should be 1, 2 or 3"));
 }
 
 #[test]

@@ -20,7 +20,7 @@ use crate::wavetable::Wavetable;
 use crate::Frame;
 use aaw_model::rules::{mod_source, mod_target, ModSource, ModTarget};
 use aaw_model::schedule::NoteOn;
-use aaw_model::{LfoShape, Synth as Spec, SynthFilterMode, Wave, WidthMode};
+use aaw_model::{LfoShape, Synth as Spec, SynthFilterMode, TempoMap, Wave, WidthMode};
 use std::collections::{BTreeMap, HashMap};
 use std::f64::consts::{PI, TAU};
 use std::hash::{Hash, Hasher};
@@ -125,6 +125,9 @@ struct OscSpec {
 #[derive(Clone, Debug)]
 struct LfoSpec {
     shape: LfoShape,
+    /// Beats a cycle takes, for an LFO on the song's grid whose rate follows
+    /// the song's tempo steps; None for one in Hz, or one a lane moves.
+    synced: Option<f64>,
     /// Beats a cycle takes, when the rate is in beats; the rate in Hz is
     /// then worked out from the tempo and kept in the values.
     retrigger: bool,
@@ -157,6 +160,8 @@ pub struct Patch {
     rate: f64,
     /// Lanes on the patch's fields, by the index of the value they move.
     lanes: Vec<(usize, Arc<Envelope>)>,
+    /// The song's tempo map, when its tempo changes and an LFO follows it.
+    map: Option<Arc<TempoMap>>,
     /// What decides whether a playing synth can take a new patch in its
     /// stride: the parts whose change would jump the waveform. Levels and
     /// knobs are not part of it.
@@ -172,10 +177,11 @@ impl Patch {
         spec: &Spec,
         lanes: &BTreeMap<String, Arc<Envelope>>,
         rate: f64,
-        tempo: f64,
+        map: &TempoMap,
         seed: u64,
         tables: &HashMap<String, Arc<Wavetable>>,
     ) -> Patch {
+        let tempo = map.opening();
         let mut v = Values([0.0; LEN]);
         v.0[GLIDE] = spec.glide_ms;
         v.0[VELOCITY] = spec.velocity_percent;
@@ -213,12 +219,16 @@ impl Patch {
         let mut lfos = Vec::with_capacity(MAX_LFO);
         for (i, l) in spec.lfos.values().enumerate().take(MAX_LFO) {
             let at = LFO + i * LFO_FIELDS;
-            v.0[at] = match l.beats_exact().and_then(|b| num_traits::ToPrimitive::to_f64(&b)) {
-                Some(beats) if beats > 0.0 => tempo / 60.0 / beats,
+            let beats = l.beats_exact().and_then(|b| num_traits::ToPrimitive::to_f64(&b)).filter(|b| *b > 0.0);
+            v.0[at] = match beats {
+                Some(beats) => tempo / 60.0 / beats,
                 _ => l.rate_hz,
             };
             v.0[at + 1] = l.phase_percent;
+            let id = spec.lfos.get_index(i).map(|(id, _)| id.as_str()).unwrap_or_default();
+            let moved = lanes.contains_key(&format!("lfos.{id}.rate_hz"));
             lfos.push(LfoSpec {
+                synced: beats.filter(|_| map.constant_tempo().is_none() && !moved),
                 shape: l.shape,
                 retrigger: l.retrigger,
             });
@@ -241,6 +251,16 @@ impl Patch {
         for (path, env) in lanes {
             if let Some(index) = slot(spec, path) {
                 lane_slots.push((index, env.clone()));
+            }
+        }
+        // An LFO on the grid in a song whose tempo steps runs at each step's
+        // tempo from the step's frame.
+        for (i, l) in lfos.iter().enumerate() {
+            if let Some(beats) = l.synced {
+                let steps = map.steps();
+                let frames = steps.iter().enumerate().map(|(k, s)| if k == 0 { i64::MIN } else { map.frame(&s.beat, rate as i64) }).collect();
+                let values = steps.iter().map(|s| s.bpm / 60.0 / beats).collect();
+                lane_slots.push((LFO + i * LFO_FIELDS, Arc::new(Envelope::steps(frames, values))));
             }
         }
         let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -272,6 +292,7 @@ impl Patch {
             seed: hash(&[spec.seed as u64, seed]),
             rate,
             lanes: lane_slots,
+            map: (map.constant_tempo().is_none()).then(|| Arc::new(map.clone())),
             signature: h.finish(),
         }
     }
@@ -290,6 +311,10 @@ impl Patch {
     fn lfo_phase_at(&self, i: usize, frame: i64) -> f64 {
         let rate = self.statics.0[LFO + i * LFO_FIELDS];
         let phase0 = self.statics.0[LFO + i * LFO_FIELDS + 1] / 100.0;
+        // On the grid of a song whose tempo steps: its cycles are the beats.
+        if let (Some(beats), Some(map)) = (self.lfos[i].synced, &self.map) {
+            return phase0 + map.beat_of_frame(frame.max(0) as f64, self.rate) / beats;
+        }
         phase0 + frame.max(0) as f64 * rate / self.rate
     }
 }
@@ -1301,7 +1326,7 @@ mod tests {
     }
 
     fn patch(yaml: &str) -> Arc<Patch> {
-        Arc::new(Patch::new(&spec(yaml), &BTreeMap::new(), 48000.0, 120.0, 7, &tables(&spec(yaml))))
+        Arc::new(Patch::new(&spec(yaml), &BTreeMap::new(), 48000.0, &aaw_model::TempoMap::constant(120.0), 7, &tables(&spec(yaml))))
     }
 
     /// The built-in tables the patch's wavetable oscillators name.
@@ -1427,7 +1452,7 @@ mod tests {
         assert!((peak / rms - 2f64.sqrt()).abs() < 0.05, "a sine's crest: {}", peak / rms);
         // A wavetable oscillator with no table plays nothing.
         let spec = spec("{oscillators: {a: {wave: wavetable, table: organ}}}");
-        let none = Arc::new(Patch::new(&spec, &BTreeMap::new(), 48000.0, 120.0, 7, &HashMap::new()));
+        let none = Arc::new(Patch::new(&spec, &BTreeMap::new(), 48000.0, &aaw_model::TempoMap::constant(120.0), 7, &HashMap::new()));
         let quiet = render(&mut Synth::new(none, notes, 4096, 240), 48000, 4096);
         assert!(quiet.iter().all(|f| *f == [0.0; 2]));
     }
@@ -1507,10 +1532,10 @@ mod tests {
                 aaw_model::Point { at: aaw_model::Beat::int(1), value: 8000.0, curve: aaw_model::Curve::Linear, shape: 0.0 },
             ],
         };
-        let env = Arc::new(Envelope::new(&lane, aaw_model::rules::Domain::Log, 120.0, 48000));
+        let env = Arc::new(Envelope::new(&lane, aaw_model::rules::Domain::Log, &aaw_model::TempoMap::constant(120.0), 48000));
         let mut lanes = BTreeMap::new();
         lanes.insert("filter.cutoff_hz".to_string(), env);
-        let sweep = Arc::new(Patch::new(&spec("{oscillators: {a: {wave: saw, phase: 0}}, filter: {cutoff_hz: 20000, slope_db_per_octave: 24}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), &lanes, 48000.0, 120.0, 7, &HashMap::new()));
+        let sweep = Arc::new(Patch::new(&spec("{oscillators: {a: {wave: saw, phase: 0}}, filter: {cutoff_hz: 20000, slope_db_per_octave: 24}, envelopes: {amp: {attack_ms: 0, release_ms: 0}}}"), &lanes, 48000.0, &aaw_model::TempoMap::constant(120.0), 7, &HashMap::new()));
         let notes = Arc::new(vec![note(60, 0, 48000)]);
         let out = render(&mut Synth::new(sweep, notes, 4096, 240), 30000, 4096);
         let rms = |from: usize, to: usize| (out[from..to].iter().map(|f| f[0] * f[0]).sum::<f64>() / (to - from) as f64).sqrt();

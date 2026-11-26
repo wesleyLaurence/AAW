@@ -9,7 +9,7 @@
 //! position jump there. Nothing is smoothed.
 
 use aaw_model::rules::Domain;
-use aaw_model::{frame, Curve, Lane};
+use aaw_model::{Curve, Lane, TempoMap};
 use std::sync::Arc;
 
 #[derive(Debug, PartialEq)]
@@ -27,17 +27,33 @@ pub struct Envelope {
 }
 
 impl Envelope {
-    pub fn new(lane: &Lane, domain: Domain, tempo: f64, rate: i64) -> Envelope {
+    pub fn new(lane: &Lane, domain: Domain, map: &TempoMap, rate: i64) -> Envelope {
         let log = domain == Domain::Log;
         let first = lane.points[0].value;
         Envelope {
-            frames: lane.points.iter().map(|p| frame(&p.at_exact(), tempo, rate)).collect(),
+            frames: lane.points.iter().map(|p| map.frame(&p.at_exact(), rate)).collect(),
             values: lane.points.iter().map(|p| if log { p.value.ln() } else { p.value }).collect(),
             hold: lane.points.iter().map(|p| p.curve == Curve::Hold).collect(),
             power: lane.points.iter().map(|p| 4f64.powf(p.shape.abs())).collect(),
             late: lane.points.iter().map(|p| p.shape > 0.0).collect(),
             log,
             constant: lane.points.iter().all(|p| p.value == first).then_some(first),
+        }
+    }
+
+    /// Values held from frames on, the first from the start: a field that
+    /// follows the song's tempo steps.
+    pub fn steps(frames: Vec<i64>, values: Vec<f64>) -> Envelope {
+        let n = frames.len();
+        let first = values[0];
+        Envelope {
+            constant: values.iter().all(|v| *v == first).then_some(first),
+            frames,
+            values,
+            hold: vec![true; n],
+            power: vec![1.0; n],
+            late: vec![false; n],
+            log: false,
         }
     }
 
@@ -314,7 +330,7 @@ mod tests {
 
     // 120 BPM at 48 kHz: a beat is 24000 frames.
     fn envelope(points: &[(f64, f64, Curve)], domain: Domain) -> Envelope {
-        Envelope::new(&lane(points), domain, 120.0, 48000)
+        Envelope::new(&lane(points), domain, &aaw_model::TempoMap::constant(120.0), 48000)
     }
 
     #[test]
@@ -406,7 +422,7 @@ mod tests {
                 (l.points[0].value, l.points[1].value) = (100.0, 1600.0);
             }
             l.points[0].shape = shape;
-            Envelope::new(&l, domain, 120.0, 48000)
+            Envelope::new(&l, domain, &aaw_model::TempoMap::constant(120.0), 48000)
         };
         // Halfway through two beats at 120 BPM is frame 24000.
         let straight = shaped(0.0, Domain::Linear);
@@ -436,6 +452,6 @@ mod tests {
         assert!(block.iter().enumerate().all(|(i, v)| *v == e.at(1000 + i as i64)));
         let mut held = lane(&[(0.0, 1.0, Curve::Hold), (2.0, 8.0, Curve::Linear)]);
         held.points[0].shape = 1.0;
-        assert_eq!(Envelope::new(&held, Domain::Linear, 120.0, 48000).at(24000), 1.0);
+        assert_eq!(Envelope::new(&held, Domain::Linear, &aaw_model::TempoMap::constant(120.0), 48000).at(24000), 1.0);
     }
 }
