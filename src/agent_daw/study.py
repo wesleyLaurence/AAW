@@ -474,6 +474,10 @@ def glance(study: dict) -> dict:
         out["tempo_bpm"] = g["tempo"]["bpm"]
         out["steady"] = g["tempo"].get("steady")
         out["ambiguous_with"] = g["tempo"].get("ambiguous_with")
+        out["tempo_steps"] = [
+            {"bar": seg["bar"], "seconds": seg["seconds"], "bpm": seg["bpm"]}
+            for seg in (g["tempo"].get("segments") or [])[1:]
+        ]
         out["meter"] = g.get("meter")
         out["bars"] = g["bar_count"]
         out["first_downbeat_seconds"] = g.get("first_downbeat_seconds")
@@ -522,6 +526,8 @@ def summary(study: dict) -> str:
         tempo = f"{at['tempo_bpm']:g} BPM" + (" steady" if at.get("steady") else " not steady")
         if at.get("ambiguous_with"):
             tempo += f" (could be {', '.join(f'{v:g}' for v in at['ambiguous_with'])})"
+        for step in at.get("tempo_steps") or []:
+            tempo += f", then {step['bpm']:.4g} from bar {step['bar']} ({clock(step['seconds'])})"
         said.append(f"- **Grid:** {tempo}, {at.get('meter')}, {at['bars']} bars from the first downbeat at "
                     f"{num(at.get('first_downbeat_seconds'), 3, ' s')} (downbeat confidence {num(at.get('downbeat_confidence'), 2)})")
     if "key" in at:

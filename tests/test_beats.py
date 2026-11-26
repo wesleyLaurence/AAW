@@ -124,13 +124,13 @@ def test_the_command_keeps_the_map_beside_the_song(tmp_path):
     assert code == 0 and not moved["cached"]
     assert moved["first_downbeat_seconds"] == pytest.approx(truth[2], abs=0.0001)
     code, kept = cli(*args)
-    assert kept["cached"] and kept["requested"] == {"bpm": None, "downbeat": 1.1, "meter": None}
+    assert kept["cached"] and kept["requested"] == {"bpm": None, "downbeat": 1.1, "meter": None, "segment_at": None}
     assert kept["first_downbeat_seconds"] == moved["first_downbeat_seconds"]
     code, slower = cli(*args, "--bpm", 60)
-    assert slower["requested"] == {"bpm": 60.0, "downbeat": 1.1, "meter": None}
+    assert slower["requested"] == {"bpm": 60.0, "downbeat": 1.1, "meter": None, "segment_at": None}
     assert slower["tempo"]["bpm"] == pytest.approx(60, abs=0.002)
     code, fresh = cli(*args, "--refresh")
-    assert fresh["requested"] == {"bpm": None, "downbeat": None, "meter": None}
+    assert fresh["requested"] == {"bpm": None, "downbeat": None, "meter": None, "segment_at": None}
     assert {k: fresh[k] for k in report} == report
 
     # A changed file is measured again.

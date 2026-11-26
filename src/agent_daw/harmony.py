@@ -300,7 +300,7 @@ def on_the_map(path, report) -> tuple[dict, list[dict]]:
     rows = report["beats"]
     mono, sr = beatmap.read(path)
     key = key_of(mono, sr)
-    period = 60 / report["tempo"]["bpm"]
+    period = 60 / beatmap.last_bpm(report)
     times = [b["seconds"] for b in rows]
     times.append(min(times[-1] + period, len(mono) / sr))
     runs = chords(

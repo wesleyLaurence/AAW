@@ -208,37 +208,139 @@ def plan(found: dict, flux, fps: float, hint=None) -> dict:
     """
     times, downs = heard(found)
     heard_bpm = bpm_of(times)
-    if hint:
-        factor = min((0.5, 1.0, 2.0), key=lambda f: abs(np.log(heard_bpm * f / hint)))
-        if abs(np.log(heard_bpm * factor / hint)) > 0.04:
-            factor = None
-    elif heard_bpm < ALWAYS_DOUBLED:
-        factor = 2.0
-    elif heard_bpm < MAYBE_DOUBLED:
-        # Trap's hats and snares between the beats a model counts at 70 start as
-        # strongly as its beats do; a slow groove's eighths start softer.
-        between = onset(flux, fps, (times[:-1] + times[1:]) / 2)
-        on = float(np.median(onset(flux, fps, times)))
-        factor = 2.0 if on > 0 and float(np.median(between)) >= BETWEEN_STRENGTH * on else 1.0
-    elif heard_bpm > beats.MAX_BPM:
-        factor = 0.5
-    else:
-        factor = 1.0
-    if factor == 2.0:
-        target = np.sort(np.concatenate([times, (times[:-1] + times[1:]) / 2]))
-    elif factor == 0.5:
-        # The half of the beats the downbeats fall on.
-        odds = likelihood(found["downbeat"], found["fps"], times)
-        target = times[int(odds[1::2].sum() > odds[0::2].sum()) :: 2]
-    else:
-        target = times
+    factor = count(times, flux, fps, hint)
     return {
-        "beats": target,
+        "beats": counted(found, times, factor),
         "heard_bpm": heard_bpm,
         "factor": factor,
         "bpm": None if factor is None else heard_bpm * factor,
         "bar": bar_length(times, downs),
     }
+
+
+def count(times, flux, fps: float, hint=None):
+    """How the model's beats are counted: 1, 2 or 0.5, or None for a --bpm none
+    of those is near."""
+    heard_bpm = bpm_of(times)
+    if hint:
+        factor = min((0.5, 1.0, 2.0), key=lambda f: abs(np.log(heard_bpm * f / hint)))
+        return factor if abs(np.log(heard_bpm * factor / hint)) <= 0.04 else None
+    if heard_bpm < ALWAYS_DOUBLED:
+        return 2.0
+    if heard_bpm < MAYBE_DOUBLED:
+        # Trap's hats and snares between the beats a model counts at 70 start as
+        # strongly as its beats do; a slow groove's eighths start softer.
+        between = onset(flux, fps, (times[:-1] + times[1:]) / 2)
+        on = float(np.median(onset(flux, fps, times)))
+        return 2.0 if on > 0 and float(np.median(between)) >= BETWEEN_STRENGTH * on else 1.0
+    if heard_bpm > beats.MAX_BPM:
+        return 0.5
+    return 1.0
+
+
+def counted(found, times, factor, after=None) -> np.ndarray:
+    """The model's beats counted by `factor`: with a beat between each two at 2,
+    every other at 0.5. `after` is the beat that follows them, if any, so a
+    doubled count has its last beat between."""
+    if factor == 2.0:
+        ends = times if after is None else np.append(times, after)
+        return np.sort(np.concatenate([times, (ends[:-1] + ends[1:]) / 2]))
+    if factor == 0.5:
+        # The half of the beats the downbeats fall on.
+        odds = likelihood(found["downbeat"], found["fps"], times)
+        return times[int(odds[1::2].sum() > odds[0::2].sum()) :: 2]
+    return times
+
+
+def segmented(found: dict, flux, fps: float, hints=(), asked=()) -> dict | None:
+    """The model's beats in segments where their tempo steps (segments.py), or
+    None where it keeps one tempo and no step is asked for.
+
+    The model hears a stretch at half its tempo as readily as a whole song, as a
+    sparse verse of a 154 song at 77, so its beats step where the song does not.
+    Each stretch between its steps is counted: the longest as a song is
+    (`count`), each other at half, the same or double, whichever is nearest it.
+    A 140 trap song the model hears at 70 that switches to 170 is heard at 85
+    there, which a song alone would keep as a slow groove. The steps are then
+    those of the counted beats, and those asked for. --bpm gives a tempo for
+    each segment in turn, and each stretch of a segment is counted nearest it.
+
+    Gives the counted beats, the beat each segment starts on, and for each
+    segment its tempo, whether the model's count is used, how its longest
+    stretch was counted, the tempo heard, and whether its step was asked for."""
+    from . import segments
+
+    times, _ = heard(found)
+    forced = segments.forced_at(times, asked)
+    # Steps are read from the beats evened out, so a stretch heard at half time
+    # is no step; a step's beat is the heard beat nearest it.
+    even = segments.evened(times)
+    found_at = sorted({int(np.argmin(np.abs(times - even[j]))) for j in segments.steps_in(even)})
+    cuts = segments.joined([j for j in found_at if 0 < j < len(times)], forced, len(times))
+    if not cuts:
+        return None
+    edges = [0, *cuts, len(times)]
+    parts = list(zip(edges[:-1], edges[1:]))
+
+    def heard_tempo(k):
+        a, b = parts[k]
+        return segments.tempo_of(times[a : min(b + 1, len(times))])
+
+    anchor = max(range(len(parts)), key=lambda k: parts[k][1] - parts[k][0])
+    a, b = parts[anchor]
+    factors = [1.0] * len(parts)
+    factors[anchor] = count(times[a:b], flux, fps)
+    ref = heard_tempo(anchor) * factors[anchor]
+    for k in range(len(parts)):
+        if k != anchor:
+            options = [f for f in (0.5, 1.0, 2.0) if beats.MIN_BPM <= heard_tempo(k) * f <= beats.MAX_BPM] or [1.0]
+            factors[k] = min(options, key=lambda f: abs(np.log(heard_tempo(k) * f / ref)))
+
+    def run():
+        """The counted beats, and where each part starts in them."""
+        out, at = [], []
+        for (a, b), factor in zip(parts, factors):
+            at.append(len(out))
+            out.extend(counted(found, times[a:b], factor, times[b] if b < len(times) else None))
+        return np.array(out), at
+
+    # Neighbours counted at one tempo are one segment, unless a step between
+    # them was asked for.
+    groups = [[0]]
+    for k in range(1, len(parts)):
+        same = abs(np.log(heard_tempo(k) * factors[k] / (heard_tempo(k - 1) * factors[k - 1])))
+        if same <= np.log(1 + segments.STEP) and parts[k][0] not in forced:
+            groups[-1].append(k)
+        else:
+            groups.append([k])
+    if len(groups) == 1:
+        return None
+    hints = list(hints or [])
+    if len(hints) > len(groups):
+        raise ValueError(
+            f"--bpm gives {len(hints)} tempos and the map has {len(groups)} segments; "
+            "give --segment-at for each step"
+        )
+    for g, group in enumerate(groups):
+        if g < len(hints) and hints[g]:
+            for k in group:
+                factors[k] = count(times[parts[k][0] : parts[k][1]], flux, fps, hints[g])
+    beats_out, part_at = run()
+    names = {1.0: "as heard", 2.0: "doubled", 0.5: "halved", None: "at --bpm"}
+    out = {"beats": beats_out, "starts": [], "bpm": [], "counted": [], "how": [], "heard_bpm": [], "forced": []}
+    for g, group in enumerate(groups):
+        lo = part_at[group[0]]
+        hi = part_at[groups[g + 1][0]] if g + 1 < len(groups) else len(beats_out)
+        used = all(factors[k] is not None for k in group)
+        longest = max(group, key=lambda k: parts[k][1] - parts[k][0])
+        hint = hints[g] if g < len(hints) else None
+        out["starts"].append(lo)
+        out["bpm"].append(segments.tempo_of(beats_out[lo : min(hi + 1, len(beats_out))]) if used else hint)
+        out["counted"].append(used)
+        out["how"].append(names[factors[longest]])
+        out["heard_bpm"].append(heard_tempo(longest))
+        out["forced"].append(g > 0 and parts[group[0]][0] in forced)
+    return out
 
 
 def bar_length(times, downs) -> int:

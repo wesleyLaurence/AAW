@@ -164,7 +164,7 @@ def beat_song(path, bpm=120.0, bars=24, first=0.137, pickup=0, late=None, seed=0
     roots = [55.0, 65.41, 73.42, 49.0]
     for i, at in enumerate(times):
         bar, place = divmod(i - pickup, 4)
-        gap = times[i + 1] - at if i + 1 < count else 60 / bpm
+        gap = times[i + 1] - at if i + 1 < count else times[-1] - times[-2] if late is not None else 60 / bpm
         if i < pickup:
             add(at, noise(0.03, 0.004, 0.12))
             continue
