@@ -746,10 +746,10 @@ pub fn range_rows(rows: &[Row]) -> Vec<String> {
 }
 
 /// What Copy takes of a range, for `Edit::RangePaste`.
-pub fn copied_range(doc: &Doc, start: f64, length: f64, rows: &[Row]) -> Result<String> {
+pub fn copied_range(doc: &Doc, start: f64, length: f64, rows: &[Row], directory: &std::path::Path) -> Result<String> {
     let start = aaw_model::beat(&Beat::Float(start.max(0.0)))?;
     let length = aaw_model::beat(&Beat::Float(length.max(0.0)))?;
-    Ok(aaw_host::range::take(&doc.tree(), &start, &length, &range_rows(rows))?.to_string())
+    Ok(aaw_host::range::take(&doc.tree(), &start, &length, &range_rows(rows), Some(directory))?.to_string())
 }
 
 /// What a marker says, as typed: on one line, without the space around

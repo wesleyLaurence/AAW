@@ -114,3 +114,21 @@ def test_trims_and_crossfades_through_the_command_line(song):
         daw("audio", "split", song, "tracks.song.audio.0", "--at", 2)
     with pytest.raises(ValueError, match="A cut runs from a beat to a later one"):
         daw("audio", "cut", song, "song", "--from", 12, "--to", 12)
+
+
+def test_a_clip_with_nothing_to_play_is_silent_and_warned_of(song):
+    # A clip starting past its file's end, as an edit once left one, plays
+    # nothing: the song renders, and daw check says which clip it is.
+    daw("audio", "add", song, "song", "song", "--at", 60, "--source-start-seconds", 40)
+    report = render(song)
+    assert report["mix"]["peak_dbfs"] < 0
+    silent = [w for w in daw("check", song)["warnings"] if w["code"] == "audio-clip-silent"]
+    assert silent == [
+        {
+            "code": "audio-clip-silent",
+            "level": "warning",
+            "message": "song: the clip at beat 60 starts 40 s into song, at or past the file's end at 25.14 s, so it plays nothing",
+            "paths": ["tracks.song.audio.1"],
+            "at": 60,
+        }
+    ]

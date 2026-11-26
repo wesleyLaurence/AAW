@@ -243,10 +243,24 @@ fn a_looped_clip_plays_as_copies_of_its_first_beats_and_wraps_without_a_click() 
 }
 
 #[test]
-fn a_clip_outside_its_file_is_refused() {
+fn a_clip_with_nothing_of_its_file_to_play_is_silent() {
     let dir = tempfile::tempdir().unwrap();
-    let error = voices(dir.path(), 120.0, "[{sample: ramp, source_start_seconds: 5}]").unwrap_err();
-    assert_eq!(error, "song: ramp: audio clip outside sample");
+    // A clip starting past its file's end plays nothing, and the clips
+    // beside it play as they would without it.
+    let v = voices(dir.path(), 120.0, "[{sample: ramp, source_start_seconds: 5}, {sample: ramp, at: 4, source_start_seconds: 1, fade_in_ms: 0}]").unwrap();
+    assert_eq!(v.len(), 1);
+    assert_eq!(v[0].start, 2 * RATE as i64);
+    assert!(near(v[0].sample(0, 0), 1.0));
+    // So does one that leaves before it starts: a sliver shorter than the
+    // lead of the clip after it.
+    let v = voices(
+        dir.path(),
+        120.0,
+        "[{sample: ramp, source_start_seconds: 0.5, source_end_seconds: 0.501, fade_out_ms: 0}, {sample: ramp, at: 0.002, source_start_seconds: 1, lead_ms: 4}]",
+    )
+    .unwrap();
+    assert_eq!(v.len(), 1);
+    assert!(rendered(dir.path(), 120.0, "[{sample: ramp, source_start_seconds: 5}]").iter().all(|f| f[0] == 0.0));
     // An end past the file's is the file's end.
     let v = &voices(dir.path(), 120.0, "[{sample: ramp, source_start_seconds: 1, source_end_seconds: 9}]").unwrap()[0];
     assert_eq!(v.length, RATE);

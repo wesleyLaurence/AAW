@@ -1244,10 +1244,17 @@ pub(crate) fn beat_text(x: &BigRational) -> String {
 
 /// An audio clip's place: the beat it is at, the seconds of its file it plays,
 /// and how many of those seconds go by in a beat.
+/// How near, in beats, a beat is to an audio clip's end to be its end: the
+/// end comes from seconds, through floats.
+pub(crate) const END_EPS: f64 = 1e-6;
+
 pub(crate) struct Span {
     pub(crate) at: BigRational,
     pub(crate) start: f64,
     pub(crate) end: Option<f64>,
+    /// How long its file is, in seconds, when the edit could read it: where
+    /// a clip without an end, or with one past it, stops.
+    pub(crate) file: Option<f64>,
     per_beat: f64,
     /// The song's tempo map, for a clip without a tempo of its own in a
     /// song whose tempo changes: its file plays at its own speed through it.
@@ -1277,6 +1284,7 @@ impl Span {
             at,
             start: number(clip.get("source_start_seconds")).unwrap_or(0.0),
             end: number(clip.get("source_end_seconds")),
+            file: None,
             per_beat,
             map: stepped,
             every: exact(clip.get("loop_beats")),
@@ -1295,18 +1303,35 @@ impl Span {
         self.start + beats * self.per_beat
     }
 
-    /// The beat the clip ends on; None when it plays to the end of its file.
+    /// The second of its file the clip stops at: its end, and no later than
+    /// its file's; None when it plays to the end of a file of unknown length.
+    pub(crate) fn stop(&self) -> Option<f64> {
+        match (self.end, self.file) {
+            (Some(end), Some(file)) => Some(end.min(file)),
+            (end, file) => end.or(file),
+        }
+    }
+
+    /// The beat the clip ends on: where it stops, or where its file does,
+    /// when that is before its start; None when it plays to the end of a
+    /// file of unknown length.
     pub(crate) fn end_beat(&self) -> Option<BigRational> {
         if let Some(length) = &self.length {
             return Some(&self.at + length);
         }
+        let seconds = (self.stop()? - self.start).max(0.0);
         if let Some((map, repitch)) = &self.map {
             let at = num_traits::ToPrimitive::to_f64(&self.at).unwrap_or(0.0);
-            let beats = map.beat_after(at, (self.end? - self.start) / repitch) - at;
+            let beats = map.beat_after(at, seconds / repitch) - at;
             return Some(&self.at + BigRational::from_float(beats)?);
         }
-        let beats = (self.end? - self.start) / self.per_beat;
-        Some(&self.at + BigRational::from_float(beats)?)
+        Some(&self.at + BigRational::from_float(seconds / self.per_beat)?)
+    }
+
+    /// Whether `beat` is inside the clip, before its end: a beat a float's
+    /// width from the end is the end, so a cut there leaves no sliver.
+    pub(crate) fn before_end(&self, beat: &BigRational) -> bool {
+        self.end_beat().is_none_or(|end| num_traits::ToPrimitive::to_f64(&(end - beat)).is_some_and(|d| d > END_EPS))
     }
 
     /// How far into its loop the clip is at `at`, when it loops every `every`.
@@ -2484,7 +2509,8 @@ impl<'a> Edit<'a> {
                             let length = match (length, exact(self.node(&loc).get("length_beats"))) {
                                 (Some(l), _) => beat_at(l)?,
                                 (None, Some(l)) => l,
-                                (None, None) => match self.span(&loc)?.end_beat() {
+                                // Its file's length is not how long it is told to play.
+                                (None, None) => match Span::of(self.node(&loc), &self.tempo())?.end_beat() {
                                     Some(end) => end - exact(self.node(&loc).get("at")).unwrap_or_default(),
                                     None => {
                                         return Err(format!(
@@ -2680,8 +2706,11 @@ impl<'a> Edit<'a> {
                 // In the order they play.
                 let mut order: Vec<(BigRational, Option<BigRational>, usize)> = Vec::new();
                 for (_, _, i) in &found {
-                    let (start, end) = self.timed(kind, self.node(&loc_of(*i)))?;
-                    order.push((start, end, *i));
+                    let node = self.node(&loc_of(*i));
+                    let (start, end) = self.timed(kind, node)?;
+                    // A clip that plays to its file's end has nothing to go on from.
+                    let to_file_end = kind == Kind::Audio && number(node.get("source_end_seconds")).is_none() && exact(node.get("length_beats")).is_none();
+                    order.push((start, if to_file_end { None } else { end }, *i));
                 }
                 order.sort();
                 let first = loc_of(order[0].2);
@@ -3099,7 +3128,7 @@ impl<'a> Edit<'a> {
                 let loc = [owner.clone(), vec![Step::Key("audio".into()), Step::Index(i)]].concat();
                 let span = self.span(&loc)?;
                 let at = beat_at(at)?;
-                if at <= span.at || span.end_beat().is_some_and(|end| at >= end) {
+                if at <= span.at || !span.before_end(&at) {
                     return Err(format!("Beat {} is not inside audio clip {}", beat_text(&at), self.audio_name(&loc)));
                 }
                 let name = self.audio_name(&loc);
@@ -3159,7 +3188,7 @@ impl<'a> Edit<'a> {
                     let at = beat_at(start)?;
                     from = span.source(&at);
                     // A beat worked out from the file's start may fall a hair before it.
-                    if from < -1e-6 || span.end.is_some_and(|end| from >= end) {
+                    if from < -1e-6 || span.stop().is_some_and(|end| from >= end) {
                         return Err(format!("Audio clip {name} has no audio at beat {}", beat_text(&at)));
                     }
                     from = from.max(0.0);
@@ -3201,13 +3230,11 @@ impl<'a> Edit<'a> {
                     return Err("A cut runs from a beat to a later one".into());
                 }
                 let gap = &to - &from;
-                let tempo = self.tempo();
                 let old = std::mem::take(self.list(&owner, "audio")?);
                 let mut kept: Vec<Item> = Vec::new();
                 for item in old {
-                    let span = Span::of(&item.node, &tempo)?;
-                    let end = span.end_beat();
-                    if end.as_ref().is_some_and(|end| *end <= from) {
+                    let span = self.audio_span(&item.node)?;
+                    if !span.before_end(&from) {
                         // Before the cut.
                         kept.push(item);
                     } else if span.at >= to {
@@ -3231,7 +3258,7 @@ impl<'a> Edit<'a> {
                             set(&mut left, "source_end_seconds", Value::Float(span.source(&from)));
                             kept.push(Item { handle: handle.take().expect("unused"), node: left });
                         }
-                        if end.is_none_or(|end| end > to) {
+                        if span.before_end(&to) {
                             let mut right = item.node;
                             set(&mut right, "at", beat_value(&from));
                             set(&mut right, "source_start_seconds", Value::Float(span.source(&to)));
@@ -3247,7 +3274,7 @@ impl<'a> Edit<'a> {
                 // The join: the clip that now ends where the cut began, and the
                 // one that now starts there.
                 let near = |end: &BigRational| num_traits::ToPrimitive::to_f64(&(end - &from)).is_some_and(|d| d.abs() < 1e-6);
-                let spans: Vec<Span> = kept.iter().map(|item| Span::of(&item.node, &tempo)).collect::<Result<_>>()?;
+                let spans: Vec<Span> = kept.iter().map(|item| self.audio_span(&item.node)).collect::<Result<_>>()?;
                 let leaving = spans.iter().position(|s| s.at < from && s.end_beat().is_some_and(|end| near(&end)));
                 let entering = spans.iter().position(|s| s.at == from);
                 *self.list(&owner, "audio")? = kept;
@@ -4032,7 +4059,22 @@ impl<'a> Edit<'a> {
 
     /// Where the audio clip at `loc` is on the timeline and in its file.
     fn span(&self, loc: &[Step]) -> Result<Span> {
-        Span::of(self.node(loc), &self.tempo())
+        self.audio_span(self.node(loc))
+    }
+
+    /// An audio clip's span, with its file's length when the edit has the
+    /// project's folder and the file reads.
+    pub(crate) fn audio_span(&self, clip: &Node) -> Result<Span> {
+        let mut span = Span::of(clip, &self.tempo())?;
+        span.file = clip.field("sample").and_then(|s| self.file_seconds(s));
+        Ok(span)
+    }
+
+    /// How long a sample's file is, in seconds.
+    fn file_seconds(&self, sample: &str) -> Option<f64> {
+        let path = self.root.get("samples")?.get(sample)?.field("path")?;
+        let dir = self.dir.as_ref()?;
+        aaw_engine::sndfile::info(&dir.join(path)).ok().map(|info| info.seconds())
     }
 
     fn audio_name(&self, loc: &[Step]) -> String {

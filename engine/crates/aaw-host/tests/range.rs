@@ -342,7 +342,7 @@ fn a_copied_range_renders_as_the_clips_it_stands_for() {
 /// What Copy takes of beats `start` for `length` on `tracks`, as the app takes it.
 fn take(s: &Session, start: i64, length: i64, tracks: &[&str]) -> Json {
     let tracks: Vec<String> = tracks.iter().map(|t| t.to_string()).collect();
-    aaw_host::range::take(&s.doc().tree(), &num_rational::BigRational::from_integer(start.into()), &num_rational::BigRational::from_integer(length.into()), &tracks).unwrap()
+    aaw_host::range::take(&s.doc().tree(), &num_rational::BigRational::from_integer(start.into()), &num_rational::BigRational::from_integer(length.into()), &tracks, None).unwrap()
 }
 
 #[test]
@@ -440,4 +440,58 @@ fn range_commands_round_trip_as_json() {
         assert_eq!(parsed.json(), c);
     }
     let _: Json = json!(null);
+}
+
+/// The audio clips of the song track as `at start end`, the end `-` when it
+/// plays to its file's end.
+fn pieces(s: &Session) -> Vec<String> {
+    get(s, "tracks.song.audio")
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| {
+            let end = c.get("source_end_seconds").map_or("-".to_string(), |e| e.to_string());
+            format!("{} {} {end}", c.get("at").unwrap_or(&json!(0)), c["source_start_seconds"])
+        })
+        .collect()
+}
+
+#[test]
+fn no_edit_leaves_an_audio_clip_with_nothing_to_play() {
+    let (_d, mut s) = open();
+    with_audio(&mut s);
+    // The clip plays to its file's end: second 1 on beat 4, so second 10,
+    // the end, on beat 22.
+    edit(&mut s, json!({"op": "set", "path": "tracks.song.audio.0.source_end_seconds", "value": null})).unwrap();
+    // A range past where the file ends does not cut it: the piece after
+    // would start past the file's end and play nothing, which once stopped
+    // the song.
+    let r = edit(&mut s, json!({"op": "range.clear", "start": 24, "length": 4, "tracks": ["song"]})).unwrap();
+    assert_eq!(r["changed"], json!(false));
+    edit(&mut s, json!({"op": "range.delete", "start": 24, "length": 4, "tracks": ["song"]})).unwrap();
+    edit(&mut s, json!({"op": "audio.cut", "track": "song", "from": 24, "to": 26})).unwrap();
+    assert_eq!(pieces(&s), ["4 1.0 -"]);
+    let err = edit(&mut s, json!({"op": "audio.split", "clip": "tracks.song.audio.0", "at": 23})).unwrap_err();
+    assert!(err.contains("is not inside"), "{err}");
+    let err = edit(&mut s, json!({"op": "audio.trim", "clip": "tracks.song.audio.0", "start": 23})).unwrap_err();
+    assert!(err.contains("has no audio at beat 23"), "{err}");
+    // A range across the file's end cuts the clip at its start, and leaves
+    // nothing after.
+    edit(&mut s, json!({"op": "range.clear", "start": 20, "length": 4, "tracks": ["song"]})).unwrap();
+    assert_eq!(pieces(&s), ["4 1.0 9.0"]);
+
+    // A range whose edge is a float's width from a clip's own end: second
+    // 0.7 to 2.2 from beat 4 ends on beat 7 and 4e-16, which a clear from 7
+    // once cut, into a piece ending where it started, and was refused.
+    edit(&mut s, json!({"op": "remove", "path": "tracks.song.audio.0"})).unwrap();
+    edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 4, "source_start_seconds": 0.7, "source_end_seconds": 2.2})).unwrap();
+    edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 7, "source_start_seconds": 5, "source_end_seconds": 6})).unwrap();
+    edit(&mut s, json!({"op": "range.clear", "start": 7, "length": 2, "tracks": ["song"]})).unwrap();
+    assert_eq!(pieces(&s), ["4 0.7 2.2"]);
+    edit(&mut s, json!({"op": "audio.add", "track": "song", "sample": "song", "at": 7, "source_start_seconds": 5, "source_end_seconds": 6})).unwrap();
+    edit(&mut s, json!({"op": "range.delete", "start": 7, "length": 2, "tracks": ["song"]})).unwrap();
+    edit(&mut s, json!({"op": "audio.cut", "track": "song", "from": 7, "to": 8})).unwrap();
+    assert_eq!(pieces(&s), ["4 0.7 2.2"]);
+    let err = edit(&mut s, json!({"op": "audio.split", "clip": "tracks.song.audio.0", "at": 7})).unwrap_err();
+    assert!(err.contains("is not inside"), "{err}");
 }

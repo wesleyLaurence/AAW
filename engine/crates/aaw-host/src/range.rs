@@ -399,11 +399,12 @@ fn index_of(track: &[Step]) -> usize {
 
 /// What Copy takes of the beats from `start` for `length` on `tracks`
 /// (tracks or groups by ID or `@N`, or every track with none), for
-/// `range.paste`; the song is not touched.
-pub fn take(root: &Node, start: &BigRational, length: &BigRational, tracks: &[String]) -> Result<serde_json::Value> {
+/// `range.paste`; the song is not touched. `dir`, the project's folder, has
+/// the files whose lengths end audio clips that play to their end.
+pub fn take(root: &Node, start: &BigRational, length: &BigRational, tracks: &[String], dir: Option<&std::path::Path>) -> Result<serde_json::Value> {
     let mut root = root.clone();
     let mut next = 0;
-    let edit = Edit { root: &mut root, handles: true, next: &mut next, origin: crate::command::Origin::User, dir: None, also: Vec::new() };
+    let edit = Edit { root: &mut root, handles: true, next: &mut next, origin: crate::command::Origin::User, dir: dir.map(Into::into), also: Vec::new() };
     edit.taken(start, length, tracks)
 }
 
@@ -501,7 +502,7 @@ impl<'a> Edit<'a> {
     pub(crate) fn timed(&self, kind: Kind, node: &Node) -> Result<(BigRational, Option<BigRational>)> {
         match kind {
             Kind::Audio => {
-                let span = Span::of(node, &self.tempo())?;
+                let span = self.audio_span(node)?;
                 Ok((span.at.clone(), span.end_beat()))
             }
             _ => {
@@ -564,7 +565,7 @@ impl<'a> Edit<'a> {
                 }
             }
             Kind::Audio => {
-                let span = Span::of(node, &self.tempo())?;
+                let span = self.audio_span(node)?;
                 if let (Some(every), Some(length)) = (&span.every, &span.length) {
                     // Each half keeps the loop; the right starts as far into
                     // it as the cut is.
@@ -608,7 +609,10 @@ impl<'a> Edit<'a> {
                     let loc = [track.clone(), vec![Step::Key(key.into()), Step::Index(i)]].concat();
                     let node = self.node(&loc).clone();
                     let (start, end) = self.timed(kind, &node)?;
-                    if !(start < *at && end.as_ref().is_none_or(|e| at < e)) {
+                    // An edge a float's width from an audio clip's end, which
+                    // comes from seconds, is its end and cuts nothing.
+                    let inside = end.as_ref().is_none_or(|e| (e - at).to_f64().is_some_and(|d| d > crate::command::END_EPS));
+                    if !(start < *at && inside) {
                         continue;
                     }
                     let (left, right) = self.split_node(kind, &node, at)?;
@@ -690,7 +694,7 @@ impl<'a> Edit<'a> {
         }
         match kind {
             Kind::Audio => {
-                let (l, r) = (Span::of(left, &self.tempo()).ok()?, Span::of(right, &self.tempo()).ok()?);
+                let (l, r) = (self.audio_span(left).ok()?, self.audio_span(right).ok()?);
                 let continuous = l.end.is_some_and(|end| (end - r.start).abs() < 1e-9);
                 if !(continuous && same("sample") && same("source_bpm") && same("stretch") && same("transpose") && same("gain_db") && same("fade_curve")) {
                     return None;
