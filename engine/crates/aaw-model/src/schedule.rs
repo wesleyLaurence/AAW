@@ -1,7 +1,7 @@
 //! Event scheduling: every hit's start frame, from exact beats.
 
 use crate::midi_effects::Played;
-use crate::{frame, Instrument, Midi, PadMode, Project, Sampler, Wave};
+use crate::{Instrument, Midi, PadMode, Project, Sampler, Wave};
 use num_rational::BigRational;
 use num_traits::ToPrimitive;
 use std::collections::HashMap;
@@ -27,7 +27,7 @@ pub struct NoteOn {
 /// those that start before the clip ends; one that starts into its loop
 /// plays from there first.
 pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
-    let (rate, tempo) = (p.session.sample_rate, p.session.tempo);
+    let (rate, map) = (p.session.sample_rate, p.tempo_map());
     // The MIDI effects change the notes here, so every reader of the
     // schedule plays what they make.
     let played = crate::midi_effects::apply(&midi.midi_effects, &midi.made, written(midi));
@@ -36,8 +36,8 @@ pub fn track_notes(p: &Project, midi: &Midi) -> Vec<NoteOn> {
         .map(|n| NoteOn {
             pitch: n.pitch,
             velocity: n.velocity,
-            start: frame(&n.at, tempo, rate),
-            end: frame(&(&n.at + &n.beats), tempo, rate),
+            start: map.frame(&n.at, rate),
+            end: map.frame(&(&n.at + &n.beats), rate),
             at: n.at,
             beats: n.beats,
         })

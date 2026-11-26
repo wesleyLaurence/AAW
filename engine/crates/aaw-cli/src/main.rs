@@ -63,7 +63,7 @@ const SECTIONS: &[(&str, &[&str])] = &[
         "Parts of the song",
         &[
             "track", "group", "return", "clip", "audio", "note", "pad", "midi", "instrument", "synth",
-            "effect", "send", "lane", "section", "marker", "range",
+            "effect", "send", "lane", "tempo", "section", "marker", "range",
         ],
     ),
     ("Play and record", &["host", "close", "play", "stop", "locate", "loop", "record", "audio-device"]),
@@ -156,6 +156,7 @@ enum Topic {
     Effects,
     Plugins,
     Automation,
+    Tempo,
     Edit,
     Check,
     Samples,
@@ -482,6 +483,8 @@ enum Top {
     Section(SectionCmd),
     #[command(subcommand)]
     Marker(MarkerCmd),
+    #[command(subcommand)]
+    Tempo(TempoCmd),
     #[command(subcommand)]
     Range(RangeCmd),
     #[command(subcommand)]
@@ -1610,6 +1613,34 @@ enum SectionCmd {
     },
 }
 
+/// The song's tempo: one for the whole song, or steps on the master's tempo
+/// lane, which everything placed in beats follows (daw describe automation).
+/// A place is a bar, 17, or BAR:BEAT, 17:3, each from 1 in the song's meter.
+#[derive(Subcommand)]
+enum TempoCmd {
+    /// The tempo's steps in order: each one's beat (at), bar and beat of the
+    /// bar, the second it starts on and its BPM, with the song's length in seconds.
+    List { project: Song },
+    /// Set the tempo from --at on to --bpm: a step there, added or changed.
+    /// --at 1 on a song without steps is its one tempo. A song left with one
+    /// tempo has no lane.
+    Set {
+        project: Song,
+        #[arg(long)]
+        at: String,
+        #[arg(long)]
+        bpm: f64,
+    },
+    /// Take out the step at --at; the tempo before it holds on.
+    Remove {
+        project: Song,
+        #[arg(long)]
+        at: String,
+    },
+    /// Go back to one tempo, the one at the song's start.
+    Clear { project: Song },
+}
+
 /// Markers: the notes the person leaves at beats while listening, with M in
 /// the app. `list` reads them with what plays at each.
 #[derive(Subcommand)]
@@ -1994,6 +2025,7 @@ fn headless(project: &Path, request: Request, play: Option<PlayArgs>) -> Result<
                 Command::Notes { path, from, to, text, grid } => s.notes(&path, from.as_ref(), to.as_ref(), text, grid.as_ref()),
                 Command::Map { per, from, to, tracks, lanes } => s.map(per.as_ref(), from.as_ref(), to.as_ref(), &tracks, lanes),
                 Command::Markers => Ok(s.markers()),
+                Command::TempoList => Ok(s.tempo_list()),
                 Command::MidiExport { clip, file } => s.export_midi(&clip, &file),
                 Command::Status => {
                     let mut m = s.status();
@@ -3332,6 +3364,19 @@ fn run(cli: &Cli) -> Result<Json> {
                 )
             }
         },
+        Top::Tempo(t) => {
+            // A place is counted in the song's meter.
+            let place = |project: &Song, at: &str| -> Result<Json> {
+                let meter = aaw_model::load(&files(project), false).map_err(text)?.session.meter();
+                Ok(aaw_host::session::value_json(&aaw_host::command::beat_value(&meter.beat_of_place(at)?)))
+            };
+            match t {
+                TempoCmd::List { project } => edit(project, C::TempoList),
+                TempoCmd::Set { project, at, bpm } => edit(project, C::TempoSet { at: place(project, at)?, bpm: *bpm }),
+                TempoCmd::Remove { project, at } => edit(project, C::TempoRemove { at: place(project, at)? }),
+                TempoCmd::Clear { project } => edit(project, C::TempoClear),
+            }
+        }
         Top::Marker(m) => match m {
             MarkerCmd::List { project } => edit(project, C::Markers),
             MarkerCmd::Add { project, at, text, id } => edit(
@@ -3465,6 +3510,7 @@ fn name(top: &Top) -> String {
         Top::Lane(_) => group("lane", ""),
         Top::Section(_) => group("section", ""),
         Top::Marker(_) => group("marker", ""),
+        Top::Tempo(_) => group("tempo", ""),
         Top::AudioDevice(_) => group("audio-device", ""),
         Top::Record(_) => group("record", ""),
         Top::Range(_) => group("range", ""),

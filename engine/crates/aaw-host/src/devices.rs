@@ -1555,6 +1555,10 @@ fn midi_identity(p: &Project, inst: &Instance, device: &Installed) -> Option<Str
     h.update(device.code.as_bytes());
     h.update([0]);
     h.update(p.session.tempo.to_string().as_bytes());
+    // A song whose tempo steps gives the device its map.
+    if p.tempo_lane().is_some() {
+        h.update(p.tempo_map().key().as_bytes());
+    }
     Some(hex(&h.finalize()))
 }
 
@@ -1578,6 +1582,9 @@ fn instrument_identity(p: &Project, owner: &str, device: &Installed) -> Option<S
     h.update(device.code.as_bytes());
     h.update([0]);
     h.update(format!("{}|{}|{}", total_frames(p), p.session.tempo, p.session.sample_rate).as_bytes());
+    if p.tempo_lane().is_some() {
+        h.update(p.tempo_map().key().as_bytes());
+    }
     Some(hex(&h.finalize()))
 }
 
@@ -1590,9 +1597,16 @@ fn instrument_lanes(t: &aaw_model::Track) -> Vec<&aaw_model::Lane> {
         .collect()
 }
 
+/// The song's tempo as an offline device is given it: each step's beat,
+/// second and tempo, one step for a song that keeps one tempo.
+fn tempo_map_json(p: &Project) -> Json {
+    let map = p.tempo_map();
+    Json::Array(map.steps().iter().map(|s| json!({"beat": s.beat_f64(), "seconds": s.seconds_f64(), "bpm": s.bpm})).collect())
+}
+
 /// The song's length in frames, as the engine plays it.
 fn total_frames(p: &Project) -> usize {
-    aaw_model::frame(&p.session.length_exact(), p.session.tempo, p.session.sample_rate).max(0) as usize
+    p.tempo_map().frame(&p.session.length_exact(), p.session.sample_rate).max(0) as usize
 }
 
 fn owner_parts<'a>(p: &'a Project, owner: &str) -> Option<(&'a [Effect], &'a [aaw_model::Lane])> {
@@ -1614,6 +1628,8 @@ fn own_project(p: &Project, e: &Effect, lanes: &[aaw_model::Lane], index: usize,
     let mut own = Project::validate(&aaw_model::value::dict(vec![("session", aaw_model::value::dict(vec![]))])).expect("a blank song");
     own.session.tempo = p.session.tempo;
     own.session.sample_rate = p.session.sample_rate;
+    // The song's tempo lane, which places the device's lanes and its input.
+    own.master.automation.extend(p.tempo_lane().cloned());
     own.session.length_beats = p.session.length_beats.clone();
     own.master.effects = vec![e.with_bypass(false)];
     let who = owner_enum(p, owner);
@@ -1953,7 +1969,7 @@ fn compute_midi(p: &Project, project: &Path, inst: &Instance) -> Result<Arc<aaw_
     let _ = std::fs::remove_dir_all(&work);
     std::fs::create_dir_all(&work).map_err(|e| format!("{}: {e}", work.display()))?;
     let result = (|| -> Result<Arc<aaw_model::midi_effects::Made>> {
-        let params = json!({"tempo": p.session.tempo, "fields": field_values(m, d), "notes": notes});
+        let params = json!({"tempo": p.session.tempo, "tempo_map": tempo_map_json(p), "fields": field_values(m, d), "notes": notes});
         let params_file = work.join("params.json");
         std::fs::write(&params_file, params.to_string()).map_err(|e| e.to_string())?;
         let output_file = work.join("output.json");
@@ -2021,7 +2037,7 @@ fn compute_audio(p: &Project, project: &Path, inst: &Instance, caches: &Caches) 
                 let name = t.field.strip_prefix("fields.").unwrap_or(&t.field).to_string();
                 let Some(spec) = m.field(&name).filter(|s| s.lane && s.kind.numeric()) else { continue };
                 let domain = if spec.log { aaw_model::rules::Domain::Log } else { aaw_model::rules::Domain::Linear };
-                let env = aaw_dsp::envelope::Envelope::new(lane, domain, p.session.tempo, rate);
+                let env = aaw_dsp::envelope::Envelope::new(lane, domain, &p.tempo_map(), rate);
                 env.fill(0, 1, &mut values);
                 let bytes: Vec<u8> = values.iter().flat_map(|v| (v.clamp(spec.min, spec.max) as f32).to_le_bytes()).collect();
                 let lane_file = work.join(format!("{name}.f32"));
@@ -2032,6 +2048,7 @@ fn compute_audio(p: &Project, project: &Path, inst: &Instance, caches: &Caches) 
         let params = json!({
             "sample_rate": rate,
             "tempo": p.session.tempo,
+            "tempo_map": tempo_map_json(p),
             "frames": frames,
             "fields": fields,
             "lanes": lane_files,
@@ -2080,7 +2097,7 @@ fn lane_files(p: &Project, m: &Manifest, lanes: &[(String, &aaw_model::Lane)], f
     for (name, lane) in lanes {
         let Some(spec) = m.field(name).filter(|s| s.lane && s.kind.numeric()) else { continue };
         let domain = if spec.log { aaw_model::rules::Domain::Log } else { aaw_model::rules::Domain::Linear };
-        let env = aaw_dsp::envelope::Envelope::new(lane, domain, p.session.tempo, p.session.sample_rate);
+        let env = aaw_dsp::envelope::Envelope::new(lane, domain, &p.tempo_map(), p.session.sample_rate);
         env.fill(0, 1, &mut values);
         let bytes: Vec<u8> = values.iter().flat_map(|v| (v.clamp(spec.min, spec.max) as f32).to_le_bytes()).collect();
         let lane_file = work.join(format!("{name}.f32"));
@@ -2152,6 +2169,7 @@ fn compute_instrument(p: &Project, project: &Path, inst: &Instance, device: &Ins
         let params = json!({
             "sample_rate": rate,
             "tempo": p.session.tempo,
+            "tempo_map": tempo_map_json(p),
             "frames": frames,
             "fields": field_values(m, d),
             "lanes": lane_files(p, m, &lanes, frames, &work)?,

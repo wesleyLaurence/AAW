@@ -116,6 +116,8 @@ pub enum TargetKind {
     /// A field of a MIDI track's synth, `field` being its path in the patch,
     /// such as `filter.cutoff_hz` or `macros.tone`.
     Instrument,
+    /// The song's tempo, a lane on the master whose points are steps.
+    Tempo,
 }
 
 /// A resolved lane target. `key` is canonical: effects are addressed by index.
@@ -161,7 +163,7 @@ impl Target {
             TargetKind::Send(to) => format!("sends.{to}.{}", self.field),
             TargetKind::Effect { index, .. } => format!("effects.{index}.{}", self.name()),
             TargetKind::Instrument => format!("instrument.{}", self.field),
-            TargetKind::Channel => self.field.clone(),
+            TargetKind::Channel | TargetKind::Tempo => self.field.clone(),
         }
     }
 }
@@ -636,6 +638,14 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
             if parts == ["gain_db"] {
                 return Ok(channel("gain_db", Range::closed(-96.0, 24.0)));
             }
+            if parts == [crate::tempo::TEMPO_PARAM] {
+                return Ok(Target {
+                    kind: TargetKind::Tempo,
+                    field: crate::tempo::TEMPO_PARAM.into(),
+                    domain: Domain::Linear,
+                    range: Range::closed(20.0, 400.0),
+                });
+            }
         }
         _ => {
             if parts.len() == 1 && parts[0] == "gain_db" {
@@ -769,7 +779,7 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
     }
     Err(format!(
         "{param}: unknown automation target; use gain_db{}{} or effects.REF.FIELD",
-        if matches!(owner, Owner::Master(_)) { "" } else { ", pan" },
+        if matches!(owner, Owner::Master(_)) { ", tempo" } else { ", pan" },
         match owner {
             Owner::Track(t) if t.midi.as_ref().is_some_and(|m| m.synth().is_some()) => ", sends.RETURN.gain_db, instrument.FIELD",
             Owner::Track(_) | Owner::Group(_) => ", sends.RETURN.gain_db",
@@ -926,19 +936,25 @@ pub fn references(p: &Project) -> Result<(), String> {
     if p.master.effects.iter().any(|e| e.sidechain().is_some()) {
         return Err("Master compressor cannot use a sidechain".into());
     }
-    let tempo = float_fraction(p.session.tempo);
+    // A delay's time is checked at the song's slowest and fastest tempos.
+    let map = p.tempo_map();
+    let (slow, fast) = map.bounds();
+    let tempos: Vec<BigRational> = if map.constant_tempo().is_some() { vec![float_fraction(slow)] } else { vec![float_fraction(slow), float_fraction(fast)] };
+    let at = if map.constant_tempo().is_some() { "the session tempo" } else { "each of the song's tempos" };
     let ms = parse_fraction("1/1000").ok().expect("fraction");
     let ten = BigRational::from_integer(10.into());
     let synth_effects = p.tracks.iter().filter_map(|t| t.midi.as_ref().and_then(|m| m.synth()).map(|s| (t.id.as_str(), &s.effects[..])));
     for (name, effects) in owners(p).iter().map(|o| (o.name(), o.effects())).chain(synth_effects) {
         for (_, e, _) in Effect::flat(effects) {
             if let Effect::Delay(d) = e {
-                let seconds = d.time_exact() * BigRational::from_integer(60.into()) / &tempo;
-                if !(ms <= seconds && seconds <= ten) {
-                    return Err(format!(
-                        "{name}: delay time must be 1 ms to 10 s at the session tempo, not {} s",
-                        format_g(seconds.to_f64().unwrap_or(f64::NAN), 4)
-                    ));
+                for tempo in &tempos {
+                    let seconds = d.time_exact() * BigRational::from_integer(60.into()) / tempo;
+                    if !(ms <= seconds && seconds <= ten) {
+                        return Err(format!(
+                            "{name}: delay time must be 1 ms to 10 s at {at}, not {} s",
+                            format_g(seconds.to_f64().unwrap_or(f64::NAN), 4)
+                        ));
+                    }
                 }
             }
         }
@@ -958,6 +974,14 @@ pub fn references(p: &Project) -> Result<(), String> {
             let t = target(owner, &lane.param).map_err(|e| format!("{name}: {e}"))?;
             if !keys.insert(t.key()) {
                 return Err(format!("{name}: more than one lane for {}", lane.param));
+            }
+            if t.kind == TargetKind::Tempo {
+                if let Some(p) = lane.points.iter().find(|p| p.curve != crate::schema::Curve::Hold || p.shape != 0.0) {
+                    return Err(format!(
+                        "{name}: tempo point at beat {} is a step: give it curve: hold and no shape (a tempo that ramps is not supported yet)",
+                        p.at.text()
+                    ));
+                }
             }
             for point in &lane.points {
                 if !t.range.contains(point.value) {

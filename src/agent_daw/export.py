@@ -22,7 +22,7 @@ import soundfile as sf
 from fractions import Fraction
 
 from . import perception
-from .model import beat, digest, frame, hash_matches, load, meter
+from .model import TempoMap, beat, digest, hash_matches, load, meter
 
 # The programs that encode each format, in the order tried, with their arguments.
 ENCODERS = {
@@ -226,8 +226,8 @@ def export(
     folder, manifest, rendered_now = find_render(project, render)
     x, rate = sf.read(folder / "mix.wav", always_2d=True, dtype="float64")
     # The range's frames of the mix, which starts at the song's start.
-    tempo = song["session"]["tempo"]
-    first, last = (0, len(x)) if whole or render is not None else (frame(a, tempo, rate), frame(b, tempo, rate))
+    tm = TempoMap.of(song)
+    first, last = (0, len(x)) if whole or render is not None else (tm.frame(a, rate), tm.frame(b, rate))
     if last > len(x):
         raise ValueError(f"The render is {len(x)} frames; the range ends at frame {last}")
     x = x[first:last]

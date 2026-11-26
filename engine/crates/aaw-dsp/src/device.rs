@@ -17,7 +17,7 @@ use crate::spectrum::Tap;
 use crate::svf::{self, Svf};
 use crate::utility::Utility;
 use crate::{Clock, Frame};
-use aaw_model::{frame, Effect, FilterMode};
+use aaw_model::{frame, Effect, FilterMode, TempoMap};
 use std::any::Any;
 use std::collections::{BTreeMap, HashMap};
 use std::hash::{Hash, Hasher};
@@ -112,7 +112,8 @@ pub struct Plan {
     pub lanes: BTreeMap<String, Arc<Envelope>>,
     kernel: Option<Arc<Kernel>>,
     rate: i64,
-    tempo: f64,
+    /// A delay's time from each frame on, through the song's tempo steps.
+    delay_times: Vec<(i64, usize)>,
     /// Frames by which the device delays its input.
     pub latency: usize,
     /// What decides whether another device's state fits this one: the type
@@ -132,7 +133,11 @@ pub struct Plan {
 }
 
 impl Plan {
-    pub fn new(effect: &Effect, lanes: BTreeMap<String, Arc<Envelope>>, rate: i64, tempo: f64, kernels: &mut Kernels) -> Plan {
+    pub fn new(effect: &Effect, lanes: BTreeMap<String, Arc<Envelope>>, rate: i64, map: &TempoMap, kernels: &mut Kernels) -> Plan {
+        let delay_times = match effect {
+            Effect::Delay(d) => delay_times(d, map, rate),
+            _ => Vec::new(),
+        };
         let moves = |name: &str| lanes.get(name).is_some_and(|e| e.constant().is_none());
         let mut kernel = None;
         let mut latency = 0;
@@ -153,7 +158,7 @@ impl Plan {
             }
             Effect::Delay(d) => {
                 let cut = |hz: Option<f64>| hz.is_some_and(|hz| hz != 0.0);
-                hash(("delay", delay_frames(d, tempo, rate), cut(d.lowcut_hz), cut(d.highcut_hz), d.ping_pong))
+                hash(("delay", &delay_times, cut(d.lowcut_hz), cut(d.highcut_hz), d.ping_pong))
             }
             Effect::Reverb(r) => {
                 let shape = Shape {
@@ -186,7 +191,7 @@ impl Plan {
             lanes,
             kernel,
             rate,
-            tempo,
+            delay_times,
             latency,
             signature,
             tap: None,
@@ -250,8 +255,18 @@ impl Offline {
     }
 }
 
-fn delay_frames(d: &aaw_model::Delay, tempo: f64, rate: i64) -> usize {
-    frame(&d.time_exact(), tempo, rate).max(1) as usize
+/// A delay's time in frames at each step of the song's tempo, from the
+/// step's frame on: one time for a song that keeps one tempo.
+fn delay_times(d: &aaw_model::Delay, map: &TempoMap, rate: i64) -> Vec<(i64, usize)> {
+    let mut times: Vec<(i64, usize)> = Vec::new();
+    for (i, s) in map.steps().iter().enumerate() {
+        let frames = frame(&d.time_exact(), s.bpm, rate).max(1) as usize;
+        let at = if i == 0 { i64::MIN } else { map.frame(&s.beat, rate) };
+        if times.last().is_none_or(|t| t.1 != frames) {
+            times.push((at, frames));
+        }
+    }
+    times
 }
 
 pub enum Device {
@@ -360,7 +375,7 @@ impl Unit {
                 max_block,
             )),
             Effect::Delay(d) => Device::Delay(Delay::new(
-                delay_frames(d, plan.tempo, plan.rate),
+                plan.delay_times.clone(),
                 d.lowcut_hz,
                 d.highcut_hz,
                 d.ping_pong,
@@ -531,7 +546,7 @@ mod offline_tests {
             fields: Default::default(),
             bypass: false,
         });
-        let mut a = Plan::new(&e, BTreeMap::new(), 48000, 120.0, &mut Kernels::default());
+        let mut a = Plan::new(&e, BTreeMap::new(), 48000, &aaw_model::TempoMap::constant(120.0), &mut Kernels::default());
         let mut b = a.clone();
         let without = a.signature;
         a.with_cache(Some(cache.clone()));

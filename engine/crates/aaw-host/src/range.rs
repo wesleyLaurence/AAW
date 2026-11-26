@@ -501,7 +501,7 @@ impl<'a> Edit<'a> {
     pub(crate) fn timed(&self, kind: Kind, node: &Node) -> Result<(BigRational, Option<BigRational>)> {
         match kind {
             Kind::Audio => {
-                let span = Span::of(node, self.tempo())?;
+                let span = Span::of(node, &self.tempo())?;
                 Ok((span.at.clone(), span.end_beat()))
             }
             _ => {
@@ -564,7 +564,7 @@ impl<'a> Edit<'a> {
                 }
             }
             Kind::Audio => {
-                let span = Span::of(node, self.tempo())?;
+                let span = Span::of(node, &self.tempo())?;
                 if let (Some(every), Some(length)) = (&span.every, &span.length) {
                     // Each half keeps the loop; the right starts as far into
                     // it as the cut is.
@@ -690,7 +690,7 @@ impl<'a> Edit<'a> {
         }
         match kind {
             Kind::Audio => {
-                let (l, r) = (Span::of(left, self.tempo()).ok()?, Span::of(right, self.tempo()).ok()?);
+                let (l, r) = (Span::of(left, &self.tempo()).ok()?, Span::of(right, &self.tempo()).ok()?);
                 let continuous = l.end.is_some_and(|end| (end - r.start).abs() < 1e-9);
                 if !(continuous && same("sample") && same("source_bpm") && same("stretch") && same("transpose") && same("gain_db") && same("fade_curve")) {
                     return None;
@@ -848,8 +848,8 @@ impl<'a> Edit<'a> {
             let right = tree::find(self.root, *r);
             let adjacent = match (&left, &right) {
                 (Some(a), Some(b)) if a.len() >= 2 && a[..a.len() - 2] == b[..b.len() - 2] => {
-                    let end = Span::of(self.node(a), tempo)?.end_beat();
-                    let start = Span::of(self.node(b), tempo)?.at;
+                    let end = Span::of(self.node(a), &tempo)?.end_beat();
+                    let start = Span::of(self.node(b), &tempo)?.at;
                     end.is_some_and(|end| (end - start).to_f64().is_some_and(|d| d.abs() < 1e-6))
                 }
                 _ => false,

@@ -133,7 +133,8 @@ pub fn fed(p: &Project, owner: &str, index: usize) -> Result<Project, String> {
         out.groups.retain(|g| groups.contains(&g.id));
         out.returns.retain(|r| returns.contains(&r.id));
         out.master.effects.clear();
-        out.master.automation.clear();
+        // The song's tempo lane stays: it places the input on the timeline.
+        out.master.automation.retain(|l| l.param == aaw_model::TEMPO_PARAM);
         out.session.master_gain_db = 0.0;
         out.session.end_fade_ms = 0.0;
         // The input is tapped before the owner's fader.

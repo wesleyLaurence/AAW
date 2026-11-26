@@ -21,6 +21,8 @@ final class ExportSetup {
     let beatUnit: Double
     let lengthBeats: Double
     let tempo: Double
+    /// The song's tempo through time, which a range's seconds are read through.
+    let tempoMap: TempoMap
     let timeSignature: String
     /// The song's sample rate, which the file is at unless another is chosen.
     let songRate: Int
@@ -31,13 +33,15 @@ final class ExportSetup {
     let hasFolder: Bool
 
     init(options: ExportOptions, title: String, range: ExportRange, fromSelection: Bool, barBeats: Double,
-         beatUnit: Double, lengthBeats: Double, tempo: Double, timeSignature: String, songRate: Int, hasFolder: Bool) {
+         beatUnit: Double, lengthBeats: Double, tempo: Double, timeSignature: String, songRate: Int, hasFolder: Bool,
+         tempoMap: TempoMap? = nil) {
         self.options = options
         name = ExportOptions.name(title: title)
         self.barBeats = barBeats
         self.beatUnit = beatUnit
         self.lengthBeats = lengthBeats
         self.tempo = tempo
+        self.tempoMap = tempoMap ?? .constant(tempo)
         self.timeSignature = timeSignature
         self.songRate = songRate
         self.fromSelection = fromSelection
@@ -96,7 +100,7 @@ final class ExportSetup {
     var summary: String {
         let r = range
         guard r.end > r.start else { return "" }
-        let seconds = (r.end - r.start) * 60 / tempo
+        let seconds = tempoMap.constantTempo.map { (r.end - r.start) * 60 / $0 } ?? (tempoMap.seconds(r.end) - tempoMap.seconds(r.start))
         var what: String
         if r.isWhole(length: lengthBeats) {
             what = "The whole song"

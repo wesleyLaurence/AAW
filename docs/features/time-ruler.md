@@ -11,7 +11,9 @@ time from the song's start as a clock: `0:00`, `0:15`, `1:00`, and past an
 hour `1:00:00`. It follows the zoom as the bar numbers do: zoomed out a label
 every few minutes, zoomed in every second, then every fifth of a second, with
 ticks between the labels. It follows the session tempo: at 96 BPM bar 25
-stands over `1:00`, and the strip redraws when the tempo changes.
+stands over `1:00`, and the strip redraws when the tempo changes. In a song
+whose tempo steps it follows each step, its labels spaced at the slowest
+tempo ([tempo changes](tempo-changes.md)).
 
 ## Design
 

@@ -11,6 +11,7 @@
 //! to where the take ended, and written as a 32-bit float WAV under
 //! `samples/`; the host then adds the sample and the clip as one edit.
 
+use aaw_model::TempoMap;
 use crate::command::beat_value;
 use crate::session::value_json;
 use aaw_engine::capture::{Capture, ChunkTime, InputStream};
@@ -215,7 +216,7 @@ impl Finished {
     }
 
     /// The take as the reply reports it.
-    pub fn report(&self, song_rate: u32, tempo: f64) -> Json {
+    pub fn report(&self, song_rate: u32, map: &TempoMap) -> Json {
         json!({
             "track": self.track,
             "sample": self.id,
@@ -223,7 +224,7 @@ impl Finished {
             "input": self.input.label(),
             "device": self.device,
             "seconds": (self.seconds * 1000.0).round() / 1000.0,
-            "at_beat": (self.at as f64 * tempo / 60.0 / song_rate as f64 * 1000.0).round() / 1000.0,
+            "at_beat": (map.beat_of_frame(self.at as f64, song_rate as f64) * 1000.0).round() / 1000.0,
             "pulled_ms": (self.pulled_ms * 100.0).round() / 100.0,
             "lost_frames": self.lost,
         })
@@ -282,9 +283,9 @@ impl NoteTake {
     /// rounded to a thousandth of a beat, as the reply's beats are. The
     /// clip lasts whole bars of `bar_beats` from `start`, one at least.
     /// None when no note is left.
-    pub fn finish(mut self, start: i64, end: i64, rate: u32, tempo: f64, bar_beats: f64) -> Option<FinishedNotes> {
+    pub fn finish(mut self, start: i64, end: i64, rate: u32, map: &TempoMap, bar_beats: f64) -> Option<FinishedNotes> {
         let beats = |frames: i64| -> BigRational {
-            let b = frames as f64 * tempo / 60.0 / rate as f64;
+            let b = map.beat_of_frame(frames as f64, rate as f64);
             BigRational::new(((b * 1000.0).round() as i64).into(), 1000.into())
         };
         for (pitch, velocity, began) in std::mem::take(&mut self.held) {
@@ -352,8 +353,9 @@ impl FinishedNotes {
     }
 
     /// The take as the reply reports it.
-    pub fn report(&self, tempo: f64) -> Json {
-        let seconds = self.length.to_f64().unwrap_or(0.0) * 60.0 / tempo;
+    pub fn report(&self, map: &TempoMap) -> Json {
+        let at = self.at.to_f64().unwrap_or(0.0);
+        let seconds = map.seconds_between(at, at + self.length.to_f64().unwrap_or(0.0));
         json!({
             "track": self.track,
             "notes": self.count,
@@ -448,9 +450,9 @@ impl Recording {
             .collect();
         let meter = project.session.meter();
         let bar_beats = meter.beats as f64 * 4.0 / meter.unit.max(1) as f64;
-        let tempo = project.session.tempo;
+        let map = project.tempo_map();
         let notes_end = end.unwrap_or(now).max(start);
-        let notes = self.notes.into_iter().map(|n| n.finish(start, notes_end, song_rate, tempo, bar_beats)).collect();
+        let notes = self.notes.into_iter().map(|n| n.finish(start, notes_end, song_rate, &map, bar_beats)).collect();
         (takes, notes)
     }
 }
@@ -488,7 +490,7 @@ mod tests {
         take.off(48, start + 72000);
         assert_eq!(take.count(), 6);
         let end = start + 5 * 24000;
-        let done = take.finish(start, end, 48000, 120.0, 4.0).unwrap();
+        let done = take.finish(start, end, 48000, &TempoMap::constant(120.0), 4.0).unwrap();
         assert_eq!(done.at, BigRational::from_integer(4.into()));
         // Five beats of notes: two bars.
         assert_eq!(done.length, BigRational::from_integer(8.into()));
@@ -499,20 +501,20 @@ mod tests {
             .collect();
         assert_eq!(notes, vec![(60, 0.0, 0.5), (64, 1.0, 0.5), (67, 1.0, 4.0), (48, 2.0, 0.5), (48, 2.5, 0.5)]);
         assert_eq!(done.notes[1]["velocity"], 90);
-        let report = done.report(120.0);
+        let report = done.report(&TempoMap::constant(120.0));
         assert_eq!(report["notes"], 5);
         assert_eq!(report["seconds"], 4.0);
 
         // Nothing played, or nothing left, is no clip.
-        assert!(NoteTake::new("keys").finish(0, 48000, 48000, 120.0, 4.0).is_none());
+        assert!(NoteTake::new("keys").finish(0, 48000, 48000, &TempoMap::constant(120.0), 4.0).is_none());
         let mut take = NoteTake::new("keys");
         take.on(60, 100, 100);
         take.off(60, 100);
-        assert!(take.finish(0, 48000, 48000, 120.0, 4.0).is_none());
+        assert!(take.finish(0, 48000, 48000, &TempoMap::constant(120.0), 4.0).is_none());
         // A take that ended before a bar was up is still a bar; 3/4 bars.
         let mut take = NoteTake::new("keys");
         take.on(60, 100, 0);
-        assert_eq!(take.finish(0, 2400, 48000, 120.0, 3.0).unwrap().length, BigRational::from_integer(3.into()));
+        assert_eq!(take.finish(0, 2400, 48000, &TempoMap::constant(120.0), 3.0).unwrap().length, BigRational::from_integer(3.into()));
     }
 
     #[test]

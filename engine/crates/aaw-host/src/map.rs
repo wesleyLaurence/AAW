@@ -140,20 +140,21 @@ fn placed(p: &Project, dir: &Path, ti: usize) -> Vec<Placed> {
             .and_then(|s| aaw_engine::sndfile::info(&dir.join(&s.path)).ok())
             .map(|info| info.seconds());
         // A file that cannot be read is given a beat, so it is still seen.
-        let per_beat = c.seconds_per_beat(p.session.tempo);
+        let tempo_map = p.tempo_map();
+        let per_beat = c.seconds_per_beat_at_start(&tempo_map);
         let mut until = match (c.source_end_seconds, file) {
             (Some(end), Some(file)) => end.min(file),
             (Some(end), None) => end,
             (None, Some(file)) => file,
             (None, None) => c.source_start_seconds + per_beat,
         };
-        let (mut beats, mut onsets, mut looped) = (((until - c.source_start_seconds) / per_beat).max(0.0), vec![start], String::new());
+        let (mut beats, mut onsets, mut looped) = (c.beats_for_file(&tempo_map, until - c.source_start_seconds).max(0.0), vec![start], String::new());
         if let (Some(every), Some(length)) = (c.loop_exact(), c.length_exact()) {
             // The loop: so many beats of the file, played again at each wrap.
             let (every, length) = (f(&every), f(&length));
             until = until.min(c.source_start_seconds + every * per_beat);
             beats = length;
-            onsets = c.repetitions(p.session.tempo).iter().map(|r| f(&r.at_exact())).collect();
+            onsets = c.repetitions(&tempo_map).iter().map(|r| f(&r.at_exact())).collect();
             looped = format!(", loops every {}{}", beats_text(every), into_text(&c.offset_exact()));
         }
         let repeats = onsets.len() as i64;

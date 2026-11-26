@@ -61,7 +61,7 @@ lanes. Each lane has a `param` and at least one point. A point is
 |---|---|
 | track | `gain_db`, `pan`, `sends.RETURN.gain_db`, `effects.REF.FIELD`, and on a MIDI track with a Synth `instrument.FIELD`, including the patch's own effects as `instrument.effects.REF.FIELD` ([synth.md](synth.md)) |
 | return | `gain_db`, `pan`, `effects.REF.FIELD` |
-| master | `gain_db` (replaces `session.master_gain_db`), `effects.REF.FIELD` |
+| master | `gain_db` (replaces `session.master_gain_db`), `tempo` (the song's tempo, steps only: [tempo changes](tempo-changes.md)), `effects.REF.FIELD` |
 
 `REF` is an effect's `id` or its zero-based index in the chain. Any effect accepts
 an optional `id`, unique within its chain. Prefer ids: inserting an effect earlier

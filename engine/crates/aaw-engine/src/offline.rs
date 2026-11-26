@@ -8,7 +8,7 @@ use crate::{sndfile, stretch, wav};
 use aaw_dsp::resample::{pairwise_sum, Resampler};
 use aaw_model::pyfmt::{json_dumps, json_dumps_indent};
 use aaw_model::value::{dict, Value};
-use aaw_model::{frame, project_hash, Effect, Project, Stretch, Stretcher};
+use aaw_model::{project_hash, Effect, Project, Stretch, Stretcher};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -248,7 +248,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     let before = Instant::now();
     let p: Project = aaw_model::load(path, true).map_err(|e| e.to_string())?;
     let rate = p.session.sample_rate;
-    let tempo = p.session.tempo;
+    let map = p.tempo_map();
     // A stem's track, group or return by its ID, or by its name.
     let named;
     let opts = match &opts.track {
@@ -268,12 +268,12 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
             }
             let s = matches[0];
             Some((
-                frame(&s.at_exact(), tempo, rate),
-                frame(&(s.at_exact() + s.length_exact()), tempo, rate),
+                map.frame(&s.at_exact(), rate),
+                map.frame(&(s.at_exact() + s.length_exact()), rate),
             ))
         }
     };
-    let total = frame(&p.session.length_exact(), tempo, rate);
+    let total = map.frame(&p.session.length_exact(), rate);
     if total < 1 {
         return Err("Session length must be at least one audio frame".into());
     }
@@ -298,7 +298,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     let spans: Vec<(i64, i64)> = p
         .sections
         .iter()
-        .map(|s| (frame(&s.at_exact(), tempo, rate), frame(&(s.at_exact() + s.length_exact()), tempo, rate)))
+        .map(|s| (map.frame(&s.at_exact(), rate), map.frame(&(s.at_exact() + s.length_exact()), rate)))
         .collect();
     renderer.measure_spans(&spans);
     let section_ids: Vec<&str> = p.sections.iter().map(|s| s.id.as_str()).collect();
@@ -368,7 +368,7 @@ pub fn render(path: &Path, opts: &RenderOptions) -> Result<Value, String> {
     ];
     // A song that stretches names what stretched it; one that does not keeps
     // the identity it had.
-    let follows = |stretch: Stretch, bpm: Option<f64>| stretch.keeps_pitch() && bpm.is_some_and(|bpm| bpm != p.session.tempo);
+    let follows = |stretch: Stretch, bpm: Option<f64>| stretch.keeps_pitch() && bpm.is_some_and(|bpm| map.steps().iter().any(|s| s.bpm != bpm));
     let stretches = p.tracks.iter().any(|t| {
         t.sound_pads().values().any(|pad| follows(pad.stretch, pad.source_bpm))
             || t.audio.iter().any(|c| follows(c.stretch, c.source_bpm) || (c.stretch.keeps_pitch() && c.transpose != 0.0))

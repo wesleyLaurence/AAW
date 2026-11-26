@@ -4,7 +4,7 @@
 //! the song, so a clip at a third of a beat stays on its third when it moves.
 
 use crate::files::Files;
-use crate::view::{seconds_per_beat, tail_beats, FieldValue};
+use crate::view::{tail_beats, FieldValue};
 use aaw_host::command::{beat_value, ident, node_json, unique};
 use aaw_host::session::{value_json, Doc};
 use aaw_host::tree::{self, handle_text, Item, Node, Step};
@@ -615,7 +615,7 @@ impl<'a> Song<'a> {
     /// The beat a second of an audio clip's file plays on.
     fn beat_of(&self, clip: &AudioClip, seconds: f64) -> f64 {
         let at = clip.at_exact().to_f64().unwrap_or(0.0);
-        at + (seconds - clip.source_start_seconds) / seconds_per_beat(clip, self.project.session.tempo)
+        at + clip.beats_for_file(&self.project.tempo_map(), seconds - clip.source_start_seconds)
     }
 
     fn placed(&self, tree: &Node, key: u64) -> Result<Placed<'a>> {
@@ -633,13 +633,13 @@ impl<'a> Song<'a> {
             if let Some(j) = items(&track.node, "audio").iter().position(|c| c.handle == key) {
                 let clip = &project.tracks[i].audio[j];
                 let start = clip.at_exact();
-                let tempo = project.session.tempo;
+                let map = project.tempo_map();
                 // A looped clip lasts its own length; another, its audio's.
                 let played = match clip.length_exact() {
                     Some(length) => length.to_f64().unwrap_or(0.0),
-                    None => (self.source_end(clip)? - clip.source_start_seconds) / seconds_per_beat(clip, tempo),
+                    None => clip.beats_for_file(&map, self.source_end(clip)? - clip.source_start_seconds),
                 };
-                let beats = played + tail_beats(clip, tempo, self.seconds(&clip.sample));
+                let beats = played + tail_beats(clip, &map, self.seconds(&clip.sample));
                 let end = &start + span(beats);
                 return Ok(Placed { track: i, start, end, audio: Some(clip), notes: false });
             }
@@ -835,6 +835,7 @@ fn static_value(project: &Project, owner: Owner, param: &str) -> Result<f64> {
     let missing = || format!("{param} has no value");
     match (&t.kind, owner) {
         (TargetKind::Channel, Owner::Master(_)) => Ok(project.session.master_gain_db),
+        (TargetKind::Tempo, _) => Ok(project.session.tempo),
         (TargetKind::Channel, Owner::Track(x)) => Ok(if t.field == "pan" { x.pan } else { x.gain_db }),
         (TargetKind::Channel, Owner::Return(x)) => Ok(if t.field == "pan" { x.pan } else { x.gain_db }),
         (TargetKind::Send(to), Owner::Track(x)) => x.sends.iter().find(|s| &s.to == to).map(|s| s.gain_db).ok_or_else(missing),

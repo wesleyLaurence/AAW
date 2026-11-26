@@ -39,7 +39,7 @@ import numpy as np
 import soundfile as sf
 
 from . import library
-from .model import digest, load, meter, project_hash
+from .model import TempoMap, digest, load, meter, project_hash
 
 SPLITS = {
     "vocals": ("vocals", "instrumental"),
@@ -793,7 +793,9 @@ def place(project: dict, found: dict, ids: dict, record: dict, prefix: str) -> d
         session = project["session"]
         first = next(iter(record["parts"].values()))
         seconds = Fraction(first["frames"], first["sample_rate"])
-        beats = seconds * Fraction(str(session["tempo"])) / 60
+        tm = TempoMap.of(project)
+        # Through a tempo lane the parts' seconds end on a beat of the map.
+        beats = seconds * Fraction(str(session["tempo"])) / 60 if tm.tempo is not None else Fraction(tm.beat(float(seconds)))
         bar = meter(session)[0]
         length = Fraction(str(session.get("length_beats", 16)))
         if beats > length:

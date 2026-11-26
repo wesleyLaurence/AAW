@@ -552,7 +552,9 @@ private struct TempoField: View {
     @State private var typed = ""
     @FocusState private var focused: Bool
 
-    private var current: String { String(model.arrangement.tempo) }
+    /// The tempo where the song is: at the playhead, which in a song whose
+    /// tempo steps is the step it is in.
+    private var current: String { String(model.arrangement.tempoMap.tempo(atBeat: model.position)) }
 
     var body: some View {
         HStack(spacing: 4) {
@@ -565,13 +567,15 @@ private struct TempoField: View {
                 .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 3))
                 .focused($focused)
                 .accessibilityLabel("Tempo in BPM")
-                .help("Tempo: 20–400 BPM. Return applies; Escape cancels.")
+                .help(model.arrangement.tempoSteps.count > 1
+                      ? "Tempo at the playhead; the song's tempo changes on the master's tempo lane. daw tempo set changes a step."
+                      : "Tempo: 20–400 BPM. Return applies; Escape cancels.")
                 .onSubmit { focused = false; model.onFocus?() }
                 .onExitCommand { typed = current; focused = false; model.onFocus?() }
             Text("BPM")
         }
         .onAppear { typed = current }
-        .onChange(of: model.arrangement.tempo) {
+        .onChange(of: current) {
             if !focused { typed = current }
         }
         .onChange(of: focused) {

@@ -21,14 +21,14 @@ kept.
 
 ## Next
 
-Items 1–5 are tempo changes and warp markers, which the person put before
+Items 1–4 are tempo changes and warp markers, which the person put before
 everything else on November 26, 2026 (D205): a song played live, at several
 tempos and drifting, lined up to the click without being stretched, and a
 second song stretched to its tempo bar by bar. They are built in order, each
 its own branch and pull request; see
-[tempo-and-warp.md](features/tempo-and-warp.md). Its first item, a beat map
-through tempo changes, is built.
-Item 6 is the reverse-engineer track, which the person put before
+[tempo-and-warp.md](features/tempo-and-warp.md). Its first two items, a beat
+map through tempo changes and tempo changes in the song, are built.
+Item 5 is the reverse-engineer track, which the person put before
 everything else on November 16, 2026 (D182): to analyze a finished song from its
 audio alone and know everything about it, then to recreate its session from
 the master. Its items are built in order, one at a time, each a command the
@@ -39,114 +39,110 @@ are built: notes from audio as `daw transcribe` (D183), the drum groove as
 words by bar as `daw transcribe --words` (D187), sound and effects as
 `daw samples sound` (D188) and one analysis file as `daw samples study`
 (D192).
-Items 7–11 are what a code review of play past the song's end (D163) found on
+Items 6–10 are what a code review of play past the song's end (D163) found on
 October 28, 2026, in the order of how much each one harms a song, each a fix
-of its own. Item 12 is the last of the person's notes from using the app on
-October 19, 2026 (D123). Items 13–22 are the order as it stood.
+of its own. Item 11 is the last of the person's notes from using the app on
+October 19, 2026 (D123). Items 12–21 are the order as it stood.
 
-1. **Tempo changes in the song.** A `tempo` lane on the master, steps in
-    beats; one tempo map in `aaw-model` that the scheduler, stretched clips,
-    delays, the Synth, devices, the metronome, recording, MIDI files, the
-    Python tools and the app's ruler and clock all read; `daw tempo
-    list|set|remove|clear`; a song with a lane saved as `schema_version: 3`,
-    and every song without one unchanged, bit for bit
-    ([tempo and warp](features/tempo-and-warp.md#2-tempo-changes-in-the-song)).
-2. **The grid follows a song: `daw tempo follow`.** The tempo lane written
+1. **The grid follows a song: `daw tempo follow`.** The tempo lane written
     from an unstretched audio clip's beat map, a step a bar, a segment or a
     beat, so a song played live plays on the click at each of its tempos, and
     a clip with `source_bpm` over it follows it; `--keep-time` moves a song
     built at one tempo onto the new grid without changing what it sounds like
     ([tempo and warp](features/tempo-and-warp.md#3-the-grid-follows-a-song-daw-tempo-follow)).
-3. **Warp markers.** An audio clip's `warp`, file seconds pinned to its beats
+2. **Warp markers.** An audio clip's `warp`, file seconds pinned to its beats
     and the clip stretched between them, kept through splits, trims, moves and
     loops; `daw audio warp --to-beats` from the sample's beat map, and
     `--add`, `--move`, `--remove`, `--clear`
     ([tempo and warp](features/tempo-and-warp.md#4-warp-markers)).
-4. **Tempo and warp markers in the app.** Tempo steps dragged, added and
+3. **Tempo and warp markers in the app.** Tempo steps dragged, added and
     removed on the master's lane, the transport's field setting the step the
     playhead is in, Follow This Clip; warp markers dragged and added on a
-    clip's waveform in the detail panel, Warp to Beats
-    ([tempo and warp](features/tempo-and-warp.md#5-both-in-the-app)).
-5. **Tempo ramps and meter changes.** `curve: linear` on a tempo point, and a
+    clip's waveform in the detail panel, Warp to Beats; an unstretched clip's
+    waveform and a track's peaks drawn through the tempo's steps, which today
+    are drawn at the tempo where the clip starts
+    ([tempo and warp](features/tempo-and-warp.md#5-both-in-the-app),
+    [tempo changes](features/tempo-changes.md#limits)).
+4. **Tempo ramps and meter changes.** `curve: linear` on a tempo point, and a
     `time_signature` lane on the master, bars counted through it
     ([tempo and warp](features/tempo-and-warp.md#6-ramps-and-meter-changes)).
 
-6. **Recreate a session from the master.** The drums as note clips on the
+5. **Recreate a session from the master.** The drums as note clips on the
     nearest samples, the bass, chords and melodies as note clips on patches,
     the sections arranged and the mix matched, rendered and compared with
     `daw reference` until the differences are said; what no tool does yet
     becomes a line here.
 
-7. **A take from a stem tap stops at the end while a device take runs on.**
+6. **A take from a stem tap stops at the end while a device take runs on.**
     Stem taps are fed only while the player rolls, so a track recorded from a
     stem ends its clip at the song's end and loses its tail, while a
     microphone take in the same recording goes on to the stop; the comment at
     record_tick promises both run on.
-8. **Full DSP runs forever past the end.** The whole renderer graph keeps
+7. **Full DSP runs forever past the end.** The whole renderer graph keeps
     processing silence every block while play rolls on, and the resting path
     engages only when stopped, so a heavy song left playing costs its full
     CPU until someone stops it. Once past the end and quiet for a second, as
     the stopped branch already counts, skip the graph and only pass the
     block, count the beats and click.
-9. **Zero-extent content at beat 0 reads as an empty song.** The fitted
+8. **Zero-extent content at beat 0 reads as an empty song.** The fitted
     length returns eight bars when the content end is zero, so a song whose
     only item is an automation point at 0 or an audio clip at 0 whose file
     is missing flips by 28 beats as a one-beat clip is added and removed.
     Guard on no clips, points or sections instead.
-10. **The timeline's width past the end only grows while playing.** The
+9. **The timeline's width past the end only grows while playing.** The
     played beats are set from the playhead's tick and never reset, so a cue
     located past the end while stopped is drawn beyond the scrollable area,
     and after a stop far past the end the view keeps the empty width until
     the next play. Derive the content width from the largest of the length,
     the cue and the playhead in one place.
-11. **A marker click still clamps the cue.** The marker-click path keeps the
+10. **A marker click still clamps the cue.** The marker-click path keeps the
     cue just under the song's length, the rule D163 removed from the ruler's
     target; dead today, and the old limit in one more place. Replace it with
     a plain locate.
 
-12. **The person's skills: mix, master, arrange.** Written
+11. **The person's skills: mix, master, arrange.** Written
     with the agent in the ignored skills folder, each a music session over
     `daw listen`, `compare`, `separate` and the Synth: a session mixed, a mix
     mastered, parts arranged into a form. What each finds missing becomes a
     line here.
-13. **`daw audio crossfade` with an option, while the app has the project
+12. **`daw audio crossfade` with an option, while the app has the project
     open.** `--lead-ms`, alone or with `--in-ms` and `--ms`, is refused with
     "Bad request: invalid type: map, expected f64", where the same command with
     no option, and with the options on a project no host has open, sets the
     join. Until fixed, `daw set` on the clip's `lead_ms` and `fade_in_ms` and
     on `fade_out_ms` of the clip before does the same. `daw audio cut` takes the
     same three options and has not been tried with a host.
-14. **Time inserted and deleted in the app, and sections dragged.** The
+13. **Time inserted and deleted in the app, and sections dragged.** The
     selected beats ([time selection](features/time-selection.md)) inserted
     again after themselves on every track (Ableton's Duplicate Time) and
     deleted with the gap closed, as `daw range copy --insert` and `range
     delete` do; a section dragged in the ruler with what is under it; the
     time selection sent to the host for `daw status`.
-15. **A MIDI keyboard plugged in.** The typing keyboard plays and records
+14. **A MIDI keyboard plugged in.** The typing keyboard plays and records
     notes ([typing keyboard](features/typing-keyboard.md)) and ⌘U or `daw
     note quantize` snaps what was played ([quantize](features/quantize.md));
     a keyboard through CoreMIDI, with its velocity and its own latency, is
     the other half.
-16. **Sections, the master gain and the end fade in the app.** A section
+15. **Sections, the master gain and the end fade in the app.** A section
     made, named, moved and removed in the ruler, which only draws them today;
     the master gain and end fade typed in the transport bar, as the tempo is.
     The agent has `daw section` and `daw set session.FIELD`; the person has
     neither (D81). The length is managed in the background (D130).
-17. **A project made with `daw init` in the app's index,** so a song the agent
+16. **A project made with `daw init` in the app's index,** so a song the agent
     starts in a terminal opens from Open Recent.
-18. **Turns and A/B.** An agent request's commands grouped, named for the
+17. **Turns and A/B.** An agent request's commands grouped, named for the
     request, kept or reverted as one, and the song restored to before any turn;
     one key flips between before and after a turn while the loop plays.
-19. **Note transformations and chords.** Humanize with a seed, arpeggiate and
+18. **Note transformations and chords.** Humanize with a seed, arpeggiate and
     vary; chord symbols written as notes; a theory library of scales and chords,
     the person's own tables of chords by intervals, scales and modes, and note
     frequencies its data where the model's own knowledge is not to be trusted.
-20. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
+19. **Slicing a break.** A loop cut at its onsets into pads, with the note clip
     that replays it.
-21. **Presets.** Pad setups and whole tracks saved as text and loaded into any
+20. **Presets.** Pad setups and whole tracks saved as text and loaded into any
     song. Effect chains and an instrument with its chain are built
     ([effect racks and instrument racks](features/effect-racks.md)).
-22. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
+21. **The workspace as a folder of its own.** `~/Music/AAW/` with its managed
     instructions, `profile/` and skills, in place of this checkout, so a
     project kept anywhere has them; the fixed project layout created by the
     tool, and `daw check` flagging files outside it; what the agent learned,
@@ -252,6 +248,10 @@ October 19, 2026 (D123). Items 13–22 are the order as it stood.
 - A convention for one-off scripts: a known Python environment, results imported
   with the recipe that made them, edits through the host.
 - Offline devices: a script as an effect, re-run when its input changes.
+- The song's tempo map for a real-time device: `aaw_init` takes one tempo,
+  so a WebAssembly device in a song whose tempo steps knows only the one at
+  beat 0; an offline device is given the map ([tempo
+  changes](features/tempo-changes.md#decisions)).
 - Real-time devices in a sandboxed language, after a spike (FAUST is the
   candidate); the spec they are written to is Next
   ([devices anyone builds](features/custom-devices.md)).

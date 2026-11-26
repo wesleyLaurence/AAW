@@ -318,7 +318,7 @@ fn a_looped_audio_clip_split_inside_a_repetition_plays_as_it_did() {
     let at = |beat: i64| beat * 24000;
     assert!(after.contains(&at(22)) && after.contains(&(at(28) - 240)), "{after:?}");
     assert_eq!(after.len(), before.len() + 1);
-    let repetitions = s.project().tracks.iter().find(|t| t.id == "song").unwrap().audio[1].repetitions(120.0);
+    let repetitions = s.project().tracks.iter().find(|t| t.id == "song").unwrap().audio[1].repetitions(&aaw_model::TempoMap::constant(120.0));
     assert_eq!((repetitions[0].source_start_seconds, repetitions[0].lead_ms, repetitions[1].source_start_seconds), (2.0, 0.0, 1.0));
     // Moved apart and back, the halves are one loop again.
     edit(&mut s, json!({"op": "range.insert", "at": 22, "length": 4})).unwrap();

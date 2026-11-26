@@ -651,6 +651,20 @@ pub enum Command {
         id: Option<String>,
     },
 
+    // The song's tempo
+    /// The song's tempo from beat `at` on, at `bpm`: a step of the master's
+    /// tempo lane, added or changed, which everything placed in beats
+    /// follows. At beat 0 of a song without a lane it is the song's one
+    /// tempo. A lane left with one tempo goes, and that tempo is the song's.
+    #[serde(rename = "tempo.set")]
+    TempoSet { at: Json, bpm: f64 },
+    /// Takes out the step of the tempo at beat `at`: the tempo before it holds on.
+    #[serde(rename = "tempo.remove")]
+    TempoRemove { at: Json },
+    /// Goes back to one tempo, the one at beat 0: the tempo lane goes.
+    #[serde(rename = "tempo.clear")]
+    TempoClear,
+
     // Markers
     /// A note at a beat, the person's as they listen: "too busy". Without
     /// `at` it lands where the song is playing, which a host fills in.
@@ -872,6 +886,9 @@ pub enum Command {
     /// clips sounding there.
     #[serde(rename = "markers")]
     Markers,
+    /// The song's tempo steps, each with its bar, beat, second and tempo.
+    #[serde(rename = "tempo.list")]
+    TempoList,
     /// Writes the notes of a note clip that play as a MIDI file at `file`.
     #[serde(rename = "midi.export")]
     MidiExport { clip: String, file: String },
@@ -925,7 +942,7 @@ impl Command {
             Play { .. } | Stop | Locate { .. } | Loop { .. } | Metronome { .. } | NotePreview { .. } | Audio { .. } => Kind::Transport,
             NoteOn { .. } | NoteOff { .. } => Kind::Transport,
             Arm { .. } | RecordStart { .. } | RecordStop | CaptureStart { .. } | CaptureStop { .. } => Kind::Transport,
-            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | MidiExport { .. } => Kind::Read,
+            Inspect | Status | Changes { .. } | Get { .. } | Notes { .. } | Map { .. } | Markers | TempoList | MidiExport { .. } => Kind::Read,
             Select { .. } | Front { .. } | Move { .. } | Copy { .. } | Release { .. } | Fmt | Close => Kind::Host,
             _ => Kind::Edit,
         }
@@ -950,7 +967,7 @@ impl Kind {
             "undo" | "redo" => Kind::History,
             "play" | "stop" | "locate" | "loop" | "metronome" | "note.preview" | "note.on" | "note.off" | "audio" => Kind::Transport,
             "arm" | "record.start" | "record.stop" | "capture.start" | "capture.stop" => Kind::Transport,
-            "inspect" | "status" | "changes" | "get" | "notes" | "map" | "markers" | "midi.export" => Kind::Read,
+            "inspect" | "status" | "changes" | "get" | "notes" | "map" | "markers" | "tempo.list" | "midi.export" => Kind::Read,
             "select" | "front" | "project.move" | "project.copy" | "project.release" | "fmt" | "close" => Kind::Host,
             _ => Kind::Edit,
         }
@@ -1192,6 +1209,9 @@ pub(crate) struct Span {
     pub(crate) start: f64,
     pub(crate) end: Option<f64>,
     per_beat: f64,
+    /// The song's tempo map, for a clip without a tempo of its own in a
+    /// song whose tempo changes: its file plays at its own speed through it.
+    map: Option<(std::sync::Arc<aaw_model::TempoMap>, f64)>,
     /// A looped clip's loop and its length on the timeline.
     pub(crate) every: Option<BigRational>,
     pub(crate) length: Option<BigRational>,
@@ -1200,7 +1220,7 @@ pub(crate) struct Span {
 }
 
 impl Span {
-    pub(crate) fn of(clip: &Node, tempo: f64) -> Result<Span> {
+    pub(crate) fn of(clip: &Node, map: &std::sync::Arc<aaw_model::TempoMap>) -> Result<Span> {
         let at = exact(clip.get("at")).ok_or("An audio clip has no beat")?;
         // A clip with a tempo of its own follows the session's, so a beat of
         // the session is a beat of its file; one transposed by repitching
@@ -1209,12 +1229,16 @@ impl Span {
             Some(Node::Leaf(Value::Str(s))) if s.as_str() != "repitch" => 1.0,
             _ => 2f64.powf(number(clip.get("transpose")).unwrap_or(0.0) / 12.0),
         };
-        let per_beat = 60.0 / number(clip.get("source_bpm")).unwrap_or(tempo) * repitch;
+        let own = number(clip.get("source_bpm"));
+        let tempo = map.tempo_at_exact(&at);
+        let per_beat = 60.0 / own.unwrap_or(tempo) * repitch;
+        let stepped = (own.is_none() && map.constant_tempo().is_none()).then(|| (map.clone(), repitch));
         Ok(Span {
             at,
             start: number(clip.get("source_start_seconds")).unwrap_or(0.0),
             end: number(clip.get("source_end_seconds")),
             per_beat,
+            map: stepped,
             every: exact(clip.get("loop_beats")),
             length: exact(clip.get("length_beats")),
             offset: exact(clip.get("loop_offset_beats")).unwrap_or_default(),
@@ -1223,6 +1247,10 @@ impl Span {
 
     /// The seconds of the file that play on a beat.
     pub(crate) fn source(&self, beat: &BigRational) -> f64 {
+        if let Some((map, repitch)) = &self.map {
+            let (at, to) = (num_traits::ToPrimitive::to_f64(&self.at).unwrap_or(0.0), num_traits::ToPrimitive::to_f64(beat).unwrap_or(f64::NAN));
+            return self.start + map.seconds_between(at, to) * repitch;
+        }
         let beats = num_traits::ToPrimitive::to_f64(&(beat - &self.at)).unwrap_or(f64::NAN);
         self.start + beats * self.per_beat
     }
@@ -1231,6 +1259,11 @@ impl Span {
     pub(crate) fn end_beat(&self) -> Option<BigRational> {
         if let Some(length) = &self.length {
             return Some(&self.at + length);
+        }
+        if let Some((map, repitch)) = &self.map {
+            let at = num_traits::ToPrimitive::to_f64(&self.at).unwrap_or(0.0);
+            let beats = map.beat_after(at, (self.end? - self.start) / repitch) - at;
+            return Some(&self.at + BigRational::from_float(beats)?);
         }
         let beats = (self.end? - self.start) / self.per_beat;
         Some(&self.at + BigRational::from_float(beats)?)
@@ -3132,7 +3165,7 @@ impl<'a> Edit<'a> {
                 let old = std::mem::take(self.list(&owner, "audio")?);
                 let mut kept: Vec<Item> = Vec::new();
                 for item in old {
-                    let span = Span::of(&item.node, tempo)?;
+                    let span = Span::of(&item.node, &tempo)?;
                     let end = span.end_beat();
                     if end.as_ref().is_some_and(|end| *end <= from) {
                         // Before the cut.
@@ -3174,7 +3207,7 @@ impl<'a> Edit<'a> {
                 // The join: the clip that now ends where the cut began, and the
                 // one that now starts there.
                 let near = |end: &BigRational| num_traits::ToPrimitive::to_f64(&(end - &from)).is_some_and(|d| d.abs() < 1e-6);
-                let spans: Vec<Span> = kept.iter().map(|item| Span::of(&item.node, tempo)).collect::<Result<_>>()?;
+                let spans: Vec<Span> = kept.iter().map(|item| Span::of(&item.node, &tempo)).collect::<Result<_>>()?;
                 let leaving = spans.iter().position(|s| s.at < from && s.end_beat().is_some_and(|end| near(&end)));
                 let entering = spans.iter().position(|s| s.at == from);
                 *self.list(&owner, "audio")? = kept;
@@ -3640,6 +3673,43 @@ impl<'a> Edit<'a> {
                 }
                 out.label = format!("Set lane {} {param}", self.text(&loc));
             }
+            TempoSet { at, bpm } => {
+                let at = beat_at(at)?;
+                if !(20.0..=400.0).contains(bpm) {
+                    return Err(format!("A tempo is 20 to 400 BPM, not {}", aaw_model::pyfmt::float_repr(*bpm)));
+                }
+                let mut steps: Vec<(BigRational, f64)> = self.tempo().steps().iter().map(|s| (s.beat.clone(), s.bpm)).collect();
+                match steps.iter().position(|s| s.0 >= at) {
+                    Some(i) if steps[i].0 == at => steps[i].1 = *bpm,
+                    Some(i) => steps.insert(i, (at.clone(), *bpm)),
+                    None => steps.push((at.clone(), *bpm)),
+                }
+                self.write_tempo(steps)?;
+                out.label = format!("Set the tempo to {} at beat {}", aaw_model::pyfmt::float_repr(*bpm), beat_text(&at));
+            }
+            TempoRemove { at } => {
+                let at = beat_at(at)?;
+                let mut steps: Vec<(BigRational, f64)> = self.tempo().steps().iter().map(|s| (s.beat.clone(), s.bpm)).collect();
+                let i = steps.iter().position(|s| s.0 == at).ok_or_else(|| {
+                    let at_text = beat_text(&at);
+                    format!("The tempo has no step at beat {at_text}; daw tempo list gives its steps")
+                })?;
+                if i == 0 {
+                    return Err("The step at beat 0 is the song's opening tempo: daw tempo set --at 1 changes it, and daw tempo clear goes back to one tempo".into());
+                }
+                steps.remove(i);
+                self.write_tempo(steps)?;
+                out.label = format!("Remove the tempo step at beat {}", beat_text(&at));
+            }
+            TempoClear => {
+                let master = vec![Step::Key("master".into())];
+                if self.root.get("master").is_some() {
+                    if let Some(i) = self.lane(&master, aaw_model::TEMPO_PARAM) {
+                        self.take(&master, "automation", i)?;
+                    }
+                }
+                out.label = "Keep one tempo".into();
+            }
             LaneRemove { owner, param } => {
                 let loc = self.owner(owner)?;
                 let i = self.lane(&loc, param).ok_or_else(|| format!("{owner} has no lane {param}"))?;
@@ -3857,9 +3927,54 @@ impl<'a> Edit<'a> {
         self.node(loc).field("id").unwrap_or("?").to_string()
     }
 
-    /// The song's tempo.
-    pub(crate) fn tempo(&self) -> f64 {
-        number(self.root.get("session").and_then(|s| s.get("tempo"))).unwrap_or(144.0)
+    /// Writes the song's tempo as steps of (beat, bpm), the first at beat 0:
+    /// the master's tempo lane, a point a step, or with one step no lane and
+    /// that tempo the session's.
+    fn write_tempo(&mut self, steps: Vec<(BigRational, f64)>) -> Result<()> {
+        let map = aaw_model::TempoMap::from_points(self.tempo().opening(), steps);
+        let master = vec![Step::Key("master".into())];
+        if self.root.get("master").is_none() {
+            self.root.map_mut().expect("the song").insert("master".into(), Node::Map(indexmap::IndexMap::new()));
+        }
+        let existing = self.lane(&master, aaw_model::TEMPO_PARAM);
+        if let Some(bpm) = map.constant_tempo() {
+            if let Some(i) = existing {
+                self.take(&master, "automation", i)?;
+            }
+            let session = self.root.get_mut("session").and_then(Node::map_mut).ok_or("The song has no session")?;
+            session.insert("tempo".into(), Node::Leaf(Value::Float(bpm)));
+            return Ok(());
+        }
+        let points: Vec<Json> = map
+            .steps()
+            .iter()
+            .map(|s| serde_json::json!({"at": to_json(&beat_value(&s.beat)), "value": s.bpm, "curve": "hold"}))
+            .collect();
+        let points = Node::new(&json_value(&Json::Array(points))?);
+        match existing {
+            Some(i) => {
+                let lane = [master.clone(), vec![Step::Key("automation".into()), Step::Index(i)]].concat();
+                self.node_mut(&lane).map_mut().expect("lane").insert("points".into(), points);
+            }
+            None => {
+                let mut lane = indexmap::IndexMap::new();
+                lane.insert("param".to_string(), Node::Leaf(Value::str(aaw_model::TEMPO_PARAM)));
+                lane.insert("points".to_string(), points);
+                self.insert(&master, "automation", None, Node::Map(lane))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The song's tempo map: its master's tempo lane, or its one tempo.
+    pub(crate) fn tempo(&self) -> std::sync::Arc<aaw_model::TempoMap> {
+        let opening = number(self.root.get("session").and_then(|s| s.get("tempo"))).unwrap_or(144.0);
+        let lanes = self.root.get("master").and_then(|m| m.get("automation"));
+        let lane = lanes.and_then(|l| l.items().iter().find(|i| i.node.field("param") == Some(aaw_model::TEMPO_PARAM)));
+        let points = lane.and_then(|l| l.node.get("points")).map_or(Vec::new(), |p| {
+            p.items().iter().filter_map(|i| Some((exact(i.node.get("at"))?, number(i.node.get("value"))?))).collect()
+        });
+        std::sync::Arc::new(aaw_model::TempoMap::from_points(opening, points))
     }
 
     /// The song's time signature, 4/4 when the song has none it reads.
@@ -3874,7 +3989,7 @@ impl<'a> Edit<'a> {
 
     /// Where the audio clip at `loc` is on the timeline and in its file.
     fn span(&self, loc: &[Step]) -> Result<Span> {
-        Span::of(self.node(loc), self.tempo())
+        Span::of(self.node(loc), &self.tempo())
     }
 
     fn audio_name(&self, loc: &[Step]) -> String {
@@ -4015,7 +4130,7 @@ impl<'a> Edit<'a> {
         match kind {
             Kind::Audio if !same("sample") => format!("{a} and {b} play different files, so one clip cannot play what they play"),
             Kind::Audio => {
-                let (l, r) = (Span::of(left, self.tempo()), Span::of(right, self.tempo()));
+                let (l, r) = (Span::of(left, &self.tempo()), Span::of(right, &self.tempo()));
                 match (l, r) {
                     (Ok(l), Ok(r)) if l.end.is_none_or(|end| (end - r.start).abs() >= 1e-9) => format!(
                         "{b} does not go on in the file from where {a} leaves, so one clip cannot play what they play; a join is of clips that were one, as audio split leaves them"

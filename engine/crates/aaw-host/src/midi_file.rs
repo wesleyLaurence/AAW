@@ -369,8 +369,10 @@ fn ticks(beat: &BigRational) -> (u64, bool) {
 }
 
 /// Writes notes as a type 0 file of one track named `name`, on channel 1,
-/// with the song's tempo and time signature.
-pub fn write(notes: &[FileNote], name: &str, tempo: f64, meter: aaw_model::Meter) -> Written {
+/// with the song's tempo and time signature. `tempo` is the tempo from each
+/// beat of the file on, the first from its start: one, or the steps of the
+/// song's tempo map where the notes play.
+pub fn write(notes: &[FileNote], name: &str, tempo: &[(BigRational, f64)], meter: aaw_model::Meter) -> Written {
     let mut written = Written::default();
     // (tick, off before on, pitch, bytes)
     let mut events: Vec<(u64, u8, u8, [u8; 3])> = Vec::new();
@@ -402,14 +404,31 @@ pub fn write(notes: &[FileNote], name: &str, tempo: f64, meter: aaw_model::Meter
         body.extend(data);
     }
     meta(&mut body, 0x03, name.as_bytes());
-    let micros = (60_000_000.0 / tempo).round() as u32;
-    meta(&mut body, 0x51, &micros.to_be_bytes()[1..]);
+    let micros = |bpm: f64| (60_000_000.0 / bpm).round() as u32;
+    meta(&mut body, 0x51, &micros(tempo.first().map_or(120.0, |t| t.1)).to_be_bytes()[1..]);
     // The denominator as a power of two, as the file writes it.
     meta(&mut body, 0x58, &[meter.beats as u8, meter.unit.trailing_zeros() as u8, 24, 8]);
+    // Each later tempo before the notes at its tick.
+    let changes: Vec<(u64, u32)> = tempo.iter().skip(1).map(|(beat, bpm)| (ticks(beat).0, micros(*bpm))).collect();
+    let mut next = 0;
     let mut last = 0u64;
     for (tick, _, _, bytes) in &events {
+        while next < changes.len() && changes[next].0 <= *tick {
+            var(&mut body, (changes[next].0 - last) as u32);
+            body.extend([0xff, 0x51, 3]);
+            body.extend(&changes[next].1.to_be_bytes()[1..]);
+            last = changes[next].0;
+            next += 1;
+        }
         var(&mut body, (tick - last) as u32);
         body.extend(bytes);
+        last = *tick;
+    }
+    // A change after the last note, where the clip plays on.
+    for (tick, micros) in &changes[next..] {
+        var(&mut body, (tick - last) as u32);
+        body.extend([0xff, 0x51, 3]);
+        body.extend(&micros.to_be_bytes()[1..]);
         last = *tick;
     }
     var(&mut body, 0);
@@ -465,7 +484,7 @@ mod tests {
             note(72, "1/3", "1/3", 127),
             note(74, "2/3", "1/3", 100),
         ];
-        let written = write(&notes, "keys", 120.0, aaw_model::Meter::COMMON);
+        let written = write(&notes, "keys", &[(BigRational::from_integer(0.into()), 120.0)], aaw_model::Meter::COMMON);
         assert!(written.rounded.is_empty());
         let part = read(&written.bytes).unwrap();
         let mut expected = notes.clone();
@@ -479,21 +498,21 @@ mod tests {
     #[test]
     fn overlapping_notes_of_one_pitch_stay_overlapping() {
         let notes = vec![note(60, "0", "2", 100), note(60, "1", "2", 90), note(60, "3", "1", 80)];
-        let part = read(&write(&notes, "x", 100.0, aaw_model::Meter::COMMON).bytes).unwrap();
+        let part = read(&write(&notes, "x", &[(BigRational::from_integer(0.into()), 100.0)], aaw_model::Meter::COMMON).bytes).unwrap();
         assert_eq!(part.notes, notes);
     }
 
     #[test]
     fn a_note_inside_another_of_its_pitch_is_counted() {
         let notes = vec![note(62, "0", "1", 100), note(62, "1/2", "1/4", 90), note(62, "1/2", "1", 80)];
-        assert_eq!(write(&notes, "x", 100.0, aaw_model::Meter::COMMON).nested, 1);
-        assert_eq!(write(&notes[..1], "x", 100.0, aaw_model::Meter::COMMON).nested, 0);
+        assert_eq!(write(&notes, "x", &[(BigRational::from_integer(0.into()), 100.0)], aaw_model::Meter::COMMON).nested, 1);
+        assert_eq!(write(&notes[..1], "x", &[(BigRational::from_integer(0.into()), 100.0)], aaw_model::Meter::COMMON).nested, 0);
     }
 
     #[test]
     fn a_position_off_the_ticks_is_rounded_and_named() {
         let notes = vec![note(60, "0", "1", 100), note(61, "1/7", "1", 100)];
-        let written = write(&notes, "x", 100.0, aaw_model::Meter::COMMON);
+        let written = write(&notes, "x", &[(BigRational::from_integer(0.into()), 100.0)], aaw_model::Meter::COMMON);
         assert_eq!(written.rounded, vec![1]);
         let part = read(&written.bytes).unwrap();
         assert_eq!(part.notes[1].at, b("137/960"));

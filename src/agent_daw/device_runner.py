@@ -10,7 +10,10 @@ sample_rate, fields) and returns the output as an array; an instrument's
 fields), given the track's notes and no input. A MIDI effect's (kind: midi)
 defines transform(notes, fields, tempo), given notes in beats, and the
 runner writes the notes it returns to the output as JSON, {"notes":
-[[start, end, pitch, velocity], ...]}. With --check the device runs once on
+[[start, end, pitch, velocity], ...]}. Each function that takes a
+`tempo_map` keyword is given the song's tempo through time as a list of
+steps, {"beat", "seconds", "bpm"} from each step's beat on, one for a song
+that keeps one tempo. With --check the device runs once on
 a short noise, an instrument or a MIDI effect on the notes given, instead
 and the reply says what came back. Errors go to stderr as {"error": ...}
 with status 1.
@@ -18,6 +21,7 @@ with status 1.
 
 import argparse
 import importlib.util
+import inspect
 import json
 import sys
 import traceback
@@ -51,12 +55,25 @@ def beat_notes_of(params):
     return np.array(rows, dtype=BEATS)
 
 
-def transformed(function, notes, fields, tempo):
+def with_map(function, params):
+    """The keyword arguments a device's function is given beyond its own:
+    the song's tempo map, when it takes one."""
+    try:
+        takes = "tempo_map" in inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        takes = False
+    if not takes:
+        return {}
+    steps = params.get("tempo_map") or [{"beat": 0.0, "seconds": 0.0, "bpm": float(params.get("tempo", 120.0))}]
+    return {"tempo_map": steps}
+
+
+def transformed(function, notes, fields, tempo, extra=None):
     """What a MIDI effect's transform returned, as rows of [start, end,
     pitch, velocity]: from a structured array with those fields, or from
     rows of four numbers."""
     try:
-        out = function(notes, fields, tempo)
+        out = function(notes, fields, tempo, **(extra or {}))
     except Exception:  # noqa: BLE001 - whatever the device raised is the report
         fail(f"transform raised:\n{traceback.format_exc(limit=4)}")
     if out is None:
@@ -114,9 +131,9 @@ def fields_of(params, frames):
     return fields
 
 
-def run(function, *args, name="process"):
+def run(function, *args, name="process", extra=None):
     try:
-        out = function(*args)
+        out = function(*args, **(extra or {}))
     except Exception:  # noqa: BLE001
         fail(f"{name} raised:\n{traceback.format_exc(limit=4)}")
     try:
@@ -154,7 +171,7 @@ def main(argv=None):
     if kind == "midi":
         transform = load(a.device, entry, "transform", "transform(notes, fields, tempo)")
         notes = beat_notes_of(params)
-        out = transformed(transform, notes, dict(params.get("fields", {})), float(params.get("tempo", 120.0)))
+        out = transformed(transform, notes, dict(params.get("fields", {})), float(params.get("tempo", 120.0)), with_map(transform, params))
         if a.check:
             pitches = [int(n[2]) for n in out]
             print(json.dumps({"ok": True, "kind": "midi", "notes_in": int(len(notes)), "notes_out": len(out),
@@ -169,7 +186,7 @@ def main(argv=None):
         play = load(a.device, entry, "play", "play(notes, frames, sample_rate, fields)")
         frames = int(params["frames"])
         notes = notes_of(params)
-        out = run(play, notes, frames, sample_rate, fields_of(params, frames), name="play")
+        out = run(play, notes, frames, sample_rate, fields_of(params, frames), name="play", extra=with_map(play, params))
         if a.check:
             print(json.dumps({"ok": True, "notes": int(len(notes)), "frames_in": frames, "frames_out": int(out.shape[0]),
                               "channels": int(out.shape[1]), "peak": float(np.max(np.abs(out)))}))
@@ -184,7 +201,7 @@ def main(argv=None):
         frames = int(params.get("frames", sample_rate // 2))
         rng = np.random.default_rng(1)
         audio = rng.uniform(-0.25, 0.25, size=(frames, 2))
-        out = run(process, audio, sample_rate, fields_of(params, frames))
+        out = run(process, audio, sample_rate, fields_of(params, frames), extra=with_map(process, params))
         print(json.dumps({"ok": True, "frames_in": frames, "frames_out": int(out.shape[0]), "channels": int(out.shape[1]),
                           "peak": float(np.max(np.abs(out)))}))
         return
@@ -193,7 +210,7 @@ def main(argv=None):
     audio, rate = sf.read(a.input, always_2d=True, dtype="float64")
     if rate != sample_rate:
         fail(f"the input is at {rate} Hz, the song at {sample_rate}")
-    out = run(process, audio, sample_rate, fields_of(params, audio.shape[0]))
+    out = run(process, audio, sample_rate, fields_of(params, audio.shape[0]), extra=with_map(process, params))
     sf.write(a.output, out.astype(np.float32), sample_rate, subtype="FLOAT")
     print(json.dumps({"ok": True, "frames_in": int(audio.shape[0]), "frames_out": int(out.shape[0]), "channels": int(out.shape[1])}))
 

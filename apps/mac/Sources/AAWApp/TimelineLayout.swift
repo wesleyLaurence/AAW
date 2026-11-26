@@ -40,8 +40,14 @@ public struct TimelineLayout: Equatable {
     /// The note the time signature counts, in those beats: 1 in 3/4, 0.5 in
     /// 6/8. The zoom's grid and the brighter lines are at its multiples.
     public var beatUnit: Double = 1
-    /// The session tempo, in beats a minute: what makes a beat a time.
-    public var tempo: Double = 120
+    /// The session tempo at beat 0, in beats a minute; set alone, the song's
+    /// one tempo.
+    public var tempo: Double = 120 {
+        didSet { tempoMap = .constant(tempo) }
+    }
+    /// The song's tempo through time: what makes a beat a time. Set after
+    /// `tempo`.
+    public var tempoMap = TempoMap.constant(120)
     public var lengthBeats: Double = 16
     /// How far play has gone past the song's end, in beats, or zero: the
     /// view scrolls a screen past it as it does past the end, so that the
@@ -89,14 +95,15 @@ public struct TimelineLayout: Equatable {
 
     // MARK: Time
 
-    /// Points a second at this zoom and tempo.
-    public var pixelsPerSecond: CGFloat { pixelsPerBeat * CGFloat(tempo) / 60 }
+    /// Points a second at this zoom, at the slowest tempo of the song: where
+    /// a second is narrowest, so that time labels never crowd.
+    public var pixelsPerSecond: CGFloat { pixelsPerBeat * CGFloat(tempoMap.slowest) / 60 }
 
     /// Where a time from the song's start falls, in the view.
-    public func x(seconds: Double) -> CGFloat { x(seconds * tempo / 60) }
+    public func x(seconds: Double) -> CGFloat { x(tempoMap.beat(seconds)) }
 
     /// The time from the song's start at `x`, in seconds.
-    public func seconds(atX x: CGFloat) -> Double { beat(atX: x) * 60 / tempo }
+    public func seconds(atX x: CGFloat) -> Double { tempoMap.seconds(beat(atX: x)) }
 
     /// The spacings a time label may have, in seconds: tenths and fifths of
     /// a second to an hour, as a clock is read. Past an hour the step doubles.

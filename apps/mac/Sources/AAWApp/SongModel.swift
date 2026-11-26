@@ -633,7 +633,10 @@ public final class SongModel {
             refuse("Enter a tempo from 20 to 400 BPM.")
             return
         }
-        if bpm != arrangement.tempo { edit(.tempo(bpm: bpm)) }
+        // A song whose tempo steps shows the tempo at the playhead: what was
+        // typed is a change only when it differs from that. Setting a step
+        // from the field is to come; the host refuses the one tempo alone.
+        if bpm != arrangement.tempoMap.tempo(atBeat: position) { edit(.tempo(bpm: bpm)) }
     }
 
     /// Sets the song's time signature from the transport bar's field, `3/4`
@@ -2002,7 +2005,7 @@ public final class SongModel {
             options: options, title: title, range: range,
             fromSelection: selectedSound != nil && !range.isWhole(length: a.lengthBeats),
             barBeats: a.barBeats, beatUnit: a.beatUnit, lengthBeats: a.lengthBeats, tempo: a.tempo,
-            timeSignature: a.timeSignature, songRate: Int(a.sampleRate), hasFolder: !untitled
+            timeSignature: a.timeSignature, songRate: Int(a.sampleRate), hasFolder: !untitled, tempoMap: a.tempoMap
         )
     }
 

@@ -109,7 +109,7 @@ fn an_import_is_one_undo_step_and_the_song_grows_to_hold_it() {
     let file = path(dir.path(), "long.mid");
     // Ten beats of one note, past a 32-beat song from beat 28.
     let notes = [FileNote { pitch: 50, at: b("0"), duration: b("10"), velocity: 90 }];
-    std::fs::write(&file, midi_file::write(&notes, "x", 90.0, aaw_model::Meter::COMMON).bytes).unwrap();
+    std::fs::write(&file, midi_file::write(&notes, "x", &[(num_rational::BigRational::from_integer(0.into()), 90.0)], aaw_model::Meter::COMMON).bytes).unwrap();
     let before = get(&s, "");
     edit(&mut s, json!({"op": "midi.import", "file": file, "at": 28, "index": 0})).unwrap();
     assert_eq!(get(&s, "session.length_beats"), json!(40));
@@ -125,7 +125,7 @@ fn an_import_goes_on_a_midi_track_it_is_given_and_on_no_other() {
     phrase(&mut s);
     let file = path(dir.path(), "part.mid");
     let notes = [FileNote { pitch: 38, at: b("1/2"), duration: b("1"), velocity: 100 }];
-    std::fs::write(&file, midi_file::write(&notes, "x", 120.0, aaw_model::Meter::COMMON).bytes).unwrap();
+    std::fs::write(&file, midi_file::write(&notes, "x", &[(num_rational::BigRational::from_integer(0.into()), 120.0)], aaw_model::Meter::COMMON).bytes).unwrap();
     let r = edit(&mut s, json!({"op": "midi.import", "file": file, "track": "keys", "at": "16/3"})).unwrap();
     assert_eq!(r["label"], json!("Import part.mid to keys"));
     assert_eq!(r["path"], json!("tracks.keys.clips.clip2"));
@@ -170,7 +170,7 @@ fn an_import_fills_bars_of_the_songs_meter_and_an_export_writes_it() {
     let file = path(dir.path(), "waltz.mid");
     // Four beats of notes: two bars of 6/8, three beats each, not one of 4/4.
     let notes = [FileNote { pitch: 60, at: b("0"), duration: b("4"), velocity: 90 }];
-    std::fs::write(&file, midi_file::write(&notes, "x", 120.0, aaw_model::Meter::COMMON).bytes).unwrap();
+    std::fs::write(&file, midi_file::write(&notes, "x", &[(num_rational::BigRational::from_integer(0.into()), 120.0)], aaw_model::Meter::COMMON).bytes).unwrap();
     edit(&mut s, json!({"op": "midi.import", "file": file, "at": 30, "index": 0})).unwrap();
     assert_eq!(get(&s, "tracks.waltz.clips.clip1.length_beats"), json!(6));
     assert_eq!(get(&s, "session.length_beats"), json!(36), "grown to the end of a 6/8 bar");
