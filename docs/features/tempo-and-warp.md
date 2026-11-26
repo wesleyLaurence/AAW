@@ -5,8 +5,11 @@ Status: item 1, a beat map through tempo changes, built November 26, 2026
 changes in the song, built November 26, 2026 ([tempo changes](tempo-changes.md)
 is its reference, with its decisions); item 3, the grid following a song,
 built November 26, 2026 ([tempo follow](tempo-follow.md) is its reference,
-with its decisions); items 4–6 proposed, now Next items 1–3 of the backlog,
-built in order, each its own branch and pull request (D205).
+with its decisions); items 4–6 proposed, built in order, each its own branch
+and pull request (D205). The tempo half of item 5, the tempo edited in the
+app, is Next item 4 of the backlog, among the person's notes of November 26,
+2026 (D206); warp markers, warp markers in the app and item 6 are Next items
+11–13.
 
 ## What
 
@@ -324,6 +327,9 @@ measured within 5 ms of the grid; a split, a trim and a loop of it render the
 same beats; and a clip with `source_bpm` renders bit for bit as before.
 
 ### 5. Both in the app
+
+The tempo is built first, ahead of warp markers, as its own item: the person
+asked for tempo changes made in the app on November 26, 2026 (D206).
 
 - **The tempo** on the master's automation lane: a step dragged up or down
   changes its BPM, with the value shown as it moves; a double-click adds a step

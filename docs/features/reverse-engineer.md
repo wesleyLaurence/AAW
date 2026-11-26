@@ -9,7 +9,7 @@ item 3, the form, built the same day as `daw samples form`
 effects, built November 17, 2026 as `daw samples sound` ([sound.md](sound.md),
 D188); item 6, one analysis file, built November 18, 2026 as
 `daw samples study` ([study.md](study.md), D192); item 7 proposed, now Next
-item 6 of the backlog (D182, D194, D205).
+item 14 of the backlog (D182, D194, D205, D206).
 Each item is its own branch and pull request, built one at a time; where a
 model is new to the project, a trial in a throwaway environment on the
 person's songs comes first, as the downbeat model's did (D181).
