@@ -116,3 +116,145 @@ fn a_midi_file_written_from_a_clip_carries_the_steps_where_it_plays() {
         .collect();
     assert_eq!(tempos, vec![500_000, 400_000]);
 }
+
+/// A song played live: its file's downbeats, bar 1 at 1.5 s, four bars at
+/// 120 and four at 150, then a bar of 140, as pins.
+fn b(x: &aaw_model::Beat) -> f64 {
+    num_traits::ToPrimitive::to_f64(&aaw_model::signed_beat(x).unwrap()).unwrap()
+}
+
+fn live_pins() -> Vec<serde_json::Value> {
+    let mut t = 1.5;
+    let mut out = Vec::new();
+    for bar in 1..=10 {
+        out.push(json!({"seconds": t, "bar": bar}));
+        t += 4.0 * 60.0 / if bar <= 4 { 120.0 } else if bar <= 8 { 150.0 } else { 140.0 };
+    }
+    out
+}
+
+fn live_song(dir: &std::path::Path) -> Session {
+    let path = write_audio_song(dir);
+    // The tone stands in for the song: the op is given its beats.
+    let text = std::fs::read_to_string(&path).unwrap().replace("{sample: tone, at: 16}", "{sample: tone, at: 16, source_end_seconds: 60}");
+    std::fs::write(&path, text).unwrap();
+    Session::open(&path, false).unwrap()
+}
+
+#[test]
+fn the_tempo_follows_a_clip_s_downbeats_a_step_where_a_bar_changes_tempo() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = live_song(dir.path());
+    let reply = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": live_pins(), "bpm": 120})).unwrap();
+    // 1.5 s before its first downbeat is 3 beats at 120: bar 1 fits it, so
+    // the clip starts on beat 1 and its downbeat is on bar 2.
+    assert_eq!(reply["bar"], 2, "{reply}");
+    assert_eq!(reply["at"], 1);
+    assert_eq!(steps(&s), vec![(0.0, 120.0), (20.0, 150.0), (36.0, 140.0)]);
+    assert!(reply["largest_off_ms"].as_f64().unwrap() < 0.01, "{reply}");
+    // Every downbeat is on its bar line.
+    let m = s.project().tempo_map();
+    for (k, pin) in live_pins().iter().enumerate() {
+        let file = pin["seconds"].as_f64().unwrap();
+        let heard = m.seconds(1.0) + file;
+        assert!((m.seconds(4.0 + 4.0 * k as f64) - heard).abs() < 1e-6, "bar {k}");
+    }
+    // One undo step takes it all back.
+    s.undo(aaw_host::command::Origin::User, false).unwrap();
+    assert!(s.project().tempo_lane().is_none());
+    assert_eq!(s.project().tracks[1].audio[1].at, aaw_model::Beat::Int(16.into()));
+}
+
+#[test]
+fn a_step_left_out_is_made_up_at_the_next_and_a_bar_given_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = live_song(dir.path());
+    // A band a little off each bar: 120.03, 119.98, ... no step but where
+    // the bars have drifted by more than 0.05 BPM's worth.
+    let mut t = 0.25;
+    let mut pins = Vec::new();
+    for bar in 1..=40 {
+        pins.push(json!({"seconds": t, "bar": bar}));
+        t += 2.0 * 120.0 / (120.0 + 0.04 * (bar as f64 * 1.7).sin());
+    }
+    let reply = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": pins, "bpm": 120, "bar": 5})).unwrap();
+    assert_eq!(reply["bar"], 5);
+    assert_eq!(reply["at"], 15.5);
+    assert!(reply["largest_off_ms"].as_f64().unwrap() < 1.0, "{reply}");
+    // A bar its lead-in does not fit before is refused, with the first that does.
+    let e = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": live_pins(), "bpm": 120, "bar": 1})).unwrap_err();
+    assert!(e.contains("bar 2 or later"), "{e}");
+}
+
+#[test]
+fn the_tempo_follows_beats_inside_the_bar_and_a_clip_cut_into_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = live_song(dir.path());
+    // Three bars of beats, the second bar's third beat late by 20 ms.
+    let mut pins = Vec::new();
+    for bar in 1..=3 {
+        for beat in 1..=4 {
+            let late = if bar == 2 && beat == 3 { 0.02 } else { 0.0 };
+            let seconds = 2.0 + ((bar - 1) * 4 + beat - 1) as f64 * 0.5 + late;
+            pins.push(json!({"seconds": seconds, "bar": bar, "beat": beat, "beats": 4}));
+        }
+    }
+    // The clip starts on beat 2 of the file's first bar.
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.audio.1.source_start_seconds", "value": 2.5})).unwrap();
+    let reply = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": pins, "bpm": 120})).unwrap();
+    assert_eq!(reply["bar"], 1, "{reply}");
+    assert_eq!(reply["at"], 1);
+    // The beat before the late one is longer, the late one shorter.
+    let got = steps(&s);
+    assert_eq!(got[0], (0.0, 120.0));
+    assert_eq!(got[1].0, 5.0);
+    assert!((got[1].1 - 60.0 / 0.52).abs() < 0.001, "{got:?}");
+    assert_eq!(got[2], (6.0, (60.0f64 / 0.48 * 1000.0).round() / 1000.0));
+}
+
+#[test]
+fn the_tempo_follows_only_a_clip_at_its_own_speed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = live_song(dir.path());
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.audio.1.source_bpm", "value": 120})).unwrap();
+    let e = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": live_pins(), "bpm": 120})).unwrap_err();
+    assert!(e.contains("source_bpm"), "{e}");
+    let e = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass", "pins": live_pins(), "bpm": 120})).unwrap_err();
+    assert!(e.contains("not an audio clip"), "{e}");
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.audio.1.source_bpm", "value": null})).unwrap();
+    // Pins outside the clip's file are not followed: two are needed.
+    edit(&mut s, json!({"op": "set", "path": "tracks.bass.audio.1.source_end_seconds", "value": 2.0})).unwrap();
+    let e = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": live_pins(), "bpm": 120})).unwrap_err();
+    assert!(e.contains("two or more"), "{e}");
+}
+
+#[test]
+fn keep_time_moves_the_song_onto_the_new_grid_where_it_sounds() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = live_song(dir.path());
+    edit(&mut s, json!({"op": "marker.add", "at": 24, "text": "drop"})).unwrap();
+    edit(&mut s, json!({"op": "set", "path": "tracks.drums.audio.1.source_bpm", "value": 120})).unwrap();
+    let old = s.project().tempo_map();
+    let heard = |s: &Session, i: usize| s.project().tempo_map().seconds(b(&s.project().tracks[0].audio[i].at));
+    let (hit, marker, section_end) = (heard(&s, 1), old.seconds(24.0), old.seconds(8.0));
+    let clip = old.seconds(16.0);
+    let reply = edit(&mut s, json!({"op": "tempo.follow", "clip": "tracks.bass.audio.1", "pins": live_pins(), "bpm": 120, "keep_time": true})).unwrap();
+    let m = s.project().tempo_map();
+    // The clip stays where it sounds, its first downbeat on a bar.
+    let at = b(&s.project().tracks[1].audio[1].at);
+    assert!((m.seconds(at) - clip).abs() < 0.001, "{reply}");
+    let first = clip + 1.5;
+    let bar = reply["bar"].as_i64().unwrap();
+    assert!((m.seconds(4.0 * (bar - 1) as f64) - first).abs() < 0.001);
+    // Everything else sounds at its second.
+    assert!((heard(&s, 1) - hit).abs() < 1e-5);
+    let mk = b(&s.project().markers[0].at);
+    assert!((m.seconds(mk) - marker).abs() < 1e-5);
+    let sec = &s.project().sections[0];
+    assert!((m.seconds(b(&sec.at) + b(&sec.length_beats)) - section_end).abs() < 1e-5);
+    assert!(reply["moved"].as_u64().unwrap() >= 3, "{reply}");
+    // The stretched hit plays at the tempo where it now is, and is named.
+    let stretched = reply["stretched"].as_array().unwrap();
+    assert_eq!(stretched.len(), 1, "{reply}");
+    assert_eq!(stretched[0]["clip"], "tracks.drums.audio.1");
+}

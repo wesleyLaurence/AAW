@@ -41,6 +41,27 @@ fn given<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> std::re
     T::deserialize(d).map(Some)
 }
 
+/// A second of an audio clip's file pinned to a beat of the session by
+/// `tempo.follow`: bar `bar` of the file's beat map, counted on as the map
+/// counts it, and beat `beat` of that bar's `beats`, both from 1.
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Pin {
+    pub seconds: f64,
+    pub bar: i64,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub beat: i64,
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub beats: i64,
+}
+
+fn one() -> i64 {
+    1
+}
+
+fn is_one(x: &i64) -> bool {
+    *x == 1
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "op")]
 pub enum Command {
@@ -664,6 +685,25 @@ pub enum Command {
     /// Goes back to one tempo, the one at beat 0: the tempo lane goes.
     #[serde(rename = "tempo.clear")]
     TempoClear,
+    /// The tempo lane written from an audio clip's beats, `pins` of its file
+    /// (a beat map's downbeats, or its beats), so that each falls on its bar
+    /// and beat of the session, and the clip moved so its first pin is on bar
+    /// `bar` (the first its lead-in fits before, unless given). The clip plays
+    /// at its own speed: one with `source_bpm` or a loop is refused. `bpm` is
+    /// the tempo before the first pin. A step within 0.05 BPM of the one
+    /// before is left out. With `keep_time`, everything else placed in beats
+    /// moves to the beat that sounds at the second it sounds at now, and the
+    /// tempo before the first pin is fitted so the clip stays where it sounds.
+    #[serde(rename = "tempo.follow")]
+    TempoFollow {
+        clip: String,
+        pins: Vec<Pin>,
+        bpm: f64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        bar: Option<i64>,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        keep_time: bool,
+    },
 
     // Markers
     /// A note at a beat, the person's as they listen: "too busy". Without
@@ -3701,6 +3741,9 @@ impl<'a> Edit<'a> {
                 self.write_tempo(steps)?;
                 out.label = format!("Remove the tempo step at beat {}", beat_text(&at));
             }
+            TempoFollow { clip, pins, bpm, bar, keep_time } => {
+                self.tempo_follow(clip, pins, *bpm, *bar, *keep_time, &mut out)?;
+            }
             TempoClear => {
                 let master = vec![Step::Key("master".into())];
                 if self.root.get("master").is_some() {
@@ -3930,7 +3973,7 @@ impl<'a> Edit<'a> {
     /// Writes the song's tempo as steps of (beat, bpm), the first at beat 0:
     /// the master's tempo lane, a point a step, or with one step no lane and
     /// that tempo the session's.
-    fn write_tempo(&mut self, steps: Vec<(BigRational, f64)>) -> Result<()> {
+    pub(crate) fn write_tempo(&mut self, steps: Vec<(BigRational, f64)>) -> Result<()> {
         let map = aaw_model::TempoMap::from_points(self.tempo().opening(), steps);
         let master = vec![Step::Key("master".into())];
         if self.root.get("master").is_none() {
@@ -4193,7 +4236,7 @@ impl<'a> Edit<'a> {
     }
 
     /// The audio clip a path names, if it names one.
-    fn audio_clip(&self, path: &str) -> Option<Loc> {
+    pub(crate) fn audio_clip(&self, path: &str) -> Option<Loc> {
         let (owner, i) = self.member(path, "audio", "an audio clip").ok()?;
         Some([owner, vec![Step::Key("audio".into()), Step::Index(i)]].concat())
     }

@@ -9,6 +9,7 @@ pub mod client;
 pub mod command;
 pub mod devices;
 pub mod favorites;
+mod follow;
 pub mod generate;
 pub mod host;
 pub mod instruments;

@@ -31,6 +31,7 @@ Built:
 | [metronome](features/metronome.md) | Playback monitoring click and its transport toggle |
 | [manual BPM](features/tempo-control.md) | Editable session tempo in the transport bar |
 | [tempo changes](features/tempo-changes.md) | A `tempo` lane on the master, steps that everything placed in beats follows, and `daw tempo` |
+| [tempo follow](features/tempo-follow.md) | `daw tempo follow`: the tempo lane written from a song played live, so its bars are the session's |
 | [effects](features/effects.md) | Insert effects on tracks, returns and the master, sidechain compression, the limiter, delay, reverb, and sends to returns |
 | [automation](features/automation.md) | Lanes for levels, pans, sends and effect parameters |
 | [perception](features/perception.md) | `daw listen` and `daw compare` |
@@ -92,7 +93,7 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [tempo changes and warp markers](features/tempo-and-warp.md) | Next 1–4; its first two items built |
+| [tempo changes and warp markers](features/tempo-and-warp.md) | Next 1–3; its first three items built |
 | [folders as a tree in the browser](features/browser-folders.md) | Built |
 | [what makes the person wait](features/performance.md) | Next 2; proposed |
 | [colors for tracks and clips](features/colors.md) | Next 3; proposed |
