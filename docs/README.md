@@ -91,13 +91,14 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
+| [tempo changes and warp markers](features/tempo-and-warp.md) | Next 1–6; proposed |
 | [folders as a tree in the browser](features/browser-folders.md) | Built |
 | [what makes the person wait](features/performance.md) | Next 2; proposed |
 | [colors for tracks and clips](features/colors.md) | Next 3; proposed |
 | [a track's height dragged](features/track-height.md) | Next 4; proposed |
 | [names with spaces](features/display-names.md) | Built |
 | [the Drum Rack, and patterns gone](features/drum-rack.md) | Built |
-| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 5 |
+| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 7 |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
