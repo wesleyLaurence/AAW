@@ -3,8 +3,10 @@
 Status: item 1, a beat map through tempo changes, built November 26, 2026
 ([beat map](beat-map.md#tempo-segments) is its reference); item 2, tempo
 changes in the song, built November 26, 2026 ([tempo changes](tempo-changes.md)
-is its reference, with its decisions); items 3–6 proposed, now Next items 1–4
-of the backlog, built in order, each its own branch and pull request (D205).
+is its reference, with its decisions); item 3, the grid following a song,
+built November 26, 2026 ([tempo follow](tempo-follow.md) is its reference,
+with its decisions); items 4–6 proposed, now Next items 1–3 of the backlog,
+built in order, each its own branch and pull request (D205).
 
 ## What
 
@@ -195,6 +197,10 @@ renders as before, bit for bit, over the corpus the tests already render; and
 the app's ruler, clock and tempo field follow the step on a generated song.
 
 ### 3. The grid follows a song: `daw tempo follow`
+
+Built November 26, 2026; [tempo follow](tempo-follow.md) is its reference,
+and its choices are under its Decisions. What follows is the design as
+proposed.
 
 ```sh
 uv run daw tempo follow PROJECT tracks.song.audio.0              # a step a bar

@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod batch;
+mod follow;
 mod generate;
 
 // Debug builds abort when the audio callback allocates.
@@ -1639,6 +1640,33 @@ enum TempoCmd {
     },
     /// Go back to one tempo, the one at the song's start.
     Clear { project: Song },
+    /// Write the tempo from an audio clip's beat map (daw samples beats on its
+    /// file), so that each of its downbeats falls on a bar line and a song
+    /// played live plays unstretched and on the click at each of its tempos.
+    /// The clip is moved so its first downbeat is on a bar, the first its
+    /// lead-in fits before unless --bar is given; the tempo before it is the
+    /// first segment's. The clip must play its file at its own speed: no
+    /// source_bpm, no loop. A clip with source_bpm on the same timeline then
+    /// follows the steps. The reply gives the steps, the clip's place and each
+    /// segment of the map on the session's bars.
+    Follow {
+        project: Song,
+        /// The audio clip, tracks.T.audio.N.
+        clip: String,
+        /// A step a bar (a song played live), a segment of the map (one that
+        /// keeps each tempo steadily) or a beat (one that drifts in the bar).
+        #[arg(long, value_enum, default_value = "bar")]
+        by: follow::By,
+        /// The bar the clip's first downbeat is on.
+        #[arg(long)]
+        bar: Option<i64>,
+        /// For a song built at one tempo: everything else placed in beats
+        /// moves to the beat that sounds at its second now, and the clip stays
+        /// where it sounds, so only the grid moves. The reply lists each clip
+        /// with source_bpm whose speed changes.
+        #[arg(long)]
+        keep_time: bool,
+    },
 }
 
 /// Markers: the notes the person leaves at beats while listening, with M in
@@ -3375,6 +3403,7 @@ fn run(cli: &Cli) -> Result<Json> {
                 TempoCmd::Set { project, at, bpm } => edit(project, C::TempoSet { at: place(project, at)?, bpm: *bpm }),
                 TempoCmd::Remove { project, at } => edit(project, C::TempoRemove { at: place(project, at)? }),
                 TempoCmd::Clear { project } => edit(project, C::TempoClear),
+                TempoCmd::Follow { project, clip, by, bar, keep_time } => follow::run(cli, project, clip, *by, *bar, *keep_time),
             }
         }
         Top::Marker(m) => match m {
