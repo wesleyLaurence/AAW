@@ -588,7 +588,11 @@ fn prepare_ahead(p: &Project, directory: &Path, cache: &mut Cache, tracks: &[usi
         let Ok(audio) = sampler.played(t) else { break 'tracks };
         for clip in &audio {
             let leaves = sampler.clip_leaves(&audio, clip);
-            let Ok(job) = sampler.clip_job(clip, leaves) else { break 'tracks };
+            let job = match sampler.clip_job(clip, leaves) {
+                Ok(Some(job)) => job,
+                Ok(None) => continue,
+                Err(_) => break 'tracks,
+            };
             if !sampler.cache.prepared.contains_key(&job.key) && seen.insert(job.key.clone()) {
                 jobs.push(job);
             }
@@ -796,8 +800,11 @@ impl<'a> Sampler<'a> {
 
     /// What an audio clip's audio is prepared from: its file from its lead
     /// before its start to where it leaves, `leaves` seconds before its end,
-    /// and on through its fade out, as far as the file goes.
-    fn clip_job(&mut self, clip: &AudioClip, leaves: f64) -> Result<Job, String> {
+    /// and on through its fade out, as far as the file goes. None when that
+    /// is not a frame of the file: a clip starting past its file's end, or
+    /// one that leaves before it starts, which plays nothing (`daw check`
+    /// warns of it) rather than stopping the song.
+    fn clip_job(&mut self, clip: &AudioClip, leaves: f64) -> Result<Option<Job>, String> {
         let (_, _, audio) = self.original(&clip.sample)?;
         let length = audio.frames() as f64 / audio.rate as f64;
         let speed = self.clip_speed(clip);
@@ -806,15 +813,16 @@ impl<'a> Sampler<'a> {
             Some(end) => (end + (clip.fade_out_ms / 1000.0 - leaves) * speed).min(length),
             None => length,
         };
-        if start >= end {
-            return Err(format!("{}: audio clip outside sample", clip.sample));
+        let rate = audio.rate as f64;
+        if (start * rate).round_ties_even() >= (end * rate).round_ties_even() {
+            return Ok(None);
         }
         let follow = (clip.source_bpm, clip.stretch);
         // A transpose repitches as a pad's does, or is the stretcher's to
         // make at the clip's length.
         let (repitch, shift) = if clip.stretch.keeps_pitch() { (0.0, clip.transpose) } else { (clip.transpose, 0.0) };
         let tempo = self.clip_tempo(clip);
-        self.part(&clip.sample, start, Some(end), false, false, repitch, follow, shift, tempo)
+        self.part(&clip.sample, start, Some(end), false, false, repitch, follow, shift, tempo).map(Some)
     }
 
     /// The job for part of a sample: from `start` to `end` seconds of its
@@ -953,10 +961,10 @@ impl<'a> Sampler<'a> {
 
     /// The voice an audio clip plays: its part of the file, starting its lead
     /// before its beat, fading in over the start and out over the end. `track`
-    /// is the audio clips of its track.
-    pub fn clip_voice(&mut self, track: &[AudioClip], clip: &AudioClip) -> Result<Voice, String> {
+    /// is the audio clips of its track. None when it has nothing to play.
+    pub fn clip_voice(&mut self, track: &[AudioClip], clip: &AudioClip) -> Result<Option<Voice>, String> {
         let leaves = self.clip_leaves(track, clip);
-        let job = self.clip_job(clip, leaves)?;
+        let Some(job) = self.clip_job(clip, leaves)? else { return Ok(None) };
         // Where the first frame of the file it plays belongs on the timeline,
         // rounded once from the exact place of its beat. A clip split in two
         // then plays the same frames at the same places as the whole one.
@@ -966,7 +974,7 @@ impl<'a> Sampler<'a> {
         let before = (clip.source_start_seconds * file_rate - first) / file_rate / speed;
         let audio = self.prepared_for(job)?;
         let rate = self.project.session.sample_rate as f64;
-        Ok(Voice {
+        Ok(Some(Voice {
             start: ((self.clip_beat(clip) - before) * rate).round_ties_even() as i64,
             // A clip plays its file as it is: a mono file at full level on both sides.
             pan: [1.0, 1.0],
@@ -977,7 +985,7 @@ impl<'a> Sampler<'a> {
             length: audio.frames(),
             audio,
             curve: clip.fade_curve,
-        })
+        }))
     }
 }
 
@@ -1053,7 +1061,7 @@ fn voices(p: &Project, ti: usize, key: String, directory: &Path, cache: &mut Cac
     if !t.audio.is_empty() && t.frozen.is_none() {
         let audio = sampler.played(t).map_err(|e| format!("{}: {e}", t.id))?;
         for clip in &audio {
-            voices.push(sampler.clip_voice(&audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
+            voices.extend(sampler.clip_voice(&audio, clip).map_err(|e| format!("{}: {e}", t.id))?);
         }
         // The renderer takes voices in the order they start.
         voices.sort_by_key(|v| v.start);

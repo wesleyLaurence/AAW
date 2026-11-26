@@ -100,6 +100,21 @@ A clip is named by its path, `tracks.TRACK.audio.N`, or by the `@N` reference
 
 Each is one step of the host's undo history, like any command.
 
+## Where a clip ends
+
+A clip without `source_end_seconds`, or with one past its file's end, ends
+where its file does. The edits that cut at a beat know it: `audio split` and
+`audio trim --start` refuse a beat past it, and `audio cut` and the range
+verbs (`daw range`, a time selection's Delete, Cut and Copy) cut nothing
+there. A beat within a millionth of a beat of a clip's end is its end, since
+the end comes from seconds through floats, so a range from a clip's own end
+leaves no sliver of it.
+
+A clip that still has nothing of its file to play, written by hand or by an
+older version, plays nothing: it starts at or past its file's end, or ends
+before it starts once the lead of the clip after it is taken. The song plays
+around it, and `daw check` names it with `audio-clip-silent`.
+
 ## Around them
 
 - `daw inspect` lists each track's audio clips with their references.
@@ -124,6 +139,20 @@ Each is one step of the host's undo history, like any command.
 - Clips do not reverse. A clip loops with `loop_beats` and `length_beats`
   ([looping-clips.md](looping-clips.md)); a looped clip's start is not trimmed
   and it is split only at a wrap.
+
+## Decisions
+
+- **A clip with nothing to play is silent, not an error (November 26,
+  2026).** The engine refused such a clip, "TRACK: SAMPLE: audio clip
+  outside sample", and one refused clip stopped the whole song until the
+  edit was undone. A time selection's Delete past where a clip's file ended
+  had left one: the host took a clip without an end to go on forever and cut
+  it there, into a piece starting past the file's end. Rejected: refusing the
+  edit, which would not mend a song that already holds such a clip, and
+  removing the clip as the song loads, which would change the person's song
+  without their asking. The edits now read the file's length from the
+  project's folder; an edit with no folder, as a test's, still treats a clip
+  without an end as going on.
 
 Tests: the engine's place a clip's file on its beat to the frame, with a lead, at
 fractional beats and tempos; check both fade curves, the gain and a join; and the

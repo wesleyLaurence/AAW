@@ -9,7 +9,7 @@ use crate::beat::signed_beat;
 use crate::pyfmt::{float_repr, format_g};
 use crate::rules::{note_name, owners, target, Owner, MIDDLE_C};
 use crate::schedule::track_notes;
-use crate::schema::{Instrument, Midi, Pad, Project, Track, Wave};
+use crate::schema::{AudioClip, Instrument, Midi, Pad, Project, Track, Wave};
 use crate::{fraction_str, Beat};
 use num_rational::BigRational;
 use num_traits::{Signed, ToPrimitive};
@@ -45,6 +45,7 @@ pub const CODES: &[(&str, &str)] = &[
     ("stretch-audible", "A pad or audio clip is stretched more than about 8% from its source_bpm, which can be heard: at the song's tempo, or with a tempo lane at a tempo it plays in."),
     ("tempo-step-off-bar", "A step of the master's tempo lane is not on a bar line, where a step is counted; daw tempo set places one on a bar."),
     ("lane-on-bypassed-effect", "An automation lane moves a field of a bypassed effect."),
+    ("audio-clip-silent", "An audio clip has nothing of its file to play: it starts at or past its file's end, or ends before it starts once the lead of the clip after it is taken. It is silent; remove it, or trim or move it onto its audio."),
     ("sample-unreadable", "A sample's file is not audio the engine reads, so a render fails."),
     ("root-note-mismatch", "A sample's root_note disagrees with the pitch measured from its audio."),
 ];
@@ -160,6 +161,7 @@ fn bar_runs(bars: &BTreeSet<i64>) -> String {
 /// whose file is not in it is left out of the checks of where clips sound.
 pub fn check(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
     let mut out = stretch(p, seconds);
+    out.extend(silent_clips(p, seconds));
     out.extend(tempo_steps(p));
     out.extend(bypassed_lanes(p));
     out.extend(notes_outside(p));
@@ -176,6 +178,66 @@ pub fn check(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
         below_hearing(p, t, &mut out);
     }
     crowded(p, &mut out);
+    out
+}
+
+/// Audio clips with nothing of their file to play, worked out as the engine
+/// works out the part of its file a clip plays: from its lead before its
+/// start to where it leaves for the clip after it, through its fade out, as
+/// far as the file goes. Two places less than half a frame apart are one.
+fn silent_clips(p: &Project, seconds: &HashMap<String, f64>) -> Vec<Warning> {
+    const SAME: f64 = 1e-5;
+    let map = p.tempo_map();
+    let speed = |c: &AudioClip| {
+        let tempo = map.tempo_at_exact(&c.at_exact());
+        c.seconds_per_beat(tempo) * tempo / 60.0
+    };
+    let beat = |c: &AudioClip| map.seconds(f(&c.at_exact()));
+    let lead = |c: &AudioClip| (c.lead_ms / 1000.0).min(c.source_start_seconds / speed(c)).min(beat(c));
+    let mut out = Vec::new();
+    for t in &p.tracks {
+        let played: Vec<(usize, AudioClip)> =
+            t.audio.iter().enumerate().filter(|(_, c)| c.active).flat_map(|(i, c)| c.repetitions(&map).into_iter().map(move |r| (i, r))).collect();
+        let mut warned = BTreeSet::new();
+        for (k, (i, c)) in played.iter().enumerate() {
+            let file = seconds.get(&c.sample).copied();
+            let leaves = c.source_end_seconds.map_or(0.0, |end| {
+                let ends = beat(c) + (end - c.source_start_seconds) / speed(c);
+                played.iter().enumerate().find(|(j, (_, n))| *j != k && (beat(n) - ends).abs() < 0.0005).map_or(0.0, |(_, (_, n))| lead(n))
+            });
+            let end = match (c.source_end_seconds, file) {
+                (Some(end), _) => {
+                    let end = end + (c.fade_out_ms / 1000.0 - leaves) * speed(c);
+                    file.map_or(end, |file| end.min(file))
+                }
+                (None, Some(file)) => file,
+                (None, None) => continue,
+            };
+            let start = c.source_start_seconds - lead(c) * speed(c);
+            if start < end - SAME || !warned.insert(*i) {
+                continue;
+            }
+            let clip = &t.audio[*i];
+            let past = file.filter(|file| clip.source_start_seconds >= file - SAME);
+            let why = match past {
+                Some(file) => format!(
+                    "starts {} s into {}, at or past the file's end at {} s",
+                    number(clip.source_start_seconds),
+                    clip.sample,
+                    number(file)
+                ),
+                None => format!("of {} ends before it starts once the lead of the clip after it is taken", clip.sample),
+            };
+            out.push(
+                Warning::new(
+                    "audio-clip-silent",
+                    format!("{}: the clip at beat {} {why}, so it plays nothing", t.id, beat_text(&clip.at_exact())),
+                    vec![format!("tracks.{}.audio.{i}", t.id)],
+                )
+                .at(clip.at_exact()),
+            );
+        }
+    }
     out
 }
 
