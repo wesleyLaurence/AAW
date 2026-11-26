@@ -93,14 +93,19 @@ Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [tempo changes and warp markers](features/tempo-and-warp.md) | Next 1–3; its first three items built |
+| [the compressor and the limiter seen working](features/dynamics-meters.md) | Next 2; proposed |
+| [the equalizer's output gain](features/eq-output.md) | Next 3; proposed |
+| [effects dragged onto a track and along a chain](features/effect-drags.md) | Next 5–6; proposed |
+| [a group's color for its tracks](features/group-colors.md) | Next 8–9; proposed |
+| [selected rows' height dragged together](features/selected-rows-height.md) | Next 10; proposed |
+| [tempo changes and warp markers](features/tempo-and-warp.md) | Its first three items built; the tempo in the app Next 4, the rest Next 11–13 |
 | [folders as a tree in the browser](features/browser-folders.md) | Built |
-| [what makes the person wait](features/performance.md) | Next 2; proposed |
-| [colors for tracks and clips](features/colors.md) | Next 3; proposed |
-| [a track's height dragged](features/track-height.md) | Next 4; proposed |
+| [what makes the person wait](features/performance.md) | Built |
+| [colors for tracks and clips](features/colors.md) | Built |
+| [a track's height dragged](features/track-height.md) | Built |
 | [names with spaces](features/display-names.md) | Built |
 | [the Drum Rack, and patterns gone](features/drum-rack.md) | Built |
-| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 7 |
+| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 14 |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |
