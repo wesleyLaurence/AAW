@@ -308,7 +308,7 @@ def add(file, name=None, bpm=None, downbeat=None, meter=None, replace=False) -> 
         beat_map = {k: v for k, v in beat_map.items() if k not in ("path", "source")}
         beat_map["requested"] = {"bpm": bpm, "downbeat": downbeat, "meter": meter}
         rows = beat_map["beats"]
-        end = min(last, rows[-1]["seconds"] + 60 / beat_map["tempo"]["bpm"])
+        end = min(last, rows[-1]["seconds"] + 60 / beats.last_bpm(beat_map))
         phrases = measured(x, rate, phrase_starts(beat_map), end, whole, beat_map)
     reference = {
         "schema_version": VERSION,

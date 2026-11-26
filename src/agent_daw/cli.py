@@ -255,7 +255,14 @@ def parser():
     )
     beats.add_argument("--all", action="store_true", help="List every beat")
     beats.add_argument(
-        "--bpm", type=float, help="The song's tempo, to settle half or double time"
+        "--bpm",
+        help="The song's tempo, to settle half or double time; where its tempo steps, "
+        "one for each segment in turn, as 140,170",
+    )
+    beats.add_argument(
+        "--segment-at",
+        action="append",
+        help="A time whose nearest beat starts a new tempo; give it again for each step the map misses",
     )
     beats.add_argument(
         "--downbeat",
@@ -889,15 +896,22 @@ def beat_map(a, source):
     """A song's beat map: its summary, and the beats asked for."""
     from . import beats, library
 
-    if a.bpm is not None and not beats.MIN_BPM <= a.bpm <= beats.MAX_BPM:
-        raise ValueError(f"bpm must be {beats.MIN_BPM:g}–{beats.MAX_BPM:g}")
+    bpm = None
+    if a.bpm is not None:
+        try:
+            bpm = [float(v) for v in str(a.bpm).split(",")]
+        except ValueError:
+            raise ValueError(f"bpm is a tempo, or one for each segment as 140,170, not {a.bpm}") from None
+        if not all(beats.MIN_BPM <= v <= beats.MAX_BPM for v in bpm):
+            raise ValueError(f"bpm must be {beats.MIN_BPM:g}–{beats.MAX_BPM:g}")
+    steps = None if a.segment_at is None else [beats.seconds(t) for t in a.segment_at]
     if a.window <= 0 or not 0 < a.seconds <= 60:
         raise ValueError("window must be >0, and seconds >0 and <=60")
     downbeat = None if a.downbeat is None else [beats.seconds(t) for t in a.downbeat]
     at = None if a.near is None else beats.seconds(a.near)
     if a.meter is not None:
         beats.bar_of(a.meter)
-    report = library.beat_map(a.db, source, a.bpm, downbeat, a.refresh, a.meter)
+    report = library.beat_map(a.db, source, bpm, downbeat, a.refresh, a.meter, steps)
     rows = report.pop("beats")
     if a.all:
         report["beats"] = rows

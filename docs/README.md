@@ -35,7 +35,7 @@ Built:
 | [perception](features/perception.md) | `daw listen` and `daw compare` |
 | [sample analysis](features/sample-analysis.md) | `daw samples analyze`, measured search filters, root-note warnings |
 | [sound descriptors](features/sound-descriptors.md) | What a sample sounds like in seven numbers and five words, `daw samples search` sorted and filtered by them, `daw samples like`, and a category from the audio |
-| [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo, beats, downbeats and phrases |
+| [beat map](features/beat-map.md) | `daw samples beats`: a song's tempo and where it steps, beats, downbeats and phrases |
 | [the downbeat model](features/downbeat-model.md) | Beat This! leading `daw samples beats`: the bars it hears, odd bars listed, corrections that hold |
 | [a song's hits](features/song-hits.md) | `daw samples hits`: a song's or a stem's hits in one band, a kick's or a snare's, by bar and beat, with a picture |
 | [notes from audio](features/transcribe.md) | `daw transcribe`: the notes a part plays, heard by Basic Pitch and placed on the beat map, as note text, a MIDI file or a note clip |

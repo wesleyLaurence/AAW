@@ -171,12 +171,14 @@ class _Attacks:
 
 
 class Grid:
-    """A beat map's beats, continued at its tempo before the first and after the last."""
+    """A beat map's beats, continued at its tempo before the first and after the
+    last: its first segment's before, and its last segment's after."""
 
     def __init__(self, report):
         rows = report["beats"]
         self.times = np.array([r["seconds"] for r in rows], dtype=float)
         self.period = 60 / report["tempo"]["bpm"]
+        self.tail = 60 / beats.last_bpm(report)
         self.per_bar = int(report["beats_per_bar"])
         self.rows = rows
 
@@ -186,7 +188,7 @@ class Grid:
         if seconds <= t[0]:
             return (seconds - t[0]) / self.period
         if seconds >= t[last]:
-            return last + (seconds - t[last]) / self.period
+            return last + (seconds - t[last]) / self.tail
         i = int(np.searchsorted(t, seconds, side="right")) - 1
         return i + (seconds - t[i]) / (t[i + 1] - t[i])
 
@@ -195,7 +197,7 @@ class Grid:
         if index <= 0:
             return t[0] + index * self.period
         if index >= last:
-            return t[last] + (index - last) * self.period
+            return t[last] + (index - last) * self.tail
         i = int(np.floor(index))
         return t[i] + (index - i) * (t[i + 1] - t[i])
 

@@ -25,7 +25,7 @@ import soundfile as sf
 ANALYZER = hashlib.sha256(
     b"".join(
         Path(__file__).with_name(name).read_bytes()
-        for name in ("beats.py", "swing.py", "downbeats.py", "downbeat_runner.py")
+        for name in ("beats.py", "segments.py", "swing.py", "downbeats.py", "downbeat_runner.py")
     )
 ).hexdigest()[:12]
 MIN_BPM, MAX_BPM = 60.0, 200.0
@@ -47,6 +47,9 @@ RISE = 0.002  # the time a transient's rise is measured over, seconds
 STEADY_FRAMES = 3
 STEADY_SHARE = 0.8
 AGREE_MS = 10.0  # a transient this near a grid beat is on it
+# A beat followed one by one takes its own transient when it is this near the
+# median of its neighbours': a band pushes and pulls a beat by some milliseconds.
+NEIGHBOURS = 0.025
 WINDOW = 8  # beats in a window when following a tempo that drifts
 PHRASE_BARS = 4  # bars either side of a downbeat compared for a phrase change
 
@@ -308,7 +311,7 @@ def _fit(mono, sr, start, step, late, searches):
         fit["spread"] = float(np.sqrt(np.mean(left[kept] ** 2)))
         fit["trend"] = np.interp(index, index[sharp][kept], _smooth(left[kept], 17))
         total = late[sharp] + left
-        near = np.abs(total - _smooth(total, 5)) <= 0.010
+        near = np.abs(total - _smooth(total, 5)) <= NEIGHBOURS
         fit["late"] = _extend(index, index[sharp][near], total[near])
     grid = fit["start"] + fit["step"] * index + late
     offsets, rises = transients(mono, sr, grid, SEARCH)
@@ -467,19 +470,34 @@ def requested_times(downbeat) -> list[float]:
     return sorted(float(t) for t in downbeat)
 
 
-def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
-    """The beat map of a file. `bpm` settles half or double time; `downbeat` is a
-    time in seconds, or a list of them, whose nearest beat is a downbeat; `meter`
-    is the song's time signature, whose beats make a bar.
+def bpm_values(bpm) -> list[float]:
+    """The --bpm asked for: none, one, or one for each segment."""
+    if bpm is None:
+        return []
+    if isinstance(bpm, (int, float)):
+        return [float(bpm)]
+    return [float(b) for b in bpm]
+
+
+def measure(path: Path, bpm=None, downbeat=None, meter=None, segment_at=None) -> dict:
+    """The beat map of a file. `bpm` settles half or double time, a tempo or one
+    for each segment in turn; `downbeat` is a time in seconds, or a list of them,
+    whose nearest beat is a downbeat; `meter` is the song's time signature, whose
+    beats make a bar; `segment_at` is a time, or a list of them, whose nearest
+    beat starts a new tempo.
 
     Where the downbeat model is installed it leads (downbeats.py), and a bar is
     the length it hears unless `meter` says; without it a bar is 4/4 unless
     `meter` says, and one downbeat is scored for the whole song from what tends to
-    happen there."""
-    from . import downbeats
+    happen there. Where the tempo steps, each segment is measured on its own
+    (segments.py)."""
+    from . import downbeats, segments
 
     asked_bar = bar_of(meter) if meter else None
     asked = requested_times(downbeat)
+    hints = bpm_values(bpm)
+    hint = hints[0] if hints else None
+    asked_steps = requested_times(segment_at)
     mono, sr = read(path)
     duration = len(mono) / sr
     peak = float(np.abs(mono).max())
@@ -500,42 +518,110 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
     if why is None:
         try:
             found = downbeats.frames(path)
-            plan = downbeats.plan(found, _unit(flux), fps, bpm)
+            plan = downbeats.plan(found, _unit(flux), fps, hint)
             if len(plan["beats"]) < 8:
                 found, why = None, "The downbeat model heard too few beats"
         except ValueError as exc:
             found, why = None, str(exc)
+    split = None  # the segments, where the tempo steps
     if found is None:
         model["note"] = why
-        times, coarse, tempo = track(mono, sr, envelope, bpm)
+        times, coarse, tempo = track(mono, sr, envelope, hint)
+        # One grid can fit the stronger of two tempos and call the song steady, so
+        # the envelope is read for steps whatever the grid says. A song that keeps
+        # to no grid, or steps, has its beats followed one by one, each moved to
+        # its attack, as the model's are.
+        cuts = segments.rough_steps(envelope, fps)
+        if cuts or asked_steps or len(hints) > 1 or not tempo["steady"]:
+            follow_beats = None
+            if cuts or not tempo["steady"]:
+                follow_beats = downbeats.refined(
+                    mono, sr, segments.followed(mono, sr, envelope, cuts, 60 / tempo["bpm"])
+                )
+            first = times if follow_beats is None else follow_beats
+            asked_at = segments.forced_at(first, asked_steps)
+            starts = segments.joined(segments.steps_in(first), asked_at, len(first))
+            if starts or follow_beats is not None:
+                split = {
+                    "first": first,
+                    "starts": [0, *starts],
+                    "hints": [hints[k] if k < len(hints) else None for k in range(len(starts) + 1)],
+                    "forced": [False, *(s in asked_at for s in starts)],
+                    "followed": follow_beats,
+                }
     else:
-        times, coarse, tempo = track(mono, sr, envelope, plan["bpm"] or bpm)
-        agreement = downbeats.shared(plan["beats"], times) if plan["factor"] else None
-        model.update(
-            used=True,
-            heard_bpm=round(plan["heard_bpm"], 2),
-            counted={1.0: "as heard", 2.0: "doubled", 0.5: "halved", None: "at --bpm"}[plan["factor"]],
-            beats_from="onsets",
-            agreement=None if agreement is None else round(agreement, 3),
-            device=found["device"],
-            seconds=found["seconds"],
+        seg = downbeats.segmented(found, _unit(flux), fps, hints, asked_steps)
+        if seg is not None:
+            split = {
+                "first": seg["beats"],
+                "starts": seg["starts"],
+                "hints": seg["bpm"],
+                "forced": seg["forced"],
+                "model": seg,
+            }
+        else:
+            times, coarse, tempo = track(mono, sr, envelope, plan["bpm"] or hint)
+            agreement = downbeats.shared(plan["beats"], times) if plan["factor"] else None
+            model.update(
+                used=True,
+                heard_bpm=round(plan["heard_bpm"], 2),
+                counted={1.0: "as heard", 2.0: "doubled", 0.5: "halved", None: "at --bpm"}[plan["factor"]],
+                beats_from="onsets",
+                agreement=None if agreement is None else round(agreement, 3),
+                device=found["device"],
+                seconds=found["seconds"],
+            )
+            if agreement is not None and agreement < downbeats.SAME_SHARE:
+                times, tempo = downbeats.tempo_of(downbeats.refined(mono, sr, plan["beats"]), mono, sr)
+                coarse = times.copy()
+                model["beats_from"] = "model"
+            # Half and double the tempo, and the onsets' own first choice where it is another.
+            chosen = tempo["bpm"]
+            others = [b for b in (chosen / 2, chosen * 2) if MIN_BPM <= b <= MAX_BPM]
+            own = tempo_options(envelope, fps)[0]
+            if all(abs(np.log(own / b)) > 0.04 for b in [chosen, *others]):
+                others.append(own)
+            tempo["ambiguous_with"] = sorted(round(float(b), 2) for b in others)
+    if split is None and len(hints) > 1:
+        raise ValueError(
+            f"--bpm gives {len(hints)} tempos and the map has one tempo; give --segment-at for each step"
         )
-        if agreement is not None and agreement < downbeats.SAME_SHARE:
-            times, tempo = downbeats.tempo_of(downbeats.refined(mono, sr, plan["beats"]), mono, sr)
-            coarse = times.copy()
-            model["beats_from"] = "model"
-        # Half and double the tempo, and the onsets' own first choice where it is another.
-        chosen = tempo["bpm"]
-        others = [b for b in (chosen / 2, chosen * 2) if MIN_BPM <= b <= MAX_BPM]
-        own = tempo_options(envelope, fps)[0]
-        if all(abs(np.log(own / b)) > 0.04 for b in [chosen, *others]):
-            others.append(own)
-        tempo["ambiguous_with"] = sorted(round(float(b), 2) for b in others)
+    if split is not None:
+        spans = segments.bounds(split["first"], split["starts"], duration)
+        seg = split.get("model")
+        if seg is None:
+            pieces = segments.measured(mono, sr, envelope, spans, split["hints"], split["followed"], label="followed")
+        else:
+            pieces = segments.measured(mono, sr, envelope, spans, split["hints"], seg["beats"], seg["counted"])
+        pieces, spans, split = segments.merged(mono, sr, envelope, pieces, spans, split)
+        seg = split.get("model")
+        times, coarse, seg_starts = segments.joined_beats(pieces)
+        tempo = segments.summary(pieces)
+        if seg is not None:
+            sources = {f["beats_from"] for _, _, f in pieces}
+            shares = [f["agreement"] for _, _, f in pieces if f.get("agreement") is not None]
+            model.update(
+                used=True,
+                heard_bpm=round(seg["heard_bpm"][0], 2),
+                counted=seg["how"][0],
+                beats_from=sources.pop() if len(sources) == 1 else "both",
+                agreement=round(min(shares), 3) if shares else None,
+                device=found["device"],
+                seconds=found["seconds"],
+            )
+        tempo["ambiguous_with"] = segments.ambiguous(
+            tempo["bpm"], [f["bpm"] for _, _, f in pieces[1:2]], tempo["ambiguous_with"]
+        )
+        # Where each segment starts, by its first beat's time, since beats
+        # before the first sound and after the last are dropped below.
+        seg_times = [float(times[s]) if s < len(times) else duration for s in seg_starts]
     inside = (times >= first_sound - 0.02) & (times < min(last_sound, duration))
     times, coarse = times[inside], coarse[inside]
     if len(times) < max(8, 2 * (asked_bar or 4)):
         raise ValueError(f"Too few beats for a beat map: {path}")
     forced = sorted({int(np.argmin(np.abs(times - t))) for t in asked})
+    if split is not None:
+        seg_at = [int(np.searchsorted(times, t - 1e-9)) for t in seg_times]
 
     # Each beat's strength: the envelope's peak near it, against the strongest.
     frames = np.round(coarse * fps).astype(int)
@@ -544,13 +630,22 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
     strength = np.minimum(strength / max(np.percentile(strength, 95), 1e-30), 1.0)
 
     # What changes on each beat: the level in bands, and the pitch classes.
-    ends = np.append(times, min(times[-1] + 60 / tempo["bpm"], duration))
+    end_bpm = tempo["bpm"] if split is None else pieces[-1][2]["bpm"]
+    ends = np.append(times, min(times[-1] + 60 / end_bpm, duration))
     floor = max(float(power.max()), 1e-30) * 1e-8
     by_beat = _per_beat(power, fps, ends)
 
     if found is not None:
         # The bars: where the model hears downbeats, in bars of the length it hears.
-        factor = plan["factor"]
+        # In a song in segments each is counted its own way, and its bars are
+        # found as a song's are, from where it starts.
+        how = {"as heard": 1.0, "doubled": 2.0, "halved": 0.5, "at --bpm": None}
+        if split is None:
+            counts = [(0, len(times), plan["factor"])]
+        else:
+            ends_at = [*seg_at[1:], len(times)]
+            counts = [(lo, hi, how[h]) for lo, hi, h in zip(seg_at, ends_at, split["model"]["how"]) if hi > lo]
+        factor = counts[0][2]
         if asked_bar:
             per_bar = asked_bar
         elif factor == 2.0:
@@ -561,19 +656,28 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
             per_bar = 4
         else:
             per_bar = plan["bar"]
-        length = per_bar * (2 if factor == 2.0 else 1)
         odds_on = downbeats.likelihood(found["downbeat"], found["fps"], times)
         # The model's bars up to the first downbeat asked for; from each one asked
         # for, bars of the map's length to the next.
         until = forced[0] if forced else len(times)
-        if forced:
-            heard_starts = downbeats.bars(odds_on[: until + 1], length, [until])
-            heard_starts = heard_starts[heard_starts < until]
-        else:
-            heard_starts = downbeats.bars(odds_on, length)
-        model_starts = heard_starts
-        if factor == 2.0 and len(heard_starts):
-            model_starts = downbeats.halves(heard_starts, until, per_bar)
+        heard_starts, model_starts = [], []
+        for lo, hi, factor in counts:
+            hi = min(hi, until)
+            if hi <= lo:
+                continue
+            length = per_bar * (2 if factor == 2.0 else 1)
+            if hi == until and forced:
+                found_starts = downbeats.bars(odds_on[lo : hi + 1], length, [hi - lo]) + lo
+                found_starts = found_starts[found_starts < hi]
+            else:
+                found_starts = downbeats.bars(odds_on[lo:hi], length) + lo
+            heard_starts.extend(found_starts)
+            if factor == 2.0 and len(found_starts):
+                model_starts.extend(downbeats.halves(found_starts - lo, hi - lo, per_bar) + lo)
+            else:
+                model_starts.extend(found_starts)
+        heard_starts = np.array(heard_starts, dtype=int)
+        model_starts = np.array(model_starts, dtype=int)
         asked_starts = downbeats.anchored(len(times), forced, per_bar, back=False) if forced else []
         starts = np.array([*model_starts, *asked_starts], dtype=int)
         # A bar a doubled count cut in two is as sure as the bar it came from.
@@ -652,6 +756,24 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
             zip(times, strength, downbeats.labels(len(times), starts, per_bar))
         )
     ]
+    if split is None:
+        first_segment = {
+            "bar": beats[0]["bar"],
+            "seconds": beats[0]["seconds"],
+            "beat_seconds": beats[0]["seconds"],
+            "bpm": tempo["bpm"],
+            "steady": tempo["steady"],
+            "drift_ms": tempo["drift_ms"],
+            "bpm_range": tempo["bpm_range"],
+            "ambiguous_with": tempo["ambiguous_with"],
+            "beats_from": model.get("beats_from", "onsets"),
+            "set_by": "measurement",
+        }
+        tempo["segments"] = [first_segment]
+    else:
+        at = [min(i, len(times) - 1) for i in seg_at]
+        set_by = ["measurement", *("request" if f else "measurement" for f in split["forced"][1:])]
+        tempo["segments"] = segments.report(times, at, pieces, beats, per_bar, set_by)
     return {
         "path": str(path),
         "analyzer": ANALYZER,
@@ -678,6 +800,13 @@ def measure(path: Path, bpm=None, downbeat=None, meter=None) -> dict:
         ),
         "source": "measured from decoded audio (mono sum); estimates, not ground truth",
     }
+
+
+def last_bpm(report) -> float:
+    """The tempo a map ends at: its last segment's, which is its one tempo in a
+    map made before segments."""
+    found = report["tempo"].get("segments") or [report["tempo"]]
+    return float(found[-1]["bpm"])
 
 
 def seconds(text) -> float:

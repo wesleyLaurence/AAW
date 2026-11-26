@@ -664,13 +664,14 @@ def analyze_all(db: Path, refresh=False):
     }
 
 
-def beat_map(db: Path, path: Path, bpm=None, downbeat=None, refresh=False, meter=None):
+def beat_map(db: Path, path: Path, bpm=None, downbeat=None, refresh=False, meter=None, segment_at=None):
     """A file's beat map, measured once and kept beside it as NAME.beats.json.
 
     The saved map is used while the audio and the measuring code are unchanged.
-    `bpm`, `downbeat` and `meter` correct it and are kept with it, so later calls
-    give the corrected map; `refresh` measures again without them. `downbeat` is
-    a time or a list of them, kept as a time when there is one. A map measured
+    `bpm`, `downbeat`, `meter` and `segment_at` correct it and are kept with it,
+    so later calls give the corrected map; `refresh` measures again without
+    them. `downbeat` and `segment_at` are a time or a list of them, and `bpm` a
+    tempo or one for each segment, each kept as one value when there is one. A map measured
     without the downbeat model is measured again once the model is installed.
     Nothing is written beside a file in the library index, whose map is measured
     on each call.
@@ -680,23 +681,31 @@ def beat_map(db: Path, path: Path, bpm=None, downbeat=None, refresh=False, meter
 
     path = path.resolve()
     sidecar = path.with_name(f"{path.stem}.beats.json")
-    sha, asked = digest(path), {"bpm": None, "downbeat": None, "meter": None}
+    sha, asked = digest(path), {"bpm": None, "downbeat": None, "meter": None, "segment_at": None}
+
+    def one_or_list(values):
+        return None if not values else values[0] if len(values) == 1 else values
+
     if downbeat is not None:
-        times = beats.requested_times(downbeat)
-        downbeat = times[0] if len(times) == 1 else times or None
+        downbeat = one_or_list(beats.requested_times(downbeat))
+    if segment_at is not None:
+        segment_at = one_or_list(beats.requested_times(segment_at))
+    if bpm is not None:
+        bpm = one_or_list(beats.bpm_values(bpm))
     if sidecar.is_file() and not refresh:
         saved = json.loads(sidecar.read_text())
         if saved.get("sha256") == sha and saved.get("analyzer") == beats.ANALYZER:
             stale = not saved.get("model", {}).get("used") and downbeats.unavailable() is None
-            if bpm is None and downbeat is None and meter is None and not stale:
+            if bpm is None and downbeat is None and meter is None and segment_at is None and not stale:
                 return {"path": str(path), **saved, "map": str(sidecar), "cached": True}
             asked = {**asked, **saved["requested"]}
     asked = {
         "bpm": asked["bpm"] if bpm is None else bpm,
         "downbeat": asked["downbeat"] if downbeat is None else downbeat,
         "meter": asked["meter"] if meter is None else meter,
+        "segment_at": asked["segment_at"] if segment_at is None else segment_at,
     }
-    report = beats.measure(path, asked["bpm"], asked["downbeat"], asked["meter"])
+    report = beats.measure(path, asked["bpm"], asked["downbeat"], asked["meter"], asked["segment_at"])
     report = {**report, "sha256": sha, "requested": asked}
     con = connect(db)
     try:

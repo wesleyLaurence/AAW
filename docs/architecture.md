@@ -184,6 +184,10 @@ Python, in `src/agent_daw`:
   separation environment by `downbeat_runner.py`: the tempo it counts, its
   beats or the onsets', and bars of the length it hears with the odd ones
   listed; see [downbeat-model.md](features/downbeat-model.md).
+- `segments.py`: where a song's tempo steps, from the model's beats or, without
+  it, the onset envelope's tempo in windows and beats followed by dynamic
+  programming; each segment measured as a song of one tempo is, and the beats
+  joined across the steps; see [beat-map.md](features/beat-map.md#tempo-segments).
 - `hits.py`: a song's or a stem's hits in one band, from its filtered level,
   each timed from the file's own attack and placed on the beat map, with the
   counts of their levels and a picture (`daw samples hits`); see

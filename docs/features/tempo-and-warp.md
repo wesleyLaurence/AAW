@@ -1,7 +1,9 @@
 # Tempo changes and warp markers — proposed November 26, 2026
 
-Status: proposed; Next items 1–6 of the backlog, built in order, each its own
-branch and pull request (D205).
+Status: item 1, a beat map through tempo changes, built November 26, 2026
+([beat map](beat-map.md#tempo-segments) is its reference); items 2–6 proposed,
+now Next items 1–5 of the backlog, built in order, each its own branch and pull
+request (D205).
 
 ## What
 
@@ -80,6 +82,10 @@ hidden in it is not in the song. Converting one is a deliberate edit,
 [`daw tempo follow --keep-time`](#3-the-grid-follows-a-song-daw-tempo-follow).
 
 ### 1. A beat map through tempo changes
+
+Built November 26, 2026; [beat map](beat-map.md#tempo-segments) is its
+reference, and its choices are under [Decisions](#decisions). What follows is
+the design as proposed.
 
 `daw samples beats` follows one tempo, or one that wanders slowly; a song that
 changes tempo is not followed ([beat map](beat-map.md)). The downbeat model
@@ -343,6 +349,51 @@ and type a tempo, and drag a marker, each landing in the song as the matching
 Done when: a generated song with a ramp renders each hit within one frame of the
 formula's time, and a song in 4/4 that turns to 3/4 at bar 9 counts its bars on
 in the ruler and `daw map`.
+
+## Decisions
+
+Item 1, November 26, 2026:
+
+- **A step is a change of the span of two bars, not of their median.** The
+  model places a beat on its 20 ms frame, so at 150 BPM a beat is 0.38 or
+  0.40 s and the median of eight jumps by 5%, which read as steps all through a
+  steady song. The span averages the frames out.
+- **Half and double time is no step, anywhere.** The model hears a sparse
+  stretch of a 154 song at 77, and the stretches where it flips read at
+  in-between tempos, 100 to 113, which a fold of the spans alone did not stop:
+  one steady studio song came out in thirteen segments. The model's beats are
+  first evened out, a beat two or three of the song's quicker common beat long
+  cut into them; without the model the rough tempos are an octave folded. A
+  half-time switch is then the same tempo, as the design has it, and is given
+  with `--segment-at` and `--bpm` when wanted. Rejected: confirming the model's
+  steps with the onset tempogram's, since that one found three steps in the
+  steady song and missed the band's step in the live one.
+- **With the model, a segment is counted nearest the longest one.** Counted
+  alone, as the design said, the beat switch the model heard at 85 after 70
+  stayed 85, a slow groove by the person's taste, giving 140 then 85. Each
+  segment but the longest takes the half, same or double nearest the longest's
+  tempo. Without the model each segment settles its own, from where its
+  transients sit.
+- **Without the model, a song that keeps to no grid is followed by dynamic
+  programming.** The earlier following of window offsets was off by 120 to 390
+  ms on a band's drift with beats 10 ms either way, and joining a grid fitted to
+  each side of a step landed eleven beats late in the same drift. Ellis's
+  dynamic programming, with the beat's length held near each stretch's tempo
+  and either one near a step, followed both within a frame, and each beat moved
+  to its attack within 30 ms is within 0.1 ms. A steady song is measured as
+  before, bit for bit.
+- **A beat followed takes its own transient within 25 ms of its neighbours'
+  median**, not 10 ms: a band moves a beat 10 ms either way, and at 10 ms the
+  beats furthest out were taken from their neighbours, 13 ms off.
+- **The bars are found in each segment as in a song.** One path of the model's
+  downbeats through the whole song, bars of four counted beats, put a bar of
+  seven before the switch in the beat switch song, since half the bars of a
+  segment counted doubled have no downbeat the model heard.
+- **Neighbours at one tempo after measuring are one segment**, measured again
+  over both, with and without the model: stretches the model heard two ways
+  can come out at one tempo.
+- **A step is reported on the nearest bar line**, with the beat it starts on
+  as `beat_seconds`; the beats themselves stay where they are measured.
 
 ## Open questions
 
