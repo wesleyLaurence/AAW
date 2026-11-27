@@ -1034,6 +1034,16 @@ private struct DevicePanel: View {
         }
         .frame(width: Self.folded, height: height, alignment: .top)
         .background(Color(nsColor: selected ? Theme.gray(0.3) : Theme.gray(0.24)))
+        .overlay(alignment: .trailing) {
+            // A folded compressor, limiter or clipper keeps a bar of what it takes off.
+            if !effect.bypass, effect.kind == "compressor" || Self.metered.contains(effect.kind) {
+                DynamicsDrawing(model: model, effect: effect, style: .strip)
+                    .frame(width: 3)
+                    .padding(.top, 24)
+                    .padding(.bottom, 6)
+                    .padding(.trailing, 2)
+            }
+        }
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))
         .contentShape(Rectangle())
@@ -1044,6 +1054,44 @@ private struct DevicePanel: View {
         .onDrag(drag)
         .contextMenu { menu }
         .help("\(title), folded: click to open it out")
+    }
+
+    /// The effects whose reduction a meter beside their fields shows.
+    static let metered: Set<String> = ["limiter", "clipper"]
+
+    private var panelWidth: CGFloat {
+        switch effect.kind {
+        case "eq": EqPanel.width
+        case "compressor": 420
+        case _ where Self.metered.contains(effect.kind): Self.width + 50
+        default: Self.width
+        }
+    }
+
+    /// The effect's fields a row each, with the marks that automate them.
+    private var fields: some View {
+        VStack(spacing: 3) {
+            ForEach(effect.fields, id: \.name) { field in
+                HStack(spacing: 4) {
+                    Text(field.label)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 62, alignment: .leading)
+                    FieldControl(model: model, effect: effect.key, field: field)
+                    LaneMark(model: model, row: chain.row, field: field)
+                }
+                .frame(height: 19)
+            }
+            if let note {
+                Text(note)
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 2)
+            }
+        }
+        .padding(6)
     }
 
     private var panel: some View {
@@ -1109,35 +1157,31 @@ private struct DevicePanel: View {
                     EqPanel(model: model, chain: chain, effect: effect)
                 } else if effect.kind == "analyzer" {
                     AnalyzerStrip(model: model, effect: effect)
-                } else {
-                    VStack(spacing: 3) {
-                        ForEach(effect.fields, id: \.name) { field in
-                            HStack(spacing: 4) {
-                                Text(field.label)
-                                    .font(.system(size: 10))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 62, alignment: .leading)
-                                FieldControl(model: model, effect: effect.key, field: field)
-                                LaneMark(model: model, row: chain.row, field: field)
-                            }
-                            .frame(height: 19)
-                        }
-                        if let note {
-                            Text(note)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.top, 2)
-                        }
+                } else if effect.kind == "compressor" {
+                    HStack(alignment: .top, spacing: 0) {
+                        DynamicsDrawing(model: model, effect: effect, style: .display)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding([.leading, .vertical], 6)
+                            .help("What reaches the compressor, filled, what leaves it as a line over that, and what it takes off from the top; drag the threshold's line up and down. The meter's number is the most taken off since a click or a play.")
+                        fields.frame(width: Self.width - 12)
                     }
-                    .padding(6)
+                } else if Self.metered.contains(effect.kind) {
+                    HStack(alignment: .top, spacing: 0) {
+                        fields
+                        DynamicsDrawing(model: model, effect: effect, style: .meter)
+                            .frame(width: 44)
+                            .frame(maxHeight: .infinity)
+                            .padding([.trailing, .vertical], 6)
+                            .help("The level reaching it, with its ceiling marked, and the gain it takes off falling from the top; the number is the most taken off since a click or a play")
+                    }
+                } else {
+                    fields
                 }
             }
             .opacity(effect.bypass ? 0.5 : 1)
             Spacer(minLength: 0)
         }
-        .frame(width: effect.kind == "eq" ? EqPanel.width : Self.width, height: height, alignment: .top)
+        .frame(width: panelWidth, height: height, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.19)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: selected ? 2 : 0))

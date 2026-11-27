@@ -13,6 +13,7 @@
 
 use crate::dynamics::Reductions;
 use crate::envelope::Knob;
+use crate::gauge::{peak, Hopper};
 use crate::resample::i0;
 use crate::{Clock, Frame};
 use std::f64::consts::PI;
@@ -175,6 +176,8 @@ pub struct Clipper {
     pub knee: Knob,
     values: [Vec<f64>; 3],
     pub reduction: Reductions,
+    /// The hops its panel draws, when it is watched.
+    pub hopper: Hopper,
 }
 
 impl Clipper {
@@ -191,6 +194,7 @@ impl Clipper {
             knee,
             values: [0; 3].map(|_| vec![0.0; max_block]),
             reduction: Reductions::default(),
+            hopper: Hopper::default(),
         }
     }
 
@@ -201,6 +205,7 @@ impl Clipper {
         self.drive.fill(clock.frame, clock.step, &mut drives[..n]);
         self.knee.fill(clock.frame, clock.step, &mut knees[..n]);
         let late = Clipper::latency(self.over.as_ref().map_or(1, |o| o.factor as i64)) as i64;
+        let watched = self.hopper.on(&clock);
         for (i, frame) in x.iter_mut().enumerate() {
             let (gain, ceiling) = (amplitude(drives[i]), amplitude(ceilings[i]));
             let start = ceiling * amplitude(-knees[i]);
@@ -210,6 +215,9 @@ impl Clipper {
                 None => ([clip(driven[0], ceiling, start), clip(driven[1], ceiling, start)], taken(driven, ceiling, start)),
             };
             self.reduction.record(taken, clock.frame + i as i64 * clock.step - late, &clock);
+            if watched {
+                self.hopper.add(peak(driven), peak(out), taken, ceilings[i]);
+            }
             *frame = out;
         }
     }

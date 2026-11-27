@@ -1,6 +1,6 @@
 # A group's color for its tracks — proposed November 26, 2026
 
-Status: proposed, Next items 8 and 9 of the backlog (D206).
+Status: proposed, Next items 6 and 7 of the backlog (D206).
 
 ## What
 

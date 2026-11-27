@@ -1,6 +1,6 @@
 # Selected rows' height dragged together — proposed November 26, 2026
 
-Status: proposed, Next item 10 of the backlog (D206).
+Status: proposed, Next item 8 of the backlog (D206).
 
 ## What
 
