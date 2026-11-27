@@ -100,7 +100,9 @@ Rust, in `engine/crates` (see [../engine/README.md](../engine/README.md)):
   samples that a limiter on a true peak and the analyzer's meter read
   (`truepeak`), the spectrum tap an
   equalizer's panel
-  draws from, the analyzer's ring and the meter that reads it for its
+  draws from, the gauge of hops a compressor's, a limiter's or a clipper's
+  panel draws its levels and reduction from (`gauge`), the analyzer's ring
+  and the meter that reads it for its
   levels, loudness, spectrum, stereo field, spectrogram and waveform (`meter`),
   the loudness the meter and `daw listen` both read, gated, its range and its
   loudest 3 s and 400 ms (`loudness`),

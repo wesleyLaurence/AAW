@@ -124,7 +124,12 @@ stream is cut into blocks, and processing never allocates.
   points share one value is that static value. An equalizer on a track, a
   group, a return or the master writes its output into a ring the app reads
   for the spectrum under its curve (`spectrum`), kept beside the program
-  cache so that an edit leaves it where it was. An analyzer, which changes
+  cache so that an edit leaves it where it was. A compressor, a limiter and a
+  clipper there each fold the frames they process while the transport rolls
+  into hops of 256 frames, the loudest in and out, the most taken off and the
+  threshold or ceiling, in a ring of 1024 hops kept the same way
+  (`gauge::Gauge`), which their panels draw (`aaw-ffi`'s
+  `Song::gain_reduction`). An analyzer, which changes
   nothing, writes every frame of its output, both channels, into a ring of
   65 536 frames with a count of frames written (`meter::Ring`), kept the
   same way, and a `meter::Meter` fed from it off the audio thread works out

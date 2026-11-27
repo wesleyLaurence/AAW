@@ -1,6 +1,6 @@
 # The equalizer's output gain — proposed November 26, 2026
 
-Status: proposed, Next item 3 of the backlog (D206).
+Status: proposed, Next item 1 of the backlog (D206).
 
 ## What
 

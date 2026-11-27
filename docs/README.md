@@ -88,24 +88,24 @@ Built:
 | [the agent's questions in the panel](features/agent-questions.md) | The agent's questions with choices drawn in the conversation, one or several and Other, the answers sent back; a plan to approve or send back; a request the panel does not answer said in a line |
 | [beats and sixteenths in the ruler](features/ruler-beats.md) | The bar strip labels beats, eighths and sixteenths as the zoom leaves room, `5.2` and `5.2.3`, in the meter's own beats and a triplet grid's thirds, the piano roll's ruler alike; a click there lands on what is shown |
 | [finding one's way in the CLI](features/cli-navigation.md) | `daw --help` in sections, `daw describe batch`, `daw describe TOPIC.PART`, tested recipes, `daw audio-device` for the Mac's audio devices, and a line for every command, each held by a test |
+| [the compressor and the limiter seen working](features/dynamics-meters.md) | While the song plays, the compressor's display of the level reaching it and leaving it with the reduction from the top and its threshold a line dragged up and down; a meter on the limiter and the clipper with the ceiling marked; the most taken off held as a number; a reduction bar on a folded device |
 
 Proposed, in the order of Next in the backlog:
 
 | Feature | Backlog |
 |---|---|
-| [the compressor and the limiter seen working](features/dynamics-meters.md) | Next 2; proposed |
-| [the equalizer's output gain](features/eq-output.md) | Next 3; proposed |
-| [effects dragged onto a track and along a chain](features/effect-drags.md) | Next 5–6; proposed |
-| [a group's color for its tracks](features/group-colors.md) | Next 8–9; proposed |
-| [selected rows' height dragged together](features/selected-rows-height.md) | Next 10; proposed |
-| [tempo changes and warp markers](features/tempo-and-warp.md) | Its first three items built; the tempo in the app Next 4, the rest Next 11–13 |
+| [the equalizer's output gain](features/eq-output.md) | Next 1; proposed |
+| [effects dragged onto a track and along a chain](features/effect-drags.md) | Next 3–4; proposed |
+| [a group's color for its tracks](features/group-colors.md) | Next 6–7; proposed |
+| [selected rows' height dragged together](features/selected-rows-height.md) | Next 8; proposed |
+| [tempo changes and warp markers](features/tempo-and-warp.md) | Its first three items built; the tempo in the app Next 2, the rest Next 9–11 |
 | [folders as a tree in the browser](features/browser-folders.md) | Built |
 | [what makes the person wait](features/performance.md) | Built |
 | [colors for tracks and clips](features/colors.md) | Built |
 | [a track's height dragged](features/track-height.md) | Built |
 | [names with spaces](features/display-names.md) | Built |
 | [the Drum Rack, and patterns gone](features/drum-rack.md) | Built |
-| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 14 |
+| [reverse-engineering a song](features/reverse-engineer.md) | Items 1–6 built; the rest Next 12 |
 | [the agent panel](features/agent-panel.md) | Built |
 | [the agent panel's look](features/agent-panel-look.md) | Built |
 | [skills as slash commands](features/skill-commands.md) | Built |

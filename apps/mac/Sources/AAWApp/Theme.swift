@@ -68,6 +68,9 @@ enum Theme {
     /// The Synth's modulation: a source's tab, and how far an entry reaches
     /// under a control.
     static let modulation = rgb(0x4fc9b0)
+    /// The gain a compressor, a limiter or a clipper takes off, as its
+    /// meter and display draw it.
+    static let reduction = rgb(0xf2c443)
     /// A clip's waveform, over the clip's color.
     static let waveform = gray(0.05)
 

@@ -7,6 +7,7 @@
 //! waits and never allocates; a reader that catches the ring mid-block sees
 //! a window a few frames torn, which a picture does not show.
 
+use crate::gauge::Gauge;
 use crate::meter::Ring;
 use crate::Frame;
 use realfft::num_complex::Complex64;
@@ -67,7 +68,8 @@ impl Tap {
     }
 }
 
-/// The taps of a song's equalizers and the rings of its analyzers, by the
+/// The taps of a song's equalizers, the rings of its analyzers and the
+/// gauges of its compressors, limiters and clippers, by the
 /// row that owns the chain (a track's, group's or return's ID, or `master`)
 /// and the effect's index in it, kept between compiles so that the app
 /// reads the same ring while a song is edited. Entries a compile does not
@@ -82,6 +84,7 @@ struct Inner {
     generation: u64,
     taps: HashMap<(String, usize), (u64, Arc<Tap>)>,
     rings: HashMap<(String, usize), (u64, Arc<Ring>)>,
+    gauges: HashMap<(String, usize), (u64, Arc<Gauge>)>,
 }
 
 impl Taps {
@@ -112,12 +115,23 @@ impl Taps {
         entry.1.clone()
     }
 
-    /// Drops the taps and rings the compile did not ask for.
+    /// The gauge of a compressor, a limiter or a clipper, made if the song
+    /// had none there.
+    pub fn gauge(&self, owner: &str, index: usize) -> Arc<Gauge> {
+        let mut inner = self.lock();
+        let generation = inner.generation;
+        let entry = inner.gauges.entry((owner.to_string(), index)).or_insert_with(|| (generation, Arc::default()));
+        entry.0 = generation;
+        entry.1.clone()
+    }
+
+    /// Drops the taps, rings and gauges the compile did not ask for.
     pub fn finish(&self) {
         let mut inner = self.lock();
         let generation = inner.generation;
         inner.taps.retain(|_, e| e.0 == generation);
         inner.rings.retain(|_, e| e.0 == generation);
+        inner.gauges.retain(|_, e| e.0 == generation);
     }
 
     /// The tap of an equalizer, if the last compile gave it one.
@@ -128,6 +142,12 @@ impl Taps {
     /// The ring of an analyzer, if the last compile gave it one.
     pub fn find_ring(&self, owner: &str, index: usize) -> Option<Arc<Ring>> {
         self.lock().rings.get(&(owner.to_string(), index)).map(|e| e.1.clone())
+    }
+
+    /// The gauge of a compressor, a limiter or a clipper, if the last
+    /// compile gave it one.
+    pub fn find_gauge(&self, owner: &str, index: usize) -> Option<Arc<Gauge>> {
+        self.lock().gauges.get(&(owner.to_string(), index)).map(|e| e.1.clone())
     }
 }
 

@@ -7,9 +7,9 @@ is its reference, with its decisions); item 3, the grid following a song,
 built November 26, 2026 ([tempo follow](tempo-follow.md) is its reference,
 with its decisions); items 4–6 proposed, built in order, each its own branch
 and pull request (D205). The tempo half of item 5, the tempo edited in the
-app, is Next item 4 of the backlog, among the person's notes of November 26,
+app, is Next item 2 of the backlog, among the person's notes of November 26,
 2026 (D206); warp markers, warp markers in the app and item 6 are Next items
-11–13.
+9–11.
 
 ## What
 

@@ -273,6 +273,87 @@ fn an_equalizer_s_output_is_tapped_for_the_spectrum() {
 }
 
 #[test]
+fn the_dynamics_gauges_hold_the_reduction_the_render_reports() {
+    use aaw_dsp::gauge::{Gauge, GAUGE_HOPS, HOP_FRAMES};
+    use aaw_dsp::spectrum::Taps;
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_mix_song(dir.path());
+    let p = aaw_model::load(&path, true).unwrap();
+    let taps = Arc::new(Taps::default());
+    let mut cache = Cache::with_taps(taps.clone());
+    let program = Arc::new(compile_cached(&p, dir.path(), &mut cache).unwrap());
+    // Every compressor and limiter on a track, a return and the master has
+    // a gauge; the filters and the equalizer do not.
+    let watched = [("bass", 1), ("bass", 3), ("layer", 0), ("room", 1), ("master", 0)];
+    let gauges: Vec<Arc<Gauge>> = watched.iter().map(|(o, i)| taps.find_gauge(o, *i).unwrap_or_else(|| panic!("{o} {i}"))).collect();
+    assert!(taps.find_gauge("bass", 0).is_none() && taps.find_gauge("bass", 2).is_none() && taps.find_gauge("hats", 0).is_none());
+    // The whole song in blocks of 512, reading the gauges more often than
+    // their rings wrap.
+    let mut r = Renderer::new(program.clone(), 0, 4096);
+    let mut block = vec![[0.0; 2]; 512];
+    let mut read = vec![0u64; gauges.len()];
+    let mut most = vec![0f32; gauges.len()];
+    let mut louder = vec![false; gauges.len()];
+    let mut blocks = 0;
+    while !r.finished() {
+        let n = 512.min(program.total + program.latency - r.position());
+        r.render(&mut block[..n], |_, _, _| {});
+        blocks += 1;
+        if blocks % 100 == 0 || r.finished() {
+            for (k, g) in gauges.iter().enumerate() {
+                let new = (g.written() - read[k]) as usize;
+                assert!(new <= GAUGE_HOPS, "read before the ring wraps");
+                for hop in g.read(new) {
+                    most[k] = most[k].max(hop.reduction_db);
+                    louder[k] |= hop.input_db > hop.threshold_db;
+                }
+                read[k] = g.written();
+            }
+        }
+    }
+    let played = program.total + program.latency;
+    for (k, (o, i)) in watched.iter().enumerate() {
+        assert_eq!(read[k] as usize, played / HOP_FRAMES, "{o} {i}: a hop each {HOP_FRAMES} frames played");
+    }
+    // The most each took off is what the render's report measures.
+    let report = r.report();
+    let reported = |owner: &str, i: usize| {
+        let device = if owner == "master" {
+            &report.master[i]
+        } else if let Some(t) = program.tracks.iter().position(|t| t.id == owner) {
+            &report.tracks[t][i]
+        } else {
+            &report.returns[program.returns.iter().position(|r| r.id == owner).unwrap()][i]
+        };
+        device.reduction.expect("a dynamics device reports its reduction").max
+    };
+    for (k, (o, i)) in watched.iter().enumerate() {
+        let want = reported(o, *i);
+        assert!(((most[k] as f64) - want).abs() < 1e-3 * want.max(1.0), "{o} {i}: the gauge's most {} against the report's {want}", most[k]);
+    }
+    assert!(most.iter().any(|m| *m > 1.0), "something was compressed: {most:?}");
+    assert!(louder[0], "the bass compressor's key rose over its threshold");
+    // The compressor's threshold is the one set; the limiter's ceiling too.
+    let last = gauges[0].read(1)[0];
+    assert_eq!((last.threshold_db, gauges[1].read(1)[0].threshold_db), (-30.0, -3.0));
+    // Stopped, nothing more is made, and a compile keeps the same gauge.
+    let written = gauges[0].written();
+    let mut stopped = Renderer::new(program.clone(), 0, 4096);
+    for _ in 0..20 {
+        stopped.process(&mut block, false, None, |_, _, _| {});
+    }
+    assert_eq!(gauges[0].written(), written);
+    compile_cached(&p, dir.path(), &mut cache).unwrap();
+    assert!(Arc::ptr_eq(&gauges[0], &taps.find_gauge("bass", 1).unwrap()));
+    let mut bypassed = p.clone();
+    if let aaw_model::Effect::Limiter(l) = &mut bypassed.master.effects[0] {
+        l.bypass = true;
+    }
+    compile_cached(&bypassed, dir.path(), &mut cache).unwrap();
+    assert!(taps.find_gauge("master", 0).is_none(), "a bypassed device has no gauge");
+}
+
+#[test]
 fn an_analyzer_changes_nothing_and_hands_every_frame_to_its_ring() {
     use aaw_dsp::meter::{Ring, RING_FRAMES};
     use aaw_dsp::spectrum::Taps;

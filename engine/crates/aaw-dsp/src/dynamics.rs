@@ -1,6 +1,7 @@
 //! The compressor and the limiter.
 
 use crate::envelope::Knob;
+use crate::gauge::{peak, Hopper};
 use crate::truepeak::{Between, REACH};
 use crate::{Clock, Frame};
 
@@ -157,6 +158,8 @@ pub struct Compressor {
     thresholds: Vec<f64>,
     makeups: Vec<f64>,
     pub reduction: Reductions,
+    /// The hops its panel draws, when it is watched.
+    pub hopper: Hopper,
 }
 
 impl Compressor {
@@ -173,6 +176,7 @@ impl Compressor {
             thresholds: vec![0.0; max_block],
             makeups: vec![0.0; max_block],
             reduction: Reductions::default(),
+            hopper: Hopper::default(),
         }
     }
 
@@ -191,8 +195,10 @@ impl Compressor {
         let n = x.len();
         self.threshold.fill(clock.frame, clock.step, &mut self.thresholds[..n]);
         self.makeup.fill(clock.frame, clock.step, &mut self.makeups[..n]);
+        let watched = self.hopper.on(&clock);
         for i in 0..n {
-            let level = peak_db(key.map_or(x[i], |k| k[i]));
+            let heard = key.map_or(x[i], |k| k[i]);
+            let level = peak_db(heard);
             let mut reduction = self.hold.tick(self.curve(level, self.thresholds[i]));
             if self.alpha != 0.0 {
                 reduction = (1.0 - self.alpha) * reduction + self.z;
@@ -201,6 +207,9 @@ impl Compressor {
             self.reduction.record(reduction, clock.frame + i as i64 * clock.step, &clock);
             let gain = 10f64.powf((self.makeups[i] - reduction) / 20.0);
             x[i] = [x[i][0] * gain, x[i][1] * gain];
+            if watched {
+                self.hopper.add(peak(heard), peak(x[i]), reduction, self.thresholds[i]);
+            }
         }
     }
 
@@ -252,6 +261,10 @@ pub struct Limiter {
     slot: usize,
     frames: u64,
     pub reduction: Reductions,
+    /// The ceiling as set, which a true peak aims a little under.
+    ceiling_db: f64,
+    /// The hops its panel draws, when it is watched.
+    pub hopper: Hopper,
 }
 
 impl Limiter {
@@ -279,6 +292,8 @@ impl Limiter {
             slot: 0,
             frames: 0,
             reduction: Reductions::default(),
+            ceiling_db,
+            hopper: Hopper::default(),
         }
     }
 
@@ -300,11 +315,13 @@ impl Limiter {
 
     pub fn process(&mut self, x: &mut [Frame], clock: Clock) {
         let n = self.lookahead;
+        let watched = self.hopper.on(&clock);
         for (i, frame) in x.iter_mut().enumerate() {
-            let level = match &mut self.between {
-                Some(between) => 20.0 * between.tick(*frame).log10(),
-                None => peak_db(*frame),
+            let heard = match &mut self.between {
+                Some(between) => between.tick(*frame),
+                None => peak(*frame),
             };
+            let level = 20.0 * heard.log10();
             let required = (level - self.ceiling).max(0.0);
             let needed = self.window_max(required);
             let held = (self.hold.tick(needed) * FIXED).ceil() as i64;
@@ -318,6 +335,9 @@ impl Limiter {
             self.reduction.record(reduction, clock.frame + i as i64 * clock.step - self.delay as i64, &clock);
             let gain = 10f64.powf(-reduction / 20.0);
             *frame = [delayed[0] * gain, delayed[1] * gain];
+            if watched {
+                self.hopper.add(heard, peak(*frame), reduction, self.ceiling_db);
+            }
         }
     }
 

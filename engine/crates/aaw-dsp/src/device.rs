@@ -9,6 +9,7 @@ use crate::clipper::Clipper;
 use crate::delay::Delay;
 use crate::dynamics::{Compressor, CompressorSettings, Limiter, Reductions};
 use crate::envelope::{Envelope, Knob, Param};
+use crate::gauge::{Gauge, Hopper};
 use crate::meter::Ring;
 use crate::overdrive::Overdrive;
 use crate::reverb::{Kernel, Reverb, Shape};
@@ -124,6 +125,9 @@ pub struct Plan {
     pub tap: Option<Arc<Tap>>,
     /// Where an analyzer's output goes, every frame, for the app's meters.
     pub ring: Option<Arc<Ring>>,
+    /// Where a compressor, a limiter or a clipper leaves what it heard and
+    /// took off, a hop at a time, for its panel.
+    pub gauge: Option<Arc<Gauge>>,
     /// What an offline device of the person's own plays: its output as the
     /// host computed it, a frame for each frame of the timeline, or None
     /// while the host has not, when the device passes its input through.
@@ -196,6 +200,7 @@ impl Plan {
             signature,
             tap: None,
             ring: None,
+            gauge: None,
             cache: None,
             live: None,
         }
@@ -313,6 +318,7 @@ impl Unit {
         let rate = plan.rate as f64;
         let param = |name: &str, value: f64| Param::new(value, lanes.get(name));
         let knob = |name: &str, value: f64| Knob::new(Param::new(value, lanes.get(name)), glide);
+        let hopper = || Hopper::new(plan.gauge.clone());
         let device = match effect {
             Effect::Filter(f) => {
                 let highpass = f.mode == FilterMode::Highpass;
@@ -358,22 +364,32 @@ impl Unit {
                     release_ms: c.release_ms,
                     knee_db: c.knee_db,
                 };
-                Device::Compressor(Compressor::new(
+                let mut d = Compressor::new(
                     settings,
                     knob("threshold_db", c.threshold_db),
                     knob("makeup_db", c.makeup_db),
                     rate,
                     max_block,
-                ))
+                );
+                d.hopper = hopper();
+                Device::Compressor(d)
             }
-            Effect::Limiter(l) => Device::Limiter(Limiter::new(l.ceiling_db, l.release_ms, l.lookahead_ms, l.true_peak, rate)),
-            Effect::Clipper(c) => Device::Clipper(Clipper::new(
-                c.oversample,
-                knob("ceiling_db", c.ceiling_db),
-                knob("drive_db", c.drive_db),
-                knob("knee_db", c.knee_db),
-                max_block,
-            )),
+            Effect::Limiter(l) => {
+                let mut d = Limiter::new(l.ceiling_db, l.release_ms, l.lookahead_ms, l.true_peak, rate);
+                d.hopper = hopper();
+                Device::Limiter(d)
+            }
+            Effect::Clipper(c) => {
+                let mut d = Clipper::new(
+                    c.oversample,
+                    knob("ceiling_db", c.ceiling_db),
+                    knob("drive_db", c.drive_db),
+                    knob("knee_db", c.knee_db),
+                    max_block,
+                );
+                d.hopper = hopper();
+                Device::Clipper(d)
+            }
             Effect::Delay(d) => Device::Delay(Delay::new(
                 plan.delay_times.clone(),
                 d.lowcut_hz,

@@ -2960,6 +2960,37 @@ fn the_transport_bars_meter_field_sets_the_time_signature() {
 }
 
 #[test]
+fn a_compressor_s_and_a_limiter_s_reduction_is_read_for_their_panels() {
+    let (_dir, _path, song, _seen) = open();
+    let start = song.arrangement();
+    let drums = Row::Track { key: start.tracks[0].key };
+    let compressor = song.edit(Edit::EffectAdd { row: drums, kind: "compressor".into(), index: None, rack: None }, None).unwrap()[0];
+    let limiter = song.edit(Edit::EffectAdd { row: Row::Master, kind: "limiter".into(), index: None, rack: None }, None).unwrap()[0];
+    let floats = |b: &[u8]| b.chunks(4).map(|c| f32::from_le_bytes(c.try_into().unwrap())).collect::<Vec<_>>();
+    // Nothing has played: silence and no reduction, as many hops as asked
+    // for up to the ring's 1024.
+    let c = song.gain_reduction(compressor, 300).expect("a compressor on a track has a gauge");
+    assert_eq!((c.sample_rate, c.hop_frames, c.written, c.input_db.len()), (48000, 256, 0, 300 * 4));
+    assert!(floats(&c.input_db).iter().all(|l| *l == -200.0) && floats(&c.reduction_db).iter().all(|r| *r == 0.0));
+    let l = song.gain_reduction(limiter, 5000).expect("a limiter on the master has a gauge");
+    assert_eq!((l.output_db.len(), l.threshold_db.len()), (1024 * 4, 1024 * 4));
+    // Other effects, and anything that is not an effect, have none; nor a bypassed one.
+    let bass = &start.tracks[1];
+    let filter = bass.effects.iter().find(|e| e.kind == "filter").unwrap();
+    assert!(song.gain_reduction(filter.key, 10).is_none());
+    assert!(song.gain_reduction(bass.key, 10).is_none());
+    song.edit(Edit::EffectBypass { effect: limiter, on: true }, None).unwrap();
+    assert!(song.gain_reduction(limiter, 10).is_none());
+    song.edit(Edit::EffectBypass { effect: limiter, on: false }, None).unwrap();
+    assert!(song.gain_reduction(limiter, 10).is_some());
+    // The threshold the display's line drags is the compressor's field.
+    song.edit(Edit::EffectSet { effect: compressor, field: "threshold_db".into(), value: number(-27.5) }, None).unwrap();
+    let e = song.arrangement().tracks[0].effects.iter().find(|e| e.kind == "compressor").unwrap().clone();
+    assert_eq!(field(&e, "threshold_db").value, number(-27.5));
+    assert!(song.gain_reduction(compressor, 1).is_some(), "the gauge follows the edit");
+}
+
+#[test]
 fn an_equalizer_s_spectrum_is_read_for_its_panel() {
     let (_dir, _path, song, _seen) = open();
     let start = song.arrangement();

@@ -2119,6 +2119,12 @@ public final class SongModel {
         song.spectrum(effect: effect)
     }
 
+    /// The last `hops` of what a compressor, a limiter or a clipper heard
+    /// and took off, from the audio thread, for its display and meters.
+    func gainReduction(effect: UInt64, hops: Int) -> GainReduction? {
+        song.gainReduction(effect: effect, hops: UInt32(hops))
+    }
+
     public func toggleMetronome() {
         let enabled = !transport.metronome
         send { try $0.setMetronome(enabled: enabled) }

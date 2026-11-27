@@ -254,6 +254,26 @@ pub struct Spectrum {
     pub levels: Vec<f32>,
 }
 
+/// What a compressor, a limiter or a clipper heard and took off lately,
+/// for its panel: a hop each `hop_frames` frames played, oldest first. The
+/// lists cross as bytes, each value a little-endian 32-bit float, as an
+/// analyzer's do.
+#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+pub struct GainReduction {
+    pub sample_rate: u32,
+    pub hop_frames: u32,
+    /// Hops the device has made so far; the same twice means nothing has
+    /// played since. Hops are made only while the song plays.
+    pub written: u64,
+    /// The level its detector heard, the level it put out, in dB relative
+    /// to full scale with silence −200, the most gain it took off, in dB,
+    /// and the threshold or ceiling it worked against, in dB, a value a hop.
+    pub input_db: Vec<u8>,
+    pub output_db: Vec<u8>,
+    pub reduction_db: Vec<u8>,
+    pub threshold_db: Vec<u8>,
+}
+
 /// What an analyzer shows, measured from every frame that passed through it
 /// since the app began watching it. Levels are in dB relative to full
 /// scale, silence −200; loudness is BS.1770-4. The long lists cross as
@@ -607,6 +627,28 @@ impl Song {
             sample_rate,
             written: tap.written(),
             levels: analyzer.analyze(&tap),
+        })
+    }
+
+    /// The last `hops` hops, at most 1024, of what the compressor, limiter or
+    /// clipper `effect` heard and took off, for its panel; None for another
+    /// effect, one that is not on a track, a group, a return or the master,
+    /// or one bypassed. Silence, no reduction, before the first was made.
+    /// Cheap enough to read every frame drawn.
+    pub fn gain_reduction(&self, effect: u64, hops: u32) -> Option<GainReduction> {
+        let (owner, index, sample_rate) = self.chain_place(effect)?;
+        let gauge = self.taps.find_gauge(&owner, index)?;
+        let written = gauge.written();
+        let read = gauge.read(hops as usize);
+        let bytes = |f: fn(&aaw_dsp::gauge::Hop) -> f32| read.iter().flat_map(|h| f(h).to_le_bytes()).collect();
+        Some(GainReduction {
+            sample_rate,
+            hop_frames: aaw_dsp::gauge::HOP_FRAMES as u32,
+            written,
+            input_db: bytes(|h| h.input_db),
+            output_db: bytes(|h| h.output_db),
+            reduction_db: bytes(|h| h.reduction_db),
+            threshold_db: bytes(|h| h.threshold_db),
         })
     }
 

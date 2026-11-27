@@ -1158,7 +1158,8 @@ impl Lanes {
 /// A chain without its sidechain routing, which needs every chain's latency.
 /// `lanes(i)` gives the lanes on the chain's effect `i` by field; `upstream`
 /// is the latency of what comes before the chain, counted into its own.
-/// `taps` names the row for the equalizers' taps and the analyzers' rings,
+/// `taps` names the row for the equalizers' taps, the analyzers' rings and
+/// the dynamics' gauges,
 /// and `owner` the chain as the host addresses it (`tracks.T`), which keys
 /// the offline devices' caches; a patch's chain has neither.
 fn chain(
@@ -1200,6 +1201,7 @@ fn chain(
         match (taps, effect) {
             (Some(owner), Effect::Eq(_)) => plan.tap = Some(cache.taps.get(owner, flat)),
             (Some(owner), Effect::Analyzer(_)) => plan.ring = Some(cache.taps.ring(owner, flat)),
+            (Some(owner), Effect::Compressor(_) | Effect::Limiter(_) | Effect::Clipper(_)) => plan.gauge = Some(cache.taps.gauge(owner, flat)),
             _ => {}
         }
         out.effects.push((effect.kind(), Some(out.devices.len())));
