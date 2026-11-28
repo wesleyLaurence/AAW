@@ -103,7 +103,8 @@ reads its frames through the map. The transport's tempo field shows the
 tempo at the playhead. The master's tempo lane is drawn as steps under the
 master when A shows the lanes, labelled Tempo in BPM, its range the song's
 tempos with room either side. The export sheet reads a range's length
-through the map.
+through the map. The steps are edited there by hand, and an audio clip at its
+own speed is drawn through them ([tempo in the app](tempo-in-app.md)).
 
 **Python.** `timeline.py` places clips and pads through the map, splits a
 stretched clip at the steps as the engine does, and reports seconds and
@@ -157,17 +158,17 @@ it. A report of a song whose tempo changes carries its steps in
   what was floating point already.
 - **A step off a bar line is allowed and warned of** (open question 1 of the
   design): a song that changes tempo on beat 3 is placed with `--at 19:3`.
-- **The tempo field with a lane shows the tempo at the playhead**, and typing
-  a new one there is refused by the host until the app sets steps (item 4).
+- **The tempo field with a lane shows the tempo at the playhead.** Typing a
+  new one there was refused by the host until the app set steps; since
+  November 27, 2026 it sets the step the playhead is in
+  ([tempo in the app](tempo-in-app.md)).
 - **A real-time device keeps its one tempo.** Its ABI's `aaw_init` takes one;
   a change of the ABI is a change of the device spec.
 
 ## Limits
 
-- An unstretched audio clip's waveform and a track's peaks are drawn at the
-  tempo where the clip starts, so across a step they drift from what plays;
-  the app drawing through the steps comes with editing them there (Next).
 - `daw joins`' "a beat or more" and `daw key`'s weighting of samples in beats
   use the opening tempo.
-- A ramp, a meter change and editing the steps in the app are later items of
-  [tempo and warp](tempo-and-warp.md).
+- A ramp and a meter change are later items of
+  [tempo and warp](tempo-and-warp.md). The steps are edited in the app since
+  November 27, 2026 ([tempo in the app](tempo-in-app.md)).

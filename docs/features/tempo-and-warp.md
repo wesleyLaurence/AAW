@@ -7,9 +7,10 @@ is its reference, with its decisions); item 3, the grid following a song,
 built November 26, 2026 ([tempo follow](tempo-follow.md) is its reference,
 with its decisions); items 4–6 proposed, built in order, each its own branch
 and pull request (D205). The tempo half of item 5, the tempo edited in the
-app, is Next item 1 of the backlog, among the person's notes of November 26,
-2026 (D206); warp markers, warp markers in the app and item 6 are Next items
-8–10.
+app, built November 27, 2026 among the person's notes of November 26, 2026
+(D206) ([tempo in the app](tempo-in-app.md) is its reference, with its
+decisions); warp markers, warp markers in the app and item 6 are Next items
+7–9.
 
 ## What
 
@@ -329,7 +330,8 @@ same beats; and a clip with `source_bpm` renders bit for bit as before.
 ### 5. Both in the app
 
 The tempo is built first, ahead of warp markers, as its own item: the person
-asked for tempo changes made in the app on November 26, 2026 (D206).
+asked for tempo changes made in the app on November 26, 2026 (D206). It was
+built November 27, 2026; [tempo in the app](tempo-in-app.md) is its reference.
 
 - **The tempo** on the master's automation lane: a step dragged up or down
   changes its BPM, with the value shown as it moves; a double-click adds a step

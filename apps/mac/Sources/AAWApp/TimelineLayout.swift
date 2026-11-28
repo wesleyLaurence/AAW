@@ -363,6 +363,13 @@ public struct TimelineLayout: Equatable {
         return max(on, 0)
     }
 
+    /// A beat on the nearest bar line of bars `bar` beats long, or free to
+    /// a thousandth: where a tempo step lands.
+    public func snapped(_ beat: Double, toBars bar: Double, free: Bool) -> Double {
+        guard !free, bar > 0 else { return snapped(beat, free: true) }
+        return max((beat / bar).rounded() * bar, 0)
+    }
+
     /// Where each marker's flag is drawn and pressed, from its line: as wide
     /// as its text with the space around it, no further than the next
     /// marker's line, and never less than the flag. `xs` are the markers'
@@ -415,6 +422,16 @@ public struct TimelineLayout: Equatable {
         }
         guard least.isFinite, least <= 0, most >= 0 else { return 0...0 }
         return least...most
+    }
+
+    /// How far tempo steps at `steps` can be dragged in time, within `range`:
+    /// not at all when the opening step at beat 0 is among them, which keeps
+    /// its place, and else to no nearer beat 0 than `least` beats, since
+    /// beat 0 has the opening tempo.
+    public static func tempoRange(_ range: ClosedRange<Double>, steps: [Double], opening: Bool, least: Double) -> ClosedRange<Double> {
+        guard !opening, let first = steps.min() else { return 0...0 }
+        let lower = max(range.lowerBound, min(0, least - first))
+        return lower <= range.upperBound ? lower...range.upperBound : 0...0
     }
 
     /// The line of an automation segment from one point to the next, as the

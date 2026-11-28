@@ -299,6 +299,10 @@ private struct PointsDrag {
     var moved = false
     /// The point to select alone if the press turns out to be a click.
     var collapse: UInt64?
+    /// Where the song's tempo steps among them are, which go from bar line
+    /// to bar line and never onto beat 0, and whether the opening step at
+    /// beat 0 is one, which keeps its place; nil without tempo steps.
+    var tempo: (at: [Double], opening: Bool)?
 }
 
 /// A segment of a lane bent by dragging: the point it follows, whose
@@ -1728,8 +1732,12 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let colors = ContextMenu.colors(palette: Self.palette, chosen: model.selectedClipColors, none: "Track Color") {
             ContextMenu.ClipAction.color($0)
         }
+        // The tempo follows one audio clip at a time.
+        var follow: Bool?
+        if case .audio = hit.hit, model.selectedClips.count == 1 { follow = !model.followingTempo }
         let items = ContextMenu.clip(editor: editor, canSplit: model.canSplit, canJoin: model.canJoin,
-                                     activates: model.clipsActivation == true, many: model.selectedClips.count > 1, colors: colors)
+                                     activates: model.clipsActivation == true, many: model.selectedClips.count > 1, colors: colors,
+                                     follow: follow)
         return menu(of: items, #selector(clipMenuAction(_:))) { ClipChoice(action: $0) }
     }
 
@@ -1839,6 +1847,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .color(let color): model.setColor(rows: [], clips: Array(model.selectedClips), color)
         case .loop: model.toggleLoop()
         case .delete: model.deleteSelection()
+        case .followTempo: if let clip = model.selectedClips.first { model.followTempo(clip: clip) }
         }
     }
 
@@ -1854,10 +1863,14 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
             .filter { $0.distance <= 7 }
             .min { $0.distance < $1.distance }
         let shift = event.modifierFlags.contains(.shift)
+        let tempo = model.isTempo(lane)
         guard let near else {
             if event.clickCount == 2 {
                 let scale = ValueScale(min: lane.min, max: lane.max, log: lane.log)
-                let at = layout.snapped(layout.beat(atX: p.x), free: model.free(event.modifierFlags))
+                // A tempo step lands on the bar line, where another lane's point lands on the grid.
+                let free = model.free(event.modifierFlags)
+                let at = tempo ? layout.snapped(layout.beat(atX: p.x), toBars: model.arrangement.barBeats, free: free)
+                    : layout.snapped(layout.beat(atX: p.x), free: free)
                 model.edit(.pointAdd(lane: lane.key, at: at, value: scale.value(atY: p.y, in: rect))) { [weak self] made in
                     self?.model.select(points: Set(made))
                 }
@@ -1878,7 +1891,11 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         }
         if event.modifierFlags.contains(.option) {
             model.select(points: [key])
-            model.edit(.pointSet(point: key, at: nil, value: nil, hold: !near.point.hold, shape: nil))
+            if tempo {
+                model.refuse("A tempo step holds until the next one: a tempo that ramps is to come.")
+            } else {
+                model.edit(.pointSet(point: key, at: nil, value: nil, hold: !near.point.hold, shape: nil))
+            }
             return
         }
         var selection = model.selectedPoints
@@ -1900,18 +1917,25 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let lanes = model.pointLanes()
         var moving: [PointsDrag.Point] = []
         var around: [UInt64: [(at: Double, moving: Bool)]] = [:]
+        var steps: (at: [Double], opening: Bool)?
         for point in selection.sorted() {
             guard let of = lanes[point], let view = of.points.first(where: { $0.key == point }) else { continue }
             let scale = ValueScale(min: of.min, max: of.max, log: of.log)
             moving.append(PointsDrag.Point(key: point, scale: scale, at: view.at, fraction: scale.fraction(view.value)))
             if around[of.key] == nil { around[of.key] = of.points.map { ($0.at, selection.contains($0.key)) } }
+            if model.isTempo(of) {
+                var known = steps ?? ([], false)
+                known.at.append(view.at)
+                known.opening = known.opening || of.points.first?.key == point
+                steps = known
+            }
         }
         guard let grabbed = moving.first(where: { $0.key == key }) else { return }
         drag = .points(PointsDrag(
             points: moving, grabbed: grabbed, rect: rect,
             range: TimelineLayout.pointRange(Array(around.values)),
             lift: TimelineLayout.liftRange(moving.map(\.fraction)),
-            gesture: model.newGesture(), collapse: collapse
+            gesture: model.newGesture(), collapse: collapse, tempo: steps
         ))
     }
 
@@ -2100,8 +2124,13 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .points(var d):
             // The grabbed point goes to the grid line under the pointer, or
             // with ⌘ anywhere, and to the height of it; the others as far.
-            let wanted = layout.snapped(layout.beat(atX: p.x), free: model.free(event.modifierFlags))
-            let by = min(max(wanted - d.grabbed.at, d.range.lowerBound), d.range.upperBound)
+            let free = model.free(event.modifierFlags)
+            let bar = model.arrangement.barBeats
+            // Tempo steps go from bar line to bar line, as far as the grabbed one does.
+            let wanted = d.tempo != nil ? layout.snapped(layout.beat(atX: p.x), toBars: bar, free: free)
+                : layout.snapped(layout.beat(atX: p.x), free: free)
+            let range = d.tempo.map { TimelineLayout.tempoRange(d.range, steps: $0.at, opening: $0.opening, least: free ? 0.001 : bar) } ?? d.range
+            let by = min(max(wanted - d.grabbed.at, range.lowerBound), range.upperBound)
             let reach = Double(d.rect.height - 2 * ValueScale.inset)
             let fraction = reach > 0 ? Double(d.rect.maxY - ValueScale.inset - p.y) / reach : d.grabbed.fraction
             let up = min(max(fraction - d.grabbed.fraction, d.lift.lowerBound), d.lift.upperBound)
@@ -3083,24 +3112,34 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         let visible = CGRect(x: TimelineLayout.headerWidth, y: body.minY, width: bounds.width - TimelineLayout.headerWidth, height: body.height)
         let perBeat = audio.secondsPerBeat
 
+        // Where the file plays along the beats from a beat on, through the
+        // tempo's steps for a clip at its own speed.
+        let map = model.arrangement.tempoMap
+        let clipBeat = anchor + audio.sourceStartSeconds / max(perBeat, 1e-9)
+        let time = { (beat: Double, seconds: Double) in
+            ClipTime(map: map, beat: beat, seconds: seconds, secondsPerBeat: perBeat, clipBeat: clipBeat, follows: audio.sourceBpm != nil)
+        }
+
         // The file from where the clip starts in it, at the clip's level; a
         // looped clip's loop again from each wrap.
         if let wave = model.fileWaveform(audio.file), perBeat > 0 {
-            let framesPerBeat = perBeat * wave.framesPerSecond
             let wraps = Self.wraps(of: clip, at: now)
             let edges = [start] + wraps + [start + length]
             context.setFillColor(Theme.waveform.withAlphaComponent(0.78 * alpha).cgColor)
             for (from, to) in zip(edges, edges.dropFirst()) {
-                let part = CGRect(x: layout.x(from), y: body.minY, width: layout.x(to) - layout.x(from), height: body.height)
-                guard part.width > 0 else { continue }
                 // The first repetition plays the file from as far into the loop as the clip starts.
                 let into = from == start ? clip.loopOffset : 0
-                let columns = wave.columns(
-                    in: part, clippedTo: visible, fromFrame: (start - anchor + into) * framesPerBeat,
-                    framesPerPoint: framesPerBeat / Double(layout.pixelsPerBeat), step: 1 / (window?.backingScaleFactor ?? 2),
-                    gain: pow(10, audio.gainDb / 20)
-                )
-                context.fill(columns)
+                for piece in time(from, (start - anchor + into) * perBeat).pieces(from: from, to: to) {
+                    let part = CGRect(x: layout.x(piece.from), y: body.minY, width: layout.x(piece.to) - layout.x(piece.from), height: body.height)
+                    guard part.width > 0 else { continue }
+                    let framesPerBeat = piece.secondsPerBeat * wave.framesPerSecond
+                    let columns = wave.columns(
+                        in: part, clippedTo: visible, fromFrame: piece.seconds * wave.framesPerSecond,
+                        framesPerPoint: framesPerBeat / Double(layout.pixelsPerBeat), step: 1 / (window?.backingScaleFactor ?? 2),
+                        gain: pow(10, audio.gainDb / 20)
+                    )
+                    context.fill(columns)
+                }
             }
         } else {
             fill(CGRect(x: body.minX, y: body.midY.rounded(), width: body.width, height: 1), Theme.waveform.withAlphaComponent(0.3 * alpha))
@@ -3111,8 +3150,8 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         // A looped clip's are drawn across its first repetition.
         if let file = model.file(audio.file), file.beats.count > 1, perBeat > 0 {
             // The first repetition's, which plays the file from as far into the loop as the clip starts.
-            let fileAnchor = anchor - clip.loopOffset
-            let seconds = { (x: CGFloat) in (self.layout.beat(atX: x) - fileAnchor) * perBeat }
+            let first = time(start, (start - anchor + clip.loopOffset) * perBeat)
+            let seconds = { (x: CGFloat) in first.seconds(atBeat: self.layout.beat(atX: x)) }
             let last = clip.loop.map { layout.x(start + min($0 - clip.loopOffset, length)) } ?? body.maxX
             let (from, to) = (seconds(max(body.minX, visible.minX)), seconds(min(last, visible.maxX)))
             let apart = CGFloat((file.beats[1].seconds - file.beats[0].seconds) / perBeat) * layout.pixelsPerBeat
@@ -3128,7 +3167,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
                 }
                 for beat in file.beats[low...] {
                     guard beat.seconds <= to else { break }
-                    let x = layout.x(fileAnchor + beat.seconds / perBeat).rounded()
+                    let x = layout.x(first.beat(atSeconds: beat.seconds)).rounded()
                     if beat.downbeat {
                         bars.append(CGRect(x: x, y: body.maxY - 9, width: 1, height: 9))
                     } else if every {
