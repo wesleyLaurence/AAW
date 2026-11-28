@@ -2507,6 +2507,8 @@ impl EqBand {
 #[derive(Clone, Debug)]
 pub struct Eq {
     pub id: Option<String>,
+    /// A gain after the bands, in dB.
+    pub output_db: f64,
     pub bands: Vec<EqBand>,
     pub bypass: bool,
 }
@@ -2992,7 +2994,7 @@ impl Effect {
         let before = ctx.count();
         let fields: &'static [&'static str] = match kind {
             "filter" => &["type", "id", "mode", "cutoff_hz", "slope_db_per_octave", "bypass"],
-            "eq" => &["type", "id", "bands", "bypass"],
+            "eq" => &["type", "id", "output_db", "bands", "bypass"],
             "compressor" => &[
                 "type", "id", "threshold_db", "ratio", "attack_ms", "release_ms", "knee_db",
                 "makeup_db", "sidechain", "bypass",
@@ -3045,11 +3047,13 @@ impl Effect {
                 })()
             }
             "eq" => {
+                let output_db = float(ctx, "output_db", 0.0, Bounds::ge_le("-24", "24"));
                 let bands = f.req(ctx, "bands", |c, x| v::list(c, x, 1, Some(16), EqBand::validate));
                 let bypass = f.opt(ctx, "bypass", false, v::boolean);
                 (|| {
                     Some(Effect::Eq(Eq {
                         id: id?,
+                        output_db: output_db?,
                         bands: bands?,
                         bypass: bypass?,
                     }))
@@ -3347,7 +3351,10 @@ impl Effect {
                 o.req("cutoff_hz", Value::Float(e.cutoff_hz));
                 o.int("slope_db_per_octave", e.slope_db_per_octave, 12);
             }
-            Effect::Eq(e) => o.req("bands", list(&e.bands, saved, EqBand::dump)),
+            Effect::Eq(e) => {
+                o.float("output_db", e.output_db, 0.0);
+                o.req("bands", list(&e.bands, saved, EqBand::dump));
+            }
             Effect::Compressor(e) => {
                 o.req("threshold_db", Value::Float(e.threshold_db));
                 o.float("ratio", e.ratio, 4.0);

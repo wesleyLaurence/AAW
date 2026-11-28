@@ -3,7 +3,7 @@
 //! device panel is drawn from these. A test holds them to what validation
 //! accepts and to the defaults the model fills in.
 
-use crate::rules::{effect_params, Domain};
+use crate::rules::{band_params, effect_params, Domain};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Kind {
@@ -131,6 +131,9 @@ pub const BAND: &[Field] = &[
         ..number("slope_db_per_octave", "Slope", 12.0, 48.0, 12.0, "dB/oct")
     },
 ];
+
+/// An equalizer's own fields, beside its bands: a gain after them.
+const EQ: &[Field] = &[number("output_db", "Output", -24.0, 24.0, 0.0, "dB")];
 
 const COMPRESSOR: &[Field] = &[
     required(number("threshold_db", "Threshold", -60.0, 0.0, 0.0, "dB"), Initial::Number(-18.0)),
@@ -413,10 +416,11 @@ pub const SYNTH_PARTS: &[(&str, &[Field])] = &[
 
 /// The fields of an effect type, in the order the document writes them,
 /// without `type`, `id` and `bypass`, which every effect has. An equalizer's
-/// are its bands': see `BAND`.
+/// are its own, beside its bands': see `BAND`.
 pub fn effect(kind: &str) -> &'static [Field] {
     match kind {
         "filter" => FILTER,
+        "eq" => EQ,
         "compressor" => COMPRESSOR,
         "limiter" => LIMITER,
         "clipper" => CLIPPER,
@@ -436,10 +440,16 @@ pub fn effect(kind: &str) -> &'static [Field] {
 }
 
 /// The interpolation domain of a field that automation can move, or None for
-/// one it cannot. `kind` is the effect type; an equalizer's fields are its
-/// bands'.
+/// one it cannot. `kind` is the effect type; an equalizer's bands' fields
+/// are `band_automatable`'s.
 pub fn automatable(kind: &str, field: &str) -> Option<Domain> {
     effect_params(kind).iter().find(|(name, _)| *name == field).map(|(_, domain)| *domain)
+}
+
+/// The interpolation domain of an equalizer band's field that automation
+/// can move, or None for one it cannot.
+pub fn band_automatable(field: &str) -> Option<Domain> {
+    band_params().iter().find(|(name, _)| *name == field).map(|(_, domain)| *domain)
 }
 
 #[cfg(test)]
@@ -475,7 +485,9 @@ mod tests {
             fields.push(("name", Value::str("tilt")));
         }
         let own: Vec<(&str, Value)> = match kind {
+            // A band's field goes in the band, the equalizer's own beside it.
             "eq" => {
+                let (own, with): (Vec<_>, Vec<_>) = with.iter().cloned().partition(|(k, _)| EQ.iter().any(|f| f.name == *k));
                 let band = |with: &[(&str, Value)]| {
                     let mut b: Vec<(&str, Value)> = BAND
                         .iter()
@@ -488,7 +500,9 @@ mod tests {
                     }
                     dict(b)
                 };
-                vec![("bands", Value::List(vec![band(with)]))]
+                let mut fields = own;
+                fields.push(("bands", Value::List(vec![band(&with)])));
+                fields
             }
             _ => {
                 let mut own: Vec<(&str, Value)> = effect(kind)
@@ -509,23 +523,24 @@ mod tests {
 
     #[test]
     fn fields_agree_with_validation_and_defaults() {
-        for kind in crate::EFFECT_TYPES {
-            let fields = if kind == "eq" { BAND } else { effect(kind) };
+        // An equalizer's own fields, then its band's.
+        let tables = crate::EFFECT_TYPES.iter().map(|kind| (*kind, effect(kind), false)).chain([("eq", BAND, true)]);
+        for (kind, fields, band) in tables {
             // An analyzer has nothing to set: the song's `type`, `id` and
             // `bypass` alone; a rack's name and effects are not controls.
             assert!(!fields.is_empty() || kind == "analyzer" || kind == "rack" || kind == "device", "{kind}");
             // The suggested start is valid, and its dump has every field.
             let project = check(effect_value(kind, &[])).unwrap_or_else(|e| panic!("{kind}: {e}"));
             let dumped = project.master.effects[0].dump(false);
-            let dumped = match kind {
-                "eq" => match dumped.get("bands") {
+            let dumped = match band {
+                true => match dumped.get("bands") {
                     Some(Value::List(bands)) => bands[0].clone(),
                     _ => panic!("an eq has bands"),
                 },
-                _ => dumped,
+                false => dumped,
             };
             let Value::Dict(d) = &dumped else { panic!() };
-            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass", "name", "effects", "version", "fields"].contains(k)).collect();
+            let names: Vec<&str> = d.keys().filter_map(|k| k.as_str()).filter(|k| !["type", "id", "bypass", "name", "effects", "version", "fields", "bands"].contains(k)).collect();
             assert_eq!(names, fields.iter().map(|f| f.name).collect::<Vec<_>>(), "{kind}");
             for f in fields {
                 let got = dumped.get(f.name).unwrap();
@@ -561,12 +576,13 @@ mod tests {
                     Kind::Number => unreachable!(),
                 }
                 // What automation can move is a number.
-                if automatable(kind, f.name).is_some() {
+                let moved = if band { band_automatable(f.name) } else { automatable(kind, f.name) };
+                if moved.is_some() {
                     assert_eq!(f.kind, Kind::Number, "{kind}.{}", f.name);
                     assert!(!f.structural, "{kind}.{}", f.name);
                 }
             }
-            for (name, _) in effect_params(kind) {
+            for (name, _) in if band { band_params() } else { effect_params(kind) } {
                 assert!(fields.iter().any(|f| f.name == *name), "{kind}.{name} is automatable");
             }
         }

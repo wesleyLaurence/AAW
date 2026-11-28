@@ -365,8 +365,9 @@ pub fn synth_effect_param(synth: &crate::schema::Synth, path: &str) -> Result<(u
             .ok_or_else(|| format!("{path}: the patch has no effect with id or index {r}"))?,
     };
     let spec = &effects[index];
-    let allowed = effect_params(spec.kind());
-    let (name, field) = if let Effect::Eq(eq) = spec {
+    let mut allowed = effect_params(spec.kind());
+    let (name, field) = if let (Effect::Eq(eq), false) = (spec, rest.len() == 1) {
+        allowed = band_params();
         let [bands, b, field] = rest else {
             return Err(format!("{path}: address eq bands as effects.REF.bands.N.FIELD"));
         };
@@ -385,9 +386,7 @@ pub fn synth_effect_param(synth: &crate::schema::Synth, path: &str) -> Result<(u
         (field.to_string(), *field)
     };
     let Some((_, domain)) = allowed.iter().find(|(n, _)| *n == field) else {
-        let names: Vec<&str> = allowed.iter().map(|(n, _)| *n).collect();
-        let list = if names.is_empty() { "none".to_string() } else { names.join(", ") };
-        return Err(format!("{path}: {} {field} cannot be automated; automatable: {list}", spec.kind()));
+        return Err(format!("{path}: {} {field} cannot be automated; automatable: {}", spec.kind(), automatable_list(spec.kind())));
     };
     Ok((index, name, *domain, effect_range(spec.kind(), field)))
 }
@@ -464,8 +463,9 @@ pub fn synth_params(synth: &crate::schema::Synth) -> Vec<String> {
         let reference = e.id().filter(|id| !id.is_empty()).map_or_else(|| i.to_string(), str::to_string);
         match e {
             Effect::Eq(eq) => {
+                out.extend(effect_params("eq").iter().map(|(n, _)| format!("effects.{reference}.{n}")));
                 for j in 0..eq.bands.len() {
-                    out.extend(effect_params("eq").iter().map(|(n, _)| format!("effects.{reference}.bands.{j}.{n}")));
+                    out.extend(band_params().iter().map(|(n, _)| format!("effects.{reference}.bands.{j}.{n}")));
                 }
             }
             _ => out.extend(effect_params(e.kind()).iter().map(|(n, _)| format!("effects.{reference}.{n}"))),
@@ -562,11 +562,13 @@ impl<'a> Owner<'a> {
     }
 }
 
-/// Automatable effect fields with their interpolation domain, in declared order.
+/// Automatable effect fields with their interpolation domain, in declared
+/// order. An equalizer's are its own, after its bands; its bands' are
+/// `band_params`.
 pub fn effect_params(kind: &str) -> &'static [(&'static str, Domain)] {
     match kind {
         "filter" => &[("cutoff_hz", Domain::Log)],
-        "eq" => &[("freq_hz", Domain::Log), ("gain_db", Domain::Linear), ("q", Domain::Log)],
+        "eq" => &[("output_db", Domain::Linear)],
         "compressor" => &[("threshold_db", Domain::Linear), ("makeup_db", Domain::Linear)],
         "clipper" => &[("ceiling_db", Domain::Linear), ("drive_db", Domain::Linear), ("knee_db", Domain::Linear)],
         "delay" => &[("feedback_percent", Domain::Linear), ("mix_percent", Domain::Linear)],
@@ -579,13 +581,34 @@ pub fn effect_params(kind: &str) -> &'static [(&'static str, Domain)] {
     }
 }
 
-/// The range of an automatable effect field.
+/// An effect kind's automatable fields as an error lists them, an
+/// equalizer's bands' as `bands.N.FIELD`.
+fn automatable_list(kind: &str) -> String {
+    let mut names: Vec<String> = effect_params(kind).iter().map(|(n, _)| n.to_string()).collect();
+    if kind == "eq" {
+        names.extend(band_params().iter().map(|(n, _)| format!("bands.N.{n}")));
+    }
+    if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(", ")
+    }
+}
+
+/// An equalizer band's automatable fields, addressed as `bands.N.FIELD`.
+pub fn band_params() -> &'static [(&'static str, Domain)] {
+    &[("freq_hz", Domain::Log), ("gain_db", Domain::Linear), ("q", Domain::Log)]
+}
+
+/// The range of an automatable effect field; an equalizer band's are under
+/// `eq` too.
 pub fn effect_range(kind: &str, field: &str) -> Range {
     match (kind, field) {
         ("filter", "cutoff_hz") => Range::closed(10.0, 20000.0),
         ("eq", "freq_hz") => Range::closed(20.0, 20000.0),
         ("eq", "gain_db") => Range::closed(-24.0, 24.0),
         ("eq", "q") => Range::closed(0.1, 18.0),
+        ("eq", "output_db") => Range::closed(-24.0, 24.0),
         ("compressor", "threshold_db") => Range::closed(-60.0, 0.0),
         ("compressor", "makeup_db") => Range::closed(-24.0, 24.0),
         ("clipper", "ceiling_db") => Range::closed(-60.0, 24.0),
@@ -741,9 +764,10 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
                 range: Range::closed(f64::NEG_INFINITY, f64::INFINITY),
             });
         }
-        let allowed = effect_params(spec.kind());
+        let mut allowed = effect_params(spec.kind());
         let mut band = None;
-        if let Effect::Eq(eq) = spec {
+        if let (Effect::Eq(eq), false) = (spec, rest.len() == 1) {
+            allowed = band_params();
             if rest.len() != 3 || rest[0] != "bands" || !is_ascii_digits(rest[1]) {
                 return Err(format!(
                     "{param}: address eq bands as effects.REF.bands.N.FIELD"
@@ -759,16 +783,7 @@ pub fn target(owner: Owner, param: &str) -> Result<Target, String> {
         }
         let field = rest[rest.len() - 1];
         let Some((_, domain)) = allowed.iter().find(|(name, _)| *name == field) else {
-            let names: Vec<&str> = allowed.iter().map(|(n, _)| *n).collect();
-            let list = if names.is_empty() {
-                "none".to_string()
-            } else {
-                names.join(", ")
-            };
-            return Err(format!(
-                "{param}: {} {field} cannot be automated; automatable: {list}",
-                spec.kind()
-            ));
+            return Err(format!("{param}: {} {field} cannot be automated; automatable: {}", spec.kind(), automatable_list(spec.kind())));
         };
         return Ok(Target {
             kind: TargetKind::Effect { index, inner, band },

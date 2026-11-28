@@ -468,6 +468,13 @@
           "default": null,
           "title": "Id"
         },
+        "output_db": {
+          "default": 0,
+          "maximum": 24,
+          "minimum": -24,
+          "title": "Output Db",
+          "type": "number"
+        },
         "bands": {
           "items": {
             "$ref": "#/$defs/EqBand"

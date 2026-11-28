@@ -1326,14 +1326,15 @@ private struct RackPanel<Menu: View>: View {
 /// The parametric equalizer: its bands as one curve over the playing
 /// spectrum, each a point dragged for its frequency and gain, and under the
 /// curve the selected band's fields, a bell's or a shelf's gain and q or a
-/// pass's slope and resonance, with the marks that automate them.
+/// pass's slope and resonance, and the equalizer's output gain after its
+/// bands, with the marks that automate them. The curve has the gain in it.
 private struct EqPanel: View {
     let model: SongModel
     let chain: DeviceChain
     let effect: EffectView
     @State private var selected = 0
 
-    static let width: CGFloat = 400
+    static let width: CGFloat = 440
 
     private func field(_ band: Int, _ name: String) -> FieldView? {
         effect.fields.first { $0.name == "bands.\(band).\(name)" }
@@ -1385,6 +1386,13 @@ private struct EqPanel: View {
                     FieldControl(model: model, effect: effect.key, field: q).frame(width: 50)
                         .help(pass ? "Resonance at the corner: 0.71 is flat" : "Q: how narrow the band is")
                     LaneMark(model: model, row: chain.row, field: q)
+                    Spacer(minLength: 0)
+                    if let output = effect.fields.first(where: { $0.name == "output_db" }) {
+                        Text("Out").font(.system(size: 9)).foregroundStyle(.secondary)
+                        FieldControl(model: model, effect: effect.key, field: output).frame(width: 60)
+                            .help("Output: a gain after the bands")
+                        LaneMark(model: model, row: chain.row, field: output)
+                    }
                 }
                 .frame(height: 19)
             }
@@ -1622,13 +1630,14 @@ final class EqCurveView: NSView {
             context.addPath(path)
             context.fillPath()
         }
-        // The curve.
+        // The curve, with the output gain after the bands.
         let bands = self.bands
+        let output = EqLayout.outputDb(of: fields)
         let path = CGMutablePath()
         let n = Int(box.width)
         for i in 0...n {
             let x = box.minX + CGFloat(i)
-            let db = EqLayout.curveDb(bands, hz: EqLayout.hz(x: x, in: box), rate: sampleRate)
+            let db = EqLayout.curveDb(bands, hz: EqLayout.hz(x: x, in: box), rate: sampleRate) + output
             let point = CGPoint(x: x, y: EqLayout.y(db: db, in: box))
             if i == 0 { path.move(to: point) } else { path.addLine(to: point) }
         }

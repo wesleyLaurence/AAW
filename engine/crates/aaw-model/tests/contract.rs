@@ -349,7 +349,8 @@ fn each_topic_describes_its_models() {
     assert!(effects["schema"]["filter"].get("$defs").is_none());
     assert!(effects["routing"]["return"]["$defs"].get("Point").is_some());
     let automation = contract::describe_with_schema("automation").unwrap();
-    assert_eq!(automation["automatable"]["effects"]["eq"]["q"], "log");
+    assert_eq!(automation["automatable"]["effects"]["eq"]["bands.N.q"], "log");
+    assert_eq!(automation["automatable"]["effects"]["eq"]["output_db"], "linear");
     assert!(automation["automatable"]["effects"].get("limiter").is_none());
 }
 

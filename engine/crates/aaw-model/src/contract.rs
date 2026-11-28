@@ -7,7 +7,7 @@
 //! accepts and to the defaults the model fills in, so a change to a field must
 //! change both.
 
-use crate::rules::{effect_params, Domain};
+use crate::rules::{band_params, effect_params, Domain};
 use crate::{EFFECT_TYPES, MIDI_EFFECT_TYPES};
 use serde_json::{json, Map, Value as Json};
 use std::collections::BTreeSet;
@@ -100,7 +100,7 @@ const MIDI: &[(&str, &str)] = &[
 const EFFECT: &[(&str, &str)] = &[
     ("order", "Effects run top to bottom. Track inserts come before track gain and pan. Return effects process the sum of its sends, before the return's gain and pan. master.effects follow master_gain_db and precede the end fade."),
     ("filter", "Butterworth highpass or lowpass. slope_db_per_octave 12/24/36/48 is the order times 6 dB. No resonance control."),
-    ("eq", "A parametric equalizer: up to 16 RBJ biquad bands in series. bell raises or lowers gain_db at freq_hz with q as its width; low_shelf and high_shelf use q as the shelf's slope (0.71 is maximally flat); highpass and lowpass cut past freq_hz at slope_db_per_octave (12, 24, 36 or 48, Butterworth), with q the resonance at the corner (0.71 is flat, higher lifts it) and gain_db ignored. gain_db is 0 unless given; slope_db_per_octave counts only on a pass. The app draws the bands as one curve over the playing spectrum."),
+    ("eq", "A parametric equalizer: up to 16 RBJ biquad bands in series. bell raises or lowers gain_db at freq_hz with q as its width; low_shelf and high_shelf use q as the shelf's slope (0.71 is maximally flat); highpass and lowpass cut past freq_hz at slope_db_per_octave (12, 24, 36 or 48, Butterworth), with q the resonance at the corner (0.71 is flat, higher lifts it) and gain_db ignored. gain_db is 0 unless given; slope_db_per_octave counts only on a pass. output_db (-24 to 24, 0 unless given) is a gain after the bands, so a boost is evened out in the same device; a lane moves it as effects.REF.output_db. The app draws the bands as one curve over the playing spectrum, with the output gain in it."),
     ("compressor", "Stereo-linked sample-peak detector, soft knee of knee_db centered on threshold_db. attack_ms smooths onset; release_ms is the time for reduction to fall by a factor of e. makeup_db is gain added after reduction; threshold_db and makeup_db can be automated."),
     ("sidechain", "compressor.sidechain names another track. Its key is that track after its own inserts, before its gain, pan, mute and solo, so a muted kick still ducks the bass. Cycles and self-sidechains are rejected. A group's or a return's compressor may be keyed by a track; a sidechain cannot name a group or a return. Master compressors cannot use a sidechain."),
     ("limiter", "Look-ahead brickwall: no output sample exceeds ceiling_db. lookahead_ms is compensated latency. Without true_peak it holds the samples alone, and the level between them, which a converter or a lossy encoder makes of them, passes the ceiling: a render's estimated_true_peak_dbtp reads over ceiling_db, by a few tenths of a dB on most mixes and by up to 3 dB where the top is loud. true_peak: true holds that estimate too: the limiter reads the level between the samples as the render's report, daw listen and daw export measure it, four times oversampled, and turns down for it, so estimated_true_peak_dbtp comes out at or under ceiling_db and ceiling_db: -1 is -1 dBTP, with no margin left by guess. It aims 0.01 dB under the ceiling, since a gain that moves across the samples a point is read from leaves the point a little off: on noise far over the ceiling by up to 0.001 dB with the look-ahead of 3 ms and 0.004 with 1 ms, which the 0.01 covers, and by up to 0.03 with the shortest, 0.5 ms, which it does not. It takes off a little more than without, what was over between the samples, and is 19 frames later, compensated as the look-ahead is; a signal under the ceiling still passes bit-identical. Set it on the master's last limiter, with ceiling_db the true peak wanted: -1 for a file that is to be encoded or streamed. The end fade follows the master's effects and only lowers. A section preview is cut out of the song, and a cut in the middle of a sound is a peak of its own between the samples that no limiter before it holds; so is the end of a song with end_fade_ms 0 that stops while it sounds. The estimate is not a certified meter."),
@@ -897,7 +897,16 @@ pub fn describe_with_schema(topic: &str) -> Option<Json> {
                     EFFECT_TYPES
                         .iter()
                         .filter(|k| !effect_params(k).is_empty())
-                        .map(|k| (k.to_string(), domains(effect_params(k))))
+                        .map(|k| {
+                            let mut fields = domains(effect_params(k));
+                            // An equalizer's bands' fields, by the band's place.
+                            if *k == "eq" {
+                                let bands = band_params().iter().map(|(f, d)| (format!("bands.N.{f}"), *d)).collect::<Vec<_>>();
+                                let bands: Vec<(&str, Domain)> = bands.iter().map(|(f, d)| (f.as_str(), *d)).collect();
+                                fields.as_object_mut().expect("an object").extend(domains(&bands).as_object().expect("an object").clone());
+                            }
+                            (k.to_string(), fields)
+                        })
                         .collect(),
                 ),
             },

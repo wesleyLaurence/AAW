@@ -531,13 +531,14 @@ def test_lane_limits_match_the_static_field(song):
     for index, effect in enumerate(track["effects"]):
         kind = effect["type"]
         for field in described["automatable"]["effects"][kind]:
-            if kind == "eq":
+            if field.startswith("bands.N."):
+                field = field.removeprefix("bands.N.")
                 holder = lambda d, i=index: d["tracks"][0]["effects"][i]["bands"][0]
                 cases.append(("EqBand", field, holder, "tracks", f"effects.{index}.bands.0.{field}"))
             else:
                 holder = lambda d, i=index: d["tracks"][0]["effects"][i]
                 cases.append((kind.title(), field, holder, "tracks", f"effects.{index}.{field}"))
-    assert len(cases) == 15
+    assert len(cases) == 16
     for model, field, holder, owner, param in cases:
         limits = models[model]["properties"][field]
         for edge in (limits["minimum"], limits["maximum"]):
@@ -584,7 +585,14 @@ def test_eq_band_addressing(song):
     data["tracks"][0]["automation"][-1]["param"] = "effects.1.bands.1.q"
     with pytest.raises(ValueError, match="eq has 1 bands"):
         validate(data)
+    # The equalizer's own output gain is its field; a band's field on the
+    # equalizer is not, and the error names both.
+    data["tracks"][0]["automation"][-1]["param"] = "effects.1.output_db"
+    validate(data)
     data["tracks"][0]["automation"][-1]["param"] = "effects.1.q"
+    with pytest.raises(ValueError, match="automatable: output_db, bands.N.freq_hz, bands.N.gain_db, bands.N.q"):
+        validate(data)
+    data["tracks"][0]["automation"][-1]["param"] = "effects.1.bands.0"
     with pytest.raises(ValueError, match="effects.REF.bands.N.FIELD"):
         validate(data)
 

@@ -1030,8 +1030,11 @@ fn equalizer_bands_come_and_go_with_their_lanes() {
     let eq = song.edit(Edit::EffectAdd { row: drums.clone(), kind: "eq".into(), index: None, rack: None }, None).unwrap()[0];
     let u = update(&seen);
     let e = &u.arrangement.tracks[0].effects[0];
-    assert_eq!((e.bands, e.fields.len()), (1, 5));
+    assert_eq!((e.bands, e.fields.len()), (1, 6));
     assert_eq!(e.fields.iter().map(|f| (f.name.as_str(), f.band)).collect::<Vec<_>>()[..2], [("bands.0.shape", Some(0)), ("bands.0.freq_hz", Some(0))]);
+    // The equalizer's output gain is its own, after the bands, at 0 and a lane target.
+    let output = field(e, "output_db");
+    assert_eq!((output.band, output.value.clone(), output.param.as_deref()), (None, number(0.0), Some("effects.0.output_db")));
     assert_eq!((field(e, "bands.0.gain_db").value.clone(), field(e, "bands.0.q").value.clone()), (number(0.0), number(0.71)));
     for _ in 0..2 {
         song.edit(Edit::BandAdd { effect: eq, freq_hz: None, gain_db: None }, None).unwrap();
