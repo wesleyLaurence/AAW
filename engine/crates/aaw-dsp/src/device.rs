@@ -16,7 +16,7 @@ use crate::reverb::{Kernel, Reverb, Shape};
 use crate::saturation::Saturation;
 use crate::spectrum::Tap;
 use crate::svf::{self, Svf};
-use crate::utility::Utility;
+use crate::utility::{Trim, Utility};
 use crate::{Clock, Frame};
 use aaw_model::{frame, Effect, FilterMode, TempoMap};
 use std::any::Any;
@@ -307,6 +307,8 @@ pub struct Unit {
     tap: Option<Arc<Tap>>,
     /// The ring an analyzer's output is written to for the app's meters.
     ring: Option<Arc<Ring>>,
+    /// A gain after the device: an equalizer's output.
+    trim: Option<Trim>,
 }
 
 impl Unit {
@@ -448,12 +450,17 @@ impl Unit {
                 None => Device::Offline(Offline { audio: plan.cache.clone() }),
             },
         };
+        let trim = match effect {
+            Effect::Eq(e) => Some(Trim::new(knob("output_db", e.output_db), max_block)),
+            _ => None,
+        };
         Unit {
             device,
             latency: plan.latency,
             signature: plan.signature,
             tap: plan.tap.clone(),
             ring: plan.ring.clone(),
+            trim,
         }
     }
 
@@ -476,6 +483,9 @@ impl Unit {
             Device::Offline(d) => d.process(x, clock),
             Device::Live(d) => d.process(x, clock),
         }
+        if let Some(trim) = &mut self.trim {
+            trim.process(x, clock);
+        }
         if let Some(tap) = &self.tap {
             tap.write(x);
         }
@@ -489,6 +499,9 @@ impl Unit {
     /// glide from where they were. `old` is left with state to be freed off
     /// the audio thread. Does not allocate.
     pub fn take_over(&mut self, old: &mut Unit) {
+        if let (Some(new), Some(was)) = (&mut self.trim, &old.trim) {
+            new.take_over(was);
+        }
         match (&mut self.device, &mut old.device) {
             (Device::Sections(new), Device::Sections(was)) => new.take_over(was),
             (Device::Moving(new), Device::Moving(was)) => new.take_over(was),

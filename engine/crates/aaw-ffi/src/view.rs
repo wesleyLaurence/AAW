@@ -750,8 +750,10 @@ fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrume
     }
     let prefix = if instrument { "instrument." } else { "" };
     let field = |f: &describe::Field, value: Option<&Value>, name: String, band: Option<u32>| {
-        let kind = if matches!(e, Effect::Eq(_)) { "eq" } else { e.kind() };
-        let automatable = describe::automatable(kind, f.name).is_some();
+        let automatable = match band {
+            Some(_) => describe::band_automatable(f.name).is_some(),
+            None => describe::automatable(e.kind(), f.name).is_some(),
+        };
         let lane = if instrument {
             driven.instrument.get(&format!("effects.{index}.{name}")).copied()
         } else {
@@ -791,9 +793,11 @@ fn fields(e: &Effect, index: usize, tracks: &[String], driven: &Driven, instrume
     match e {
         Effect::Eq(eq) => {
             let Some(Value::List(bands)) = dump.get("bands") else { return Vec::new() };
+            // The bands' fields, then the equalizer's own.
             (0..eq.bands.len())
                 .flat_map(|j| describe::BAND.iter().map(move |f| (j, f)))
                 .map(|(j, f)| field(f, bands[j].get(f.name), format!("bands.{j}.{}", f.name), Some(j as u32)))
+                .chain(describe::effect("eq").iter().map(|f| field(f, dump.get(f.name), f.name.to_string(), None)))
                 .collect()
         }
         _ => describe::effect(e.kind()).iter().map(|f| field(f, dump.get(f.name), f.name.to_string(), None)).collect(),
@@ -948,7 +952,7 @@ pub fn synth_label(synth: &aaw_model::Synth, path: &str) -> (String, String) {
                 let e = &synth.effects[index];
                 let field = name.rsplit('.').next().unwrap_or(&name);
                 let f = match e {
-                    Effect::Eq(_) => spec(describe::BAND, field),
+                    Effect::Eq(_) if name.starts_with("bands.") => spec(describe::BAND, field),
                     _ => spec(describe::effect(e.kind()), field),
                 };
                 let band = name.split('.').nth(1).filter(|_| name.starts_with("bands.")).and_then(|b| b.parse::<usize>().ok()).map_or(String::new(), |b| format!(" band {}", b + 1));
@@ -1170,8 +1174,9 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven, devices: &Devic
         let names: Vec<String> = match e {
             Effect::Eq(eq) => (0..eq.bands.len())
                 .flat_map(|j| describe::BAND.iter().map(move |f| (j, f)))
-                .filter(|(_, f)| describe::automatable("eq", f.name).is_some())
+                .filter(|(_, f)| describe::band_automatable(f.name).is_some())
                 .map(|(j, f)| format!("bands.{j}.{}", f.name))
+                .chain(describe::effect("eq").iter().filter(|f| describe::automatable("eq", f.name).is_some()).map(|f| f.name.to_string()))
                 .collect(),
             Effect::Device(d) => devices
                 .get(&d.name)

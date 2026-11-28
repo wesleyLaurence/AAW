@@ -424,8 +424,9 @@ Muted or solo-muted tracks send nothing; returns are never solo-muted. No
 return-to-return sends exist yet.
 
 Effects: `filter`, `eq` (the parametric EQ: bells, shelves and passes with
-their slopes, drawn in the app as one curve over the playing spectrum; see
-[parametric-eq.md](features/parametric-eq.md)), `compressor` (optional `sidechain` track), `limiter`
+their slopes and an `output_db` after them, drawn in the app as one curve over
+the playing spectrum; see [parametric-eq.md](features/parametric-eq.md) and
+[eq-output.md](features/eq-output.md)), `compressor` (optional `sidechain` track), `limiter`
 (with `true_peak`, a ceiling the render's estimated true peak does not pass; see
 [true-peak-limiter.md](features/true-peak-limiter.md)),
 `clipper` (a ceiling no sample passes, with a knee and oversampling; see

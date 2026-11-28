@@ -122,6 +122,12 @@ enum EqLayout {
         return sectionDb(section(band, q: band.q, rate: rate), hz: hz, rate: rate)
     }
 
+    /// The equalizer's output gain after its bands, in dB.
+    static func outputDb(of fields: [FieldView]) -> Double {
+        if case .number(let db) = fields.first(where: { $0.name == "output_db" })?.value { return db }
+        return 0
+    }
+
     /// The bands' response together at `hz`, in dB.
     static func curveDb(_ bands: [Band], hz: Double, rate: Double) -> Double {
         bands.reduce(0) { $0 + responseDb($1, hz: hz, rate: rate) }

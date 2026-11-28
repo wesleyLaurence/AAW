@@ -37,6 +37,9 @@ fn added(key: &'static str, default: Value) -> Added {
 /// their defaults. A field added to any model needs a new first entry here.
 fn legacy_fields() -> Vec<Vec<Added>> {
     vec![
+        // An equalizer's output gain; a saturation and an overdrive have the
+        // key too, so only a mapping with bands loses it.
+        vec![Added { key: "output_db", default: Value::Float(0.0), beside: Some("bands"), unless: None }],
         // A track's, a group's, a return's and a clip's color.
         vec![added("color", Value::None)],
         // A track's, a group's and a return's name; a note, a rack and a

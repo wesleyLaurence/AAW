@@ -57,6 +57,12 @@ final class EqLayoutTests: XCTestCase {
         let bands = EqLayout.Band.bands(of: fields)
         XCTAssertEqual(bands, [band("high_shelf", 5000, gain: 2, q: 0.9), band("lowpass", 12000, q: 0.71, slope: 48)])
         XCTAssertEqual(bands.map { $0.sections }, [1, 4])
+        // The equalizer's output gain is its own field, not a band's; 0 without it.
+        XCTAssertEqual(EqLayout.outputDb(of: fields), 0)
+        fields.append(FieldView(name: "output_db", label: "Output", kind: .number, value: .number(value: -6), min: -24, max: 24, unit: "dB", log: false,
+                                choices: [], optional: false, initial: .number(value: 0), live: true, param: nil, lane: nil, band: nil))
+        XCTAssertEqual(EqLayout.outputDb(of: fields), -6)
+        XCTAssertEqual(EqLayout.Band.bands(of: fields), bands)
     }
 
     func testPointsSitAtTheGainOrTheCornerAndReadBackADrag() {

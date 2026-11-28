@@ -113,6 +113,38 @@ impl Utility {
     }
 }
 
+/// A gain after a device's own processing, as an equalizer's `output_db`:
+/// left out of the arithmetic at 0 dB, so a device without one passes its
+/// output through bit-identical.
+#[derive(Clone, Debug)]
+pub struct Trim {
+    pub gain: Knob,
+    values: Vec<f64>,
+}
+
+impl Trim {
+    pub fn new(gain: Knob, max_block: usize) -> Trim {
+        Trim { gain, values: vec![0.0; max_block] }
+    }
+
+    pub fn process(&mut self, x: &mut [Frame], clock: Clock) {
+        let n = x.len();
+        let gains = &mut self.values[..n];
+        self.gain.fill(clock.frame, clock.step, gains);
+        for (f, db) in x.iter_mut().zip(gains.iter()) {
+            if *db != 0.0 {
+                let g = amplitude(*db);
+                *f = [f[0] * g, f[1] * g];
+            }
+        }
+    }
+
+    /// Continues from `old`, gliding to its own gain.
+    pub fn take_over(&mut self, old: &Trim) {
+        self.gain.take_over(&old.gain);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

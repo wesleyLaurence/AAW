@@ -411,6 +411,10 @@ private struct SynthEffectColumn: View {
                         row(field, label: field.label)
                     }
                 }
+                // The equalizer's own fields, after its bands.
+                ForEach(effect.fields.filter { $0.band == nil }, id: \.name) { field in
+                    row(field, label: field.label)
+                }
             } else {
                 ForEach(effect.fields, id: \.name) { field in
                     row(field, label: field.label)

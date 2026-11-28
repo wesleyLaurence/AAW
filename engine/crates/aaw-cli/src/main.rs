@@ -1828,8 +1828,7 @@ fn lane_help() -> String {
          (daw describe synth). REF is an effect's id or index in the chain.\nEffect fields a lane can move:\n",
     );
     for (kind, params) in automation["automatable"]["effects"].as_object().into_iter().flatten() {
-        let names: Vec<&String> = params.as_object().into_iter().flatten().map(|(f, _)| f).collect();
-        let names: Vec<String> = names.iter().map(|f| if kind == "eq" { format!("bands.N.{f}") } else { f.to_string() }).collect();
+        let names: Vec<&str> = params.as_object().into_iter().flatten().map(|(f, _)| f.as_str()).collect();
         out.push_str(&format!("  {kind}: {}\n", names.join(", ")));
     }
     out.push_str("A point is {at, value, curve, shape}:\n");

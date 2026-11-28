@@ -96,6 +96,23 @@ def test_lowpass_and_eq_bands(tmp_path):
     assert abs(gain("high", shelves, 15000) - 4) < 0.3
 
 
+def test_eq_output_gain_follows_its_bands(tmp_path):
+    """An equalizer's output_db is a gain after its bands, moved by a lane
+    as effects.REF.output_db; at 0 it is left out and changes nothing."""
+    bands = [{"shape": "low_shelf", "freq_hz": 200, "gain_db": 6}]
+    x = tone(100, amp=0.25)
+    plain, _ = run_chain(tmp_path / "plain", [{"type": "eq", "bands": bands}], x)
+    down, _ = run_chain(tmp_path / "down", [{"type": "eq", "output_db": -6, "bands": bands}], x)
+    assert np.allclose(down, plain * 10 ** (-6 / 20), atol=1e-7)
+    zero, _ = run_chain(tmp_path / "zero", [{"type": "eq", "output_db": 0, "bands": bands}], x)
+    assert np.array_equal(zero, plain)
+    assert "output_db" not in (tmp_path / "zero" / "song.yaml").read_text()
+    assert "output_db: -6" in (tmp_path / "down" / "song.yaml").read_text()
+    # A lane at -6 is the field at -6.
+    lane, _ = run_chain(tmp_path / "lane", [{"type": "eq", "bands": bands}], x, automation={0: {"output_db": [(0, -6)]}})
+    assert np.allclose(lane, down, atol=1e-7)
+
+
 def test_compressor_static_curve_and_report(tmp_path):
     spec = {
         "type": "compressor",
