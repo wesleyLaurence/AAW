@@ -262,240 +262,51 @@ struct DeviceView: View {
     let model: SongModel
     let chain: DeviceChain
 
-    /// What the panel takes: every effect kind and a rack, and on a MIDI
-    /// track the instruments, the MIDI effects, a Synth patch and an
-    /// instrument rack.
-    private var droppable: [String] {
-        let midi = chain.track?.midi == true
-        var types = (DeviceChain.kinds + (midi ? Browser.midiEffects + Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
-        types.append(Browser.deviceType)
-        types.append(Browser.rackType)
-        types.append(Browser.pluginType)
-        if midi { types.append(Browser.patchType); types.append(Browser.instrumentRackType) }
-        return types
-    }
-
     var body: some View {
-        let keys = chain.effects.map(\.key)
-        return ScrollView(.horizontal) {
-            HStack(alignment: .top, spacing: 8) {
-                if let track = chain.track, track.frozen {
-                    // The devices are rendered to the track's file; the host
-                    // refuses a change to them until the track is unfrozen.
-                    Text("\(track.name) is frozen: its devices are rendered to a file that plays in their place. Unfreeze the track to change them.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 220, alignment: .leading)
-                        .padding(.top, 4)
-                }
-                if let track = chain.track, track.midi {
-                    ForEach(Array(track.midiEffects.enumerated()), id: \.element.key) { index, effect in
-                        MidiEffectPanel(model: model, effect: effect, index: index, count: track.midiEffects.count)
+        let height = model.detailHeight - 16
+        return GeometryReader { viewport in
+            ScrollView(.horizontal) {
+                HStack(alignment: .top, spacing: 8) {
+                    if let track = chain.track, track.frozen {
+                        // The devices are rendered to the track's file; the host
+                        // refuses a change to them until the track is unfrozen.
+                        Text("\(track.name) is frozen: its devices are rendered to a file that plays in their place. Unfreeze the track to change them.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 220, alignment: .leading)
+                            .padding(.top, 4)
                     }
-                    InstrumentPanel(model: model, track: track)
+                    if let track = chain.track, track.midi {
+                        ForEach(Array(track.midiEffects.enumerated()), id: \.element.key) { index, effect in
+                            MidiEffectPanel(model: model, effect: effect, index: index, count: track.midiEffects.count)
+                        }
+                        InstrumentPanel(model: model, track: track)
+                    }
+                    ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
+                        ChainGapMark(index: index, height: height)
+                        DevicePanel(model: model, chain: chain, effect: effect, index: index, count: chain.effects.count)
+                    }
+                    ChainGapMark(index: chain.effects.count, height: height)
+                    if chain.effects.isEmpty {
+                        Text("No effects on \(chain.name). Drag an effect here, or use Add Effect.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 320, alignment: .leading)
+                            .padding(.top, 4)
+                    }
                 }
-                ForEach(Array(chain.effects.enumerated()), id: \.element.key) { index, effect in
-                    DeviceInsertion(model: model, row: chain.row, index: UInt32(index), keys: keys)
-                    DevicePanel(model: model, chain: chain, effect: effect, index: index, count: chain.effects.count)
-                }
-                DeviceInsertion(model: model, row: chain.row, index: UInt32(chain.effects.count), keys: keys)
-                if chain.effects.isEmpty {
-                    Text("No effects on \(chain.name). Drag an effect here, or use Add Effect.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 320, alignment: .leading)
-                        .padding(.top, 4)
+                .padding(8)
+                // The whole panel takes a drop, past the chain's end too.
+                .frame(minWidth: viewport.size.width, minHeight: viewport.size.height, alignment: .topLeading)
+                .coordinateSpace(name: ChainGeometry.space)
+                .overlayPreferenceValue(ChainGeometryKey.self) { geometry in
+                    // A click goes through to the panels: AppKit offers a
+                    // drag to the view all the same.
+                    ChainDropTarget(model: model, chain: chain, geometry: geometry)
+                        .allowsHitTesting(false)
                 }
             }
-            .padding(8)
         }
-        .onDrop(of: droppable, isTargeted: nil) { providers in
-            guard let provider = providers.first else { return false }
-            if provider.hasItemConformingToTypeIdentifier(Browser.rackType) {
-                // A saved rack: one device at the end of the shown row's chain.
-                let row = chain.row
-                provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
-                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
-                    DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, rack: name) }
-                }
-                return true
-            }
-            if provider.hasItemConformingToTypeIdentifier(Browser.pluginType) {
-                // A plugin, by its slug: one device at the end of the shown row's chain.
-                let row = chain.row
-                provider.loadDataRepresentation(forTypeIdentifier: Browser.pluginType) { data, _ in
-                    guard let data, let slug = String(data: data, encoding: .utf8) else { return }
-                    DispatchQueue.main.async { model.addBrowserDevice(slug, to: row) }
-                }
-                return true
-            }
-            if provider.hasItemConformingToTypeIdentifier(Browser.instrumentRackType) {
-                // An instrument rack: the track's instrument and a rack first in its chain.
-                guard model.canAddBrowserDevice(Browser.instrumentRackKind, to: chain.row) else { return false }
-                let row = chain.row
-                provider.loadDataRepresentation(forTypeIdentifier: Browser.instrumentRackType) { data, _ in
-                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
-                    DispatchQueue.main.async { model.addBrowserDevice(Browser.instrumentRackKind, to: row, rack: name) }
-                }
-                return true
-            }
-            if provider.hasItemConformingToTypeIdentifier(Browser.patchType) {
-                // A Synth patch: loaded into the track's Synth, or a Synth attached with it.
-                guard model.canAddBrowserDevice("synth", to: chain.row) else { return false }
-                let row = chain.row
-                provider.loadDataRepresentation(forTypeIdentifier: Browser.patchType) { data, _ in
-                    guard let data, let name = String(data: data, encoding: .utf8) else { return }
-                    DispatchQueue.main.async { model.addBrowserDevice("synth", to: row, patch: name) }
-                }
-                return true
-            }
-            // The kind's own type, or the one every device has, with the kind
-            // the browser holds from when the drag began.
-            let own = (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }
-            let held = provider.hasItemConformingToTypeIdentifier(Browser.deviceType) ? model.browser.draggedDevice?.kind : nil
-            guard let kind = own ?? held, model.canAddBrowserDevice(kind, to: chain.row) else { return false }
-            model.addBrowserDevice(kind, to: chain.row)
-            return true
-        }
-    }
-}
-
-/// The strip between two devices of a chain, or between two effects of a
-/// rack (`rack`): an effect or a rack from the browser dropped here goes in
-/// at this place, an effect of the list dragged by its title moves here,
-/// one of the row's other list, the chain's or a rack's, moves in here,
-/// and a copy of one dragged with Option held goes in here.
-private struct DeviceInsertion: View {
-    let model: SongModel
-    let row: RowID
-    let index: UInt32
-    /// The list's effects, for where one dragged out of it goes.
-    let keys: [UInt64]
-    /// The rack whose effects the strip is between, for a rack's strip.
-    var rack: UInt64? = nil
-    @State private var targeted = false
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(targeted ? Color.accentColor : Color.secondary.opacity(0.18))
-            .frame(width: 12, height: model.detailHeight - 54 - (rack == nil ? 0 : RackLayout.inset))
-            .onDrop(of: DeviceChain.kinds.map { Browser.deviceType + "." + $0 } + [Browser.rackType, Browser.pluginType, DeviceChain.effectType],
-                    delegate: InsertionDrop(model: model, row: row, index: index, keys: keys, rack: rack, targeted: $targeted))
-            .help(rack == nil
-                  ? "Drop an effect or a rack here, or one of the chain's effects dragged from its title to move it; with Option, a copy of one"
-                  : "Drop an effect here, or one of the row's effects dragged from its title to move it into the rack; with Option, a copy of one")
-    }
-}
-
-/// What lands on an insertion strip: a kind or a rack from the browser, an
-/// effect of the list dragged from its title, moved here as the ◂ ▸ marks
-/// move it, an effect of the row's other list moved in here, or with
-/// Option a copy of an effect dragged from the device panel. The strips on
-/// either side of the dragged effect refuse it, so that a strip does not
-/// light up for a move nothing makes; a rack's strip refuses a rack, since
-/// a rack holds no rack, and lays a saved rack's effects in.
-private struct InsertionDrop: DropDelegate {
-    let model: SongModel
-    let row: RowID
-    let index: UInt32
-    let keys: [UInt64]
-    let rack: UInt64?
-    @Binding var targeted: Bool
-
-    /// A kind from the browser that can go here: any, but a rack inside a rack.
-    private func kind(of info: DropInfo) -> String? {
-        DeviceChain.kinds.first { info.hasItemsConforming(to: [Browser.deviceType + "." + $0]) }.flatMap { $0 != "rack" || rack == nil ? $0 : nil }
-    }
-
-    private func isRack(_ info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [Browser.rackType])
-    }
-
-    /// A plugin from the browser can go here, but not inside a rack.
-    private func isPlugin(_ info: DropInfo) -> Bool {
-        rack == nil && info.hasItemsConforming(to: [Browser.pluginType])
-    }
-
-    private var copying: Bool {
-        NSEvent.modifierFlags.contains(.option)
-    }
-
-    /// The effect of this list being dragged without Option, and where it
-    /// goes; nil when it is another list's or would stay where it is.
-    private var move: (key: UInt64, to: Int)? {
-        guard !copying, let key = model.draggedEffect, let from = keys.firstIndex(of: key),
-              let to = DeviceChain.moveTarget(from: from, strip: Int(index)) else { return nil }
-        return (key, to)
-    }
-
-    /// An effect of the row's other list being dragged without Option, the
-    /// chain's onto a rack's strip or a rack's onto the chain's.
-    private var crossing: UInt64? {
-        guard !copying, let key = model.draggedEffect, !keys.contains(key), let chain = model.deviceChain, chain.row == row,
-              DeviceChain.crosses(key, in: chain.effects, to: rack) else { return nil }
-        return key
-    }
-
-    private func accepts(_ info: DropInfo) -> Bool {
-        kind(of: info) != nil || isRack(info) || isPlugin(info) || (info.hasItemsConforming(to: [DeviceChain.effectType]) && (copying || move != nil || crossing != nil))
-    }
-
-    func validateDrop(info: DropInfo) -> Bool {
-        kind(of: info) != nil || isRack(info) || isPlugin(info) || info.hasItemsConforming(to: [DeviceChain.effectType])
-    }
-
-    func dropEntered(info: DropInfo) {
-        targeted = accepts(info)
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        let ok = accepts(info)
-        if targeted != ok { targeted = ok }
-        guard ok else { return DropProposal(operation: .cancel) }
-        return DropProposal(operation: move != nil || crossing != nil ? .move : .copy)
-    }
-
-    func dropExited(info: DropInfo) {
-        targeted = false
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        targeted = false
-        if let kind = kind(of: info) {
-            model.addBrowserDevice(kind, to: row, index: index, into: rack)
-            return true
-        }
-        if let provider = info.itemProviders(for: [Browser.rackType]).first {
-            let (model, row, index, rack) = (model, row, index, rack)
-            provider.loadDataRepresentation(forTypeIdentifier: Browser.rackType) { data, _ in
-                guard let data, let name = String(data: data, encoding: .utf8) else { return }
-                DispatchQueue.main.async { model.addBrowserDevice("rack", to: row, index: index, rack: name, into: rack) }
-            }
-            return true
-        }
-        if isPlugin(info), let provider = info.itemProviders(for: [Browser.pluginType]).first {
-            let (model, row, index) = (model, row, index)
-            provider.loadDataRepresentation(forTypeIdentifier: Browser.pluginType) { data, _ in
-                guard let data, let slug = String(data: data, encoding: .utf8) else { return }
-                DispatchQueue.main.async { model.addBrowserDevice(slug, to: row, index: index) }
-            }
-            return true
-        }
-        if let move {
-            model.edit(.effectMove(effect: move.key, index: UInt32(move.to)))
-            return true
-        }
-        if let crossing {
-            model.moveEffect(crossing, in: row, to: rack, index: index)
-            return true
-        }
-        guard copying, let provider = info.itemProviders(for: [DeviceChain.effectType]).first else { return false }
-        let (model, row, index, rack) = (model, row, index, rack)
-        provider.loadDataRepresentation(forTypeIdentifier: DeviceChain.effectType) { data, _ in
-            guard let data, let key = String(data: data, encoding: .utf8).flatMap(UInt64.init) else { return }
-            DispatchQueue.main.async { model.copyEffect(key, to: row, index: index, into: rack) }
-        }
-        return true
     }
 }
 
@@ -931,9 +742,10 @@ private struct InstrumentPanel: View {
 /// and a control for each of its fields; a rack as a frame around its
 /// effects' panels; an effect folded to a strip with its name along it. A
 /// click on its title selects it, for Copy, Duplicate and Delete; a drag
-/// from the title onto an insertion strip moves it there, into or out of
-/// a rack too, and with Option copies it onto a header or a strip; a right
-/// click offers the same as the menus, with Make Rack and Unrack.
+/// from the title over the chain moves it to the gap nearest the pointer,
+/// into or out of a rack too, onto another row's header or lane moves it
+/// there, and with Option copies it; a right click offers the same as the
+/// menus, with Make Rack and Unrack.
 private struct DevicePanel: View {
     let model: SongModel
     let chain: DeviceChain
@@ -1154,7 +966,7 @@ private struct DevicePanel: View {
             .onTapGesture { model.select(effect: effect.key) }
             .onDrag(drag)
             .contextMenu { menu }
-            .help("Click to select the effect; drag it onto a strip between devices to move it there, into a rack or out of one, with Option to copy it there or onto a header")
+            .help("Click to select the effect; drag it along the chain to move it, into a rack or out of one, or onto another track to move it there; with Option, to copy it")
 
             Group {
                 if effect.kind == "eq" {
@@ -1192,13 +1004,13 @@ private struct DevicePanel: View {
     }
 }
 
-/// A rack: a frame around its effects' panels, each with a strip before it
-/// and one after the last, under a title bar with the rack's name, its
-/// bypass, a mark that folds every effect to a strip or opens them all
-/// out, Save…, Unrack, the moves and ×. An effect or a saved rack dropped
-/// on the frame goes in at its end; on a strip, at that place. An effect
-/// of the chain dragged onto a strip moves into the rack, and one of the
-/// rack dragged onto the chain's strip leaves it.
+/// A rack: a frame around its effects' panels, a gap before each and after
+/// the last, under a title bar with the rack's name, its bypass, a mark
+/// that folds every effect to a strip or opens them all out, Save…,
+/// Unrack, the moves and ×. Its effects are a chain of their own: an
+/// effect or a saved rack dragged over them goes in at the gap nearest the
+/// pointer, an effect of the chain dragged there moves into the rack, and
+/// one of the rack's dragged over the chain leaves it.
 /// How a rack's frame is laid out.
 enum RackLayout {
     /// How much shorter a rack's effects are than the chain's: the rack's
@@ -1215,7 +1027,6 @@ private struct RackPanel<Menu: View>: View {
     @ViewBuilder let menu: () -> Menu
     let drag: () -> NSItemProvider
     @State private var saving: ChainHeader.RackSave?
-    @State private var targeted = false
 
     private var title: String {
         effect.name ?? effect.id.map { "Rack · \($0)" } ?? "Rack"
@@ -1230,8 +1041,8 @@ private struct RackPanel<Menu: View>: View {
     }
 
     var body: some View {
-        let keys = effect.effects.map(\.key)
         let inner = effect.effects.count
+        let height = model.detailHeight - 16 - RackLayout.inset
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 5) {
                 Button {
@@ -1296,14 +1107,14 @@ private struct RackPanel<Menu: View>: View {
             .onTapGesture { model.select(effect: effect.key) }
             .onDrag(drag)
             .contextMenu { menu() }
-            .help("Click to select the rack; drag it onto a strip between devices to move it there")
+            .help("Click to select the rack; drag it along the chain to move it, or onto another track to move it there; with Option, to copy it")
 
             HStack(alignment: .top, spacing: 8) {
                 ForEach(Array(effect.effects.enumerated()), id: \.element.key) { j, one in
-                    DeviceInsertion(model: model, row: chain.row, index: UInt32(j), keys: keys, rack: effect.key)
+                    ChainGapMark(rack: effect.key, index: j, height: height)
                     DevicePanel(model: model, chain: chain, effect: one, index: j, count: inner, rack: effect.key)
                 }
-                DeviceInsertion(model: model, row: chain.row, index: UInt32(inner), keys: keys, rack: effect.key)
+                ChainGapMark(rack: effect.key, index: inner, height: height)
                 if effect.effects.isEmpty {
                     Text("An empty rack. Drop effects here, or drag the chain's into it.")
                         .font(.system(size: 11))
@@ -1314,13 +1125,17 @@ private struct RackPanel<Menu: View>: View {
             }
             .padding(8)
             .opacity(effect.bypass ? 0.5 : 1)
+            // Over its effects a drag lands among them, over its title bar
+            // in the chain.
+            .background(GeometryReader { g in
+                Color.clear.preference(key: ChainGeometryKey.self,
+                                       value: ChainGeometry(racks: [effect.key: g.frame(in: .named(ChainGeometry.space))]))
+            })
         }
         .frame(height: model.detailHeight - 16, alignment: .top)
         .background(Color(nsColor: Theme.gray(0.15)))
         .clipShape(RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected || targeted ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: selected || targeted ? 2 : 1))
-        .onDrop(of: DeviceChain.kinds.filter { $0 != "rack" }.map { Browser.deviceType + "." + $0 } + [Browser.rackType, DeviceChain.effectType],
-                delegate: InsertionDrop(model: model, row: chain.row, index: UInt32(inner), keys: keys, rack: effect.key, targeted: $targeted))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.35), lineWidth: selected ? 2 : 1))
         .sheet(item: $saving) { save in
             RackSaveSheet(model: model, chain: chain, save: save) { saving = nil }
         }

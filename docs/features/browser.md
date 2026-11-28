@@ -90,8 +90,7 @@ instruments, effects and patches do not.
 | Dropped on | Does |
 |---|---|
 | A track's, return's or the master's header | Adds it to the end of that row's chain |
-| The device panel outside an insertion strip | Adds it to the end of the shown row's chain |
-| The device panel, between two devices | Adds it to the shown row's chain at that place, with a line where it will go while it is dragged |
+| The device panel's chain | Adds it to the shown row's chain at the gap nearest the pointer, among a rack's effects over them, with a line down that gap while it is dragged; past the last device, at the end |
 | Anywhere else | Nothing; the pointer shows that it will not be taken |
 
 **Dragging an instrument.**

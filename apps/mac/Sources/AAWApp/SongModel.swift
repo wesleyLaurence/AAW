@@ -66,10 +66,10 @@ struct DeviceChain {
     /// its key.
     static let effectType = "org.aaw.effect"
 
-    /// Where an effect at `from` in a chain goes when it is let go on the
-    /// insertion strip `strip`, which sits before the effect of that index
-    /// and after the last; nil for the strips on either side of the effect,
-    /// where it would land where it is.
+    /// Where an effect at `from` in a chain goes when it is let go in the
+    /// gap `strip`, which sits before the effect of that index and after
+    /// the last; nil for the gaps on either side of the effect, where it
+    /// would land where it is.
     static func moveTarget(from: Int, strip: Int) -> Int? {
         if strip == from || strip == from + 1 { return nil }
         return strip < from ? strip : strip - 1
@@ -244,10 +244,10 @@ public final class SongModel {
     /// since: what Delete takes off.
     private(set) var drumPadInHand: (track: UInt64, pad: String)?
     /// The effect last dragged by its title, of a chain or of a Synth's
-    /// patch, set as the drag starts: a strip reads it to say where the
-    /// effect would go, since the drag's own data is not readable until it
-    /// is let go. It stays set after the drag, and is read only while a drag
-    /// of an effect's type is over a strip.
+    /// patch, set as the drag starts: the chain, the timeline and a Synth's
+    /// strips read it to say where the effect would go, since the drag's
+    /// own data is not readable until it is let go. It stays set after the
+    /// drag, and is read only while a drag of an effect's type is over them.
     var draggedEffect: UInt64?
     /// The effects whose panels are folded to a strip in the device panel,
     /// by key: the window's, not the song's.
@@ -1660,6 +1660,12 @@ public final class SongModel {
     /// instrument plugin.
     func isInstrumentKind(_ kind: String) -> Bool {
         Browser.isInstrument(kind) || isInstrumentPlugin(kind)
+    }
+
+    /// Whether a kind from the browser goes into a row's effect chain, at a
+    /// place in it: an effect, a rack, an effect of the person's own.
+    func goesInChain(_ kind: String) -> Bool {
+        kind == "rack" || DeviceChain.kinds.contains(kind) || plugins.contains { $0.slug == kind && $0.kind == "effect" }
     }
 
     func canAddBrowserDevice(_ kind: String, to row: RowID?) -> Bool {
