@@ -475,8 +475,9 @@ pub enum Command {
     #[serde(rename = "effect.remove")]
     EffectRemove { effect: String },
     /// Moves an effect to `index` of its chain, or with `owner` into another
-    /// chain of its row at `index`: a rack of the chain, or the chain out
-    /// of a rack. The lanes on it follow; an id the chain has is numbered.
+    /// chain at `index`: a rack of the chain, the chain out of a rack, or
+    /// another row's chain or a rack of it. The lanes on it follow, to the
+    /// row it lands on; an id the chain has is numbered.
     #[serde(rename = "effect.move")]
     EffectMove {
         effect: String,
@@ -1682,15 +1683,13 @@ impl<'a> Edit<'a> {
         Ok(handle)
     }
 
-    /// Moves effect `from` of one chain into another chain of the same row
-    /// at `index`, the lanes on it following and an id the chain has
-    /// numbered: the chain it landed in, as it is afterwards, and where.
+    /// Moves effect `from` of one chain into another chain, of the same row
+    /// or another, at `index`, the lanes on it following to the row it
+    /// lands on and an id the chain has numbered: the chain it landed in,
+    /// as it is afterwards, and where.
     fn move_between(&mut self, from_owner: &[Step], from: usize, to_owner: &[Step], index: usize) -> Result<(Loc, usize)> {
-        let (a, _) = self.lane_owner(from_owner).ok_or_else(|| format!("{} has no chain", self.text(from_owner)))?;
-        let (b, _) = self.lane_owner(to_owner).ok_or_else(|| format!("{} has no chain", self.text(to_owner)))?;
-        if a != b {
-            return Err("An effect is moved within its row; daw effect add puts one like it on another row".into());
-        }
+        self.lane_owner(from_owner).ok_or_else(|| format!("{} has no chain", self.text(from_owner)))?;
+        self.lane_owner(to_owner).ok_or_else(|| format!("{} has no chain", self.text(to_owner)))?;
         let loc = [from_owner.to_vec(), vec![Step::Key("effects".into()), Step::Index(from)]].concat();
         if self.node(&loc).field("type") == Some("rack") {
             if self.is_rack(to_owner) {

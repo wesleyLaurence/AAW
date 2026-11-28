@@ -937,6 +937,20 @@ fn an_effect_is_duplicated_copied_and_pasted() {
     assert!(e.contains("sidechain"), "{e}");
     assert_eq!(kinds(&song.arrangement(), 1), before);
 
+    // Dragged without Option onto a return's row, it moves there, last in
+    // its chain, keeping its key; onto the track that keys it, it stays.
+    let on_return = song.arrangement().returns[0].effects.len();
+    song.edit(Edit::EffectMoveTo { effect: compressor, row: plate.clone(), rack: None, index: u32::MAX }, None).unwrap();
+    let u = update(&seen);
+    assert_eq!(u.change.label, "Move effect returns.plate.effects.duck-2 into returns.plate");
+    assert_eq!(kinds(&u.arrangement, 0), ["compressor"], "only its duplicate is left on the drums");
+    assert_eq!((u.arrangement.returns[0].effects.len(), u.arrangement.returns[0].effects.last().map(|e| e.key)), (on_return + 1, Some(compressor)));
+    let e = song.edit(Edit::EffectMoveTo { effect: compressor, row: perc.clone(), rack: None, index: u32::MAX }, None).unwrap_err().to_string();
+    assert!(e.contains("sidechain"), "{e}");
+    song.undo().unwrap();
+    let u = update(&seen);
+    assert_eq!(u.arrangement.tracks[0].effects[0].key, compressor, "undo puts it back");
+
     // ⌘C then ⌘V: what Copy took is pasted after the effect has changed and after it is gone.
     let copied = song.copy_effect(compressor).unwrap();
     song.edit(Edit::EffectSet { effect: compressor, field: "threshold_db".into(), value: number(-6.0) }, None).unwrap();

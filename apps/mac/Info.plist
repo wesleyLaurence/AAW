@@ -51,6 +51,86 @@
 				</array>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.browser-device</string>
+			<key>UTTypeDescription</key>
+			<string>AAW device</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.browser-patch</string>
+			<key>UTTypeDescription</key>
+			<string>AAW Synth patch</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.browser-rack</string>
+			<key>UTTypeDescription</key>
+			<string>AAW effect rack</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.browser-plugin</string>
+			<key>UTTypeDescription</key>
+			<string>AAW plugin</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.browser-instrument-rack</string>
+			<key>UTTypeDescription</key>
+			<string>AAW instrument rack</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.effect</string>
+			<key>UTTypeDescription</key>
+			<string>AAW effect</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.synth-effect</string>
+			<key>UTTypeDescription</key>
+			<string>AAW Synth effect</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.aaw.synth-source</string>
+			<key>UTTypeDescription</key>
+			<string>AAW Synth source</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>

@@ -312,14 +312,57 @@ fn an_effect_moves_into_a_rack_and_out_again_with_its_lanes() {
     assert_eq!(r["label"], json!("Move effect tracks.bass.effects.warm into tracks.bass"));
     assert_eq!(kinds(&s, "tracks.bass"), ["rack", "saturation"]);
     assert_eq!(params(&s), [json!("sends.plate.gain_db"), json!("effects.fx.effects.0.threshold_db"), json!("effects.warm.drive_db")]);
-    // Across rows it is refused; within a chain the owner may be given.
-    let e = edit(&mut s, json!({"op": "effect.move", "effect": "tracks.bass.effects.warm", "index": 0, "owner": "returns.plate"})).unwrap_err();
-    assert!(e.contains("within its row"), "{e}");
+    // Within a chain the owner may be given.
     edit(&mut s, json!({"op": "effect.move", "effect": "tracks.bass.effects.warm", "index": 0, "owner": "tracks.bass"})).unwrap();
     assert_eq!(kinds(&s, "tracks.bass"), ["saturation", "rack"]);
     s.undo(Origin::User, false).unwrap();
     s.undo(Origin::User, false).unwrap();
     assert_eq!(kinds(&s, "tracks.bass.effects.fx"), ["compressor", "saturation"]);
+}
+
+#[test]
+fn an_effect_moves_to_another_row_with_its_lanes() {
+    let (_d, mut s) = open();
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "saturation", "id": "warm", "drive_db": 6})).unwrap();
+    edit(&mut s, json!({"op": "lane.set", "owner": "tracks.bass", "param": "effects.warm.drive_db", "points": [{"at": 0, "value": 3}]})).unwrap();
+    edit(&mut s, json!({"op": "effect.add", "owner": "returns.plate", "type": "saturation", "id": "warm"})).unwrap();
+    let params = |s: &Session, row: &str| -> Vec<Json> {
+        get(s, &format!("{row}.automation")).as_array().map(|a| a.iter().map(|l| l["param"].clone()).collect()).unwrap_or_default()
+    };
+    let before = params(&s, "returns.plate");
+    // Last in the return's chain: the lane goes with it, under the id the return gives it.
+    let r = edit(&mut s, json!({"op": "effect.move", "effect": "tracks.bass.effects.warm", "index": 99, "owner": "returns.plate"})).unwrap();
+    assert_eq!(r["label"], json!("Move effect returns.plate.effects.warm-2 into returns.plate"));
+    assert_eq!(kinds(&s, "tracks.bass"), ["compressor"]);
+    assert_eq!(kinds(&s, "returns.plate").last().map(String::as_str), Some("saturation"));
+    assert!(!params(&s, "tracks.bass").contains(&json!("effects.warm.drive_db")));
+    assert_eq!(params(&s, "returns.plate"), [before, vec![json!("effects.warm-2.drive_db")]].concat());
+    // Into a rack of the master, by index, and out of it to a track again.
+    edit(&mut s, json!({"op": "effect.add", "owner": "master", "type": "rack", "id": "fx"})).unwrap();
+    edit(&mut s, json!({"op": "effect.move", "effect": "returns.plate.effects.warm-2", "index": 0, "owner": "master.effects.fx"})).unwrap();
+    assert_eq!(kinds(&s, "master.effects.fx"), ["saturation"]);
+    assert_eq!(params(&s, "master").last(), Some(&json!("effects.fx.effects.warm-2.drive_db")));
+    edit(&mut s, json!({"op": "effect.move", "effect": "master.effects.fx.effects.warm-2", "index": 0, "owner": "tracks.bass"})).unwrap();
+    assert_eq!(kinds(&s, "tracks.bass"), ["saturation", "compressor"]);
+    assert_eq!(params(&s, "tracks.bass").last(), Some(&json!("effects.warm-2.drive_db")));
+    // Undo takes each step back: the three moves and the rack.
+    for _ in 0..4 {
+        s.undo(Origin::User, false).unwrap();
+    }
+    assert_eq!(kinds(&s, "tracks.bass").last().map(String::as_str), Some("saturation"));
+    assert_eq!(params(&s, "tracks.bass").last(), Some(&json!("effects.warm.drive_db")));
+}
+
+#[test]
+fn a_compressor_is_not_moved_onto_the_track_that_keys_it() {
+    let (_d, mut s) = open();
+    edit(&mut s, json!({"op": "track.add", "id": "kick", "type": "audio"})).unwrap();
+    edit(&mut s, json!({"op": "effect.add", "owner": "tracks.bass", "type": "compressor", "id": "duck", "threshold_db": -20, "ratio": 4, "sidechain": "kick"})).unwrap();
+    let before = kinds(&s, "tracks.kick");
+    let e = edit(&mut s, json!({"op": "effect.move", "effect": "tracks.bass.effects.duck", "index": 0, "owner": "tracks.kick"})).unwrap_err();
+    assert!(e.contains("sidechain"), "{e}");
+    assert_eq!(kinds(&s, "tracks.kick"), before);
+    assert!(kinds(&s, "tracks.bass").len() >= 2, "it stays where it was");
 }
 
 #[test]

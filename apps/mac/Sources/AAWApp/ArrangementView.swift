@@ -163,6 +163,14 @@ private enum DropTarget: Equatable {
     case newClip(at: Double)
 }
 
+/// Where a device from the browser, or an effect out of the device panel,
+/// would land: on a row, its header or its lane, or an instrument on a new
+/// track under the tracks.
+enum DeviceDrop: Equatable {
+    case row(RowID)
+    case newTrack
+}
+
 /// How long the arrangement took to draw each frame of a run of scrolling and
 /// zooming, in milliseconds, and how far apart the frames were.
 struct DrawTimes {
@@ -472,6 +480,9 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     /// when play has stopped.
     private var beginningPending = false
     private var dropTarget: DropTarget?
+    /// Where a dragged device or effect would land, lit: a row, or for an
+    /// instrument the new track under the tracks.
+    private var deviceDrop: DeviceDrop?
     /// The file being dragged over the view and its length, in seconds for an
     /// audio file and in beats for a MIDI file, read once for the outline of
     /// the clip it would make.
@@ -513,7 +524,7 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         model.onWaveforms = { [weak self] in self?.needsDisplay = true }
         model.onMeasure = { [weak self] frames, then in self?.measure(frames: frames, then: then) }
         registerForDraggedTypes(
-            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.pluginType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
+            [.fileURL, .string, NSPasteboard.PasteboardType(Browser.deviceType), NSPasteboard.PasteboardType(Browser.patchType), NSPasteboard.PasteboardType(Browser.rackType), NSPasteboard.PasteboardType(Browser.pluginType), NSPasteboard.PasteboardType(Browser.instrumentRackType), NSPasteboard.PasteboardType(DeviceChain.effectType)]
                 + (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).map { NSPasteboard.PasteboardType(Browser.deviceType + "." + $0) })
     }
 
@@ -2446,61 +2457,77 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         return true
     }
 
+    /// Lands a device from the browser at a point of the view, as a drag
+    /// that ends there does: on the row under it, or an instrument under
+    /// the tracks on a new track. False where it cannot land.
+    @discardableResult
+    func drop(device: DraggedDevice, at p: CGPoint) -> Bool {
+        guard let landing = deviceLanding(device.kind, at: p) else { return false }
+        let row: RowID?
+        if case .row(let r) = landing { row = r } else { row = nil }
+        model.addBrowserDevice(device.kind, to: row, patch: device.patch, rack: device.rack)
+        return true
+    }
+
+    /// The types a device dragged out of the browser carries, one of them
+    /// at least.
+    private static let deviceTypes: Set<NSPasteboard.PasteboardType> = Set(
+        [Browser.deviceType, Browser.patchType, Browser.rackType, Browser.pluginType, Browser.instrumentRackType].map { NSPasteboard.PasteboardType($0) })
+
     /// The device being dragged from the browser: its kind, for a Synth
     /// patch the patch's name, and for a rack (kind "rack") or an
-    /// instrument rack the rack's.
-    private func device(of sender: NSDraggingInfo) -> (kind: String, patch: String?, rack: String?)? {
-        let board = sender.draggingPasteboard
-        if board.types?.contains(NSPasteboard.PasteboardType(Browser.patchType)) == true {
-            let name = board.data(forType: NSPasteboard.PasteboardType(Browser.patchType)).flatMap { String(data: $0, encoding: .utf8) }
-            return ("synth", name, nil)
-        }
-        if board.types?.contains(NSPasteboard.PasteboardType(Browser.instrumentRackType)) == true {
-            let name = board.data(forType: NSPasteboard.PasteboardType(Browser.instrumentRackType)).flatMap { String(data: $0, encoding: .utf8) }
-            return (Browser.instrumentRackKind, nil, name)
-        }
-        if board.types?.contains(NSPasteboard.PasteboardType(Browser.rackType)) == true {
-            let name = board.data(forType: NSPasteboard.PasteboardType(Browser.rackType)).flatMap { String(data: $0, encoding: .utf8) }
-            return ("rack", nil, name)
-        }
-        if board.types?.contains(NSPasteboard.PasteboardType(Browser.pluginType)) == true,
-           let slug = board.data(forType: NSPasteboard.PasteboardType(Browser.pluginType)).flatMap({ String(data: $0, encoding: .utf8) }) {
-            return (slug, nil, nil)
-        }
-        return (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first {
-            board.types?.contains(NSPasteboard.PasteboardType(Browser.deviceType + "." + $0)) == true
-        }.map { ($0, nil, nil) }
+    /// instrument rack the rack's. The browser holds it from when the drag
+    /// began, since the drag's data is not readable until it is let go.
+    private func device(of sender: NSDraggingInfo) -> DraggedDevice? {
+        guard sender.draggingSource != nil, let types = sender.draggingPasteboard.types,
+              types.contains(where: { Self.deviceTypes.contains($0) || $0.rawValue.hasPrefix(Browser.deviceType + ".") }) else { return nil }
+        return model.browser.draggedDevice
     }
 
-    private func deviceLanding(_ kind: String, at point: CGPoint) -> (valid: Bool, row: RowID?) {
-        guard point.y >= TimelineLayout.rulerHeight else { return (false, nil) }
+    /// Where a device from the browser at a point lands: on the row under
+    /// it, its header or its lane, when the row takes that kind; under the
+    /// tracks, an instrument on a new track; nil elsewhere.
+    private func deviceLanding(_ kind: String, at point: CGPoint) -> DeviceDrop? {
+        guard point.y >= TimelineLayout.rulerHeight else { return nil }
         if let (row, _) = row(atY: point.y) {
-            return (point.x < TimelineLayout.headerWidth && model.canAddBrowserDevice(kind, to: row), row)
+            return model.canAddBrowserDevice(kind, to: row) ? .row(row) : nil
         }
-        return (model.isInstrumentKind(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight, nil)
+        return model.isInstrumentKind(kind) && point.y >= TimelineLayout.rulerHeight + tracksHeight ? .newTrack : nil
     }
 
-    /// The effect being dragged by its title out of the device panel.
+    /// The effect being dragged by its title out of the device panel, which
+    /// the model holds from when the drag began.
     private func draggedEffect(of sender: NSDraggingInfo) -> UInt64? {
-        let board = sender.draggingPasteboard
-        guard board.types?.contains(NSPasteboard.PasteboardType(DeviceChain.effectType)) == true else { return nil }
-        return board.data(forType: NSPasteboard.PasteboardType(DeviceChain.effectType))
-            .flatMap { String(data: $0, encoding: .utf8) }.flatMap(UInt64.init)
+        guard sender.draggingSource != nil,
+              sender.draggingPasteboard.types?.contains(NSPasteboard.PasteboardType(DeviceChain.effectType)) == true else { return nil }
+        return model.draggedEffect
     }
 
-    /// The row whose header is at a point, where a dragged effect is copied
-    /// to when Option is held: any track, return or the master.
-    private func effectLanding(at point: CGPoint) -> RowID? {
-        guard NSEvent.modifierFlags.contains(.option), point.x < TimelineLayout.headerWidth, point.y >= TimelineLayout.rulerHeight else { return nil }
-        return row(atY: point.y)?.id
+    /// The row under a point, header or lane, where a dragged effect moves
+    /// to, or with Option is copied to, and what it does there.
+    private func effectLanding(_ effect: UInt64, at point: CGPoint) -> (row: RowID, landing: EffectLanding)? {
+        guard point.y >= TimelineLayout.rulerHeight, let row = row(atY: point.y)?.id,
+              let landing = model.effectLanding(effect, on: row, copying: NSEvent.modifierFlags.contains(.option)) else { return nil }
+        return (row, landing)
+    }
+
+    /// Lights where a dragged device or effect would land.
+    private func light(_ drop: DeviceDrop?) {
+        guard drop != deviceDrop else { return }
+        deviceDrop = drop
+        needsDisplay = true
     }
 
     override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
-        if draggedEffect(of: sender) != nil {
-            return effectLanding(at: convert(sender.draggingLocation, from: nil)) == nil ? [] : .copy
+        if let effect = draggedEffect(of: sender) {
+            let landing = effectLanding(effect, at: convert(sender.draggingLocation, from: nil))
+            light(landing.map { .row($0.row) })
+            return landing.map { $0.landing == .copy ? .copy : .move } ?? []
         }
-        if let (kind, _, _) = device(of: sender) {
-            return deviceLanding(kind, at: convert(sender.draggingLocation, from: nil)).valid ? .copy : []
+        if let device = device(of: sender) {
+            let landing = deviceLanding(device.kind, at: convert(sender.draggingLocation, from: nil))
+            light(landing)
+            return landing == nil ? [] : .copy
         }
         guard let file = sample(of: sender) else { return [] }
         let p = convert(sender.draggingLocation, from: nil)
@@ -2516,20 +2543,24 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
     override func draggingExited(_ sender: NSDraggingInfo?) {
         dropTarget = nil
         dropFile = nil
+        deviceDrop = nil
         needsDisplay = true
     }
 
+    override func draggingEnded(_ sender: NSDraggingInfo) {
+        light(nil)
+    }
+
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        light(nil)
+        let point = convert(sender.draggingLocation, from: nil)
         if let effect = draggedEffect(of: sender) {
-            guard let row = effectLanding(at: convert(sender.draggingLocation, from: nil)) else { return false }
-            model.copyEffect(effect, to: row)
+            guard let landing = effectLanding(effect, at: point) else { return false }
+            model.dropEffect(effect, on: landing.row, copying: landing.landing == .copy)
             return true
         }
-        if let (kind, patch, rack) = device(of: sender) {
-            let landing = deviceLanding(kind, at: convert(sender.draggingLocation, from: nil))
-            guard landing.valid else { return false }
-            model.addBrowserDevice(kind, to: landing.row, patch: patch, rack: rack)
-            return true
+        if let device = device(of: sender) {
+            return drop(device: device, at: point)
         }
         defer {
             dropTarget = nil
@@ -2778,6 +2809,25 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
         case .newClip(let at):
             fill(CGRect(x: 0, y: under - 1.5, width: bounds.width, height: 2), Theme.insertion)
             drawDropped(at: at, top: under, line: TimelineLayout.trackHeight)
+        case nil: break
+        }
+
+        // Where a dragged device or effect would land: the row lit, its
+        // header more than its lane; an instrument under the tracks, the
+        // header a new track would have.
+        switch deviceDrop {
+        case .row(let id):
+            if let frame = frame(of: id) {
+                let top = max(frame.top, ruler)
+                let height = frame.top + frame.height - 1 - top
+                if height > 0 {
+                    fill(CGRect(x: 0, y: top, width: header - 1, height: height), Theme.insertion.withAlphaComponent(0.3))
+                    fill(CGRect(x: header, y: top, width: bounds.width - header, height: height), Theme.insertion.withAlphaComponent(0.12))
+                }
+            }
+        case .newTrack:
+            fill(CGRect(x: 0, y: under, width: header - 1, height: TimelineLayout.trackHeight - 1), Theme.insertion.withAlphaComponent(0.3))
+            fill(CGRect(x: 0, y: under - 1.5, width: header - 1, height: 2), Theme.insertion)
         case nil: break
         }
 

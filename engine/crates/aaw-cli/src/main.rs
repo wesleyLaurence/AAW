@@ -1506,13 +1506,14 @@ enum EffectCmd {
     /// Remove an effect and the lanes that automate it.
     Remove { project: Song, effect: String },
     /// Move an effect in its chain, or with --to into a rack of its row
-    /// (tracks.T.effects.RACK) or out of one into the row's chain (tracks.T);
-    /// the lanes on it follow.
+    /// (tracks.T.effects.RACK), out of one into the row's chain (tracks.T),
+    /// or to another row's chain or a rack of it (returns.R, master); the
+    /// lanes on it follow.
     Move {
         project: Song,
         effect: String,
         index: usize,
-        /// The chain to move it into: the row's, or a rack of it.
+        /// The chain to move it into: its row's, a rack of it, or another row's.
         #[arg(long)]
         to: Option<String>,
     },

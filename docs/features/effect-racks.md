@@ -124,8 +124,9 @@ a Synth patch or into a song without a bass unkeyed.
 was, in their order, with `--name` and `--id` the rack's; `rack unwrap` lays a
 rack's effects out where it was, each bypassed if the rack was, an id the
 chain has numbered. `effect move --to` moves an effect into a rack of its row,
-or out of one into the row's chain, at the index given there; across rows an
-effect is copied, not moved. In every case the lanes on the effects follow:
+or out of one into the row's chain, at the index given there; since November
+28, 2026 it also moves one onto another row's chain or a rack of it
+([effect drags](effect-drags.md)). In every case the lanes on the effects follow:
 `effects.glue.threshold_db` becomes `effects.drum-glue.effects.glue.threshold_db`
 on the way in and back again on the way out, a lane by index is renumbered,
 and each change is said under `also`. Lanes on the owner's effects by index

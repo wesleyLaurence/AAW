@@ -7,7 +7,7 @@ import UniformTypeIdentifiers
 /// folder or its song file, and with none a new Untitled project. For checking the app without
 /// anyone at the screen, `--click X,Y`, `--shift-click X,Y`, `--double-click
 /// X,Y`, `--drag X1,Y1,X2,Y2` (and `--opt-drag`, `--cmd-drag` with a key
-/// held), `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
+/// held), `--drop FILE,X,Y`, `--drop-device KIND,X,Y`, `--key KEY`, `--type TEXT`, `--analyzer-click X,Y`, `--analyzer-drag X1,Y1,X2,Y2`, `--wait SECONDS`,
 /// `--ask TEXT`, `--attach FILE`, `--attach-clips`, `--listen` and `--record-audio`
 /// in the order to perform them, then `--export PATH [--export-level
 /// LEVEL] [--export-range START-END]`, `--measure JSON [--frames N]` and `--snapshot PNG`, with
@@ -21,6 +21,9 @@ struct Launch {
         case key(Key)
         /// An audio file let go at a point, as a drag from the Finder ends.
         case drop(URL, CGPoint)
+        /// A device of the browser's, by kind, let go at a point of the
+        /// timeline, as a drag out of the browser ends.
+        case dropDevice(String, CGPoint)
         /// Time for something else to happen, such as an agent's command.
         case wait(Double)
         /// A click, or a drag, in the first analyzer window that is open, in
@@ -145,6 +148,12 @@ struct Launch {
                 if parts.count >= 3, let x = Double(parts[parts.count - 2]), let y = Double(parts[parts.count - 1]) {
                     let path = parts.dropLast(2).joined(separator: ",")
                     actions.append(.drop(URL(fileURLWithPath: path), CGPoint(x: x, y: y)))
+                }
+            case "--drop-device":
+                // KIND,X,Y
+                let parts = (rest.popFirst() ?? "").split(separator: ",")
+                if parts.count == 3, let x = Double(parts[1]), let y = Double(parts[2]) {
+                    actions.append(.dropDevice(String(parts[0]), CGPoint(x: x, y: y)))
                 }
             case "--key":
                 if let key = rest.popFirst().flatMap(Key.init) { actions.append(.key(key)) }
@@ -715,6 +724,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             if let view = arrangement(in: content) {
                 view.drop(file: file, at: view.convert(CGPoint(x: p.x, y: content.bounds.height - p.y), from: nil))
+            }
+        case .dropDevice(let kind, let p):
+            // As `drop`: no drag can be made up, so the device is handed to
+            // where one that ended at the point would have left it.
+            func arrangement(in view: NSView) -> ArrangementView? {
+                (view as? ArrangementView) ?? view.subviews.lazy.compactMap(arrangement).first
+            }
+            if let view = arrangement(in: content) {
+                view.drop(device: DraggedDevice(kind: kind), at: view.convert(CGPoint(x: p.x, y: content.bounds.height - p.y), from: nil))
             }
         case .analyzerClick, .analyzerDrag:
             // The analyzer's window, whose events the song's would not take.
