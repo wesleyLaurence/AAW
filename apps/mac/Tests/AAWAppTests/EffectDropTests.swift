@@ -101,6 +101,13 @@ final class EffectDropTests: XCTestCase {
         XCTAssertEqual(launch.actions, [.dropDevice("compressor", CGPoint(x: 400, y: 120))])
     }
 
+    /// The scripted drop of one of the panel's effects, with Option or not.
+    func testAnEffectIsLetGoAtAPointWithOptionOrNot() {
+        let launch = Launch(arguments: ["--drop-effect", "lim,445,620", "--opt-drop-effect", "comp,720,620", "--drop-effect", "lim"])
+        XCTAssertEqual(launch.actions, [.dropEffect("lim", CGPoint(x: 445, y: 620), copying: false),
+                                        .dropEffect("comp", CGPoint(x: 720, y: 620), copying: true)])
+    }
+
     /// macOS carries a drag's type only if an app declares it: every type
     /// the app's drags carry is in its Info.plist, conforming to data.
     @MainActor

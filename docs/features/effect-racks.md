@@ -197,14 +197,15 @@ its bypass, a mark that folds every effect in it to a strip or opens them all
 out, Save… for the rack's effects alone, Unrack, the moves and ×. Each
 effect's panel, in a rack or in the chain, has a fold mark in its title that
 turns it into a strip 28 points wide with its name along it, and a click on
-the strip opens it out; the folds are the window's and are not saved. Between
-a rack's effects are insertion strips as the chain has them: an effect or a
-saved rack from the browser dropped on one goes in there, a saved rack laid
-in as its effects; a drop on the rack's frame goes in at its end. An effect of
-the chain dragged by its title onto a rack's strip moves into the rack, one
-of the rack dragged onto the chain's strip leaves it, and a drag with Option
-held copies it there, as between devices; a rack cannot be dragged into a
-rack. Make Rack in an effect's menu wraps it in a new rack where it was, to
+the strip opens it out; the folds are the window's and are not saved. A
+rack's effects are a chain of their own: an effect or a saved rack from the
+browser dragged over them goes in at the gap nearest the pointer, a saved
+rack laid in as its effects, and over the rack's title bar it goes in the
+chain beside the rack. An effect of the chain dragged by its title over a
+rack's effects moves into the rack, one of the rack dragged over the chain
+leaves it, and a drag with Option held copies it there, as between devices;
+a rack cannot be dragged into a rack, and over one it lands in the chain
+([effect drags](effect-drags.md)). Make Rack in an effect's menu wraps it in a new rack where it was, to
 drag the others into, and Unrack in a rack's menu lays its effects out. Copy,
 Paste, Duplicate and Delete act on an effect inside a rack as on any; Paste
 and Duplicate land after the selected effect in its own list. A rack's
@@ -215,8 +216,8 @@ rack, and the person's saved racks under a Racks heading after the kinds, each
 with its name and the kinds of its effects, searched by name, tag and kind
 along with the kinds. A saved rack is dragged onto a track's, a group's, a
 return's or the master's header, where it lands as one device at the end of
-that row's chain; onto the device panel, the same for the row shown; or onto
-an insertion strip, where it goes in at that place. + and a double-click add
+that row's chain; or over the device panel's chain, where it goes in at the
+gap nearest the pointer. + and a double-click add
 it to the selected row. Save Rack… in the device panel's header asks for a
 name, a description and tags, as the Synth's Save As… does, and writes the
 row's chain to the library, over a rack of the name only when ticked; the

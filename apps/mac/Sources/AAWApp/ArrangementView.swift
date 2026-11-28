@@ -2505,10 +2505,19 @@ final class ArrangementView: NSView, NSTextFieldDelegate {
 
     /// The row under a point, header or lane, where a dragged effect moves
     /// to, or with Option is copied to, and what it does there.
-    private func effectLanding(_ effect: UInt64, at point: CGPoint) -> (row: RowID, landing: EffectLanding)? {
+    private func effectLanding(_ effect: UInt64, at point: CGPoint, copying: Bool = NSEvent.modifierFlags.contains(.option)) -> (row: RowID, landing: EffectLanding)? {
         guard point.y >= TimelineLayout.rulerHeight, let row = row(atY: point.y)?.id,
-              let landing = model.effectLanding(effect, on: row, copying: NSEvent.modifierFlags.contains(.option)) else { return nil }
+              let landing = model.effectLanding(effect, on: row, copying: copying) else { return nil }
         return (row, landing)
+    }
+
+    /// Lets go of an effect dragged out of the device panel at a point of
+    /// the view, as a drag that ends there does. False where it cannot land.
+    @discardableResult
+    func drop(effect: UInt64, at p: CGPoint, copying: Bool) -> Bool {
+        guard let landing = effectLanding(effect, at: p, copying: copying) else { return false }
+        model.dropEffect(effect, on: landing.row, copying: landing.landing == .copy)
+        return true
     }
 
     /// Lights where a dragged device or effect would land.
