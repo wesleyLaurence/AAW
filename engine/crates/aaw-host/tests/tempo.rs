@@ -74,6 +74,41 @@ fn a_song_back_at_one_tempo_has_no_lane_and_saves_as_before() {
 }
 
 #[test]
+fn the_steps_are_points_of_the_lane_as_the_app_edits_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut s = Session::open(&write_song(dir.path()), false).unwrap();
+    // The lane shown in the app: one step, the song's tempo, which holds.
+    edit(&mut s, json!({"op": "lane.set", "owner": "master", "param": "tempo", "points": [{"at": 0, "value": 120}]})).unwrap();
+    assert_eq!(s.project().tempo_lane().unwrap().points[0].curve, aaw_model::Curve::Hold);
+    edit(&mut s, json!({"op": "point.add", "owner": "master", "param": "tempo", "at": 16, "value": 150})).unwrap();
+    assert_eq!(steps(&s), vec![(0.0, 120.0), (16.0, 150.0)]);
+    // Dragged up, along and the opening one down: the session's tempo with it.
+    let step = "master.automation.0.points.1";
+    edit(&mut s, json!({"op": "point.set", "point": step, "value": 160, "at": 20})).unwrap();
+    edit(&mut s, json!({"op": "point.set", "point": "master.automation.0.points.0", "value": 100})).unwrap();
+    assert_eq!(steps(&s), vec![(0.0, 100.0), (20.0, 160.0)]);
+    assert_eq!(s.project().session.tempo, 100.0);
+    // The opening step stays at beat 0, alone there, and is not removed alone.
+    for (op, says) in [
+        (json!({"op": "point.set", "point": "master.automation.0.points.0", "at": 4}), "opening tempo"),
+        (json!({"op": "point.set", "point": step, "at": 0}), "Beat 0"),
+        (json!({"op": "point.add", "owner": "master", "param": "tempo", "at": 0, "value": 90}), "Beat 0"),
+        (json!({"op": "point.remove", "point": "master.automation.0.points.0"}), "opening tempo"),
+        (json!({"op": "point.set", "point": step, "curve": "linear"}), "ramps"),
+    ] {
+        let e = edit(&mut s, op).unwrap_err();
+        assert!(e.contains(says), "{e}");
+    }
+    assert_eq!(steps(&s), vec![(0.0, 100.0), (20.0, 160.0)]);
+    // The last step out leaves the lane of one tempo; its own last point takes it.
+    edit(&mut s, json!({"op": "point.remove", "point": step})).unwrap();
+    assert_eq!(steps(&s), vec![(0.0, 100.0)]);
+    edit(&mut s, json!({"op": "point.remove", "point": "master.automation.0.points.0"})).unwrap();
+    assert!(s.project().tempo_lane().is_none());
+    assert_eq!(s.project().session.tempo, 100.0);
+}
+
+#[test]
 fn a_tempo_change_is_refused_while_a_track_is_frozen() {
     let dir = tempfile::tempdir().unwrap();
     let mut s = Session::open(&write_song(dir.path()), false).unwrap();

@@ -1168,6 +1168,20 @@ fn beat_of(v: &Value) -> Option<Beat> {
 }
 
 /// The exact beat a leaf holds, if it holds one: a note's may be negative.
+/// Why the tempo lane's first step stays where it is.
+const OPENING_STEP: &str = "The tempo step at beat 0 is the song's opening tempo: it stays at beat 0, its tempo can change, and removing the lane (daw tempo clear) goes back to one tempo";
+
+/// A tempo lane's points, each holding unless it says otherwise: a step.
+fn held(points: &Json) -> Json {
+    let mut points = points.clone();
+    if let Some(list) = points.as_array_mut() {
+        for p in list.iter_mut().filter_map(Json::as_object_mut) {
+            p.entry("curve").or_insert_with(|| Json::String("hold".into()));
+        }
+    }
+    points
+}
+
 pub(crate) fn exact(n: Option<&Node>) -> Option<BigRational> {
     match n {
         Some(Node::Leaf(v)) => beat_of(v).and_then(|b| aaw_model::signed_beat(&b).ok()),
@@ -2070,6 +2084,33 @@ impl<'a> Edit<'a> {
                 .position(|p| exact(p.node.get("at")).is_some_and(|x| &x > t))
                 .unwrap_or(points.len()),
             None => points.len(),
+        }
+    }
+
+    /// Whether a place in the song is the master's.
+    fn is_master(loc: &[Step]) -> bool {
+        matches!(loc, [Step::Key(k)] if k == "master")
+    }
+
+    /// Whether a lane is the master's tempo lane, whose points are steps.
+    fn is_tempo_lane(&self, lane: &[Step]) -> bool {
+        Self::is_master(&lane[..lane.len().saturating_sub(2)]) && self.node(lane).field("param") == Some(aaw_model::TEMPO_PARAM)
+    }
+
+    /// A tempo lane's steps after a point of it was added or moved: the
+    /// first, the song's opening tempo, at beat 0 and alone there, as
+    /// `daw tempo` writes it.
+    fn check_tempo_steps(&self, lane: &[Step]) -> Result<()> {
+        if !self.is_tempo_lane(lane) {
+            return Ok(());
+        }
+        let ats: Vec<Option<BigRational>> = self.node(lane).get("points").map_or(&[][..], Node::items).iter().map(|p| exact(p.node.get("at"))).collect();
+        match ats.as_slice() {
+            [Some(first), ..] if !first.is_zero() => Err(OPENING_STEP.into()),
+            [_, Some(second), ..] if second.is_zero() => {
+                Err("Beat 0 has the song's opening tempo: change that step's tempo, or place a step after it".into())
+            }
+            _ => Ok(()),
         }
     }
 
@@ -3725,7 +3766,8 @@ impl<'a> Edit<'a> {
             }
             LaneSet { owner, param, points } => {
                 let loc = self.owner(owner)?;
-                let points = Node::new(&json_value(points)?);
+                let tempo = Self::is_master(&loc) && param == aaw_model::TEMPO_PARAM;
+                let points = Node::new(&json_value(&if tempo { held(points) } else { points.clone() })?);
                 match self.lane(&loc, param) {
                     Some(i) => {
                         let lane = [loc.clone(), vec![Step::Key("automation".into()), Step::Index(i)]].concat();
@@ -3788,7 +3830,12 @@ impl<'a> Edit<'a> {
             }
             PointAdd { owner, param, fields } => {
                 let loc = self.owner(owner)?;
-                let point = map_node(fields)?;
+                // A point of the tempo is a step: it holds unless it says otherwise.
+                let mut fields = fields.clone();
+                if Self::is_master(&loc) && param == aaw_model::TEMPO_PARAM {
+                    fields.entry("curve").or_insert_with(|| Json::String("hold".into()));
+                }
+                let point = map_node(&fields)?;
                 let at = exact(point.get("at"));
                 match self.lane(&loc, param) {
                     Some(i) => {
@@ -3806,6 +3853,9 @@ impl<'a> Edit<'a> {
                         out.made.push(self.insert(&lane, "points", None, point)?);
                     }
                 }
+                if let Some(i) = self.lane(&loc, param) {
+                    self.check_tempo_steps(&[loc.clone(), vec![Step::Key("automation".into()), Step::Index(i)]].concat())?;
+                }
                 out.label = format!("Add point to {} {param}", self.text(&loc));
             }
             PointSet { point, fields } => {
@@ -3819,6 +3869,7 @@ impl<'a> Edit<'a> {
                     let slot = Self::point_slot(self.node(&lane).get("points").map_or(&[], Node::items), at.as_ref());
                     self.list(&lane, "points")?.insert(slot, item);
                 }
+                self.check_tempo_steps(&lane)?;
                 // Named for its lane, which a person can find, not its handle.
                 let param = self.node(&lane).field("param").unwrap_or_default().to_string();
                 let owner = self.text(&lane[..lane.len().saturating_sub(2)]);
@@ -3826,6 +3877,9 @@ impl<'a> Edit<'a> {
             }
             PointRemove { point } => {
                 let (lane, i) = self.member(point, "points", "an automation point")?;
+                if i == 0 && self.is_tempo_lane(&lane) && self.node(&lane).get("points").map_or(0, |p| p.items().len()) > 1 {
+                    return Err(OPENING_STEP.into());
+                }
                 let param = self.node(&lane).field("param").unwrap_or_default().to_string();
                 let owner = self.text(&lane[..lane.len().saturating_sub(2)]);
                 let loc = [lane, vec![Step::Key("points".into()), Step::Index(i)]].concat();

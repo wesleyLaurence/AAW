@@ -567,8 +567,8 @@ private struct TempoField: View {
                 .background(Color(nsColor: Theme.control), in: RoundedRectangle(cornerRadius: 3))
                 .focused($focused)
                 .accessibilityLabel("Tempo in BPM")
-                .help(model.arrangement.tempoSteps.count > 1
-                      ? "Tempo at the playhead; the song's tempo changes on the master's tempo lane. daw tempo set changes a step."
+                .help(model.tempoLane != nil
+                      ? "Tempo at the playhead, 20–400 BPM: typing one sets the step of the master's tempo lane the playhead is in. Return applies; Escape cancels."
                       : "Tempo: 20–400 BPM. Return applies; Escape cancels.")
                 .onSubmit { focused = false; model.onFocus?() }
                 .onExitCommand { typed = current; focused = false; model.onFocus?() }

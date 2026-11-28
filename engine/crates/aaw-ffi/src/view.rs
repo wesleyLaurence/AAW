@@ -1119,6 +1119,10 @@ fn lane_targets(owner: Owner, sends: &[String], driven: &Driven, devices: &Devic
     if !matches!(owner, Owner::Master(_)) {
         params.push("pan".into());
     }
+    // The song's tempo, whose lane is the master's: a step from each beat on.
+    if matches!(owner, Owner::Master(_)) {
+        params.push(aaw_model::TEMPO_PARAM.into());
+    }
     params.extend(sends.iter().map(|to| format!("sends.{to}.gain_db")));
     let mut out: Vec<LaneTarget> = params
         .into_iter()

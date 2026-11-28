@@ -1,6 +1,6 @@
 # Effects dragged onto a track and along a chain — proposed November 26, 2026
 
-Status: proposed, Next items 2 and 3 of the backlog (D206).
+Status: proposed, Next items 1 and 2 of the backlog (D206).
 
 ## What
 

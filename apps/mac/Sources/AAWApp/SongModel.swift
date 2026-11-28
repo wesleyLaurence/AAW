@@ -633,10 +633,38 @@ public final class SongModel {
             refuse("Enter a tempo from 20 to 400 BPM.")
             return
         }
-        // A song whose tempo steps shows the tempo at the playhead: what was
-        // typed is a change only when it differs from that. Setting a step
-        // from the field is to come; the host refuses the one tempo alone.
-        if bpm != arrangement.tempoMap.tempo(atBeat: position) { edit(.tempo(bpm: bpm)) }
+        // The field shows the tempo at the playhead, and what was typed sets
+        // it there: the step of the tempo lane the playhead is in, or the
+        // song's one tempo.
+        if let step = tempoLane.flatMap({ Self.step(of: $0, at: position) }) {
+            if bpm != step.value { edit(.pointSet(point: step.key, at: nil, value: bpm, hold: nil, shape: nil)) }
+        } else if bpm != arrangement.tempo {
+            edit(.tempo(bpm: bpm))
+        }
+    }
+
+    /// The master's tempo lane, whose points are the song's tempo steps:
+    /// the first at beat 0, the song's opening tempo, each held to the next.
+    var tempoLane: LaneView? { arrangement.master.lanes.first { $0.param == "tempo" } }
+
+    /// Whether a lane is the master's tempo lane.
+    func isTempo(_ lane: LaneView) -> Bool { lane.param == "tempo" && tempoLane?.key == lane.key }
+
+    /// The step of a tempo lane playing at a beat: the last at or before it.
+    nonisolated static func step(of lane: LaneView, at beat: Double) -> PointView? {
+        lane.points.last { $0.at <= beat + 1e-9 } ?? lane.points.first
+    }
+
+    /// The selected points to remove, in the order to remove them: the
+    /// tempo lane's opening step stays while any other step of it does, and
+    /// goes last with all of them, taking the lane with it, since the song
+    /// then keeps its opening tempo as its one tempo.
+    nonisolated static func removal(of selected: Set<UInt64>, tempo: LaneView?) -> [UInt64] {
+        var keys = selected.sorted()
+        guard let tempo, let opening = tempo.points.first?.key, keys.contains(opening) else { return keys }
+        keys.removeAll { $0 == opening }
+        if tempo.points.dropFirst().allSatisfy({ selected.contains($0.key) }) { keys.append(opening) }
+        return keys
     }
 
     /// Sets the song's time signature from the transport bar's field, `3/4`
@@ -1215,7 +1243,12 @@ public final class SongModel {
         } else if !selectedClips.isEmpty {
             edit(.clipsRemove(clips: selectedClips.sorted()))
         } else if !selectedPoints.isEmpty {
-            edit(.pointsRemove(points: selectedPoints.sorted()))
+            let keys = Self.removal(of: selectedPoints, tempo: tempoLane)
+            if keys.isEmpty {
+                refuse("The tempo at beat 0 is the song's opening tempo: drag it to change it, or remove the lane with the other steps.")
+            } else {
+                edit(.pointsRemove(points: keys))
+            }
         } else if let row = selectedRow, row != .master {
             edit(.remove(row: row.row))
         }
@@ -2042,6 +2075,28 @@ public final class SongModel {
 
     func dismissExport() {
         exportOutcome = nil
+    }
+
+    /// Whether `daw tempo follow` is measuring a clip's beats.
+    public private(set) var followingTempo = false
+
+    /// Tempo ▸ Follow This Clip: the bundle's `daw tempo follow` on an audio
+    /// clip, off the main thread, which measures its file's beats and writes
+    /// the master's tempo lane from them through the host, a step a bar, in
+    /// one undo step; the lane is shown when it is done. Why it wrote
+    /// nothing is said as a refusal.
+    func followTempo(clip key: UInt64) {
+        guard !followingTempo else { return }
+        followingTempo = true
+        DawProcess.run(Exporter.daw, ["tempo", "follow", url.path, "@\(key)"]) { [weak self] outcome in
+            guard let self else { return }
+            self.followingTempo = false
+            switch outcome {
+            case .done: self.showAutomation()
+            case .failed(let reason): self.refuse(reason)
+            case .cancelled: break
+            }
+        }
     }
 
     /// Copies a sample file into the project, off the main thread, and hands

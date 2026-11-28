@@ -39,6 +39,9 @@ public enum ContextMenu {
         case edit, cut, copy, duplicate, split, join, activate, loop, delete
         /// A color of Color ▸, by name, or none for the clips' own taken away.
         case color(String?)
+        /// Tempo ▸ Follow This Clip: the song's tempo lane written from an
+        /// audio clip's beats, as `daw tempo follow` writes it.
+        case followTempo
     }
 
     /// What an item of an effect's menu does, to the effect that was clicked
@@ -210,9 +213,10 @@ public enum ContextMenu {
     /// selected, `activates` whether 0 would activate the selection, every
     /// clip of it being deactivated, rather than deactivate it, and `many`
     /// whether more than one clip is selected. Color is the `colors`
-    /// submenu, when given.
+    /// submenu, when given. Tempo ▸ Follow This Clip is offered for one
+    /// audio clip, `follow` saying whether it can be chosen now.
     public static func clip(editor: String, canSplit: Bool, canJoin: Bool, activates: Bool = false,
-                            many: Bool = false, colors: [Item<ClipAction>]? = nil) -> [Item<ClipAction>] {
+                            many: Bool = false, colors: [Item<ClipAction>]? = nil, follow: Bool? = nil) -> [Item<ClipAction>] {
         var items: [Item<ClipAction>] = [
             Item(title: "Edit \(editor)", action: .edit),
             .separator,
@@ -229,6 +233,11 @@ public enum ContextMenu {
         ]
         if let colors {
             items.append(Item(title: "Color", action: .color(nil), children: colors))
+        }
+        if let follow {
+            items.append(Item(title: "Tempo", action: .followTempo, children: [
+                Item(title: "Follow This Clip", action: .followTempo, enabled: follow),
+            ]))
         }
         items.append(Item(title: "Delete", action: .delete, key: "\u{8}", command: false))
         return items

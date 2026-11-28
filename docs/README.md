@@ -32,6 +32,7 @@ Built:
 | [manual BPM](features/tempo-control.md) | Editable session tempo in the transport bar |
 | [tempo changes](features/tempo-changes.md) | A `tempo` lane on the master, steps that everything placed in beats follows, and `daw tempo` |
 | [tempo follow](features/tempo-follow.md) | `daw tempo follow`: the tempo lane written from a song played live, so its bars are the session's |
+| [tempo in the app](features/tempo-in-app.md) | The master's Tempo lane edited by hand, the tempo field setting the step at the playhead, Follow This Clip, and audio clips drawn through the steps |
 | [effects](features/effects.md) | Insert effects on tracks, returns and the master, sidechain compression, the limiter, delay, reverb, and sends to returns |
 | [automation](features/automation.md) | Lanes for levels, pans, sends and effect parameters |
 | [perception](features/perception.md) | `daw listen` and `daw compare` |
@@ -98,7 +99,7 @@ Proposed, in the order of Next in the backlog:
 | [effects dragged onto a track and along a chain](features/effect-drags.md) | Next 3–4; proposed |
 | [a group's color for its tracks](features/group-colors.md) | Next 6–7; proposed |
 | [selected rows' height dragged together](features/selected-rows-height.md) | Next 8; proposed |
-| [tempo changes and warp markers](features/tempo-and-warp.md) | Its first three items built; the tempo in the app Next 2, the rest Next 9–11 |
+| [tempo changes and warp markers](features/tempo-and-warp.md) | Its first three items and the tempo in the app built; the rest Next 7–9 |
 | [folders as a tree in the browser](features/browser-folders.md) | Built |
 | [what makes the person wait](features/performance.md) | Built |
 | [colors for tracks and clips](features/colors.md) | Built |

@@ -635,6 +635,42 @@ fn several_automation_points_move_and_go_together() {
 }
 
 #[test]
+fn the_tempo_is_a_lane_of_the_master_whose_points_are_steps() {
+    let (_dir, _path, song, seen) = open();
+    transport(&seen);
+    let start = song.arrangement();
+    let tempo = start.tempo;
+    assert!(start.master.lane_targets.iter().any(|t| t.param == "tempo" && t.label == "Tempo"));
+    song.edit(Edit::LaneAdd { row: Row::Master, param: "tempo".into() }, None).unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.master.lane_targets.iter().all(|t| t.param != "tempo"));
+    let lane = u.arrangement.master.lanes.iter().find(|l| l.param == "tempo").unwrap().clone();
+    assert_eq!((lane.points.len(), lane.points[0].value, lane.points[0].hold), (1, tempo, true));
+    // A double-click on the lane: a step, which holds.
+    let step = song.edit(Edit::PointAdd { lane: lane.key, at: 16.0, value: 150.0 }, None).unwrap()[0];
+    let u = update(&seen);
+    let steps = |u: &Update| u.arrangement.tempo_steps.iter().map(|s| (s.beat, s.bpm)).collect::<Vec<_>>();
+    assert_eq!(steps(&u), [(0.0, tempo), (16.0, 150.0)]);
+    // Dragged, the handle stays through the drag.
+    for value in [151.0, 152.0] {
+        song.edit(Edit::PointSet { point: step, at: Some(20.0), value: Some(value), hold: None, shape: None }, Some("step".into())).unwrap();
+    }
+    update(&seen);
+    assert_eq!(steps(&update(&seen)), [(0.0, tempo), (20.0, 152.0)]);
+    // The opening step stays at beat 0 and holds.
+    let opening = lane.points[0].key;
+    assert!(song.edit(Edit::PointSet { point: opening, at: Some(4.0), value: None, hold: None, shape: None }, None).is_err());
+    assert!(song.edit(Edit::PointSet { point: step, at: None, value: None, hold: Some(false), shape: None }, None).is_err());
+    assert!(song.edit(Edit::PointsRemove { points: vec![opening] }, None).is_err());
+    // Every step removed, the opening one last: the song keeps one tempo.
+    song.edit(Edit::PointsRemove { points: vec![step, opening] }, None).unwrap();
+    let u = update(&seen);
+    assert!(u.arrangement.master.lanes.iter().all(|l| l.param != "tempo"));
+    assert_eq!(steps(&u), [(0.0, tempo)]);
+    song.close();
+}
+
+#[test]
 fn tracks_and_returns_are_added_named_moved_and_removed() {
     let (_dir, path, song, seen) = open();
     transport(&seen);
@@ -776,7 +812,7 @@ fn a_device_panel_is_drawn_from_an_effect_s_fields() {
         targets(&a.tracks[0].lane_targets),
         [("gain_db".into(), "Volume".into()), ("pan".into(), "Pan".into()), ("sends.plate.gain_db".into(), "Send plate".into())]
     );
-    assert_eq!(targets(&a.master.lane_targets), [("gain_db".to_string(), "Volume".to_string())]);
+    assert_eq!(targets(&a.master.lane_targets), [("gain_db".to_string(), "Volume".to_string()), ("tempo".into(), "Tempo".into())]);
     assert!(targets(&a.tracks[1].lane_targets).contains(&("effects.1.feedback_percent".into(), "delay Feedback".into())));
     song.close();
 }
