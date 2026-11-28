@@ -47,6 +47,12 @@ enum RowID: Hashable {
 }
 
 /// The channel whose devices the detail panel shows.
+/// What an effect dragged out of the device panel does where it is let go.
+enum EffectLanding: Equatable {
+    case move
+    case copy
+}
+
 struct DeviceChain {
     var row: RowID
     var name: String
@@ -1006,6 +1012,42 @@ public final class SongModel {
         edit(.effectCopy(effect: effect, row: row.row, index: index, rack: rack)) { [weak self] made in
             self?.showEffect(made.first, on: row)
         }
+    }
+
+    /// What letting go of an effect dragged out of the device panel over a
+    /// row does: with Option a copy at the end of the row's chain, without it
+    /// a move there; nil for a move onto the row it is on already, where it
+    /// would stay, or for an effect no row's chain has.
+    func effectLanding(_ effect: UInt64, on row: RowID, copying: Bool) -> EffectLanding? {
+        guard let from = self.row(ofEffect: effect) else { return nil }
+        if copying { return .copy }
+        return from == row ? nil : .move
+    }
+
+    /// Lets go of a dragged effect over a row, as `effectLanding` says.
+    func dropEffect(_ effect: UInt64, on row: RowID, copying: Bool) {
+        switch effectLanding(effect, on: row, copying: copying) {
+        case .copy?: copyEffect(effect, to: row)
+        case .move?: moveEffect(effect, to: row)
+        case nil: break
+        }
+    }
+
+    /// Moves an effect to the end of another row's chain, with the lanes on
+    /// it, as `daw effect move --to` does, and shows it there. The host
+    /// refuses a compressor onto the track that keys it, and says why.
+    func moveEffect(_ effect: UInt64, to row: RowID) {
+        edit(.effectMoveTo(effect: effect, row: row.row, rack: nil, index: UInt32.max)) { [weak self] _ in
+            self?.showEffect(effect, on: row)
+        }
+    }
+
+    /// The row whose chain, or a rack of it, has an effect.
+    func row(ofEffect key: UInt64) -> RowID? {
+        let a = arrangement
+        let rows: [(RowID, [EffectView])] = a.tracks.map { (.track($0.key), $0.effects) } + a.groups.map { (.group($0.key), $0.effects) }
+            + a.returns.map { (.bus($0.key), $0.effects) } + [(.master, a.master.effects)]
+        return rows.first { DeviceChain.find(key, in: $0.1) != nil }?.0
     }
 
     /// Shows an effect the person just made on a row: the row selected, its

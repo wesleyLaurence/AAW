@@ -4,6 +4,15 @@ import Observation
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// A device dragged out of the browser, as a drop reads it: its kind, "rack"
+/// for an effect rack and a plugin's slug for a plugin, and the name of the
+/// patch or the rack it carries.
+struct DraggedDevice: Equatable {
+    var kind: String
+    var patch: String? = nil
+    var rack: String? = nil
+}
+
 /// The sample library as the browser shows it. The index is the one `daw
 /// samples scan` writes and `daw samples search` reads; a search here asks
 /// the same Python, so the person and the agent find the same samples.
@@ -34,6 +43,10 @@ final class Browser {
     var scanning = false
     var folderError: String?
     @ObservationIgnored private var folderOperations = 0
+    /// A device dragged out of the browser: an effect, a MIDI effect or an
+    /// instrument, with the data its kind. Each also has a type of its own,
+    /// this one with `.KIND` after it. The app's drag types are declared in
+    /// its Info.plist, as macOS needs them to be to carry them.
     static let deviceType = "org.aaw.browser-device"
     /// A Synth patch dragged out of the browser; the data is its name.
     static let patchType = "org.aaw.browser-patch"
@@ -317,6 +330,18 @@ final class Browser {
 
     /// The sample being dragged out of the browser.
     @ObservationIgnored var dragged: SampleInfo?
+    /// The device being dragged out of the browser, set as the drag starts:
+    /// the timeline reads it to say where the device would land, since the
+    /// drag's own data is not readable until it is let go. Only read while
+    /// a drag of a device's type is over the view.
+    @ObservationIgnored var draggedDevice: DraggedDevice?
+
+    /// A drag of a device out of the browser begins: it is the one dragged,
+    /// and no sample is.
+    func startDrag(_ device: DraggedDevice) {
+        dragged = nil
+        draggedDevice = device
+    }
     @ObservationIgnored private var sound: NSSound?
     @ObservationIgnored private var pending: Task<Void, Never>?
     @ObservationIgnored private var searches = 0
@@ -959,7 +984,7 @@ struct BrowserView: View {
         .contextMenu { favoriteItem("instrument_rack", rack.slug, name: rack.name) }
         .onTapGesture(count: 2) { model.addBrowserDevice(Browser.instrumentRackKind, to: model.selectedRow, rack: rack.name) }
         .onDrag {
-            browser.dragged = nil
+            browser.startDrag(DraggedDevice(kind: Browser.instrumentRackKind, rack: rack.name))
             let provider = NSItemProvider()
             provider.registerDataRepresentation(forTypeIdentifier: Browser.instrumentRackType, visibility: .all) { completion in
                 completion(Data(rack.name.utf8), nil)
@@ -1002,7 +1027,7 @@ struct BrowserView: View {
         .contextMenu { favoriteItem("rack", rack.slug, name: rack.name) }
         .onTapGesture(count: 2) { model.addBrowserDevice("rack", to: model.selectedRow, rack: rack.name) }
         .onDrag {
-            browser.dragged = nil
+            browser.startDrag(DraggedDevice(kind: "rack", rack: rack.name))
             let provider = NSItemProvider()
             provider.registerDataRepresentation(forTypeIdentifier: Browser.rackType, visibility: .all) { completion in
                 completion(Data(rack.name.utf8), nil)
@@ -1048,7 +1073,7 @@ struct BrowserView: View {
         .help(plugin.description.isEmpty ? "\(plugin.slug), version \(plugin.version), from the \(plugin.from)" : plugin.description)
         .onTapGesture(count: 2) { model.addBrowserDevice(plugin.slug, to: model.selectedRow) }
         .onDrag {
-            browser.dragged = nil
+            browser.startDrag(DraggedDevice(kind: plugin.slug))
             let provider = NSItemProvider()
             provider.registerDataRepresentation(forTypeIdentifier: Browser.pluginType, visibility: .all) { completion in
                 completion(Data(plugin.slug.utf8), nil)
@@ -1082,11 +1107,16 @@ struct BrowserView: View {
         .contextMenu { favoriteItem("device", kind, name: kind) }
         .onTapGesture(count: 2) { model.addBrowserDevice(kind, to: model.selectedRow) }
         .onDrag {
-            browser.dragged = nil
+            browser.startDrag(DraggedDevice(kind: kind))
             let provider = NSItemProvider()
-            provider.registerDataRepresentation(forTypeIdentifier: Browser.deviceType + "." + kind, visibility: .all) { completion in
-                completion(Data(kind.utf8), nil)
-                return nil
+            // The kind's own type, which the device panel and the Sampler
+            // take, and the one declared type every effect and instrument
+            // has, which the timeline takes.
+            for type in [Browser.deviceType + "." + kind, Browser.deviceType] {
+                provider.registerDataRepresentation(forTypeIdentifier: type, visibility: .all) { completion in
+                    completion(Data(kind.utf8), nil)
+                    return nil
+                }
             }
             return provider
         }
@@ -1124,7 +1154,7 @@ struct BrowserView: View {
         .contextMenu { favoriteItem("patch", patch.slug, name: patch.name) }
         .onTapGesture(count: 2) { model.addBrowserDevice("synth", to: model.selectedRow, patch: patch.name) }
         .onDrag {
-            browser.dragged = nil
+            browser.startDrag(DraggedDevice(kind: "synth", patch: patch.name))
             let provider = NSItemProvider()
             provider.registerDataRepresentation(forTypeIdentifier: Browser.patchType, visibility: .all) { completion in
                 completion(Data(patch.name.utf8), nil)

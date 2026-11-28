@@ -402,9 +402,10 @@ pub enum Edit {
     /// chain (`into`), its effects are laid in, since a rack holds no rack.
     /// What is added is what the edit makes.
     RackAdd { row: Row, rack: String, index: Option<u32>, into: Option<u64> },
-    /// Moves an effect into a rack of its row's chain (`rack`), or out of
-    /// one into the row's chain (None), at `index` there; the lanes on it
-    /// follow. A move within one chain is `EffectMove`.
+    /// Moves an effect into `row`'s chain (`rack` None) or a rack of it,
+    /// at `index` there or its end: into a rack of its own row's chain, out
+    /// of one, or onto another row, as a drag onto a strip or a header
+    /// does. The lanes on it follow. A move within one chain is `EffectMove`.
     EffectMoveTo { effect: u64, row: Row, rack: Option<u64>, index: u32 },
     /// Wraps effects of one chain in a new rack where the first of them
     /// was, as Make Rack does. The rack is what the edit makes.

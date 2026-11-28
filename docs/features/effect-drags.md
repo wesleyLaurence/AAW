@@ -1,6 +1,9 @@
 # Effects dragged onto a track and along a chain — proposed November 26, 2026
 
-Status: proposed, Next items 1 and 2 of the backlog (D206).
+Status: item 1, an effect dropped anywhere on a track, built November 28,
+2026 (see [Built](#built-an-effect-dropped-anywhere-on-a-track)); item 2,
+an effect dragged along its chain, proposed, Next item 1 of the backlog
+(D206).
 
 ## What
 
@@ -51,8 +54,10 @@ Both were built in part and never dragged by hand
   --to OWNER` will take it; a compressor keyed from the row it lands on is
   refused with the reason, as a copy is.
 - **The chain is one target.** The device panel's chain takes the drop over
-  its whole width in an AppKit view, as the timeline's does, so that a
-  scripted drag reaches it and the move can be checked by a scripted run. The
+  its whole width in an AppKit view, as the timeline's does, so that the
+  gap is chosen by the view's own geometry and a scripted run can hand it a
+  drop, as `--drop-device` does the timeline (a scripted `--drag` never
+  completes a drag session; see Decisions). The
   gap is the nearest boundary between two devices to the pointer, refused at
   the two either side of the dragged one, as `DeviceChain.moveTarget` says
   today. A rack's frame is a chain of its own, as its strips are now.
@@ -64,6 +69,61 @@ Both were built in part and never dragged by hand
 Scripted drags of the bundle on a generated song drop a browser effect on a
 track's lane and an effect between two others of a chain, each landing as
 the matching `daw` command writes it; a test holds the gap chosen at each x.
+
+## Built: an effect dropped anywhere on a track
+
+- **The row is the target.** A device from the browser, an effect, a rack, a
+  plugin, a MIDI effect or an instrument, lands on the row under the pointer
+  over its header or its lane, any track, group, return or the master that
+  takes that kind (`SongModel.canAddBrowserDevice`), last in its chain; the
+  row is lit while the drag is over it, the header more than the lane. Under
+  the tracks an instrument still makes a new track, the band a new header
+  would have lit.
+- **An effect out of the device panel** moves to the end of the chain of the
+  row it is let go over, with the lanes on it, and that row's devices show
+  with it selected; with Option it is copied there, onto any row, its own
+  too. A move onto the row it is on does nothing and lights nothing.
+  `SongModel.effectLanding` says which, and is tested.
+- **The engine** moves an effect between rows: `effect.move` with an
+  `owner` of another row's chain or a rack of it, `daw effect move --to
+  OWNER`, `Edit::EffectMoveTo` from the app. The lanes on it move to the row
+  it lands on, an id that chain has numbered (`warm-2`) and the lane renamed
+  with it; validation refuses a compressor onto the track that keys it, with
+  the reason, as a copy is refused.
+- **Declared drag types.** The app's drag types are declared in its
+  Info.plist (`UTExportedTypeDeclarations`, each conforming to
+  `public.data`): `org.aaw.browser-device`, `-patch`, `-rack`, `-plugin`,
+  `-instrument-rack`, `org.aaw.effect`, `org.aaw.synth-effect` and
+  `org.aaw.synth-source`; a test holds the list. A device from the browser
+  carries `org.aaw.browser-device` besides its own
+  `org.aaw.browser-device.KIND`, which stays undeclared, and the browser
+  holds what it is dragging (`Browser.draggedDevice`) from when the drag
+  begins, as the panel holds `draggedEffect`; the timeline and the device
+  panel read the kind there.
+- **Scripted runs** hand a device to the timeline with `--drop-device
+  KIND,X,Y`, as `--drop FILE,X,Y` hands a file.
+
+## Decisions
+
+- **What failed.** Neither gesture had been made by hand. Besides the header
+  alone taking a device and Option alone taking an effect, macOS knew none of
+  the app's drag types: `UTType("org.aaw.effect")` is nil for an identifier
+  no app declares, and SwiftUI's drags and drops work in `UTType`s, which
+  matches the `dyn.…` types a scripted drag logged in #120. An AppKit view
+  registered for the literal name could then never be offered the drag.
+  Declaring the types was chosen over carrying the data as plain text, which
+  every text field would take.
+- **One declared device type,** with the kind held by the browser, over
+  declaring a type for each kind: the kinds come from the engine, and a new
+  one would go undeclared without a sign.
+- **A move without Option,** as Ableton moves a device dragged to another
+  track, over the copy alone that #71 made: the person's note asked to drag
+  an effect onto a track.
+- **Not checked by a real drag.** A scripted `--drag` posts mouse events
+  to the window, which never complete a drag session, and a drag made at the
+  system's level would take the person's own pointer. The landings are held
+  by tests and `--drop-device` runs; the drag itself waits for the person's
+  use of the app.
 
 ## Open questions
 

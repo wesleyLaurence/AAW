@@ -268,6 +268,7 @@ struct DeviceView: View {
     private var droppable: [String] {
         let midi = chain.track?.midi == true
         var types = (DeviceChain.kinds + (midi ? Browser.midiEffects + Browser.instruments : [])).map { Browser.deviceType + "." + $0 }
+        types.append(Browser.deviceType)
         types.append(Browser.rackType)
         types.append(Browser.pluginType)
         if midi { types.append(Browser.patchType); types.append(Browser.instrumentRackType) }
@@ -348,8 +349,11 @@ struct DeviceView: View {
                 }
                 return true
             }
-            guard let kind = (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first(where: { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }),
-                  model.canAddBrowserDevice(kind, to: chain.row) else { return false }
+            // The kind's own type, or the one every device has, with the kind
+            // the browser holds from when the drag began.
+            let own = (DeviceChain.kinds + Browser.midiEffects + Browser.instruments).first { provider.hasItemConformingToTypeIdentifier(Browser.deviceType + "." + $0) }
+            let held = provider.hasItemConformingToTypeIdentifier(Browser.deviceType) ? model.browser.draggedDevice?.kind : nil
+            guard let kind = own ?? held, model.canAddBrowserDevice(kind, to: chain.row) else { return false }
             model.addBrowserDevice(kind, to: chain.row)
             return true
         }
